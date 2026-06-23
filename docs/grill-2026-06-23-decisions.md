@@ -30,6 +30,29 @@
 | D19 | events 排序 tie-breaker | unspecified / timestamp+device / timestamp+device+cardId | **`(timestamp, device, cardId)` lexicographic** | deterministic across runs/machines |
 | D20 | CloudKit SLA | 当作硬保证 / 当作目标 | **当作目标，非 SLA** | Apple 不提供 sync 延迟保证；real-world 超出可在 v1.x amendment 中放宽，不作为 defect |
 
+## Plan 阶段决策 (PL-*)
+
+Plan grill 钉死的技术选型，详细 rationale 见 `specs/001-core-briefing-cli/research.md`。
+
+| # | 决策 | 选项 | 拍板 | Rationale |
+|---|---|---|---|---|
+| PL-1 | CloudKit API + 进程架构 | 两进程各自连 CloudKit / App 单一 author / 混合 | **App-as-service + CLI-as-thin-XPC-client** | 单进程拥有 CloudKit identity，零 sync 冲突；CLI 启动毫秒级；schema 一处 |
+| PL-A | XPC 协议形态 | per-method @objc / 单 method JSON-RPC | **单 method `execute(Data)→Data` + Codable envelope** | schema 演进零阻力；CLI/App 升级解耦 |
+| PL-A.1 | Schema validation 时机 | App 端唯一 / CLI 本地优先 + App 兜底 | **CLI 本地先验，错误立即返回；App 端再验作为 defense-in-depth** | agent 快速反馈环；CLI 版本漂移防护 |
+| PL-B | App lifecycle | LaunchAgent / LaunchDaemon | **LaunchAgent**（user 身份，可访问 iCloud） |
+| PL-B.1 | KeepAlive | bare true / dict | **dict + SuccessfulExit=false** | user 可主动 quit |
+| PL-B.2 | App 形态 | Dock app / menubar app | **LSUIElement=true 纯 menubar** | "打开看一眼"使用习惯 |
+| PL-B.3 | 关 window 行为 | quit / hide | **hide** |
+| PL-B.4 | plist 安装 | app 自装 / Makefile / settings 按钮 | **app 首次启动自检 + SMAppService 安装** | 用户零摩擦；Apple 现代化推荐 API |
+| PL-C | CLI 兜底 | 失败放弃 / 自动拉起 app | **NSWorkspace.openApplication + poll 5s** | 5s 硬编码（不可配），4 exit codes |
+| PL-C.1 | CLI exit codes | 自定义 | **0/1/2/3** | 对应 agent 三类 retry 策略 |
+| PL-3' | Card payload 多态 | 7 @Model / 巨型 @Model / payloadJSON Data | **payloadJSON Data + Codable dispatch** | SwiftData/CloudKit friendly；schema 在 Codable struct 唯一定义；forward-compat 天然 |
+| PL-4 | 项目生成 | XcodeGen / Tuist / pure SPM | **XcodeGen** | 你既有 pattern 熟；YAML 简洁；支持 entitlements/signing |
+| PL-5 | 测试框架 | XCTest / Swift Testing | **Swift Testing** | OS 26 + Swift 6 原生首选 |
+| PL-6 | device 字段 | UUID / 名称 / 组合 | **`"<deviceName> [<UUID8>]"`** | 人可读 + 改名稳定 |
+| PL-7 | CI | GH Actions hosted / self-hosted / Xcode Cloud / git hook / public repo | **GH Actions hosted (A+) + self-hosted 预案** | 免费额度足够 (~40 PR/月)，超额备案 |
+| PL-8 | History retention | 永久 / 30 / 90 / 可配置 | **90 天硬编码，app 自动 cleanup** | 季度回看合理；v2 history navigation 直接可用；CloudKit quota 毫无压力 |
+
 ## 数据模型 (Schema v1)
 
 ### Briefing
@@ -123,11 +146,16 @@ UserEvent 是 append-only；agent 通过 `aidash events pull` 拉取，自行 de
 ## 后续步骤
 
 1. **Constitution v1.0.0** ✅ 已落地（`.specify/memory/constitution.md`）
-2. **下一步**：跑 `/speckit-specify`，把上面 schema 写成详细 spec
-3. **再下一步**：`/speckit-plan` 决定具体技术细节（CloudKit 用 `NSPersistentCloudKitContainer`
-   还是直接 `CKDatabase`、XcodeGen project.yml、CI 配置等）
-4. **再下一步**：`/speckit-tasks` 拆成 Multica issues 可消费的任务
-5. **Implementation 不用 `/speckit-implement`**：tasks → multica-quick-issue → TL pipeline
+2. **Spec 001-core-briefing-cli** ✅ 已落地 + post-review 修订（D17-D20）
+3. **Plan 001-core-briefing-cli** ✅ 已落地 + 5 个 sub-artifacts
+   - `plan.md` 主文档（含 Constitution Check pass + Complexity Tracking）
+   - `research.md` (R-1 ~ R-10)
+   - `data-model.md`（SwiftData @Model + Codable struct + dispatch）
+   - `contracts/cli-surface.md`、`contracts/xpc-protocol.md`、`contracts/cardtype-payloads.md`
+   - `quickstart.md`（5 分钟 agent recipe）
+4. **下一步**: `/speckit-tasks` 把 plan 转换为 Multica-ready 任务列表
+5. **再下一步**：通过 `multica-quick-issue` skill 批量灌进 Multica 由 TL → Planner → Fullstack → Reviewer 执行
+6. **Implementation 不用 `/speckit-implement`**：tasks → Multica
 
 ## 待处理（不阻塞 AIDash）
 
