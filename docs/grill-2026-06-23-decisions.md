@@ -148,13 +148,16 @@ UserEvent 是 append-only；agent 通过 `aidash events pull` 拉取，自行 de
 1. **Constitution v1.0.0** ✅ 已落地（`.specify/memory/constitution.md`）
 2. **Spec 001-core-briefing-cli** ✅ 已落地 + post-review 修订（D17-D20）
 3. **Plan 001-core-briefing-cli** ✅ 已落地 + 5 个 sub-artifacts
-   - `plan.md` 主文档（含 Constitution Check pass + Complexity Tracking）
-   - `research.md` (R-1 ~ R-10)
-   - `data-model.md`（SwiftData @Model + Codable struct + dispatch）
-   - `contracts/cli-surface.md`、`contracts/xpc-protocol.md`、`contracts/cardtype-payloads.md`
-   - `quickstart.md`（5 分钟 agent recipe）
-4. **下一步**: `/speckit-tasks` 把 plan 转换为 Multica-ready 任务列表
-5. **再下一步**：通过 `multica-quick-issue` skill 批量灌进 Multica 由 TL → Planner → Fullstack → Reviewer 执行
+4. **Tasks 001-core-briefing-cli** ✅ 已落地（81 tasks，46 个 [P]）
+   - Phase 1 SETUP (8 tasks): 项目脚手架 + XcodeGen
+   - Phase 2 FOUND (14 tasks): 共享 schema + validator + tests，blocks all
+   - Phase 3 US1 (36 tasks): MVP — agent 推 briefing + Mac 读
+   - Phase 4 US2 (6 tasks): 跨设备同步 (iPad/iPhone)
+   - Phase 5 US3 (9 tasks): UserEvent (done/star)
+   - Phase 6 POLISH (7 tasks): CI + docs + perf + schema discovery
+5. **下一步**: 通过 `multica-quick-issue` skill 批量灌进 Multica
+   - 每个 task → 一个 Multica issue，标题 `[T###] [Story] Brief description`
+   - Multica TL 按 dependency graph 调度，按 [P] 标签并行化
 6. **Implementation 不用 `/speckit-implement`**：tasks → Multica
 
 ## 待处理（不阻塞 AIDash）
