@@ -1,0 +1,28 @@
+# Build artifacts
+DerivedData/
+.build/
+*.xcodeproj/
+*.xcworkspace/
+*.swp
+.DS_Store
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+
+# SPM
+Packages/*/.build/
+.swiftpm/
+
+# Temp / logs
+/tmp/aidash-*
+*.log
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

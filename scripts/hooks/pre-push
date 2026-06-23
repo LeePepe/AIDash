@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# AIDash pre-push hook.
+#
+# Lives in scripts/hooks/ under version control. Activated in any
+# worktree (or main checkout) by running once:
+#
+#     git config core.hooksPath scripts/hooks
+#
+# Runs Core tests + workspace build before push. Skips the heavy
+# xcodebuild gate for docs-only pushes. Bypass for emergencies with
+# `git push --no-verify`.
+
+set -e
+set -o pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+remote="$1"
+url="$2"
+
+# Read the ref ranges being pushed from stdin.
+# Format per line: <local_ref> <local_sha> <remote_ref> <remote_sha>
+pushing_anything=0
+docs_only=1
+zero="0000000000000000000000000000000000000000"
+
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+    [ -z "$local_sha" ] && continue
+    [ "$local_sha" = "$zero" ] && continue   # delete; skip
+
+    pushing_anything=1
+
+    if [ "$remote_sha" = "$zero" ]; then
+        # New branch on remote — compare against merge-base with main.
+        base="$(git merge-base "$local_sha" origin/main 2>/dev/null || echo "")"
+    else
+        base="$remote_sha"
+    fi
+
+    if [ -z "$base" ]; then
+        # Can't compute diff range; be conservative.
+        docs_only=0
+        continue
+    fi
+
+    changed_files="$(git diff --name-only "$base..$local_sha")"
+    if [ -z "$changed_files" ]; then
+        continue
+    fi
+
+    # Anything outside docs/, *.md, .specify/, .github/, scripts/hooks/
+    # counts as code.
+    while IFS= read -r f; do
+        case "$f" in
+            docs/*|*.md|.specify/*|.github/*|scripts/hooks/*) ;;
+            *) docs_only=0 ;;
+        esac
+    done <<<"$changed_files"
+done
+
+if [ "$pushing_anything" = "0" ]; then
+    exit 0
+fi
+
+if [ "$docs_only" = "1" ]; then
+    echo "[pre-push] docs-only push; skipping build/test gate."
+    exit 0
+fi
+
+# Test gate — Core package only (fast, no Xcode required for SPM tests).
+if [ -d "Packages/AIDashCore" ]; then
+    echo "[pre-push] swift test (AIDashCore)..."
+    if ! swift test --package-path Packages/AIDashCore > /tmp/aidash-pre-push-test.log 2>&1; then
+        echo "[pre-push] FAILED: swift test"
+        tail -40 /tmp/aidash-pre-push-test.log
+        exit 1
+    fi
+fi
+
+# Build gate — generate xcodeproj if missing, then build macOS app.
+# Skip if xcodegen / xcodebuild not yet available (during very early
+# scaffolding tasks T001-T008 the project may not yet exist).
+if [ -f "project.yml" ]; then
+    if ! command -v xcodegen >/dev/null 2>&1; then
+        echo "[pre-push] WARNING: project.yml exists but xcodegen not installed; skipping build gate."
+    elif ! command -v xcodebuild >/dev/null 2>&1; then
+        echo "[pre-push] WARNING: xcodebuild not found; skipping build gate."
+    else
+        echo "[pre-push] xcodegen generate..."
+        if ! xcodegen generate > /tmp/aidash-pre-push-xcodegen.log 2>&1; then
+            echo "[pre-push] FAILED: xcodegen generate"
+            tail -40 /tmp/aidash-pre-push-xcodegen.log
+            exit 1
+        fi
+
+        # If a workspace/project exists, do a macOS build.
+        if [ -d "AIDash.xcodeproj" ] || [ -d "AIDash.xcworkspace" ]; then
+            echo "[pre-push] xcodebuild macOS app..."
+            if ! xcodebuild -scheme AIDashApp -destination "platform=macOS" build \
+                    > /tmp/aidash-pre-push-build.log 2>&1; then
+                echo "[pre-push] FAILED: xcodebuild macOS"
+                tail -50 /tmp/aidash-pre-push-build.log
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+echo "[pre-push] all checks passed."
+exit 0
