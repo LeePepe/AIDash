@@ -25,6 +25,10 @@
 | D14 | Dependency policy | Zero deps / case-by-case | **case-by-case**，新引入要写 ADR | 用户拒绝硬性 zero；保留弹性 |
 | D15 | HTTP client | Alamofire / URLSession | **URLSession**（不写死禁止 Alamofire，未来评估） | 现阶段无 HTTP use case；CloudKit 不走 HTTP |
 | D16 | Integration | hermes / claude / 多个 | **Spec Kit 用 hermes 写 spec/plan/tasks；Multica 执行 implement** | tasks.md → Multica issues |
+| D17 | UserEvent actions v1 | done+star+hide / done+star / done+hide | **done + star（无 hide）**，star 视觉 prominent | done = 完成；star = 正向放大信号；hide 砍掉避免 user 进入"管理"心态 |
+| D18 | Past-date briefings v1 | UI 支持 / UI 不支持 / 模糊 | **UI 不支持**（CLI 接受 past dates） | "glanceable today" 是 v1 唯一体验；v2 加历史 navigation 零 schema 变更 |
+| D19 | events 排序 tie-breaker | unspecified / timestamp+device / timestamp+device+cardId | **`(timestamp, device, cardId)` lexicographic** | deterministic across runs/machines |
+| D20 | CloudKit SLA | 当作硬保证 / 当作目标 | **当作目标，非 SLA** | Apple 不提供 sync 延迟保证；real-world 超出可在 v1.x amendment 中放宽，不作为 defect |
 
 ## 数据模型 (Schema v1)
 
@@ -83,14 +87,18 @@
 {
   "id": "uuid",
   "timestamp": "2026-06-23T09:15:23Z",
-  "device": "iPhone-15",     // 触发设备，agent 分析时去重用
+  "device": "iPhone-15",     // 触发设备
   "cardId": "uuid",          // 哪张卡
-  "action": "done"           // done | star | hide | open (后期可扩展)
+  "action": "done"           // v1 白名单: done | star
+                             // hide 砍掉（D17），v2 可加，不需要 schema 变更
 }
 ```
 
 UserEvent 是 append-only；agent 通过 `aidash events pull` 拉取，自行 dedup
 和决定如何影响明天的 briefing。
+
+排序规则（D19）：`(timestamp, device, cardId)` lexicographic tie-breaker，
+保证 deterministic output。
 
 ## 模块依赖图
 
