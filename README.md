@@ -14,7 +14,11 @@ briefing, and close it. Two lightweight reactions (mark done, star) flow
 back to agents so they can learn what to surface tomorrow.
 
 For the full mission and principles, see
-[Constitution v1.0.0](.specify/memory/constitution.md).
+[Constitution v1.0.0](.specify/memory/constitution.md). For the feature
+scope and acceptance criteria, see the
+[Core Briefing CLI spec](specs/001-core-briefing-cli/spec.md)
+(plan: [plan.md](specs/001-core-briefing-cli/plan.md),
+tasks: [tasks.md](specs/001-core-briefing-cli/tasks.md)).
 
 ## Architecture
 
