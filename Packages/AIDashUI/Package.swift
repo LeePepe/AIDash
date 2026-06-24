@@ -23,5 +23,9 @@ let package = Package(
                 .product(name: "AIDashCore", package: "AIDashCore"),
             ]
         ),
+        .testTarget(
+            name: "AIDashUITests",
+            dependencies: ["AIDashUI"]
+        ),
     ]
 )
