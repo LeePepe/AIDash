@@ -28,4 +28,21 @@ public struct AgentSummaryPayload: CardPayloadProtocol {
         self.completed = completed
         self.stats = stats
     }
+
+    public func validateInvariants() throws {
+        if agentName.isEmpty {
+            throw XPCError(
+                code: "schema.payload_decode_failed",
+                message: "AgentSummaryPayload requires non-empty agentName",
+                field: "agentName"
+            )
+        }
+        guard !completed.isEmpty else {
+            throw XPCError(
+                code: "schema.payload_decode_failed",
+                message: "AgentSummaryPayload requires at least one completed item",
+                field: "completed"
+            )
+        }
+    }
 }

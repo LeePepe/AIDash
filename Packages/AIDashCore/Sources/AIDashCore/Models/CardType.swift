@@ -26,6 +26,7 @@ extension CardType {
     }
 
     public func validate(_ data: Data) throws {
-        _ = try decode(data)
+        let payload = try decode(data)
+        try payload.validateInvariants()
     }
 }
