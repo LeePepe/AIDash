@@ -32,9 +32,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash
         PRODUCT_NAME: AIDash
         INFOPLIST_FILE: Apps/AIDashApp/Info.plist
-        GENERATE_INFOPLIST_FILE: NO
+        GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_ENTITLEMENTS: Apps/AIDashApp/AIDashApp.entitlements
         ENABLE_HARDENED_RUNTIME: YES
+        INFOPLIST_KEY_LSUIElement[sdk=macosx*]: YES
     dependencies:
       - package: AIDashCore
       - package: AIDashUI
