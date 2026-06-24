@@ -69,3 +69,20 @@ import Foundation
     #expect(container.style == .warning)
     #expect(container.subtitle == nil)
 }
+
+@Test func containerModelUnknownRawValueFallback() async throws {
+    let container = ContainerModel(
+        id: "C3",
+        title: "Forward Compat",
+        subtitle: nil,
+        order: 30,
+        layout: .auto,
+        style: .neutral
+    )
+
+    container.layoutRaw = "unknown_future_layout"
+    container.styleRaw = "unknown_future_style"
+
+    #expect(container.layout == .auto)
+    #expect(container.style == .neutral)
+}
