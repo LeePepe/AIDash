@@ -41,6 +41,11 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.items[1].unit == "s")
         #expect(decoded.items[3].trend == nil)
         #expect(decoded.items[3].unit == nil)
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.metric.decode(data)
+        #expect(dispatched is MetricPayload)
     }
 
     // MARK: InsightPayload
@@ -59,6 +64,11 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.citations?.count == 1)
         #expect(decoded.citations?[0].label == "PR #1")
         #expect(decoded.citations?[0].url == "https://example.com/pr/1")
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.insight.decode(data)
+        #expect(dispatched is InsightPayload)
     }
 
     @Test func insightPayloadNoCitationsRoundTrip() throws {
@@ -88,6 +98,11 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.completed[1].ref == nil)
         #expect(decoded.stats?.count == 2)
         #expect(decoded.stats?[1].value == 4.5)
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.agentSummary.decode(data)
+        #expect(dispatched is AgentSummaryPayload)
     }
 
     @Test func agentSummaryPayloadNoStatsRoundTrip() throws {
@@ -114,6 +129,11 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.items[0].due == nil)
         #expect(decoded.items[1].due == dueDate)
         #expect(decoded.items[2].ref == "https://example.com")
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.todoList.decode(data)
+        #expect(dispatched is TodoListPayload)
     }
 
     // MARK: TrendingPayload
@@ -131,6 +151,11 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.items.count == 2)
         #expect(decoded.items[0].score == 487)
         #expect(decoded.items[1].score == nil)
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.trending.decode(data)
+        #expect(dispatched is TrendingPayload)
     }
 
     // MARK: DigestPayload
@@ -149,6 +174,11 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.body == "Brief overview of the day.")
         #expect(decoded.sections?.count == 2)
         #expect(decoded.sections?[0].paragraphs.count == 2)
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.digest.decode(data)
+        #expect(dispatched is DigestPayload)
     }
 
     @Test func digestPayloadNoSectionsRoundTrip() throws {
@@ -164,6 +194,11 @@ struct CardPayloadRoundTripTests {
         let decoded = try roundTrip(payload)
         #expect(decoded.title == "Engineering")
         #expect(decoded.subtitle == "Backend, infra")
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.sectionHeader.decode(data)
+        #expect(dispatched is SectionHeaderPayload)
     }
 
     @Test func sectionHeaderPayloadNoSubtitleRoundTrip() throws {
@@ -186,5 +221,17 @@ struct CardPayloadRoundTripTests {
             SectionHeaderPayload(title: "t"),
         ]
         #expect(payloads.count == 7)
+    }
+
+    // MARK: Dispatch mismatch
+
+    @Test func dispatchFailsOnMismatchedPayload() throws {
+        let metricPayload = MetricPayload(items: [
+            MetricPayload.Item(label: "x", value: 1, unit: nil, trend: nil),
+        ])
+        let data = try encoder.encode(metricPayload)
+        #expect(throws: DecodingError.self) {
+            _ = try CardType.insight.decode(data)
+        }
     }
 }
