@@ -13,6 +13,7 @@ public enum CardType: String, Codable, Sendable, CaseIterable {
 extension CardType {
     public func decode(_ data: Data) throws -> any CardPayloadProtocol {
         let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         switch self {
         case .metric:        return try decoder.decode(MetricPayload.self, from: data)
         case .insight:       return try decoder.decode(InsightPayload.self, from: data)
