@@ -55,8 +55,8 @@ Prerequisites:
 git clone https://github.com/LeePepe/AIDash.git
 cd AIDash
 
-# Generate xcodeproj from project.yml
-xcodegen generate
+# One-line setup: install XcodeGen, generate the project, and open it in Xcode
+brew install xcodegen && xcodegen generate && open AIDash.xcodeproj
 
 # Activate the version-controlled git hooks
 git config core.hooksPath scripts/hooks
@@ -67,9 +67,6 @@ swift test --package-path Packages/AIDashCore
 # Build everything
 xcodebuild -scheme AIDashApp -destination "platform=macOS" build
 xcodebuild -scheme aidash    -destination "platform=macOS" build
-
-# Open in Xcode
-open AIDash.xcodeproj
 ```
 
 ## Project layout
