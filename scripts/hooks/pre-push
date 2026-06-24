@@ -97,7 +97,7 @@ if [ -f "project.yml" ]; then
         # If a workspace/project exists, do a macOS build.
         if [ -d "AIDash.xcodeproj" ] || [ -d "AIDash.xcworkspace" ]; then
             echo "[pre-push] xcodebuild macOS app..."
-            if ! xcodebuild -scheme AIDashApp -destination "platform=macOS" build \
+            if ! xcodebuild -scheme AIDashApp -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build \
                     > /tmp/aidash-pre-push-build.log 2>&1; then
                 echo "[pre-push] FAILED: xcodebuild macOS"
                 tail -50 /tmp/aidash-pre-push-build.log
