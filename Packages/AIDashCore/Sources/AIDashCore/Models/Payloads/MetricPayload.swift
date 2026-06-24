@@ -22,4 +22,14 @@ public struct MetricPayload: CardPayloadProtocol {
     public init(items: [Item]) {
         self.items = items
     }
+
+    public func validateInvariants() throws {
+        guard !items.isEmpty else {
+            throw XPCError(
+                code: "schema.payload_decode_failed",
+                message: "MetricPayload requires at least one item",
+                field: "items"
+            )
+        }
+    }
 }

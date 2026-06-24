@@ -66,12 +66,15 @@ public struct SchemaValidator {
 
         do {
             try cardType.validate(payload)
-        } catch is XPCError {
+        } catch let xpcError as XPCError where xpcError.code == "schema.payload_decode_failed" {
+            // Invariant violation — already has the correct code and field.
+            throw xpcError
+        } catch let decodingError as DecodingError {
             throw XPCError(
                 code: "schema.payload_decode_failed",
                 message: "Payload JSON does not match \(type) schema",
-                field: "payload",
-                cause: "Decoding failed for CardType.\(type)"
+                field: Self.firstFailingKey(from: decodingError),
+                cause: decodingError.localizedDescription
             )
         } catch {
             throw XPCError(
@@ -162,6 +165,21 @@ public struct SchemaValidator {
                 got: value,
                 allowed: E.allCases.map(\.rawValue)
             )
+        }
+    }
+
+    private static func firstFailingKey(from error: DecodingError) -> String {
+        switch error {
+        case .keyNotFound(let key, _):
+            return key.stringValue
+        case .valueNotFound(_, let context):
+            return context.codingPath.last?.stringValue ?? "payload"
+        case .typeMismatch(_, let context):
+            return context.codingPath.last?.stringValue ?? "payload"
+        case .dataCorrupted(let context):
+            return context.codingPath.last?.stringValue ?? "payload"
+        @unknown default:
+            return "payload"
         }
     }
 }

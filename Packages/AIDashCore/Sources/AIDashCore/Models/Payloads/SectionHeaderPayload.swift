@@ -6,4 +6,14 @@ public struct SectionHeaderPayload: CardPayloadProtocol {
         self.title = title
         self.subtitle = subtitle
     }
+
+    public func validateInvariants() throws {
+        if title.isEmpty {
+            throw XPCError(
+                code: "schema.payload_decode_failed",
+                message: "SectionHeaderPayload requires non-empty title",
+                field: "title"
+            )
+        }
+    }
 }
