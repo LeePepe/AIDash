@@ -23,5 +23,9 @@ let package = Package(
             name: "AIDashCoreTests",
             dependencies: ["AIDashCore"]
         ),
+        .testTarget(
+            name: "AIDashCorePublicAPITests",
+            dependencies: ["AIDashCore"]
+        ),
     ]
 )
