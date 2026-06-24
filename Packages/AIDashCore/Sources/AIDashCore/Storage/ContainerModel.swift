@@ -1,14 +1,33 @@
 import SwiftData
 import Foundation
 
-// Minimal stub so BriefingModel's @Relationship compiles.
-// T021 will replace this with the full implementation.
 @Model
 public final class ContainerModel {
-    @Attribute(.unique) public var id: String
-    public var briefing: BriefingModel?
+    @Attribute(.unique) public var id: String                // UUID from agent
+    public var title: String
+    public var subtitle: String?
+    public var order: Int
+    public var layoutRaw: String                             // ContainerLayout.rawValue
+    public var styleRaw: String                              // CardStyle.rawValue
+    public var briefing: BriefingModel?                      // inverse for cascade
 
-    public init(id: String) {
+    public init(id: String, title: String, subtitle: String?, order: Int,
+                layout: ContainerLayout, style: CardStyle) {
         self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.order = order
+        self.layoutRaw = layout.rawValue
+        self.styleRaw = style.rawValue
+    }
+
+    public var layout: ContainerLayout {
+        get { ContainerLayout(rawValue: layoutRaw) ?? .auto }
+        set { layoutRaw = newValue.rawValue }
+    }
+
+    public var style: CardStyle {
+        get { CardStyle(rawValue: styleRaw) ?? .neutral }
+        set { styleRaw = newValue.rawValue }
     }
 }

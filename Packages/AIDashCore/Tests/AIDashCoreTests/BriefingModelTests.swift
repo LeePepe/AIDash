@@ -28,3 +28,44 @@ import Foundation
     #expect(briefing.publishedAt == published)
     #expect(briefing.containers.isEmpty)
 }
+
+@Test func containerModelInit() async throws {
+    let container = ContainerModel(
+        id: "C1",
+        title: "Overview",
+        subtitle: "Daily summary",
+        order: 10,
+        layout: .grid,
+        style: .accent
+    )
+
+    #expect(container.id == "C1")
+    #expect(container.title == "Overview")
+    #expect(container.subtitle == "Daily summary")
+    #expect(container.order == 10)
+    #expect(container.layout == .grid)
+    #expect(container.style == .accent)
+    #expect(container.layoutRaw == "grid")
+    #expect(container.styleRaw == "accent")
+    #expect(container.briefing == nil)
+}
+
+@Test func containerModelComputedSetters() async throws {
+    let container = ContainerModel(
+        id: "C2",
+        title: "Tasks",
+        subtitle: nil,
+        order: 20,
+        layout: .auto,
+        style: .neutral
+    )
+
+    container.layout = .hero
+    container.style = .warning
+
+    #expect(container.layoutRaw == "hero")
+    #expect(container.styleRaw == "warning")
+    #expect(container.layout == .hero)
+    #expect(container.style == .warning)
+    #expect(container.subtitle == nil)
+}
