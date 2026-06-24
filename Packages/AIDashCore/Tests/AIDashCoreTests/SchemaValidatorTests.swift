@@ -120,6 +120,99 @@ struct SchemaValidatorTests {
         )
     }
 
+    @Test func cardPut_validInsight_doesNotThrow() throws {
+        let payload = try JSONEncoder().encode(
+            InsightPayload(title: "Test insight", body: "Some analysis", citations: nil)
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "insight",
+            size: "medium",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
+    @Test func cardPut_validAgentSummary_doesNotThrow() throws {
+        let payload = try JSONEncoder().encode(
+            AgentSummaryPayload(
+                agentName: "multica/test",
+                completed: [AgentSummaryPayload.Completed(title: "Fixed bug", ref: nil)],
+                stats: nil
+            )
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "agentSummary",
+            size: "medium",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
+    @Test func cardPut_validTodoList_doesNotThrow() throws {
+        let payload = try JSONEncoder().encode(
+            TodoListPayload(items: [
+                TodoListPayload.Item(title: "Review PRs", priority: .high, due: nil, ref: nil)
+            ])
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "todoList",
+            size: "medium",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
+    @Test func cardPut_validTrending_doesNotThrow() throws {
+        let payload = try JSONEncoder().encode(
+            TrendingPayload(
+                topic: "Swift news",
+                items: [TrendingPayload.Item(title: "Swift 6.1 released", url: "https://swift.org", score: nil)]
+            )
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "trending",
+            size: "wide",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
+    @Test func cardPut_validDigest_doesNotThrow() throws {
+        let payload = try JSONEncoder().encode(
+            DigestPayload(title: "Tuesday at a glance", body: "Overview of the day.", sections: nil)
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "digest",
+            size: "hero",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
+    @Test func cardPut_validSectionHeader_doesNotThrow() throws {
+        let payload = try JSONEncoder().encode(
+            SectionHeaderPayload(title: "Engineering", subtitle: nil)
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "sectionHeader",
+            size: "small",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
     @Test func cardPut_unknownType_throws() {
         do {
             try SchemaValidator.validateCardPut(
