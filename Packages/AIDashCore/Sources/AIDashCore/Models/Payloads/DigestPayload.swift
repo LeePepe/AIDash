@@ -18,4 +18,21 @@ public struct DigestPayload: CardPayloadProtocol {
         self.body = body
         self.sections = sections
     }
+
+    public func validateInvariants() throws {
+        if title.isEmpty {
+            throw XPCError(
+                code: "schema.payload_decode_failed",
+                message: "DigestPayload requires non-empty title",
+                field: "title"
+            )
+        }
+        if body.isEmpty {
+            throw XPCError(
+                code: "schema.payload_decode_failed",
+                message: "DigestPayload requires non-empty body",
+                field: "body"
+            )
+        }
+    }
 }
