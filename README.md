@@ -117,6 +117,27 @@ The CLI validates schema locally, dispatches via XPC to the macOS app,
 and the app writes to CloudKit. iPad and iPhone pick up the new briefing
 within ~60 seconds via CloudKit auto-sync.
 
+## Quality expectations
+
+**Accessibility.** All SwiftUI views must preserve platform accessibility
+conventions: support Dynamic Type, use semantic labels for VoiceOver, and
+maintain clear touch targets (≥ 44pt). Decorative images are marked
+`.accessibilityHidden(true)`.
+
+**Localisation.** User-facing copy must live in localizable string catalogs
+(`.xcstrings`), not hardcoded in source files. This ensures translation
+readiness without expanding Phase 1 implementation scope.
+
+**Privacy.** Data is stored exclusively in CloudKit Private DB — no
+third-party analytics, no external storage services, and no app-side LLM
+calls in v1. The CLI never touches the network directly; it communicates
+via XPC to the app.
+
+**Design boundary.** AIDash is read-only: no compose surface, no chat
+input, no user-authored content. The information hierarchy is flat:
+`Briefing → Container → Card`. Module dependency flows upward
+(`Core → UI → App`; CLI depends on Core only).
+
 ## Related project
 
 [agent-ops-dashboard](https://github.com/LeePepe/agent-ops-dashboard) —
