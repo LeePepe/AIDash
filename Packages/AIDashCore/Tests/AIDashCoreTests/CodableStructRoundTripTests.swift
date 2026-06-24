@@ -92,7 +92,8 @@ struct CodableStructRoundTripTests {
     // MARK: - Briefing
 
     @Test func briefingRoundTrip() throws {
-        let now = Date()
+        // Use a whole-second date so ISO8601 round-trip is lossless
+        let now = Date(timeIntervalSince1970: Double(Int(Date().timeIntervalSince1970)))
         let briefing = Briefing(
             date: "2026-06-24",
             generatedAt: now,
@@ -112,6 +113,7 @@ struct CodableStructRoundTripTests {
         let data = try encoder.encode(briefing)
         let decoded = try decoder.decode(Briefing.self, from: data)
         #expect(decoded.date == "2026-06-24")
+        #expect(decoded.generatedAt == now)
         #expect(decoded.generatedBy == "claude-code")
         #expect(decoded.containers.count == 1)
         #expect(decoded.containers[0].id == "ctr-1")
@@ -120,7 +122,8 @@ struct CodableStructRoundTripTests {
     // MARK: - UserEvent
 
     @Test func userEventRoundTrip() throws {
-        let ts = Date()
+        // Use a whole-second date so ISO8601 round-trip is lossless
+        let ts = Date(timeIntervalSince1970: Double(Int(Date().timeIntervalSince1970)))
         let event = UserEvent(
             id: "evt-001",
             timestamp: ts,
@@ -131,6 +134,7 @@ struct CodableStructRoundTripTests {
         let data = try encoder.encode(event)
         let decoded = try decoder.decode(UserEvent.self, from: data)
         #expect(decoded.id == "evt-001")
+        #expect(decoded.timestamp == ts)
         #expect(decoded.device == "Test iPhone [AABB]")
         #expect(decoded.cardId == "card-001")
         #expect(decoded.action == .done)
@@ -149,13 +153,4 @@ struct CodableStructRoundTripTests {
         #expect(decoded.action == .star)
     }
 
-    // MARK: - Memberwise init accessibility
-
-    @Test func publicMemberwiseInitAccessible() throws {
-        // Verify all public inits compile and are callable from outside the module
-        _ = Card(id: "x", type: .metric, size: .small, style: .neutral, payload: Data())
-        _ = Container(id: "x", title: "t", subtitle: nil, order: 0, layout: .auto, style: .neutral, cards: [])
-        _ = Briefing(date: "2026-01-01", generatedAt: Date(), generatedBy: "test", containers: [])
-        _ = UserEvent(id: "x", timestamp: Date(), device: "d", cardId: "c", action: .done)
-    }
 }
