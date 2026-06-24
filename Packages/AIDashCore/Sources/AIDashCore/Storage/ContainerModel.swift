@@ -9,6 +9,8 @@ public final class ContainerModel {
     public var order: Int
     public var layoutRaw: String                             // ContainerLayout.rawValue
     public var styleRaw: String                              // CardStyle.rawValue
+    @Relationship(deleteRule: .cascade, inverse: \CardModel.container)
+    public var cards: [CardModel]
     public var briefing: BriefingModel?                      // inverse for cascade
 
     public init(id: String, title: String, subtitle: String?, order: Int,
@@ -19,6 +21,7 @@ public final class ContainerModel {
         self.order = order
         self.layoutRaw = layout.rawValue
         self.styleRaw = style.rawValue
+        self.cards = []
     }
 
     public var layout: ContainerLayout {
