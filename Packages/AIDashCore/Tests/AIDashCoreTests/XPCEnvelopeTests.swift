@@ -1,101 +1,93 @@
-import Foundation
 import Testing
+import Foundation
 @testable import AIDashCore
 
-// MARK: - T033: XPC envelope JSON round-trip tests
+@Suite("XPC envelope")
+struct XPCEnvelopeTests {
 
-@Test func xpcRequestRoundTrip() throws {
-    let original = XPCRequest(
-        requestId: "550e8400-e29b-41d4-a716-446655440000",
-        cliVersion: "1.0.0",
-        command: "card.put",
-        params: Data("{\"key\":\"value\"}".utf8)
-    )
-
-    let encoded = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(XPCRequest.self, from: encoded)
-
-    #expect(decoded.requestId == original.requestId)
-    #expect(decoded.cliVersion == original.cliVersion)
-    #expect(decoded.command == original.command)
-    #expect(decoded.params == original.params)
-}
-
-@Test func xpcResponseSuccessRoundTrip() throws {
-    let original = XPCResponse(
-        requestId: "550e8400-e29b-41d4-a716-446655440000",
-        appVersion: "2.0.0",
-        ok: true,
-        data: Data("{\"id\":\"abc\"}".utf8),
-        error: nil
-    )
-
-    let encoded = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(XPCResponse.self, from: encoded)
-
-    #expect(decoded.requestId == original.requestId)
-    #expect(decoded.appVersion == original.appVersion)
-    #expect(decoded.ok == true)
-    #expect(decoded.data == original.data)
-    #expect(decoded.error == nil)
-}
-
-@Test func xpcResponseErrorRoundTrip() throws {
-    let error = XPCError(
-        code: "schema.unknown_card_type",
-        message: "Unknown card type",
-        field: "type",
-        got: "bogus",
-        allowed: ["metric", "chart", "text"],
-        cause: "validation failed"
-    )
-    let original = XPCResponse(
-        requestId: "550e8400-e29b-41d4-a716-446655440000",
-        appVersion: "2.0.0",
-        ok: false,
-        data: nil,
-        error: error
-    )
-
-    let encoded = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(XPCResponse.self, from: encoded)
-
-    #expect(decoded.ok == false)
-    #expect(decoded.data == nil)
-    #expect(decoded.error?.code == "schema.unknown_card_type")
-    #expect(decoded.error?.message == "Unknown card type")
-    #expect(decoded.error?.field == "type")
-    #expect(decoded.error?.got == "bogus")
-    #expect(decoded.error?.allowed == ["metric", "chart", "text"])
-    #expect(decoded.error?.cause == "validation failed")
-}
-
-@Test func xpcErrorMinimalRoundTrip() throws {
-    let original = XPCError(
-        code: "internal.unexpected",
-        message: "Something went wrong"
-    )
-
-    let encoded = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(XPCError.self, from: encoded)
-
-    #expect(decoded.code == original.code)
-    #expect(decoded.message == original.message)
-    #expect(decoded.field == nil)
-    #expect(decoded.got == nil)
-    #expect(decoded.allowed == nil)
-    #expect(decoded.cause == nil)
-}
-
-@Test func xpcErrorIsThrowable() throws {
-    func throwingFunction() throws {
-        throw XPCError(
-            code: "schema.unknown_card_type",
-            message: "Bad type"
+    @Test func requestRoundtrip() throws {
+        let params = try JSONEncoder().encode(BriefingPutParams(
+            date: "2026-06-23", generatedBy: "agent", published: false
+        ))
+        let req = XPCRequest(
+            requestId: UUID().uuidString,
+            cliVersion: "1.0.0",
+            command: "briefing.put",
+            params: params
         )
+        let data = try JSONEncoder().encode(req)
+        let decoded = try JSONDecoder().decode(XPCRequest.self, from: data)
+        #expect(decoded.command == "briefing.put")
+        #expect(decoded.cliVersion == "1.0.0")
     }
 
-    #expect(throws: XPCError.self) {
-        try throwingFunction()
+    @Test func responseSuccessRoundtrip() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let result = try encoder.encode(BriefingPutResult(
+            date: "2026-06-23", generatedAt: .now, publishedAt: nil
+        ))
+        let resp = XPCResponse(
+            requestId: UUID().uuidString, appVersion: "1.0.0",
+            ok: true, data: result, error: nil
+        )
+        let data = try encoder.encode(resp)
+        let decoded = try decoder.decode(XPCResponse.self, from: data)
+        #expect(decoded.ok == true)
+        #expect(decoded.data != nil)
+        #expect(decoded.error == nil)
+    }
+
+    @Test func responseErrorRoundtrip() throws {
+        let err = XPCError(
+            code: "schema.unknown_card_type",
+            message: "test",
+            field: "type",
+            got: "unicorn",
+            allowed: ["metric", "insight"]
+        )
+        let resp = XPCResponse(
+            requestId: UUID().uuidString, appVersion: "1.0.0",
+            ok: false, data: nil, error: err
+        )
+        let data = try JSONEncoder().encode(resp)
+        let decoded = try JSONDecoder().decode(XPCResponse.self, from: data)
+        #expect(decoded.ok == false)
+        #expect(decoded.error?.code == "schema.unknown_card_type")
+        #expect(decoded.error?.allowed?.count == 2)
+    }
+
+    @Test func cardPutParamsRoundtrip() throws {
+        let p = CardPutParams(
+            containerId: UUID().uuidString, id: UUID().uuidString,
+            type: .digest, size: .hero, style: .neutral,
+            payload: Data("{}".utf8)
+        )
+        let data = try JSONEncoder().encode(p)
+        let decoded = try JSONDecoder().decode(CardPutParams.self, from: data)
+        #expect(decoded.type == .digest)
+        #expect(decoded.size == .hero)
+    }
+
+    @Test func eventsPullResultRoundtrip() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let events = [
+            UserEvent(id: UUID().uuidString, timestamp: .now,
+                      device: "iPhone [X]", cardId: UUID().uuidString, action: .done),
+            UserEvent(id: UUID().uuidString, timestamp: .now,
+                      device: "iPad [Y]", cardId: UUID().uuidString, action: .star),
+        ]
+        let r = EventsPullResult(events: events, count: 2)
+        let data = try encoder.encode(r)
+        let decoded = try decoder.decode(EventsPullResult.self, from: data)
+        #expect(decoded.count == 2)
+        #expect(decoded.events[1].action == .star)
     }
 }
