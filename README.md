@@ -14,7 +14,11 @@ briefing, and close it. Two lightweight reactions (mark done, star) flow
 back to agents so they can learn what to surface tomorrow.
 
 For the full mission and principles, see
-[Constitution v1.0.0](.specify/memory/constitution.md).
+[Constitution v1.0.0](.specify/memory/constitution.md). For the feature
+scope and acceptance criteria, see the
+[Core Briefing CLI spec](specs/001-core-briefing-cli/spec.md)
+(plan: [plan.md](specs/001-core-briefing-cli/plan.md),
+tasks: [tasks.md](specs/001-core-briefing-cli/tasks.md)).
 
 ## Architecture
 
@@ -51,8 +55,8 @@ Prerequisites:
 git clone https://github.com/LeePepe/AIDash.git
 cd AIDash
 
-# Generate xcodeproj from project.yml
-xcodegen generate
+# One-line setup: install XcodeGen, generate the project, and open it in Xcode
+brew install xcodegen && xcodegen generate && open AIDash.xcodeproj
 
 # Activate the version-controlled git hooks
 git config core.hooksPath scripts/hooks
@@ -63,9 +67,6 @@ swift test --package-path Packages/AIDashCore
 # Build everything
 xcodebuild -scheme AIDashApp -destination "platform=macOS" build
 xcodebuild -scheme aidash    -destination "platform=macOS" build
-
-# Open in Xcode
-open AIDash.xcodeproj
 ```
 
 ## Project layout
@@ -115,6 +116,27 @@ aidash briefing publish --date today
 The CLI validates schema locally, dispatches via XPC to the macOS app,
 and the app writes to CloudKit. iPad and iPhone pick up the new briefing
 within ~60 seconds via CloudKit auto-sync.
+
+## Quality expectations
+
+**Accessibility.** All SwiftUI views must preserve platform accessibility
+conventions: support Dynamic Type, use semantic labels for VoiceOver, and
+maintain clear touch targets (≥ 44pt). Decorative images are marked
+`.accessibilityHidden(true)`.
+
+**Localisation.** User-facing copy must live in localizable string catalogs
+(`.xcstrings`), not hardcoded in source files. This ensures translation
+readiness without expanding Phase 1 implementation scope.
+
+**Privacy.** Data is stored exclusively in CloudKit Private DB — no
+third-party analytics, no external storage services, and no app-side LLM
+calls in v1. The CLI never touches the network directly; it communicates
+via XPC to the app.
+
+**Design boundary.** AIDash is read-only: no compose surface, no chat
+input, no user-authored content. The information hierarchy is flat:
+`Briefing → Container → Card`. Module dependency flows upward
+(`Core → UI → App`; CLI depends on Core only).
 
 ## Related project
 
