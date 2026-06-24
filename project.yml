@@ -35,10 +35,6 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: Apps/AIDashApp/AIDashApp.entitlements
         ENABLE_HARDENED_RUNTIME: YES
-        INFOPLIST_KEY_LSUIElement[sdk=macosx*]: YES
-      configs:
-        Debug:
-          CODE_SIGNING_ALLOWED: NO
     dependencies:
       - package: AIDashCore
       - package: AIDashUI
