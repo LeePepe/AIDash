@@ -42,6 +42,7 @@ targets:
       configs:
         Debug:
           INFOPLIST_KEY_LSUIElement[sdk=macosx*]: YES
+          CODE_SIGNING_ALLOWED: NO
         Release:
           INFOPLIST_KEY_LSUIElement[sdk=macosx*]: YES
     dependencies:
