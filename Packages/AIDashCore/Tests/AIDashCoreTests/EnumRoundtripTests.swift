@@ -17,6 +17,7 @@ struct EnumRoundtripTests {
         let data = try JSONEncoder().encode(value)
         let decoded = try JSONDecoder().decode(CardSize.self, from: data)
         #expect(decoded == value)
+        #expect(decoded.rawValue == value.rawValue)
     }
 
     @Test(arguments: CardStyle.allCases)
@@ -24,6 +25,7 @@ struct EnumRoundtripTests {
         let data = try JSONEncoder().encode(value)
         let decoded = try JSONDecoder().decode(CardStyle.self, from: data)
         #expect(decoded == value)
+        #expect(decoded.rawValue == value.rawValue)
     }
 
     @Test(arguments: ContainerLayout.allCases)
@@ -31,6 +33,7 @@ struct EnumRoundtripTests {
         let data = try JSONEncoder().encode(value)
         let decoded = try JSONDecoder().decode(ContainerLayout.self, from: data)
         #expect(decoded == value)
+        #expect(decoded.rawValue == value.rawValue)
     }
 
     @Test(arguments: UserEventAction.allCases)
@@ -38,6 +41,7 @@ struct EnumRoundtripTests {
         let data = try JSONEncoder().encode(value)
         let decoded = try JSONDecoder().decode(UserEventAction.self, from: data)
         #expect(decoded == value)
+        #expect(decoded.rawValue == value.rawValue)
     }
 
     @Test func cardTypeCount() {
