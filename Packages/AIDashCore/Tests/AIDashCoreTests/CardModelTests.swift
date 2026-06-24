@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftData
 @testable import AIDashCore
 
 @Test func cardModelInit() async throws {
@@ -131,4 +132,106 @@ func cardModelAllCardStyles(cardStyle: CardStyle) async throws {
     #expect(card.type == .metric)
     #expect(card.size == .medium)
     #expect(card.style == .neutral)
+}
+
+// MARK: - ContainerModel.cards relationship tests
+
+@Test func containerCardsInitializesEmpty() async throws {
+    let container = ContainerModel(
+        id: "REL-C1",
+        title: "Test",
+        subtitle: nil,
+        order: 0,
+        layout: .auto,
+        style: .neutral
+    )
+
+    #expect(container.cards.isEmpty)
+}
+
+@Test func containerCardsRelationshipInMemory() async throws {
+    let config = ModelConfiguration(isStoredInMemoryOnly: true)
+    let container = try ModelContainer(
+        for: BriefingModel.self, ContainerModel.self, CardModel.self,
+        configurations: config
+    )
+    let context = ModelContext(container)
+
+    let cont = ContainerModel(
+        id: "REL-C2",
+        title: "Metrics",
+        subtitle: nil,
+        order: 1,
+        layout: .list,
+        style: .neutral
+    )
+    context.insert(cont)
+
+    let card = CardModel(
+        id: "REL-CARD1",
+        type: .metric,
+        size: .medium,
+        style: .neutral,
+        payloadJSON: Data("{\"value\":42}".utf8)
+    )
+    card.container = cont
+    context.insert(card)
+    try context.save()
+
+    // Verify inverse: container.cards contains the card
+    #expect(cont.cards.count == 1)
+    #expect(cont.cards.first?.id == "REL-CARD1")
+
+    // Verify forward: card.container points back
+    #expect(card.container?.id == "REL-C2")
+}
+
+@Test func containerCardsCascadeDelete() async throws {
+    let config = ModelConfiguration(isStoredInMemoryOnly: true)
+    let container = try ModelContainer(
+        for: BriefingModel.self, ContainerModel.self, CardModel.self,
+        configurations: config
+    )
+    let context = ModelContext(container)
+
+    let cont = ContainerModel(
+        id: "REL-C3",
+        title: "Cascade",
+        subtitle: nil,
+        order: 0,
+        layout: .grid,
+        style: .accent
+    )
+    context.insert(cont)
+
+    let card1 = CardModel(
+        id: "REL-CARD2",
+        type: .insight,
+        size: .wide,
+        style: .success,
+        payloadJSON: Data()
+    )
+    card1.container = cont
+
+    let card2 = CardModel(
+        id: "REL-CARD3",
+        type: .digest,
+        size: .medium,
+        style: .neutral,
+        payloadJSON: Data()
+    )
+    card2.container = cont
+
+    context.insert(card1)
+    context.insert(card2)
+    try context.save()
+
+    #expect(cont.cards.count == 2)
+
+    // Delete the container — cascade should remove its cards
+    context.delete(cont)
+    try context.save()
+
+    let remainingCards = try context.fetch(FetchDescriptor<CardModel>())
+    #expect(remainingCards.isEmpty)
 }
