@@ -417,3 +417,244 @@ import Testing
     #expect(decodedResult.cardTypes == ["metric"])
     #expect(decodedResult.payloads["metric"] == #"{"type":"object"}"#)
 }
+
+// MARK: - Error envelope round-trip
+
+@Test func errorEnvelopeRoundTrip() throws {
+    let encoder = JSONEncoder()
+    let decoder = JSONDecoder()
+
+    let error = XPCError(
+        code: "schema.unknown_card_type",
+        message: "Unknown card type 'foo'",
+        field: "type",
+        got: "foo",
+        allowed: ["metric", "insight", "digest"]
+    )
+    let response = XPCResponse(
+        requestId: "req-err",
+        appVersion: "1.0.0",
+        ok: false,
+        data: nil,
+        error: error
+    )
+    let responseData = try encoder.encode(response)
+    let decoded = try decoder.decode(XPCResponse.self, from: responseData)
+
+    #expect(decoded.ok == false)
+    #expect(decoded.data == nil)
+    #expect(decoded.error?.code == "schema.unknown_card_type")
+    #expect(decoded.error?.message == "Unknown card type 'foo'")
+    #expect(decoded.error?.field == "type")
+    #expect(decoded.error?.got == "foo")
+    #expect(decoded.error?.allowed == ["metric", "insight", "digest"])
+}
+
+// MARK: - Remaining command envelope tests
+
+@Test func briefingGetEnvelopeRoundTrip() throws {
+    let params = BriefingGetParams(date: "2026-06-24")
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let paramsData = try encoder.encode(params)
+    let request = XPCRequest(
+        requestId: "req-bg",
+        cliVersion: "1.0.0",
+        command: "briefing.get",
+        params: paramsData
+    )
+    let requestData = try encoder.encode(request)
+    let decodedRequest = try decoder.decode(XPCRequest.self, from: requestData)
+    let decodedParams = try decoder.decode(BriefingGetParams.self, from: decodedRequest.params)
+
+    #expect(decodedRequest.command == "briefing.get")
+    #expect(decodedParams.date == "2026-06-24")
+
+    let now = Date(timeIntervalSince1970: 1_750_000_000)
+    let briefing = Briefing(
+        date: "2026-06-24",
+        generatedAt: now,
+        generatedBy: "claude-code",
+        containers: []
+    )
+    let result = BriefingGetResult(briefing: briefing)
+    let resultData = try encoder.encode(result)
+    let response = XPCResponse(
+        requestId: "req-bg",
+        appVersion: "1.0.0",
+        ok: true,
+        data: resultData,
+        error: nil
+    )
+    let responseData = try encoder.encode(response)
+    let decodedResponse = try decoder.decode(XPCResponse.self, from: responseData)
+    let decodedResult = try decoder.decode(BriefingGetResult.self, from: decodedResponse.data!)
+
+    #expect(decodedResponse.ok == true)
+    #expect(decodedResult.briefing.date == "2026-06-24")
+    #expect(decodedResult.briefing.generatedBy == "claude-code")
+}
+
+@Test func briefingPublishEnvelopeRoundTrip() throws {
+    let params = BriefingPublishParams(date: "2026-06-24")
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let paramsData = try encoder.encode(params)
+    let request = XPCRequest(
+        requestId: "req-bp",
+        cliVersion: "1.0.0",
+        command: "briefing.publish",
+        params: paramsData
+    )
+    let requestData = try encoder.encode(request)
+    let decodedRequest = try decoder.decode(XPCRequest.self, from: requestData)
+    let decodedParams = try decoder.decode(BriefingPublishParams.self, from: decodedRequest.params)
+
+    #expect(decodedRequest.command == "briefing.publish")
+    #expect(decodedParams.date == "2026-06-24")
+
+    let now = Date(timeIntervalSince1970: 1_750_000_000)
+    let result = BriefingPublishResult(date: "2026-06-24", publishedAt: now)
+    let resultData = try encoder.encode(result)
+    let response = XPCResponse(
+        requestId: "req-bp",
+        appVersion: "1.0.0",
+        ok: true,
+        data: resultData,
+        error: nil
+    )
+    let responseData = try encoder.encode(response)
+    let decodedResponse = try decoder.decode(XPCResponse.self, from: responseData)
+    let decodedResult = try decoder.decode(BriefingPublishResult.self, from: decodedResponse.data!)
+
+    #expect(decodedResponse.ok == true)
+    #expect(decodedResult.date == "2026-06-24")
+    #expect(decodedResult.publishedAt == now)
+}
+
+@Test func containerPutEnvelopeRoundTrip() throws {
+    let params = ContainerPutParams(
+        briefingDate: "2026-06-24",
+        id: "c-1",
+        title: "Summary",
+        subtitle: nil,
+        order: 0,
+        layout: .auto,
+        style: .neutral
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let paramsData = try encoder.encode(params)
+    let request = XPCRequest(
+        requestId: "req-cp",
+        cliVersion: "1.0.0",
+        command: "container.put",
+        params: paramsData
+    )
+    let requestData = try encoder.encode(request)
+    let decodedRequest = try decoder.decode(XPCRequest.self, from: requestData)
+    let decodedParams = try decoder.decode(ContainerPutParams.self, from: decodedRequest.params)
+
+    #expect(decodedRequest.command == "container.put")
+    #expect(decodedParams.id == "c-1")
+    #expect(decodedParams.layout == .auto)
+
+    let now = Date(timeIntervalSince1970: 1_750_000_000)
+    let result = ContainerPutResult(id: "c-1", updatedAt: now, wasCreated: true)
+    let resultData = try encoder.encode(result)
+    let response = XPCResponse(
+        requestId: "req-cp",
+        appVersion: "1.0.0",
+        ok: true,
+        data: resultData,
+        error: nil
+    )
+    let responseData = try encoder.encode(response)
+    let decodedResponse = try decoder.decode(XPCResponse.self, from: responseData)
+    let decodedResult = try decoder.decode(ContainerPutResult.self, from: decodedResponse.data!)
+
+    #expect(decodedResponse.ok == true)
+    #expect(decodedResult.id == "c-1")
+    #expect(decodedResult.wasCreated == true)
+}
+
+@Test func containerDeleteEnvelopeRoundTrip() throws {
+    let params = ContainerDeleteParams(id: "c-1")
+    let encoder = JSONEncoder()
+    let decoder = JSONDecoder()
+
+    let paramsData = try encoder.encode(params)
+    let request = XPCRequest(
+        requestId: "req-cd",
+        cliVersion: "1.0.0",
+        command: "container.delete",
+        params: paramsData
+    )
+    let requestData = try encoder.encode(request)
+    let decodedRequest = try decoder.decode(XPCRequest.self, from: requestData)
+    let decodedParams = try decoder.decode(ContainerDeleteParams.self, from: decodedRequest.params)
+
+    #expect(decodedRequest.command == "container.delete")
+    #expect(decodedParams.id == "c-1")
+
+    let result = ContainerDeleteResult()
+    let resultData = try encoder.encode(result)
+    let response = XPCResponse(
+        requestId: "req-cd",
+        appVersion: "1.0.0",
+        ok: true,
+        data: resultData,
+        error: nil
+    )
+    let responseData = try encoder.encode(response)
+    let decodedResponse = try decoder.decode(XPCResponse.self, from: responseData)
+    let decodedResult = try decoder.decode(ContainerDeleteResult.self, from: decodedResponse.data!)
+
+    #expect(decodedResponse.ok == true)
+    _ = decodedResult // Empty struct, just verify decode succeeds
+}
+
+@Test func cardDeleteEnvelopeRoundTrip() throws {
+    let params = CardDeleteParams(id: "card-99")
+    let encoder = JSONEncoder()
+    let decoder = JSONDecoder()
+
+    let paramsData = try encoder.encode(params)
+    let request = XPCRequest(
+        requestId: "req-crd",
+        cliVersion: "1.0.0",
+        command: "card.delete",
+        params: paramsData
+    )
+    let requestData = try encoder.encode(request)
+    let decodedRequest = try decoder.decode(XPCRequest.self, from: requestData)
+    let decodedParams = try decoder.decode(CardDeleteParams.self, from: decodedRequest.params)
+
+    #expect(decodedRequest.command == "card.delete")
+    #expect(decodedParams.id == "card-99")
+
+    let result = CardDeleteResult()
+    let resultData = try encoder.encode(result)
+    let response = XPCResponse(
+        requestId: "req-crd",
+        appVersion: "1.0.0",
+        ok: true,
+        data: resultData,
+        error: nil
+    )
+    let responseData = try encoder.encode(response)
+    let decodedResponse = try decoder.decode(XPCResponse.self, from: responseData)
+    let decodedResult = try decoder.decode(CardDeleteResult.self, from: decodedResponse.data!)
+
+    #expect(decodedResponse.ok == true)
+    _ = decodedResult // Empty struct, just verify decode succeeds
+}
