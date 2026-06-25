@@ -1,5 +1,6 @@
 import ArgumentParser
 import AIDashCore
+import Foundation
 
 @main
 struct AIDash: AsyncParsableCommand {
@@ -16,11 +17,53 @@ struct AIDash: AsyncParsableCommand {
         ]
     )
 
+    // MARK: - Root-level global flags
+    //
+    // Declared on the root command so `parseAsRoot()` accepts
+    // `aidash --json briefing publish ...` and `aidash --quiet ...`.
+    // Leaf commands also expose them via `GlobalOptions` (via OptionGroup)
+    // so the same flags work after the subcommand verb. `GlobalOptions`
+    // additionally inspects `ProcessInfo.processInfo.arguments` so that the
+    // effective flags can be observed from any leaf regardless of position.
+
     @Flag(name: .long, help: "Emit machine-readable JSON on stdout instead of human format.")
-    var json = false
+    var json: Bool = false
 
     @Flag(name: .long, help: "Suppress non-essential stdout (errors still go to stderr).")
-    var quiet = false
+    var quiet: Bool = false
+
+    // MARK: - Global error handler
+
+    static func main() async {
+        do {
+            var command = try parseAsRoot()
+            if var asyncCmd = command as? any AsyncParsableCommand {
+                try await asyncCmd.run()
+            } else {
+                try command.run()
+            }
+            Darwin.exit(0)
+        } catch let xpcError as XPCError {
+            try? JSONOutput().emit(error: xpcError)
+            Darwin.exit(ExitCodeMapper.code(for: xpcError))
+        } catch {
+            // Determine if this is a clean exit (--help, --version) or a
+            // validation failure (missing required flags, unknown args).
+            let code = exitCode(for: error)
+            if code == .success {
+                // --help / --version: ArgumentParser formats its own output
+                Self.exit(withError: error)
+            } else {
+                // Validation failure → structured JSON envelope on stderr, exit 1
+                let wrapped = XPCError(
+                    code: "schema.argument_validation_failed",
+                    message: Self.message(for: error)
+                )
+                try? JSONOutput().emit(error: wrapped)
+                Darwin.exit(1)
+            }
+        }
+    }
 }
 
 // MARK: - Briefing
@@ -44,18 +87,10 @@ struct BriefingPutCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T050")
-    }
-}
-
-struct BriefingPublishCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "publish",
-        abstract: "Mark a briefing as visible to readers."
-    )
-
-    func run() async throws {
-        fatalError("not yet implemented in T051")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "briefing put is not yet implemented (T050)"
+        )
     }
 }
 
@@ -66,7 +101,10 @@ struct BriefingGetCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T052")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "briefing get is not yet implemented (T052)"
+        )
     }
 }
 
@@ -90,7 +128,10 @@ struct ContainerPutCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T053")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "container put is not yet implemented (T053)"
+        )
     }
 }
 
@@ -101,7 +142,10 @@ struct ContainerDeleteCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T175")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "container delete is not yet implemented (T175)"
+        )
     }
 }
 
@@ -125,7 +169,10 @@ struct CardPutCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T054")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "card put is not yet implemented (T054)"
+        )
     }
 }
 
@@ -136,7 +183,10 @@ struct CardDeleteCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T176")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "card delete is not yet implemented (T176)"
+        )
     }
 }
 
@@ -159,7 +209,10 @@ struct EventsPullCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T170")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "events pull is not yet implemented (T170)"
+        )
     }
 }
 
@@ -182,6 +235,9 @@ struct SchemaListCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T055")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "schema list is not yet implemented (T055)"
+        )
     }
 }
