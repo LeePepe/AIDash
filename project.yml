@@ -31,6 +31,7 @@ targets:
     sources:
       - path: Apps/AIDashApp/Sources
       - path: Apps/AIDashApp/Resources/com.tianpli.aidash.plist
+        platform: macOS
         buildPhase:
           copyFiles:
             destination: wrapper
