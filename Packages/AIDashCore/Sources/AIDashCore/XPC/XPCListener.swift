@@ -34,6 +34,13 @@ private final class XPCListenerDelegate: NSObject, NSXPCListenerDelegate, Sendab
         _ listener: NSXPCListener,
         shouldAcceptNewConnection newConnection: NSXPCConnection
     ) -> Bool {
+        // Validate connecting process runs as the same user
+        let peerUID = newConnection.effectiveUserIdentifier
+        guard peerUID == getuid() else {
+            logger.warning("Rejected XPC connection from UID \(peerUID, privacy: .private)")
+            return false
+        }
+
         let interface = NSXPCInterface(with: AIDashXPCServiceProtocol.self)
         newConnection.exportedInterface = interface
         newConnection.exportedObject = XPCServiceStub()
