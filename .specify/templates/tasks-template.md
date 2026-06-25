@@ -19,6 +19,57 @@ description: "Task list template for feature implementation"
 - **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
 - Include exact file paths in descriptions
 
+## Task Body Template (Multica-Executed Projects)
+
+This project (`AIDash`) hands every task to a Multica issue. To prevent
+the AI Reviewer from inventing standards and looping repair rounds, every
+non-trivial task body MUST follow this template:
+
+```markdown
+- [ ] **TXXX [P?] [USx]** Short imperative description.
+
+  **Files in scope** (PR may only modify these + their tests):
+  - `path/to/file1.swift`
+  - `path/to/file2.swift`
+
+  **Files NOT to touch** (touching = constitutional 🔴 FAIL):
+  - `path/to/forbidden1.swift`  (owned by TYYY)
+  - `path/to/forbidden2.swift`  (owned by TZZZ)
+
+  **Functional acceptance**:
+  - Concrete, machine-verifiable bullet (e.g. "function signature matches
+    `public init(payload:size:style:)`")
+  - Bullet referencing the contract (e.g. "renders all fields listed in
+    `contracts/cardtype-payloads.md` §`metric` at every CardSize")
+
+  **Quality bars** (apply automatically — do not restate):
+  Constitution §"Cross-Cutting Quality Bars" all sections.
+
+  **Dependencies**: TYYY (hard), TZZZ (soft — stub OK).
+```
+
+Rules:
+
+1. **Files in scope** is mandatory. The reviewer enforces it as P0 scope
+   discipline (constitution §A).
+2. **Files NOT to touch** lists the most likely "drift" targets — files in
+   the same directory, files owned by sibling tasks. The Fullstack Engineer
+   reads this BEFORE coding; the reviewer enforces it BEFORE merging.
+3. **Functional acceptance** lists what makes the task "done as intended".
+   This is what the AI Reviewer scores against. Anything else
+   (a11y / i18n / URL policy / envelope / test depth) is governed by the
+   constitution's Cross-Cutting Quality Bars — DO NOT re-list those in the
+   task body, that's the bug we're fixing.
+4. **Quality bars** is a one-line reference, not a copy. Reviewers find
+   the latest standards in the constitution.
+5. Trivial setup tasks (T001 "create directory layout") may skip this
+   template.
+
+This template + the constitution's quality bars are the only two sources
+of standards the AI Reviewer is allowed to use. If the reviewer cites a
+standard that is in neither place, that's a reviewer bug — file it as a
+constitution amendment.
+
 ## Path Conventions
 
 - **Single project**: `src/`, `tests/` at repository root
