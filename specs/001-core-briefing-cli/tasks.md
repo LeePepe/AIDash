@@ -218,6 +218,28 @@ within 30s.
 "Independent Test" against a fresh install; verify 2 containers + 3 cards
 of different types render correctly in the macOS app.
 
+### Legacy scope interpretation for Phase 3 child issues
+
+The currently-open Multica child issues for T040-T110 were created before the
+`Files in scope` template existed. For those already-created issues, apply the
+following scope rules when reviewing or implementing them:
+
+1. **Review only the true PR diff** — compare the branch to its merge-base with
+   the PR base branch (three-dot diff / actual PR diff), not a two-dot drift
+   against the latest `main`. Main-branch changes that landed after the task
+   branch was cut are not scope violations by themselves.
+2. **Named file = scope anchor** — the file path(s) named in the task bullet are
+   the primary files in scope.
+3. **Compile/test wiring is allowed when strictly necessary** — package/workspace
+   wiring, target registration, and tests that directly exercise the scoped
+   file(s) are in scope when required to make the named file buildable and
+   verifiable.
+4. **Explicit dependency stubs are allowed only when the task text says so** — if
+   a task/issue says a dependency stub or placeholder is acceptable until its
+   owning task merges (for example CardRouter depending on T097-T103), that
+   stub is in scope for the dependency boundary only; it must not replace or
+   delete another task's owned implementation file.
+
 ### CLI binary scaffolding (US1)
 
 - [ ] **T040 [US1]** Implement `CLI/aidash/Sources/main.swift` with
