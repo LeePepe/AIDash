@@ -410,18 +410,12 @@ of different types render correctly in the macOS app.
   - Surface errors to a log file in `~/Library/Logs/AIDash/`. Constitution
     forbids `fatalError`; surface to user via menubar status.
 
-### Manual smoke test (US1)
+### User-feedback validation (US1)
 
-- [ ] **T120 [US1]** Run end-to-end manual smoke test for User Story 1:
-  - Build `AIDashApp` for macOS, install to `/Applications/AIDash.app`
-  - Build `aidash` CLI, install to `/usr/local/bin/aidash` (or
-    `~/.local/bin/aidash`)
-  - Run the `quickstart.md` 5-minute recipe
-  - Verify briefing renders correctly on Mac
-  - Document any discrepancies as bug-fix follow-up issues.
-
-**Checkpoint**: User Story 1 fully functional on macOS. Multica TL
-should run T120 personally to confirm before declaring P1 complete.
+No dedicated manual smoke-test task exists for US1. Multica agents validate
+US1 with automated build/test evidence, contract checks, and PR review. The
+user will give feedback while using AIDash; discrepancies become follow-up
+bug issues and do not block declaring US1 implementation complete.
 
 ---
 
@@ -466,18 +460,16 @@ refresh.
   Use `@Environment(\.horizontalSizeClass)` + `GeometryReader` as
   appropriate. Add `#Preview` blocks for each size class.
 
-### Manual sync test (US2)
+### User-feedback validation (US2)
 
-- [ ] **T150 [US2]** Run end-to-end manual sync test:
-  - Publish briefing on Mac (use quickstart recipe)
-  - Open AIDash on paired iPad
-  - Wait, verify within 60s the briefing appears
-  - Repeat on iPhone
-  - Verify offline-first: airplane mode on iPad, open app → previous
-    briefing visible from cache.
+No dedicated manual sync-test task exists for US2. Agents validate cross-device
+sync with automated build evidence, CloudKit integration checks where feasible,
+and clear handoff notes for any real-device uncertainty. The user will report
+real-device sync feedback during normal use; feedback becomes follow-up bugs,
+not a blocking checkpoint.
 
-**Checkpoint**: Stories 1+2 both work independently. P2 delivers
-cross-device visibility.
+**Checkpoint**: Stories 1+2 are implementation-complete when their code, build
+gates, and review gates pass.
 
 ---
 
@@ -550,18 +542,16 @@ in app, run `aidash events pull --since`, verify expected JSON output.
   today - 90 days`. UserEventModels cascade via SwiftData relationship.
   Use a background `Task.detached(priority: .background)`.
 
-### Manual end-to-end test (US3)
+### User-feedback validation (US3)
 
-- [ ] **T190 [US3]** Run end-to-end manual test:
-  - Open briefing on iPhone, tap done on one card, tap star on another
-  - Verify visual feedback within 100ms (spec SC-006)
-  - Open same briefing on iPad → verify done/star state appears within
-    60s
-  - On Mac, run `aidash events pull --since today --json` → verify
-    both events present with correct cardId/action/device/timestamp.
+No dedicated manual end-to-end test task exists for US3. Agents validate event
+recording/pull behavior with unit/integration-style checks and build gates.
+The user's normal use of done/star actions is the acceptance signal; issues
+reported later become follow-up bugs.
 
-**Checkpoint**: All three user stories independently functional. v1 MVP
-complete.
+**Checkpoint**: All three user stories are implementation-complete once code,
+build gates, and review gates pass. v1 MVP completeness is not blocked on a
+manual test issue.
 
 ---
 
@@ -636,7 +626,7 @@ Phase 2 FOUND    (T010-T033) — blocks all user stories
    ├─────────────┬─────────────┬
    ▼             ▼             ▼
 Phase 3 US1   Phase 4 US2   Phase 5 US3
-(T040-T120)  (T130-T150)  (T160-T190)
+(T040-T110)  (T130-T140)  (T160-T180)
    │             │             │
    └─────────────┴─────────────┘
                  │
@@ -651,8 +641,8 @@ sequencing.
 
 ### Critical path
 
-`T001 → T002 → T010 → T013 → T014 → T040 → T060 → T070 → T080 → T090 → T096 → T097 → T120`
-≈ 13 sequential tasks; everything else is parallel-eligible to the right
+`T001 → T002 → T010 → T013 → T014 → T040 → T060 → T070 → T080 → T090 → T096 → T097`
+≈ 12 sequential tasks; everything else is parallel-eligible to the right
 people.
 
 ### Multica execution notes
@@ -698,9 +688,9 @@ T018, T020-T023 are all independent.
 
 1. Phase 1 SETUP (T001-T008) ≈ 1 day
 2. Phase 2 FOUND (T010-T033) ≈ 3-5 days
-3. Phase 3 US1 (T040-T120) ≈ 7-10 days
-4. STOP, demo on Mac, validate spec US1 acceptance scenarios
-5. Ship as v0.1 (functional MVP, single device)
+3. Phase 3 US1 (T040-T110) ≈ 7-10 days
+4. Ship as v0.1 once code/build/review gates pass; user feedback during
+   real use becomes follow-up work
 
 ### Incremental delivery
 
@@ -728,9 +718,9 @@ After Phase 2 completes:
   contracts/ — Multica agents should `cat` those files for full
   context.
 - `swift test` must pass after every task in Phases 2-5 (CI gate).
-- Manual smoke test tasks (T120, T150, T190) require a real Mac + paired
-  iPad/iPhone signed into the same iCloud account — only the user can
-  run these; Multica should mark them as user-blocked.
+- Do not create or wait on manual smoke-test tasks (historical T120/T150/T190).
+  The user will give product feedback while using the app; Multica should turn
+  that feedback into follow-up bugs, not block implementation completion.
 - Constitution forbids `fatalError` / `try!` / `as!` in production code;
   every error path must be a graceful UI state or non-zero exit.
 - Each task ends with `git commit` using conventional commit prefix

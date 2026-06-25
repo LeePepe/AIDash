@@ -176,8 +176,10 @@ Three gates, in priority order:
    argument parsing) has unit tests. Adding or changing a card type requires
    an updated test for its payload encode/decode round-trip.
 3. **UI tests are not required.** SwiftUI views are exempt from automated
-   tests. Manual smoke-test on macOS + iPad simulator + iPhone simulator
-   before merging UI changes.
+   UI-test gates. Manual or hardware smoke tests are not merge blockers;
+   agents validate UI work with build gates, previews, contract checks, and
+   reviewer inspection. The user will provide product feedback naturally while
+   using the app; that feedback becomes follow-up issues, not a pre-ship gate.
 
 ---
 
@@ -360,6 +362,16 @@ Every PR must pass before merge:
 4. If the PR adds or changes a card type, both the strongly-typed payload
    struct and the round-trip test exist.
 
+### User Feedback, Not Manual Test Gates
+
+AIDash is validated by shipping agent-completed increments and letting the
+user report issues while using the app. Multica MUST NOT create, require, or
+wait on dedicated manual smoke-test issues (for example T120/T150/T190). If a
+flow needs real-device or iCloud confirmation, agents should ship the best
+automated evidence available, mark any uncertainty in the handoff, and let the
+user's later feedback create bug-fix follow-up issues. User feedback is an
+input signal for the next agent cycle, not a blocking phase checkpoint.
+
 ---
 
 ## Governance
@@ -382,4 +394,4 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.1.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-25
+**Version**: 1.2.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-25
