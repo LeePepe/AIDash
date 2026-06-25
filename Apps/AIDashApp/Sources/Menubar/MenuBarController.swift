@@ -1,6 +1,5 @@
 #if os(macOS)
 import AppKit
-import SwiftUI
 
 @MainActor
 public final class MenuBarController: NSObject {
@@ -17,31 +16,42 @@ public final class MenuBarController: NSObject {
                                       accessibilityDescription: "AIDash")
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Open Briefing",
-                                 action: #selector(openBriefing),
-                                 keyEquivalent: ""))
+
+        let openItem = NSMenuItem(title: "Open Briefing",
+                                   action: #selector(openBriefing),
+                                   keyEquivalent: "")
+        openItem.target = self
+        menu.addItem(openItem)
+
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "About AIDash",
-                                 action: #selector(showAbout),
-                                 keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Quit AIDash",
-                                 action: #selector(NSApplication.terminate(_:)),
-                                 keyEquivalent: "q"))
-        for it in menu.items { it.target = self }
+
+        let aboutItem = NSMenuItem(title: "About AIDash",
+                                    action: #selector(showAbout),
+                                    keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
+        // Quit: target NSApp directly so NSApplication.terminate(_:) dispatches correctly.
+        let quitItem = NSMenuItem(title: "Quit AIDash",
+                                   action: #selector(NSApplication.terminate(_:)),
+                                   keyEquivalent: "q")
+        quitItem.target = NSApp
+        menu.addItem(quitItem)
+
         item.menu = menu
         self.statusItem = item
     }
 
     @objc private func openBriefing() {
+        // Activate app and always post the briefing-open notification.
+        // The scene/window owner (T082) is the source of truth for which
+        // window represents the briefing; we do not guess by title.
         NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.title.contains("AIDash") }) {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            NotificationCenter.default.post(name: .openBriefingWindow, object: nil)
-        }
+        NotificationCenter.default.post(name: .openBriefingWindow, object: nil)
     }
 
     @objc private func showAbout() {
+        NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(nil)
     }
 }
