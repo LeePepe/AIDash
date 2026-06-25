@@ -43,7 +43,7 @@ public struct InsightCardView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if let citations = payload.citations, !citations.isEmpty {
-                citationLinks(citations: citations)
+                collapsedCitations(count: citations.count)
             }
 
         case .hero:
@@ -59,23 +59,47 @@ public struct InsightCardView: View {
         }
     }
 
-    private var truncatedBody: String {
+    var truncatedBody: String {
         if payload.body.count <= 150 {
             return payload.body
         }
         let prefix = payload.body.prefix(150)
-        return String(prefix) + "…"
+        return String(prefix) + "\u{2026}"
+    }
+
+    @ViewBuilder
+    private func collapsedCitations(count: Int) -> some View {
+        Label(
+            "\(count) source\(count == 1 ? "" : "s")",
+            systemImage: "link"
+        )
+        .font(.footnote)
+        .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
     private func citationLinks(citations: [InsightPayload.Citation]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(citations, id: \.url) { citation in
-                if let url = URL(string: citation.url) {
-                    Link(citation.label, destination: url)
-                        .font(.footnote)
-                }
+            ForEach(safeCitations(from: citations), id: \.url) { citation in
+                Link(citation.label, destination: citation.url)
+                    .font(.footnote)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
+        }
+    }
+
+    func safeCitations(
+        from citations: [InsightPayload.Citation]
+    ) -> [(label: String, url: URL)] {
+        let allowedSchemes: Set<String> = ["http", "https"]
+        return citations.compactMap { citation in
+            guard let url = URL(string: citation.url),
+                  let scheme = url.scheme?.lowercased(),
+                  allowedSchemes.contains(scheme) else {
+                return nil
+            }
+            return (label: citation.label, url: url)
         }
     }
 
