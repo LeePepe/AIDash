@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SwiftData
 import AIDashCore
 
@@ -12,6 +13,11 @@ public final class CloudKitContainer {
     }
 
     public let state: InitState
+
+    private static let logger = Logger(
+        subsystem: "com.tianpli.aidash",
+        category: "CloudKitContainer"
+    )
 
     private init() {
         let schema = Schema([
@@ -33,28 +39,32 @@ public final class CloudKitContainer {
             let container = try ModelContainer(for: schema, configurations: configuration)
             self.state = .ready(container)
         } catch {
-            self.state = .failed(reason: error.localizedDescription)
+            Self.logger.error("CloudKit container init failed: \(error.localizedDescription, privacy: .private)")
+            self.state = .failed(reason: "iCloud data sync is unavailable. Please check your iCloud account in Settings.")
         }
     }
 
-    /// Convenience accessor. Callers MUST inspect `state` first and show
-    /// the error scene when `.failed`. This fallback exists solely to keep
-    /// type signatures clean for code paths that only execute when `.ready`.
+    /// Returns the model container when state is `.ready`.
+    /// Callers MUST inspect `state` first; calling this when `.failed` is a programming error.
     public var modelContainer: ModelContainer {
-        switch state {
-        case .ready(let container):
-            return container
-        case .failed(let reason):
-            assertionFailure("CloudKitContainer unavailable: \(reason). Caller must inspect .state first.")
-            let inMemory = ModelConfiguration(isStoredInMemoryOnly: true)
-            // swiftlint:disable:next force_try
-            return try! ModelContainer(
-                for: BriefingModel.self,
-                ContainerModel.self,
-                CardModel.self,
-                UserEventModel.self,
-                configurations: inMemory
-            )
+        get throws {
+            switch state {
+            case .ready(let container):
+                return container
+            case .failed(let reason):
+                throw CloudKitContainerError.unavailable(reason: reason)
+            }
+        }
+    }
+}
+
+public enum CloudKitContainerError: Error, LocalizedError {
+    case unavailable(reason: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unavailable(let reason):
+            return reason
         }
     }
 }
