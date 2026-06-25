@@ -45,12 +45,29 @@ public final class CloudKitContainer {
             self.state = .ready(container)
         } catch {
             Self.logger.error("CloudKit container init failed: \(error.localizedDescription, privacy: .private)")
-            self.state = .failed(reason: "iCloud data sync is unavailable. Please check your iCloud account in Settings.")
+            self.state = .failed(reason: Self.iCloudUnavailableMessage)
         }
     }
 
+    /// User-facing message used when CloudKit init fails. Resolved through the
+    /// app's String Catalog (`Localizable.xcstrings`, key `cloudkit.unavailable.message`)
+    /// so translations can be added without code changes (Constitution §F.1).
+    internal static var iCloudUnavailableMessage: String {
+        String(
+            localized: "cloudkit.unavailable.message",
+            defaultValue: "iCloud data sync is unavailable. Please check your iCloud account in Settings.",
+            bundle: .main,
+            comment: "Shown in the iCloud unavailable scene when SwiftData CloudKit init fails."
+        )
+    }
+
     /// Returns the model container when state is `.ready`.
-    /// Callers MUST inspect `state` first; calling this when `.failed` is a programming error.
+    ///
+    /// - Returns: The shared `ModelContainer` for SwiftData operations.
+    /// - Throws: `CloudKitContainerError.unavailable(reason:)` when `state` is
+    ///   `.failed`. Callers MUST inspect `state` first; reaching this getter
+    ///   while `.failed` is a programming error and the throw is the graceful
+    ///   contract that replaces a crash.
     public var modelContainer: ModelContainer {
         get throws {
             switch state {

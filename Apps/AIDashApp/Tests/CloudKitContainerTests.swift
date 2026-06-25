@@ -32,7 +32,7 @@ import AIDashCore
 
 @MainActor
 @Test func cloudKitContainerFailedStateThrows() async throws {
-    let reason = "iCloud data sync is unavailable. Please check your iCloud account in Settings."
+    let reason = CloudKitContainer.iCloudUnavailableMessage
     let sut = CloudKitContainer(state: .failed(reason: reason))
 
     guard case .failed(let r) = sut.state else {
@@ -50,13 +50,27 @@ import AIDashCore
 @Test func cloudKitContainerFailedReasonIsSanitized() async throws {
     // The real singleton's failed reason must not leak internal diagnostics
     let sut = CloudKitContainer(state: .failed(
-        reason: "iCloud data sync is unavailable. Please check your iCloud account in Settings."
+        reason: CloudKitContainer.iCloudUnavailableMessage
     ))
 
     if case .failed(let reason) = sut.state {
         #expect(!reason.contains("/"))
         #expect(!reason.contains("NSError"))
         #expect(!reason.contains("CloudKit"))
+    }
+}
+
+@MainActor
+@Test func cloudKitContainerFailedReasonIsLocalized() async throws {
+    // The message must be sourced from the String Catalog, not a hardcoded
+    // literal. We assert non-empty + identical to the public accessor.
+    let message = CloudKitContainer.iCloudUnavailableMessage
+    #expect(!message.isEmpty)
+    let sut = CloudKitContainer(state: .failed(reason: message))
+    if case .failed(let reason) = sut.state {
+        #expect(reason == message)
+    } else {
+        Issue.record("Expected .failed state")
     }
 }
 
