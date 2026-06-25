@@ -43,11 +43,11 @@ public struct AgentSummaryCardView: View {
             .font(.headline)
             .lineLimit(1)
         if let prStat = payload.stats?.first(where: { $0.label == "PRs" }) {
-            Text("\(Int(prStat.value)) PRs")
+            Text("\(Int(prStat.value)) \(String(localized: "PRs"))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        } else {
-            Text("\(payload.completed.count) completed")
+        } else if let firstStat = payload.stats?.first {
+            Text("\(firstStat.label): \(formattedStatValue(firstStat.value))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -95,6 +95,11 @@ public struct AgentSummaryCardView: View {
             .font(.title2)
             .fontWeight(.semibold)
 
+        Text(String(localized: "spent the day on"))
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .italic()
+
         ForEach(Array(payload.completed.enumerated()), id: \.offset) { _, item in
             completedRow(item)
         }
@@ -111,14 +116,17 @@ public struct AgentSummaryCardView: View {
 
     // MARK: - Helpers
 
+    private static let allowedSchemes: Set<String> = ["https", "http"]
+
     @ViewBuilder
     private func completedRow(_ item: AgentSummaryPayload.Completed) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .font(.caption)
-            if let ref = item.ref {
-                Link(item.title, destination: URL(string: ref) ?? URL(string: "about:blank")!)
+                .accessibilityHidden(true)
+            if let url = validURL(from: item.ref) {
+                Link(item.title, destination: url)
                     .font(.subheadline)
                     .lineLimit(1)
             } else {
@@ -127,6 +135,17 @@ public struct AgentSummaryCardView: View {
                     .lineLimit(1)
             }
         }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func validURL(from ref: String?) -> URL? {
+        guard let ref, let url = URL(string: ref),
+              let scheme = url.scheme?.lowercased(),
+              Self.allowedSchemes.contains(scheme) else {
+            return nil
+        }
+        return url
     }
 
     @ViewBuilder
