@@ -69,34 +69,55 @@ struct OutputFormatterTests {
         #expect(json.contains("1970-01-01T00:00:00Z"))
     }
 
-    // MARK: - XPCError encoding
+    // MARK: - Error envelope (cli-surface.md contract)
 
-    @Test("JSONOutput encodes XPCError with all fields")
-    func jsonOutputXPCErrorFields() throws {
+    @Test("CLIErrorEnvelope wraps XPCError in ok:false envelope with all fields")
+    func errorEnvelopeAllFields() throws {
         let error = XPCError(
             code: "test.error",
             message: "Something broke",
             field: "name",
             got: "bad",
-            allowed: ["good", "better"]
+            allowed: ["good", "better"],
+            cause: "internal transport detail"
         )
-        let data = try JSONOutput.encoder.encode(error)
+        let envelope = CLIErrorEnvelope(from: error)
+        let data = try JSONOutput.encoder.encode(envelope)
         let json = String(data: data, encoding: .utf8)!
+        #expect(json.contains("\"ok\":false"))
+        #expect(json.contains("\"error\":{"))
         #expect(json.contains("\"code\":\"test.error\""))
         #expect(json.contains("\"message\":\"Something broke\""))
         #expect(json.contains("\"field\":\"name\""))
         #expect(json.contains("\"got\":\"bad\""))
         #expect(json.contains("\"allowed\""))
+        // cause must NOT leak to CLI output
+        #expect(!json.contains("\"cause\""))
+        #expect(!json.contains("internal transport detail"))
     }
 
-    @Test("JSONOutput encodes XPCError with nil optional fields")
-    func jsonOutputXPCErrorMinimal() throws {
+    @Test("CLIErrorEnvelope omits nil optional fields")
+    func errorEnvelopeMinimal() throws {
         let error = XPCError(code: "minimal.error", message: "Minimal")
-        let data = try JSONOutput.encoder.encode(error)
+        let envelope = CLIErrorEnvelope(from: error)
+        let data = try JSONOutput.encoder.encode(envelope)
         let json = String(data: data, encoding: .utf8)!
+        #expect(json.contains("\"ok\":false"))
         #expect(json.contains("\"code\":\"minimal.error\""))
-        // nil fields should not appear (or appear as null depending on Codable impl)
+        #expect(json.contains("\"message\":\"Minimal\""))
         #expect(!json.contains("\"got\""))
+        #expect(!json.contains("\"field\""))
+        #expect(!json.contains("\"allowed\""))
+        #expect(!json.contains("\"cause\""))
+    }
+
+    @Test("CLIErrorEnvelope includes requestId when provided")
+    func errorEnvelopeRequestId() throws {
+        let error = XPCError(code: "test.error", message: "Test")
+        let envelope = CLIErrorEnvelope(from: error, requestId: "abc-123")
+        let data = try JSONOutput.encoder.encode(envelope)
+        let json = String(data: data, encoding: .utf8)!
+        #expect(json.contains("\"requestId\":\"abc-123\""))
     }
 }
 
