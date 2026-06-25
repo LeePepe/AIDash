@@ -63,8 +63,11 @@ targets:
     sources:
       - path: CLI/aidash/Tests
       - path: CLI/aidash/Sources/XPCClient
+      - path: CLI/aidash/Sources/Commands
     dependencies:
       - package: AIDashCore
+      - package: swift-argument-parser
+        product: ArgumentParser
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.cli.tests
