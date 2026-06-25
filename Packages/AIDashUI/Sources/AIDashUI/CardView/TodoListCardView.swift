@@ -68,20 +68,20 @@ public struct TodoListCardView: View {
         }
     }
 
-    // MARK: - Wide: all items
+    // MARK: - Wide: all items (payload order preserved)
 
     @ViewBuilder
     private var wideContent: some View {
-        ForEach(Array(itemsSortedByPriority.enumerated()), id: \.offset) { _, item in
+        ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
             TodoItemRow(item: item, showDue: true)
         }
     }
 
-    // MARK: - Hero: all items with expanded due-date / ref panel
+    // MARK: - Hero: all items with expanded due-date / ref panel (payload order preserved)
 
     @ViewBuilder
     private var heroContent: some View {
-        ForEach(Array(itemsSortedByPriority.enumerated()), id: \.offset) { _, item in
+        ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
             VStack(alignment: .leading, spacing: 4) {
                 TodoItemRow(item: item, showDue: true)
                 if let ref = item.ref {
@@ -147,6 +147,16 @@ private struct TodoItemRow: View {
         Circle()
             .fill(priorityColor)
             .frame(width: 8, height: 8)
+            .accessibilityLabel(priorityLabel)
+    }
+
+    private var priorityLabel: String {
+        switch item.priority {
+        case .high: return "High priority"
+        case .medium: return "Medium priority"
+        case .low: return "Low priority"
+        case nil: return "No priority"
+        }
     }
 
     private var priorityColor: Color {
