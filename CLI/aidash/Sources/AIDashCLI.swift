@@ -1,5 +1,6 @@
 import ArgumentParser
 import AIDashCore
+import Foundation
 
 @main
 struct AIDash: AsyncParsableCommand {
@@ -21,6 +22,29 @@ struct AIDash: AsyncParsableCommand {
 
     @Flag(name: .long, help: "Suppress non-essential stdout (errors still go to stderr).")
     var quiet = false
+
+    // MARK: - Global error handler (T044)
+
+    static func main() async {
+        do {
+            var command = try parseAsRoot()
+            if var asyncCmd = command as? AsyncParsableCommand {
+                try await asyncCmd.run()
+            } else {
+                try command.run()
+            }
+        } catch let xpcError as XPCError {
+            // XPC-layer or domain errors → emit JSON envelope and exit with mapped code
+            try? JSONOutput().emit(error: xpcError)
+            Darwin.exit(ExitCodeMapper.code(for: xpcError))
+        } catch {
+            // Delegate to ArgumentParser's standard error handling:
+            // - CleanExit (--help, --version) → prints and exits 0
+            // - Parse/validation errors → prints error + usage, exits with standard code
+            // - Other unknown errors → prints localizedDescription, exits 1
+            Self.exit(withError: error)
+        }
+    }
 }
 
 // MARK: - Briefing

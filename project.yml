@@ -69,6 +69,8 @@ targets:
     sources:
       - path: CLI/aidash/Tests
       - path: CLI/aidash/Sources/XPCClient
+      - path: CLI/aidash/Sources/ExitCode.swift
+      - path: CLI/aidash/Sources/Output
     dependencies:
       - package: AIDashCore
     settings:
