@@ -21,6 +21,9 @@ let package = Package(
             name: "AIDashUI",
             dependencies: [
                 .product(name: "AIDashCore", package: "AIDashCore"),
+            ],
+            resources: [
+                .process("Resources"),
             ]
         ),
         .testTarget(

@@ -1,0 +1,30 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "agent_summary.hero_subtitle" : {
+      "comment" : "Pull-quote shown under the agent name in the hero Agent Summary card layout.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "spent the day on"
+          }
+        }
+      }
+    },
+    "agent_summary.prs_label" : {
+      "comment" : "Suffix shown after a pull-request count in the small Agent Summary card layout.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PRs"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
