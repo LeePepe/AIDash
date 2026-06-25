@@ -54,7 +54,9 @@ struct BriefingPublishCommand: AsyncParsableCommand {
                 )
             }
             let formatter = globals.outputMode.formatter(requestId: response.requestId)
-            try formatter.emit(success: result)
+            if !globals.isQuiet {
+                try formatter.emit(success: result)
+            }
         } else if let error = response.error {
             let remoteError = XPCError(
                 code: error.code,

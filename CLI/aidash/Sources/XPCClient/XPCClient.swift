@@ -20,6 +20,11 @@ public actor XPCClient {
     /// Timeout for XPC calls (per contract: 5s budget).
     private static let timeoutDuration: Duration = .seconds(5)
 
+    /// Per-probe timeout used during launch-and-poll retry. Shorter than the
+    /// regular call budget so a wedged service does not block the AppLauncher
+    /// loop (10 attempts × 500 ms poll cadence).
+    private static let probeTimeout: Duration = .milliseconds(400)
+
     private let appLauncher: AppLauncher
 
     public init(appLauncher: AppLauncher = AppLauncher()) {
@@ -36,7 +41,7 @@ public actor XPCClient {
             // App may not be running — launch it and retry once.
             hasRetriedWithLaunch = true
             try await appLauncher.launchAndWait { [weak self] in
-                await self?.probeConnection() ?? false
+                await self?.probeRoundTrip() ?? false
             }
             return try await executeWithTimeout(request)
         }
@@ -64,14 +69,44 @@ public actor XPCClient {
         }
     }
 
-    /// Connection-level probe: attempts to create a fresh connection and obtain a proxy.
-    /// Returns `true` if the XPC service endpoint is reachable (proxy can be created).
-    /// Does NOT send any command — just validates the transport layer.
-    private func probeConnection() -> Bool {
+    /// Readiness probe: performs a real protocol-valid XPC round trip using
+    /// the `schema.list` command. The service is considered ready when ANY
+    /// `XPCResponse` is received (even an error response) — the success of
+    /// the transport layer is what we're checking, not the response payload.
+    ///
+    /// Uses a short per-probe timeout so a wedged service does not block the
+    /// `AppLauncher` polling loop. Returns `false` on any transport failure,
+    /// timeout, or decode failure; returns `true` only when the app actually
+    /// answered the round trip.
+    private func probeRoundTrip() async -> Bool {
         connection = nil
-        let conn = ensureConnection()
-        let proxy = conn.remoteObjectProxy as? AIDashXPCServiceProtocol
-        return proxy != nil
+        let request = XPCRequest(
+            requestId: UUID().uuidString,
+            cliVersion: "1.0.0",
+            command: "schema.list",
+            params: Data()
+        )
+        do {
+            _ = try await withThrowingTaskGroup(of: XPCResponse.self) { group in
+                group.addTask {
+                    try await self.executeXPC(request)
+                }
+                group.addTask {
+                    try await Task.sleep(for: Self.probeTimeout)
+                    throw XPCError(
+                        code: "xpc.timeout",
+                        message: "probe timed out"
+                    )
+                }
+                let result = try await group.next()!
+                group.cancelAll()
+                return result
+            }
+            return true
+        } catch {
+            connection = nil
+            return false
+        }
     }
 
     private func executeXPC(_ request: XPCRequest) async throws -> XPCResponse {
@@ -83,7 +118,7 @@ public actor XPCClient {
 
             let proxy = conn.remoteObjectProxyWithErrorHandler { [weak self] err in
                 Task { await self?.handleTransportFailure(err) }
-            } as? AIDashXPCServiceProtocol
+            } as? any AIDashXPCServiceProtocol
 
             guard let proxy else {
                 completePending { $0.resume(throwing: XPCError(

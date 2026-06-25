@@ -17,12 +17,27 @@ struct AIDash: AsyncParsableCommand {
         ]
     )
 
+    // MARK: - Root-level global flags
+    //
+    // Declared on the root command so `parseAsRoot()` accepts
+    // `aidash --json briefing publish ...` and `aidash --quiet ...`.
+    // Leaf commands also expose them via `GlobalOptions` (via OptionGroup)
+    // so the same flags work after the subcommand verb. `GlobalOptions`
+    // additionally inspects `ProcessInfo.processInfo.arguments` so that the
+    // effective flags can be observed from any leaf regardless of position.
+
+    @Flag(name: .long, help: "Emit machine-readable JSON on stdout instead of human format.")
+    var json: Bool = false
+
+    @Flag(name: .long, help: "Suppress non-essential stdout (errors still go to stderr).")
+    var quiet: Bool = false
+
     // MARK: - Global error handler
 
     static func main() async {
         do {
             var command = try parseAsRoot()
-            if var asyncCmd = command as? AsyncParsableCommand {
+            if var asyncCmd = command as? any AsyncParsableCommand {
                 try await asyncCmd.run()
             } else {
                 try command.run()
