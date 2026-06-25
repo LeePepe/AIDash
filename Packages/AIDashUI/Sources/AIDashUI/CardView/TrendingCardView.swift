@@ -35,16 +35,16 @@ public struct TrendingCardView: View {
         }
     }
 
-    // MARK: - Small: topic + top-1 item only
+    // MARK: - Small: topic + count only
 
     @ViewBuilder
     private var smallContent: some View {
         Text(payload.topic)
             .font(.caption)
             .foregroundStyle(.secondary)
-        if let first = payload.items.first {
-            TrendingItemRow(item: first, rank: 1, showScore: false)
-        }
+        Text("\(payload.items.count) items")
+            .font(.subheadline)
+            .fontWeight(.medium)
     }
 
     // MARK: - Medium: topic + top-3
@@ -83,25 +83,30 @@ public struct TrendingCardView: View {
         }
     }
 
-    // MARK: - Hero: topic + top-10 with titles + scores + sparkline
+    // MARK: - Hero: topic + top-8 with titles + scores + sparkline
 
     @ViewBuilder
     private var heroContent: some View {
         Text(payload.topic)
             .font(.headline)
-        let top10 = Array(payload.items.prefix(10))
-        if !top10.isEmpty {
-            ScoreSparkline(items: top10)
+        let top8 = Array(payload.items.prefix(8))
+        if !top8.isEmpty {
+            ScoreSparkline(items: top8)
                 .frame(height: 40)
+                .accessibilityLabel("Score distribution sparkline")
+                .accessibilityValue(sparklineAccessibilityValue(for: top8))
         }
-        ForEach(Array(top10.enumerated()), id: \.offset) { index, item in
+        ForEach(Array(top8.enumerated()), id: \.offset) { index, item in
             TrendingItemRow(item: item, rank: index + 1, showScore: true)
         }
-        if payload.items.count > 10 {
-            Text("+\(payload.items.count - 10) more")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+    }
+
+    private func sparklineAccessibilityValue(for items: [TrendingPayload.Item]) -> String {
+        let scores = items.compactMap(\.score)
+        guard let max = scores.max(), let min = scores.min() else {
+            return "No scores available"
         }
+        return "Scores range from \(Int(min)) to \(Int(max))"
     }
 
     // MARK: - Background
@@ -249,6 +254,7 @@ private struct ScoreSparkline: View {
                 .init(title: "VisionOS 3 SDK announced", url: "https://example.com/vision", score: 120),
                 .init(title: "New Swift Testing framework", url: "https://example.com/testing", score: 95),
                 .init(title: "Core Data deprecated timeline", url: "https://example.com/coredata", score: 88),
+                .init(title: "Async/Await best practices guide", url: "https://example.com/async", score: 72),
             ]
         ),
         size: .hero,
