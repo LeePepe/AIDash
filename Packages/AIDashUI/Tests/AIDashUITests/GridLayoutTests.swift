@@ -27,21 +27,54 @@ struct GridLayoutTests {
         #expect(layout.style == .accent)
     }
 
-    @Test("compact size class produces 2 columns")
-    func compactSizeClassProduces2Columns() {
-        let count = GridLayout.columnCount(for: .compact)
-        #expect(count == 2)
+    // MARK: - Column count: compact size class
+
+    @Test("compact size class produces 2 columns (narrow width)")
+    func compactNarrowProduces2Columns() {
+        #expect(GridLayout.columnCount(for: .compact, width: 320) == 2)
     }
 
-    @Test("regular size class produces 4 columns")
-    func regularSizeClassProduces4Columns() {
-        let count = GridLayout.columnCount(for: .regular)
-        #expect(count == 4)
+    @Test("compact size class produces 2 columns even at wider width")
+    func compactWideProduces2Columns() {
+        #expect(GridLayout.columnCount(for: .compact, width: 1024) == 2)
     }
 
-    @Test("nil size class falls back to 2 columns")
-    func nilSizeClassFallsBackTo2Columns() {
-        let count = GridLayout.columnCount(for: nil)
-        #expect(count == 2)
+    // MARK: - Column count: regular size class (3- and 4-column tiers)
+
+    @Test("regular size class with narrow width produces 3 columns")
+    func regularNarrowProduces3Columns() {
+        #expect(GridLayout.columnCount(for: .regular, width: 768) == 3)
+    }
+
+    @Test("regular size class just under threshold produces 3 columns")
+    func regularJustUnderThresholdProduces3Columns() {
+        #expect(GridLayout.columnCount(for: .regular, width: 899) == 3)
+    }
+
+    @Test("regular size class at threshold produces 4 columns")
+    func regularAtThresholdProduces4Columns() {
+        #expect(GridLayout.columnCount(for: .regular, width: 900) == 4)
+    }
+
+    @Test("regular size class at full width produces 4 columns")
+    func regularFullWidthProduces4Columns() {
+        #expect(GridLayout.columnCount(for: .regular, width: 1366) == 4)
+    }
+
+    // MARK: - Column count: nil size class (width-only fallback)
+
+    @Test("nil size class with narrow width produces 2 columns")
+    func nilNarrowProduces2Columns() {
+        #expect(GridLayout.columnCount(for: nil, width: 400) == 2)
+    }
+
+    @Test("nil size class with medium width produces 3 columns")
+    func nilMediumProduces3Columns() {
+        #expect(GridLayout.columnCount(for: nil, width: 700) == 3)
+    }
+
+    @Test("nil size class with wide width produces 4 columns")
+    func nilWideProduces4Columns() {
+        #expect(GridLayout.columnCount(for: nil, width: 1200) == 4)
     }
 }
