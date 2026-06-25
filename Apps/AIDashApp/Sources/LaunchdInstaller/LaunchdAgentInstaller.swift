@@ -16,6 +16,9 @@ public final class LaunchdAgentInstaller {
 
     /// Registers the LaunchAgent if it is not already enabled.
     /// Idempotent — safe to call on every app launch.
+    ///
+    /// Error surfacing beyond OSLog (menubar status, file logging) is
+    /// intentionally deferred to a follow-up POLISH task per T110 scope.
     public func registerIfNeeded() {
         let status = agentService.status
         log.info("LaunchAgent current status: \(String(describing: status))")
@@ -28,7 +31,7 @@ public final class LaunchdAgentInstaller {
                 try agentService.register()
                 log.info("LaunchAgent registered successfully.")
             } catch {
-                log.error("LaunchAgent registration failed: \(error.localizedDescription, privacy: .public)")
+                log.error("LaunchAgent registration failed: \(error, privacy: .private)")
             }
         @unknown default:
             log.warning("Unknown SMAppService status: \(String(describing: status))")
