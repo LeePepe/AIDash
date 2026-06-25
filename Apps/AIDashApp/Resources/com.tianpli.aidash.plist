@@ -5,6 +5,10 @@
 <dict>
     <key>Label</key>
     <string>com.tianpli.aidash</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>Contents/MacOS/AIDash</string>
+    </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
