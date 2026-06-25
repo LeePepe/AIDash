@@ -19,6 +19,11 @@ public final class CloudKitContainer {
         category: "CloudKitContainer"
     )
 
+    /// Internal initializer for testing — allows injecting a specific state.
+    internal init(state: InitState) {
+        self.state = state
+    }
+
     private init() {
         let schema = Schema([
             BriefingModel.self,
