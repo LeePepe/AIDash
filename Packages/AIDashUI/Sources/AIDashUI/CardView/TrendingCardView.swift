@@ -35,16 +35,16 @@ public struct TrendingCardView: View {
         }
     }
 
-    // MARK: - Small: topic + count only
+    // MARK: - Small: topic + top-1 item
 
     @ViewBuilder
     private var smallContent: some View {
         Text(payload.topic)
             .font(.caption)
             .foregroundStyle(.secondary)
-        Text("\(payload.items.count) items")
-            .font(.subheadline)
-            .fontWeight(.medium)
+        if let first = payload.items.first {
+            TrendingItemRow(item: first, rank: 1, showScore: true, size: size)
+        }
     }
 
     // MARK: - Medium: topic + top-3
@@ -56,7 +56,7 @@ public struct TrendingCardView: View {
             .foregroundStyle(.secondary)
         let top3 = Array(payload.items.prefix(3))
         ForEach(Array(top3.enumerated()), id: \.offset) { index, item in
-            TrendingItemRow(item: item, rank: index + 1, showScore: true)
+            TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
         }
         if payload.items.count > 3 {
             Text("+\(payload.items.count - 3) more")
@@ -74,7 +74,7 @@ public struct TrendingCardView: View {
             .foregroundStyle(.secondary)
         let top5 = Array(payload.items.prefix(5))
         ForEach(Array(top5.enumerated()), id: \.offset) { index, item in
-            TrendingItemRow(item: item, rank: index + 1, showScore: true)
+            TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
         }
         if payload.items.count > 5 {
             Text("+\(payload.items.count - 5) more")
@@ -83,21 +83,23 @@ public struct TrendingCardView: View {
         }
     }
 
-    // MARK: - Hero: topic + top-8 with titles + scores + sparkline
+    // MARK: - Hero: topic + top-10 with titles + scores + sparkline
 
     @ViewBuilder
     private var heroContent: some View {
         Text(payload.topic)
             .font(.headline)
-        let top8 = Array(payload.items.prefix(8))
-        if !top8.isEmpty {
-            ScoreSparkline(items: top8)
+        let top10 = Array(payload.items.prefix(10))
+        let scoredCount = top10.compactMap(\.score).count
+        if scoredCount >= 2 {
+            ScoreSparkline(items: top10, tint: sparklineColor)
                 .frame(height: 40)
+                .accessibilityElement()
                 .accessibilityLabel("Score distribution sparkline")
-                .accessibilityValue(sparklineAccessibilityValue(for: top8))
+                .accessibilityValue(sparklineAccessibilityValue(for: top10))
         }
-        ForEach(Array(top8.enumerated()), id: \.offset) { index, item in
-            TrendingItemRow(item: item, rank: index + 1, showScore: true)
+        ForEach(Array(top10.enumerated()), id: \.offset) { index, item in
+            TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
         }
     }
 
@@ -119,6 +121,15 @@ public struct TrendingCardView: View {
         case .accent: return Color.accentColor.opacity(0.10)
         }
     }
+
+    private var sparklineColor: Color {
+        switch style {
+        case .neutral: return Color.secondary
+        case .success: return Color.green
+        case .warning: return Color.orange
+        case .accent: return Color.accentColor
+        }
+    }
 }
 
 // MARK: - TrendingItemRow
@@ -127,6 +138,7 @@ private struct TrendingItemRow: View {
     let item: TrendingPayload.Item
     let rank: Int
     let showScore: Bool
+    let size: CardSize
 
     var body: some View {
         HStack(spacing: 8) {
@@ -137,13 +149,23 @@ private struct TrendingItemRow: View {
                 .frame(width: 20, alignment: .trailing)
             Text(item.title)
                 .font(.subheadline)
-                .lineLimit(2)
+                .lineLimit(titleLineLimit)
             Spacer()
             if showScore, let score = item.score {
                 Text(formattedScore(score))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // Per constitution §E.2: hero and wide must wrap (no truncation).
+    // Compact sizes still cap to keep card glanceable.
+    private var titleLineLimit: Int? {
+        switch size {
+        case .small, .medium: return 2
+        case .wide, .hero: return nil
         }
     }
 
@@ -160,6 +182,7 @@ private struct TrendingItemRow: View {
 
 private struct ScoreSparkline: View {
     let items: [TrendingPayload.Item]
+    let tint: Color
 
     var body: some View {
         GeometryReader { geometry in
@@ -183,7 +206,7 @@ private struct ScoreSparkline: View {
                         }
                     }
                 }
-                .stroke(Color.accentColor, lineWidth: 2)
+                .stroke(tint, lineWidth: 2)
             }
         }
     }
@@ -255,6 +278,8 @@ private struct ScoreSparkline: View {
                 .init(title: "New Swift Testing framework", url: "https://example.com/testing", score: 95),
                 .init(title: "Core Data deprecated timeline", url: "https://example.com/coredata", score: 88),
                 .init(title: "Async/Await best practices guide", url: "https://example.com/async", score: 72),
+                .init(title: "TipKit recipes for onboarding", url: "https://example.com/tipkit", score: 60),
+                .init(title: "App Intents 2.0 deep dive", url: "https://example.com/appintents", score: 55),
             ]
         ),
         size: .hero,
