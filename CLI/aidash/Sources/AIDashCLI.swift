@@ -1,5 +1,6 @@
 import ArgumentParser
 import AIDashCore
+import Foundation
 
 @main
 struct AIDash: AsyncParsableCommand {
@@ -16,11 +17,26 @@ struct AIDash: AsyncParsableCommand {
         ]
     )
 
-    @Flag(name: .long, help: "Emit machine-readable JSON on stdout instead of human format.")
-    var json = false
+    // MARK: - Global error handler (T044)
 
-    @Flag(name: .long, help: "Suppress non-essential stdout (errors still go to stderr).")
-    var quiet = false
+    static func main() async {
+        do {
+            var command = try parseAsRoot()
+            if var asyncCmd = command as? AsyncParsableCommand {
+                try await asyncCmd.run()
+            } else {
+                try command.run()
+            }
+            Darwin.exit(0)
+        } catch let xpcError as XPCError {
+            try? JSONOutput().emit(error: xpcError)
+            Darwin.exit(ExitCodeMapper.code(for: xpcError))
+        } catch {
+            // Let ArgumentParser handle its own errors (--help, --version,
+            // validation messages) via the standard exit mechanism.
+            Self.exit(withError: error)
+        }
+    }
 }
 
 // MARK: - Briefing
@@ -45,17 +61,6 @@ struct BriefingPutCommand: AsyncParsableCommand {
 
     func run() async throws {
         fatalError("not yet implemented in T050")
-    }
-}
-
-struct BriefingPublishCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "publish",
-        abstract: "Mark a briefing as visible to readers."
-    )
-
-    func run() async throws {
-        fatalError("not yet implemented in T051")
     }
 }
 
