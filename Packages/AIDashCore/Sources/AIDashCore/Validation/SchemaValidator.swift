@@ -19,6 +19,21 @@ public struct SchemaValidator {
         try requireValidDate(date)
     }
 
+    public static func validateBriefingGet(date: String) throws {
+        try requireNonEmpty(date, field: "date")
+        try requireValidDate(date)
+    }
+
+    public static func validateContainerDelete(id: String) throws {
+        try requireNonEmpty(id, field: "id")
+        try requireValidUUID(id, field: "id")
+    }
+
+    public static func validateCardDelete(id: String) throws {
+        try requireNonEmpty(id, field: "id")
+        try requireValidUUID(id, field: "id")
+    }
+
     public static func validateContainerPut(
         id: String,
         title: String,

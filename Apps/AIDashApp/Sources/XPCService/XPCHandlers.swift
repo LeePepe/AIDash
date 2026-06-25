@@ -49,16 +49,34 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
                 data: nil,
                 error: error
             )
-        } catch {
+        } catch is DecodingError {
             return XPCResponse(
                 requestId: (try? JSONDecoder.xpc.decode(XPCRequest.self, from: data).requestId) ?? "",
                 appVersion: Self.appVersion,
                 ok: false,
                 data: nil,
                 error: XPCError(
-                    code: "internal.unexpected",
-                    message: "Failed to decode request",
-                    cause: error.localizedDescription
+                    code: "schema.payload_decode_failed",
+                    message: "Failed to decode request envelope"
+                )
+            )
+        } catch {
+            let code: String
+            if String(describing: error).contains("SwiftData") ||
+               String(describing: error).contains("ModelContext") ||
+               String(describing: error).contains("PersistentModel") {
+                code = "internal.swiftdata_error"
+            } else {
+                code = "internal.unexpected"
+            }
+            return XPCResponse(
+                requestId: (try? JSONDecoder.xpc.decode(XPCRequest.self, from: data).requestId) ?? "",
+                appVersion: Self.appVersion,
+                ok: false,
+                data: nil,
+                error: XPCError(
+                    code: code,
+                    message: "An internal error occurred"
                 )
             )
         }
@@ -138,10 +156,8 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
     private func handleBriefingPublish(_ request: XPCRequest) async throws -> Data {
         let params = try decodeParams(BriefingPublishParams.self, from: request)
+        try SchemaValidator.validateBriefingPublish(date: params.date)
         let dateValue = params.date
-        guard !dateValue.isEmpty else {
-            throw XPCError(code: "schema.missing_required_field", message: "Required field 'date' is empty", field: "date")
-        }
 
         let context = ModelContext(container)
         let descriptor = FetchDescriptor<BriefingModel>(
@@ -169,10 +185,8 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
     private func handleBriefingGet(_ request: XPCRequest) async throws -> Data {
         let params = try decodeParams(BriefingGetParams.self, from: request)
+        try SchemaValidator.validateBriefingGet(date: params.date)
         let dateValue = params.date
-        guard !dateValue.isEmpty else {
-            throw XPCError(code: "schema.missing_required_field", message: "Required field 'date' is empty", field: "date")
-        }
 
         let context = ModelContext(container)
         let descriptor = FetchDescriptor<BriefingModel>(
@@ -280,9 +294,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
     private func handleContainerDelete(_ request: XPCRequest) async throws -> Data {
         let params = try decodeParams(ContainerDeleteParams.self, from: request)
-        guard !params.id.isEmpty else {
-            throw XPCError(code: "schema.missing_required_field", message: "Required field 'id' is empty", field: "id")
-        }
+        try SchemaValidator.validateContainerDelete(id: params.id)
 
         let context = ModelContext(container)
         let containerId = params.id
@@ -365,9 +377,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
     private func handleCardDelete(_ request: XPCRequest) async throws -> Data {
         let params = try decodeParams(CardDeleteParams.self, from: request)
-        guard !params.id.isEmpty else {
-            throw XPCError(code: "schema.missing_required_field", message: "Required field 'id' is empty", field: "id")
-        }
+        try SchemaValidator.validateCardDelete(id: params.id)
 
         let context = ModelContext(container)
         let cardId = params.id
@@ -398,30 +408,65 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         let filterCardId = params.cardId
         let filterAction = params.action?.rawValue
 
-        var descriptor = FetchDescriptor<UserEventModel>(
-            predicate: #Predicate { event in
+        let predicate: Predicate<UserEventModel>
+        if let until, let filterCardId, let filterAction {
+            predicate = #Predicate { event in
+                event.timestamp >= since &&
+                event.timestamp <= until &&
+                event.cardId == filterCardId &&
+                event.actionRaw == filterAction
+            }
+        } else if let until, let filterCardId {
+            predicate = #Predicate { event in
+                event.timestamp >= since &&
+                event.timestamp <= until &&
+                event.cardId == filterCardId
+            }
+        } else if let until, let filterAction {
+            predicate = #Predicate { event in
+                event.timestamp >= since &&
+                event.timestamp <= until &&
+                event.actionRaw == filterAction
+            }
+        } else if let filterCardId, let filterAction {
+            predicate = #Predicate { event in
+                event.timestamp >= since &&
+                event.cardId == filterCardId &&
+                event.actionRaw == filterAction
+            }
+        } else if let until {
+            predicate = #Predicate { event in
+                event.timestamp >= since &&
+                event.timestamp <= until
+            }
+        } else if let filterCardId {
+            predicate = #Predicate { event in
+                event.timestamp >= since &&
+                event.cardId == filterCardId
+            }
+        } else if let filterAction {
+            predicate = #Predicate { event in
+                event.timestamp >= since &&
+                event.actionRaw == filterAction
+            }
+        } else {
+            predicate = #Predicate { event in
                 event.timestamp >= since
-            },
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
-        )
-
-        let allEvents = try context.fetch(descriptor)
-
-        // Apply additional filters in-memory (SwiftData predicate limitations)
-        let filtered = allEvents.filter { event in
-            if let untilDate = until, event.timestamp > untilDate {
-                return false
             }
-            if let cId = filterCardId, event.cardId != cId {
-                return false
-            }
-            if let act = filterAction, event.actionRaw != act {
-                return false
-            }
-            return true
         }
 
-        let events = filtered.map { model in
+        let descriptor = FetchDescriptor<UserEventModel>(
+            predicate: predicate,
+            sortBy: [
+                SortDescriptor(\.timestamp, order: .forward),
+                SortDescriptor(\.device, order: .forward),
+                SortDescriptor(\.cardId, order: .forward)
+            ]
+        )
+
+        let fetchedEvents = try context.fetch(descriptor)
+
+        let events = fetchedEvents.map { model in
             UserEvent(
                 id: model.id,
                 timestamp: model.timestamp,
@@ -446,10 +491,38 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
             cardStyles: CardStyle.allCases.map(\.rawValue),
             containerLayouts: ContainerLayout.allCases.map(\.rawValue),
             userEventActions: UserEventAction.allCases.map(\.rawValue),
-            payloads: [:]
+            payloads: Self.payloadSchemas
         )
         return try JSONEncoder.xpc.encode(result)
     }
+
+    // MARK: - Payload Schema Descriptions
+
+    private static let payloadSchemas: [String: String] = {
+        var schemas: [String: String] = [:]
+        schemas[CardType.metric.rawValue] = """
+        {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"unit":{"type":"string"},"trend":{"type":"string","enum":["up","down","flat"]}}}}}}
+        """
+        schemas[CardType.insight.rawValue] = """
+        {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"body":{"type":"string","minLength":1},"citations":{"type":"array","items":{"type":"object","required":["label","url"],"properties":{"label":{"type":"string"},"url":{"type":"string"}}}}}}
+        """
+        schemas[CardType.agentSummary.rawValue] = """
+        {"type":"object","required":["agentName","completed"],"properties":{"agentName":{"type":"string","minLength":1},"completed":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"ref":{"type":"string"}}}},"stats":{"type":"array","items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"}}}}}}
+        """
+        schemas[CardType.todoList.rawValue] = """
+        {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"priority":{"type":"string","enum":["low","medium","high"]},"due":{"type":"string","format":"date-time"},"ref":{"type":"string"}}}}}}
+        """
+        schemas[CardType.trending.rawValue] = """
+        {"type":"object","required":["topic","items"],"properties":{"topic":{"type":"string","minLength":1},"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title","url"],"properties":{"title":{"type":"string"},"url":{"type":"string"},"score":{"type":"number"}}}}}}
+        """
+        schemas[CardType.digest.rawValue] = """
+        {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"body":{"type":"string","minLength":1},"sections":{"type":"array","items":{"type":"object","required":["heading","paragraphs"],"properties":{"heading":{"type":"string"},"paragraphs":{"type":"array","items":{"type":"string"}}}}}}}
+        """
+        schemas[CardType.sectionHeader.rawValue] = """
+        {"type":"object","required":["title"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"}}}
+        """
+        return schemas
+    }()
 
     // MARK: - Helpers
 
