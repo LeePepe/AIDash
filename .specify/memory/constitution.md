@@ -181,6 +181,141 @@ Three gates, in priority order:
 
 ---
 
+## Cross-Cutting Quality Bars
+
+These bars apply to **every** task in this repository. They are the
+authoritative source of truth for what the AI Reviewer is allowed to flag.
+Tasks SHOULD NOT restate these — they reference them by section. Reviewers
+MUST NOT invent quality bars not listed here; if a bar is missing, amend the
+constitution first.
+
+Each bar declares a **severity tier**:
+
+- **P0 (ship blocker)** — PR is `🔴 FAIL`, cannot merge.
+- **P1 (must fix)** — PR is `🟡 CHANGES REQUESTED`. If the functional task
+  is correct, the reviewer MAY approve the PR as `🟢 PASS WITH FOLLOW-UP`
+  and require the issue to spawn a follow-up sub-issue covering only the P1
+  finding (see §Scope Discipline).
+- **P2 (nice to have)** — informational, never blocks merge.
+
+### A. Scope Discipline (P0)
+
+1. A PR may modify **only the files listed in the task's "Files in scope"
+   section**, plus tests for those files. Any other file change is a
+   constitutional violation and the reviewer MUST 🔴 FAIL.
+2. Deleting a file is a scope change. Deleting a file that another task
+   owns (e.g. T099 deletes `TodoListCardView.swift` owned by T100) is
+   automatic 🔴 FAIL.
+3. If the task description says a file is forbidden (`Files NOT to touch`),
+   touching it = 🔴 FAIL.
+4. Resolving a merge conflict that requires touching out-of-scope files
+   requires a comment by the Fullstack Engineer naming the conflict file
+   and the resolution. Reviewers accept this as long as the change is
+   strictly the conflict resolution.
+
+### B. CLI Surface (P0)
+
+1. All `--json` success output MUST be wrapped in the envelope per
+   `contracts/cli-surface.md`: `{ "ok": true, "data": <payload>, "requestId":
+   "..." }`. Raw payload writes are 🔴 FAIL.
+2. All errors MUST be written to stderr as JSON per
+   `contracts/cli-surface.md` §"Error envelope" regardless of `--json` flag.
+3. Exit codes follow `contracts/cli-surface.md` §"Exit codes" exactly.
+
+### C. URL & Link Policy (P0)
+
+1. Any `URL` constructed from agent-authored content (card refs, link
+   targets, etc.) MUST be validated. The allowed scheme set is `https`
+   only. `http`, `about:`, `javascript:`, `file:`, custom schemes → reject
+   and render as plain text.
+2. `URL` must have a non-empty host. URLs without a host (e.g.
+   `https:///foo`) → reject.
+3. Centralize validation in a single helper (`URLPolicy.validate(_:)` in
+   AIDashCore). View code MUST NOT inline its own validation.
+
+### D. Error Handling (P0)
+
+Mirrors §Error Handling above and elevates to P0 for review purposes:
+
+1. No `fatalError`, no `try!`, no `as!` in production code (test code
+   excluded).
+2. CloudKit / XPC / I/O failures degrade gracefully — no crash on the user
+   path.
+3. Throwing functions document their error contract in the doc-comment.
+
+### E. Accessibility (P1)
+
+Applies to every SwiftUI view in `AIDashUI` and `AIDashApp`:
+
+1. **Dynamic Type**: all user-visible text uses semantic fonts
+   (`.body`, `.headline`, `.caption`, etc.) or `.font(.system(...,
+   design: ...))`. No hardcoded `.font(.system(size: 12))` for body text.
+2. **Truncation**: in `hero` and `wide` sizes, body text MUST wrap, not
+   truncate. `lineLimit(nil)` or size-aware lineLimit only.
+3. **Hit targets**: any interactive element (Link, Button, tappable row)
+   MUST have minimum 44pt hit area on iOS, 28pt on macOS. Use
+   `.frame(minHeight: 44)` or `.contentShape` to enforce.
+4. **Decorative icons**: SF Symbols used purely for visual decoration MUST
+   be marked `.accessibilityHidden(true)` or combined into the parent's
+   accessibility label via `.accessibilityElement(children: .combine)`.
+5. **Repeated content** in lists: combine row content with
+   `.accessibilityElement(children: .combine)` so VoiceOver announces one
+   row at a time, not the bullet + the title + the timestamp as three
+   separate elements.
+
+### F. Internationalization (P1)
+
+1. All user-visible string literals MUST be defined in a String Catalog
+   (`.xcstrings`) and accessed via `Text("key", tableName: ...)` or
+   `String(localized: "key")`.
+2. Hardcoded UI literals (`Text("PRs")`, `Text("completed")`) in source
+   files are 🟡 CHANGES REQUESTED. Strings in `#Preview` blocks and
+   `Localizable.xcstrings` itself are exempt.
+3. Layout uses leading/trailing alignment, not left/right. SwiftUI's
+   default behavior is correct; this rule exists to catch manual
+   `HStack(alignment: .left)` and similar.
+
+### G. Test Coverage (P1)
+
+1. For every new public API in `AIDashCore`, the PR MUST include at least
+   one round-trip / behavior test, not just a smoke "this compiles" test.
+2. For every new `CardView` in `AIDashUI`, the PR MUST include at least 2
+   `#Preview` blocks covering different `CardSize` values.
+3. For every new CLI subcommand, the PR MUST include at least 2 tests:
+   one success path, one validation-failure path. JSON envelope assertion
+   is part of the success-path test.
+4. Tests that only assert `model.property == .someConstant` without
+   exercising behavior are 🟡 CHANGES REQUESTED (test was the goal, not
+   coverage).
+
+### H. Design Fidelity (P2)
+
+1. Card content rendering MUST match `contracts/cardtype-payloads.md` for
+   the relevant CardType + CardSize cell. Missing fields the contract
+   marks "required at this size" is 🟡 CHANGES REQUESTED.
+2. Style tint application uses the constitution's 4-tier
+   (`neutral/success/warning/accent`). Custom tints out of band are
+   🟡 CHANGES REQUESTED unless an ADR exists.
+
+### Verdict Aggregation Rules
+
+Reviewer MUST aggregate per-bar findings into an overall verdict:
+
+- Any P0 finding → 🔴 FAIL. PR cannot merge.
+- No P0, any P1 finding, but functional task is correct → 🟢 PASS WITH
+  FOLLOW-UP. Reviewer creates a sub-issue per P1 finding via
+  `multica issue create --parent <current>` and lists the new issue keys
+  in the verdict comment. The current PR ships.
+- No P0, any P1 finding, AND functional task is incorrect → 🟡 CHANGES
+  REQUESTED. Loop back to Fullstack.
+- Only P2 findings or none → 🟢 PASS.
+
+The "PASS WITH FOLLOW-UP" verdict is the new default for UI tasks with
+a11y / i18n gaps. It exists to prevent the >10-round review loops that
+burn run-count guards on stylistic findings.
+
+---
+
 ## Development Workflow
 
 ### Spec-Driven, Multica-Executed
@@ -247,4 +382,4 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.0.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-23
+**Version**: 1.1.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-25
