@@ -16,14 +16,18 @@ final class MenuBarController {
         if let button = item.button {
             button.image = NSImage(
                 systemSymbolName: "doc.text.magnifyingglass",
-                accessibilityDescription: "AIDash"
+                accessibilityDescription: String(localized: "menubar.app_name", defaultValue: "AIDash")
             )
         }
 
         let menu = NSMenu()
         // TODO(T081): Add "Open Briefing" and "About AIDash" items
         menu.addItem(
-            NSMenuItem(title: "Quit AIDash", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            NSMenuItem(
+                title: String(localized: "menubar.quit", defaultValue: "Quit AIDash"),
+                action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: "q"
+            )
         )
         item.menu = menu
         statusItem = item

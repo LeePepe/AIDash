@@ -14,13 +14,17 @@ public struct BriefingWindowScene: Scene {
         WindowGroup {
             if let container {
                 // TODO(T082/T090): Replace with BriefingView
-                Text("AIDash")
+                Text(String(localized: "briefing.app_name", defaultValue: "AIDash"))
                     .modelContainer(container)
             } else {
                 ContentUnavailableView {
-                    Label("Storage Unavailable", systemImage: "exclamationmark.triangle")
+                    Label {
+                        Text(String(localized: "briefing.storage_unavailable.title", defaultValue: "Storage Unavailable"))
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                    }
                 } description: {
-                    Text("AIDash could not initialize storage.\nPlease restart the app or check iCloud settings.")
+                    Text(String(localized: "briefing.storage_unavailable.description", defaultValue: "AIDash could not initialize storage.\nPlease restart the app or check iCloud settings."))
                 }
             }
         }
