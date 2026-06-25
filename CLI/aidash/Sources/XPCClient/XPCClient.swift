@@ -15,13 +15,13 @@ struct XPCClient: Sendable {
         // Attempt connection; if service unreachable, launch app and retry.
         let responseData: Data
         do {
-            responseData = try await sendViaXPC(requestData)
+            responseData = try await sendWithTimeout(requestData)
         } catch {
             // App not running — attempt launch and retry.
             let launcher = AppLauncher()
             try await launcher.launchAndWait { await probe() }
             do {
-                responseData = try await sendViaXPC(requestData)
+                responseData = try await sendWithTimeout(requestData)
             } catch {
                 throw XPCError(
                     code: "xpc.app_unavailable",
@@ -34,13 +34,74 @@ struct XPCClient: Sendable {
         return response
     }
 
-    /// Probe whether the XPC service is reachable.
-    private func probe() -> Bool {
+    /// Probe whether the XPC service is actually reachable by performing a
+    /// lightweight round-trip handshake (empty request → any reply or error).
+    private func probe() async -> Bool {
         let connection = NSXPCConnection(machServiceName: Self.serviceName)
         connection.remoteObjectInterface = NSXPCInterface(with: AIDashXPCServiceProtocol.self)
         connection.activate()
         defer { connection.invalidate() }
-        return connection.remoteObjectProxy != nil
+
+        // Use a short timeout: if we don't get a reply within 1s, service isn't ready.
+        let isReachable: Bool = await withCheckedContinuation { continuation in
+            var didResume = false
+
+            connection.invalidationHandler = {
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume(returning: false)
+            }
+
+            guard let proxy = connection.remoteObjectProxyWithErrorHandler({ _ in
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume(returning: false)
+            }) as? AIDashXPCServiceProtocol else {
+                if !didResume {
+                    didResume = true
+                    continuation.resume(returning: false)
+                }
+                return
+            }
+
+            // Send a minimal ping — an empty request. The service will reply
+            // (possibly with an error response), proving it's listening.
+            proxy.execute(requestData: Data()) { _ in
+                connection.invalidate()
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume(returning: true)
+            }
+
+            // Timeout after 1 second — if no reply, consider not reachable.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume(returning: false)
+            }
+        }
+
+        return isReachable
+    }
+
+    /// Send raw request data over XPC with the 5-second timeout contract.
+    private func sendWithTimeout(_ requestData: Data) async throws -> Data {
+        try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask {
+                try await self.sendViaXPC(requestData)
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(Self.timeoutSeconds))
+                throw XPCError(
+                    code: "xpc.connection_invalidated",
+                    message: "XPC request timed out after \(Int(Self.timeoutSeconds))s."
+                )
+            }
+
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
     }
 
     /// Send raw request data over XPC and return raw response data.

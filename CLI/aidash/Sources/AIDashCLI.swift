@@ -15,12 +15,6 @@ struct AIDash: AsyncParsableCommand {
             SchemaCommand.self,
         ]
     )
-
-    @Flag(name: .long, help: "Emit machine-readable JSON on stdout instead of human format.")
-    var json = false
-
-    @Flag(name: .long, help: "Suppress non-essential stdout (errors still go to stderr).")
-    var quiet = false
 }
 
 // MARK: - Briefing

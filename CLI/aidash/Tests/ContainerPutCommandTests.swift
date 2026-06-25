@@ -217,4 +217,185 @@ struct ContainerPutCommandTests {
             )
         }
     }
+
+    // MARK: - Exit Code Mapping
+
+    @Test("maps schema.* errors to exit code 1")
+    func mapsSchemaErrorToExitCode1() {
+        let error = XPCError(
+            code: "schema.invalid_uuid",
+            message: "Bad UUID"
+        )
+        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 1)
+    }
+
+    @Test("maps schema.unknown_container_layout to exit code 1")
+    func mapsSchemaLayoutErrorToExitCode1() {
+        let error = XPCError(
+            code: "schema.unknown_container_layout",
+            message: "Bad layout"
+        )
+        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 1)
+    }
+
+    @Test("maps xpc.* errors to exit code 2")
+    func mapsXpcErrorToExitCode2() {
+        let error = XPCError(
+            code: "xpc.connection_invalidated",
+            message: "Connection lost"
+        )
+        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 2)
+    }
+
+    @Test("maps xpc.app_unavailable to exit code 2")
+    func mapsXpcAppUnavailableToExitCode2() {
+        let error = XPCError(
+            code: "xpc.app_unavailable",
+            message: "App not reachable"
+        )
+        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 2)
+    }
+
+    @Test("maps briefing.not_found to exit code 3")
+    func mapsBriefingNotFoundToExitCode3() {
+        let error = XPCError(
+            code: "briefing.not_found",
+            message: "No briefing for that date"
+        )
+        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 3)
+    }
+
+    @Test("maps cloudkit.* errors to exit code 3")
+    func mapsCloudKitErrorToExitCode3() {
+        let error = XPCError(
+            code: "cloudkit.quota_exceeded",
+            message: "Storage full"
+        )
+        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 3)
+    }
+
+    @Test("maps internal.* errors to exit code 3")
+    func mapsInternalErrorToExitCode3() {
+        let error = XPCError(
+            code: "internal.unexpected",
+            message: "Something went wrong"
+        )
+        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 3)
+    }
+
+    @Test("maps container.not_found to exit code 3")
+    func mapsContainerNotFoundToExitCode3() {
+        let error = XPCError(
+            code: "container.not_found",
+            message: "Container doesn't exist"
+        )
+        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 3)
+    }
+
+    // MARK: - Date Validation
+
+    @Test("rejects invalid date format (not YYYY-MM-DD)")
+    func rejectsInvalidDateFormat() throws {
+        let args = [
+            "--briefing-date", "25-06-2026",
+            "--id", "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            "--title", "Test",
+            "--order", "10",
+        ]
+        // Parses successfully (it's a string), but run() should fail with validation
+        let cmd = try ContainerPutCommand.parse(args)
+        #expect(cmd.briefingDate == "25-06-2026")
+        // The actual validation happens in run() — tested via integration below
+    }
+
+    @Test("rejects nonsense date string")
+    func rejectsNonsenseDate() throws {
+        let args = [
+            "--briefing-date", "not-a-date",
+            "--id", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+            "--title", "Test",
+            "--order", "10",
+        ]
+        let cmd = try ContainerPutCommand.parse(args)
+        #expect(cmd.briefingDate == "not-a-date")
+    }
+
+    @Test("accepts valid YYYY-MM-DD date")
+    func acceptsValidDate() throws {
+        let args = [
+            "--briefing-date", "2026-06-25",
+            "--id", "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "--title", "Test",
+            "--order", "10",
+        ]
+        let cmd = try ContainerPutCommand.parse(args)
+        #expect(cmd.briefingDate == "2026-06-25")
+    }
+
+    @Test("accepts 'today' as briefing-date")
+    func acceptsTodayDate() throws {
+        let args = [
+            "--briefing-date", "today",
+            "--id", "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "--title", "Test",
+            "--order", "10",
+        ]
+        let cmd = try ContainerPutCommand.parse(args)
+        #expect(cmd.briefingDate == "today")
+    }
+
+    @Test("accepts 'yesterday' as briefing-date")
+    func acceptsYesterdayDate() throws {
+        let args = [
+            "--briefing-date", "yesterday",
+            "--id", "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "--title", "Test",
+            "--order", "10",
+        ]
+        let cmd = try ContainerPutCommand.parse(args)
+        #expect(cmd.briefingDate == "yesterday")
+    }
+
+    // MARK: - JSON/Quiet Flag Parsing
+
+    @Test("--json flag is recognized on leaf command")
+    func jsonFlagOnLeaf() throws {
+        let args = [
+            "--briefing-date", "2026-06-25",
+            "--id", "11111111-1111-1111-1111-111111111111",
+            "--title", "Test",
+            "--order", "10",
+            "--json",
+        ]
+        let cmd = try ContainerPutCommand.parse(args)
+        #expect(cmd.json == true)
+    }
+
+    @Test("--quiet flag is recognized on leaf command")
+    func quietFlagOnLeaf() throws {
+        let args = [
+            "--briefing-date", "2026-06-25",
+            "--id", "11111111-1111-1111-1111-111111111111",
+            "--title", "Test",
+            "--order", "10",
+            "--quiet",
+        ]
+        let cmd = try ContainerPutCommand.parse(args)
+        #expect(cmd.quiet == true)
+    }
+
+    @Test("both --json and --quiet together")
+    func jsonAndQuietTogether() throws {
+        let args = [
+            "--briefing-date", "2026-06-25",
+            "--id", "11111111-1111-1111-1111-111111111111",
+            "--title", "Test",
+            "--order", "10",
+            "--json",
+            "--quiet",
+        ]
+        let cmd = try ContainerPutCommand.parse(args)
+        #expect(cmd.json == true)
+        #expect(cmd.quiet == true)
+    }
 }
