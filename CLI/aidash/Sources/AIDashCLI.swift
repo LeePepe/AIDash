@@ -48,17 +48,6 @@ struct BriefingPutCommand: AsyncParsableCommand {
     }
 }
 
-struct BriefingPublishCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "publish",
-        abstract: "Mark a briefing as visible to readers."
-    )
-
-    func run() async throws {
-        fatalError("not yet implemented in T051")
-    }
-}
-
 struct BriefingGetCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "get",

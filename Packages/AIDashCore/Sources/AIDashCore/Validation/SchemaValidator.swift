@@ -14,6 +14,11 @@ public struct SchemaValidator {
         try requireValidDate(date)
     }
 
+    public static func validateBriefingPublish(date: String) throws {
+        try requireNonEmpty(date, field: "date")
+        try requireValidDate(date)
+    }
+
     public static func validateContainerPut(
         id: String,
         title: String,

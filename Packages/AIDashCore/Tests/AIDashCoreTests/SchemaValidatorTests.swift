@@ -48,6 +48,47 @@ struct SchemaValidatorTests {
         }
     }
 
+    // MARK: - BriefingPublish
+
+    @Test func briefingPublish_validDate_doesNotThrow() throws {
+        try SchemaValidator.validateBriefingPublish(date: "2026-06-24")
+    }
+
+    @Test func briefingPublish_emptyDate_throwsMissingField() {
+        do {
+            try SchemaValidator.validateBriefingPublish(date: "")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.missing_required_field")
+            #expect(error.field == "date")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    @Test func briefingPublish_invalidDate_throwsInvalidDate() {
+        do {
+            try SchemaValidator.validateBriefingPublish(date: "not-a-date")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_date")
+            #expect(error.got == "not-a-date")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    @Test func briefingPublish_malformedDate_throwsInvalidDate() {
+        do {
+            try SchemaValidator.validateBriefingPublish(date: "06-24-2026")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_date")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
     // MARK: - ContainerPut
 
     @Test func containerPut_validInput_doesNotThrow() throws {
