@@ -4,7 +4,11 @@ import AIDashCore
 /// Human-readable output: pretty-printed JSON to stdout for success,
 /// JSON error to stderr (per cli-surface contract: errors are always JSON).
 public struct HumanOutput: OutputFormatter {
-    public init() {}
+    private let requestId: String?
+
+    public init(requestId: String? = nil) {
+        self.requestId = requestId
+    }
 
     public func emit(success: any Encodable) throws {
         let json = try JSONEncoder().encode(AnyEncodable(success))
@@ -22,6 +26,6 @@ public struct HumanOutput: OutputFormatter {
     }
 
     public func emit(error: XPCError) throws {
-        try JSONOutput().emit(error: error)
+        try JSONOutput(requestId: requestId).emit(error: error)
     }
 }

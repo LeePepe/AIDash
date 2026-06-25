@@ -24,8 +24,9 @@ struct BriefingPublishCommand: AsyncParsableCommand {
         let params = BriefingPublishParams(date: resolvedDate)
         let paramsData = try JSONEncoder().encode(params)
 
+        let requestId = UUID().uuidString
         let request = XPCRequest(
-            requestId: UUID().uuidString,
+            requestId: requestId,
             cliVersion: "1.0.0",
             command: "briefing.publish",
             params: paramsData
@@ -34,14 +35,40 @@ struct BriefingPublishCommand: AsyncParsableCommand {
         let client = XPCClient()
         let response = try await client.execute(request)
 
-        if response.ok, let data = response.data {
-            let result = try JSONDecoder.iso8601Decoder.decode(
-                BriefingPublishResult.self, from: data
-            )
-            let formatter = globals.outputMode.formatter()
+        if response.ok {
+            guard let data = response.data else {
+                throw XPCError(
+                    code: "xpc.decode_failure",
+                    message: "Server returned ok=true but no data payload"
+                )
+            }
+            let result: BriefingPublishResult
+            do {
+                result = try JSONDecoder.iso8601Decoder.decode(
+                    BriefingPublishResult.self, from: data
+                )
+            } catch {
+                throw XPCError(
+                    code: "xpc.decode_failure",
+                    message: "Failed to decode BriefingPublishResult: \(error.localizedDescription)"
+                )
+            }
+            let formatter = globals.outputMode.formatter(requestId: response.requestId)
             try formatter.emit(success: result)
         } else if let error = response.error {
-            throw error
+            throw XPCError(
+                code: error.code,
+                message: error.message,
+                field: error.field,
+                got: error.got,
+                allowed: error.allowed,
+                cause: error.cause
+            )
+        } else {
+            throw XPCError(
+                code: "xpc.decode_failure",
+                message: "Server returned ok=false but no error payload"
+            )
         }
     }
 }

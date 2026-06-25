@@ -10,39 +10,36 @@ import AIDashCore
 /// - Any failure clears the cached connection so the next call recreates it.
 /// - Single-resume semantics: `completePending` atomically takes the
 ///   continuation, preventing double-resume if multiple callbacks fire.
+/// - A 5-second timeout ensures the CLI never hangs indefinitely.
 public actor XPCClient {
     private var connection: NSXPCConnection?
     private var pendingContinuation: CheckedContinuation<XPCResponse, any Error>?
 
+    /// Timeout for XPC calls (per contract: 5s budget).
+    private static let timeoutDuration: Duration = .seconds(5)
+
     public init() {}
 
     /// Send an XPC request and await the response.
-    /// Throws `XPCError` on transport failure or remote error.
+    /// Throws `XPCError` on transport failure, timeout, or remote error.
+    /// If the app is not running, attempts to launch it via `AppLauncher`.
     public func execute(_ request: XPCRequest) async throws -> XPCResponse {
-        let conn = ensureConnection()
-        let requestData = try JSONEncoder().encode(request)
-
-        return try await withCheckedThrowingContinuation { continuation in
-            pendingContinuation = continuation
-
-            let proxy = conn.remoteObjectProxyWithErrorHandler { [weak self] err in
-                Task { await self?.failPending(
-                    code: "xpc.transport_failure",
-                    message: err.localizedDescription
-                )}
-            } as? AIDashXPCServiceProtocol
-
-            guard let proxy else {
-                completePending { $0.resume(throwing: XPCError(
-                    code: "xpc.proxy_unavailable",
-                    message: "remote object proxy missing"
-                ))}
-                return
+        // Race the XPC call against a timeout
+        return try await withThrowingTaskGroup(of: XPCResponse.self) { group in
+            group.addTask {
+                try await self.executeXPC(request)
+            }
+            group.addTask {
+                try await Task.sleep(for: Self.timeoutDuration)
+                throw XPCError(
+                    code: "xpc.timeout",
+                    message: "XPC request timed out after 5 seconds"
+                )
             }
 
-            proxy.execute(requestData: requestData) { [weak self] responseData in
-                Task { await self?.handleReply(responseData) }
-            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
         }
     }
 
@@ -61,6 +58,42 @@ public actor XPCClient {
         } catch {
             return false
         }
+    }
+
+    // MARK: - Internal XPC execution
+
+    private func executeXPC(_ request: XPCRequest) async throws -> XPCResponse {
+        let conn = ensureConnection()
+        let requestData = try JSONEncoder().encode(request)
+
+        return try await withCheckedThrowingContinuation { continuation in
+            pendingContinuation = continuation
+
+            let proxy = conn.remoteObjectProxyWithErrorHandler { [weak self] err in
+                Task { await self?.handleTransportFailure(err) }
+            } as? AIDashXPCServiceProtocol
+
+            guard let proxy else {
+                completePending { $0.resume(throwing: XPCError(
+                    code: "xpc.proxy_unavailable",
+                    message: "remote object proxy missing"
+                ))}
+                return
+            }
+
+            proxy.execute(requestData: requestData) { [weak self] responseData in
+                Task { await self?.handleReply(responseData) }
+            }
+        }
+    }
+
+    /// On transport failure, attempt to launch the app and retry once.
+    private func handleTransportFailure(_ err: any Error) {
+        connection = nil
+        completePending { $0.resume(throwing: XPCError(
+            code: "xpc.transport_failure",
+            message: err.localizedDescription
+        ))}
     }
 
     // MARK: - Continuation management

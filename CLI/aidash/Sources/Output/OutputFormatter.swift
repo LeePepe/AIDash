@@ -10,10 +10,10 @@ public enum OutputMode: Sendable {
     case human
     case json
 
-    public func formatter() -> any OutputFormatter {
+    public func formatter(requestId: String? = nil) -> any OutputFormatter {
         switch self {
-        case .human: return HumanOutput()
-        case .json:  return JSONOutput()
+        case .human: return HumanOutput(requestId: requestId)
+        case .json:  return JSONOutput(requestId: requestId)
         }
     }
 }

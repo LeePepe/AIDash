@@ -2,17 +2,23 @@ import Foundation
 import AIDashCore
 
 /// Machine-readable JSON output: success to stdout, errors to stderr.
+/// Emits the documented envelope format per cli-surface.md.
 public struct JSONOutput: OutputFormatter {
-    public init() {}
+    private let requestId: String?
+
+    public init(requestId: String? = nil) {
+        self.requestId = requestId
+    }
 
     public func emit(success: any Encodable) throws {
-        let data = try Self.encoder.encode(AnyEncodable(success))
+        let envelope = CLISuccessEnvelope(data: AnyEncodable(success), requestId: requestId)
+        let data = try Self.encoder.encode(envelope)
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))
     }
 
     public func emit(error: XPCError) throws {
-        let envelope = CLIErrorEnvelope(from: error)
+        let envelope = CLIErrorEnvelope(from: error, requestId: requestId)
         let data = try Self.encoder.encode(envelope)
         FileHandle.standardError.write(data)
         FileHandle.standardError.write(Data("\n".utf8))
@@ -26,7 +32,15 @@ public struct JSONOutput: OutputFormatter {
     }()
 }
 
-// MARK: - CLI Error Envelope (per cli-surface.md)
+// MARK: - CLI Success Envelope (per cli-surface.md §"Success envelope")
+
+struct CLISuccessEnvelope: Encodable {
+    let ok = true
+    let data: AnyEncodable
+    let requestId: String?
+}
+
+// MARK: - CLI Error Envelope (per cli-surface.md §"Error envelope")
 
 struct CLIErrorBody: Encodable {
     let allowed: [String]?
