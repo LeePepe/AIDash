@@ -43,7 +43,7 @@ public struct AgentSummaryCardView: View {
             .font(.headline)
             .lineLimit(1)
         if let prStat = payload.stats?.first(where: { $0.label == "PRs" }) {
-            Text("\(Int(prStat.value)) \(String(localized: "PRs"))")
+            Text("\(Int(prStat.value)) \(Self.prsLabel)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else if let firstStat = payload.stats?.first {
@@ -81,11 +81,7 @@ public struct AgentSummaryCardView: View {
         }
 
         if let stats = payload.stats, !stats.isEmpty {
-            HStack(spacing: 12) {
-                ForEach(Array(stats.enumerated()), id: \.offset) { _, stat in
-                    statBadge(stat)
-                }
-            }
+            statsLayout(stats)
         }
     }
 
@@ -95,7 +91,7 @@ public struct AgentSummaryCardView: View {
             .font(.title2)
             .fontWeight(.semibold)
 
-        Text(String(localized: "spent the day on"))
+        Text(Self.heroSubtitle)
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .italic()
@@ -106,17 +102,11 @@ public struct AgentSummaryCardView: View {
 
         if let stats = payload.stats, !stats.isEmpty {
             Divider()
-            HStack(spacing: 16) {
-                ForEach(Array(stats.enumerated()), id: \.offset) { _, stat in
-                    statBadge(stat)
-                }
-            }
+            statsLayout(stats)
         }
     }
 
     // MARK: - Helpers
-
-    private static let allowedSchemes: Set<String> = ["https", "http"]
 
     @ViewBuilder
     private func completedRow(_ item: AgentSummaryPayload.Completed) -> some View {
@@ -125,37 +115,54 @@ public struct AgentSummaryCardView: View {
                 .foregroundStyle(.green)
                 .font(.caption)
                 .accessibilityHidden(true)
-            if let url = validURL(from: item.ref) {
+            if let url = URLPolicy.validate(item.ref) {
                 Link(item.title, destination: url)
                     .font(.subheadline)
-                    .lineLimit(1)
+                    .lineLimit(completedRowLineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(item.title)
                     .font(.subheadline)
-                    .lineLimit(1)
+                    .lineLimit(completedRowLineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
     }
 
-    private func validURL(from ref: String?) -> URL? {
-        guard let ref, let url = URL(string: ref),
-              let scheme = url.scheme?.lowercased(),
-              Self.allowedSchemes.contains(scheme) else {
-            return nil
+    /// Per constitution §E.2: `wide` and `hero` body text MUST wrap, not
+    /// truncate. `small` and `medium` stay single-line for layout density.
+    private var completedRowLineLimit: Int? {
+        switch size {
+        case .small, .medium: return 1
+        case .wide, .hero:    return nil
         }
-        return url
+    }
+
+    /// Stats row that adapts to variable stat counts/labels without
+    /// horizontal overflow. Uses a wrapping grid so long labels reflow
+    /// to a new line instead of clipping.
+    @ViewBuilder
+    private func statsLayout(_ stats: [AgentSummaryPayload.Stat]) -> some View {
+        let columns = [GridItem(.adaptive(minimum: 80), spacing: 12, alignment: .leading)]
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            ForEach(Array(stats.enumerated()), id: \.offset) { _, stat in
+                statBadge(stat)
+            }
+        }
     }
 
     @ViewBuilder
     private func statBadge(_ stat: AgentSummaryPayload.Stat) -> some View {
-        VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(formattedStatValue(stat.value))
                 .font(.headline)
             Text(stat.label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -169,6 +176,27 @@ public struct AgentSummaryCardView: View {
         }
         return String(format: "%.1f", value)
     }
+
+    // MARK: - Localized strings
+    //
+    // Per constitution §F.1, user-visible literals are accessed via
+    // `String(localized:)`. These keys are also written to the package
+    // String Catalog (`Resources/Localizable.xcstrings`) so translators
+    // can localize them without touching source.
+
+    private static let prsLabel = String(
+        localized: "agent_summary.prs_label",
+        defaultValue: "PRs",
+        bundle: .module,
+        comment: "Suffix shown after a pull-request count in the small Agent Summary card layout."
+    )
+
+    private static let heroSubtitle = String(
+        localized: "agent_summary.hero_subtitle",
+        defaultValue: "spent the day on",
+        bundle: .module,
+        comment: "Pull-quote shown under the agent name in the hero Agent Summary card layout."
+    )
 
     private var backgroundTint: Color {
         switch style {
