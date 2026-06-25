@@ -19,9 +19,15 @@ public struct BriefingWindowScene: Scene {
                 BriefingView()
                     .modelContainer(container)
                     .frame(minWidth: 720, minHeight: 480)
+                    #if os(macOS)
+                    .windowDismissBehavior(.disabled)
+                    #endif
             case .failed(let reason):
                 ICloudUnavailableView(reason: reason)
                     .frame(minWidth: 480, minHeight: 320)
+                    #if os(macOS)
+                    .windowDismissBehavior(.disabled)
+                    #endif
             }
         }
         #if os(macOS)
