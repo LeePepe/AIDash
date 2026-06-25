@@ -2,12 +2,15 @@ import Testing
 import Foundation
 @testable import AIDashCore
 
-/// Tests for XPC transport error codes used by XPCClient.
+/// Tests for XPC transport error codes and the `XPCPendingRequests` lifecycle
+/// table that `XPCClient` builds on.
 ///
-/// XPCClient lives in the CLI target (not importable here), so these tests
-/// verify the error contracts it depends on: construction, throwability,
-/// encoding roundtrip, and single-resume guard pattern for all five XPC
-/// transport error codes.
+/// `XPCClient` itself lives in the CLI target and cannot be imported here,
+/// but its full lifecycle behaviour (per-request continuations, single-resume,
+/// fail-all on connection death, request-id collision) is implemented in
+/// `XPCPendingRequests`, which IS importable and exercised below. The tests
+/// here are the actual behavioural contract; `XPCClient` only wires
+/// `NSXPCConnection` callbacks into these primitives.
 @Suite("XPC transport error codes")
 struct XPCTransportErrorTests {
 
@@ -145,38 +148,224 @@ struct XPCTransportErrorTests {
         #expect(decoded.error?.got == "unicorn")
         #expect(decoded.error?.allowed == ["metric", "insight"])
     }
+}
 
-    // MARK: - Continuation guard pattern validation
+// MARK: - XPCPendingRequests lifecycle (the testable seam of XPCClient)
 
-    /// Simulates the `completePending` single-resume pattern used by XPCClient.
-    /// Two concurrent "callbacks" race to resume; only the first should win.
-    @Test func singleResumeGuardPattern() async {
-        actor ContinuationHolder {
-            var pending: CheckedContinuation<String, any Error>?
+/// Direct behavioural tests for `XPCPendingRequests` — the per-request
+/// continuation table that `XPCClient` uses. These tests cover every
+/// lifecycle path that the AI Reviewer called out:
+///
+/// - Per-request continuations: registering two requests, completing one,
+///   verifying the other is still pending.
+/// - Single-resume guard: completing the same id twice resumes once and
+///   the second call is a no-op.
+/// - Fail-all (invalidation/interruption): every pending continuation gets
+///   the error code, table is emptied.
+/// - Request-id collision: re-registering an id resumes the prior
+///   continuation with `xpc.request_id_collision` so it does not leak.
+/// - Specific error codes propagate through both `complete` and `failAll`.
+@Suite("XPCPendingRequests lifecycle")
+struct XPCPendingRequestsTests {
 
-            func setPending(_ c: CheckedContinuation<String, any Error>) {
-                pending = c
-            }
+    @Test func registerAndCompleteSingleRequest() async throws {
+        let table = XPCPendingRequests()
+        let requestId = UUID().uuidString
 
-            func completePending(
-                _ body: (CheckedContinuation<String, any Error>) -> Void
-            ) {
-                guard let cont = pending else { return }
-                pending = nil
-                body(cont)
-            }
-        }
-
-        let holder = ContinuationHolder()
-        let result: String = try! await withCheckedThrowingContinuation { cont in
+        let result: XPCResponse = try await withCheckedThrowingContinuation { cont in
             Task {
-                await holder.setPending(cont)
-                // First callback wins
-                await holder.completePending { $0.resume(returning: "first") }
-                // Second callback is a no-op (continuation already consumed)
-                await holder.completePending { $0.resume(returning: "second") }
+                await table.register(requestId: requestId, continuation: cont)
+                #expect(await table.pendingCount == 1)
+                await table.complete(requestId: requestId) { cont in
+                    cont.resume(returning: makeResponse(requestId: requestId))
+                }
             }
         }
-        #expect(result == "first")
+
+        #expect(result.requestId == requestId)
+        #expect(await table.pendingCount == 0)
+    }
+
+    @Test func overlappingRequestsDoNotInterfere() async throws {
+        let table = XPCPendingRequests()
+        let idA = "request-A"
+        let idB = "request-B"
+
+        async let valueA: XPCResponse = withCheckedThrowingContinuation { cont in
+            Task { await table.register(requestId: idA, continuation: cont) }
+        }
+        async let valueB: XPCResponse = withCheckedThrowingContinuation { cont in
+            Task { await table.register(requestId: idB, continuation: cont) }
+        }
+
+        // Wait until both are registered before completing.
+        try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+        #expect(await table.pendingCount == 2)
+
+        // Complete B first; A must still be in-flight.
+        await table.complete(requestId: idB) { cont in
+            cont.resume(returning: makeResponse(requestId: idB))
+        }
+        let bResult = try await valueB
+        #expect(bResult.requestId == idB)
+        #expect(await table.pendingCount == 1)
+
+        // Now complete A.
+        await table.complete(requestId: idA) { cont in
+            cont.resume(returning: makeResponse(requestId: idA))
+        }
+        let aResult = try await valueA
+        #expect(aResult.requestId == idA)
+        #expect(await table.pendingCount == 0)
+    }
+
+    @Test func completeTwiceIsSingleResume() async throws {
+        let table = XPCPendingRequests()
+        let requestId = UUID().uuidString
+
+        let result: XPCResponse = try await withCheckedThrowingContinuation { cont in
+            Task {
+                await table.register(requestId: requestId, continuation: cont)
+                // First complete wins.
+                let firstFired = await table.complete(requestId: requestId) { cont in
+                    cont.resume(returning: makeResponse(requestId: requestId, appVersion: "first"))
+                }
+                #expect(firstFired == true)
+                // Second complete is a no-op — does NOT call the closure.
+                let secondFired = await table.complete(requestId: requestId) { _ in
+                    Issue.record("second complete must not invoke closure")
+                }
+                #expect(secondFired == false)
+            }
+        }
+
+        #expect(result.appVersion == "first")
+    }
+
+    @Test func completeUnknownIdIsNoOp() async {
+        let table = XPCPendingRequests()
+        let fired = await table.complete(requestId: "never-registered") { _ in
+            Issue.record("unknown id must not invoke closure")
+        }
+        #expect(fired == false)
+        #expect(await table.pendingCount == 0)
+    }
+
+    @Test func failAllResumesEveryPendingWithError() async {
+        let table = XPCPendingRequests()
+        let idA = "fail-A"
+        let idB = "fail-B"
+
+        // Use a TaskGroup so we can collect both thrown errors.
+        async let errorA: any Error = capturingError {
+            try await withCheckedThrowingContinuation { cont in
+                Task { await table.register(requestId: idA, continuation: cont) }
+            } as XPCResponse
+        }
+        async let errorB: any Error = capturingError {
+            try await withCheckedThrowingContinuation { cont in
+                Task { await table.register(requestId: idB, continuation: cont) }
+            } as XPCResponse
+        }
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(await table.pendingCount == 2)
+
+        await table.failAll(
+            code: "xpc.connection_invalidated",
+            message: "XPC connection was invalidated"
+        )
+
+        let caughtA = await errorA
+        let caughtB = await errorB
+        #expect((caughtA as? XPCError)?.code == "xpc.connection_invalidated")
+        #expect((caughtB as? XPCError)?.code == "xpc.connection_invalidated")
+        #expect(await table.pendingCount == 0)
+    }
+
+    @Test func failAllOnEmptyTableIsNoOp() async {
+        let table = XPCPendingRequests()
+        await table.failAll(code: "xpc.connection_interrupted", message: "interrupted")
+        #expect(await table.pendingCount == 0)
+    }
+
+    @Test func registerCollisionResumesPriorContinuation() async throws {
+        let table = XPCPendingRequests()
+        let collidingId = "duplicate-id"
+
+        // First continuation: must end up resumed with xpc.request_id_collision.
+        async let priorError: any Error = capturingError {
+            try await withCheckedThrowingContinuation { cont in
+                Task { await table.register(requestId: collidingId, continuation: cont) }
+            } as XPCResponse
+        }
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(await table.pendingCount == 1)
+
+        // Second continuation: takes over the id, eventually resolved.
+        let secondResult: XPCResponse = try await withCheckedThrowingContinuation { cont in
+            Task {
+                await table.register(requestId: collidingId, continuation: cont)
+                // Prior must already be evicted; only the new continuation is pending.
+                #expect(await table.pendingCount == 1)
+                await table.complete(requestId: collidingId) { cont in
+                    cont.resume(returning: makeResponse(requestId: collidingId, appVersion: "winner"))
+                }
+            }
+        }
+
+        let caught = await priorError
+        #expect((caught as? XPCError)?.code == "xpc.request_id_collision")
+        #expect(secondResult.appVersion == "winner")
+        #expect(await table.pendingCount == 0)
+    }
+
+    @Test func completePropagatesThrownError() async {
+        let table = XPCPendingRequests()
+        let requestId = UUID().uuidString
+
+        let caught: any Error = await capturingError {
+            try await withCheckedThrowingContinuation { cont in
+                Task {
+                    await table.register(requestId: requestId, continuation: cont)
+                    await table.complete(requestId: requestId) { cont in
+                        cont.resume(throwing: XPCError(
+                            code: "xpc.decode_failure",
+                            message: "garbage in reply"
+                        ))
+                    }
+                }
+            } as XPCResponse
+        }
+
+        #expect((caught as? XPCError)?.code == "xpc.decode_failure")
+    }
+}
+
+// MARK: - Test helpers
+
+private func makeResponse(
+    requestId: String,
+    appVersion: String = "1.0.0"
+) -> XPCResponse {
+    XPCResponse(
+        requestId: requestId,
+        appVersion: appVersion,
+        ok: true,
+        data: nil,
+        error: nil
+    )
+}
+
+/// Run an async throwing expression and return the thrown error. Fails the
+/// surrounding test if no error is thrown.
+private func capturingError<T>(_ body: () async throws -> T) async -> any Error {
+    do {
+        _ = try await body()
+        Issue.record("expected an error but body returned normally")
+        return XPCError(code: "test.no_error", message: "no error thrown")
+    } catch {
+        return error
     }
 }
