@@ -38,11 +38,26 @@ struct AIDash: AsyncParsableCommand {
             try? JSONOutput().emit(error: xpcError)
             Darwin.exit(ExitCodeMapper.code(for: xpcError))
         } catch {
-            // Delegate to ArgumentParser's standard error handling:
-            // - CleanExit (--help, --version) → prints and exits 0
-            // - Parse/validation errors → prints error + usage, exits with standard code
-            // - Other unknown errors → prints localizedDescription, exits 1
-            Self.exit(withError: error)
+            // ArgumentParser routes `--help` / `--version` here as "errors" with
+            // exit code `.success`; those must print to stdout (or stderr per
+            // ArgumentParser) and exit 0 — they are NOT contract errors. For
+            // everything else (parser errors, validation failures, unknown
+            // errors), the CLI contract requires a JSON envelope on stderr with
+            // a mapped exit code.
+            let argParserExit = Self.exitCode(for: error)
+            if argParserExit == ExitCode.success {
+                // Let ArgumentParser handle help/version output and exit 0.
+                Self.exit(withError: error)
+            }
+            let wrapped = XPCError(
+                code: "schema.invalid_argument",
+                message: Self.fullMessage(for: error),
+                field: nil,
+                got: nil,
+                allowed: nil
+            )
+            try? JSONOutput().emit(error: wrapped)
+            Darwin.exit(ExitCodeMapper.code(for: wrapped))
         }
     }
 }
