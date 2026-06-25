@@ -57,6 +57,19 @@ targets:
       - package: swift-argument-parser
         product: ArgumentParser
 
+  aidashTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: CLI/aidash/Tests
+      - path: CLI/aidash/Sources/XPCClient
+    dependencies:
+      - package: AIDashCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.cli.tests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   AIDashApp:
     build:
@@ -72,5 +85,8 @@ schemes:
         aidash: all
     run:
       config: Debug
+    test:
+      targets:
+        - aidashTests
     archive:
       config: Release
