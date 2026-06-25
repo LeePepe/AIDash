@@ -56,7 +56,7 @@ struct BriefingPublishCommand: AsyncParsableCommand {
             let formatter = globals.outputMode.formatter(requestId: response.requestId)
             try formatter.emit(success: result)
         } else if let error = response.error {
-            throw XPCError(
+            let remoteError = XPCError(
                 code: error.code,
                 message: error.message,
                 field: error.field,
@@ -64,6 +64,9 @@ struct BriefingPublishCommand: AsyncParsableCommand {
                 allowed: error.allowed,
                 cause: error.cause
             )
+            let formatter = globals.outputMode.formatter(requestId: response.requestId)
+            try formatter.emit(error: remoteError)
+            Darwin.exit(ExitCodeMapper.code(for: remoteError))
         } else {
             throw XPCError(
                 code: "xpc.decode_failure",
@@ -75,6 +78,9 @@ struct BriefingPublishCommand: AsyncParsableCommand {
 
 // MARK: - Global Options (shared across all commands)
 
+/// Detects `--json` and `--quiet` from both leaf-level ArgumentParser parsing
+/// AND root-level process arguments (e.g. `aidash --json briefing publish ...`).
+/// This allows flags before or after the subcommand verb.
 struct GlobalOptions: ParsableArguments {
     @Flag(name: .long, help: "Emit machine-readable JSON on stdout instead of human format.")
     var json = false
@@ -83,7 +89,12 @@ struct GlobalOptions: ParsableArguments {
     var quiet = false
 
     var outputMode: OutputMode {
-        json ? .json : .human
+        let isJSON = json || ProcessInfo.processInfo.arguments.contains("--json")
+        return isJSON ? .json : .human
+    }
+
+    var isQuiet: Bool {
+        quiet || ProcessInfo.processInfo.arguments.contains("--quiet")
     }
 }
 

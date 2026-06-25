@@ -11,21 +11,42 @@ import AIDashCore
 /// - Single-resume semantics: `completePending` atomically takes the
 ///   continuation, preventing double-resume if multiple callbacks fire.
 /// - A 5-second timeout ensures the CLI never hangs indefinitely.
+/// - On transport failure, launches AIDash.app via `AppLauncher` and retries once.
 public actor XPCClient {
     private var connection: NSXPCConnection?
     private var pendingContinuation: CheckedContinuation<XPCResponse, any Error>?
+    private var hasRetriedWithLaunch = false
 
     /// Timeout for XPC calls (per contract: 5s budget).
     private static let timeoutDuration: Duration = .seconds(5)
 
-    public init() {}
+    private let appLauncher: AppLauncher
+
+    public init(appLauncher: AppLauncher = AppLauncher()) {
+        self.appLauncher = appLauncher
+    }
 
     /// Send an XPC request and await the response.
     /// Throws `XPCError` on transport failure, timeout, or remote error.
-    /// If the app is not running, attempts to launch it via `AppLauncher`.
+    /// If the app is not running, attempts to launch it via `AppLauncher` and retries once.
     public func execute(_ request: XPCRequest) async throws -> XPCResponse {
-        // Race the XPC call against a timeout
-        return try await withThrowingTaskGroup(of: XPCResponse.self) { group in
+        do {
+            return try await executeWithTimeout(request)
+        } catch let error as XPCError where error.code == "xpc.transport_failure" && !hasRetriedWithLaunch {
+            // App may not be running — launch it and retry once.
+            hasRetriedWithLaunch = true
+            try await appLauncher.launchAndWait { [weak self] in
+                await self?.probeConnection() ?? false
+            }
+            return try await executeWithTimeout(request)
+        }
+    }
+
+    // MARK: - Internal
+
+    /// Race the XPC call against a timeout.
+    private func executeWithTimeout(_ request: XPCRequest) async throws -> XPCResponse {
+        try await withThrowingTaskGroup(of: XPCResponse.self) { group in
             group.addTask {
                 try await self.executeXPC(request)
             }
@@ -43,24 +64,15 @@ public actor XPCClient {
         }
     }
 
-    /// Returns `true` if the XPC service responds.
-    /// Used by `AppLauncher.launchAndWait(probe:)` to poll readiness.
-    public func canReachService() async -> Bool {
-        do {
-            let req = XPCRequest(
-                requestId: UUID().uuidString,
-                cliVersion: "1.0.0",
-                command: "ping",
-                params: Data("{}".utf8)
-            )
-            _ = try await execute(req)
-            return true
-        } catch {
-            return false
-        }
+    /// Connection-level probe: attempts to create a fresh connection and obtain a proxy.
+    /// Returns `true` if the XPC service endpoint is reachable (proxy can be created).
+    /// Does NOT send any command — just validates the transport layer.
+    private func probeConnection() -> Bool {
+        connection = nil
+        let conn = ensureConnection()
+        let proxy = conn.remoteObjectProxy as? AIDashXPCServiceProtocol
+        return proxy != nil
     }
-
-    // MARK: - Internal XPC execution
 
     private func executeXPC(_ request: XPCRequest) async throws -> XPCResponse {
         let conn = ensureConnection()
@@ -87,7 +99,6 @@ public actor XPCClient {
         }
     }
 
-    /// On transport failure, attempt to launch the app and retry once.
     private func handleTransportFailure(_ err: any Error) {
         connection = nil
         completePending { $0.resume(throwing: XPCError(
