@@ -1,7 +1,6 @@
 import SwiftUI
 import AIDashCore
 
-@MainActor
 public struct ListLayout: View {
     let cards: [CardModel]
     let style: CardStyle
