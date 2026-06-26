@@ -44,7 +44,7 @@ struct AIDash: AsyncParsableCommand {
             }
         } catch let xpcError as XPCError {
             // XPC-layer or domain errors → emit JSON envelope and exit with mapped code
-            try? JSONOutput().emit(error: xpcError)
+            try? JSONOutput().emit(error: xpcError, requestId: nil)
             Darwin.exit(ExitCodeMapper.code(for: xpcError))
         } catch {
             // ArgumentParser routes `--help` / `--version` here as "errors" with
@@ -65,7 +65,7 @@ struct AIDash: AsyncParsableCommand {
                 got: nil,
                 allowed: nil
             )
-            try? JSONOutput().emit(error: wrapped)
+            try? JSONOutput().emit(error: wrapped, requestId: nil)
             Darwin.exit(ExitCodeMapper.code(for: wrapped))
         }
     }
@@ -167,19 +167,7 @@ struct CardCommand: AsyncParsableCommand {
     )
 }
 
-struct CardPutCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "put",
-        abstract: "Create or update a card."
-    )
-
-    func run() async throws {
-        throw XPCError(
-            code: "internal.not_implemented",
-            message: "card put is not yet implemented (T054)"
-        )
-    }
-}
+// `CardPutCommand` is defined in `Commands/CardPutCommand.swift` (T054).
 
 struct CardDeleteCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
