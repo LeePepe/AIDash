@@ -184,8 +184,15 @@ public actor XPCClient {
 
         switch decoded {
         case .success(let response):
-            await pending.complete(requestId: requestId) { cont in
-                cont.resume(returning: response)
+            switch XPCClient.resultForResponse(response) {
+            case .success(let value):
+                await pending.complete(requestId: requestId) { cont in
+                    cont.resume(returning: value)
+                }
+            case .failure(let remoteError):
+                await pending.complete(requestId: requestId) { cont in
+                    cont.resume(throwing: remoteError)
+                }
             }
         case .failure(let error):
             connection = nil
@@ -193,6 +200,24 @@ public actor XPCClient {
                 cont.resume(throwing: error)
             }
         }
+    }
+
+    /// Pure mapping of a decoded `XPCResponse` to a Result.
+    ///
+    /// Per T044 contract: failed responses (`ok == false`) must surface the
+    /// embedded `XPCError` so `ExitCodeMapper` can map remote error codes
+    /// (`schema.*`, `storage.*`, `not_found`, …) to the right exit code.
+    /// If `ok == false` but `error` is missing, return a synthetic `internal`
+    /// error so callers never silently see a failure.
+    public static func resultForResponse(_ response: XPCResponse) -> Result<XPCResponse, XPCError> {
+        if response.ok {
+            return .success(response)
+        }
+        let remoteError = response.error ?? XPCError(
+            code: "internal",
+            message: "XPC response ok=false but no error payload"
+        )
+        return .failure(remoteError)
     }
 
     // MARK: - Connection lifecycle
@@ -219,5 +244,28 @@ public actor XPCClient {
         c.resume()
         connection = c
         return c
+    }
+}
+
+// MARK: - Health probe (T044)
+
+extension XPCClient {
+    /// Returns `true` if the XPC service responds to a `ping` command.
+    ///
+    /// Used by `AppLauncher.launchAndWait(probe:)` to poll readiness.
+    /// The app-side handler (T061) must accept `command == "ping"` as a no-op.
+    public func canReachService() async -> Bool {
+        do {
+            let req = XPCRequest(
+                requestId: UUID().uuidString,
+                cliVersion: "1.0.0",
+                command: "ping",
+                params: Data("{}".utf8)
+            )
+            _ = try await execute(req)
+            return true
+        } catch {
+            return false
+        }
     }
 }
