@@ -121,19 +121,7 @@ struct ContainerCommand: AsyncParsableCommand {
     )
 }
 
-struct ContainerPutCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "put",
-        abstract: "Create or update a container."
-    )
-
-    func run() async throws {
-        throw XPCError(
-            code: "internal.not_implemented",
-            message: "container put is not yet implemented (T053)"
-        )
-    }
-}
+// ContainerPutCommand: real implementation in Commands/ContainerPutCommand.swift
 
 struct ContainerDeleteCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
