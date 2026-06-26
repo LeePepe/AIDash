@@ -6,6 +6,15 @@ import Foundation
 ///
 /// Upsert by `(briefing_date, id)`. Cards under this container are NOT touched
 /// (use `card put` separately). Per `contracts/cli-surface.md` §"container put".
+///
+/// Error-flow contract (per `AIDash.main` central handler):
+///   - Local validation / XPC transport / decode failures → throw `XPCError`.
+///     The central handler emits a single envelope via `JSONOutput()` and
+///     exits via `ExitCodeMapper` (`schema.*` → 1, `xpc.*` → 2, else 3).
+///   - Remote `ok=false` errors → emit the envelope here with the
+///     `response.requestId` and throw `ExitCode`. `run()` catches the
+///     `ExitCode` and calls `Darwin.exit` so the central handler does NOT
+///     re-emit `schema.argument_validation_failed`.
 struct ContainerPutCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "put",
@@ -43,53 +52,42 @@ struct ContainerPutCommand: AsyncParsableCommand {
 
     func run() async throws {
         // Step 1: Resolve and validate date locally.
+        // Local schema failure → throw XPCError → central handler emits and
+        // exits 1 with a single `schema.*` envelope.
         let resolvedDate = DateResolver.resolve(briefingDate)
-        do {
-            try validateDate(resolvedDate)
-        } catch let error as XPCError {
-            try globals.outputMode.formatter(requestId: nil).emit(error: error)
-            throw ExitCode(ExitCodeMapper.code(for: error))
-        }
+        try validateDate(resolvedDate)
 
         // Step 2: Local validation — fail fast, never round-trip invalid input.
-        do {
-            try SchemaValidator.validateContainerPut(
-                id: id,
-                title: title,
-                order: order,
-                layout: layout,
-                style: style
-            )
-        } catch let error as XPCError {
-            try globals.outputMode.formatter(requestId: nil).emit(error: error)
-            throw ExitCode(ExitCodeMapper.code(for: error))
-        }
+        try SchemaValidator.validateContainerPut(
+            id: id,
+            title: title,
+            order: order,
+            layout: layout,
+            style: style
+        )
 
         // Step 3: Build params.
         // Layout/style enums are already validated by SchemaValidator, so the
-        // initializers below cannot fail — but we route through XPCError if they
-        // somehow do, rather than crashing.
+        // initializers below cannot fail in practice — but route through
+        // XPCError if they somehow do, so the central handler can emit cleanly
+        // rather than crashing.
         guard let containerLayout = ContainerLayout(rawValue: layout) else {
-            let error = XPCError(
+            throw XPCError(
                 code: "schema.unknown_container_layout",
                 message: "Unknown layout '\(layout)'",
                 field: "layout",
                 got: layout,
                 allowed: ContainerLayout.allCases.map(\.rawValue)
             )
-            try globals.outputMode.formatter(requestId: nil).emit(error: error)
-            throw ExitCode(ExitCodeMapper.code(for: error))
         }
         guard let cardStyle = CardStyle(rawValue: style) else {
-            let error = XPCError(
+            throw XPCError(
                 code: "schema.unknown_card_style",
                 message: "Unknown style '\(style)'",
                 field: "style",
                 got: style,
                 allowed: CardStyle.allCases.map(\.rawValue)
             )
-            try globals.outputMode.formatter(requestId: nil).emit(error: error)
-            throw ExitCode(ExitCodeMapper.code(for: error))
         }
 
         let params = ContainerPutParams(
@@ -114,82 +112,77 @@ struct ContainerPutCommand: AsyncParsableCommand {
         )
 
         // Step 5: Send via XPC. Transport failures surface as XPCError with
-        // `xpc.*` code, which ExitCodeMapper renders as exit 2.
-        let response: XPCResponse
-        do {
-            response = try await XPCClient().execute(request)
-        } catch let error as XPCError {
-            try globals.outputMode.formatter(requestId: requestId).emit(error: error)
-            throw ExitCode(ExitCodeMapper.code(for: error))
-        }
+        // `xpc.*` code, which the central handler renders as exit 2.
+        let response = try await XPCClient().execute(request)
 
         // Step 6: Handle response.
-        try Self.emit(response: response, globals: globals, requestedId: requestId)
+        //
+        // `Self.emit` either returns (success), throws `XPCError` (decode
+        // failure / malformed response — central handler emits + exits), or
+        // throws `ExitCode` (remote error — `Self.emit` already wrote the
+        // envelope on stderr with the correct `response.requestId`, so we
+        // must NOT let the throw fall through to the central handler or it
+        // will emit a second `schema.argument_validation_failed` envelope).
+        do {
+            try Self.emit(response: response, globals: globals)
+        } catch let exitCode as ExitCode {
+            Darwin.exit(exitCode.rawValue)
+        }
     }
 
-    // MARK: - Emit (extracted so tests can drive the success path with a
+    // MARK: - Emit (extracted so tests can drive both branches with a
     // synthetic `XPCResponse`).
     //
-    // Per `cli-surface.md` §"Exit codes":
-    //   - `ok=true`  → emit JSON / human envelope on stdout, return (exit 0).
-    //   - `ok=false` → emit error envelope on stderr verbatim, exit code class
-    //     is taken from `ExitCodeMapper`:
+    // Per `cli-surface.md` §"Exit codes" and the central-handler contract:
+    //   - `ok=true`  → emit success envelope on stdout (unless `--quiet`),
+    //     return normally. Decode failures throw `XPCError` so the central
+    //     handler emits a single error envelope.
+    //   - `ok=false` → emit error envelope on stderr verbatim with
+    //     `response.requestId`, then throw `ExitCode(ExitCodeMapper.code(for:))`
+    //     so `run()` can `Darwin.exit` without a second emit at the central
+    //     handler. Exit-code class is taken from `ExitCodeMapper`:
     //       * `schema.*` → 1
     //       * `xpc.*`    → 2
     //       * anything else (briefing.* / container.* / cloudkit.* / internal.*) → 3
-    //     The reviewer's contract reading is that **any** server-returned
-    //     `ok=false` is exit 3, but the published `cli-surface.md` exit-code
-    //     table still maps by code class — `ExitCodeMapper.code(for:)` is the
-    //     single source of truth used by every other subcommand, so we use it
-    //     here too for consistency. This is the same mapping the constitution
-    //     and other commands ship today.
     static func emit(
         response: XPCResponse,
-        globals: GlobalOptions,
-        requestedId: String
+        globals: GlobalOptions
     ) throws {
-        let envelopeRequestId = response.requestId
-        let formatter = globals.outputMode.formatter(requestId: envelopeRequestId)
-
         if response.ok {
             guard let data = response.data else {
-                let err = XPCError(
+                throw XPCError(
                     code: "xpc.decode_failure",
                     message: "Server returned ok=true but no data payload"
                 )
-                try formatter.emit(error: err)
-                throw ExitCode(ExitCodeMapper.code(for: err))
             }
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
             let result: ContainerPutResult
             do {
-                result = try decoder.decode(ContainerPutResult.self, from: data)
+                result = try JSONDecoder.iso8601Decoder.decode(
+                    ContainerPutResult.self, from: data
+                )
             } catch {
-                let err = XPCError(
+                throw XPCError(
                     code: "xpc.decode_failure",
                     message: "Failed to decode ContainerPutResult: \(error.localizedDescription)"
                 )
-                try formatter.emit(error: err)
-                throw ExitCode(ExitCodeMapper.code(for: err))
             }
             if !globals.isQuiet {
+                let formatter = globals.outputMode.formatter(requestId: response.requestId)
                 try formatter.emit(success: result)
             }
             return
         }
 
         if let remoteError = response.error {
+            let formatter = globals.outputMode.formatter(requestId: response.requestId)
             try formatter.emit(error: remoteError)
             throw ExitCode(ExitCodeMapper.code(for: remoteError))
         }
 
-        let err = XPCError(
+        throw XPCError(
             code: "xpc.decode_failure",
             message: "Server returned ok=false but no error payload"
         )
-        try formatter.emit(error: err)
-        throw ExitCode(ExitCodeMapper.code(for: err))
     }
 
     // MARK: - Helpers

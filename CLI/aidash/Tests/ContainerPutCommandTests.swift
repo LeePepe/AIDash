@@ -193,8 +193,7 @@ struct ContainerPutCommandTests {
         let stdout = try captureStdout {
             try ContainerPutCommand.emit(
                 response: response,
-                globals: globals,
-                requestedId: "req-123"
+                globals: globals
             )
         }
 
@@ -232,8 +231,7 @@ struct ContainerPutCommandTests {
             do {
                 try ContainerPutCommand.emit(
                     response: response,
-                    globals: globals,
-                    requestedId: "req-err"
+                    globals: globals
                 )
                 Issue.record("Expected ExitCode to be thrown")
             } catch let code as ExitCode {
@@ -276,8 +274,7 @@ struct ContainerPutCommandTests {
             do {
                 try ContainerPutCommand.emit(
                     response: response,
-                    globals: GlobalOptions.test(json: true, quiet: false),
-                    requestedId: "req-s"
+                    globals: GlobalOptions.test(json: true, quiet: false)
                 )
             } catch let code as ExitCode {
                 capturedExit = code.rawValue
@@ -304,8 +301,7 @@ struct ContainerPutCommandTests {
             do {
                 try ContainerPutCommand.emit(
                     response: response,
-                    globals: GlobalOptions.test(json: true, quiet: false),
-                    requestedId: "req-x"
+                    globals: GlobalOptions.test(json: true, quiet: false)
                 )
             } catch let code as ExitCode {
                 capturedExit = code.rawValue
@@ -337,11 +333,127 @@ struct ContainerPutCommandTests {
         let stdout = try captureStdout {
             try ContainerPutCommand.emit(
                 response: response,
-                globals: globals,
-                requestedId: "req-q"
+                globals: globals
             )
         }
         #expect(stdout.isEmpty)
+    }
+
+    // MARK: - Central-handler contract
+    //
+    // These tests pin the contract introduced by the `6c08a9f` reviewer
+    // finding: local/transport/decode failures MUST surface as XPCError so
+    // `AIDash.main`'s `catch let xpcError as XPCError` branch emits a single
+    // envelope and exits via `ExitCodeMapper`. They MUST NOT throw `ExitCode`
+    // (which would short-circuit to the generic `catch` and emit a second
+    // `schema.argument_validation_failed` envelope at exit 1).
+
+    @Test("ok=true with no data payload throws XPCError xpc.decode_failure (not ExitCode)")
+    func successWithNoDataThrowsXPCError() throws {
+        let response = XPCResponse(
+            requestId: "req-nd",
+            appVersion: "test",
+            ok: true,
+            data: nil,
+            error: nil
+        )
+        do {
+            try ContainerPutCommand.emit(
+                response: response,
+                globals: GlobalOptions.test(json: true, quiet: false)
+            )
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "xpc.decode_failure")
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
+        }
+    }
+
+    @Test("ok=true with undecodable data throws XPCError xpc.decode_failure (not ExitCode)")
+    func successWithUndecodableDataThrowsXPCError() throws {
+        let response = XPCResponse(
+            requestId: "req-bad",
+            appVersion: "test",
+            ok: true,
+            data: Data("not json".utf8),
+            error: nil
+        )
+        do {
+            try ContainerPutCommand.emit(
+                response: response,
+                globals: GlobalOptions.test(json: true, quiet: false)
+            )
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "xpc.decode_failure")
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
+        }
+    }
+
+    @Test("ok=false with no error payload throws XPCError xpc.decode_failure (not ExitCode)")
+    func malformedFailureThrowsXPCError() throws {
+        let response = XPCResponse(
+            requestId: "req-m",
+            appVersion: "test",
+            ok: false,
+            data: nil,
+            error: nil
+        )
+        do {
+            try ContainerPutCommand.emit(
+                response: response,
+                globals: GlobalOptions.test(json: true, quiet: false)
+            )
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "xpc.decode_failure")
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
+        }
+    }
+
+    @Test("run(): invalid --briefing-date throws XPCError (not ExitCode) so central handler emits exit 1")
+    func runLocalDateValidationThrowsXPCError() async throws {
+        // Parse via ArgumentParser so we exercise the real run() path.
+        let cmd = try ContainerPutCommand.parse([
+            "--briefing-date", "not-a-date",
+            "--id", "11111111-1111-1111-1111-111111111111",
+            "--title", "Test",
+            "--order", "10",
+        ])
+        do {
+            try await cmd.run()
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_date")
+            #expect(error.field == "briefingDate")
+        } catch let exit as ExitCode {
+            Issue.record("Expected XPCError, got ExitCode \(exit.rawValue) — this means the command is double-emitting via the central handler.")
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
+        }
+    }
+
+    @Test("run(): invalid --id (bad UUID) throws XPCError (not ExitCode)")
+    func runLocalUUIDValidationThrowsXPCError() async throws {
+        let cmd = try ContainerPutCommand.parse([
+            "--briefing-date", "2026-06-25",
+            "--id", "not-a-uuid",
+            "--title", "Test",
+            "--order", "10",
+        ])
+        do {
+            try await cmd.run()
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code.hasPrefix("schema."))
+        } catch let exit as ExitCode {
+            Issue.record("Expected XPCError, got ExitCode \(exit.rawValue) — this means the command is double-emitting via the central handler.")
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
+        }
     }
 }
 
