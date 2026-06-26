@@ -19,8 +19,19 @@ public struct SchemaValidator {
         try requireValidDate(date)
     }
 
+    /// Validates the `--date` argument for `aidash briefing get`. Accepts
+    /// `YYYY-MM-DD` or the contract sugar value `latest`; date sugar values
+    /// `today`/`yesterday` are expected to be resolved to `YYYY-MM-DD` by the
+    /// caller (e.g. `DateResolver`) before reaching this validator.
+    ///
+    /// - Throws: `XPCError` with one of:
+    ///   - `schema.missing_required_field` if `date` is empty
+    ///     (per `cli-surface.md` §"briefing get").
+    ///   - `schema.invalid_date` if `date` is non-empty, not `"latest"`,
+    ///     and not a valid `YYYY-MM-DD` calendar date.
     public static func validateBriefingGet(date: String) throws {
         try requireNonEmpty(date, field: "date")
+        if date.lowercased() == "latest" { return }
         try requireValidDate(date)
     }
 
