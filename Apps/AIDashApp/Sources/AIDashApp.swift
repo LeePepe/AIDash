@@ -9,15 +9,28 @@ struct AIDashApp: App {
 
     #if os(macOS)
     private let menuBarController: MenuBarController
+    private let xpcListener: XPCListener?
     #endif
 
     init() {
-        self.containerState = CloudKitContainer.shared.state
+        let state = CloudKitContainer.shared.state
+        self.containerState = state
         #if os(macOS)
         self.menuBarController = MenuBarController()
-        // TODO(T060): Start XPCListener once the listener lands on main so the CLI can reach us.
         // Register the LaunchAgent (T110). Idempotent — safe on every launch.
         LaunchdAgentInstaller.shared.registerIfNeeded()
+        // T060: start the XPC listener once the ModelContainer is ready, so
+        // the `aidash` CLI can reach us. If CloudKit init failed, skip the
+        // listener — handlers need a real ModelContainer (Constitution §D.2
+        // graceful degradation: surface failure in UI, do not crash).
+        switch state {
+        case .ready(let container):
+            let listener = XPCListener(handlers: XPCHandlers(container: container))
+            listener.start()
+            self.xpcListener = listener
+        case .failed:
+            self.xpcListener = nil
+        }
         #endif
     }
 
