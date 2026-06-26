@@ -132,14 +132,14 @@ public struct MetricCardView: View {
 
     // MARK: - Helpers
 
-    private func formattedValue(_ value: Double) -> String {
+    func formattedValue(_ value: Double) -> String {
         if value == value.rounded() && value < 1_000_000 {
             return String(format: "%.0f", value)
         }
         return String(format: "%.1f", value)
     }
 
-    private func trendIconName(_ trend: MetricPayload.Item.Trend) -> String {
+    func trendIconName(_ trend: MetricPayload.Item.Trend) -> String {
         switch trend {
         case .up: return "arrow.up"
         case .down: return "arrow.down"
@@ -147,7 +147,7 @@ public struct MetricCardView: View {
         }
     }
 
-    private func trendColor(_ trend: MetricPayload.Item.Trend) -> Color {
+    func trendColor(_ trend: MetricPayload.Item.Trend) -> Color {
         switch trend {
         case .up: return .green
         case .down: return .red
@@ -155,7 +155,7 @@ public struct MetricCardView: View {
         }
     }
 
-    private var backgroundTint: Color {
+    var backgroundTint: Color {
         switch style {
         case .neutral: return Color.clear
         case .success: return Color.green.opacity(0.08)
