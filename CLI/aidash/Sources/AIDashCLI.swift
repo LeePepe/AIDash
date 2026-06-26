@@ -94,19 +94,7 @@ struct BriefingPutCommand: AsyncParsableCommand {
     }
 }
 
-struct BriefingGetCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "get",
-        abstract: "Read a briefing (containers + cards)."
-    )
-
-    func run() async throws {
-        throw XPCError(
-            code: "internal.not_implemented",
-            message: "briefing get is not yet implemented (T052)"
-        )
-    }
-}
+// `BriefingGetCommand` is defined in `Commands/BriefingGetCommand.swift` (T052).
 
 // MARK: - Container
 
