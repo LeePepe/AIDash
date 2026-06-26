@@ -1,7 +1,14 @@
 import Foundation
 
 public struct SchemaListParams: Codable, Sendable {
-    public init() {}
+    /// Optional CardType filter. When set, the app responds with only that
+    /// type's payload schema in the `payloads` map (other enum fields are
+    /// still emitted for self-documentation).
+    public let type: String?
+
+    public init(type: String? = nil) {
+        self.type = type
+    }
 }
 
 public struct SchemaListResult: Codable, Sendable {

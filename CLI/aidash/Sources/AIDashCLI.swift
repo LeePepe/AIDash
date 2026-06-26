@@ -228,16 +228,4 @@ struct SchemaCommand: AsyncParsableCommand {
     )
 }
 
-struct SchemaListCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "list",
-        abstract: "Print the full schema as JSON."
-    )
-
-    func run() async throws {
-        throw XPCError(
-            code: "internal.not_implemented",
-            message: "schema list is not yet implemented (T055)"
-        )
-    }
-}
+// `SchemaListCommand` is defined in `Commands/SchemaListCommand.swift` (T055).

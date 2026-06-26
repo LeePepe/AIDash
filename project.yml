@@ -72,6 +72,7 @@ targets:
       - path: CLI/aidash/Sources/Output
       - path: CLI/aidash/Sources/ExitCode.swift
       - path: CLI/aidash/Sources/DateResolver.swift
+      - path: CLI/aidash/Sources/SchemaListRendering.swift
     dependencies:
       - package: AIDashCore
     settings:

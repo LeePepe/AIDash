@@ -91,6 +91,22 @@ public struct SchemaValidator {
         }
     }
 
+    /// Validates the optional `--type` filter on `schema.list`. Nil = no
+    /// filter (return all card types), non-nil must be a known `CardType`
+    /// rawValue or this throws `schema.unknown_card_type`.
+    public static func validateSchemaList(type: String?) throws {
+        guard let type, !type.isEmpty else { return }
+        guard CardType(rawValue: type) != nil else {
+            throw XPCError(
+                code: "schema.unknown_card_type",
+                message: "Unknown card type '\(type)'",
+                field: "type",
+                got: type,
+                allowed: CardType.allCases.map(\.rawValue)
+            )
+        }
+    }
+
     public static func validateUserEvent(
         id: String,
         device: String,
