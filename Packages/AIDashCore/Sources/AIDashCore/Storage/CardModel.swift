@@ -1,14 +1,16 @@
 import SwiftData
 import Foundation
 
+// CloudKit compatibility: scalars optional or default-valued; no `@Attribute(.unique)`.
+// Logical uniqueness is enforced in the XPC business layer. See data-model.md.
 @Model
 public final class CardModel {
-    @Attribute(.unique) public var id: String                // UUID from agent
-    public var typeRaw: String                                // CardType.rawValue
-    public var sizeRaw: String                               // CardSize.rawValue
-    public var styleRaw: String                              // CardStyle.rawValue
-    public var payloadJSON: Data
-    public var container: ContainerModel?                    // inverse for cascade
+    public var id: String = ""                                // UUID from agent
+    public var typeRaw: String = CardType.metric.rawValue
+    public var sizeRaw: String = CardSize.medium.rawValue
+    public var styleRaw: String = CardStyle.neutral.rawValue
+    public var payloadJSON: Data = Data()
+    public var container: ContainerModel?                     // inverse for cascade
 
     public init(id: String, type: CardType, size: CardSize,
                 style: CardStyle, payloadJSON: Data) {
