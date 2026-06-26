@@ -49,8 +49,8 @@ struct CardPutCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Card size: small | medium | wide | hero.")
     var size: String
 
-    @Option(name: .long, help: "Card style: neutral | success | warning | accent.")
-    var style: String
+    @Option(name: .long, help: "Card style: neutral | success | warning | accent (default: neutral).")
+    var style: String = CardStyle.neutral.rawValue
 
     @Option(
         name: .long,
