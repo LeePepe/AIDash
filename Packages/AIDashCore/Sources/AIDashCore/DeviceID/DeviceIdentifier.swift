@@ -32,11 +32,8 @@ public enum DeviceIdentifier {
     /// source is per-call (e.g. `globallyUniqueString`).
     private static let cachedStableUUID: String = {
         #if os(iOS) || os(visionOS) || os(tvOS) || os(watchOS)
-        if let vendorID = UIDevice.current.identifierForVendor?.uuidString {
-            return vendorID
-        }
-        // identifierForVendor can be nil (e.g. during restore). Persist a
-        // generated UUID so the suffix stays stable across calls and launches.
+        // Use a persisted UUID to avoid MainActor-isolated UIDevice access
+        // in a nonisolated context (Swift 6 strict concurrency).
         let key = "com.aidash.DeviceIdentifier.fallbackUUID"
         if let stored = UserDefaults.standard.string(forKey: key) {
             return stored
