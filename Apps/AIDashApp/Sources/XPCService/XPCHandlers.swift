@@ -257,11 +257,22 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
             )
         }
 
+        // Upsert by (briefing_date, id): only treat an existing container as a
+        // match when it already belongs to the requested briefing. A same-id
+        // container under a different briefing must not be silently moved.
         let containerId = params.id
         let containerDescriptor = FetchDescriptor<ContainerModel>(
             predicate: #Predicate { $0.id == containerId }
         )
         let existing = try context.fetch(containerDescriptor).first
+        if let existing, existing.briefing?.date != params.briefingDate {
+            throw XPCError(
+                code: "internal.unexpected",
+                message: "Container id already exists under a different briefing",
+                field: "id",
+                got: params.id
+            )
+        }
         let now = Date()
         let wasCreated: Bool
 
@@ -342,11 +353,22 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
             )
         }
 
+        // Upsert by (container_id, id): only treat an existing card as a match
+        // when it already belongs to the requested container. A same-id card
+        // under a different container must not be silently moved.
         let cardId = params.id
         let cardDescriptor = FetchDescriptor<CardModel>(
             predicate: #Predicate { $0.id == cardId }
         )
         let existing = try context.fetch(cardDescriptor).first
+        if let existing, existing.container?.id != params.containerId {
+            throw XPCError(
+                code: "internal.unexpected",
+                message: "Card id already exists under a different container",
+                field: "id",
+                got: params.id
+            )
+        }
         let now = Date()
         let wasCreated: Bool
 

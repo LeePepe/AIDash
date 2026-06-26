@@ -119,6 +119,98 @@ struct SchemaValidatorTests {
         }
     }
 
+    // MARK: - BriefingGet
+
+    @Test func briefingGet_validInput_doesNotThrow() throws {
+        try SchemaValidator.validateBriefingGet(date: "2026-06-24")
+    }
+
+    @Test func briefingGet_emptyDate_throwsMissingField() {
+        do {
+            try SchemaValidator.validateBriefingGet(date: "")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.missing_required_field")
+            #expect(error.field == "date")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    @Test func briefingGet_invalidDate_throwsInvalidDate() {
+        do {
+            try SchemaValidator.validateBriefingGet(date: "06-24-2026")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_date")
+            #expect(error.got == "06-24-2026")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    // MARK: - ContainerDelete
+
+    @Test func containerDelete_validInput_doesNotThrow() throws {
+        try SchemaValidator.validateContainerDelete(id: "550E8400-E29B-41D4-A716-446655440000")
+    }
+
+    @Test func containerDelete_emptyId_throwsMissingField() {
+        do {
+            try SchemaValidator.validateContainerDelete(id: "")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.missing_required_field")
+            #expect(error.field == "id")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    @Test func containerDelete_invalidUUID_throws() {
+        do {
+            try SchemaValidator.validateContainerDelete(id: "not-a-uuid")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_uuid")
+            #expect(error.field == "id")
+            #expect(error.got == "not-a-uuid")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    // MARK: - CardDelete
+
+    @Test func cardDelete_validInput_doesNotThrow() throws {
+        try SchemaValidator.validateCardDelete(id: "660E8400-E29B-41D4-A716-446655440000")
+    }
+
+    @Test func cardDelete_emptyId_throwsMissingField() {
+        do {
+            try SchemaValidator.validateCardDelete(id: "")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.missing_required_field")
+            #expect(error.field == "id")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    @Test func cardDelete_invalidUUID_throws() {
+        do {
+            try SchemaValidator.validateCardDelete(id: "not-a-uuid")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_uuid")
+            #expect(error.field == "id")
+            #expect(error.got == "not-a-uuid")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
     // MARK: - EventsPull
 
     @Test func eventsPull_nilCardId_doesNotThrow() throws {
