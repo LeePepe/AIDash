@@ -1,0 +1,18 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "cloudkit.unavailable.message" : {
+      "comment" : "Shown in the iCloud unavailable scene when SwiftData CloudKit init fails.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud data sync is unavailable. Please check your iCloud account in Settings."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

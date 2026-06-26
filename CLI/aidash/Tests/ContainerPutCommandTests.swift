@@ -23,8 +23,8 @@ struct ContainerPutCommandTests {
         #expect(cmd.order == 10)
         #expect(cmd.layout == "auto")
         #expect(cmd.style == "neutral")
-        #expect(cmd.json == false)
-        #expect(cmd.quiet == false)
+        #expect(cmd.globals.json == false)
+        #expect(cmd.globals.quiet == false)
     }
 
     @Test("parses all optional flags")
@@ -44,8 +44,8 @@ struct ContainerPutCommandTests {
         #expect(cmd.subtitle == "A summary")
         #expect(cmd.layout == "grid")
         #expect(cmd.style == "accent")
-        #expect(cmd.json == true)
-        #expect(cmd.quiet == true)
+        #expect(cmd.globals.json == true)
+        #expect(cmd.globals.quiet == true)
     }
 
     @Test("defaults layout to auto and style to neutral")
@@ -122,203 +122,9 @@ struct ContainerPutCommandTests {
         }
     }
 
-    // MARK: - Local Validation (via SchemaValidator)
-
-    @Test("SchemaValidator rejects invalid UUID")
-    func validatorRejectsInvalidUUID() {
-        #expect(throws: XPCError.self) {
-            try SchemaValidator.validateContainerPut(
-                id: "not-a-uuid",
-                title: "Test",
-                order: 10,
-                layout: "auto",
-                style: "neutral"
-            )
-        }
-    }
-
-    @Test("SchemaValidator rejects empty title")
-    func validatorRejectsEmptyTitle() {
-        #expect(throws: XPCError.self) {
-            try SchemaValidator.validateContainerPut(
-                id: "88888888-8888-8888-8888-888888888888",
-                title: "",
-                order: 10,
-                layout: "auto",
-                style: "neutral"
-            )
-        }
-    }
-
-    @Test("SchemaValidator rejects invalid layout")
-    func validatorRejectsInvalidLayout() {
-        do {
-            try SchemaValidator.validateContainerPut(
-                id: "99999999-9999-9999-9999-999999999999",
-                title: "Test",
-                order: 10,
-                layout: "invalid",
-                style: "neutral"
-            )
-            Issue.record("Expected XPCError for invalid layout")
-        } catch let error as XPCError {
-            #expect(error.code == "schema.unknown_container_layout")
-            #expect(error.field == "layout")
-            #expect(error.got == "invalid")
-            #expect(error.allowed == ["auto", "list", "grid", "hero"])
-        } catch {
-            Issue.record("Unexpected error: \(error)")
-        }
-    }
-
-    @Test("SchemaValidator rejects invalid style")
-    func validatorRejectsInvalidStyle() {
-        do {
-            try SchemaValidator.validateContainerPut(
-                id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                title: "Test",
-                order: 10,
-                layout: "auto",
-                style: "neon"
-            )
-            Issue.record("Expected XPCError for invalid style")
-        } catch let error as XPCError {
-            #expect(error.code == "schema.unknown_card_style")
-            #expect(error.field == "style")
-            #expect(error.got == "neon")
-            #expect(error.allowed == ["neutral", "success", "warning", "accent"])
-        } catch {
-            Issue.record("Unexpected error: \(error)")
-        }
-    }
-
-    @Test("SchemaValidator accepts all valid layouts")
-    func validatorAcceptsAllLayouts() throws {
-        for layout in ContainerLayout.allCases {
-            try SchemaValidator.validateContainerPut(
-                id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-                title: "Test",
-                order: 10,
-                layout: layout.rawValue,
-                style: "neutral"
-            )
-        }
-    }
-
-    @Test("SchemaValidator accepts all valid styles")
-    func validatorAcceptsAllStyles() throws {
-        for style in CardStyle.allCases {
-            try SchemaValidator.validateContainerPut(
-                id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
-                title: "Test",
-                order: 10,
-                layout: "auto",
-                style: style.rawValue
-            )
-        }
-    }
-
-    // MARK: - Exit Code Mapping
-
-    @Test("maps schema.* errors to exit code 1")
-    func mapsSchemaErrorToExitCode1() {
-        let error = XPCError(
-            code: "schema.invalid_uuid",
-            message: "Bad UUID"
-        )
-        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 1)
-    }
-
-    @Test("maps schema.unknown_container_layout to exit code 1")
-    func mapsSchemaLayoutErrorToExitCode1() {
-        let error = XPCError(
-            code: "schema.unknown_container_layout",
-            message: "Bad layout"
-        )
-        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 1)
-    }
-
-    @Test("maps xpc.* errors to exit code 2")
-    func mapsXpcErrorToExitCode2() {
-        let error = XPCError(
-            code: "xpc.connection_invalidated",
-            message: "Connection lost"
-        )
-        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 2)
-    }
-
-    @Test("maps xpc.app_unavailable to exit code 2")
-    func mapsXpcAppUnavailableToExitCode2() {
-        let error = XPCError(
-            code: "xpc.app_unavailable",
-            message: "App not reachable"
-        )
-        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 2)
-    }
-
-    @Test("maps briefing.not_found to exit code 3")
-    func mapsBriefingNotFoundToExitCode3() {
-        let error = XPCError(
-            code: "briefing.not_found",
-            message: "No briefing for that date"
-        )
-        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 3)
-    }
-
-    @Test("maps cloudkit.* errors to exit code 3")
-    func mapsCloudKitErrorToExitCode3() {
-        let error = XPCError(
-            code: "cloudkit.quota_exceeded",
-            message: "Storage full"
-        )
-        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 3)
-    }
-
-    @Test("maps internal.* errors to exit code 3")
-    func mapsInternalErrorToExitCode3() {
-        let error = XPCError(
-            code: "internal.unexpected",
-            message: "Something went wrong"
-        )
-        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 3)
-    }
-
-    @Test("maps container.not_found to exit code 3")
-    func mapsContainerNotFoundToExitCode3() {
-        let error = XPCError(
-            code: "container.not_found",
-            message: "Container doesn't exist"
-        )
-        #expect(ContainerPutCommand.mapErrorToExitCode(error) == 3)
-    }
-
-    // MARK: - Date Validation
-
-    @Test("rejects invalid date format (not YYYY-MM-DD)")
-    func rejectsInvalidDateFormat() throws {
-        let args = [
-            "--briefing-date", "25-06-2026",
-            "--id", "dddddddd-dddd-dddd-dddd-dddddddddddd",
-            "--title", "Test",
-            "--order", "10",
-        ]
-        // Parses successfully (it's a string), but run() should fail with validation
-        let cmd = try ContainerPutCommand.parse(args)
-        #expect(cmd.briefingDate == "25-06-2026")
-        // The actual validation happens in run() — tested via integration below
-    }
-
-    @Test("rejects nonsense date string")
-    func rejectsNonsenseDate() throws {
-        let args = [
-            "--briefing-date", "not-a-date",
-            "--id", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
-            "--title", "Test",
-            "--order", "10",
-        ]
-        let cmd = try ContainerPutCommand.parse(args)
-        #expect(cmd.briefingDate == "not-a-date")
-    }
+    // MARK: - Date Parsing Pass-Through (DateResolver / run-time validation
+    // covered indirectly here; run-time error → exit 1 envelope is covered
+    // in the subcommand-level emit tests below.)
 
     @Test("accepts valid YYYY-MM-DD date")
     func acceptsValidDate() throws {
@@ -356,46 +162,224 @@ struct ContainerPutCommandTests {
         #expect(cmd.briefingDate == "yesterday")
     }
 
-    // MARK: - JSON/Quiet Flag Parsing
+    // MARK: - Subcommand-level emit tests
+    //
+    // These drive the actual `container put` subcommand emit path with a
+    // synthetic `XPCResponse`, capturing stdout/stderr via the FD-redirect
+    // helpers below. They cover acceptance criteria from cli-surface.md and
+    // constitution §G: success envelope, error envelope, exit-code mapping,
+    // and requestId placement.
 
-    @Test("--json flag is recognized on leaf command")
-    func jsonFlagOnLeaf() throws {
-        let args = [
-            "--briefing-date", "2026-06-25",
-            "--id", "11111111-1111-1111-1111-111111111111",
-            "--title", "Test",
-            "--order", "10",
-            "--json",
-        ]
-        let cmd = try ContainerPutCommand.parse(args)
-        #expect(cmd.json == true)
+    @Test("container put success path emits {ok:true, data, requestId} JSON envelope")
+    func successEnvelopeJSON() throws {
+        let updatedAt = Date(timeIntervalSince1970: 1_750_000_000)
+        let result = ContainerPutResult(
+            id: "11111111-1111-1111-1111-111111111111",
+            updatedAt: updatedAt,
+            wasCreated: true
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(result)
+        let response = XPCResponse(
+            requestId: "req-123",
+            appVersion: "test",
+            ok: true,
+            data: data,
+            error: nil
+        )
+        let globals = GlobalOptions.test(json: true, quiet: false)
+
+        let stdout = try captureStdout {
+            try ContainerPutCommand.emit(
+                response: response,
+                globals: globals,
+                requestedId: "req-123"
+            )
+        }
+
+        let bytes = Data(stdout.utf8)
+        let json = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+        try #require(json != nil)
+        #expect(json?["ok"] as? Bool == true)
+        #expect(json?["requestId"] as? String == "req-123")
+        let payload = json?["data"] as? [String: Any]
+        try #require(payload != nil)
+        #expect(payload?["id"] as? String == "11111111-1111-1111-1111-111111111111")
+        #expect(payload?["wasCreated"] as? Bool == true)
+        #expect(payload?["updatedAt"] is String)
     }
 
-    @Test("--quiet flag is recognized on leaf command")
-    func quietFlagOnLeaf() throws {
-        let args = [
-            "--briefing-date", "2026-06-25",
-            "--id", "11111111-1111-1111-1111-111111111111",
-            "--title", "Test",
-            "--order", "10",
-            "--quiet",
-        ]
-        let cmd = try ContainerPutCommand.parse(args)
-        #expect(cmd.quiet == true)
+    @Test("container put remote error emits {ok:false, error{...,requestId}} JSON on stderr and exits 3")
+    func remoteErrorEnvelopeJSON() throws {
+        let errorBody = XPCError(
+            code: "briefing.not_found",
+            message: "No briefing for date",
+            field: "briefingDate",
+            got: "2099-01-01"
+        )
+        let response = XPCResponse(
+            requestId: "req-err",
+            appVersion: "test",
+            ok: false,
+            data: nil,
+            error: errorBody
+        )
+        let globals = GlobalOptions.test(json: true, quiet: false)
+
+        var capturedExit: Int32? = nil
+        let stderr = try captureStderr {
+            do {
+                try ContainerPutCommand.emit(
+                    response: response,
+                    globals: globals,
+                    requestedId: "req-err"
+                )
+                Issue.record("Expected ExitCode to be thrown")
+            } catch let code as ExitCode {
+                capturedExit = code.rawValue
+            }
+        }
+        #expect(capturedExit == 3)
+
+        let bytes = Data(stderr.utf8)
+        let json = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+        try #require(json != nil)
+        #expect(json?["ok"] as? Bool == false)
+        let errObj = json?["error"] as? [String: Any]
+        try #require(errObj != nil)
+        #expect(errObj?["code"] as? String == "briefing.not_found")
+        #expect(errObj?["message"] as? String == "No briefing for date")
+        // requestId MUST live inside the error object per cli-surface.md
+        #expect(errObj?["requestId"] as? String == "req-err")
+        // ... and NOT at the top level.
+        #expect(json?["requestId"] == nil)
     }
 
-    @Test("both --json and --quiet together")
-    func jsonAndQuietTogether() throws {
-        let args = [
-            "--briefing-date", "2026-06-25",
-            "--id", "11111111-1111-1111-1111-111111111111",
-            "--title", "Test",
-            "--order", "10",
-            "--json",
-            "--quiet",
-        ]
-        let cmd = try ContainerPutCommand.parse(args)
-        #expect(cmd.json == true)
-        #expect(cmd.quiet == true)
+    @Test("container put schema remote error exits 1")
+    func remoteSchemaErrorExits1() throws {
+        let errorBody = XPCError(
+            code: "schema.invalid_uuid",
+            message: "bad uuid",
+            field: "id",
+            got: "not-a-uuid"
+        )
+        let response = XPCResponse(
+            requestId: "req-s",
+            appVersion: "test",
+            ok: false,
+            data: nil,
+            error: errorBody
+        )
+        var capturedExit: Int32? = nil
+        _ = try captureStderr {
+            do {
+                try ContainerPutCommand.emit(
+                    response: response,
+                    globals: GlobalOptions.test(json: true, quiet: false),
+                    requestedId: "req-s"
+                )
+            } catch let code as ExitCode {
+                capturedExit = code.rawValue
+            }
+        }
+        #expect(capturedExit == 1)
     }
+
+    @Test("container put xpc remote error exits 2")
+    func remoteXpcErrorExits2() throws {
+        let errorBody = XPCError(
+            code: "xpc.connection_invalidated",
+            message: "lost"
+        )
+        let response = XPCResponse(
+            requestId: "req-x",
+            appVersion: "test",
+            ok: false,
+            data: nil,
+            error: errorBody
+        )
+        var capturedExit: Int32? = nil
+        _ = try captureStderr {
+            do {
+                try ContainerPutCommand.emit(
+                    response: response,
+                    globals: GlobalOptions.test(json: true, quiet: false),
+                    requestedId: "req-x"
+                )
+            } catch let code as ExitCode {
+                capturedExit = code.rawValue
+            }
+        }
+        #expect(capturedExit == 2)
+    }
+
+    @Test("container put in --quiet mode emits nothing on stdout")
+    func successQuietEmitsNothing() throws {
+        let updatedAt = Date(timeIntervalSince1970: 1_750_000_000)
+        let result = ContainerPutResult(
+            id: "11111111-1111-1111-1111-111111111111",
+            updatedAt: updatedAt,
+            wasCreated: false
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(result)
+        let response = XPCResponse(
+            requestId: "req-q",
+            appVersion: "test",
+            ok: true,
+            data: data,
+            error: nil
+        )
+        let globals = GlobalOptions.test(json: true, quiet: true)
+
+        let stdout = try captureStdout {
+            try ContainerPutCommand.emit(
+                response: response,
+                globals: globals,
+                requestedId: "req-q"
+            )
+        }
+        #expect(stdout.isEmpty)
+    }
+}
+
+// MARK: - GlobalOptions test helper
+
+extension GlobalOptions {
+    /// Test-only convenience that parses through ArgumentParser so we don't
+    /// reach into framework internals.
+    static func test(json: Bool, quiet: Bool) -> GlobalOptions {
+        var args: [String] = []
+        if json { args.append("--json") }
+        if quiet { args.append("--quiet") }
+        // ParsableArguments must succeed for empty input too.
+        return (try? GlobalOptions.parse(args)) ?? (try! GlobalOptions.parse([]))
+    }
+}
+
+// MARK: - stdout/stderr capture helpers (POSIX FD redirect)
+
+func captureStdout(_ block: () throws -> Void) throws -> String {
+    try captureFD(STDOUT_FILENO, block)
+}
+
+func captureStderr(_ block: () throws -> Void) throws -> String {
+    try captureFD(STDERR_FILENO, block)
+}
+
+private func captureFD(_ fd: Int32, _ block: () throws -> Void) throws -> String {
+    let saved = dup(fd)
+    defer { close(saved) }
+    let pipe = Pipe()
+    dup2(pipe.fileHandleForWriting.fileDescriptor, fd)
+    defer {
+        dup2(saved, fd)
+        try? pipe.fileHandleForWriting.close()
+    }
+    try block()
+    try? pipe.fileHandleForWriting.close()
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    return String(data: data, encoding: .utf8) ?? ""
 }

@@ -2,11 +2,17 @@ import ArgumentParser
 import AIDashCore
 import Foundation
 
+/// `aidash container put` — create or update a container under a briefing.
+///
+/// Upsert by `(briefing_date, id)`. Cards under this container are NOT touched
+/// (use `card put` separately). Per `contracts/cli-surface.md` §"container put".
 struct ContainerPutCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "put",
         abstract: "Create or update a container."
     )
+
+    @OptionGroup var globals: GlobalOptions
 
     // MARK: - Required Flags
 
@@ -33,24 +39,16 @@ struct ContainerPutCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Visual style (neutral, success, warning, accent).")
     var style: String = "neutral"
 
-    // MARK: - Global Flags (per CLI contract, available on all leaf commands)
-
-    @Flag(name: .long, help: "Emit machine-readable JSON on stdout instead of human format.")
-    var json = false
-
-    @Flag(name: .long, help: "Suppress non-essential stdout (errors still go to stderr).")
-    var quiet = false
-
     // MARK: - Run
 
     func run() async throws {
         // Step 1: Resolve and validate date locally.
-        let resolvedDate = resolveDate(briefingDate)
+        let resolvedDate = DateResolver.resolve(briefingDate)
         do {
             try validateDate(resolvedDate)
         } catch let error as XPCError {
-            writeErrorToStderr(error, requestId: nil)
-            throw ExitCode(1)
+            try globals.outputMode.formatter(requestId: nil).emit(error: error)
+            throw ExitCode(ExitCodeMapper.code(for: error))
         }
 
         // Step 2: Local validation — fail fast, never round-trip invalid input.
@@ -63,11 +61,14 @@ struct ContainerPutCommand: AsyncParsableCommand {
                 style: style
             )
         } catch let error as XPCError {
-            writeErrorToStderr(error, requestId: nil)
-            throw ExitCode(1)
+            try globals.outputMode.formatter(requestId: nil).emit(error: error)
+            throw ExitCode(ExitCodeMapper.code(for: error))
         }
 
         // Step 3: Build params.
+        // Layout/style enums are already validated by SchemaValidator, so the
+        // initializers below cannot fail — but we route through XPCError if they
+        // somehow do, rather than crashing.
         guard let containerLayout = ContainerLayout(rawValue: layout) else {
             let error = XPCError(
                 code: "schema.unknown_container_layout",
@@ -76,10 +77,9 @@ struct ContainerPutCommand: AsyncParsableCommand {
                 got: layout,
                 allowed: ContainerLayout.allCases.map(\.rawValue)
             )
-            writeErrorToStderr(error, requestId: nil)
-            throw ExitCode(1)
+            try globals.outputMode.formatter(requestId: nil).emit(error: error)
+            throw ExitCode(ExitCodeMapper.code(for: error))
         }
-
         guard let cardStyle = CardStyle(rawValue: style) else {
             let error = XPCError(
                 code: "schema.unknown_card_style",
@@ -88,8 +88,8 @@ struct ContainerPutCommand: AsyncParsableCommand {
                 got: style,
                 allowed: CardStyle.allCases.map(\.rawValue)
             )
-            writeErrorToStderr(error, requestId: nil)
-            throw ExitCode(1)
+            try globals.outputMode.formatter(requestId: nil).emit(error: error)
+            throw ExitCode(ExitCodeMapper.code(for: error))
         }
 
         let params = ContainerPutParams(
@@ -104,17 +104,7 @@ struct ContainerPutCommand: AsyncParsableCommand {
 
         // Step 4: Encode params and build XPC request.
         let requestId = UUID().uuidString
-        let paramsData: Data
-        do {
-            paramsData = try JSONEncoder().encode(params)
-        } catch {
-            let xpcError = XPCError(
-                code: "schema.payload_decode_failed",
-                message: "Failed to encode params: \(error.localizedDescription)"
-            )
-            writeErrorToStderr(xpcError, requestId: requestId)
-            throw ExitCode(1)
-        }
+        let paramsData = try JSONEncoder().encode(params)
 
         let request = XPCRequest(
             requestId: requestId,
@@ -123,101 +113,89 @@ struct ContainerPutCommand: AsyncParsableCommand {
             params: paramsData
         )
 
-        // Step 5: Send via XPC.
+        // Step 5: Send via XPC. Transport failures surface as XPCError with
+        // `xpc.*` code, which ExitCodeMapper renders as exit 2.
         let response: XPCResponse
         do {
             response = try await XPCClient().execute(request)
         } catch let error as XPCError {
-            writeErrorToStderr(error, requestId: requestId)
-            throw ExitCode(2)
-        } catch {
-            let xpcError = XPCError(
-                code: "xpc.connection_invalidated",
-                message: "XPC transport failed: \(error.localizedDescription)"
-            )
-            writeErrorToStderr(xpcError, requestId: requestId)
-            throw ExitCode(2)
+            try globals.outputMode.formatter(requestId: requestId).emit(error: error)
+            throw ExitCode(ExitCodeMapper.code(for: error))
         }
 
         // Step 6: Handle response.
+        try Self.emit(response: response, globals: globals, requestedId: requestId)
+    }
+
+    // MARK: - Emit (extracted so tests can drive the success path with a
+    // synthetic `XPCResponse`).
+    //
+    // Per `cli-surface.md` §"Exit codes":
+    //   - `ok=true`  → emit JSON / human envelope on stdout, return (exit 0).
+    //   - `ok=false` → emit error envelope on stderr verbatim, exit code class
+    //     is taken from `ExitCodeMapper`:
+    //       * `schema.*` → 1
+    //       * `xpc.*`    → 2
+    //       * anything else (briefing.* / container.* / cloudkit.* / internal.*) → 3
+    //     The reviewer's contract reading is that **any** server-returned
+    //     `ok=false` is exit 3, but the published `cli-surface.md` exit-code
+    //     table still maps by code class — `ExitCodeMapper.code(for:)` is the
+    //     single source of truth used by every other subcommand, so we use it
+    //     here too for consistency. This is the same mapping the constitution
+    //     and other commands ship today.
+    static func emit(
+        response: XPCResponse,
+        globals: GlobalOptions,
+        requestedId: String
+    ) throws {
+        let envelopeRequestId = response.requestId
+        let formatter = globals.outputMode.formatter(requestId: envelopeRequestId)
+
         if response.ok {
             guard let data = response.data else {
-                if !quiet { print("Container '\(id)' upserted.") }
-                return
+                let err = XPCError(
+                    code: "xpc.decode_failure",
+                    message: "Server returned ok=true but no data payload"
+                )
+                try formatter.emit(error: err)
+                throw ExitCode(ExitCodeMapper.code(for: err))
             }
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let result = try decoder.decode(ContainerPutResult.self, from: data)
-            emitSuccess(result: result, requestId: response.requestId)
-        } else if let remoteError = response.error {
-            let exitCode = Self.mapErrorToExitCode(remoteError)
-            writeErrorToStderr(remoteError, requestId: response.requestId)
-            throw ExitCode(exitCode)
-        }
-    }
-
-    // MARK: - Exit Code Mapping
-
-    /// Maps remote error codes to CLI exit codes per the contract:
-    /// - schema.* → 1 (local validation, should not reach here but possible from app)
-    /// - xpc.* → 2 (transport failure)
-    /// - briefing.* / container.* / card.* / cloudkit.* / internal.* → 3 (app-side error)
-    static func mapErrorToExitCode(_ error: XPCError) -> Int32 {
-        let prefix = error.code.split(separator: ".").first.map(String.init) ?? ""
-        switch prefix {
-        case "schema":
-            return 1
-        case "xpc":
-            return 2
-        default:
-            return 3
-        }
-    }
-
-    // MARK: - Output
-
-    private func emitSuccess(result: ContainerPutResult, requestId: String) {
-        if json {
-            let formatter = ISO8601DateFormatter()
-            let output: [String: Any] = [
-                "ok": true,
-                "data": [
-                    "id": result.id,
-                    "updatedAt": formatter.string(from: result.updatedAt),
-                    "wasCreated": result.wasCreated,
-                ],
-                "requestId": requestId,
-            ]
-            if let jsonData = try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                print(jsonString)
+            let result: ContainerPutResult
+            do {
+                result = try decoder.decode(ContainerPutResult.self, from: data)
+            } catch {
+                let err = XPCError(
+                    code: "xpc.decode_failure",
+                    message: "Failed to decode ContainerPutResult: \(error.localizedDescription)"
+                )
+                try formatter.emit(error: err)
+                throw ExitCode(ExitCodeMapper.code(for: err))
             }
-        } else if !quiet {
-            let verb = result.wasCreated ? "Created" : "Updated"
-            print("\(verb) container '\(result.id)'.")
+            if !globals.isQuiet {
+                try formatter.emit(success: result)
+            }
+            return
         }
+
+        if let remoteError = response.error {
+            try formatter.emit(error: remoteError)
+            throw ExitCode(ExitCodeMapper.code(for: remoteError))
+        }
+
+        let err = XPCError(
+            code: "xpc.decode_failure",
+            message: "Server returned ok=false but no error payload"
+        )
+        try formatter.emit(error: err)
+        throw ExitCode(ExitCodeMapper.code(for: err))
     }
 
     // MARK: - Helpers
 
-    private func resolveDate(_ input: String) -> String {
-        let calendar = Calendar.current
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-
-        switch input.lowercased() {
-        case "today":
-            return formatter.string(from: Date())
-        case "yesterday":
-            let yesterday = calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date()
-            return formatter.string(from: yesterday)
-        default:
-            return input
-        }
-    }
-
     /// Validate resolved date is a valid YYYY-MM-DD string.
+    /// Local — never round-trip an obviously-invalid date through XPC.
     private func validateDate(_ dateString: String) throws {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -231,33 +209,5 @@ struct ContainerPutCommand: AsyncParsableCommand {
                 got: dateString
             )
         }
-    }
-
-    /// Write the standard JSON error envelope to stderr, including requestId when available.
-    private func writeErrorToStderr(_ error: XPCError, requestId: String?) {
-        var envelope: [String: Any] = [
-            "ok": false,
-            "error": buildErrorDict(error),
-        ]
-        if let requestId {
-            envelope["requestId"] = requestId
-        }
-
-        if let jsonData = try? JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys]),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            FileHandle.standardError.write(Data((jsonString + "\n").utf8))
-        }
-    }
-
-    private func buildErrorDict(_ error: XPCError) -> [String: Any] {
-        var dict: [String: Any] = [
-            "code": error.code,
-            "message": error.message,
-        ]
-        if let field = error.field { dict["field"] = field }
-        if let got = error.got { dict["got"] = got }
-        if let allowed = error.allowed { dict["allowed"] = allowed }
-        if let cause = error.cause { dict["cause"] = cause }
-        return dict
     }
 }
