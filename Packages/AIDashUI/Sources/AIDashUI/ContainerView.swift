@@ -39,39 +39,14 @@ public struct ContainerView: View {
     private var layoutContent: some View {
         let cards = sortedCards
         switch container.layout {
+        case .auto:
+            AutoLayout(cards: cards, style: container.style)
         case .list:
             ListLayout(cards: cards, style: container.style)
-        case .auto:
-            // Inline fallback until AutoLayout (T092) ships
-            LazyVStack(spacing: 12) {
-                ForEach(cards) { card in
-                    cardFallback(card)
-                }
-            }
         case .grid:
-            // Inline fallback until GridLayout (T094) ships
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 160), spacing: 12)],
-                spacing: 12
-            ) {
-                ForEach(cards) { card in
-                    cardFallback(card)
-                }
-            }
+            GridLayout(cards: cards, style: container.style)
         case .hero:
-            // Inline fallback until HeroLayout (T095) ships
-            VStack(spacing: 16) {
-                ForEach(cards) { card in
-                    cardFallback(card)
-                }
-            }
+            HeroLayout(cards: cards, style: container.style)
         }
-    }
-
-    /// Minimal card representation used by inline layout fallbacks.
-    /// Will be replaced by CardRouter (T096) once the layout tasks ship.
-    private func cardFallback(_ card: CardModel) -> some View {
-        Text(card.id)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
