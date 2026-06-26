@@ -24,6 +24,30 @@
           }
         }
       }
+    },
+    "card_router.fallback.title" : {
+      "comment" : "Headline shown in the CardRouter fallback placeholder when a card payload cannot be decoded.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Card unavailable"
+          }
+        }
+      }
+    },
+    "card_router.fallback.detail" : {
+      "comment" : "Caption shown in the CardRouter fallback placeholder. %@ is the card type raw value (e.g. metric, insight).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not decode %@ payload."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
