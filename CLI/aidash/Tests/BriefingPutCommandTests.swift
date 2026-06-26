@@ -280,3 +280,104 @@ struct BriefingPutCommandTests {
         }
     }
 }
+
+// MARK: - handleExecuteError (XPCClient.execute throws-only path)
+
+@Suite("BriefingPutCommand.handleExecuteError")
+struct BriefingPutCommandHandleExecuteErrorTests {
+
+    @Test("local xpc.* error is rethrown (central handler maps to exit 2)")
+    func localXpcErrorRethrown() throws {
+        let local = XPCError(code: "xpc.timeout", message: "no reply in 5s")
+        do {
+            try BriefingPutCommand.handleExecuteError(
+                local,
+                requestId: "req-local",
+                globals: GlobalOptions.test(json: true, quiet: false)
+            )
+            Issue.record("Expected XPCError to be rethrown for local xpc.* code")
+        } catch let err as XPCError {
+            // Must be the SAME error so the central handler renders the
+            // original message + code, not a wrapped one.
+            #expect(err.code == "xpc.timeout")
+            #expect(err.message == "no reply in 5s")
+        }
+    }
+
+    @Test("remote briefing.* error emits envelope on stderr with requestId and throws ExitCode(3)")
+    func remoteAppErrorEmitsAndExits3() throws {
+        let remote = XPCError(
+            code: "briefing.already_published",
+            message: "Already published",
+            field: "date",
+            got: "2026-06-24"
+        )
+        var capturedExit: Int32? = nil
+        let stderr = try captureStderr {
+            do {
+                try BriefingPutCommand.handleExecuteError(
+                    remote,
+                    requestId: "req-remote",
+                    globals: GlobalOptions.test(json: true, quiet: false)
+                )
+                Issue.record("Expected ExitCode to be thrown")
+            } catch let code as ExitCode {
+                capturedExit = code.rawValue
+            }
+        }
+        #expect(capturedExit == 3)
+
+        let json = try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
+        try #require(json != nil)
+        #expect(json?["ok"] as? Bool == false)
+        let errObj = json?["error"] as? [String: Any]
+        try #require(errObj != nil)
+        #expect(errObj?["code"] as? String == "briefing.already_published")
+        // requestId MUST live inside the error object per cli-surface.md
+        #expect(errObj?["requestId"] as? String == "req-remote")
+        #expect(json?["requestId"] == nil)
+    }
+
+    @Test("remote schema.* error still exits 3 (reserved-prefix rule applies to local only)")
+    func remoteSchemaErrorStillExits3() throws {
+        // This is the regression the AI Reviewer flagged: the actor-based
+        // `XPCClient.execute` re-throws server envelopes as XPCError, so if
+        // we routed by prefix alone, a remote `schema.*` would exit 1 — the
+        // prefix-based mapper is local-only per `cli-surface.md` §"Exit
+        // codes". `handleExecuteError` must keep it at exit 3.
+        let remote = XPCError(code: "schema.invalid_uuid", message: "server-side bad UUID")
+        var capturedExit: Int32? = nil
+        _ = try captureStderr {
+            do {
+                try BriefingPutCommand.handleExecuteError(
+                    remote,
+                    requestId: "req-schema-remote",
+                    globals: GlobalOptions.test(json: true, quiet: false)
+                )
+                Issue.record("Expected ExitCode to be thrown")
+            } catch let code as ExitCode {
+                capturedExit = code.rawValue
+            }
+        }
+        #expect(capturedExit == 3)
+    }
+
+    @Test("remote app-side error (non-xpc, non-schema) still exits 3")
+    func remoteCloudKitErrorExits3() throws {
+        let remote = XPCError(code: "cloudkit.quota_exceeded", message: "quota")
+        var capturedExit: Int32? = nil
+        _ = try captureStderr {
+            do {
+                try BriefingPutCommand.handleExecuteError(
+                    remote,
+                    requestId: "req-ck",
+                    globals: GlobalOptions.test(json: true, quiet: false)
+                )
+                Issue.record("Expected ExitCode to be thrown")
+            } catch let code as ExitCode {
+                capturedExit = code.rawValue
+            }
+        }
+        #expect(capturedExit == 3)
+    }
+}
