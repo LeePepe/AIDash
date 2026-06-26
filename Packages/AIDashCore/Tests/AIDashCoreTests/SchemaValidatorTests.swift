@@ -53,6 +53,7 @@ struct SchemaValidatorTests {
     @Test func containerPut_validInput_doesNotThrow() throws {
         try SchemaValidator.validateContainerPut(
             id: "550E8400-E29B-41D4-A716-446655440000",
+            briefingDate: "2026-06-24",
             title: "Morning",
             order: 0,
             layout: "auto",
@@ -64,6 +65,7 @@ struct SchemaValidatorTests {
         do {
             try SchemaValidator.validateContainerPut(
                 id: "550E8400-E29B-41D4-A716-446655440000",
+                briefingDate: "2026-06-24",
                 title: "T",
                 order: 0,
                 layout: "carousel",
@@ -83,6 +85,7 @@ struct SchemaValidatorTests {
         do {
             try SchemaValidator.validateContainerPut(
                 id: "not-a-uuid",
+                briefingDate: "2026-06-24",
                 title: "T",
                 order: 0,
                 layout: "auto",
@@ -92,6 +95,47 @@ struct SchemaValidatorTests {
         } catch let error as XPCError {
             #expect(error.code == "schema.invalid_uuid")
             #expect(error.field == "id")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    @Test func containerPut_invalidBriefingDate_throws() {
+        do {
+            try SchemaValidator.validateContainerPut(
+                id: "550E8400-E29B-41D4-A716-446655440000",
+                briefingDate: "06-24-2026",
+                title: "T",
+                order: 0,
+                layout: "auto",
+                style: "neutral"
+            )
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_date")
+            #expect(error.field == "briefingDate")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    // MARK: - EventsPull
+
+    @Test func eventsPull_nilCardId_doesNotThrow() throws {
+        try SchemaValidator.validateEventsPull(cardId: nil)
+    }
+
+    @Test func eventsPull_validCardId_doesNotThrow() throws {
+        try SchemaValidator.validateEventsPull(cardId: "550E8400-E29B-41D4-A716-446655440000")
+    }
+
+    @Test func eventsPull_invalidCardId_throws() {
+        do {
+            try SchemaValidator.validateEventsPull(cardId: "not-a-uuid")
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_uuid")
+            #expect(error.field == "cardId")
         } catch {
             Issue.record("Unexpected error type")
         }

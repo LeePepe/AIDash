@@ -236,6 +236,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         let params = try decodeParams(ContainerPutParams.self, from: request)
         try SchemaValidator.validateContainerPut(
             id: params.id,
+            briefingDate: params.briefingDate,
             title: params.title,
             order: params.order,
             layout: params.layout.rawValue,
@@ -401,6 +402,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
     private func handleEventsPull(_ request: XPCRequest) async throws -> Data {
         let params = try decodeParams(EventsPullParams.self, from: request)
+        try SchemaValidator.validateEventsPull(cardId: params.cardId)
 
         let context = ModelContext(container)
         let since = params.since
@@ -412,20 +414,20 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         if let until, let filterCardId, let filterAction {
             predicate = #Predicate { event in
                 event.timestamp >= since &&
-                event.timestamp <= until &&
+                event.timestamp < until &&
                 event.cardId == filterCardId &&
                 event.actionRaw == filterAction
             }
         } else if let until, let filterCardId {
             predicate = #Predicate { event in
                 event.timestamp >= since &&
-                event.timestamp <= until &&
+                event.timestamp < until &&
                 event.cardId == filterCardId
             }
         } else if let until, let filterAction {
             predicate = #Predicate { event in
                 event.timestamp >= since &&
-                event.timestamp <= until &&
+                event.timestamp < until &&
                 event.actionRaw == filterAction
             }
         } else if let filterCardId, let filterAction {
@@ -437,7 +439,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         } else if let until {
             predicate = #Predicate { event in
                 event.timestamp >= since &&
-                event.timestamp <= until
+                event.timestamp < until
             }
         } else if let filterCardId {
             predicate = #Predicate { event in
