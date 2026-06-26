@@ -245,39 +245,67 @@ extension CardType {
 
 ## SwiftData `@Model` classes (storage mirror)
 
-These mirror the Codable structs but use SwiftData persistence semantics
-(`@Attribute(.unique)`, `@Relationship`, default values for migration).
+These mirror the Codable structs but use SwiftData persistence semantics.
+
+> **CloudKit compatibility (MY-1016 / MY-1018)** — when the SwiftData store is
+> backed by `NSPersistentCloudKitContainer`, CloudKit imposes three
+> non-negotiable schema constraints on every `@Model` class:
+>
+> 1. Every stored scalar attribute must be **optional** or have a **default
+>    value**. Non-optional/no-default scalars cause `Store failed to load`
+>    at app launch.
+> 2. Every to-many relationship must be **optional**. CloudKit cannot model
+>    a non-optional `[Child]` to-many; the underlying record field is
+>    nullable. Business code MUST treat `nil` as "empty array".
+> 3. `@Attribute(.unique)` is **forbidden** — CloudKit has no uniqueness
+>    enforcement. Logical uniqueness (briefing by `date`, container/card by
+>    `id`) is enforced in the **XPC business layer** (`XPCHandlers`) by
+>    fetching by logical key first and updating in place, otherwise
+>    inserting.
+>
+> The Codable wire structs (`Briefing`, `Container`, `Card`, `UserEvent` and
+> the per-CardType payloads) keep their required, non-optional fields —
+> the CLI contract is unchanged. Only the SwiftData storage mirror is
+> relaxed for CloudKit.
 
 ```swift
 import SwiftData
 
 @Model
 public final class BriefingModel {
-    @Attribute(.unique) public var date: String              // "2026-06-23"
-    public var generatedAt: Date
-    public var generatedBy: String
+    public var date: String = ""              // "2026-06-23" — required by validator
+    public var generatedAt: Date = Date.distantPast
+    public var generatedBy: String = ""
+    public var publishedAt: Date?             // nil until briefing.publish
     @Relationship(deleteRule: .cascade, inverse: \ContainerModel.briefing)
-    public var containers: [ContainerModel]
+    var rawContainers: [ContainerModel]?       // CloudKit-nullable to-many
 
-    public init(date: String, generatedAt: Date, generatedBy: String) {
+    public init(date: String, generatedAt: Date, generatedBy: String, publishedAt: Date? = nil) {
         self.date = date
         self.generatedAt = generatedAt
         self.generatedBy = generatedBy
-        self.containers = []
+        self.publishedAt = publishedAt
+        self.rawContainers = []
+    }
+
+    /// Business-layer view: nil is treated as empty.
+    public var containers: [ContainerModel] {
+        get { rawContainers ?? [] }
+        set { rawContainers = newValue }
     }
 }
 
 @Model
 public final class ContainerModel {
-    @Attribute(.unique) public var id: String                // UUID from agent
-    public var title: String
+    public var id: String = ""                // UUID from agent
+    public var title: String = ""
     public var subtitle: String?
-    public var order: Int
-    public var layoutRaw: String                             // ContainerLayout.rawValue
-    public var styleRaw: String                              // CardStyle.rawValue
+    public var order: Int = 0
+    public var layoutRaw: String = ContainerLayout.auto.rawValue
+    public var styleRaw: String = CardStyle.neutral.rawValue
     @Relationship(deleteRule: .cascade, inverse: \CardModel.container)
-    public var cards: [CardModel]
-    public var briefing: BriefingModel?                      // inverse for cascade
+    var rawCards: [CardModel]?
+    public var briefing: BriefingModel?       // inverse for cascade
 
     public init(id: String, title: String, subtitle: String?, order: Int,
                 layout: ContainerLayout, style: CardStyle) {
@@ -287,7 +315,7 @@ public final class ContainerModel {
         self.order = order
         self.layoutRaw = layout.rawValue
         self.styleRaw = style.rawValue
-        self.cards = []
+        self.rawCards = []
     }
 
     public var layout: ContainerLayout {
@@ -298,16 +326,20 @@ public final class ContainerModel {
         get { CardStyle(rawValue: styleRaw) ?? .neutral }
         set { styleRaw = newValue.rawValue }
     }
+    public var cards: [CardModel] {
+        get { rawCards ?? [] }
+        set { rawCards = newValue }
+    }
 }
 
 @Model
 public final class CardModel {
-    @Attribute(.unique) public var id: String                // UUID from agent
-    public var typeRaw: String                                // CardType.rawValue
-    public var sizeRaw: String
-    public var styleRaw: String
-    public var payloadJSON: Data
-    public var container: ContainerModel?                    // inverse for cascade
+    public var id: String = ""                // UUID from agent
+    public var typeRaw: String = CardType.metric.rawValue
+    public var sizeRaw: String = CardSize.medium.rawValue
+    public var styleRaw: String = CardStyle.neutral.rawValue
+    public var payloadJSON: Data = Data()
+    public var container: ContainerModel?     // inverse for cascade
 
     public init(id: String, type: CardType, size: CardSize,
                 style: CardStyle, payloadJSON: Data) {
@@ -318,18 +350,27 @@ public final class CardModel {
         self.payloadJSON = payloadJSON
     }
 
-    public var type: CardType { CardType(rawValue: typeRaw)! }
-    public var size: CardSize { CardSize(rawValue: sizeRaw)! }
-    public var style: CardStyle { CardStyle(rawValue: styleRaw)! }
+    public var type: CardType {
+        get { CardType(rawValue: typeRaw) ?? .metric }
+        set { typeRaw = newValue.rawValue }
+    }
+    public var size: CardSize {
+        get { CardSize(rawValue: sizeRaw) ?? .medium }
+        set { sizeRaw = newValue.rawValue }
+    }
+    public var style: CardStyle {
+        get { CardStyle(rawValue: styleRaw) ?? .neutral }
+        set { styleRaw = newValue.rawValue }
+    }
 }
 
 @Model
 public final class UserEventModel {
-    @Attribute(.unique) public var id: String
-    public var timestamp: Date
-    public var device: String
-    public var cardId: String
-    public var actionRaw: String
+    public var id: String = ""
+    public var timestamp: Date = Date.distantPast
+    public var device: String = ""
+    public var cardId: String = ""
+    public var actionRaw: String = UserEventAction.done.rawValue
 
     public init(id: String, timestamp: Date, device: String,
                 cardId: String, action: UserEventAction) {
@@ -340,7 +381,7 @@ public final class UserEventModel {
         self.actionRaw = action.rawValue
     }
 
-    public var action: UserEventAction { UserEventAction(rawValue: actionRaw)! }
+    public var action: UserEventAction? { UserEventAction(rawValue: actionRaw) }
 }
 ```
 
@@ -394,9 +435,9 @@ enum DataStore {
 
 | Query | Pattern | Notes |
 |---|---|---|
-| "Today's briefing" | `#Predicate<BriefingModel> { $0.date == today }` | Unique attribute → 1 result |
+| "Today's briefing" | `#Predicate<BriefingModel> { $0.date == today }` | One result after dedupe — XPC handler fetches by date and updates in place |
 | "Most recent published" | sort by `date` desc, limit 1 | Fallback when today is empty |
-| "Cards in container, ordered" | from `ContainerModel.cards` | SwiftData preserves relationship order |
+| "Cards in container, ordered" | from `ContainerModel.cards` (nil → empty) | SwiftData preserves relationship order |
 | "Events since T" | `#Predicate<UserEventModel> { $0.timestamp >= since }` sorted by timestamp asc | CLI `events pull` |
 | "Old briefings to delete" | `#Predicate<BriefingModel> { $0.date < cutoff }` | Background cleanup task |
 
@@ -404,22 +445,32 @@ enum DataStore {
 
 ## Idempotency contract
 
-The CLI subcommands `put` are idempotent by `id`:
-- `briefing put` with the same `date` updates `generatedAt` and
-  `generatedBy`, leaves containers alone (those have their own put).
-- `container put` with the same `id` replaces `title/subtitle/order/layout/
-  style`, leaves cards alone (those have their own put).
-- `card put` with the same `id` replaces `type/size/style/payload`.
+The CLI subcommands `put` are idempotent by `id`. Logical uniqueness is
+enforced in the XPC business layer (`XPCHandlers`) — **not** by SwiftData
+`@Attribute(.unique)`, which is incompatible with CloudKit. Each `put`
+handler fetches by the logical key first; if a record exists it is updated
+in place, otherwise a new record is inserted:
 
-`publish` is a metadata-only marker (sets a `publishedAt` field on
-BriefingModel — extending the schema slightly compared to the bare struct
-above). When the app's SwiftUI observer sees `publishedAt != nil`, the
-briefing becomes visible. This is how spec FR-006's atomic publish works.
+- `briefing put` fetches `BriefingModel` by `date`. Same date → update
+  `generatedAt` / `generatedBy` (and set `publishedAt = now` when
+  `published` is requested and not already set); leaves containers alone
+  (those have their own put).
+- `container put` fetches `ContainerModel` by `id` scoped to the
+  requested parent briefing. Same `(briefingDate, id)` → replace
+  `title/subtitle/order/layout/style`; a same-`id` container under a
+  different briefing is rejected rather than silently moved. Leaves
+  cards alone (those have their own put).
+- `card put` fetches `CardModel` by `id` scoped to the requested parent
+  container. Same `(containerId, id)` → replace `type/size/style/payload`;
+  a same-`id` card under a different container is rejected.
+- `events pull` reads `UserEventModel` ordered by `timestamp`; event id
+  uniqueness is the device/agent's responsibility (UUID generated at
+  source).
 
-Add to BriefingModel:
-```swift
-public var publishedAt: Date?    // nil until `briefing publish` called
-```
+`publish` is a metadata-only marker (sets `publishedAt` on
+`BriefingModel`). When the app's SwiftUI observer sees `publishedAt != nil`,
+the briefing becomes visible. This is how spec FR-006's atomic publish
+works.
 
 ---
 
