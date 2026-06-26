@@ -4,7 +4,7 @@ import AIDashCore
 
 @main
 struct AIDashApp: App {
-    @State private var containerState: CloudKitContainer.InitState = .failed("Loading…")
+    @State private var containerState: CloudKitContainer.InitState = .failed(reason: "Loading…")
 
     init() {
         #if os(macOS)
