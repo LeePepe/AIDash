@@ -1,45 +1,68 @@
 import Foundation
 import AIDashCore
 
-/// Emits structured JSON to stdout/stderr per `contracts/cli-surface.md`.
-///
-/// Errors are always emitted as JSON to stderr, regardless of `--json` flag.
-public struct JSONOutput: Sendable {
-    public init() {}
+/// Machine-readable JSON output: success to stdout, errors to stderr.
+/// Emits the documented envelope format per cli-surface.md.
+public struct JSONOutput: OutputFormatter {
+    private let requestId: String?
 
-    /// Emit an error envelope to stderr.
-    public func emit(error: XPCError, requestId: String? = nil) throws {
-        let envelope = ErrorEnvelope(
-            ok: false,
-            error: ErrorDetail(
-                code: error.code,
-                message: error.message,
-                field: error.field,
-                got: error.got,
-                allowed: error.allowed,
-                requestId: requestId ?? UUID().uuidString
-            )
-        )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(envelope)
+    public init(requestId: String? = nil) {
+        self.requestId = requestId
+    }
+
+    public func emit(success: any Encodable) throws {
+        let envelope = CLISuccessEnvelope(data: AnyEncodable(success), requestId: requestId)
+        let data = try Self.encoder.encode(envelope)
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data("\n".utf8))
+    }
+
+    public func emit(error: XPCError) throws {
+        let envelope = CLIErrorEnvelope(from: error, requestId: requestId)
+        let data = try Self.encoder.encode(envelope)
         FileHandle.standardError.write(data)
         FileHandle.standardError.write(Data("\n".utf8))
     }
+
+    static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys]
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
 }
 
-// MARK: - Private envelope types
+// MARK: - CLI Success Envelope (per cli-surface.md §"Success envelope")
 
-private struct ErrorEnvelope: Encodable {
-    let ok: Bool
-    let error: ErrorDetail
+struct CLISuccessEnvelope: Encodable {
+    let ok = true
+    let data: AnyEncodable
+    let requestId: String?
 }
 
-private struct ErrorDetail: Encodable {
+// MARK: - CLI Error Envelope (per cli-surface.md §"Error envelope")
+
+struct CLIErrorBody: Encodable {
+    let allowed: [String]?
     let code: String
-    let message: String
     let field: String?
     let got: String?
-    let allowed: [String]?
-    let requestId: String
+    let message: String
+    let requestId: String?
+}
+
+struct CLIErrorEnvelope: Encodable {
+    let ok = false
+    let error: CLIErrorBody
+
+    init(from xpcError: XPCError, requestId: String? = nil) {
+        self.error = CLIErrorBody(
+            allowed: xpcError.allowed,
+            code: xpcError.code,
+            field: xpcError.field,
+            got: xpcError.got,
+            message: xpcError.message,
+            requestId: requestId
+        )
+    }
 }

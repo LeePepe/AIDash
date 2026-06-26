@@ -17,18 +17,27 @@ struct AIDash: AsyncParsableCommand {
         ]
     )
 
+    // MARK: - Root-level global flags
+    //
+    // Declared on the root command so `parseAsRoot()` accepts
+    // `aidash --json briefing publish ...` and `aidash --quiet ...`.
+    // Leaf commands also expose them via `GlobalOptions` (via OptionGroup)
+    // so the same flags work after the subcommand verb. `GlobalOptions`
+    // additionally inspects `ProcessInfo.processInfo.arguments` so that the
+    // effective flags can be observed from any leaf regardless of position.
+
     @Flag(name: .long, help: "Emit machine-readable JSON on stdout instead of human format.")
-    var json = false
+    var json: Bool = false
 
     @Flag(name: .long, help: "Suppress non-essential stdout (errors still go to stderr).")
-    var quiet = false
+    var quiet: Bool = false
 
     // MARK: - Global error handler (T044)
 
     static func main() async {
         do {
             var command = try parseAsRoot()
-            if var asyncCmd = command as? AsyncParsableCommand {
+            if var asyncCmd = command as? any AsyncParsableCommand {
                 try await asyncCmd.run()
             } else {
                 try command.run()
@@ -83,18 +92,10 @@ struct BriefingPutCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T050")
-    }
-}
-
-struct BriefingPublishCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "publish",
-        abstract: "Mark a briefing as visible to readers."
-    )
-
-    func run() async throws {
-        fatalError("not yet implemented in T051")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "briefing put is not yet implemented (T050)"
+        )
     }
 }
 
@@ -105,7 +106,10 @@ struct BriefingGetCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T052")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "briefing get is not yet implemented (T052)"
+        )
     }
 }
 
@@ -129,7 +133,10 @@ struct ContainerPutCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T053")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "container put is not yet implemented (T053)"
+        )
     }
 }
 
@@ -140,7 +147,10 @@ struct ContainerDeleteCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T175")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "container delete is not yet implemented (T175)"
+        )
     }
 }
 
@@ -164,7 +174,10 @@ struct CardPutCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T054")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "card put is not yet implemented (T054)"
+        )
     }
 }
 
@@ -175,7 +188,10 @@ struct CardDeleteCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T176")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "card delete is not yet implemented (T176)"
+        )
     }
 }
 
@@ -198,7 +214,10 @@ struct EventsPullCommand: AsyncParsableCommand {
     )
 
     func run() async throws {
-        fatalError("not yet implemented in T170")
+        throw XPCError(
+            code: "internal.not_implemented",
+            message: "events pull is not yet implemented (T170)"
+        )
     }
 }
 
@@ -214,13 +233,4 @@ struct SchemaCommand: AsyncParsableCommand {
     )
 }
 
-struct SchemaListCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "list",
-        abstract: "Print the full schema as JSON."
-    )
-
-    func run() async throws {
-        fatalError("not yet implemented in T055")
-    }
-}
+// `SchemaListCommand` is defined in `Commands/SchemaListCommand.swift` (T055).

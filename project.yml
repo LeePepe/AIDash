@@ -30,6 +30,7 @@ targets:
     supportedDestinations: [macOS, iOS]
     sources:
       - path: Apps/AIDashApp/Sources
+      - path: Apps/AIDashApp/Resources/Localizable.xcstrings
       - path: Apps/AIDashApp/Resources/com.tianpli.aidash.plist
         platform: macOS
         buildPhase:
@@ -47,6 +48,19 @@ targets:
     dependencies:
       - package: AIDashCore
       - package: AIDashUI
+
+  AIDashAppTests:
+    type: bundle.unit-test
+    supportedDestinations: [macOS, iOS]
+    sources:
+      - path: Apps/AIDashApp/Tests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: AIDashApp
+      - package: AIDashCore
 
   aidash:
     type: tool
@@ -69,8 +83,10 @@ targets:
     sources:
       - path: CLI/aidash/Tests
       - path: CLI/aidash/Sources/XPCClient
-      - path: CLI/aidash/Sources/ExitCode.swift
       - path: CLI/aidash/Sources/Output
+      - path: CLI/aidash/Sources/ExitCode.swift
+      - path: CLI/aidash/Sources/DateResolver.swift
+      - path: CLI/aidash/Sources/SchemaListRendering.swift
     dependencies:
       - package: AIDashCore
     settings:
@@ -85,6 +101,10 @@ schemes:
         AIDashApp: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - AIDashAppTests
     archive:
       config: Release
   aidash:
