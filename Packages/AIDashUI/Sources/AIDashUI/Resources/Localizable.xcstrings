@@ -25,14 +25,68 @@
         }
       }
     },
-    "card_router.fallback.title" : {
-      "comment" : "Headline shown in the CardRouter fallback placeholder when a card payload cannot be decoded.",
+    "briefing.empty.subtitle" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Card unavailable"
+            "value" : "Use the aidash CLI to publish your first one."
+          }
+        }
+      }
+    },
+    "briefing.empty.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No briefings yet"
+          }
+        }
+      }
+    },
+    "briefing.empty_containers.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This briefing was published without any sections."
+          }
+        }
+      }
+    },
+    "briefing.empty_containers.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No sections in this briefing"
+          }
+        }
+      }
+    },
+    "briefing.fallback.banner %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No new briefing today — showing latest (%1$@)"
+          }
+        }
+      }
+    },
+    "briefing.published.relative %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Published %1$@"
           }
         }
       }
@@ -45,6 +99,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Could not decode %@ payload."
+          }
+        }
+      }
+    },
+    "card_router.fallback.title" : {
+      "comment" : "Headline shown in the CardRouter fallback placeholder when a card payload cannot be decoded.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Card unavailable"
           }
         }
       }
