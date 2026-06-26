@@ -59,7 +59,7 @@ public struct TrendingCardView: View {
             TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
         }
         if payload.items.count > 3 {
-            Text("+\(payload.items.count - 3) more")
+            Text(Self.moreItemsLabel(overflow: payload.items.count - 3))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -77,7 +77,7 @@ public struct TrendingCardView: View {
             TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
         }
         if payload.items.count > 5 {
-            Text("+\(payload.items.count - 5) more")
+            Text(Self.moreItemsLabel(overflow: payload.items.count - 5))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -95,7 +95,7 @@ public struct TrendingCardView: View {
             ScoreSparkline(items: top10, tint: sparklineColor)
                 .frame(height: 40)
                 .accessibilityElement()
-                .accessibilityLabel("Score distribution sparkline")
+                .accessibilityLabel(Self.sparklineAccessibilityLabel)
                 .accessibilityValue(sparklineAccessibilityValue(for: top10))
         }
         ForEach(Array(top10.enumerated()), id: \.offset) { index, item in
@@ -106,9 +106,45 @@ public struct TrendingCardView: View {
     private func sparklineAccessibilityValue(for items: [TrendingPayload.Item]) -> String {
         let scores = items.compactMap(\.score)
         guard let max = scores.max(), let min = scores.min() else {
-            return "No scores available"
+            return Self.sparklineEmptyValue
         }
-        return "Scores range from \(Int(min)) to \(Int(max))"
+        return Self.sparklineRangeValue(min: Int(min), max: Int(max))
+    }
+
+    // MARK: - Localized strings
+    //
+    // Per constitution §F.1, user-visible literals are accessed via
+    // `String(localized:)` and registered in `Resources/Localizable.xcstrings`
+    // so translators can localize them without touching source.
+
+    static func moreItemsLabel(overflow: Int) -> String {
+        String(
+            localized: "trending.more_items \(overflow)",
+            bundle: .module,
+            comment: "Trailing line on a Trending card listing how many additional items were truncated. The integer is the overflow count (always ≥ 1)."
+        )
+    }
+
+    static let sparklineAccessibilityLabel = String(
+        localized: "trending.sparkline.accessibility_label",
+        defaultValue: "Score distribution sparkline",
+        bundle: .module,
+        comment: "VoiceOver label for the Hero Trending card's score-distribution sparkline element."
+    )
+
+    static let sparklineEmptyValue = String(
+        localized: "trending.sparkline.accessibility_value.empty",
+        defaultValue: "No scores available",
+        bundle: .module,
+        comment: "VoiceOver value for the Trending sparkline when no items in the visible window carry a score."
+    )
+
+    static func sparklineRangeValue(min: Int, max: Int) -> String {
+        String(
+            localized: "trending.sparkline.accessibility_value.range \(min) \(max)",
+            bundle: .module,
+            comment: "VoiceOver value for the Trending sparkline describing the min/max of scored items. The integers are the minimum and maximum scores."
+        )
     }
 
     // MARK: - Background
