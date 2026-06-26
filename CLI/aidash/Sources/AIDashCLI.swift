@@ -44,7 +44,7 @@ struct AIDash: AsyncParsableCommand {
             }
             Darwin.exit(0)
         } catch let xpcError as XPCError {
-            try? JSONOutput().emit(error: xpcError)
+            try? JSONOutput().emit(error: xpcError, requestId: nil)
             Darwin.exit(ExitCodeMapper.code(for: xpcError))
         } catch {
             // Determine if this is a clean exit (--help, --version) or a
@@ -59,7 +59,7 @@ struct AIDash: AsyncParsableCommand {
                     code: "schema.argument_validation_failed",
                     message: Self.message(for: error)
                 )
-                try? JSONOutput().emit(error: wrapped)
+                try? JSONOutput().emit(error: wrapped, requestId: nil)
                 Darwin.exit(1)
             }
         }
