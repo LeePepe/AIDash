@@ -359,7 +359,14 @@ extension GlobalOptions {
     }
 }
 
-// MARK: - stdout/stderr capture helpers (POSIX FD redirect)
+// MARK: - stdout/stderr capture helpers
+//
+// We redirect the live POSIX FD into a temporary file (not a pipe) so the
+// Swift Testing framework's own output written during the captured block
+// can drain freely without blocking the writer side, and we can read the
+// captured slice back after restoring the FD. Using a Pipe here deadlocks
+// once the pipe buffer fills because Swift Testing keeps writing to the
+// redirected FD throughout the test run.
 
 func captureStdout(_ block: () throws -> Void) throws -> String {
     try captureFD(STDOUT_FILENO, block)
@@ -372,14 +379,28 @@ func captureStderr(_ block: () throws -> Void) throws -> String {
 private func captureFD(_ fd: Int32, _ block: () throws -> Void) throws -> String {
     let saved = dup(fd)
     defer { close(saved) }
-    let pipe = Pipe()
-    dup2(pipe.fileHandleForWriting.fileDescriptor, fd)
-    defer {
-        dup2(saved, fd)
-        try? pipe.fileHandleForWriting.close()
+
+    let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("aidash-capture-\(UUID().uuidString).log")
+    FileManager.default.createFile(atPath: tmpURL.path, contents: nil)
+    let writeHandle = try FileHandle(forWritingTo: tmpURL)
+    defer { try? FileManager.default.removeItem(at: tmpURL) }
+
+    dup2(writeHandle.fileDescriptor, fd)
+
+    var thrown: Error?
+    do {
+        try block()
+    } catch {
+        thrown = error
     }
-    try block()
-    try? pipe.fileHandleForWriting.close()
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    return String(data: data, encoding: .utf8) ?? ""
+
+    // Flush + restore.
+    try? writeHandle.synchronize()
+    dup2(saved, fd)
+    try? writeHandle.close()
+
+    let captured = (try? String(contentsOf: tmpURL, encoding: .utf8)) ?? ""
+    if let thrown { throw thrown }
+    return captured
 }
