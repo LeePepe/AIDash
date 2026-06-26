@@ -14,21 +14,27 @@ public struct BriefingWindowScene: Scene {
 
     public var body: some Scene {
         WindowGroup {
-            switch state {
-            case .ready(let container):
-                BriefingView()
-                    .modelContainer(container)
-                    .frame(minWidth: 720, minHeight: 480)
-                    #if os(macOS)
-                    .windowDismissBehavior(.disabled)
-                    #endif
-            case .failed(let reason):
-                ICloudUnavailableView(reason: reason)
-                    .frame(minWidth: 480, minHeight: 320)
-                    #if os(macOS)
-                    .windowDismissBehavior(.disabled)
-                    #endif
+            // The min-size modifier is applied at a stable position outside the
+            // state switch. A state-dependent `.frame(minWidth:minHeight:)`
+            // combined with `.windowResizability(.contentMinSize)` made the
+            // window's min size flip between branches during the initial layout
+            // pass, which triggered SwiftUI's NSHostingView to call
+            // `-layoutSubtreeIfNeeded` while it was already laying out — the
+            // `_NSDetectedLayoutRecursion` warning Apple has marked as a future
+            // hard crash.
+            Group {
+                switch state {
+                case .ready(let container):
+                    BriefingView()
+                        .modelContainer(container)
+                case .failed(let reason):
+                    ICloudUnavailableView(reason: reason)
+                }
             }
+            .frame(minWidth: 720, minHeight: 480)
+            #if os(macOS)
+            .windowDismissBehavior(.disabled)
+            #endif
         }
         #if os(macOS)
         .defaultSize(width: 1024, height: 720)
