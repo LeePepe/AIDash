@@ -120,6 +120,8 @@ public struct AgentSummaryCardView: View {
                     .font(.subheadline)
                     .lineLimit(completedRowLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             } else {
                 Text(item.title)
                     .font(.subheadline)
@@ -127,7 +129,6 @@ public struct AgentSummaryCardView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
     }
 
