@@ -20,6 +20,9 @@ packages:
     path: Packages/AIDashCore
   AIDashUI:
     path: Packages/AIDashUI
+  swift-argument-parser:
+    url: https://github.com/apple/swift-argument-parser
+    from: "1.5.0"
 
 targets:
   AIDashApp:
@@ -27,6 +30,12 @@ targets:
     supportedDestinations: [macOS, iOS]
     sources:
       - path: Apps/AIDashApp/Sources
+      - path: Apps/AIDashApp/Resources/com.tianpli.aidash.plist
+        platform: macOS
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash
@@ -51,6 +60,25 @@ targets:
         SKIP_INSTALL: NO
     dependencies:
       - package: AIDashCore
+      - package: swift-argument-parser
+        product: ArgumentParser
+
+  aidashTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: CLI/aidash/Tests
+      - path: CLI/aidash/Sources/XPCClient
+      - path: CLI/aidash/Sources/Output
+      - path: CLI/aidash/Sources/ExitCode.swift
+      - path: CLI/aidash/Sources/DateResolver.swift
+      - path: CLI/aidash/Sources/SchemaListRendering.swift
+    dependencies:
+      - package: AIDashCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.cli.tests
+        GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   AIDashApp:
@@ -67,5 +95,8 @@ schemes:
         aidash: all
     run:
       config: Debug
+    test:
+      targets:
+        - aidashTests
     archive:
       config: Release

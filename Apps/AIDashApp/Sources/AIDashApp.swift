@@ -5,7 +5,7 @@ import AIDashUI
 
 @main
 struct AIDashApp: App {
-    private let container = CloudKitContainer.shared
+    @State private var containerState: CloudKitContainer.InitState = .failed("Loading…")
 
     #if os(macOS)
     private let menuBarController = MenuBarController()
@@ -13,15 +13,13 @@ struct AIDashApp: App {
 
     init() {
         #if os(macOS)
-        // Start XPC listener so the CLI can reach us
-        XPCListener.shared.start()
-
-        // Register login item (T110)
+        // TODO(T060): Start XPCListener once the listener lands on main so the CLI can reach us.
+        // Register the LaunchAgent (T110). Idempotent — safe on every launch.
         LaunchdAgentInstaller.shared.registerIfNeeded()
         #endif
     }
 
     var body: some Scene {
-        BriefingWindowScene(state: container.state)
+        BriefingWindowScene(state: containerState)
     }
 }
