@@ -162,19 +162,7 @@ struct CardCommand: AsyncParsableCommand {
     )
 }
 
-struct CardPutCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "put",
-        abstract: "Create or update a card."
-    )
-
-    func run() async throws {
-        throw XPCError(
-            code: "internal.not_implemented",
-            message: "card put is not yet implemented (T054)"
-        )
-    }
-}
+// `CardPutCommand` is defined in `Commands/CardPutCommand.swift` (T054).
 
 struct CardDeleteCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
