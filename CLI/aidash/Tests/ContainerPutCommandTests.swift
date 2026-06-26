@@ -254,8 +254,8 @@ struct ContainerPutCommandTests {
         #expect(json?["requestId"] == nil)
     }
 
-    @Test("container put schema remote error exits 1")
-    func remoteSchemaErrorExits1() throws {
+    @Test("container put remote schema error still exits 3 (server-returned = app-side)")
+    func remoteSchemaErrorExits3() throws {
         let errorBody = XPCError(
             code: "schema.invalid_uuid",
             message: "bad uuid",
@@ -280,11 +280,11 @@ struct ContainerPutCommandTests {
                 capturedExit = code.rawValue
             }
         }
-        #expect(capturedExit == 1)
+        #expect(capturedExit == 3)
     }
 
-    @Test("container put xpc remote error exits 2")
-    func remoteXpcErrorExits2() throws {
+    @Test("container put remote xpc error still exits 3 (server-returned = app-side)")
+    func remoteXpcErrorExits3() throws {
         let errorBody = XPCError(
             code: "xpc.connection_invalidated",
             message: "lost"
@@ -307,7 +307,7 @@ struct ContainerPutCommandTests {
                 capturedExit = code.rawValue
             }
         }
-        #expect(capturedExit == 2)
+        #expect(capturedExit == 3)
     }
 
     @Test("container put in --quiet mode emits nothing on stdout")
@@ -451,6 +451,56 @@ struct ContainerPutCommandTests {
             #expect(error.code.hasPrefix("schema."))
         } catch let exit as ExitCode {
             Issue.record("Expected XPCError, got ExitCode \(exit.rawValue) — this means the command is double-emitting via the central handler.")
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
+        }
+    }
+
+    // MARK: - CLI-contract validation codes
+    //
+    // cli-surface.md §"aidash container put" Errors mandates
+    // `schema.invalid_layout` / `schema.invalid_style` for invalid --layout
+    // / --style. The shared AIDashCore SchemaValidator uses internal codes
+    // (schema.unknown_container_layout / schema.unknown_card_style); the
+    // CLI must rename them at the command boundary.
+
+    @Test("run(): invalid --layout throws XPCError schema.invalid_layout (CLI contract code)")
+    func runInvalidLayoutUsesContractCode() async throws {
+        let cmd = try ContainerPutCommand.parse([
+            "--briefing-date", "2026-06-25",
+            "--id", "11111111-1111-1111-1111-111111111111",
+            "--title", "Test",
+            "--order", "10",
+            "--layout", "carousel",
+        ])
+        do {
+            try await cmd.run()
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_layout")
+            #expect(error.field == "layout")
+            #expect(error.got == "carousel")
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
+        }
+    }
+
+    @Test("run(): invalid --style throws XPCError schema.invalid_style (CLI contract code)")
+    func runInvalidStyleUsesContractCode() async throws {
+        let cmd = try ContainerPutCommand.parse([
+            "--briefing-date", "2026-06-25",
+            "--id", "11111111-1111-1111-1111-111111111111",
+            "--title", "Test",
+            "--order", "10",
+            "--style", "rainbow",
+        ])
+        do {
+            try await cmd.run()
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.invalid_style")
+            #expect(error.field == "style")
+            #expect(error.got == "rainbow")
         } catch {
             Issue.record("Expected XPCError, got: \(error)")
         }

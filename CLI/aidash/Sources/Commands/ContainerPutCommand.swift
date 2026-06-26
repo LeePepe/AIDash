@@ -7,14 +7,21 @@ import Foundation
 /// Upsert by `(briefing_date, id)`. Cards under this container are NOT touched
 /// (use `card put` separately). Per `contracts/cli-surface.md` §"container put".
 ///
-/// Error-flow contract (per `AIDash.main` central handler):
-///   - Local validation / XPC transport / decode failures → throw `XPCError`.
+/// Error-flow contract (per `AIDash.main` central handler + cli-surface.md
+/// §"Exit codes"):
+///   - Local validation failures → throw `XPCError` with `schema.*` code.
 ///     The central handler emits a single envelope via `JSONOutput()` and
-///     exits via `ExitCodeMapper` (`schema.*` → 1, `xpc.*` → 2, else 3).
-///   - Remote `ok=false` errors → emit the envelope here with the
-///     `response.requestId` and throw `ExitCode`. `run()` catches the
-///     `ExitCode` and calls `Darwin.exit` so the central handler does NOT
-///     re-emit `schema.argument_validation_failed`.
+///     exits 1 via `ExitCodeMapper`.
+///   - XPC transport failures (`xpc.*`) → propagate `XPCError` from
+///     `XPCClient.execute`. Central handler emits + exits 2.
+///   - Remote `ok=false` (server/app-side errors — any code class) → emit
+///     the envelope here (so it carries `response.requestId`) and throw
+///     `ExitCode(3)`. `run()` catches that `ExitCode` and `Darwin.exit`s
+///     so the central handler does NOT re-emit `schema.argument_validation_failed`.
+///     Per `cli-surface.md` §"Exit codes": code 3 is "app-side error" —
+///     remote `schema.*` and remote `xpc.*` are still server-side returns
+///     and stay on exit 3. Only LOCAL `schema.*` / `xpc.*` get the 1 / 2
+///     mapping from `ExitCodeMapper`.
 struct ContainerPutCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "put",
@@ -57,7 +64,18 @@ struct ContainerPutCommand: AsyncParsableCommand {
         let resolvedDate = DateResolver.resolve(briefingDate)
         try validateDate(resolvedDate)
 
-        // Step 2: Local validation — fail fast, never round-trip invalid input.
+        // Step 2: Local validation.
+        //
+        // We validate layout/style locally with the CLI-contract codes
+        // (`schema.invalid_layout` / `schema.invalid_style` per
+        // `cli-surface.md` §"aidash container put" Errors) BEFORE delegating
+        // to `SchemaValidator.validateContainerPut`. The shared validator's
+        // enum-check error codes are the AIDashCore internal taxonomy
+        // (`schema.unknown_container_layout` / `schema.unknown_card_style`)
+        // and aren't the documented `aidash container put` surface — the
+        // CLI must rename them to match the published command contract.
+        try validateLayout(layout)
+        try validateStyle(style)
         try SchemaValidator.validateContainerPut(
             id: id,
             title: title,
@@ -67,14 +85,13 @@ struct ContainerPutCommand: AsyncParsableCommand {
         )
 
         // Step 3: Build params.
-        // Layout/style enums are already validated by SchemaValidator, so the
-        // initializers below cannot fail in practice — but route through
-        // XPCError if they somehow do, so the central handler can emit cleanly
-        // rather than crashing.
+        // Layout/style enums were already validated above, so these
+        // initializers cannot fail in practice — but route through the
+        // CLI-contract `schema.invalid_*` codes if they somehow do.
         guard let containerLayout = ContainerLayout(rawValue: layout) else {
             throw XPCError(
-                code: "schema.unknown_container_layout",
-                message: "Unknown layout '\(layout)'",
+                code: "schema.invalid_layout",
+                message: "Invalid layout '\(layout)'",
                 field: "layout",
                 got: layout,
                 allowed: ContainerLayout.allCases.map(\.rawValue)
@@ -82,8 +99,8 @@ struct ContainerPutCommand: AsyncParsableCommand {
         }
         guard let cardStyle = CardStyle(rawValue: style) else {
             throw XPCError(
-                code: "schema.unknown_card_style",
-                message: "Unknown style '\(style)'",
+                code: "schema.invalid_style",
+                message: "Invalid style '\(style)'",
                 field: "style",
                 got: style,
                 allowed: CardStyle.allCases.map(\.rawValue)
@@ -133,17 +150,18 @@ struct ContainerPutCommand: AsyncParsableCommand {
     // MARK: - Emit (extracted so tests can drive both branches with a
     // synthetic `XPCResponse`).
     //
-    // Per `cli-surface.md` §"Exit codes" and the central-handler contract:
+    // Per `cli-surface.md` §"Exit codes":
     //   - `ok=true`  → emit success envelope on stdout (unless `--quiet`),
-    //     return normally. Decode failures throw `XPCError` so the central
-    //     handler emits a single error envelope.
-    //   - `ok=false` → emit error envelope on stderr verbatim with
-    //     `response.requestId`, then throw `ExitCode(ExitCodeMapper.code(for:))`
-    //     so `run()` can `Darwin.exit` without a second emit at the central
-    //     handler. Exit-code class is taken from `ExitCodeMapper`:
-    //       * `schema.*` → 1
-    //       * `xpc.*`    → 2
-    //       * anything else (briefing.* / container.* / cloudkit.* / internal.*) → 3
+    //     return normally. Decode failures throw `XPCError xpc.decode_failure`
+    //     (transport-class) so the central handler emits a single envelope
+    //     and exits 2.
+    //   - `ok=false` → server returned an app-side error. Emit the error
+    //     envelope on stderr verbatim with `response.requestId`, then throw
+    //     `ExitCode(3)`. Per the contract: code 3 is "App-side error"; every
+    //     remote `ok=false` belongs there regardless of code class (remote
+    //     `schema.*` and remote `xpc.*` are still server returns). The
+    //     `ExitCodeMapper` 1/2 mapping is only for LOCAL validation /
+    //     transport failures that throw `XPCError` to the central handler.
     static func emit(
         response: XPCResponse,
         globals: GlobalOptions
@@ -176,7 +194,9 @@ struct ContainerPutCommand: AsyncParsableCommand {
         if let remoteError = response.error {
             let formatter = globals.outputMode.formatter(requestId: response.requestId)
             try formatter.emit(error: remoteError)
-            throw ExitCode(ExitCodeMapper.code(for: remoteError))
+            // Per cli-surface.md §"Exit codes": code 3 = App-side error.
+            // ANY server-returned ok=false maps to 3 regardless of code class.
+            throw ExitCode(3)
         }
 
         throw XPCError(
@@ -200,6 +220,34 @@ struct ContainerPutCommand: AsyncParsableCommand {
                 message: "Date '\(dateString)' is not in YYYY-MM-DD format",
                 field: "briefingDate",
                 got: dateString
+            )
+        }
+    }
+
+    /// Validate `--layout` against `ContainerLayout` with the CLI-contract
+    /// error code (`cli-surface.md` §"aidash container put" Errors).
+    private func validateLayout(_ value: String) throws {
+        guard ContainerLayout(rawValue: value) != nil else {
+            throw XPCError(
+                code: "schema.invalid_layout",
+                message: "Invalid layout '\(value)'",
+                field: "layout",
+                got: value,
+                allowed: ContainerLayout.allCases.map(\.rawValue)
+            )
+        }
+    }
+
+    /// Validate `--style` against `CardStyle` with the CLI-contract error
+    /// code (`cli-surface.md` §"aidash container put" Errors).
+    private func validateStyle(_ value: String) throws {
+        guard CardStyle(rawValue: value) != nil else {
+            throw XPCError(
+                code: "schema.invalid_style",
+                message: "Invalid style '\(value)'",
+                field: "style",
+                got: value,
+                allowed: CardStyle.allCases.map(\.rawValue)
             )
         }
     }
