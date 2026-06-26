@@ -88,8 +88,15 @@ public actor XPCClient {
 
         switch decoded {
         case .success(let response):
-            await pending.complete(requestId: requestId) { cont in
-                cont.resume(returning: response)
+            switch XPCClient.resultForResponse(response) {
+            case .success(let value):
+                await pending.complete(requestId: requestId) { cont in
+                    cont.resume(returning: value)
+                }
+            case .failure(let remoteError):
+                await pending.complete(requestId: requestId) { cont in
+                    cont.resume(throwing: remoteError)
+                }
             }
         case .failure(let error):
             connection = nil
@@ -97,6 +104,24 @@ public actor XPCClient {
                 cont.resume(throwing: error)
             }
         }
+    }
+
+    /// Pure mapping of a decoded `XPCResponse` to a Result.
+    ///
+    /// Per T044 contract: failed responses (`ok == false`) must surface the
+    /// embedded `XPCError` so `ExitCodeMapper` can map remote error codes
+    /// (`schema.*`, `storage.*`, `not_found`, …) to the right exit code.
+    /// If `ok == false` but `error` is missing, return a synthetic `internal`
+    /// error so callers never silently see a failure.
+    public static func resultForResponse(_ response: XPCResponse) -> Result<XPCResponse, XPCError> {
+        if response.ok {
+            return .success(response)
+        }
+        let remoteError = response.error ?? XPCError(
+            code: "internal",
+            message: "XPC response ok=false but no error payload"
+        )
+        return .failure(remoteError)
     }
 
     // MARK: - Connection lifecycle
