@@ -1,6 +1,18 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "briefing.storage_unavailable.title" : {
+      "comment" : "Title shown in the BriefingWindowScene fallback when CloudKit container init fails.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud unavailable"
+          }
+        }
+      }
+    },
     "cloudkit.unavailable.message" : {
       "comment" : "Shown in the iCloud unavailable scene when SwiftData CloudKit init fails.",
       "extractionState" : "manual",
