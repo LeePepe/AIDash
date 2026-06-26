@@ -1,0 +1,89 @@
+import SwiftUI
+import AIDashCore
+
+/// Routes a `CardModel` to the corresponding type-specific card view by decoding
+/// its `payloadJSON` via `CardType.decode` (preserving `.iso8601` date handling).
+/// On decode failure, renders a generic fallback placeholder (FR-032).
+public struct CardRouter: View {
+    let card: CardModel
+
+    public init(card: CardModel) {
+        self.card = card
+    }
+
+    public var body: some View {
+        cardContent
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(.separator)
+            )
+    }
+
+    @ViewBuilder
+    private var cardContent: some View {
+        if let payload = try? card.type.decode(card.payloadJSON) {
+            routedView(for: payload)
+        } else {
+            fallbackView
+        }
+    }
+
+    @ViewBuilder
+    private func routedView(for payload: any CardPayloadProtocol) -> some View {
+        switch payload {
+        case let p as MetricPayload:
+            MetricCardView(payload: p, size: card.size, style: card.style)
+        case let p as InsightPayload:
+            InsightCardView(payload: p, size: card.size, style: card.style)
+        case let p as AgentSummaryPayload:
+            AgentSummaryCardView(payload: p, size: card.size, style: card.style)
+        case let p as TodoListPayload:
+            TodoListCardView(payload: p, size: card.size, style: card.style)
+        case let p as TrendingPayload:
+            TrendingCardView(payload: p, size: card.size, style: card.style)
+        case let p as DigestPayload:
+            DigestCardView(payload: p, size: card.size, style: card.style)
+        case let p as SectionHeaderPayload:
+            SectionHeaderCardView(payload: p, size: card.size, style: card.style)
+        default:
+            fallbackView
+        }
+    }
+
+    private var fallbackView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text(Self.fallbackTitle)
+                .font(.headline)
+            Text(String(format: Self.fallbackDetailFormat, card.type.rawValue))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Localized strings
+    //
+    // Per constitution §F.1, user-visible literals are accessed via
+    // `String(localized:)` and registered in `Resources/Localizable.xcstrings`
+    // so translators can localize them without touching source.
+
+    private static let fallbackTitle = String(
+        localized: "card_router.fallback.title",
+        defaultValue: "Card unavailable",
+        bundle: .module,
+        comment: "Headline shown in the CardRouter fallback placeholder when a card payload cannot be decoded."
+    )
+
+    private static let fallbackDetailFormat = String(
+        localized: "card_router.fallback.detail",
+        defaultValue: "Could not decode %@ payload.",
+        bundle: .module,
+        comment: "Caption shown in the CardRouter fallback placeholder. %@ is the card type raw value (e.g. metric, insight)."
+    )
+}
