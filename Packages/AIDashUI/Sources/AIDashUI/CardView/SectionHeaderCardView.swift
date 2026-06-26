@@ -16,7 +16,7 @@ public struct SectionHeaderCardView: View {
         VStack(alignment: .leading, spacing: subtitleSpacing) {
             content
         }
-        .padding(.horizontal, horizontalPadding)
+        .padding(.horizontal, Self.horizontalPadding)
         .padding(.vertical, verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(backgroundTint, in: RoundedRectangle(cornerRadius: 12))
@@ -25,53 +25,36 @@ public struct SectionHeaderCardView: View {
     @ViewBuilder
     private var content: some View {
         Text(payload.title)
-            .font(titleFont)
+            .font(Self.titleFont)
             .fontWeight(.semibold)
             .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
 
         if let subtitle = payload.subtitle, !subtitle.isEmpty {
             Text(subtitle)
-                .font(subtitleFont)
+                .font(Self.subtitleFont)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    // MARK: - Size-driven typography & spacing
-
+    // MARK: - Invariant typography & horizontal padding
+    //
     // Per contracts/cardtype-payloads.md §sectionHeader:
-    // all sizes show the same header layout; size hint affects vertical
-    // spacing only (small = compact, hero = generous).
+    //   "all sizes show the same header layout. Size hint affects vertical
+    //   spacing only (small = compact, hero = generous)."
+    //
+    // Title font, subtitle font, and horizontal padding therefore do not
+    // depend on `size`. Only the vertical paddings and the title/subtitle
+    // gap vary per size.
 
-    private var titleFont: Font {
-        switch size {
-        case .small:  return .headline
-        case .medium: return .title3
-        case .wide:   return .title2
-        case .hero:   return .title
-        }
-    }
+    static let titleFont: Font = .title3
+    static let subtitleFont: Font = .subheadline
+    static let horizontalPadding: CGFloat = 16
 
-    private var subtitleFont: Font {
-        switch size {
-        case .small:  return .caption
-        case .medium: return .subheadline
-        case .wide:   return .subheadline
-        case .hero:   return .body
-        }
-    }
+    // MARK: - Size-driven vertical spacing only
 
-    private var horizontalPadding: CGFloat {
-        switch size {
-        case .small:  return 12
-        case .medium: return 16
-        case .wide:   return 16
-        case .hero:   return 20
-        }
-    }
-
-    private var verticalPadding: CGFloat {
+    var verticalPadding: CGFloat {
         switch size {
         case .small:  return 6
         case .medium: return 10
@@ -80,7 +63,7 @@ public struct SectionHeaderCardView: View {
         }
     }
 
-    private var subtitleSpacing: CGFloat {
+    var subtitleSpacing: CGFloat {
         switch size {
         case .small:  return 2
         case .medium: return 4
@@ -91,7 +74,7 @@ public struct SectionHeaderCardView: View {
 
     // MARK: - Style tint
 
-    private var backgroundTint: Color {
+    var backgroundTint: Color {
         switch style {
         case .neutral: return Color.clear
         case .success: return Color.green.opacity(0.08)
