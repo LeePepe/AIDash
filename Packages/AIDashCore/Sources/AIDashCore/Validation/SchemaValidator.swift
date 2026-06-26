@@ -19,18 +19,43 @@ public struct SchemaValidator {
         try requireValidDate(date)
     }
 
+    public static func validateBriefingGet(date: String) throws {
+        try requireNonEmpty(date, field: "date")
+        try requireValidDate(date)
+    }
+
+    public static func validateContainerDelete(id: String) throws {
+        try requireNonEmpty(id, field: "id")
+        try requireValidUUID(id, field: "id")
+    }
+
+    public static func validateCardDelete(id: String) throws {
+        try requireNonEmpty(id, field: "id")
+        try requireValidUUID(id, field: "id")
+    }
+
+    public static func validateEventsPull(cardId: String?) throws {
+        if let cardId {
+            try requireNonEmpty(cardId, field: "cardId")
+            try requireValidUUID(cardId, field: "cardId")
+        }
+    }
+
     public static func validateContainerPut(
         id: String,
+        briefingDate: String,
         title: String,
         order: Int,
         layout: String,
         style: String
     ) throws {
         try requireNonEmpty(id, field: "id")
+        try requireNonEmpty(briefingDate, field: "briefingDate")
         try requireNonEmpty(title, field: "title")
         try requireNonEmpty(layout, field: "layout")
         try requireNonEmpty(style, field: "style")
         try requireValidUUID(id, field: "id")
+        try requireValidDate(briefingDate, field: "briefingDate")
         try requireValidEnum(layout, field: "layout", type: ContainerLayout.self,
                              errorCode: "schema.unknown_container_layout")
         try requireValidEnum(style, field: "style", type: CardStyle.self,
@@ -158,6 +183,10 @@ public struct SchemaValidator {
     }
 
     private static func requireValidDate(_ value: String) throws {
+        try requireValidDate(value, field: "date")
+    }
+
+    private static func requireValidDate(_ value: String, field: String) throws {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -166,7 +195,7 @@ public struct SchemaValidator {
             throw XPCError(
                 code: "schema.invalid_date",
                 message: "Date '\(value)' is not in YYYY-MM-DD format",
-                field: "date",
+                field: field,
                 got: value
             )
         }
