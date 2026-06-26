@@ -24,6 +24,54 @@
           }
         }
       }
+    },
+    "menubar.about" : {
+      "comment" : "Menu bar item that opens the standard About panel.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About AIDash"
+          }
+        }
+      }
+    },
+    "menubar.app_name" : {
+      "comment" : "Accessibility label for the AIDash menu bar status item icon.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AIDash"
+          }
+        }
+      }
+    },
+    "menubar.open_briefing" : {
+      "comment" : "Menu bar item that opens the briefing window.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Briefing"
+          }
+        }
+      }
+    },
+    "menubar.quit" : {
+      "comment" : "Menu bar item that quits the AIDash app.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quit AIDash"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
