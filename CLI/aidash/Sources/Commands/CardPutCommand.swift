@@ -123,9 +123,9 @@ struct CardPutCommand: AsyncParsableCommand {
                     message: "Failed to decode CardPutResult: \(error.localizedDescription)"
                 )
             }
-            let formatter = globals.outputMode.formatter(requestId: response.requestId)
+            let formatter = globals.outputMode.formatter()
             if !globals.isQuiet {
-                try formatter.emit(success: result)
+                try formatter.emit(success: result, requestId: response.requestId)
             }
         } else if let error = response.error {
             // Remote error — re-throw as XPCError so the central handler in
