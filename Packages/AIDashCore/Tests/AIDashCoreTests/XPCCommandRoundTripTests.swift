@@ -187,8 +187,24 @@ import Testing
     let data = try encoder.encode(original)
     let decoded = try decoder.decode(SchemaListParams.self, from: data)
 
-    // Empty struct — just verify it round-trips without error
-    _ = decoded
+    #expect(decoded.type == nil)
+}
+
+@Test func schemaListParamsWithTypeRoundTrip() throws {
+    let original = SchemaListParams(type: "metric")
+
+    let encoder = JSONEncoder()
+    let decoder = JSONDecoder()
+    let data = try encoder.encode(original)
+    let decoded = try decoder.decode(SchemaListParams.self, from: data)
+
+    #expect(decoded.type == "metric")
+
+    // Verify the encoded JSON actually carries the field so a non-Swift
+    // peer (the macOS app's XPC handler) would observe the filter.
+    let json = try #require(String(data: data, encoding: .utf8))
+    #expect(json.contains("\"type\""))
+    #expect(json.contains("\"metric\""))
 }
 
 @Test func schemaListResultRoundTrip() throws {
