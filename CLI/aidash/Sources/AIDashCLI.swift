@@ -32,7 +32,7 @@ struct AIDash: AsyncParsableCommand {
     @Flag(name: .long, help: "Suppress non-essential stdout (errors still go to stderr).")
     var quiet: Bool = false
 
-    // MARK: - Global error handler
+    // MARK: - Global error handler (T044)
 
     static func main() async {
         do {
@@ -42,26 +42,31 @@ struct AIDash: AsyncParsableCommand {
             } else {
                 try command.run()
             }
-            Darwin.exit(0)
         } catch let xpcError as XPCError {
+            // XPC-layer or domain errors → emit JSON envelope and exit with mapped code
             try? JSONOutput().emit(error: xpcError, requestId: nil)
             Darwin.exit(ExitCodeMapper.code(for: xpcError))
         } catch {
-            // Determine if this is a clean exit (--help, --version) or a
-            // validation failure (missing required flags, unknown args).
-            let code = exitCode(for: error)
-            if code == .success {
-                // --help / --version: ArgumentParser formats its own output
+            // ArgumentParser routes `--help` / `--version` here as "errors" with
+            // exit code `.success`; those must print to stdout (or stderr per
+            // ArgumentParser) and exit 0 — they are NOT contract errors. For
+            // everything else (parser errors, validation failures, unknown
+            // errors), the CLI contract requires a JSON envelope on stderr with
+            // a mapped exit code.
+            let argParserExit = Self.exitCode(for: error)
+            if argParserExit == ExitCode.success {
+                // Let ArgumentParser handle help/version output and exit 0.
                 Self.exit(withError: error)
-            } else {
-                // Validation failure → structured JSON envelope on stderr, exit 1
-                let wrapped = XPCError(
-                    code: "schema.argument_validation_failed",
-                    message: Self.message(for: error)
-                )
-                try? JSONOutput().emit(error: wrapped, requestId: nil)
-                Darwin.exit(1)
             }
+            let wrapped = XPCError(
+                code: "schema.invalid_argument",
+                message: Self.fullMessage(for: error),
+                field: nil,
+                got: nil,
+                allowed: nil
+            )
+            try? JSONOutput().emit(error: wrapped, requestId: nil)
+            Darwin.exit(ExitCodeMapper.code(for: wrapped))
         }
     }
 }
