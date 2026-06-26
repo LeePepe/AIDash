@@ -53,9 +53,9 @@ struct BriefingPublishCommand: AsyncParsableCommand {
                     message: "Failed to decode BriefingPublishResult: \(error.localizedDescription)"
                 )
             }
-            let formatter = globals.outputMode.formatter(requestId: response.requestId)
+            let formatter = globals.outputMode.formatter()
             if !globals.isQuiet {
-                try formatter.emit(success: result)
+                try formatter.emit(success: result, requestId: response.requestId)
             }
         } else if let error = response.error {
             let remoteError = XPCError(
@@ -66,8 +66,8 @@ struct BriefingPublishCommand: AsyncParsableCommand {
                 allowed: error.allowed,
                 cause: error.cause
             )
-            let formatter = globals.outputMode.formatter(requestId: response.requestId)
-            try formatter.emit(error: remoteError)
+            let formatter = globals.outputMode.formatter()
+            try formatter.emit(error: remoteError, requestId: response.requestId)
             Darwin.exit(ExitCodeMapper.code(for: remoteError))
         } else {
             throw XPCError(

@@ -60,7 +60,7 @@ struct SchemaListCommandTests {
         let saved = dup(FileHandle.standardOutput.fileDescriptor)
         dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardOutput.fileDescriptor)
 
-        try JSONOutput(requestId: "req-1").emit(success: envelope)
+        try JSONOutput().emit(success: envelope, requestId: "req-1")
 
         // Restore stdout before reading the pipe to avoid deadlock.
         dup2(saved, FileHandle.standardOutput.fileDescriptor)
@@ -88,7 +88,7 @@ struct SchemaListCommandTests {
         let saved = dup(FileHandle.standardOutput.fileDescriptor)
         dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardOutput.fileDescriptor)
 
-        try JSONOutput(requestId: "req-md").emit(success: envelope)
+        try JSONOutput().emit(success: envelope, requestId: "req-md")
 
         dup2(saved, FileHandle.standardOutput.fileDescriptor)
         close(saved)

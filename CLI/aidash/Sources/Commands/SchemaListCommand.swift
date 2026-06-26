@@ -110,13 +110,13 @@ struct SchemaListCommand: AsyncParsableCommand {
         result: SchemaListResult,
         format: OutputFormat,
         outputMode: OutputMode,
-        requestId: String?
+        requestId: String
     ) throws {
         switch format {
         case .json:
             let envelopeData = SchemaListRendering.makeEnvelopeData(result)
-            let formatter = outputMode.formatter(requestId: requestId)
-            try formatter.emit(success: envelopeData)
+            let formatter = outputMode.formatter()
+            try formatter.emit(success: envelopeData, requestId: requestId)
 
         case .markdown:
             let body = SchemaListRendering.renderMarkdown(result)
@@ -125,8 +125,8 @@ struct SchemaListCommand: AsyncParsableCommand {
                 // Preserve the contract envelope even when the user asks for
                 // Markdown — Markdown body is carried as a string field.
                 let envelope = MarkdownEnvelopeData(markdown: body)
-                let formatter = outputMode.formatter(requestId: requestId)
-                try formatter.emit(success: envelope)
+                let formatter = outputMode.formatter()
+                try formatter.emit(success: envelope, requestId: requestId)
             case .human:
                 FileHandle.standardOutput.write(Data(body.utf8))
             }
