@@ -6,103 +6,99 @@ import AIDashCore
 @MainActor
 @Suite("MetricCardView Tests")
 struct MetricCardViewTests {
-    @Test("initializes with payload, size, and style")
-    func initializesCorrectly() {
-        let payload = MetricPayload(items: [
-            .init(label: "PRs merged", value: 3, trend: .up),
-        ])
-        let view = MetricCardView(payload: payload, size: .small, style: .neutral)
-
-        #expect(view.payload.items.count == 1)
-        #expect(view.size == .small)
-        #expect(view.style == .neutral)
+    private func view(
+        items: [MetricPayload.Item] = [.init(label: "Test", value: 1)],
+        size: CardSize = .small,
+        style: CardStyle = .neutral
+    ) -> MetricCardView {
+        MetricCardView(payload: MetricPayload(items: items), size: size, style: style)
     }
 
-    @Test("small size uses only first item")
-    func smallSizeUsesFirstItem() {
-        let payload = MetricPayload(items: [
-            .init(label: "Coverage", value: 87.5, unit: "%", trend: .up),
-            .init(label: "Extra", value: 10),
-        ])
-        let view = MetricCardView(payload: payload, size: .small, style: .success)
+    // MARK: - formattedValue behavior
 
-        #expect(view.payload.items.first?.label == "Coverage")
-        #expect(view.size == .small)
+    @Test("formattedValue renders whole numbers without decimals")
+    func formattedValueWholeNumber() {
+        let v = view()
+        #expect(v.formattedValue(3) == "3")
+        #expect(v.formattedValue(0) == "0")
+        #expect(v.formattedValue(124) == "124")
     }
 
-    @Test("medium size limits to two items")
-    func mediumSizeLimitsToTwo() {
-        let payload = MetricPayload(items: [
-            .init(label: "A", value: 1),
-            .init(label: "B", value: 2),
-            .init(label: "C", value: 3),
-        ])
-        let view = MetricCardView(payload: payload, size: .medium, style: .neutral)
-
-        #expect(view.size == .medium)
-        #expect(view.payload.items.count == 3)
+    @Test("formattedValue keeps one decimal for fractional values")
+    func formattedValueFractional() {
+        let v = view()
+        #expect(v.formattedValue(87.5) == "87.5")
+        #expect(v.formattedValue(0.42) == "0.4")
+        #expect(v.formattedValue(1.04) == "1.0") // rounds down to 1 decimal
     }
 
-    @Test("wide size accepts up to four items in grid")
-    func wideSizeGrid() {
-        let payload = MetricPayload(items: [
-            .init(label: "A", value: 1),
-            .init(label: "B", value: 2),
-            .init(label: "C", value: 3),
-            .init(label: "D", value: 4),
-        ])
-        let view = MetricCardView(payload: payload, size: .wide, style: .accent)
-
-        #expect(view.size == .wide)
-        #expect(view.payload.items.count == 4)
+    @Test("formattedValue switches to decimal form at one million even for whole values")
+    func formattedValueLargeNumbers() {
+        let v = view()
+        // 999_999 is whole and below threshold → "%.0f"
+        #expect(v.formattedValue(999_999) == "999999")
+        // 1_000_000 is whole but at threshold → falls through to "%.1f"
+        #expect(v.formattedValue(1_000_000) == "1000000.0")
     }
 
-    @Test("hero size separates primary from secondary metrics")
-    func heroSizeLayout() {
+    // MARK: - trendIconName behavior (SF Symbol mapping)
+
+    @Test("trendIconName maps each trend to the correct SF Symbol")
+    func trendIconNames() {
+        let v = view()
+        #expect(v.trendIconName(.up) == "arrow.up")
+        #expect(v.trendIconName(.down) == "arrow.down")
+        #expect(v.trendIconName(.flat) == "arrow.right")
+    }
+
+    // MARK: - trendColor behavior (semantic color mapping)
+
+    @Test("trendColor maps up to green, down to red, flat to secondary")
+    func trendColors() {
+        let v = view()
+        #expect(v.trendColor(.up) == .green)
+        #expect(v.trendColor(.down) == .red)
+        #expect(v.trendColor(.flat) == .secondary)
+    }
+
+    // MARK: - backgroundTint behavior (style → tint mapping)
+
+    @Test("backgroundTint resolves each CardStyle to the expected tinted color")
+    func backgroundTintForEachStyle() {
+        #expect(view(style: .neutral).backgroundTint == Color.clear)
+        #expect(view(style: .success).backgroundTint == Color.green.opacity(0.08))
+        #expect(view(style: .warning).backgroundTint == Color.orange.opacity(0.08))
+        #expect(view(style: .accent).backgroundTint == Color.accentColor.opacity(0.10))
+    }
+
+    // MARK: - body rendering smoke (covers every size × style combination)
+
+    @Test(
+        "body renders without crashing for every size × style combination",
+        arguments: CardSize.allCases, CardStyle.allCases
+    )
+    func bodyRendersForAllSizeStyleCombinations(size: CardSize, style: CardStyle) {
         let payload = MetricPayload(items: [
             .init(label: "Primary", value: 100, unit: "%", trend: .up),
-            .init(label: "Secondary A", value: 5, trend: .down),
-            .init(label: "Secondary B", value: 42, trend: .flat),
+            .init(label: "Secondary", value: 5, trend: .down),
+            .init(label: "Tertiary", value: 42, trend: .flat),
+            .init(label: "Quaternary", value: 7),
         ])
-        let view = MetricCardView(payload: payload, size: .hero, style: .warning)
-
-        #expect(view.size == .hero)
-        #expect(view.payload.items.first?.label == "Primary")
-        #expect(view.payload.items.dropFirst().count == 2)
+        let v = MetricCardView(payload: payload, size: size, style: style)
+        // Touching the body forces SwiftUI to evaluate the @ViewBuilder switch
+        // and the per-cell formatters. If a layout branch crashes (e.g. empty
+        // items, missing optional), this would surface here.
+        _ = v.body
     }
 
-    @Test("all card styles produce valid views")
-    func allStylesValid() {
-        let payload = MetricPayload(items: [
-            .init(label: "Test", value: 1),
-        ])
+    // MARK: - empty-items resilience for body
 
-        for cardStyle in CardStyle.allCases {
-            let view = MetricCardView(payload: payload, size: .small, style: cardStyle)
-            #expect(view.style == cardStyle)
+    @Test("body does not crash when payload has a single item across all sizes")
+    func bodyHandlesSingleItem() {
+        let payload = MetricPayload(items: [.init(label: "Solo", value: 1)])
+        for size in CardSize.allCases {
+            let v = MetricCardView(payload: payload, size: size, style: .neutral)
+            _ = v.body
         }
-    }
-
-    @Test("all card sizes produce valid views")
-    func allSizesValid() {
-        let payload = MetricPayload(items: [
-            .init(label: "Test", value: 1),
-        ])
-
-        for cardSize in CardSize.allCases {
-            let view = MetricCardView(payload: payload, size: cardSize, style: .neutral)
-            #expect(view.size == cardSize)
-        }
-    }
-
-    @Test("item without unit or trend is valid")
-    func itemWithoutOptionals() {
-        let payload = MetricPayload(items: [
-            .init(label: "Count", value: 42),
-        ])
-        let view = MetricCardView(payload: payload, size: .small, style: .neutral)
-
-        #expect(view.payload.items.first?.unit == nil)
-        #expect(view.payload.items.first?.trend == nil)
     }
 }
