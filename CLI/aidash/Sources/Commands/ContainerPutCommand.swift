@@ -78,6 +78,7 @@ struct ContainerPutCommand: AsyncParsableCommand {
         try validateStyle(style)
         try SchemaValidator.validateContainerPut(
             id: id,
+            briefingDate: resolvedDate,
             title: title,
             order: order,
             layout: layout,
@@ -185,15 +186,15 @@ struct ContainerPutCommand: AsyncParsableCommand {
                 )
             }
             if !globals.isQuiet {
-                let formatter = globals.outputMode.formatter(requestId: response.requestId)
-                try formatter.emit(success: result)
+                let formatter = globals.outputMode.formatter()
+                try formatter.emit(success: result, requestId: response.requestId)
             }
             return
         }
 
         if let remoteError = response.error {
-            let formatter = globals.outputMode.formatter(requestId: response.requestId)
-            try formatter.emit(error: remoteError)
+            let formatter = globals.outputMode.formatter()
+            try formatter.emit(error: remoteError, requestId: response.requestId)
             // Per cli-surface.md §"Exit codes": code 3 = App-side error.
             // ANY server-returned ok=false maps to 3 regardless of code class.
             throw ExitCode(3)
