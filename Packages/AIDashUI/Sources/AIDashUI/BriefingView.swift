@@ -163,12 +163,18 @@ public struct BriefingView: View {
         .frame(maxWidth: .infinity, minHeight: 320)
     }
 
-    /// The user's local calendar day formatted as `yyyy-MM-dd`.
-    /// Uses the current locale's calendar and time zone so the boundary between
-    /// "today" and "tomorrow" matches what the user sees on their device clock,
-    /// not the UTC day boundary.
+    /// The user's local calendar day formatted as POSIX `yyyy-MM-dd`.
+    ///
+    /// Uses a Gregorian calendar pinned to the user's current time zone so the
+    /// boundary between "today" and "tomorrow" matches the user's device clock,
+    /// while the year/month/day values stay in the POSIX/Gregorian system that
+    /// Core uses to store and validate `BriefingModel.date`. `Calendar.current`
+    /// is intentionally avoided because users on Buddhist/Japanese/Hebrew/etc.
+    /// calendar settings would otherwise produce non-Gregorian year values
+    /// (e.g. `2569-06-25`) that would never match the stored date strings.
     private static func localTodayString() -> String {
-        let calendar = Calendar.current
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
         let components = calendar.dateComponents([.year, .month, .day], from: Date())
         let year = components.year ?? 1970
         let month = components.month ?? 1

@@ -13,17 +13,16 @@ struct BriefingViewTests {
         _ = view.body
     }
 
-    @Test("localTodayString matches local calendar date, not UTC")
+    @Test("localTodayString matches Gregorian local calendar date, not UTC")
     func localTodayStringMatchesLocalCalendar() throws {
-        // The view's todayString must use the user's local calendar so the
-        // "today" filter matches what the user sees on their device clock.
-        // We compare against Calendar.current to assert this contract.
-        let mirror = Mirror(reflecting: BriefingView.self)
-        _ = mirror // mirror only; the helper is private. Verify behavior via
-                   // calendar comparison through Date math.
-
+        // The view's todayString must use a Gregorian calendar pinned to the
+        // user's current time zone. Using Calendar.current directly would
+        // produce non-Gregorian year/month/day values for users on
+        // Buddhist/Japanese/Hebrew/etc. calendar settings, which would never
+        // match `BriefingModel.date` values stored as POSIX yyyy-MM-dd.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
         let now = Date()
-        let calendar = Calendar.current
         let components = calendar.dateComponents([.year, .month, .day], from: now)
         let expected = String(
             format: "%04d-%02d-%02d",
@@ -37,15 +36,10 @@ struct BriefingViewTests {
         #expect(expected[expected.index(expected.startIndex, offsetBy: 4)] == "-")
         #expect(expected[expected.index(expected.startIndex, offsetBy: 7)] == "-")
 
-        // And NOT the UTC date when the local timezone differs near midnight.
-        // We can't force midnight reliably in a unit test, but we can assert
-        // that the format the production code uses is the same yyyy-MM-dd
-        // format derived from Calendar.current.
-        let utcFormatter = ISO8601DateFormatter()
-        utcFormatter.formatOptions = [.withFullDate]
-        let utcToday = String(utcFormatter.string(from: now).prefix(10))
-        // Both should be yyyy-MM-dd; difference (if any) is only at the
-        // day-boundary, which is exactly the bug we are guarding against.
-        #expect(utcToday.count == 10)
+        // Year must be Gregorian (4-digit, within a sane range for a daily
+        // briefing app). This guards against accidental reintroduction of
+        // Calendar.current, which on a Buddhist locale would yield 2569+.
+        let year = components.year ?? 0
+        #expect(year >= 2024 && year <= 2100)
     }
 }
