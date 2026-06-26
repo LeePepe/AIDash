@@ -12,6 +12,42 @@
           }
         }
       }
+    },
+    "menubar.aboutAIDash" : {
+      "comment" : "Menu bar item that opens the standard About panel.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About AIDash"
+          }
+        }
+      }
+    },
+    "menubar.openBriefing" : {
+      "comment" : "Menu bar item that opens the briefing window.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Briefing"
+          }
+        }
+      }
+    },
+    "menubar.quitAIDash" : {
+      "comment" : "Menu bar item that terminates the application.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quit AIDash"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

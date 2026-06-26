@@ -17,7 +17,7 @@ public final class MenuBarController: NSObject {
 
         let menu = NSMenu()
 
-        let openItem = NSMenuItem(title: "Open Briefing",
+        let openItem = NSMenuItem(title: Self.openBriefingTitle,
                                    action: #selector(openBriefing),
                                    keyEquivalent: "")
         openItem.target = self
@@ -25,14 +25,14 @@ public final class MenuBarController: NSObject {
 
         menu.addItem(.separator())
 
-        let aboutItem = NSMenuItem(title: "About AIDash",
+        let aboutItem = NSMenuItem(title: Self.aboutTitle,
                                     action: #selector(showAbout),
                                     keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
 
         // Quit: target NSApp directly so NSApplication.terminate(_:) dispatches correctly.
-        let quitItem = NSMenuItem(title: "Quit AIDash",
+        let quitItem = NSMenuItem(title: Self.quitTitle,
                                    action: #selector(NSApplication.terminate(_:)),
                                    keyEquivalent: "q")
         quitItem.target = NSApp
@@ -53,6 +53,37 @@ public final class MenuBarController: NSObject {
     @objc private func showAbout() {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(nil)
+    }
+
+    // MARK: - Localized titles
+    // Resolved through the app's String Catalog (`Localizable.xcstrings`)
+    // so translations can be added without code changes (Constitution §F.1).
+
+    internal static var openBriefingTitle: String {
+        String(
+            localized: "menubar.openBriefing",
+            defaultValue: "Open Briefing",
+            bundle: .main,
+            comment: "Menu bar item that opens the briefing window."
+        )
+    }
+
+    internal static var aboutTitle: String {
+        String(
+            localized: "menubar.aboutAIDash",
+            defaultValue: "About AIDash",
+            bundle: .main,
+            comment: "Menu bar item that opens the standard About panel."
+        )
+    }
+
+    internal static var quitTitle: String {
+        String(
+            localized: "menubar.quitAIDash",
+            defaultValue: "Quit AIDash",
+            bundle: .main,
+            comment: "Menu bar item that terminates the application."
+        )
     }
 }
 
