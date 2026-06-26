@@ -2,8 +2,8 @@ import Foundation
 import Testing
 import AIDashCore
 
-@Suite("ExitCodeMapper")
-struct ExitCodeMapperTests {
+@Suite("ExitCodeMapper — full prefix coverage")
+struct ExitCodeMapperPrefixTests {
 
     // MARK: - Schema errors → exit 1
 
