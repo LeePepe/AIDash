@@ -114,6 +114,54 @@
           }
         }
       }
+    },
+    "trending.more_items %lld" : {
+      "comment" : "Trailing line on a Trending card listing how many additional items were truncated. %lld is the overflow count (always ≥ 1).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%1$lld more"
+          }
+        }
+      }
+    },
+    "trending.sparkline.accessibility_label" : {
+      "comment" : "VoiceOver label for the Hero Trending card's score-distribution sparkline element.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Score distribution sparkline"
+          }
+        }
+      }
+    },
+    "trending.sparkline.accessibility_value.empty" : {
+      "comment" : "VoiceOver value for the Trending sparkline when no items in the visible window carry a score.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No scores available"
+          }
+        }
+      }
+    },
+    "trending.sparkline.accessibility_value.range %lld %lld" : {
+      "comment" : "VoiceOver value for the Trending sparkline describing the min/max of scored items. %1$lld is the minimum score, %2$lld is the maximum score.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scores range from %1$lld to %2$lld"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
