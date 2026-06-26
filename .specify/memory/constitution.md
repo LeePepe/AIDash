@@ -102,6 +102,24 @@ agents, where it belongs. The same app build serves any agent strategy
 - **Concurrency**: `@MainActor` is the default for view-layer code. Cross-actor
   calls go through `async`. `@unchecked Sendable`, `nonisolated(unsafe)`, and
   similar escape hatches require an ADR with explicit justification.
+- **Off-actor framework callbacks**: System frameworks that deliver delegate
+  callbacks on internal queues MUST NOT be wrapped in classes annotated
+  `@MainActor`. In particular:
+  - `NSXPCListenerDelegate` (e.g. `XPCListener`) — `shouldAcceptNewConnection`
+    runs on the listener's own internal serial queue, not the main actor.
+    The conforming class MUST be left nonisolated. Per-connection work that
+    actually needs main-actor isolation MUST be hopped via the exported
+    handlers object (e.g. an `@MainActor XPCHandlers` that hops inside its
+    own `execute(requestData:reply:)`), never via `MainActor.assumeIsolated`
+    on the delegate callback path (that would trap, violating §D.2 graceful
+    XPC failure).
+  - Any historical task body (issue checklist) that demands `@MainActor` or
+    a `MainActor.assumeIsolated` shim on such a delegate is **superseded by
+    this clause** — Reviewer MUST treat the constitutional rule as the
+    source of truth and not 🔴 FAIL a PR for omitting the unsafe annotation.
+    Reviewer MAY still flag missing functional acceptance (Mach service
+    name, exported interface, handlers wiring) — but the actor-isolation
+    bullet is no longer a P0.
 
 ### Module Architecture
 
@@ -394,4 +412,4 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.2.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-25
+**Version**: 1.3.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-26
