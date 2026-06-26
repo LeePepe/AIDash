@@ -260,7 +260,7 @@ struct CardPutCommandTests {
         let saved = dup(FileHandle.standardOutput.fileDescriptor)
         dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardOutput.fileDescriptor)
 
-        try JSONOutput(requestId: "req-card-put-2").emit(success: result)
+        try JSONOutput().emit(success: result, requestId: "req-card-put-2")
 
         dup2(saved, FileHandle.standardOutput.fileDescriptor)
         close(saved)
@@ -298,7 +298,7 @@ struct CardPutCommandTests {
         let saved = dup(FileHandle.standardError.fileDescriptor)
         dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardError.fileDescriptor)
 
-        try JSONOutput(requestId: "req-card-put-err").emit(error: remoteError)
+        try JSONOutput().emit(error: remoteError, requestId: "req-card-put-err")
 
         dup2(saved, FileHandle.standardError.fileDescriptor)
         close(saved)
