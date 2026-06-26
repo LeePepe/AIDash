@@ -83,6 +83,7 @@ targets:
     sources:
       - path: CLI/aidash/Tests
       - path: CLI/aidash/Sources/XPCClient
+      - path: CLI/aidash/Sources/Commands
       - path: CLI/aidash/Sources/Output
       - path: CLI/aidash/Sources/ExitCode.swift
       - path: CLI/aidash/Sources/DateResolver.swift
@@ -90,6 +91,8 @@ targets:
       - path: CLI/aidash/Sources/PayloadResolver.swift
     dependencies:
       - package: AIDashCore
+      - package: swift-argument-parser
+        product: ArgumentParser
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.cli.tests
