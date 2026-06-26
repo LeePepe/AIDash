@@ -46,7 +46,12 @@ struct ICloudUnavailableView: View {
             Image(systemName: "icloud.slash")
                 .font(.system(size: 56))
                 .foregroundStyle(.secondary)
-            Text("iCloud unavailable")
+            Text(String(
+                localized: "briefing.storage_unavailable.title",
+                defaultValue: "iCloud unavailable",
+                bundle: .main,
+                comment: "Title shown in the BriefingWindowScene fallback when CloudKit container init fails."
+            ))
                 .font(.title2.bold())
             Text(reason)
                 .font(.callout)
