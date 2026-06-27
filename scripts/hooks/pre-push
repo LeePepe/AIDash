@@ -94,14 +94,26 @@ if [ -f "project.yml" ]; then
             exit 1
         fi
 
-        # If a workspace/project exists, do a macOS build.
+        # If a workspace/project exists, do a macOS build of every shipped
+        # target. Both AIDashApp and the aidash CLI must build cleanly —
+        # CLI breakage previously slipped through because only AIDashApp
+        # was gated here (MY-1023).
         if [ -d "AIDash.xcodeproj" ] || [ -d "AIDash.xcworkspace" ]; then
-            echo "[pre-push] xcodebuild macOS app..."
+            echo "[pre-push] xcodebuild AIDashApp (macOS)..."
             if ! xcodebuild -scheme AIDashApp -destination "platform=macOS" \
                     CODE_SIGNING_ALLOWED=NO build \
-                    > /tmp/aidash-pre-push-build.log 2>&1; then
-                echo "[pre-push] FAILED: xcodebuild macOS"
-                tail -50 /tmp/aidash-pre-push-build.log
+                    > /tmp/aidash-pre-push-build-app.log 2>&1; then
+                echo "[pre-push] FAILED: xcodebuild AIDashApp"
+                tail -50 /tmp/aidash-pre-push-build-app.log
+                exit 1
+            fi
+
+            echo "[pre-push] xcodebuild aidash CLI (macOS)..."
+            if ! xcodebuild -scheme aidash -destination "platform=macOS" \
+                    CODE_SIGNING_ALLOWED=NO build \
+                    > /tmp/aidash-pre-push-build-cli.log 2>&1; then
+                echo "[pre-push] FAILED: xcodebuild aidash"
+                tail -50 /tmp/aidash-pre-push-build-cli.log
                 exit 1
             fi
         fi
