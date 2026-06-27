@@ -5,15 +5,33 @@ import AppKit
 public final class MenuBarController: NSObject {
     private var statusItem: NSStatusItem?
 
+    /// Test-only accessor: lets `MenuBarControllerTests` inspect the
+    /// installed `NSStatusItem` to assert layout-recursion guarantees
+    /// (fixed length, sized template image). Not part of the public API
+    /// surface used by production code.
+    internal var statusItemForTesting: NSStatusItem? { statusItem }
+
     public override init() {
         super.init()
         installStatusItem()
     }
 
     private func installStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "chart.bar.doc.horizontal",
-                                      accessibilityDescription: Self.appName)
+        // Use a fixed square length and a sized template image. On macOS 26
+        // a variable-length NSStatusItem combined with an SF Symbol image
+        // whose `size` is the symbol's intrinsic size triggers an AppKit
+        // `_NSDetectedLayoutRecursion` warning during the initial layout
+        // pass: the status-item host view runs `-layoutSubtreeIfNeeded` to
+        // measure the icon while it is already inside its own layout pass.
+        // Pinning `length` and giving the image a stable size + template
+        // flag breaks that recursion before AppKit ever enters it.
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let icon = NSImage(systemSymbolName: "chart.bar.doc.horizontal",
+                              accessibilityDescription: Self.appName) {
+            icon.isTemplate = true
+            icon.size = NSSize(width: 18, height: 18)
+            item.button?.image = icon
+        }
 
         let menu = NSMenu()
 
