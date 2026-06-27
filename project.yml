@@ -14,6 +14,10 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     CODE_SIGN_STYLE: Automatic
+    # Personal Apple Developer team (paid). Pinned here so `xcodegen generate`
+    # never wipes the team selection from AIDash.xcodeproj. CI uses
+    # CODE_SIGNING_ALLOWED=NO so this is ignored on macos-latest runners.
+    DEVELOPMENT_TEAM: 4Z8GG667QD
 
 packages:
   AIDashCore:
