@@ -8,14 +8,27 @@ Date: 2026-06-27
 
 ## Summary
 
-The failing `CKError 15/2000 "Server Rejected Request"` on `com.apple.coredata.cloudkit.zone:__defaultOwner__` is reproducing in the latest build. Evidence below shows the App ID, CloudKit Dashboard container, and provisioning profile are all correctly configured server-side for team `4Z8GG667QD`. The signed application bundle, however, embeds an incomplete entitlement set: it omits `com.apple.developer.icloud-container-environment` and `com.apple.developer.ubiquity-container-identifiers`, both of which the issued provisioning profile authorizes. This mismatch between what the profile grants and what the codesign blob declares is the most plausible single root cause for the server-side rejection.
+The failing `CKError 15/2000 "Server Rejected Request"` on `com.apple.coredata.cloudkit.zone:__defaultOwner__` is reproducing in the latest build. The signed application bundle embeds an incomplete entitlement set: it omits `com.apple.developer.icloud-container-environment` and `com.apple.developer.ubiquity-container-identifiers`, both of which the issued provisioning profile authorizes. This mismatch between what the profile grants and what the codesign blob declares is the most plausible single root cause for the server-side rejection.
 
-Recommended next action: **entitlement code change** — extend `Apps/AIDashApp/AIDashApp.entitlements` with the two missing keys, rebuild, and re-test. No Dashboard / Portal action is required from the user at this point.
+**Outstanding verification gap:** direct CloudKit Dashboard inspection at `icloud.developer.apple.com` was **not performed** — the agent runtime has no authenticated browser session for that site and no public CLI exists to query it. The Dashboard-container acceptance check (root candidate A) is therefore unverified by this spike; provisioning-profile entitlements are recorded only as indirect supporting evidence, not as confirmation. See section A below for the explicit limitation and what the user must visually check.
+
+Recommended next action: **entitlement code change** — extend `Apps/AIDashApp/AIDashApp.entitlements` with the two missing keys, rebuild, and re-test. The user should also visually confirm container existence in CloudKit Dashboard before or in parallel with the entitlement fix; if the container is genuinely missing under team `4Z8GG667QD`, the entitlement change alone will not resolve the rejection and a Dashboard-side creation step will be required.
 
 ## Root-candidate evidence
 
 ### A. CloudKit Dashboard container under team `4Z8GG667QD`
-Implied present. The embedded provisioning profile signed by Apple WWDR for this app on 2026-06-26 lists in its `Entitlements` dictionary:
+
+**Verdict: UNVERIFIED — direct Dashboard access not available to this agent.**
+
+The acceptance criterion requires confirming that `iCloud.com.tianpli.aidash` exists in the CloudKit Dashboard under team `4Z8GG667QD` with Development environment available. The authoritative check for this is a logged-in visit to `https://icloud.developer.apple.com/dashboard/`, which requires an interactive Apple ID sign-in plus 2FA. The agent runtime has neither an authenticated browser session for that site nor a public Apple CLI/API that exposes Dashboard container metadata, so this check could not be executed directly in this spike.
+
+**Required user action (still open against this acceptance criterion):** visually confirm in CloudKit Dashboard that:
+
+1. Container `iCloud.com.tianpli.aidash` is listed under team `4Z8GG667QD`.
+2. The Development environment is provisioned (default zone visible / creatable).
+3. The signed-in Apple ID has write permission on that container.
+
+**Indirect supporting evidence (not a substitute for the direct check):** the provisioning profile embedded in the built `AIDash.app` bundle, signed by Apple WWDR on 2026-06-26, lists in its `Entitlements` dictionary:
 
 ```
 com.apple.developer.icloud-container-development-container-identifiers = [iCloud.com.tianpli.aidash]
@@ -25,7 +38,7 @@ com.apple.developer.ubiquity-container-identifiers = [iCloud.com.tianpli.aidash]
 com.apple.developer.team-identifier = 4Z8GG667QD
 ```
 
-Apple does not issue a profile authorizing a container the team does not own; the container therefore exists under team `4Z8GG667QD` and has both Production and Development environments enabled. A direct CloudKit Dashboard fetch was not performed because the agent has no authenticated access to `icloud.developer.apple.com`; the user can confirm visually if desired, but the profile evidence already satisfies this question.
+Apple's profile-issuance service normally rejects requests that reference a container the team does not own, so a profile carrying these entitlements is consistent with the container existing under team `4Z8GG667QD`. Treat this as supporting context only — it does not satisfy the Dashboard verification criterion, and it does not prove the container is in a healthy or writable state at the moment.
 
 ### B. Apple Developer Portal App ID `com.tianpli.aidash`
 Confirmed present with CloudKit capability and container association. The same profile entitlement set above could not be issued otherwise. The profile is also marked `IsXcodeManaged=true` and was regenerated automatically on 2026-06-26, so Xcode's automatic-signing path has successfully reconciled the App ID with the new paid team.
@@ -103,7 +116,9 @@ The container ID in the failing request is exactly `iCloud.com.tianpli.aidash`, 
 
 ## Why this points at entitlements, not Dashboard / Portal
 
-Two observations rule out the "container missing in Dashboard" and "App ID not configured" branches:
+Caveat: this analysis is conditional on the Dashboard container actually existing under team `4Z8GG667QD` (root candidate A, currently unverified — see section A). If the user's Dashboard check shows the container is missing or unhealthy, the conclusion below does not apply and the Dashboard branch must be addressed first.
+
+Assuming the container exists, two observations argue against the "container missing in Dashboard" and "App ID not configured" branches:
 
 1. Apple WWDR signed a profile for this team that explicitly names `iCloud.com.tianpli.aidash` in both `icloud-container-identifiers` and `icloud-container-development-container-identifiers`. Apple's signing service would reject a profile request referencing a container that does not exist under the team or an App ID without CloudKit enabled.
 2. The CKModifyRecordZonesOperation reached `cloudd` and got a server response (not `CKErrorDomain Code=3 "Bad container"` and not `Code=9 "Not Authenticated"`). The server actively evaluated the request and rejected it — i.e. the request authenticated against the right container and was refused at the permission layer.
@@ -114,9 +129,11 @@ Separately, `com.apple.developer.ubiquity-container-identifiers` is required by 
 
 ## Recommended next action
 
-**One action path: extend the entitlement plist.** No user action against the Apple Developer Portal or CloudKit Dashboard is required at this time.
+**Primary action path: extend the entitlement plist** (handled in a follow-up implementation issue; this spike does not modify production code).
 
-Add to `Apps/AIDashApp/AIDashApp.entitlements` (handled in a follow-up implementation issue; this spike does not modify production code):
+**Parallel user action: visually verify the Dashboard container.** Section A's acceptance criterion remains open — the user (or any operator with Apple ID access) must confirm in CloudKit Dashboard that `iCloud.com.tianpli.aidash` exists under team `4Z8GG667QD` with the Development environment available. If that check fails, the entitlement fix alone will not resolve the rejection.
+
+Add to `Apps/AIDashApp/AIDashApp.entitlements`:
 
 ```xml
 <key>com.apple.developer.icloud-container-environment</key>
