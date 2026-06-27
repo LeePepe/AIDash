@@ -1,0 +1,51 @@
+name: build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build + test (macOS 26)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: swift test (AIDashCore)
+        run: swift test --package-path Packages/AIDashCore
+
+      - name: Build AIDashApp (macOS)
+        run: |
+          xcodebuild \
+            -scheme AIDashApp \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Build aidash CLI (macOS)
+        run: |
+          xcodebuild \
+            -scheme aidash \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
