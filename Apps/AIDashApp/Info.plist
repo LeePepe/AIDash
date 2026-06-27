@@ -29,10 +29,5 @@
 	<string>26.0</string>
 	<key>MinimumOSVersion</key>
 	<string>26.0</string>
-	<key>MachServices</key>
-	<dict>
-		<key>com.tianpli.aidash.xpc.v1</key>
-		<true/>
-	</dict>
 </dict>
 </plist>

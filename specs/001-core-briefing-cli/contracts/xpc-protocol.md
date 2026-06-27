@@ -20,6 +20,33 @@
 protocol change ships a new name (`.v2`), letting old CLI and new app
 coexist during a transition.
 
+### Launchd integration (required)
+
+`NSXPCListener(machServiceName:)` is a thin wrapper over `launchd`'s
+mach-port brokering — it only works when the **launchd job that owns
+the process** has the corresponding `MachServices` entry. Therefore:
+
+- The bundled LaunchAgent plist at
+  `Apps/AIDashApp/Resources/com.tianpli.aidash.plist` (copied into
+  `Contents/Library/LaunchAgents/` at build) **MUST** declare:
+
+  ```xml
+  <key>MachServices</key>
+  <dict>
+      <key>com.tianpli.aidash.xpc.v1</key>
+      <true/>
+  </dict>
+  ```
+
+- The app's `Info.plist` MUST NOT declare `MachServices`. `Info.plist`
+  `MachServices` only applies to XPC services bundled inside
+  `Contents/XPCServices/`, not to launchd-managed agents — declaring
+  it on the host app is misleading and unused.
+- `SMAppService.agent(plistName:)` (used in `AIDashApp` launch) reads
+  the LaunchAgent plist above; registration silently fails with
+  `EX_CONFIG` (78) every `ThrottleInterval` seconds when `MachServices`
+  is missing, because launchd has no port to broker to the CLI.
+
 ---
 
 ## Obj-C protocol
