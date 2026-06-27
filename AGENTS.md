@@ -70,14 +70,15 @@ xcodegen generate
 swift test --package-path Packages/AIDashCore
 
 # Build the macOS app
-xcodebuild -scheme AIDashApp -destination "platform=macOS" build
+xcodebuild -scheme AIDashApp -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build
 
 # Build the iPhone/iPad app
 xcodebuild -scheme AIDashApp -destination "platform=iOS Simulator,name=iPhone 17,OS=26.0" build
 xcodebuild -scheme AIDashApp -destination "platform=iOS Simulator,name=iPad Pro,OS=26.0" build
 
-# Build the CLI
-xcodebuild -scheme aidash -destination "platform=macOS" build
+# Build the aidash CLI (macOS only). MUST pass before any push that
+# touches CLI/aidash/** or project.yml.
+xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build
 ```
 
 ## Git workflow
@@ -89,13 +90,20 @@ xcodebuild -scheme aidash -destination "platform=macOS" build
 - **Conventional commits.** `feat:`, `fix:`, `refactor:`, `test:`,
   `docs:`, `chore:`.
 - **PR is the unit of merge.** Each PR closes one Multica issue.
-- **`main` is protected.** CI must pass (build gate + Core test gate).
-  Reviewer must approve.
+- **`main` is protected.** Two layers of CI gate every change:
+  1. **Local `pre-push` hook** (`scripts/hooks/pre-push`) — runs
+     `swift test` on `AIDashCore`, then `xcodegen generate`, then
+     `xcodebuild` for BOTH `AIDashApp` and the `aidash` CLI. Activated
+     per-worktree via `git config core.hooksPath scripts/hooks`.
+  2. **GitHub Actions** (`.github/workflows/build.yml`) — re-runs the
+     same gates on `macos-latest` for every PR against `main` and for
+     every push to `main`. This is the authoritative CI signal that the
+     Reviewer and PR Manager must confirm green before merge.
 - **Hooks live in `scripts/hooks/`** (under version control), activated
   via `git config core.hooksPath scripts/hooks`. `.git/hooks/` is
-  per-worktree and ignored. The `pre-push` hook runs the test + build
-  gate; bypass with `--no-verify` is allowed only for docs-only
-  changes.
+  per-worktree and ignored. Bypass with `--no-verify` is allowed only
+  for docs-only changes — the GitHub Actions gate still runs and will
+  fail the PR if non-docs code is broken.
 
 ## When in doubt
 
