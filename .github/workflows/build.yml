@@ -13,15 +13,34 @@ concurrency:
 jobs:
   build:
     name: build + test (macOS 26)
-    runs-on: macos-latest
+    # macos-26 runner ships Xcode 26.x (Swift 6.2), which AIDashUI requires
+    # (Package.swift declares swift-tools-version: 6.2). macos-latest defaults
+    # to Xcode 16.4 / Swift 6.1 and fails package resolution.
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode 26 (Swift 6.2)
+        # Even on macos-26 the default xcode-select may point at an older
+        # Xcode; pick the highest installed Xcode_26*.app explicitly so
+        # `xcodebuild` / `swift` see Swift 6.2 unconditionally.
+        run: |
+          set -euo pipefail
+          XCODE_APP=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -Vr | head -n1 || true)
+          if [ -z "$XCODE_APP" ]; then
+            echo "ERROR: no Xcode 26.x found on runner. Installed Xcode apps:"
+            ls -d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+          echo "Selecting $XCODE_APP"
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+
       - name: Show toolchain
         run: |
           sw_vers
+          xcode-select -p
           xcodebuild -version
           swift --version
 
