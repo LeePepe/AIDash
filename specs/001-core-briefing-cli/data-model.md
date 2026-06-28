@@ -89,9 +89,15 @@ public struct Briefing: Codable, Sendable {
     public let date: String           // "YYYY-MM-DD"
     public let generatedAt: Date
     public let generatedBy: String    // human-readable agent name
+    public let publishedAt: Date?     // nil until briefing.publish; mirrors BriefingModel.publishedAt
     public let containers: [Container]
 }
 ```
+
+`publishedAt` is a backward-compatible additive field: older clients that
+predate this key continue to decode successfully (treated as `nil`). The
+field is surfaced by `briefing.get` so callers can verify their writes
+without a follow-up store inspection.
 
 ### Container
 
