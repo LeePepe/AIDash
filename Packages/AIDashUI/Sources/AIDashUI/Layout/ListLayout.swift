@@ -13,8 +13,7 @@ public struct ListLayout: View {
     public var body: some View {
         LazyVStack(spacing: 12) {
             ForEach(cards) { card in
-                // TODO: Replace with CardRouter(card: card) when T096 merges
-                Text(card.id)
+                CardRouter(card: card)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

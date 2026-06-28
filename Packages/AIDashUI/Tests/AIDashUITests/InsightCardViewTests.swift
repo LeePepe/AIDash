@@ -55,14 +55,15 @@ struct InsightCardViewTests {
         #expect(view.style == style)
     }
 
-    @Test("safeCitations filters out non-http schemes")
+    @Test("safeCitations enforces URLPolicy (https-only, non-empty host)")
     func filtersCitationSchemes() {
         let citations: [InsightPayload.Citation] = [
             .init(label: "Good HTTPS", url: "https://example.com"),
-            .init(label: "Good HTTP", url: "http://example.com"),
+            .init(label: "Bad HTTP", url: "http://example.com"),
             .init(label: "Bad file", url: "file:///etc/passwd"),
             .init(label: "Bad custom", url: "myapp://deeplink"),
             .init(label: "Bad javascript", url: "javascript:alert(1)"),
+            .init(label: "Bad empty host", url: "https:///foo"),
             .init(label: "Invalid URL", url: ""),
         ]
 
@@ -73,9 +74,8 @@ struct InsightCardViewTests {
         )
         let safe = view.safeCitations(from: citations)
 
-        #expect(safe.count == 2)
+        #expect(safe.count == 1)
         #expect(safe[0].label == "Good HTTPS")
-        #expect(safe[1].label == "Good HTTP")
     }
 
     @Test("truncatedBody truncates at 150 chars with ellipsis")

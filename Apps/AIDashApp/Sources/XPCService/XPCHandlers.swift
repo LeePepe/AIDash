@@ -203,6 +203,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
             date: model.date,
             generatedAt: model.generatedAt,
             generatedBy: model.generatedBy,
+            publishedAt: model.publishedAt,
             containers: model.containers
                 .sorted { $0.order < $1.order }
                 .map { containerModel in
