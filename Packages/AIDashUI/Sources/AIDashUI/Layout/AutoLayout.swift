@@ -15,8 +15,7 @@ public struct AutoLayout: View {
             ForEach(groupedRows, id: \.id) { row in
                 switch row {
                 case .fullWidth(let card):
-                    // TODO: Replace with CardRouter(card: card) when T096 merges
-                    Text(card.id)
+                    CardRouter(card: card)
                         .frame(maxWidth: .infinity)
                 case .grid(let gridCards):
                     LazyVGrid(
@@ -25,8 +24,7 @@ public struct AutoLayout: View {
                         spacing: 12
                     ) {
                         ForEach(gridCards) { card in
-                            // TODO: Replace with CardRouter(card: card) when T096 merges
-                            Text(card.id)
+                            CardRouter(card: card)
                         }
                     }
                 }
