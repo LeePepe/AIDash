@@ -101,10 +101,7 @@ aidash briefing get --date <YYYY-MM-DD|today|yesterday|latest>
 ```
 
 **Success data**: full Briefing as JSON (containers + cards, payloads
-decoded into their typed shapes). The Briefing envelope includes
-`publishedAt` (ISO-8601 string, or `null` for an unpublished draft) so
-callers can verify a prior `briefing publish` without inspecting the
-store directly.
+decoded into their typed shapes).
 
 ---
 
