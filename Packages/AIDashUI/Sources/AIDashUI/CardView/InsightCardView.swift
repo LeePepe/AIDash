@@ -92,11 +92,8 @@ public struct InsightCardView: View {
     func safeCitations(
         from citations: [InsightPayload.Citation]
     ) -> [(label: String, url: URL)] {
-        let allowedSchemes: Set<String> = ["http", "https"]
-        return citations.compactMap { citation in
-            guard let url = URL(string: citation.url),
-                  let scheme = url.scheme?.lowercased(),
-                  allowedSchemes.contains(scheme) else {
+        citations.compactMap { citation in
+            guard let url = URLPolicy.validate(citation.url) else {
                 return nil
             }
             return (label: citation.label, url: url)
