@@ -84,30 +84,9 @@ public struct BriefingView: View {
             emptyContainersState
         } else {
             ForEach(sorted) { container in
-                containerStub(container)
+                ContainerView(container: container)
             }
         }
-    }
-
-    /// Minimal in-place container renderer used until T091 (ContainerView)
-    /// merges. This deliberately stays as a compact title/subtitle stub so
-    /// T090 does not depend on a not-yet-shipped sibling task. It is private
-    /// to this file so it cannot accidentally become public surface.
-    @ViewBuilder
-    private func containerStub(_ container: ContainerModel) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(container.title)
-                .font(.headline)
-            if let subtitle = container.subtitle {
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
     }
 
     private var emptyContainersState: some View {

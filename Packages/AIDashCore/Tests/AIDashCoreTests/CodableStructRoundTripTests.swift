@@ -117,6 +117,48 @@ struct CodableStructRoundTripTests {
         #expect(decoded.generatedBy == "claude-code")
         #expect(decoded.containers.count == 1)
         #expect(decoded.containers[0].id == "ctr-1")
+        #expect(decoded.publishedAt == nil)
+    }
+
+    /// MY-1047: `briefing.get` must surface `publishedAt` so callers can
+    /// verify a prior `briefing.publish` without inspecting the SwiftData
+    /// store. The Briefing wire type carries the timestamp through encode
+    /// and decode.
+    @Test func briefingRoundTripWithPublishedAt() throws {
+        let generatedAt = Date(timeIntervalSince1970: 1_750_000_000)
+        let publishedAt = Date(timeIntervalSince1970: 1_750_000_500)
+        let briefing = Briefing(
+            date: "2026-06-28",
+            generatedAt: generatedAt,
+            generatedBy: "claude-code",
+            publishedAt: publishedAt,
+            containers: []
+        )
+        let data = try encoder.encode(briefing)
+        let decoded = try decoder.decode(Briefing.self, from: data)
+        #expect(decoded.publishedAt == publishedAt)
+
+        let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["publishedAt"] is String)
+    }
+
+    /// Backward compatibility: payloads written by an older app version that
+    /// predates the `publishedAt` field must continue to decode. The missing
+    /// key surfaces as `nil`, never a decoding failure.
+    @Test func briefingDecodesLegacyPayloadWithoutPublishedAt() throws {
+        let legacyJSON = #"""
+        {
+          "date": "2026-06-28",
+          "generatedAt": "2026-06-28T11:00:00Z",
+          "generatedBy": "legacy-agent",
+          "containers": []
+        }
+        """#
+        let data = Data(legacyJSON.utf8)
+        let decoded = try decoder.decode(Briefing.self, from: data)
+        #expect(decoded.date == "2026-06-28")
+        #expect(decoded.generatedBy == "legacy-agent")
+        #expect(decoded.publishedAt == nil)
     }
 
     // MARK: - UserEvent

@@ -28,9 +28,9 @@ public struct HeroLayout: View {
         }
     }
 
-    // Stub until CardRouter (T096) is available
+    // Routes each card through CardRouter for content rendering.
     @ViewBuilder
     private func cardView(for card: CardModel) -> some View {
-        Text(card.id)
+        CardRouter(card: card)
     }
 }
