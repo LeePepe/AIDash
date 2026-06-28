@@ -47,6 +47,39 @@ the process** has the corresponding `MachServices` entry. Therefore:
   `EX_CONFIG` (78) every `ThrottleInterval` seconds when `MachServices`
   is missing, because launchd has no port to broker to the CLI.
 
+- The plist **MUST** identify the executable with `BundleProgram` (a
+  path relative to the enclosing `.app` bundle), not with
+  `ProgramArguments`:
+
+  ```xml
+  <key>BundleProgram</key>
+  <string>Contents/MacOS/AIDash</string>
+  ```
+
+  SMAppService-managed agents are launched from launchd's own working
+  directory (`/`), not from inside the bundle, so a relative
+  `ProgramArguments` value like `Contents/MacOS/AIDash` cannot be
+  resolved. When that happens the mach port still brokers (CLI sees the
+  service name) but launchd parks the job in `state = spawn scheduled`
+  forever — the process is never spawned and every CLI request hangs.
+  `BundleProgram` tells launchd to resolve the path against the
+  containing bundle, which is the supported way to launch the host app.
+
+- The plist **MUST** declare `ProcessType=Interactive`. AIDash is a
+  user-facing menubar app, not a daemon; the `Interactive` process
+  type opts the agent out of background throttling so the menubar UI
+  is responsive when launchd spawns it on demand.
+
+- The plist **MUST NOT** declare `KeepAlive` for AIDash. The agent is
+  on-demand: launchd spawns it when a CLI client connects to the
+  `com.tianpli.aidash.xpc.v1` mach service (or at login via
+  `RunAtLoad=true`), and the app exits when the user quits it.
+  `KeepAlive` (in particular `KeepAlive.Crashed=true`) interacts
+  poorly with on-demand mach activation and has empirically produced
+  crash-loops on user sessions when paired with a misconfigured
+  executable path. Use unattended uptime via `RunAtLoad` plus
+  on-demand re-spawn from the mach port, not via `KeepAlive`.
+
 ---
 
 ## Obj-C protocol
