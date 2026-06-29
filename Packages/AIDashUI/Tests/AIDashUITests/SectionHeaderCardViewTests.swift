@@ -55,39 +55,34 @@ struct SectionHeaderCardViewTests {
         )
     }
 
-    // MARK: - Contract: invariant layout across sizes
+    // MARK: - Typography contract (MY-1059)
     //
-    // contracts/cardtype-payloads.md §sectionHeader states:
+    // contracts/cardtype-payloads.md §sectionHeader:
     //   "all sizes show the same header layout. Size hint affects vertical
     //   spacing only (small = compact, hero = generous)."
     //
-    // These tests pin that contract: typography (title font, subtitle font)
-    // and horizontal padding MUST NOT depend on size. Only vertical padding
-    // and subtitle gap may vary, and they must scale monotonically from
-    // .small → .hero (small = compact, hero = generous).
+    // Typography (title font, subtitle font, secondary color) comes from
+    // the shared per-type recipe and MUST NOT depend on size. Only
+    // vertical paddings and the subtitle gap may vary, and they must
+    // scale monotonically from .small → .hero (small = compact,
+    // hero = generous).
+
+    @Test("uses the shared sectionHeader typography recipe")
+    func usesSharedTypographyRecipe() {
+        let expected = AIDashTypography.detail(for: .sectionHeader)
+        #expect(SectionHeaderCardView.recipe.primary == expected.primary)
+        #expect(SectionHeaderCardView.recipe.secondary == expected.secondary)
+        #expect(SectionHeaderCardView.recipe.secondaryColor == expected.secondaryColor)
+    }
 
     @Test("title font is invariant across sizes (typography contract)")
     func titleFontInvariant() {
-        #expect(SectionHeaderCardView.titleFont == .title3)
+        #expect(SectionHeaderCardView.recipe.primary == .title3.weight(.semibold))
     }
 
     @Test("subtitle font is invariant across sizes (typography contract)")
     func subtitleFontInvariant() {
-        #expect(SectionHeaderCardView.subtitleFont == .subheadline)
-    }
-
-    @Test("horizontal padding is invariant across sizes")
-    func horizontalPaddingInvariant() {
-        let payload = SectionHeaderPayload(title: "Title", subtitle: "Sub")
-        for size in CardSize.allCases {
-            let view = SectionHeaderCardView(payload: payload, size: size, style: .neutral)
-            // Horizontal padding lives on the type, not the instance — but we
-            // assert via the same path the body uses so the test fails if a
-            // refactor ever reintroduces per-size horizontal padding on the
-            // instance.
-            _ = view.body
-        }
-        #expect(SectionHeaderCardView.horizontalPadding == 16)
+        #expect(SectionHeaderCardView.recipe.secondary == .subheadline)
     }
 
     @Test("vertical padding scales monotonically: small ≤ medium ≤ wide ≤ hero")
@@ -130,28 +125,28 @@ struct SectionHeaderCardViewTests {
         }
     }
 
-    // MARK: - Style tint contract
+    // MARK: - No-badge / no-chrome contract (MY-1059)
+    //
+    // §Card Chrome — sectionHeader is the single allowed structural
+    // variant that renders NO badge, NO shared card chrome, NO
+    // background, NO border, NO card padding wrapper.
 
-    @Test("neutral style uses clear background tint")
-    func neutralBackgroundIsClear() {
-        let payload = SectionHeaderPayload(title: "Title")
-        let view = SectionHeaderCardView(payload: payload, size: .medium, style: .neutral)
-        #expect(view.backgroundTint == Color.clear)
+    @Test("sectionHeader CardType declares no icon badge")
+    func noIconBadge() {
+        #expect(!CardType.sectionHeader.hasIconBadge)
+        #expect(CardType.sectionHeader.iconSymbol == nil)
+        #expect(CardType.sectionHeader.iconTint == nil)
     }
 
-    @Test("non-neutral styles use distinct, non-clear background tints")
-    func nonNeutralBackgroundsDiffer() {
-        let payload = SectionHeaderPayload(title: "Title")
-        let neutral = SectionHeaderCardView(payload: payload, size: .medium, style: .neutral).backgroundTint
-        let success = SectionHeaderCardView(payload: payload, size: .medium, style: .success).backgroundTint
-        let warning = SectionHeaderCardView(payload: payload, size: .medium, style: .warning).backgroundTint
-        let accent  = SectionHeaderCardView(payload: payload, size: .medium, style: .accent).backgroundTint
-
-        #expect(success != neutral)
-        #expect(warning != neutral)
-        #expect(accent  != neutral)
-        #expect(success != warning)
-        #expect(success != accent)
-        #expect(warning != accent)
+    @Test("renderer source applies no shared card chrome and no local background")
+    func sourceHasNoChrome() throws {
+        let source = try loadRendererSource(named: "SectionHeaderCardView")
+        #expect(!source.contains(".cardChrome("), "SectionHeaderCardView must NOT use shared cardChrome")
+        #expect(!source.contains("CardTypeBadge("), "SectionHeaderCardView must NOT render a type badge")
+        #expect(!source.contains("RoundedRectangle(cornerRadius:"), "SectionHeaderCardView must NOT draw a rounded background")
+        #expect(!source.contains("backgroundTint"), "SectionHeaderCardView must NOT declare a backgroundTint")
+        #expect(!source.contains(".background(Color"), "SectionHeaderCardView must NOT apply a Color background")
+        #expect(!source.contains(".background(.background"), "SectionHeaderCardView must NOT apply a hierarchical background")
+        #expect(!source.contains(".strokeBorder("), "SectionHeaderCardView must NOT draw a border")
     }
 }
