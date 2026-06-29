@@ -89,6 +89,50 @@ This is intentional: it pushes business logic out of the app and into the
 agents, where it belongs. The same app build serves any agent strategy
 (per-tab agents, single planner agent, mixed) without code changes.
 
+### VI. Three Orthogonal Card Dimensions (NON-NEGOTIABLE)
+
+The `type / size / style` trio (Principle IV) is **three independent visual
+concerns**. Each dimension owns one thing and one thing only — they may not
+overlap. A renderer that conflates two dimensions (e.g. uses `size` to drive
+font scale, or uses `style` to mutate card chrome structure) is a
+constitutional violation and the Reviewer MUST 🔴 FAIL.
+
+- **`size` = physical geometry only.** It maps to grid columns / explicit
+  height / corner radius / padding. It MUST NOT affect typography scale.
+  `small` = 1 column, `medium` = 2 columns, `wide` = full row, `hero` =
+  full row + double height. Corner radius and padding scale with size
+  (see §Design System & Tokens) — that is geometry, not chrome. Density
+  across sizes comes from how many items the type renderer chooses to
+  show at that geometry, not from shrinking type.
+- **`type` = leading icon badge + typography + content density.** Each
+  `CardType` owns a 32×32 leading icon badge (SF Symbol + tint color),
+  its own font configuration, and a content-density vocabulary. The icon
+  badge is the primary type discriminator — a reader scanning the
+  briefing tells `metric` from `digest` from `agentSummary` by icon
+  glyph first, typography second. Two different types render visually
+  distinct even at the same size and style. Type is the "what kind of
+  card am I" channel.
+- **`style` = semantic signal tint only.** `style` MUST NOT change card
+  chrome structure (background material, padding) or the size-driven
+  geometry (corner radius). The only permitted style affordance is a
+  left-edge accent stripe (3pt hairline; success=green, warning=orange,
+  accent=accentColor; `neutral` = no stripe). Filling the whole card
+  with a colored background tint is forbidden — it cannot be
+  distinguished at low opacity and dominates the visual at high opacity.
+
+The type icon's tint color and the style stripe color are independent
+channels and do not conflict by construction: the icon sits at the top
+inside the card (always the same color per type), and the stripe sits
+on the left edge (varies by status). A `success` `metric` card has a
+green left stripe **and** a blue chart-bar icon — both signals coexist
+because they're at different positions with different meanings.
+
+A direct corollary: any single card is uniquely identified by (type,
+size, style), and a viewer scanning the briefing MUST be able to tell
+type apart by icon glyph + typography, size apart by physical
+dimensions + corner radius, and style apart by stripe color —
+independently, not jointly.
+
 ---
 
 ## Technical Constraints
@@ -198,6 +242,171 @@ Three gates, in priority order:
    agents validate UI work with build gates, previews, contract checks, and
    reviewer inspection. The user will provide product feedback naturally while
    using the app; that feedback becomes follow-up issues, not a pre-ship gate.
+
+### Design System & Tokens
+
+This section is the single source of truth for AIDash visual design. Card
+views, container layouts, and any new SwiftUI surface MUST consume these
+tokens. Inventing per-view padding/font/color constants is forbidden —
+add to this table or amend the constitution first.
+
+#### Two-Level Typography Hierarchy
+
+The UI uses exactly two typography systems. They MUST be visually
+distinguishable at a glance: a reader scanning the briefing must
+instantly tell "section label" from "card content" without reading
+words.
+
+- **Overview tier** (container titles, section dividers, briefing date
+  header). Configuration: `.system(.caption2, design: .rounded, weight:
+  .semibold)`, color `.secondary`, letter spacing `+0.6pt` (acts as ALL
+  CAPS for Latin while keeping CJK readable). This tier is for "where am
+  I in the document" labels — never for content.
+- **Detail tier** (card content). Each `CardType` declares its own
+  typography recipe inside the detail tier (see "Per-Type Typography
+  Recipes" below). The detail tier MUST NOT use the overview tier's
+  font / color — they are not interchangeable.
+
+The briefing's top-level date header is the one exception that uses
+neither tier — it uses `.largeTitle.bold()` once at the very top.
+
+#### Per-Type Visual Recipes (icon badge + typography, detail tier)
+
+`type` owns two visual signals: a leading 32×32 icon badge (primary
+discriminator — reader sees the glyph first) AND the detail-tier
+typography recipe. `size` MUST NOT mutate either; size only controls how
+many items / how much of the payload the renderer chooses to show.
+
+| CardType | Icon (SF Symbol) | Icon tint | Primary font | Secondary font | Notes |
+|---|---|---|---|---|---|
+| `metric` | `chart.bar.fill` | `.blue` | `.system(size: 36, weight: .bold, design: .rounded)` | `.caption` `.secondary` for label | Hero number always large; unit + trend arrow inline |
+| `insight` | `sparkles` | `.purple` | `.title3.weight(.semibold)` | `.body` `.primary` for body | Title first, body wraps |
+| `digest` | `doc.text.fill` | `.teal` | `.headline` for section heading | `.body` `lineSpacing: 4` for paragraphs | Prose; section list expands `body` paragraphs |
+| `agentSummary` | `bubble.left.and.bubble.right.fill` | `.indigo` | `.headline` for agent name | `.callout` for completed; `.caption.monospaced()` for refs | Refs render as capsule chips |
+| `todoList` | `checklist` | `.green` | `.body` per row | `.caption2` for priority dot label | Each row leads with a priority color dot |
+| `trending` | `chart.line.uptrend.xyaxis` | `.orange` | `.callout.monospaced()` for score | `.body` for title | Scores right-aligned mono |
+| `sectionHeader` | (no badge, no chrome) | — | `.title3.weight(.semibold)` | `.subheadline` `.secondary` | Renders with NO card chrome (raw header inside container) |
+
+#### Icon badge specification
+
+Every card type except `sectionHeader` renders a 32×32pt leading badge
+in the card's top-left corner:
+
+```
+ZStack {
+    RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(type.iconTint.opacity(0.15))    // soft tinted container
+    Image(systemName: type.icon)
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundStyle(type.iconTint)        // full saturation glyph
+}
+.frame(width: 32, height: 32)
+```
+
+The icon tint colors above (`.blue` / `.purple` / `.teal` / `.indigo` /
+`.green` / `.orange`) are chosen to be visually distinguishable at a
+glance, follow Apple Settings app icon coding conventions, and adapt
+automatically to Dark Mode and accessibility settings (Increase
+Contrast). Custom hex literals are forbidden.
+
+#### Size = Geometry Only (geometry ladders)
+
+`size` is a layout instruction, never a typography hint. Geometry
+includes grid columns AND corner radius AND padding — they scale
+together so a small card feels tight and a hero feels editorial.
+
+| size | Grid span | Min height | Corner radius | Padding |
+|---|---|---|---|---|
+| `small` | 1 column (target 200-260pt) | 96pt | 10pt | 12 / 14pt |
+| `medium` | 2 columns (target 400-520pt) | 140pt | 14pt | 16pt |
+| `wide` | full row (all columns) | 140pt (intrinsic) | 14pt | 16 / 20pt |
+| `hero` | full row, double height | 280pt | 20pt | 24pt |
+
+Container grid columns adapt by viewport: iPhone = 1 col, iPad portrait
+= 2 col, iPad landscape / Mac small window = 3 col, Mac large window = 4
+col. The card's own size token tells the grid how many columns to span;
+the grid itself decides total column count.
+
+#### Style = Semantic Signal Only (left stripe, no background fill)
+
+`style` does not change card chrome. It adds (or omits) a 3pt left-edge
+accent stripe. Card background, corner radius, padding, and elevation
+are identical across all four `style` values.
+
+| style | Stripe color | When agents use it |
+|---|---|---|
+| `neutral` | none | default; informational |
+| `success` | `.green` | positive outcomes (PR merged, goal hit) |
+| `warning` | `.orange` | attention needed (PR stuck, deadline near) |
+| `accent` | `.accentColor` | spotlight / call to action |
+
+Trend arrows inside `metric` cards may still use red / green — these are
+content (signal direction), not card chrome.
+
+#### Card Chrome (shared structure, size-scaled geometry)
+
+Every card view shares the same outer chrome structure and rendering
+recipe. Per-card override is forbidden. The only values that change
+across cards are geometry (corner radius, padding — both driven by
+`size`) and the optional left stripe (driven by `style`).
+
+- Background: `.background.secondary` (HierarchicalShapeStyle —
+  automatically renders as `secondarySystemGroupedBackground` on iOS /
+  iPadOS and `controlBackgroundColor` on macOS, sitting one step above
+  the page background).
+- Corner radius: per §Size = Geometry Only ladder (10 / 14 / 14 / 20).
+- Inner padding: per §Size = Geometry Only ladder.
+- Shadow: none (flat with material depth).
+- Border: hairline 0.5pt `.separator.opacity(0.5)` overlay for edge
+  definition. No other borders. The left 3pt stripe (when `style !=
+  .neutral`) sits inside the rounded shape, not as a separate border.
+
+The single allowed structural variant is the `sectionHeader` card type,
+which has **no chrome at all** — it renders as a typography-only
+divider so containers can group cards with a sub-heading without
+nesting containers (Principle III, spec D9). The `sectionHeader` also
+omits the leading icon badge.
+
+#### Page Chrome (where cards sit)
+
+Cards MUST visually float above a slightly darker page background — if
+the page background and card background are identical, the cards
+disappear into the canvas (the failure mode observed on 2026-06-29).
+
+- Page background: `Color(NSColor.windowBackgroundColor)` (macOS) /
+  `Color(.systemGroupedBackground)` (iOS / iPadOS). These are one
+  hierarchy step *below* the card's `.background.secondary`, so the
+  card naturally appears elevated without needing a shadow.
+- Page horizontal padding: 24pt (Mac) / 20pt (iOS / iPad).
+- Page vertical padding (top of briefing, bottom of last container):
+  24pt.
+
+#### Container Chrome
+
+Containers MUST NOT wrap their cards in their own colored panel. A
+container is rendered as:
+
+1. An overview-tier title line (and optional subtitle line).
+2. 12pt vertical spacing.
+3. The cards laid out by the container's `layout` (auto/list/grid/hero).
+4. 24pt vertical spacing before the next container.
+
+This is intentional: nesting "card inside titled box inside scroll
+view" produces the "everything looks the same" failure mode. Section
+headers act as anchors; cards carry the content.
+
+#### Spacing & Color Tokens
+
+- Container vertical spacing: 24pt between containers; 12pt between
+  container header and first card.
+- Card vertical spacing inside a container: 12pt.
+- Grid column gap: 12pt.
+- Page horizontal padding: see §Page Chrome.
+- Only semantic colors: `.primary`, `.secondary`, `.tertiary` for
+  text; system colors (`.blue` / `.purple` / `.teal` / `.indigo` /
+  `.green` / `.orange` / `.red` / `.accentColor`) for type icon tints
+  and signal channels. Hardcoded `Color(red:..., green:..., blue:...)`
+  and `Color(hex:)` literals are forbidden (Quality Bar §I P1.4).
 
 ---
 
@@ -317,6 +526,69 @@ Applies to every SwiftUI view in `AIDashUI` and `AIDashApp`:
    (`neutral/success/warning/accent`). Custom tints out of band are
    🟡 CHANGES REQUESTED unless an ADR exists.
 
+### I. Design Token Discipline (P0 for dimension conflation; P1 for token drift)
+
+This bar enforces Principle VI ("Three Orthogonal Card Dimensions") and
+the §Design System & Tokens contract. The Reviewer reads card / layout
+diffs against the token table, not aesthetic taste.
+
+**P0 — Dimension Conflation (🔴 FAIL)**
+
+These violate the Principle VI orthogonality guarantee:
+
+1. A `CardView` whose `body` (or downstream switch) branches on `size`
+   to choose a different `Font`, `FontWeight`, or `Font.Design`. `size`
+   is geometry only.
+2. A `CardView` whose `body` branches on `style` to mutate background
+   material, padding, or shadow. `style` only controls the left stripe
+   presence + color.
+3. A `CardView` rendering its own `background(Color.X.opacity(N))`
+   driven by `style`. Whole-card colored fills are forbidden.
+4. A renderer that uses overview-tier typography for card content, or
+   detail-tier typography for container titles / section dividers. The
+   two tiers are not interchangeable.
+5. A `CardView` for any type other than `sectionHeader` that omits the
+   leading 32×32 icon badge per the §Per-Type Visual Recipes table.
+   The icon is the primary type discriminator and is mandatory.
+
+**P1 — Token Drift (🟡 CHANGES REQUESTED)**
+
+These violate the §Design System & Tokens table but do not break the
+orthogonality contract:
+
+1. Hardcoded numeric font sizes (`.font(.system(size: 12))`) when a
+   semantic alias is available, OR a size that disagrees with the
+   per-type recipe table for that CardType.
+2. Hardcoded padding / spacing values that disagree with the
+   §Size = Geometry Only ladder or the §Spacing & Color Tokens list.
+3. Corner radius that disagrees with the §Size = Geometry Only ladder
+   (small=10 / medium=14 / wide=14 / hero=20), or shadow added to a
+   card.
+4. Hardcoded color literals (`Color(red:, green:, blue:)`,
+   `Color(hex:)`) when a semantic color (`.primary`, `.secondary`,
+   `.green`, `.accentColor`, etc.) covers the case. Type icon tints
+   MUST come from the §Per-Type Visual Recipes table, not freshly
+   chosen.
+5. `Container` view wrapping its child cards in its own
+   `RoundedRectangle` / `background` — containers are typography +
+   spacing only, not chrome.
+6. Page background that equals card background (no hierarchical
+   contrast). Pages MUST use a one-step-darker background per
+   §Page Chrome so cards visually float.
+
+**Reviewer workflow for this bar**
+
+For any PR touching `Packages/AIDashUI/Sources/AIDashUI/**`:
+
+1. Open the diff against `.specify/memory/constitution.md` §Design
+   System & Tokens.
+2. For each modified view, walk the per-type recipe table and confirm
+   typography matches the CardType row.
+3. Confirm size-switches do not change font / padding / chrome.
+4. Confirm style-switches only toggle the left stripe.
+5. Confirm spacing constants come from the §Spacing & Color Tokens
+   list, not freshly-invented numbers.
+
 ### Verdict Aggregation Rules
 
 Reviewer MUST aggregate per-bar findings into an overall verdict:
@@ -412,4 +684,4 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.3.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-26
+**Version**: 1.4.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-29
