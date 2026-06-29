@@ -1,5 +1,6 @@
 import Testing
 import SwiftUI
+import Foundation
 import AIDashCore
 @testable import AIDashUI
 
@@ -48,7 +49,7 @@ struct HeroLayoutTests {
 
     @Test("HeroLayout delegates to TokenGrid and never branches on CardType")
     func delegatesToTokenGrid() throws {
-        let source = try LayoutSourceLoader.read("HeroLayout.swift")
+        let source = try readLayoutSource("HeroLayout.swift")
 
         #expect(source.contains("TokenGrid("),
                 "HeroLayout must delegate placement to TokenGrid")
@@ -134,4 +135,19 @@ struct TokenGridPackingTests {
         let rows = TokenGrid.packRows(["a", "b"], totalColumns: 0) { _ in 1 }
         #expect(rows.isEmpty)
     }
+}
+
+fileprivate func readLayoutSource(_ filename: String) throws -> String {
+    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    for _ in 0..<8 {
+        let candidate = dir
+            .appendingPathComponent("Sources/AIDashUI/Layout")
+            .appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return try String(contentsOf: candidate, encoding: .utf8)
+        }
+        dir = dir.deletingLastPathComponent()
+    }
+    struct NotFound: Error { let filename: String }
+    throw NotFound(filename: filename)
 }

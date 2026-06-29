@@ -63,7 +63,7 @@ struct AutoLayoutTests {
 
     @Test("AutoLayout source delegates to TokenGrid and never switches on CardType")
     func autoLayoutDelegatesAndAvoidsCardTypeBranching() throws {
-        let source = try LayoutSourceLoader.read("AutoLayout.swift")
+        let source = try readLayoutSource("AutoLayout.swift")
 
         #expect(source.contains("TokenGrid("),
                 "AutoLayout must delegate placement to TokenGrid")
@@ -76,4 +76,24 @@ struct AutoLayoutTests {
         #expect(!source.contains(".background("),
                 "AutoLayout must not paint its own background")
     }
+}
+
+/// Reads a Swift source file from `Sources/AIDashUI/Layout/<filename>` by
+/// walking up from this test file. Used by the source-level assertions
+/// that verify layouts delegate to `TokenGrid` without branching on
+/// `CardType` or painting their own chrome (SwiftUI's view graph does not
+/// expose enough to assert this at runtime).
+fileprivate func readLayoutSource(_ filename: String) throws -> String {
+    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    for _ in 0..<8 {
+        let candidate = dir
+            .appendingPathComponent("Sources/AIDashUI/Layout")
+            .appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return try String(contentsOf: candidate, encoding: .utf8)
+        }
+        dir = dir.deletingLastPathComponent()
+    }
+    struct NotFound: Error { let filename: String }
+    throw NotFound(filename: filename)
 }

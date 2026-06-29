@@ -54,7 +54,7 @@ struct ListLayoutTests {
 
     @Test("ListLayout delegates to TokenGrid with collapseToList: true")
     func delegatesWithCollapse() throws {
-        let source = try LayoutSourceLoader.read("ListLayout.swift")
+        let source = try readLayoutSource("ListLayout.swift")
 
         #expect(source.contains("TokenGrid("),
                 "ListLayout must delegate to the shared TokenGrid")
@@ -67,4 +67,19 @@ struct ListLayoutTests {
         #expect(!source.contains(".background("),
                 "ListLayout must not paint its own background")
     }
+}
+
+fileprivate func readLayoutSource(_ filename: String) throws -> String {
+    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    for _ in 0..<8 {
+        let candidate = dir
+            .appendingPathComponent("Sources/AIDashUI/Layout")
+            .appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return try String(contentsOf: candidate, encoding: .utf8)
+        }
+        dir = dir.deletingLastPathComponent()
+    }
+    struct NotFound: Error { let filename: String }
+    throw NotFound(filename: filename)
 }

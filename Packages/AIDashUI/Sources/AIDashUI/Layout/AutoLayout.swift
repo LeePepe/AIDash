@@ -12,6 +12,15 @@ import AIDashCore
 // `collapseToList` is the only per-layout override: ListLayout sets it
 // to `true` so every card spans the full row regardless of its declared
 // size. Auto / grid / hero use the token-driven column count untouched.
+//
+// Implementation note: TokenGrid is a custom SwiftUI `Layout` rather
+// than a `GeometryReader`-wrapped VStack. `GeometryReader` is a flexible
+// container that does not report an intrinsic height up the layout
+// tree, so when a parent `ScrollView` / `VStack` asks the grid for its
+// preferred size it would collapse to the placeholder height while the
+// cards rendered outside the allocated rectangle. The `Layout`
+// implementation packs rows during `sizeThatFits` and reports the real
+// total height so container spacing is preserved.
 
 @MainActor
 struct TokenGrid: View {
@@ -24,19 +33,22 @@ struct TokenGrid: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            PackedRowsView(
-                cards: cards,
-                width: proxy.size.width,
-                collapseToList: collapseToList
-            )
+        TokenGridLayout(
+            spans: cards.map { AIDashSize.gridSpan($0.size) },
+            collapseToList: collapseToList,
+            columnGap: AIDashSpacing.gridGap,
+            rowGap: AIDashSpacing.cardVertical
+        ) {
+            ForEach(cards, id: \.id) { card in
+                CardRouter(card: card)
+            }
         }
     }
 
     /// Greedy left-to-right row packing. Pure function — no SwiftUI.
-    /// Each card's span is clamped to `[1, totalColumns]`. Returns rows of
-    /// `(card, span)` pairs in input order.
-    static func packRows<C>(
+    /// Each item's span is clamped to `[1, totalColumns]`. Returns rows of
+    /// `(item, span)` pairs in input order.
+    nonisolated static func packRows<C>(
         _ items: [C],
         totalColumns: Int,
         spanForItem: (C) -> Int
@@ -60,43 +72,114 @@ struct TokenGrid: View {
     }
 }
 
-@MainActor
-private struct PackedRowsView: View {
-    let cards: [CardModel]
-    let width: CGFloat
+/// Custom `Layout` that packs cards into rows using a token-driven
+/// column count and a per-card span. Reports the packed rows' total
+/// height in `sizeThatFits` so a parent `ScrollView` / `VStack` allocates
+/// the correct vertical space (otherwise cards would draw outside the
+/// allocated rectangle and container spacing would collapse).
+struct TokenGridLayout: Layout {
+    let spans: [Int]
     let collapseToList: Bool
+    let columnGap: CGFloat
+    let rowGap: CGFloat
 
-    var body: some View {
-        let totalColumns = collapseToList
-            ? 1
-            : max(1, AIDashSize.columnCount(forWidth: width))
-        let gap = AIDashSpacing.gridGap
-        let totalGap = CGFloat(max(0, totalColumns - 1)) * gap
-        let cellWidth = max(0, (width - totalGap) / CGFloat(totalColumns))
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let width = proposal.width ?? .zero
+        guard width > 0, !subviews.isEmpty else { return .zero }
+        let rows = packedRows(width: width, subviewCount: subviews.count)
+        let totalColumns = resolvedColumnCount(for: width)
+        let colWidth = columnWidth(totalWidth: width, columns: totalColumns)
 
-        let rows = TokenGrid.packRows(
-            cards,
-            totalColumns: totalColumns,
-            spanForItem: { AIDashSize.gridSpan($0.size) }
-        )
-
-        VStack(spacing: AIDashSpacing.cardVertical) {
-            ForEach(rows.indices, id: \.self) { rowIdx in
-                let row = rows[rowIdx]
-                HStack(alignment: .top, spacing: gap) {
-                    ForEach(row.indices, id: \.self) { colIdx in
-                        let entry = row[colIdx]
-                        let widthForSpan = cellWidth * CGFloat(entry.span)
-                            + gap * CGFloat(max(0, entry.span - 1))
-                        CardRouter(card: entry.item)
-                            .frame(width: widthForSpan, alignment: .topLeading)
-                    }
-                    if row.reduce(0, { $0 + $1.span }) < totalColumns {
-                        Spacer(minLength: 0)
-                    }
-                }
+        var totalHeight: CGFloat = 0
+        for (rowIdx, row) in rows.enumerated() {
+            var rowHeight: CGFloat = 0
+            for entry in row {
+                let cellWidth = widthForSpan(entry.span, columnWidth: colWidth)
+                let size = subviews[entry.index].sizeThatFits(
+                    ProposedViewSize(width: cellWidth, height: nil)
+                )
+                rowHeight = max(rowHeight, size.height)
+            }
+            totalHeight += rowHeight
+            if rowIdx < rows.count - 1 {
+                totalHeight += rowGap
             }
         }
+        return CGSize(width: width, height: totalHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard bounds.width > 0, !subviews.isEmpty else { return }
+        let rows = packedRows(width: bounds.width, subviewCount: subviews.count)
+        let totalColumns = resolvedColumnCount(for: bounds.width)
+        let colWidth = columnWidth(totalWidth: bounds.width, columns: totalColumns)
+
+        var y = bounds.minY
+        for row in rows {
+            var rowHeight: CGFloat = 0
+            for entry in row {
+                let cellWidth = widthForSpan(entry.span, columnWidth: colWidth)
+                let size = subviews[entry.index].sizeThatFits(
+                    ProposedViewSize(width: cellWidth, height: nil)
+                )
+                rowHeight = max(rowHeight, size.height)
+            }
+            var x = bounds.minX
+            for entry in row {
+                let cellWidth = widthForSpan(entry.span, columnWidth: colWidth)
+                subviews[entry.index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: cellWidth, height: rowHeight)
+                )
+                x += cellWidth + columnGap
+            }
+            y += rowHeight + rowGap
+        }
+    }
+
+    private struct PackedEntry {
+        let index: Int
+        let span: Int
+    }
+
+    private func packedRows(width: CGFloat, subviewCount: Int) -> [[PackedEntry]] {
+        let totalColumns = resolvedColumnCount(for: width)
+        let indexed = (0..<subviewCount).map { $0 }
+        let rows = TokenGrid.packRows(indexed, totalColumns: totalColumns) { idx in
+            spans[safe: idx] ?? 1
+        }
+        return rows.map { row in row.map { PackedEntry(index: $0.item, span: $0.span) } }
+    }
+
+    private func resolvedColumnCount(for width: CGFloat) -> Int {
+        collapseToList ? 1 : max(1, AIDashSize.columnCount(forWidth: width))
+    }
+
+    private func columnWidth(totalWidth: CGFloat, columns: Int) -> CGFloat {
+        guard columns > 0 else { return 0 }
+        let gaps = CGFloat(max(0, columns - 1)) * columnGap
+        return max(0, (totalWidth - gaps) / CGFloat(columns))
+    }
+
+    private func widthForSpan(_ span: Int, columnWidth: CGFloat) -> CGFloat {
+        let s = max(1, span)
+        return columnWidth * CGFloat(s) + columnGap * CGFloat(max(0, s - 1))
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 

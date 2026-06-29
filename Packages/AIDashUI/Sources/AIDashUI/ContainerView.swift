@@ -34,8 +34,9 @@ public struct ContainerView: View {
                 .textCase(.uppercase)
             if let subtitle = container.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(AIDashTypography.section)
+                    .tracking(AIDashTypography.sectionTracking)
+                    .foregroundStyle(AIDashTypography.sectionColor)
             }
         }
     }

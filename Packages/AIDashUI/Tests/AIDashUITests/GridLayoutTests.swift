@@ -1,5 +1,6 @@
 import Testing
 import SwiftUI
+import Foundation
 import AIDashCore
 @testable import AIDashUI
 
@@ -91,7 +92,7 @@ struct GridLayoutTests {
 
     @Test("GridLayout delegates to TokenGrid and never branches on CardType")
     func delegatesToTokenGridAndAvoidsCardTypeBranching() throws {
-        let source = try LayoutSourceLoader.read("GridLayout.swift")
+        let source = try readLayoutSource("GridLayout.swift")
 
         #expect(source.contains("TokenGrid("),
                 "GridLayout must delegate placement to TokenGrid")
@@ -104,4 +105,19 @@ struct GridLayoutTests {
         #expect(!source.contains(".background("),
                 "GridLayout must not paint its own background")
     }
+}
+
+fileprivate func readLayoutSource(_ filename: String) throws -> String {
+    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    for _ in 0..<8 {
+        let candidate = dir
+            .appendingPathComponent("Sources/AIDashUI/Layout")
+            .appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return try String(contentsOf: candidate, encoding: .utf8)
+        }
+        dir = dir.deletingLastPathComponent()
+    }
+    struct NotFound: Error { let filename: String }
+    throw NotFound(filename: filename)
 }
