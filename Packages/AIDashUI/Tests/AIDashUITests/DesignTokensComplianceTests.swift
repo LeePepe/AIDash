@@ -36,29 +36,65 @@ struct DesignTokensComplianceTests {
     // the one structural variant — verified separately below.
 
     @Test(
-        "Every content card type at (medium, neutral) renders token-backed typography + chrome + badge",
-        arguments: contentCardTypes
+        "Every CardType at (medium, neutral) renders its declared contract — content types get token-backed typography + chrome + badge; sectionHeader gets typography only (≥7 combos, one per case)",
+        arguments: CardType.allCases
     )
     func typeMatrixMediumNeutral(type: CardType) throws {
-        // 1. Each content type has both a symbol and a tint — the icon
-        //    badge is mandatory per §Per-Type Visual Recipes.
-        #expect(type.iconSymbol != nil, "\(type) must declare an SF Symbol")
-        #expect(type.iconTint != nil, "\(type) must declare a tint color")
-        #expect(type.hasIconBadge, "\(type) must render a badge")
-
-        // 2. Typography comes from the per-type recipe (Detail tier),
-        //    not the overview tier and not freshly-invented constants.
-        let recipe = AIDashTypography.detail(for: type)
-        #expect(recipe.primary != AIDashTypography.section,
-                "\(type) must use the detail-tier primary font, not the overview-tier section font")
-
-        // 3. The renderer source consumes the shared cardChrome modifier
-        //    (which carries background, border, padding, corner radius).
+        // Iterating CardType.allCases (all 7 cases) — not just content
+        // types — guarantees the matrix covers the full enum even when the
+        // enum grows. The sectionHeader branch documents the
+        // "structural variant" contract from §Card Chrome so we cannot
+        // silently regress to "6 chromed cards + 1 forgotten".
         let renderer = try Self.rendererSource(for: type)
-        #expect(renderer.contains(".cardChrome(size: size, style: style)"),
-                "\(type) renderer must apply the shared cardChrome modifier")
-        #expect(renderer.contains("CardTypeBadge(type: .\(type.rawValue))"),
-                "\(type) renderer must render the shared 32x32 type badge")
+        let recipe = AIDashTypography.detail(for: type)
+
+        if type == .sectionHeader {
+            // sectionHeader is the one structural variant: typography
+            // only, no chrome, no badge. Detailed assertions live in
+            // sectionHeaderHasNoChrome / sectionHeaderHasNoBadge — the
+            // matrix entry just pins the high-level contract.
+            #expect(type.iconSymbol == nil,
+                    "sectionHeader must NOT declare an SF Symbol")
+            #expect(type.iconTint == nil,
+                    "sectionHeader must NOT declare an icon tint")
+            #expect(!type.hasIconBadge,
+                    "sectionHeader must NOT render a badge")
+            #expect(recipe.primary != AIDashTypography.section,
+                    "sectionHeader detail-tier primary font must NOT collapse to the overview-tier section font")
+            #expect(!renderer.contains(".cardChrome("),
+                    "sectionHeader renderer must NOT apply cardChrome — it is chrome-less by contract")
+            #expect(!renderer.contains("CardTypeBadge("),
+                    "sectionHeader renderer must NOT render a CardTypeBadge")
+        } else {
+            // 1. Every content type has both a symbol and a tint — the
+            //    icon badge is mandatory per §Per-Type Visual Recipes.
+            #expect(type.iconSymbol != nil, "\(type) must declare an SF Symbol")
+            #expect(type.iconTint != nil, "\(type) must declare a tint color")
+            #expect(type.hasIconBadge, "\(type) must render a badge")
+
+            // 2. Typography comes from the per-type recipe (Detail tier),
+            //    not the overview tier and not freshly-invented constants.
+            #expect(recipe.primary != AIDashTypography.section,
+                    "\(type) must use the detail-tier primary font, not the overview-tier section font")
+
+            // 3. The renderer source consumes the shared cardChrome modifier
+            //    (which carries background, border, padding, corner radius).
+            #expect(renderer.contains(".cardChrome(size: size, style: style)"),
+                    "\(type) renderer must apply the shared cardChrome modifier")
+            #expect(renderer.contains("CardTypeBadge(type: .\(type.rawValue))"),
+                    "\(type) renderer must render the shared 32x32 type badge")
+        }
+    }
+
+    @Test("type matrix covers every CardType case (≥7 combos as required by Acceptance 10)")
+    func typeMatrixCoversAllCardTypeCases() {
+        // Pin the lower bound explicitly so a future enum shrink or a
+        // future `arguments:` regression that filters out cases fails
+        // loudly in CI rather than silently dropping coverage.
+        #expect(CardType.allCases.count >= 7,
+                "Acceptance 10 requires at least 7 type x medium x neutral combinations; CardType.allCases has \(CardType.allCases.count)")
+        #expect(CardType.allCases.contains(.sectionHeader),
+                "sectionHeader MUST be included in the type matrix even though its chrome contract differs")
     }
 
     @Test("Per-type badge tints are all distinct (visual discriminator contract)")
@@ -135,34 +171,63 @@ struct DesignTokensComplianceTests {
     // and chrome (background contract) MUST NOT vary with size.
 
     @Test(
-        "metric x size x neutral: typography invariant across sizes (size MUST NOT change fonts)",
+        "metric x size x neutral: typography invariant across sizes (renderer reads from a size-free recipe + size-free badge)",
         arguments: CardSize.allCases
     )
-    func metricSizeOrthogonalityTypographyInvariant(size: CardSize) {
-        let mediumRecipe = AIDashTypography.detail(for: .metric)
+    func metricSizeOrthogonalityTypographyInvariant(size: CardSize) throws {
         // The recipe lookup is keyed on CardType only — it MUST NOT take
-        // size. This test exercises the contract from every size's
-        // perspective so a future regression (e.g. `detail(for:size:)`)
-        // would break the assertion at the call site.
+        // size. We still iterate sizes here so that any future regression
+        // adding a `detail(for:size:)` overload would force this call
+        // site to change and break the contract loudly.
         let recipe = AIDashTypography.detail(for: .metric)
-        #expect(recipe.primary == mediumRecipe.primary,
+        let neutralRecipe = AIDashTypography.detail(for: .metric)
+        #expect(recipe.primary == neutralRecipe.primary,
                 "metric primary font must be the same at size=\(size) as at .medium")
-        #expect(recipe.secondary == mediumRecipe.secondary,
+        #expect(recipe.secondary == neutralRecipe.secondary,
                 "metric secondary font must be the same at size=\(size) as at .medium")
-        #expect(recipe.secondaryColor == mediumRecipe.secondaryColor)
-        #expect(recipe.secondaryLineSpacing == mediumRecipe.secondaryLineSpacing)
+        #expect(recipe.secondaryColor == neutralRecipe.secondaryColor)
+        #expect(recipe.secondaryLineSpacing == neutralRecipe.secondaryLineSpacing)
+
+        // Inspect renderer behavior per size: walk every `switch size`
+        // block in the renderer body and assert that the per-case branch
+        // for THIS size contains no `.font(`, `CardTypeBadge(`,
+        // `stripeColor(`, `.cardChrome(`, or `.background(` call. A
+        // future regression that wraps any of those in a size-conditional
+        // would fire this assertion. The metricRendererDoesNotSizeBranchOnFont
+        // test enforces the no-`.font(.system(size:` rule globally; this
+        // test enforces the no-conditional-on-size rule per case.
+        let source = try Self.rendererSource(for: .metric)
+        let branchSource = try Self.body(of: source, forCaseLabel: ".\(Self.rawCase(for: size))",
+                                         inSwitchKey: "size")
+        let forbiddenInSizeBranch: [(String, String)] = [
+            (".font(",        "renderer must not select fonts inside a `switch size` branch"),
+            ("CardTypeBadge(", "renderer must not place CardTypeBadge inside a `switch size` branch — badge is size-invariant"),
+            ("stripeColor(",  "renderer must not consume stripeColor inside a `switch size` branch — stripe is style-driven"),
+            (".cardChrome(",  "renderer must not call cardChrome inside a `switch size` branch — chrome lives at the top of the body"),
+            (".background(",  "renderer must not introduce any `.background(...)` inside a `switch size` branch"),
+        ]
+        for (needle, msg) in forbiddenInSizeBranch {
+            #expect(!branchSource.contains(needle),
+                    "metric renderer (size=\(size)): \(msg) — found `\(needle)` in the per-size branch")
+        }
     }
 
     @Test(
         "metric x size x neutral: badge contract invariant across sizes",
         arguments: CardSize.allCases
     )
-    func metricSizeOrthogonalityBadgeInvariant(size: CardSize) {
-        // The badge is type-keyed, not size-keyed; iterating sizes
-        // documents the contract and guards against a future regression
-        // where the renderer wraps the badge in a size-conditional.
+    func metricSizeOrthogonalityBadgeInvariant(size: CardSize) throws {
+        // The badge is type-keyed, not size-keyed. We assert the
+        // CardType extension contract AND verify the renderer renders
+        // exactly one CardTypeBadge — at the body's top level, never
+        // inside a `switch size` branch.
         #expect(CardType.metric.iconSymbol == "chart.bar.fill", "size=\(size) must not change badge symbol")
         #expect(CardType.metric.iconTint == .blue, "size=\(size) must not change badge tint")
+
+        let source = try Self.rendererSource(for: .metric)
+        let badgeOccurrences = source.components(separatedBy: "CardTypeBadge(type: .metric)").count - 1
+        #expect(badgeOccurrences == 1,
+                "metric renderer must render exactly one CardTypeBadge — found \(badgeOccurrences). A size-conditional badge would make the count > 1 or wrap it in a `switch size`")
     }
 
     @Test(
@@ -250,14 +315,36 @@ struct DesignTokensComplianceTests {
     }
 
     @Test(
-        "metric x medium x style: typography invariant across styles (style MUST NOT change fonts)",
+        "metric x medium x style: typography invariant across styles (renderer reads from a style-free recipe; no `.font(` lives inside a `switch style` branch)",
         arguments: CardStyle.allCases
     )
-    func metricStyleOrthogonalityTypographyInvariant(style: CardStyle) {
+    func metricStyleOrthogonalityTypographyInvariant(style: CardStyle) throws {
         let neutralRecipe = AIDashTypography.detail(for: .metric)
         let recipe = AIDashTypography.detail(for: .metric) // recipe keyed on type only
         #expect(recipe.primary == neutralRecipe.primary, "style=\(style) must not change primary font")
         #expect(recipe.secondary == neutralRecipe.secondary, "style=\(style) must not change secondary font")
+
+        // Renderer inspection: if a future regression wraps `.font(` in a
+        // `switch style` block, this assertion fires. The renderer is
+        // allowed to have NO `switch style` block at all — that is the
+        // current and correct state. We only assert that if one exists
+        // for this case label, it does not contain forbidden tokens.
+        let source = try Self.rendererSource(for: .metric)
+        if let branchSource = try? Self.body(of: source, forCaseLabel: ".\(style)", inSwitchKey: "style") {
+            let forbiddenInStyleBranch: [(String, String)] = [
+                (".font(",       "renderer must not select fonts inside a `switch style` branch"),
+                (".background(", "renderer must not introduce any `.background(...)` inside a `switch style` branch"),
+                (".cardChrome(", "renderer must not call cardChrome inside a `switch style` branch"),
+            ]
+            for (needle, msg) in forbiddenInStyleBranch {
+                #expect(!branchSource.contains(needle),
+                        "metric renderer (style=\(style)): \(msg) — found `\(needle)` in the per-style branch")
+            }
+        }
+        // The renderer must NOT switch on style at all in its top-level
+        // body (style only manifests as the stripe inside cardChrome).
+        #expect(!source.contains("switch style"),
+                "metric renderer body must not contain `switch style` — style is consumed by the shared cardChrome modifier, not the renderer")
     }
 
     @Test(
@@ -319,15 +406,43 @@ struct DesignTokensComplianceTests {
                 "\(type) renderer must not use Color.white as background")
         #expect(!source.contains("Color.black"),
                 "\(type) renderer must not use Color.black as background")
-        // A whole-card tinted fill manifests as `.background(<color>.opacity(...))`
-        // applied to the outermost view. We forbid any `.background(` that takes
-        // a color expression (vs the shared modifier `.cardChrome(...)`). Note
-        // the iconTint.opacity(0.15) ZStack lives in DesignTokens.swift, not in
-        // per-card renderers, so renderers must stay free of `.background(`.
-        #expect(!matches(source, pattern: #"\.background\(\s*Color\."#),
-                "\(type) renderer must not apply a `.background(Color.*)` whole-card fill — chrome lives in cardChrome only")
-        #expect(!source.contains(".background(.background"),
-                "\(type) renderer must not apply a `.background(.background…)` hierarchical fill — that belongs to the shared cardChrome modifier")
+
+        // P0.3 — Whole-card tinted fill guard (broadened per MY-1060 review #3).
+        //
+        // The previous guard only matched three narrow patterns
+        // (`.background(Color.*`, `.background(.background…)`, and the
+        // `backgroundTint` identifier). That left obvious style-driven
+        // fills such as `.background(.green.opacity(0.1))`,
+        // `.background(AIDashChrome.stripeColor(for: style)?.opacity(0.1))`,
+        // `.background(panelTint)`, and any newly-named background helper
+        // wide open. The renderer contract is unambiguous: card chrome
+        // lives in the shared `.cardChrome(size:style:)` modifier and
+        // NOWHERE ELSE. So we forbid ANY `.background(` call in renderer
+        // bodies, with no allow-list. The shared `cardChrome` modifier
+        // applies the background once, outside any renderer.
+        //
+        // This guard is intentionally absolute. If a renderer ever
+        // legitimately needs a non-card background (e.g. an inner ZStack
+        // tint inside a sub-component), refactor that sub-component out
+        // into its own helper view in DesignTokens.swift or a new file
+        // and apply the background there — NOT in the per-type renderer.
+        let backgroundOccurrences = source.components(separatedBy: ".background(").count - 1
+        #expect(backgroundOccurrences == 0,
+                "\(type) renderer must not call `.background(` at all — chrome (including any style-driven fill) lives only in the shared `.cardChrome(size:style:)` modifier. Found \(backgroundOccurrences) occurrence(s). Whole-card tinted fills (e.g. `.background(.green.opacity(...))`, `.background(AIDashChrome.stripeColor(for: style)?.opacity(...))`, `.background(panelTint)`, or any newly-named helper) are forbidden.")
+
+        // Defense-in-depth: even if a future contributor exempts the
+        // absolute guard above (e.g. by moving renderer chrome behind a
+        // helper that does not contain the literal `.background(`), the
+        // following named anti-patterns still fail loudly. These mirror
+        // the patterns the reviewer called out explicitly.
+        #expect(!source.contains("backgroundTint"),
+                "\(type) renderer must not declare or consume a local backgroundTint — style controls the shared left stripe only")
+        #expect(!source.contains("panelTint"),
+                "\(type) renderer must not declare or consume a `panelTint` — whole-card tints are forbidden")
+        #expect(!source.contains("cardTint"),
+                "\(type) renderer must not declare or consume a `cardTint` — whole-card tints are forbidden")
+        #expect(!source.contains("AIDashChrome.stripeColor"),
+                "\(type) renderer must not consume AIDashChrome.stripeColor — the stripe is painted by the shared cardChrome modifier, not the renderer")
 
         // P1.1 — hardcoded numeric font sizes
         #expect(!matches(source, pattern: #"\.font\(\.system\(size:\s*[0-9]"#),
@@ -351,9 +466,8 @@ struct DesignTokensComplianceTests {
         #expect(!source.contains("Color(hex:"),
                 "\(type) renderer must not use Color(hex:) literals — use semantic colors")
 
-        // P0.3 + Card Chrome — local backgroundTint variable / function names
-        #expect(!source.contains("backgroundTint"),
-                "\(type) renderer must not declare a local backgroundTint — style controls the shared left stripe only")
+        // (P0.3 backgroundTint guard is enforced above with the broadened
+        // whole-card tinted-fill block — no duplicate needed here.)
 
         // §Card Chrome — literal corner radius / padding / minHeight constants
         // belong inside `AIDashSize.*`, never in a renderer body. The shared
@@ -585,6 +699,59 @@ struct DesignTokensComplianceTests {
                                  under: ["Sources", "AIDashUI"])
         return try String(contentsOf: url, encoding: .utf8)
     }
+
+    // MARK: - Source slicing
+    //
+    // `body(of:forCaseLabel:inSwitchKey:)` extracts the body of one
+    // `case <label>:` arm of a `switch <key>` block from a renderer's
+    // source. The match is intentionally lenient (no AST): we look for
+    // the first `switch <key>` occurrence, then the first `case <label>:`
+    // inside it, then return everything up to the next `case ` at the
+    // same indentation level or the closing brace. This is enough to
+    // catch a regression that puts `.font(`, `CardTypeBadge(`,
+    // `.cardChrome(`, or `.background(` inside a `switch size` /
+    // `switch style` arm — the actual purpose of the helper.
+    //
+    // Throws `bodySliceError(.switchNotFound)` if no `switch <key>`
+    // appears in the source, and `bodySliceError(.caseNotFound)` if the
+    // case label is not present inside the switch. Callers that treat a
+    // missing switch as "no regression possible" should catch the throw
+    // with `try?`.
+
+    static func body(of source: String, forCaseLabel label: String, inSwitchKey key: String) throws -> String {
+        let switchToken = "switch \(key)"
+        guard let switchRange = source.range(of: switchToken) else {
+            throw BodySliceError.switchNotFound(key)
+        }
+        let after = source[switchRange.upperBound...]
+        let caseToken = "case \(label):"
+        guard let caseRange = after.range(of: caseToken) else {
+            throw BodySliceError.caseNotFound(label, key)
+        }
+        let armStart = caseRange.upperBound
+        // The arm ends at the next `case ` (sibling), or the next
+        // `default:`, or the next closing brace. We scan for the first
+        // of these terminators and slice up to it.
+        let armSource = after[armStart...]
+        let terminators = ["case .", "default:", "}\n"]
+        var endIndex = armSource.endIndex
+        for term in terminators {
+            if let r = armSource.range(of: term), r.lowerBound < endIndex {
+                endIndex = r.lowerBound
+            }
+        }
+        return String(armSource[..<endIndex])
+    }
+
+    enum BodySliceError: Error {
+        case switchNotFound(String)
+        case caseNotFound(String, String)
+    }
+
+    /// Returns the unqualified case identifier for a CardSize, i.e.
+    /// "small" / "medium" / "wide" / "hero". Used to build a `case .<x>:`
+    /// label for `body(of:forCaseLabel:inSwitchKey:)`.
+    static func rawCase(for size: CardSize) -> String { size.rawValue }
 
     private static func sourceFile(named filename: String,
                                    under relativeComponents: [String]) throws -> URL {
