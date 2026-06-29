@@ -13,12 +13,18 @@ public struct AgentSummaryCardView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            content
+        HStack(alignment: .top, spacing: 12) {
+            CardTypeBadge(type: .agentSummary)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundTint, in: RoundedRectangle(cornerRadius: 12))
+        .cardChrome(size: size, style: style)
+    }
+
+    private var recipe: AIDashTypography.DetailRecipe {
+        AIDashTypography.detail(for: .agentSummary)
     }
 
     @ViewBuilder
@@ -35,28 +41,26 @@ public struct AgentSummaryCardView: View {
         }
     }
 
-    // MARK: - Size Layouts
+    // MARK: - Size Layouts (density / item count only — no typography or chrome changes)
 
     @ViewBuilder
     private var smallLayout: some View {
-        Text(payload.agentName)
-            .font(.headline)
+        agentNameText
             .lineLimit(1)
         if let prStat = payload.stats?.first(where: { $0.label == "PRs" }) {
             Text("\(Int(prStat.value)) \(Self.prsLabel)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(recipe.secondary)
+                .foregroundStyle(recipe.secondaryColor)
         } else if let firstStat = payload.stats?.first {
             Text("\(firstStat.label): \(formattedStatValue(firstStat.value))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(recipe.secondary)
+                .foregroundStyle(recipe.secondaryColor)
         }
     }
 
     @ViewBuilder
     private var mediumLayout: some View {
-        Text(payload.agentName)
-            .font(.headline)
+        agentNameText
             .lineLimit(1)
 
         ForEach(Array(payload.completed.prefix(2).enumerated()), id: \.offset) { _, item in
@@ -65,15 +69,14 @@ public struct AgentSummaryCardView: View {
 
         if let stat = mostRelevantStat {
             Text("\(stat.label): \(formattedStatValue(stat.value))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(recipe.secondary)
+                .foregroundStyle(recipe.secondaryColor)
         }
     }
 
     @ViewBuilder
     private var wideLayout: some View {
-        Text(payload.agentName)
-            .font(.headline)
+        agentNameText
             .lineLimit(1)
 
         ForEach(Array(payload.completed.prefix(5).enumerated()), id: \.offset) { _, item in
@@ -87,12 +90,10 @@ public struct AgentSummaryCardView: View {
 
     @ViewBuilder
     private var heroLayout: some View {
-        Text(payload.agentName)
-            .font(.title2)
-            .fontWeight(.semibold)
+        agentNameText
 
         Text(Self.heroSubtitle)
-            .font(.subheadline)
+            .font(recipe.secondary)
             .foregroundStyle(.secondary)
             .italic()
 
@@ -106,7 +107,12 @@ public struct AgentSummaryCardView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Shared text styling
+
+    private var agentNameText: Text {
+        Text(payload.agentName)
+            .font(recipe.primary)
+    }
 
     @ViewBuilder
     private func completedRow(_ item: AgentSummaryPayload.Completed) -> some View {
@@ -117,14 +123,16 @@ public struct AgentSummaryCardView: View {
                 .accessibilityHidden(true)
             if let url = URLPolicy.validate(item.ref) {
                 Link(item.title, destination: url)
-                    .font(.subheadline)
+                    .font(recipe.secondary)
+                    .foregroundStyle(recipe.secondaryColor)
                     .lineLimit(completedRowLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
             } else {
                 Text(item.title)
-                    .font(.subheadline)
+                    .font(recipe.secondary)
+                    .foregroundStyle(recipe.secondaryColor)
                     .lineLimit(completedRowLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -158,9 +166,9 @@ public struct AgentSummaryCardView: View {
     private func statBadge(_ stat: AgentSummaryPayload.Stat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(formattedStatValue(stat.value))
-                .font(.headline)
+                .font(recipe.primary)
             Text(stat.label)
-                .font(.caption2)
+                .font(recipe.secondary)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -198,15 +206,6 @@ public struct AgentSummaryCardView: View {
         bundle: .module,
         comment: "Pull-quote shown under the agent name in the hero Agent Summary card layout."
     )
-
-    private var backgroundTint: Color {
-        switch style {
-        case .neutral: return Color.clear
-        case .success: return Color.green.opacity(0.08)
-        case .warning: return Color.orange.opacity(0.08)
-        case .accent: return Color.accentColor.opacity(0.10)
-        }
-    }
 }
 
 // MARK: - Previews
@@ -223,7 +222,7 @@ public struct AgentSummaryCardView: View {
         size: .small,
         style: .neutral
     )
-    .frame(width: 160, height: 100)
+    .frame(width: 220, height: 120)
     .padding()
 }
 
@@ -243,7 +242,7 @@ public struct AgentSummaryCardView: View {
         size: .medium,
         style: .success
     )
-    .frame(width: 300, height: 180)
+    .frame(width: 360, height: 200)
     .padding()
 }
 
@@ -265,7 +264,7 @@ public struct AgentSummaryCardView: View {
         size: .wide,
         style: .accent
     )
-    .frame(width: 500, height: 250)
+    .frame(width: 560, height: 280)
     .padding()
 }
 
@@ -287,6 +286,6 @@ public struct AgentSummaryCardView: View {
         size: .hero,
         style: .warning
     )
-    .frame(width: 600, height: 350)
+    .frame(width: 640, height: 380)
     .padding()
 }
