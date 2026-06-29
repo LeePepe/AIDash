@@ -42,7 +42,7 @@ struct AgentSummaryCardViewTests {
         #expect(view.size == size)
     }
 
-    @Test("renders across all card styles", arguments: [CardStyle.neutral, .success, .warning, .accent])
+    @Test("renders across all card styles", arguments: CardStyle.allCases)
     func acceptsAllStyles(style: CardStyle) {
         let view = AgentSummaryCardView(
             payload: samplePayload,
@@ -66,5 +66,21 @@ struct AgentSummaryCardViewTests {
         let view = AgentSummaryCardView(payload: payload, size: .wide, style: .neutral)
         _ = view.body
         #expect(view.payload.completed.count == 3)
+    }
+
+    // MARK: - Token compliance contract
+
+    @Test("declares CardType.agentSummary so it carries the constitution badge + tint")
+    func badgeIsAgentSummary() {
+        #expect(CardType.agentSummary.iconSymbol == "bubble.left.and.bubble.right.fill")
+        #expect(CardType.agentSummary.iconTint == .indigo)
+        #expect(CardType.agentSummary.hasIconBadge)
+    }
+
+    @Test("uses the AgentSummary detail recipe (headline + callout) from DesignTokens")
+    func consumesDetailRecipe() {
+        let recipe = AIDashTypography.detail(for: .agentSummary)
+        #expect(recipe.primary == .headline)
+        #expect(recipe.secondary == .callout)
     }
 }

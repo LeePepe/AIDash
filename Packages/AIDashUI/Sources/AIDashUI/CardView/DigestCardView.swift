@@ -13,46 +13,41 @@ public struct DigestCardView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            content
+        HStack(alignment: .top, spacing: 12) {
+            CardTypeBadge(type: .digest)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundTint, in: RoundedRectangle(cornerRadius: 12))
+        .cardChrome(size: size, style: style)
+    }
+
+    private var recipe: AIDashTypography.DetailRecipe {
+        AIDashTypography.detail(for: .digest)
     }
 
     @ViewBuilder
     private var content: some View {
         switch size {
         case .small:
-            Text(payload.title)
-                .font(.headline)
+            titleText
                 .lineLimit(2)
 
         case .medium:
-            Text(payload.title)
-                .font(.headline)
-            Text(truncatedBody)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            titleText
+            bodyText(truncatedBody)
 
         case .wide:
-            Text(payload.title)
-                .font(.headline)
-            Text(payload.body)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            titleText
+            bodyText(payload.body)
             if let sections = payload.sections, let first = sections.first {
                 sectionView(first)
             }
 
         case .hero:
-            Text(payload.title)
-                .font(.title3)
-                .fontWeight(.semibold)
-            Text(payload.body)
-                .font(.body)
-                .foregroundStyle(.secondary)
+            titleText
+            bodyText(payload.body)
             if let sections = payload.sections {
                 ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                     sectionView(section)
@@ -61,16 +56,30 @@ public struct DigestCardView: View {
         }
     }
 
+    private var titleText: Text {
+        Text(payload.title)
+            .font(recipe.primary)
+    }
+
+    private func bodyText(_ text: String) -> some View {
+        Text(text)
+            .font(recipe.secondary)
+            .foregroundStyle(recipe.secondaryColor)
+            .lineSpacing(recipe.secondaryLineSpacing)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     @ViewBuilder
     private func sectionView(_ section: DigestPayload.Section) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(section.heading)
-                .font(.subheadline)
-                .fontWeight(.medium)
+                .font(recipe.primary)
             ForEach(Array(section.paragraphs.enumerated()), id: \.offset) { _, paragraph in
                 Text(paragraph)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(recipe.secondary)
+                    .foregroundStyle(recipe.secondaryColor)
+                    .lineSpacing(recipe.secondaryLineSpacing)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.top, 4)
@@ -82,15 +91,6 @@ public struct DigestCardView: View {
         }
         let prefix = payload.body.prefix(200)
         return String(prefix) + "\u{2026}"
-    }
-
-    private var backgroundTint: Color {
-        switch style {
-        case .neutral: return Color.clear
-        case .success: return Color.green.opacity(0.08)
-        case .warning: return Color.orange.opacity(0.08)
-        case .accent: return Color.accentColor.opacity(0.10)
-        }
     }
 }
 
@@ -105,6 +105,7 @@ public struct DigestCardView: View {
         size: .small,
         style: .neutral
     )
+    .frame(width: 220, height: 120)
     .padding()
 }
 
@@ -117,6 +118,7 @@ public struct DigestCardView: View {
         size: .medium,
         style: .accent
     )
+    .frame(width: 360, height: 200)
     .padding()
 }
 
@@ -139,6 +141,7 @@ public struct DigestCardView: View {
         size: .wide,
         style: .success
     )
+    .frame(width: 560, height: 320)
     .padding()
 }
 
@@ -161,5 +164,6 @@ public struct DigestCardView: View {
         size: .hero,
         style: .warning
     )
+    .frame(width: 640, height: 420)
     .padding()
 }
