@@ -97,4 +97,38 @@ struct InsightCardViewTests {
 
         #expect(view.truncatedBody == shortBody)
     }
+
+    // MARK: - Token contract assertions
+    //
+    // Per MY-1057 / constitution §Per-Type Visual Recipes: Insight MUST consume
+    // AIDashTypography.detail(for: .insight) and must NOT carry its own
+    // backgroundTint / corner radius / padding tokens.
+
+    @Test("Insight type carries the Per-Type icon badge contract")
+    func insightBadgeContract() {
+        #expect(CardType.insight.iconSymbol == "sparkles")
+        #expect(CardType.insight.iconTint == .purple)
+        #expect(CardType.insight.hasIconBadge)
+    }
+
+    @Test("Insight primary font is title3 semibold, secondary is .body .primary")
+    func insightTypographyMatchesRecipe() {
+        let recipe = AIDashTypography.detail(for: .insight)
+        #expect(recipe.primary == .title3.weight(.semibold))
+        #expect(recipe.secondary == .body)
+        #expect(recipe.secondaryColor == .primary)
+    }
+
+    @Test(
+        "body renders without crashing for every size × style combination",
+        arguments: CardSize.allCases, CardStyle.allCases
+    )
+    func bodyRendersForAllSizeStyleCombinations(size: CardSize, style: CardStyle) {
+        let view = InsightCardView(
+            payload: payloadWithCitations,
+            size: size,
+            style: style
+        )
+        _ = view.body
+    }
 }

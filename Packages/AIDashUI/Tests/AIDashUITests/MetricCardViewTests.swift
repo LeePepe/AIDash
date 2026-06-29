@@ -52,6 +52,9 @@ struct MetricCardViewTests {
     }
 
     // MARK: - trendColor behavior (semantic color mapping)
+    //
+    // Trend arrow color is METRIC CONTENT (signal direction), not card chrome.
+    // Per constitution §Style = Semantic Signal Only this is allowed to stay.
 
     @Test("trendColor maps up to green, down to red, flat to secondary")
     func trendColors() {
@@ -61,14 +64,25 @@ struct MetricCardViewTests {
         #expect(v.trendColor(.flat) == .secondary)
     }
 
-    // MARK: - backgroundTint behavior (style → tint mapping)
+    // MARK: - Token contract assertions
+    //
+    // Per MY-1057 / constitution §Per-Type Visual Recipes: Metric MUST consume
+    // AIDashTypography.detail(for: .metric) and must NOT have its own
+    // backgroundTint / corner radius / padding tokens.
 
-    @Test("backgroundTint resolves each CardStyle to the expected tinted color")
-    func backgroundTintForEachStyle() {
-        #expect(view(style: .neutral).backgroundTint == Color.clear)
-        #expect(view(style: .success).backgroundTint == Color.green.opacity(0.08))
-        #expect(view(style: .warning).backgroundTint == Color.orange.opacity(0.08))
-        #expect(view(style: .accent).backgroundTint == Color.accentColor.opacity(0.10))
+    @Test("Metric type carries the Per-Type icon badge contract")
+    func metricBadgeContract() {
+        #expect(CardType.metric.iconSymbol == "chart.bar.fill")
+        #expect(CardType.metric.iconTint == .blue)
+        #expect(CardType.metric.hasIconBadge)
+    }
+
+    @Test("Metric primary font is 36pt rounded bold, secondary is .caption .secondary")
+    func metricTypographyMatchesRecipe() {
+        let recipe = AIDashTypography.detail(for: .metric)
+        #expect(recipe.primary == .system(size: 36, weight: .bold, design: .rounded))
+        #expect(recipe.secondary == .caption)
+        #expect(recipe.secondaryColor == .secondary)
     }
 
     // MARK: - body rendering smoke (covers every size × style combination)
