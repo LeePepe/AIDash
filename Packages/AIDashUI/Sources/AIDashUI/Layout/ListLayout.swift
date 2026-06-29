@@ -1,6 +1,10 @@
 import SwiftUI
 import AIDashCore
 
+/// Single-column list layout. Routes through the shared TokenGrid with
+/// `collapseToList: true` so every card spans the full row regardless of
+/// its declared size token (per the constitution: list collapse is the
+/// only allowed deviation from the size→span ladder).
 public struct ListLayout: View {
     let cards: [CardModel]
     let style: CardStyle
@@ -11,11 +15,6 @@ public struct ListLayout: View {
     }
 
     public var body: some View {
-        LazyVStack(spacing: 12) {
-            ForEach(cards) { card in
-                CardRouter(card: card)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
+        TokenGrid(cards: cards, collapseToList: true)
     }
 }

@@ -1,6 +1,11 @@
 import SwiftUI
 import SwiftData
 import AIDashCore
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 public struct BriefingView: View {
     @Query private var todaysBriefings: [BriefingModel]
@@ -27,7 +32,7 @@ public struct BriefingView: View {
 
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
                 if let briefing = todaysBriefings.first {
                     header(for: briefing, isFallback: false)
                     containers(for: briefing)
@@ -38,8 +43,11 @@ public struct BriefingView: View {
                     emptyState
                 }
             }
-            .padding()
+            .padding(.horizontal, Self.pageHorizontalPadding)
+            .padding(.vertical, AIDashSpacing.pageVertical)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(Self.pageBackground)
     }
 
     @ViewBuilder
@@ -114,7 +122,6 @@ public struct BriefingView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 160)
         .padding()
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var emptyState: some View {
@@ -140,6 +147,37 @@ public struct BriefingView: View {
             .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 320)
+    }
+
+    // MARK: - Page chrome tokens
+    //
+    // Sourced from .specify/memory/constitution.md §Page Chrome and
+    // §Spacing & Color Tokens. The page background sits one hierarchy
+    // step BELOW the card's `.background.secondary`, so cards visually
+    // float without needing a shadow.
+
+    /// Horizontal padding for the page. Mac gets 24pt; iOS / iPad get
+    /// 20pt. Honoring the platform compile-time channel keeps the
+    /// constant deterministic at unit-test time.
+    static var pageHorizontalPadding: CGFloat {
+        #if os(macOS)
+        return AIDashSpacing.pageHorizontalMac
+        #else
+        return AIDashSpacing.pageHorizontalCompact
+        #endif
+    }
+
+    /// Page background. macOS uses `windowBackgroundColor`; iOS / iPadOS
+    /// use `systemGroupedBackground`. Both are one step *below* the
+    /// card's `.background.secondary`.
+    static var pageBackground: Color {
+        #if canImport(UIKit)
+        return Color(.systemGroupedBackground)
+        #elseif canImport(AppKit)
+        return Color(NSColor.windowBackgroundColor)
+        #else
+        return Color.clear
+        #endif
     }
 
     /// The user's local calendar day formatted as POSIX `yyyy-MM-dd`.

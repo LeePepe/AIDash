@@ -1,5 +1,6 @@
 import Testing
 import SwiftUI
+import Foundation
 import AIDashCore
 @testable import AIDashUI
 
@@ -61,20 +62,62 @@ struct GridLayoutTests {
         #expect(GridLayout.columnCount(for: .regular, width: 1366) == 4)
     }
 
-    // MARK: - Column count: nil size class (width-only fallback)
+    // MARK: - Column count: nil size class (width-only fallback uses AIDashSize tokens)
+
+    @Test("nil size class with very narrow width produces 1 column")
+    func nilVeryNarrowProduces1Column() {
+        // AIDashSize.columnCount: width < 480 → 1 column
+        #expect(GridLayout.columnCount(for: nil, width: 320) == 1)
+    }
 
     @Test("nil size class with narrow width produces 2 columns")
     func nilNarrowProduces2Columns() {
-        #expect(GridLayout.columnCount(for: nil, width: 400) == 2)
+        // AIDashSize.columnCount: 480 ≤ width < 768 → 2 columns
+        #expect(GridLayout.columnCount(for: nil, width: 600) == 2)
     }
 
     @Test("nil size class with medium width produces 3 columns")
     func nilMediumProduces3Columns() {
-        #expect(GridLayout.columnCount(for: nil, width: 700) == 3)
+        // AIDashSize.columnCount: 768 ≤ width < 1100 → 3 columns
+        #expect(GridLayout.columnCount(for: nil, width: 900) == 3)
     }
 
     @Test("nil size class with wide width produces 4 columns")
     func nilWideProduces4Columns() {
+        // AIDashSize.columnCount: width ≥ 1100 → 4 columns
         #expect(GridLayout.columnCount(for: nil, width: 1200) == 4)
     }
+
+    // MARK: - TokenGrid wiring
+
+    @Test("GridLayout delegates to TokenGrid and never branches on CardType")
+    func delegatesToTokenGridAndAvoidsCardTypeBranching() throws {
+        let source = try readLayoutSource("GridLayout.swift")
+
+        #expect(source.contains("TokenGrid("),
+                "GridLayout must delegate placement to TokenGrid")
+        #expect(!source.contains("switch card.type"),
+                "GridLayout must not branch on CardType")
+        #expect(!source.contains("CardType."),
+                "GridLayout must not reference any CardType cases")
+        #expect(!source.contains(".cardChrome"),
+                "GridLayout must not apply card chrome")
+        #expect(!source.contains(".background("),
+                "GridLayout must not paint its own background")
+    }
+}
+
+fileprivate func readLayoutSource(_ filename: String) throws -> String {
+    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    for _ in 0..<8 {
+        let candidate = dir
+            .appendingPathComponent("Sources/AIDashUI/Layout")
+            .appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return try String(contentsOf: candidate, encoding: .utf8)
+        }
+        dir = dir.deletingLastPathComponent()
+    }
+    struct NotFound: Error { let filename: String }
+    throw NotFound(filename: filename)
 }
