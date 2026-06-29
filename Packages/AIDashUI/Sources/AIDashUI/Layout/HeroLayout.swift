@@ -1,6 +1,11 @@
 import SwiftUI
 import AIDashCore
 
+/// Hero layout. Cards declare their own spans via `AIDashSize.gridSpan`
+/// (a `hero` or `wide` card spans the full row, while small/medium pack
+/// into the remaining columns). The layout simply forwards the cards to
+/// the shared TokenGrid — it does not invent its own chrome, padding, or
+/// CardType branching.
 public struct HeroLayout: View {
     let cards: [CardModel]
     let style: CardStyle
@@ -11,26 +16,6 @@ public struct HeroLayout: View {
     }
 
     public var body: some View {
-        VStack(spacing: 12) {
-            if let hero = cards.first {
-                cardView(for: hero)
-                    .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
-                    .padding(.bottom, 4)
-            }
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 12)],
-                spacing: 12
-            ) {
-                ForEach(cards.dropFirst()) { card in
-                    cardView(for: card)
-                }
-            }
-        }
-    }
-
-    // Routes each card through CardRouter for content rendering.
-    @ViewBuilder
-    private func cardView(for card: CardModel) -> some View {
-        CardRouter(card: card)
+        TokenGrid(cards: cards)
     }
 }

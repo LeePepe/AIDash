@@ -15,18 +15,23 @@ public struct ContainerView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // No container-level panel, background, or rounded chrome.
+        // The container is just typography + spacing — see
+        // .specify/memory/constitution.md §Container Chrome.
+        VStack(alignment: .leading, spacing: AIDashSpacing.containerHeaderToFirstCard) {
             header
             layoutContent
         }
-        .padding(.vertical, 8)
     }
 
     @ViewBuilder
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(container.title)
-                .font(.title2.bold())
+                .font(AIDashTypography.section)
+                .tracking(AIDashTypography.sectionTracking)
+                .foregroundStyle(AIDashTypography.sectionColor)
+                .textCase(.uppercase)
             if let subtitle = container.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.callout)
