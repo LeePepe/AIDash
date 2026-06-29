@@ -1,6 +1,16 @@
 import SwiftUI
 import AIDashCore
 
+/// `sectionHeader` is the one structural variant that renders **no card
+/// chrome at all** — no background, no border, no padding wrapper, no
+/// leading icon badge. Per constitution §Card Chrome it exists as a
+/// typography-only divider so containers can group cards with a
+/// sub-heading without nesting containers (Principle III, spec D9).
+///
+/// `size` only affects vertical divider spacing (small = compact,
+/// hero = generous). Typography is invariant across sizes per
+/// `contracts/cardtype-payloads.md` §sectionHeader. `style` has no
+/// chrome effect on this card type.
 public struct SectionHeaderCardView: View {
     let payload: SectionHeaderPayload
     let size: CardSize
@@ -14,43 +24,29 @@ public struct SectionHeaderCardView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: subtitleSpacing) {
-            content
+            Text(payload.title)
+                .font(Self.recipe.primary)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let subtitle = payload.subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(Self.recipe.secondary)
+                    .foregroundStyle(Self.recipe.secondaryColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(.horizontal, Self.horizontalPadding)
         .padding(.vertical, verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundTint, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    @ViewBuilder
-    private var content: some View {
-        Text(payload.title)
-            .font(Self.titleFont)
-            .fontWeight(.semibold)
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        if let subtitle = payload.subtitle, !subtitle.isEmpty {
-            Text(subtitle)
-                .font(Self.subtitleFont)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    // MARK: - Invariant typography & horizontal padding
+    // MARK: - Invariant typography
     //
-    // Per contracts/cardtype-payloads.md §sectionHeader:
-    //   "all sizes show the same header layout. Size hint affects vertical
-    //   spacing only (small = compact, hero = generous)."
-    //
-    // Title font, subtitle font, and horizontal padding therefore do not
-    // depend on `size`. Only the vertical paddings and the title/subtitle
-    // gap vary per size.
+    // Typography comes from the shared per-type recipe and never varies
+    // with `size`. Holding these as static lets tests assert the
+    // invariant without instantiating the view.
 
-    static let titleFont: Font = .title3
-    static let subtitleFont: Font = .subheadline
-    static let horizontalPadding: CGFloat = 16
+    static let recipe = AIDashTypography.detail(for: .sectionHeader)
 
     // MARK: - Size-driven vertical spacing only
 
@@ -69,17 +65,6 @@ public struct SectionHeaderCardView: View {
         case .medium: return 4
         case .wide:   return 6
         case .hero:   return 8
-        }
-    }
-
-    // MARK: - Style tint
-
-    var backgroundTint: Color {
-        switch style {
-        case .neutral: return Color.clear
-        case .success: return Color.green.opacity(0.08)
-        case .warning: return Color.orange.opacity(0.08)
-        case .accent:  return Color.accentColor.opacity(0.10)
         }
     }
 }

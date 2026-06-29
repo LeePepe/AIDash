@@ -99,4 +99,52 @@ struct TrendingCardViewLocalizationTests {
         let view = TrendingCardView(payload: payload, size: .medium, style: .neutral)
         _ = view.body
     }
+
+    // MARK: - Token contract (MY-1054 / MY-1059)
+
+    @Test("uses the shared trending typography recipe")
+    func usesSharedTypographyRecipe() {
+        let expected = AIDashTypography.detail(for: .trending)
+        #expect(TrendingCardView.recipe.primary == expected.primary)
+        #expect(TrendingCardView.recipe.secondary == expected.secondary)
+        #expect(TrendingCardView.recipe.secondaryColor == expected.secondaryColor)
+    }
+
+    @Test("typography recipe is invariant across sizes (size = geometry only)")
+    func typographyInvariantAcrossSizes() {
+        for _ in CardSize.allCases {
+            #expect(TrendingCardView.recipe.primary == AIDashTypography.detail(for: .trending).primary)
+            #expect(TrendingCardView.recipe.secondary == AIDashTypography.detail(for: .trending).secondary)
+        }
+    }
+
+    @Test("trending renders its required leading icon badge")
+    func rendersTypeBadge() {
+        #expect(CardType.trending.hasIconBadge)
+        #expect(CardType.trending.iconSymbol == "chart.line.uptrend.xyaxis")
+        #expect(CardType.trending.iconTint == .orange)
+    }
+
+    @Test("body materializes for every (size, style) combination")
+    func bodyMaterializesEverywhere() {
+        let payload = TrendingPayload(
+            topic: "Test",
+            items: (1...3).map { .init(title: "Item \($0)", url: "https://example.com/\($0)", score: Double($0)) }
+        )
+        for size in CardSize.allCases {
+            for style in CardStyle.allCases {
+                let view = TrendingCardView(payload: payload, size: size, style: style)
+                _ = view.body
+            }
+        }
+    }
+
+    @Test("renderer source contains no local backgroundTint or RoundedRectangle chrome")
+    func sourceHasNoLocalChrome() throws {
+        let source = try loadRendererSource(named: "TrendingCardView")
+        #expect(!source.contains("backgroundTint"), "TrendingCardView must not declare a local backgroundTint")
+        #expect(!source.contains("RoundedRectangle(cornerRadius:"), "TrendingCardView must not draw its own rounded background")
+        #expect(source.contains(".cardChrome(size: size, style: style)"), "TrendingCardView must consume the shared cardChrome modifier")
+        #expect(source.contains("CardTypeBadge(type: .trending)"), "TrendingCardView must render the shared 32×32 type badge")
+    }
 }
