@@ -13,13 +13,17 @@ public struct TrendingCardView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            content
+        HStack(alignment: .top, spacing: 12) {
+            CardTypeBadge(type: .trending)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundTint, in: RoundedRectangle(cornerRadius: 12))
+        .cardChrome(size: size, style: style)
     }
+
+    // MARK: - Size-driven content selection (geometry/density only)
 
     @ViewBuilder
     private var content: some View {
@@ -39,9 +43,7 @@ public struct TrendingCardView: View {
 
     @ViewBuilder
     private var smallContent: some View {
-        Text(payload.topic)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        topicLabel
         if let first = payload.items.first {
             TrendingItemRow(item: first, rank: 1, showScore: true, size: size)
         }
@@ -51,16 +53,14 @@ public struct TrendingCardView: View {
 
     @ViewBuilder
     private var mediumContent: some View {
-        Text(payload.topic)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        topicLabel
         let top3 = Array(payload.items.prefix(3))
         ForEach(Array(top3.enumerated()), id: \.offset) { index, item in
             TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
         }
         if payload.items.count > 3 {
             Text(Self.moreItemsLabel(overflow: payload.items.count - 3))
-                .font(.caption2)
+                .font(Self.recipe.secondary)
                 .foregroundStyle(.tertiary)
         }
     }
@@ -69,16 +69,14 @@ public struct TrendingCardView: View {
 
     @ViewBuilder
     private var wideContent: some View {
-        Text(payload.topic)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+        topicLabel
         let top5 = Array(payload.items.prefix(5))
         ForEach(Array(top5.enumerated()), id: \.offset) { index, item in
             TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
         }
         if payload.items.count > 5 {
             Text(Self.moreItemsLabel(overflow: payload.items.count - 5))
-                .font(.caption2)
+                .font(Self.recipe.secondary)
                 .foregroundStyle(.tertiary)
         }
     }
@@ -87,8 +85,7 @@ public struct TrendingCardView: View {
 
     @ViewBuilder
     private var heroContent: some View {
-        Text(payload.topic)
-            .font(.headline)
+        topicLabel
         let top10 = Array(payload.items.prefix(10))
         let scoredCount = top10.compactMap(\.score).count
         if scoredCount >= 2 {
@@ -101,6 +98,13 @@ public struct TrendingCardView: View {
         ForEach(Array(top10.enumerated()), id: \.offset) { index, item in
             TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
         }
+    }
+
+    @ViewBuilder
+    private var topicLabel: some View {
+        Text(payload.topic)
+            .font(Self.recipe.secondary)
+            .foregroundStyle(.secondary)
     }
 
     private func sparklineAccessibilityValue(for items: [TrendingPayload.Item]) -> String {
@@ -147,23 +151,23 @@ public struct TrendingCardView: View {
         )
     }
 
-    // MARK: - Background
+    // MARK: - Typography recipe
 
-    private var backgroundTint: Color {
-        switch style {
-        case .neutral: return Color.clear
-        case .success: return Color.green.opacity(0.08)
-        case .warning: return Color.orange.opacity(0.08)
-        case .accent: return Color.accentColor.opacity(0.10)
-        }
-    }
+    static let recipe = AIDashTypography.detail(for: .trending)
+
+    // MARK: - Sparkline color
+    //
+    // The sparkline is data, not chrome — it visualizes the score series. Its
+    // tint is derived from `style` only as a content-coloring hint (matches
+    // the metric trend-arrow precedent in §Style table). It does NOT change
+    // card background, padding, radius, or any other chrome dimension.
 
     private var sparklineColor: Color {
         switch style {
-        case .neutral: return Color.secondary
-        case .success: return Color.green
-        case .warning: return Color.orange
-        case .accent: return Color.accentColor
+        case .neutral: return .secondary
+        case .success: return .green
+        case .warning: return .orange
+        case .accent:  return .accentColor
         }
     }
 }
@@ -179,17 +183,17 @@ private struct TrendingItemRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Text("\(rank)")
-                .font(.caption)
-                .fontWeight(.bold)
+                .font(TrendingCardView.recipe.primary)
                 .foregroundStyle(.secondary)
-                .frame(width: 20, alignment: .trailing)
+                .frame(width: 24, alignment: .trailing)
             Text(item.title)
-                .font(.subheadline)
+                .font(TrendingCardView.recipe.secondary)
+                .foregroundStyle(TrendingCardView.recipe.secondaryColor)
                 .lineLimit(titleLineLimit)
-            Spacer()
+            Spacer(minLength: 0)
             if showScore, let score = item.score {
                 Text(formattedScore(score))
-                    .font(.caption)
+                    .font(TrendingCardView.recipe.primary)
                     .foregroundStyle(.secondary)
             }
         }

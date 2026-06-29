@@ -13,13 +13,17 @@ public struct TodoListCardView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            content
+        HStack(alignment: .top, spacing: 12) {
+            CardTypeBadge(type: .todoList)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundTint, in: RoundedRectangle(cornerRadius: 12))
+        .cardChrome(size: size, style: style)
     }
+
+    // MARK: - Size-driven content selection (geometry/density only)
 
     @ViewBuilder
     private var content: some View {
@@ -40,14 +44,15 @@ public struct TodoListCardView: View {
     @ViewBuilder
     private var smallContent: some View {
         let highestPriority = itemsSortedByPriority.first
-        HStack {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text("\(payload.items.count)")
-                .font(.title2)
-                .fontWeight(.bold)
+                .font(Self.recipe.primary)
+                .fontWeight(.semibold)
             Text("items")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Self.recipe.secondary)
+                .foregroundStyle(Self.recipe.secondaryColor)
         }
+        .accessibilityElement(children: .combine)
         if let item = highestPriority {
             TodoItemRow(item: item, showDue: false)
         }
@@ -63,8 +68,8 @@ public struct TodoListCardView: View {
         }
         if payload.items.count > 3 {
             Text("+\(payload.items.count - 3) more")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Self.recipe.secondary)
+                .foregroundStyle(Self.recipe.secondaryColor)
         }
     }
 
@@ -86,15 +91,18 @@ public struct TodoListCardView: View {
                 TodoItemRow(item: item, showDue: true)
                 if let ref = item.ref {
                     Text(ref)
-                        .font(.caption2)
+                        .font(Self.recipe.secondary)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
             }
+            .accessibilityElement(children: .combine)
         }
     }
 
     // MARK: - Helpers
+
+    static let recipe = AIDashTypography.detail(for: .todoList)
 
     private var itemsSortedByPriority: [TodoListPayload.Item] {
         payload.items.sorted { lhs, rhs in
@@ -110,15 +118,6 @@ public struct TodoListCardView: View {
         case nil: return 0
         }
     }
-
-    private var backgroundTint: Color {
-        switch style {
-        case .neutral: return Color.clear
-        case .success: return Color.green.opacity(0.08)
-        case .warning: return Color.orange.opacity(0.08)
-        case .accent: return Color.accentColor.opacity(0.10)
-        }
-    }
 }
 
 // MARK: - TodoItemRow
@@ -131,15 +130,16 @@ private struct TodoItemRow: View {
         HStack(spacing: 8) {
             priorityIndicator
             Text(item.title)
-                .font(.subheadline)
+                .font(TodoListCardView.recipe.primary)
                 .lineLimit(2)
-            Spacer()
+            Spacer(minLength: 0)
             if showDue, let due = item.due {
                 Text(due, style: .date)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(TodoListCardView.recipe.secondary)
+                    .foregroundStyle(TodoListCardView.recipe.secondaryColor)
             }
         }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
