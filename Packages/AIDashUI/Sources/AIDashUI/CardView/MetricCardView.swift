@@ -13,83 +13,45 @@ public struct MetricCardView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            content
+        HStack(alignment: .top, spacing: 12) {
+            CardTypeBadge(type: .metric)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundTint, in: RoundedRectangle(cornerRadius: 12))
+        .cardChrome(size: size, style: style)
     }
 
     @ViewBuilder
     private var content: some View {
         switch size {
         case .small:
-            smallLayout
-        case .medium:
-            mediumLayout
-        case .wide:
-            wideLayout
-        case .hero:
-            heroLayout
-        }
-    }
-
-    // MARK: - Size Layouts
-
-    private var smallLayout: some View {
-        VStack(alignment: .center, spacing: 4) {
             if let item = payload.items.first {
-                metricValue(item, font: .largeTitle)
-                Text(item.label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var mediumLayout: some View {
-        HStack(spacing: 16) {
-            ForEach(Array(payload.items.prefix(2).enumerated()), id: \.offset) { _, item in
                 metricCell(item)
             }
-        }
-    }
-
-    private var wideLayout: some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(payload.items.count, 4)),
-            spacing: 12
-        ) {
-            ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
-                metricCell(item)
+        case .medium:
+            HStack(alignment: .top, spacing: 16) {
+                ForEach(Array(payload.items.prefix(2).enumerated()), id: \.offset) { _, item in
+                    metricCell(item)
+                }
             }
-        }
-    }
-
-    private var heroLayout: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let primary = payload.items.first {
-                metricValue(primary, font: .system(size: 48, weight: .bold))
-                Text(primary.label)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+        case .wide:
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.flexible(), spacing: 12),
+                    count: max(1, min(payload.items.count, 4))
+                ),
+                spacing: 12
+            ) {
+                ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
+                    metricCell(item)
+                }
             }
-
-            if payload.items.count > 1 {
-                Divider()
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.adaptive(minimum: 100), spacing: 12),
-                        count: 1
-                    ),
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    ForEach(Array(payload.items.dropFirst().enumerated()), id: \.offset) { _, item in
-                        metricCell(item, compact: true)
-                    }
+        case .hero:
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
+                    metricCell(item)
                 }
             }
         }
@@ -97,36 +59,42 @@ public struct MetricCardView: View {
 
     // MARK: - Components
 
-    private func metricCell(_ item: MetricPayload.Item, compact: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            metricValue(item, font: compact ? .title3 : .title2)
+    private func metricCell(_ item: MetricPayload.Item) -> some View {
+        let recipe = AIDashTypography.detail(for: .metric)
+        return VStack(alignment: .leading, spacing: 2) {
+            metricValue(item, recipe: recipe)
             Text(item.label)
-                .font(compact ? .caption2 : .caption)
-                .foregroundStyle(.secondary)
+                .font(recipe.secondary)
+                .foregroundStyle(recipe.secondaryColor)
         }
     }
 
-    private func metricValue(_ item: MetricPayload.Item, font: Font) -> some View {
+    private func metricValue(
+        _ item: MetricPayload.Item,
+        recipe: AIDashTypography.DetailRecipe
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(formattedValue(item.value))
-                .font(font)
-                .fontWeight(.semibold)
+                .font(recipe.primary)
 
             if let unit = item.unit {
                 Text(unit)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(recipe.secondary)
+                    .foregroundStyle(recipe.secondaryColor)
             }
 
             if let trend = item.trend {
-                trendArrow(trend)
+                trendArrow(trend, recipe: recipe)
             }
         }
     }
 
-    private func trendArrow(_ trend: MetricPayload.Item.Trend) -> some View {
+    private func trendArrow(
+        _ trend: MetricPayload.Item.Trend,
+        recipe: AIDashTypography.DetailRecipe
+    ) -> some View {
         Image(systemName: trendIconName(trend))
-            .font(.caption)
+            .font(recipe.secondary)
             .foregroundStyle(trendColor(trend))
     }
 
@@ -154,15 +122,6 @@ public struct MetricCardView: View {
         case .flat: return .secondary
         }
     }
-
-    var backgroundTint: Color {
-        switch style {
-        case .neutral: return Color.clear
-        case .success: return Color.green.opacity(0.08)
-        case .warning: return Color.orange.opacity(0.08)
-        case .accent: return Color.accentColor.opacity(0.10)
-        }
-    }
 }
 
 // MARK: - Previews
@@ -175,7 +134,7 @@ public struct MetricCardView: View {
         size: .small,
         style: .success
     )
-    .frame(width: 160, height: 120)
+    .frame(width: 220, height: 140)
     .padding()
 }
 
@@ -188,7 +147,7 @@ public struct MetricCardView: View {
         size: .medium,
         style: .neutral
     )
-    .frame(width: 320, height: 120)
+    .frame(width: 420, height: 160)
     .padding()
 }
 
@@ -203,7 +162,7 @@ public struct MetricCardView: View {
         size: .wide,
         style: .accent
     )
-    .frame(width: 500, height: 140)
+    .frame(width: 640, height: 180)
     .padding()
 }
 
@@ -218,6 +177,6 @@ public struct MetricCardView: View {
         size: .hero,
         style: .warning
     )
-    .frame(width: 500, height: 220)
+    .frame(width: 640, height: 320)
     .padding()
 }

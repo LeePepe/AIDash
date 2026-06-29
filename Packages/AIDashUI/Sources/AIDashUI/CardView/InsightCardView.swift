@@ -13,46 +13,46 @@ public struct InsightCardView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            content
+        HStack(alignment: .top, spacing: 12) {
+            CardTypeBadge(type: .insight)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundTint, in: RoundedRectangle(cornerRadius: 12))
+        .cardChrome(size: size, style: style)
     }
 
     @ViewBuilder
     private var content: some View {
+        let recipe = AIDashTypography.detail(for: .insight)
+        Text(payload.title)
+            .font(recipe.primary)
+
         switch size {
         case .small:
-            Text(payload.title)
-                .font(.headline)
-                .lineLimit(2)
+            EmptyView()
 
         case .medium:
-            Text(payload.title)
-                .font(.headline)
             Text(truncatedBody)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(recipe.secondary)
+                .foregroundStyle(recipe.secondaryColor)
+            if let citations = payload.citations, !citations.isEmpty {
+                collapsedCitations(count: citations.count)
+            }
 
         case .wide:
-            Text(payload.title)
-                .font(.headline)
             Text(payload.body)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(recipe.secondary)
+                .foregroundStyle(recipe.secondaryColor)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
 
         case .hero:
-            Text(payload.title)
-                .font(.title3)
-                .fontWeight(.semibold)
             Text(payload.body)
-                .font(.body)
-                .foregroundStyle(.secondary)
+                .font(recipe.secondary)
+                .foregroundStyle(recipe.secondaryColor)
             if let citations = payload.citations, !citations.isEmpty {
                 citationLinks(citations: citations)
             }
@@ -99,15 +99,6 @@ public struct InsightCardView: View {
             return (label: citation.label, url: url)
         }
     }
-
-    private var backgroundTint: Color {
-        switch style {
-        case .neutral: return Color.clear
-        case .success: return Color.green.opacity(0.08)
-        case .warning: return Color.orange.opacity(0.08)
-        case .accent: return Color.accentColor.opacity(0.10)
-        }
-    }
 }
 
 #Preview("Small — Neutral") {
@@ -119,6 +110,7 @@ public struct InsightCardView: View {
         size: .small,
         style: .neutral
     )
+    .frame(width: 220, height: 140)
     .padding()
 }
 
@@ -131,6 +123,7 @@ public struct InsightCardView: View {
         size: .medium,
         style: .warning
     )
+    .frame(width: 420, height: 200)
     .padding()
 }
 
@@ -147,6 +140,7 @@ public struct InsightCardView: View {
         size: .wide,
         style: .success
     )
+    .frame(width: 640, height: 200)
     .padding()
 }
 
@@ -163,5 +157,6 @@ public struct InsightCardView: View {
         size: .hero,
         style: .accent
     )
+    .frame(width: 640, height: 320)
     .padding()
 }
