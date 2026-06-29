@@ -45,4 +45,41 @@ struct ListLayoutTests {
         let layout = ListLayout(cards: cards, style: .neutral)
         _ = layout.body
     }
+
+    // MARK: - TokenGrid / list collapse contract
+    //
+    // The constitution permits one deviation from the shared grid:
+    // ListLayout collapses every card to span the full row. Source
+    // assertions pin this contract.
+
+    @Test("ListLayout delegates to TokenGrid with collapseToList: true")
+    func delegatesWithCollapse() throws {
+        let source = try readLayoutSource("ListLayout.swift")
+
+        #expect(source.contains("TokenGrid("),
+                "ListLayout must delegate to the shared TokenGrid")
+        #expect(source.contains("collapseToList: true"),
+                "ListLayout must pass collapseToList: true to TokenGrid")
+        #expect(!source.contains("CardType."),
+                "ListLayout must not branch on CardType")
+        #expect(!source.contains(".cardChrome"),
+                "ListLayout must not apply card chrome")
+        #expect(!source.contains(".background("),
+                "ListLayout must not paint its own background")
+    }
+}
+
+fileprivate func readLayoutSource(_ filename: String) throws -> String {
+    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    for _ in 0..<8 {
+        let candidate = dir
+            .appendingPathComponent("Sources/AIDashUI/Layout")
+            .appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return try String(contentsOf: candidate, encoding: .utf8)
+        }
+        dir = dir.deletingLastPathComponent()
+    }
+    struct NotFound: Error { let filename: String }
+    throw NotFound(filename: filename)
 }

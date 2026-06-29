@@ -120,4 +120,76 @@ struct ContainerViewTests {
 
         #expect(view.container.style == style)
     }
+
+    // MARK: - Container Chrome contract
+    //
+    // Constitution §Container Chrome: the container view MUST NOT wrap
+    // its cards in a `RoundedRectangle`, `.background(...)`, material
+    // panel, or colored fill. These tests pin the contract by reading
+    // the source — code-level inspection is the only test layer that
+    // can prove the absence of chrome modifiers since SwiftUI's view
+    // graph is opaque.
+
+    @Test("ContainerView source contains no container-level background or panel chrome")
+    func containerHasNoPanelChrome() throws {
+        let source = try Self.containerViewSource()
+
+        #expect(!source.contains(".background(") ,
+                "ContainerView must not call .background — containers carry typography + spacing only")
+        #expect(!source.contains("RoundedRectangle("),
+                "ContainerView must not draw a RoundedRectangle around its cards")
+        #expect(!source.contains(".thinMaterial") && !source.contains(".regularMaterial"),
+                "ContainerView must not use a material panel")
+        #expect(!source.contains(".fill("),
+                "ContainerView must not paint a colored fill")
+    }
+
+    @Test("ContainerView header uses overview-tier typography token")
+    func headerUsesOverviewTypography() throws {
+        let source = try Self.containerViewSource()
+
+        #expect(source.contains("AIDashTypography.section"),
+                "Header must use AIDashTypography.section font")
+        #expect(source.contains("AIDashTypography.sectionTracking"),
+                "Header must apply the +0.6pt tracking token")
+        #expect(source.contains("AIDashTypography.sectionColor"),
+                "Header must use the overview-tier color token")
+    }
+
+    @Test("ContainerView header-to-first-card spacing uses AIDashSpacing token")
+    func headerToFirstCardSpacingUsesToken() throws {
+        let source = try Self.containerViewSource()
+
+        #expect(source.contains("AIDashSpacing.containerHeaderToFirstCard"),
+                "Header-to-card spacing must come from the 12pt token, not a magic number")
+    }
+
+    // MARK: - Source helper
+
+    private static func containerViewSource() throws -> String {
+        let url = try sourceFile(named: "ContainerView.swift",
+                                 under: "Sources/AIDashUI")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private static func sourceFile(named filename: String,
+                                   under relativePath: String) throws -> URL {
+        // Walk up from this test file until we find the AIDashUI package root,
+        // then descend into the requested subdirectory.
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        for _ in 0..<8 {
+            let candidate = dir
+                .appendingPathComponent(relativePath)
+                .appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            dir = dir.deletingLastPathComponent()
+        }
+        throw SourceLookupError.notFound(filename)
+    }
+
+    private enum SourceLookupError: Error {
+        case notFound(String)
+    }
 }
