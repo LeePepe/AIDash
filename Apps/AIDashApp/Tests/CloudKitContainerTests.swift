@@ -83,6 +83,33 @@ import AIDashCore
     #expect(a === b)
 }
 
+// MARK: - Storage-mode gate (prevents the async CloudKit-mirror crash)
+
+@MainActor
+@Test func storageModeUsesCloudKitWhenAccountAvailable() {
+    // With an iCloud account present, attach the CloudKit-mirrored store.
+    #expect(CloudKitContainer.storageMode(cloudAvailable: true) == .cloudKit)
+}
+
+@MainActor
+@Test func storageModeFallsBackToLocalWhenNoAccount() {
+    // Without iCloud, we MUST NOT attach the CloudKit mirror: doing so lets
+    // NSPersistentCloudKitContainer abort the process on its own queue, a
+    // crash no do/catch can intercept. Local-only keeps the app launchable.
+    #expect(CloudKitContainer.storageMode(cloudAvailable: false) == .localOnly)
+}
+
+@MainActor
+@Test func realSingletonInitNeverCrashesRegardlessOfICloud() {
+    // Constructing the shared container must not crash whether or not this
+    // host has iCloud — the whole point of the preflight gate. Reaching here
+    // with a non-failed-or-failed state (i.e. no trap) is the assertion.
+    switch CloudKitContainer.shared.state {
+    case .ready, .failed:
+        #expect(Bool(true))
+    }
+}
+
 @MainActor
 @Test func cloudKitContainerSharedSchemaHasFourEntities() async throws {
     // Validates that the singleton registers all 4 models regardless of CloudKit availability
