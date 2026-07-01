@@ -24,6 +24,37 @@ before doing anything material.** It governs every decision below.
 | Agent quickstart (how to publish a briefing) | `specs/001-core-briefing-cli/quickstart.md` |
 | Task breakdown | `specs/001-core-briefing-cli/tasks.md` |
 | Original grill decisions (audit trail) | `docs/grill-2026-06-23-decisions.md` |
+| **Global technical context** (architecture, data flow, layers) | `tech-context.md` |
+| **Per-layer technical context** | `Packages/<X>/tech-context.md` |
+
+## Read Contract(读取契约)
+
+任务开始前,按你要碰的东西,先读对应文档 —— 不读就动手 = 违规。
+优先级:Constitution > spec > tech-context > plan > task > intuition。
+
+| 你要做的事 | 必读(前置) | 拿什么 |
+|---|---|---|
+| 任何任务 | `.specify/memory/constitution.md` | 不可违反的红线 |
+| 决定"做什么" / 改需求 | `specs/<当前>/spec.md` | 功能意图、验收标准、范围边界 |
+| 改全局架构 / 跨层设计 | `tech-context.md`(顶层) | 架构决策、数据流、分层规则 |
+| **改 `Packages/<X>/**`** | **`Packages/<X>/tech-context.md`** | 该层职责、依赖、红线、测试约定 |
+| 改 CI / hook / gate | 见 Constitution 的 Quality Gates 节 | 门禁约定 |
+
+### 分层路由(Layer Routing)—— 核心
+
+- 改哪个包,**先读那个包的 `tech-context.md`**(顶部 frontmatter 有 layer/依赖/红线)。
+- 改动只落在 **1 个层** → 一个 agent 直接做。
+- 改动跨 **2+ 层** → 任务太大,**按层拆**成 N 个子任务;每个子任务 = 一层 =
+  一个独立可 build/test 的 commit。
+- 单层内仍很大 → 按技术切面拆(lib / 接口 / UI / 格式化 / fixture / 文档 / 迁移)。
+- 做完发现别层也要动 → **记为新任务,不扩展原任务**。
+- 用行数/文件数当"任务大小"阈值是脆弱的;**layer 边界才是 scope 单元**。
+
+### 分层发现(Layer Discovery)
+
+lint / UT 失败时:解析失败路径 → 映射到 layer(哪个 Package)→ 派该层的修复
+(带上该层 `tech-context.md` frontmatter 的 `red_lines`)→ 只在该层内修 → 跑该层
+test 验证 → 若根因在别层,记为新任务,不跨层改。
 
 ## Hard constraints (from Constitution)
 
