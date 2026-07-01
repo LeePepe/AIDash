@@ -25,6 +25,10 @@ pushing_anything=0
 docs_only=1
 zero="0000000000000000000000000000000000000000"
 
+# Captured diff range for the quality gates (require-tests / diff-size).
+gate_base=""
+gate_head=""
+
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "$local_sha" ] && continue
     [ "$local_sha" = "$zero" ] && continue   # delete; skip
@@ -43,6 +47,10 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
         docs_only=0
         continue
     fi
+
+    # Remember the range so the quality gates can inspect this push.
+    gate_base="$base"
+    gate_head="$local_sha"
 
     changed_files="$(git diff --name-only "$base..$local_sha")"
     if [ -z "$changed_files" ]; then
@@ -66,6 +74,21 @@ fi
 if [ "$docs_only" = "1" ]; then
     echo "[pre-push] docs-only push; skipping build/test gate."
     exit 0
+fi
+
+# Quality gates — require-tests (blocking) + diff-size (advisory).
+# Only run when we have a concrete diff range for this push.
+if [ -n "$gate_base" ] && [ -n "$gate_head" ]; then
+    if [ -x "scripts/quality/check-diff-size.sh" ]; then
+        scripts/quality/check-diff-size.sh "$gate_base" "$gate_head" || true
+    fi
+    if [ -x "scripts/quality/require-tests.sh" ]; then
+        echo "[pre-push] require-tests gate..."
+        if ! scripts/quality/require-tests.sh "$gate_base" "$gate_head"; then
+            echo "[pre-push] FAILED: require-tests"
+            exit 1
+        fi
+    fi
 fi
 
 # Test gate — Core package only (fast, no Xcode required for SPM tests).
