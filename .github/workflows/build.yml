@@ -27,6 +27,9 @@ jobs:
       - name: Anti-rot — frontmatter matches code
         run: scripts/hooks/check-frontmatter
 
+      - name: Anti-rot — tasks.md in sync with spec + single-layer
+        run: scripts/hooks/check-tasks-fresh
+
       - name: Gate — code changes must include tests
         # 改了 .swift 源码却没动任何测试文件 → 失败。逃生舱:PR 任一 commit
         # message 含 "Allow-No-Tests:"。PR 用 base..head;push-to-main 用 before..after。
