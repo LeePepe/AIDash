@@ -1,0 +1,33 @@
+name: auto-merge
+
+# 任何 PR 一建就挂上 squash auto-merge。真正何时合并由 main 的 ruleset
+# 机器门决定:必须 "build + test (macOS 26)" 与 "claude-review" 两个 required
+# status check 都绿,分支还得与 main 同步(strict)。门没过 → 不会合。
+#
+# 不论谁提的 PR 都触发(包括 fork / 外部贡献者)。fork PR 无 secret 也没关系:
+# 本 workflow 只调 gh API,用的是内置 GITHUB_TOKEN。
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enable-auto-merge:
+    runs-on: ubuntu-latest
+    # draft PR 不挂 auto-merge;转 ready 时会再次触发。
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Enable squash auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr merge "$PR_URL" --squash --auto
