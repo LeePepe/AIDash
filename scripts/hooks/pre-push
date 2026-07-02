@@ -73,6 +73,16 @@ if [ -x "scripts/hooks/check-frontmatter" ]; then
     fi
 fi
 
+# 规划层防腐 — tasks.md 必须与 spec 同步、实现任务单层。
+# 同样 docs-only 也跑(tasks/spec 都是 docs)。
+if [ -x "scripts/hooks/check-tasks-fresh" ]; then
+    echo "[pre-push] check-tasks-fresh..."
+    if ! scripts/hooks/check-tasks-fresh; then
+        echo "[pre-push] FAILED: tasks.md 与 spec 不同步或任务跨层"
+        exit 1
+    fi
+fi
+
 if [ "$docs_only" = "1" ]; then
     echo "[pre-push] docs-only push; skipping build/test gate."
     exit 0

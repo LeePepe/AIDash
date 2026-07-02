@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# check-tasks-fresh — 规划层防腐:校验 spec-kit 的 tasks.md 与 spec 同步 + 任务单层。
+#
+# 与 check-frontmatter(代码层防腐)同构,把"防腐"从 frontmatter↔code 延伸到
+# tasks↔spec。删除 Planner(运行时拆分)后,dev team 的 TL 调度环直接信任 tasks.md;
+# 本脚本保证它不过期、不跨层,是那份信任的前提。
+#
+# 校验三件事:
+#   ① tasks.md 引用的 spec/契约文件仍存在
+#   ② tasks.md 不旧于 spec.md / plan.md(git 提交时间;非 git 用 mtime)
+#   ③ 每个任务的 Files in scope(bullet 里反引号包裹的 Packages/… Apps/… CLI/… 路径)
+#      落在单一 layer —— 跨层的 T### = spec bug(拆漏)
+#
+# pre-push / CI 各跑一次;TL 调度环 sync-check 也调它。腐烂即 exit 1。依赖 awk(gawk gensub)。
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+# bash 3.2(macOS)无 mapfile;用 while-read 收集
+TASKS=()
+while IFS= read -r t; do
+    [ -n "$t" ] && TASKS+=("$t")
+done < <(find specs -maxdepth 2 -name 'tasks.md' 2>/dev/null | sort)
+if [ "${#TASKS[@]}" -eq 0 ]; then
+    echo "[check-tasks-fresh] 无 specs/*/tasks.md;跳过(非 spec-driven repo)。"
+    exit 0
+fi
+
+mtime_of() {
+    local t
+    t="$(git log -1 --format=%ct -- "$1" 2>/dev/null)"
+    [ -z "$t" ] && t="$(stat -f %m "$1" 2>/dev/null || echo 0)"
+    echo "${t:-0}"
+}
+
+# awk 跨层检测器写临时文件(避免管道子 shell 吞掉 fail 标记)。BSD awk 兼容:不用 gensub。
+AWK_XL="$(mktemp)"
+trap 'rm -f "$AWK_XL"' EXIT
+cat > "$AWK_XL" <<'AWK'
+/^- \[[ x]\] \*\*T[0-9]+/ {
+    if (tid != "") process()
+    # 提取 T### id(不用 gensub):在整行里 match T 后跟数字
+    if (match($0, /T[0-9]+/)) tid = substr($0, RSTART, RLENGTH); else tid = "T?"
+    # [Story] tag 决定是否适用单层规则:SETUP/POLISH 是脚手架/CI/docs,天生跨层,豁免。
+    # 只对实现类任务(FOUND / US*)强制单层。
+    exempt = ($0 ~ /\[(SETUP|POLISH)\]/)
+    block = $0 "\n"; next
+}
+{ if (tid != "") block = block $0 "\n" }
+END { if (tid != "") process() }
+function layerof(pp,   a) {
+    if (pp ~ /^Packages\//) { split(pp, a, "/"); return "pkg:" a[2] }
+    if (pp ~ /^Apps\//)  return "App"
+    if (pp ~ /^CLI\//)   return "CLI"
+    return ""
+}
+function process(   p, lay, layers, cnt, k, out) {
+    if (exempt) return
+    delete layers; cnt = 0
+    while (match(block, /`[^`]*(Packages|Apps|CLI)\/[^`]*`/)) {
+        p = substr(block, RSTART+1, RLENGTH-2)
+        block = substr(block, RSTART+RLENGTH)
+        lay = layerof(p)
+        if (lay != "" && !(lay in layers)) { layers[lay] = 1; cnt++ }
+    }
+    if (cnt > 1) {
+        out = ""
+        for (k in layers) out = out (out=="" ? "" : ", ") k
+        printf("%s\t%s\n", tid, out)
+    }
+}
+AWK
+
+fail=0
+
+for tasks in "${TASKS[@]}"; do
+    dir="$(dirname "$tasks")"
+    echo "[check-tasks-fresh] $tasks"
+
+    # ① 引用的 spec/契约文件存在
+    refs="$(grep -oE '(specs/[A-Za-z0-9._/-]+\.md|contracts/[A-Za-z0-9._/-]+\.md|(spec|plan|research|data-model|quickstart)\.md)' "$tasks" | sort -u || true)"
+    while IFS= read -r r; do
+        [ -z "$r" ] && continue
+        case "$r" in
+            specs/*) path="$r" ;;
+            *)       path="$dir/$r" ;;
+        esac
+        [ -f "$path" ] || { echo "[check-tasks-fresh] ❌ 引用的 '$r' 不存在($path)"; fail=1; }
+    done <<< "$refs"
+
+    # ② tasks.md 不旧于 spec.md / plan.md
+    tt="$(mtime_of "$tasks")"
+    for up in "$dir/spec.md" "$dir/plan.md"; do
+        [ -f "$up" ] || continue
+        ut="$(mtime_of "$up")"
+        if [ "$ut" -gt "$tt" ]; then
+            echo "[check-tasks-fresh] ❌ $(basename "$up") 比 tasks.md 新 —— spec 变了但 tasks 未重跑 /tasks"
+            fail=1
+        fi
+    done
+
+    # ③ 任务单层
+    xl="$(awk -f "$AWK_XL" "$tasks")"
+    if [ -n "$xl" ]; then
+        while IFS=$'\t' read -r tid layers; do
+            [ -z "$tid" ] && continue
+            echo "[check-tasks-fresh] ❌ $tid 的 Files in scope 跨层($layers)—— spec bug,应拆成单层 T###"
+            fail=1
+        done <<< "$xl"
+    fi
+done
+
+if [ "$fail" -eq 0 ]; then
+    echo "[check-tasks-fresh] ✅ tasks.md 与 spec 同步、任务单层"
+    exit 0
+else
+    echo "[check-tasks-fresh] 规划层腐烂:重跑 /tasks 重新生成 tasks.md,或修 spec 后再试。"
+    exit 1
+fi
