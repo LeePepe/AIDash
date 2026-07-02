@@ -10,6 +10,11 @@ red_lines:
   - Swift 6 严格并发;@unchecked Sendable、nonisolated(unsafe) 需 docs/adr/ 下 ADR
   - 默认仅 Apple 框架;新增非 Apple 依赖(swift-argument-parser 之外)需 ADR
   - 三个正交卡片维度(type/size/style)不得混为一谈
+roles:                              # 层内轴:类角色 → 目录(角色顺序见顶层 canonical_roles)
+  Types:   [Models, XPC]            # 领域模型 + XPC 契约:纯数据/协议,不依赖任何上层角色
+  Config:  [DeviceID]              # 设备标识:轻配置
+  Repo:    [CloudKit, Storage]     # CloudKit 客户端 + SwiftData 镜像:持久化
+  Service: [Validation]            # schema 校验 + URL 策略:依赖 Types,可被 Repo 用
 test: swift test --package-path Packages/AIDashCore
 owns: [Briefing, Container, Card, CardType, CardSize, CardStyle, CloudKitContainer, XPCProtocol, XPCRequest, XPCResponse, XPCError, SchemaValidator, URLPolicy, CardPayloadProtocol, DeviceIdentifier]
 ---

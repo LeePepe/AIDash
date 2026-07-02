@@ -50,6 +50,23 @@ AIDashCore ← aidash CLI        (CLI 绝不 import UI)
 ```
 方向单向不可逆。改动跨越这条边界 = 信号:任务太大或分层错了,应拆(见分层路由)。
 
+## 两条依赖轴(层间 + 层内)
+
+依赖方向在**两个粒度**上各锁一次,同一原则"依赖只能向下":
+
+- **层间轴(package)**:上面那张图,事实源是各 `Packages/*/tech-context.md` 的 `depends_on`。
+- **层内轴(class role)**:一个包**内部**,类的架构角色之间谁能依赖谁。事实源是各层 frontmatter
+  的 `roles`(角色→目录),角色顺序由下面的 `canonical_roles` 定义。
+
+```yaml
+canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
+```
+
+含义(**类角色 stereotype 的依赖顺序,不是包**):低角色的类不得依赖高角色的类。
+如 `Types`(领域模型)不得 import `Repo`(存储客户端)/`Service`(校验);反过来可以。
+各层 `roles` 只从这个词表取子集映射到自己的目录。canonical model 是**层内**规则,
+包依赖走 `depends_on`,两轴正交。
+
 ## Rules(全局技术约束,摘自 constitution)
 
 - macOS 26 / iOS 26 最低,无向后兼容 shim。

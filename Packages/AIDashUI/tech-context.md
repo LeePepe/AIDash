@@ -11,6 +11,10 @@ red_lines:
   - 视图层默认 @MainActor;Swift 6 严格并发
   - 无 App 侧 LLM 调用:内容是 agent 撰写的,不在视图层生成
   - 无 fatalError / try! / as!,渲染失败走优雅 UI 回退
+roles:                              # 层内轴:类角色 → 目录(角色顺序见顶层 canonical_roles)
+  Types:   [DesignTokens]          # 设计令牌:颜色/间距/字号单源,纯值,不依赖任何视图
+  Runtime: [Layout]                # 容器布局引擎:Grid/List/Hero/Auto,消费 Tokens
+  UI:      [CardView]              # 类型渲染器 + 视图:依赖 Layout + Tokens,最上层
 test: swift test --package-path Packages/AIDashUI
 owns: [BriefingView, ContainerView, CardRouter, DesignTokens, AutoLayout, GridLayout, ListLayout, HeroLayout, MetricCardView, TrendingCardView, SectionHeaderCardView]
 ---
