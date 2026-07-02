@@ -63,9 +63,38 @@ if [ "$pushing_anything" = "0" ]; then
     exit 0
 fi
 
+# 防腐校验 — 每层 tech-context.md 的 frontmatter 必须与代码一致。
+# 即便 docs-only 也跑:tech-context.md 本身就是 docs,改坏了要拦。
+if [ -x "scripts/hooks/check-frontmatter" ]; then
+    echo "[pre-push] check-frontmatter..."
+    if ! scripts/hooks/check-frontmatter; then
+        echo "[pre-push] FAILED: frontmatter 与代码不一致"
+        exit 1
+    fi
+fi
+
 if [ "$docs_only" = "1" ]; then
     echo "[pre-push] docs-only push; skipping build/test gate."
     exit 0
+fi
+
+# 门:改代码必带测试 —— 改了源码却没动任何测试文件 → 拦。
+# 逃生舱:任一 commit message 含 "Allow-No-Tests:" 则放行。
+# 范围以本次推送的整体 diff(最后一段 base..local_sha)为准。
+if [ -n "${base:-}" ] && [ -n "${local_sha:-}" ]; then
+    range_changed="$(git diff --name-only "$base..$local_sha" 2>/dev/null || true)"
+    src_changed="$(echo "$range_changed" | grep -E '\.swift$' | grep -vE '(^|/)Tests/|Tests?\.swift$' || true)"
+    test_changed="$(echo "$range_changed" | grep -E '(^|/)Tests/|Tests?\.swift$' || true)"
+    if [ -n "$src_changed" ] && [ -z "$test_changed" ]; then
+        if ! git log "$base..$local_sha" --format=%B 2>/dev/null | grep -qi '^Allow-No-Tests:'; then
+            echo "[pre-push] ❌ 改了源码(.swift)但无测试改动。"
+            echo "[pre-push]    补对应层的测试,或在某个 commit message 写:Allow-No-Tests: <原因>"
+            echo "[pre-push]    改动的源文件:"
+            echo "$src_changed" | sed 's/^/[pre-push]      /'
+            exit 1
+        fi
+        echo "[pre-push] ⚠️ 改了源码但无测试改动;因 Allow-No-Tests: 放行。"
+    fi
 fi
 
 # Test gate — Core package only (fast, no Xcode required for SPM tests).

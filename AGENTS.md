@@ -121,15 +121,26 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
 - **Conventional commits.** `feat:`, `fix:`, `refactor:`, `test:`,
   `docs:`, `chore:`.
 - **PR is the unit of merge.** Each PR closes one Multica issue.
-- **`main` is protected.** Two layers of CI gate every change:
-  1. **Local `pre-push` hook** (`scripts/hooks/pre-push`) — runs
-     `swift test` on `AIDashCore`, then `xcodegen generate`, then
-     `xcodebuild` for BOTH `AIDashApp` and the `aidash` CLI. Activated
-     per-worktree via `git config core.hooksPath scripts/hooks`.
-  2. **GitHub Actions** (`.github/workflows/build.yml`) — re-runs the
-     same gates on `macos-latest` for every PR against `main` and for
-     every push to `main`. This is the authoritative CI signal that the
-     Reviewer and PR Manager must confirm green before merge.
+- **`main` is protected.** Three gates guard every change (发现→修复解耦):
+  1. **Local `pre-commit` hook** (`scripts/hooks/pre-commit`) — 增量:只对本次
+     暂存改动涉及的 SPM 包跑 `swift build` + `swift test` + 对暂存 `.swift`
+     跑 swiftlint。秒级。**注意:顶层代码(`Apps/**`、`CLI/**`)不属于任何
+     `Packages/<X>` 层,pre-commit 不覆盖——它们的门禁落在 pre-push/CI 的全量
+     构建。**
+  2. **Local `pre-push` hook** (`scripts/hooks/pre-push`) — 全量:防腐校验
+     (frontmatter 对代码)、「改代码必带测试」门、`swift test`(AIDashCore)、
+     `xcodegen generate`、`xcodebuild` for BOTH `AIDashApp` and `aidash` CLI。
+     Activated per-worktree via `git config core.hooksPath scripts/hooks`.
+  3. **GitHub Actions** (`.github/workflows/build.yml`) — re-runs the same
+     gates(含防腐校验 + 改代码必带测试)on `macos-26` for every PR against
+     `main` and for every push to `main`. This is the authoritative CI signal;
+     只有它挡得住 `--no-verify`。**需在仓库 branch ruleset 里把此 job 设为
+     required status check**(脚本进 workflow ≠ 已 required)。
+- **改代码必带测试.** 改了 `.swift` 源码却没动任何测试文件 → pre-push / CI 拦。
+  逃生舱:任一 commit message 写 `Allow-No-Tests: <原因>`(仅限确无法测的改动)。
+- **防腐校验.** `scripts/hooks/check-frontmatter` 核对每层 `tech-context.md`
+  frontmatter 与代码一致(layer 名==目录名、`depends_on` ⇄ `Package.swift`
+  双向一致、`depended_by` 镜像、`test` 路径存在)。架构变了就更新对应层文档。
 - **Hooks live in `scripts/hooks/`** (under version control), activated
   via `git config core.hooksPath scripts/hooks`. `.git/hooks/` is
   per-worktree and ignored. Bypass with `--no-verify` is allowed only
