@@ -1,0 +1,44 @@
+name: claude-review
+
+# 自动 code review,跑在维护者本机的 self-hosted runner 上,用已登录订阅的
+# 本地 `claude` CLI(不需要 ANTHROPIC_API_KEY)。
+#
+# 这是 main 的 required status check:job 失败(发现 critical/high)→ 本 check
+# 红 → 挡住 auto-merge。job 恒定运行,保证 check 一定会上报状态,否则 PR 永卡。
+#
+# 安全:public repo 上 self-hosted runner 会执行 PR 代码。脚本内部对 fork PR
+# 走 no-op(不 checkout、不跑 claude);仍建议在仓库 Settings→Actions 把
+# "Fork pull request workflows from outside collaborators" 设为需人工批准。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    runs-on: [self-hosted, aidash-mac]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Run local claude review (gate)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: scripts/ci/claude-review.sh
