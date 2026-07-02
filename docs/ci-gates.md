@@ -40,10 +40,15 @@
 cd ~/actions-runner-aidash && ./svc.sh install && ./svc.sh start
 ```
 
-### 安全(public repo)
-- fork PR 的代码**不在本机执行**(脚本内 no-op),避免 self-hosted 被滥用跑任意代码。
-- 建议 GitHub → Settings → Actions → General →「Fork pull request workflows from
-  outside collaborators」设为 **Require approval for all external contributors**。
+### 安全(public repo + self-hosted 的高危组合)
+self-hosted runner + `pull_request` + checkout PR head = 公认高危:step 执行的是 PR 版本的代码。
+本仓库的**信任边界放在 workflow YAML**(`pull_request` 事件下 YAML 由 base 分支评估,fork 改不到),
+**不放在被 checkout 的脚本里**:
+- `claude-review` job 有 `if: head.repo.full_name == github.repository` —— fork PR 的代码**一行都不在本机执行**。
+- fork PR 改由 `claude-review-fork` job(GitHub 托管 runner)只发提示 + 上报同名 check,留人工。
+- 仓库设置已把 **outside collaborators 的 workflow 设为需人工批准**
+  (`actions/permissions/fork-pr-contributor-approval = all_external_contributors`)。
+- review prompt 显式声明 diff 为**不可信数据**,防止 PR 内对抗性文本诱导 `verdict=pass`。
 
 ## ruleset 即代码
 `scripts/rulesets/main-protection.json` 是唯一真相,改后重跑 `scripts/rulesets/apply`
