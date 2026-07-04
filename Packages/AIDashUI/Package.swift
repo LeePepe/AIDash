@@ -5,30 +5,32 @@ let package = Package(
     name: "AIDashUI",
     platforms: [
         .macOS(.v26),
-        .iOS(.v26),
+        .iOS(.v26)
     ],
     products: [
         .library(
             name: "AIDashUI",
             targets: ["AIDashUI"]
-        ),
+        )
     ],
     dependencies: [
         .package(path: "../AIDashCore"),
+        .package(path: "../DesignKit")
     ],
     targets: [
         .target(
             name: "AIDashUI",
             dependencies: [
                 .product(name: "AIDashCore", package: "AIDashCore"),
+                .product(name: "DesignKit", package: "DesignKit")
             ],
             resources: [
-                .process("Resources"),
+                .process("Resources")
             ]
         ),
         .testTarget(
             name: "AIDashUITests",
             dependencies: ["AIDashUI"]
-        ),
+        )
     ]
 )

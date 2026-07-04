@@ -1,12 +1,12 @@
 ---
 layer: AIDashUI
 role: 跨平台 SwiftUI 视图:卡片类型渲染器、容器布局、briefing 骨架、设计令牌。依赖 Core。
-depends_on: [AIDashCore]
+depends_on: [AIDashCore, DesignKit]
 depended_by: [AIDashApp]
 red_lines:
-  - 只能依赖 AIDashCore,不得引入其它本地包或非 Apple 依赖(需 ADR)
+  - 只能依赖 AIDashCore(数据契约)与 DesignKit(seed 色彩系统);不得引入其它本地包或非 Apple 依赖(需 ADR)
   - 容器是通用渲染槽:布局由数据驱动(CardType/Size/Style),不得为特定业务硬编码布局
-  - 设计令牌纪律:颜色/间距/字号走 DesignTokens,禁止散落魔法值(P0 维度混淆 / P1 令牌漂移)
+  - 颜色走 DesignKit 的 seed 系统(规范源);卡片几何/排版走本层 DesignTokens。禁止散落魔法值/hex(P0 维度混淆 / P1 令牌漂移)
   - 三个正交卡片维度(type/size/style)渲染时不得混为一谈
   - 视图层默认 @MainActor;Swift 6 严格并发
   - 无 App 侧 LLM 调用:内容是 agent 撰写的,不在视图层生成

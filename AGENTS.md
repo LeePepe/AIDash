@@ -26,6 +26,12 @@ before doing anything material.** It governs every decision below.
 | Original grill decisions (audit trail) | `docs/grill-2026-06-23-decisions.md` |
 | **Global technical context** (architecture, data flow, layers) | `tech-context.md` |
 | **Per-layer technical context** | `Packages/<X>/tech-context.md` |
+| **Design system / seed color source** (canonical) | `Packages/DesignKit/tech-context.md` |
+| CI / quality gates 说明 | `docs/ci-gates.md` |
+| Daily digest + aidash push-chain 运维 | `docs/daily-digest-and-aidash-push-chain.md` |
+| Agent-ops redo backlog | `docs/agent-ops-redo-backlog.md` |
+| ADR: nonisolated(unsafe) XPC reply | `docs/adr/001-nonisolated-unsafe-xpc-reply.md` |
+| Design north-star (视觉目标) | `design/north-star.md` |
 
 ## Read Contract(读取契约)
 
@@ -38,6 +44,7 @@ before doing anything material.** It governs every decision below.
 | 决定"做什么" / 改需求 | `specs/<当前>/spec.md` | 功能意图、验收标准、范围边界 |
 | 改全局架构 / 跨层设计 | `tech-context.md`(顶层) | 架构决策、数据流、分层规则 |
 | **改 `Packages/<X>/**`** | **`Packages/<X>/tech-context.md`** | 该层职责、依赖、红线、测试约定 |
+| **改颜色/组件视觉** | **`Packages/DesignKit/tech-context.md`** | seed 色彩系统单源、组件词汇、设计红线 |
 | 改 CI / hook / gate | 见 Constitution 的 Quality Gates 节 | 门禁约定 |
 
 ### 分层路由(Layer Routing)—— 核心
@@ -82,9 +89,13 @@ Reviewer.
 ```
 AIDashCore (zero UI deps, used by both app and CLI)
    ↑
-AIDashUI  (SwiftUI views; depends on Core)
+AIDashUI  (SwiftUI views; depends on Core + DesignKit)
    ↑
 AIDashApp (macOS + iPadOS + iOS app; depends on UI + Core)
+
+DesignKit (seed color system + components; zero local deps)
+   ↑
+AIDashUI  (consumes DesignKit's color source)
 
 aidash CLI (macOS only; depends on Core only; MUST NOT import UI)
 ```
