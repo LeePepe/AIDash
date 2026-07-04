@@ -11,6 +11,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  require-tests:
+    name: require-tests (改代码必带测试)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute diff range
+        id: range
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            # push to main: compare against the previous tip
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            # first push / force scenarios may lack a valid before
+            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              base="$(git rev-parse "$head~1" 2>/dev/null || echo "$head")"
+            fi
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+      - name: Diff-size advisory
+        run: scripts/quality/check-diff-size.sh "${{ steps.range.outputs.base }}" "${{ steps.range.outputs.head }}"
+      - name: Require tests (blocking)
+        run: scripts/quality/require-tests.sh "${{ steps.range.outputs.base }}" "${{ steps.range.outputs.head }}"
+
   build:
     name: build + test (macOS 26)
     # macos-26 runner ships Xcode 26.x (Swift 6.2), which AIDashUI requires

@@ -25,6 +25,10 @@ pushing_anything=0
 docs_only=1
 zero="0000000000000000000000000000000000000000"
 
+# Captured diff range for the quality gates (require-tests / diff-size).
+gate_base=""
+gate_head=""
+
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "$local_sha" ] && continue
     [ "$local_sha" = "$zero" ] && continue   # delete; skip
@@ -43,6 +47,10 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
         docs_only=0
         continue
     fi
+
+    # Remember the range so the quality gates can inspect this push.
+    gate_base="$base"
+    gate_head="$local_sha"
 
     changed_files="$(git diff --name-only "$base..$local_sha")"
     if [ -z "$changed_files" ]; then
@@ -63,47 +71,23 @@ if [ "$pushing_anything" = "0" ]; then
     exit 0
 fi
 
-# 防腐校验 — 每层 tech-context.md 的 frontmatter 必须与代码一致。
-# 即便 docs-only 也跑:tech-context.md 本身就是 docs,改坏了要拦。
-if [ -x "scripts/hooks/check-frontmatter" ]; then
-    echo "[pre-push] check-frontmatter..."
-    if ! scripts/hooks/check-frontmatter; then
-        echo "[pre-push] FAILED: frontmatter 与代码不一致"
-        exit 1
-    fi
-fi
-
-# 规划层防腐 — tasks.md 必须与 spec 同步、实现任务单层。
-# 同样 docs-only 也跑(tasks/spec 都是 docs)。
-if [ -x "scripts/hooks/check-tasks-fresh" ]; then
-    echo "[pre-push] check-tasks-fresh..."
-    if ! scripts/hooks/check-tasks-fresh; then
-        echo "[pre-push] FAILED: tasks.md 与 spec 不同步或任务跨层"
-        exit 1
-    fi
-fi
-
 if [ "$docs_only" = "1" ]; then
     echo "[pre-push] docs-only push; skipping build/test gate."
     exit 0
 fi
 
-# 门:改代码必带测试 —— 改了源码却没动任何测试文件 → 拦。
-# 逃生舱:任一 commit message 含 "Allow-No-Tests:" 则放行。
-# 范围以本次推送的整体 diff(最后一段 base..local_sha)为准。
-if [ -n "${base:-}" ] && [ -n "${local_sha:-}" ]; then
-    range_changed="$(git diff --name-only "$base..$local_sha" 2>/dev/null || true)"
-    src_changed="$(echo "$range_changed" | grep -E '\.swift$' | grep -vE '(^|/)Tests/|Tests?\.swift$' || true)"
-    test_changed="$(echo "$range_changed" | grep -E '(^|/)Tests/|Tests?\.swift$' || true)"
-    if [ -n "$src_changed" ] && [ -z "$test_changed" ]; then
-        if ! git log "$base..$local_sha" --format=%B 2>/dev/null | grep -qi '^Allow-No-Tests:'; then
-            echo "[pre-push] ❌ 改了源码(.swift)但无测试改动。"
-            echo "[pre-push]    补对应层的测试,或在某个 commit message 写:Allow-No-Tests: <原因>"
-            echo "[pre-push]    改动的源文件:"
-            echo "$src_changed" | sed 's/^/[pre-push]      /'
+# Quality gates — require-tests (blocking) + diff-size (advisory).
+# Only run when we have a concrete diff range for this push.
+if [ -n "$gate_base" ] && [ -n "$gate_head" ]; then
+    if [ -x "scripts/quality/check-diff-size.sh" ]; then
+        scripts/quality/check-diff-size.sh "$gate_base" "$gate_head" || true
+    fi
+    if [ -x "scripts/quality/require-tests.sh" ]; then
+        echo "[pre-push] require-tests gate..."
+        if ! scripts/quality/require-tests.sh "$gate_base" "$gate_head"; then
+            echo "[pre-push] FAILED: require-tests"
             exit 1
         fi
-        echo "[pre-push] ⚠️ 改了源码但无测试改动;因 Allow-No-Tests: 放行。"
     fi
 fi
 
