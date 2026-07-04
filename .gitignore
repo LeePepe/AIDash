@@ -19,6 +19,9 @@ Packages/*/.build/
 /tmp/aidash-*
 *.log
 
+# Runtime state (snapshots / cron output — regenerated, not source)
+.aidash-state/
+
 # Editor
 .vscode/
 .idea/
