@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# AIDash 防腐校验 — 核对每层 tech-context.md 的 frontmatter 与代码一致。
+#
+# 分层文档最大风险是和代码脱节。本脚本让 frontmatter 里的事实必须与代码一致:
+#   ① layer 名 == 目录名(包名)
+#   ② depends_on ⇄ Package.swift 的 .package(path:) 声明,双向一致(不漏、不多、不指幽灵层)
+#   ③ depended_by 与 depends_on 互为镜像(A.depends_on 含 B ⟺ B.depended_by 含 A),仅校验本地包
+#   ④ test 命令引用的 --package-path 路径存在
+#   ⑤ roles(层内轴):角色名在顶层 canonical_roles 词表内;映射的目录/文件真实存在
+#
+# 依赖 python3(仅用于解析 frontmatter,与 Swift/生态无关)。
+# pre-push 与 CI 各跑一次;腐烂即 exit 1。
+#
+# 负向测试:在某层 frontmatter 写个幽灵依赖,确认本脚本能抓到,再改回。
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+command -v python3 >/dev/null 2>&1 || { echo "[check-frontmatter] ⚠️ 无 python3,跳过防腐校验"; exit 0; }
+
+# frontmatter 解析器写临时文件(避免 heredoc 嵌进 $() 的括号解析坑)
+PARSER="$(mktemp)"
+trap 'rm -f "$PARSER"' EXIT
+cat > "$PARSER" <<'PY'
+import sys, re
+text = open(sys.argv[1], encoding='utf-8').read()
+m = re.match(r'^---\n(.*?)\n---\n', text, re.S)
+if not m:
+    print("NO_FRONTMATTER"); sys.exit(0)
+fm = m.group(1)
+
+def scalar(k):
+    mm = re.search(r'^%s:\s*(.+)$' % re.escape(k), fm, re.M)
+    return mm.group(1).strip() if mm else ""
+
+def listfield(k):
+    mm = re.search(r'^%s:\s*\[(.*?)\]\s*$' % re.escape(k), fm, re.M)
+    if not mm:
+        return []
+    return [x.strip() for x in mm.group(1).split(',') if x.strip()]
+
+# test 字段可能含 # 注释;depends_on/depended_by 同理去掉行内注释已在 [] 内处理
+print("LAYER=" + scalar("layer"))
+print("TEST=" + scalar("test").split('#')[0].strip())
+print("DEPS=" + ",".join(listfield("depends_on")))
+print("DEPBY=" + ",".join(listfield("depended_by")))
+
+# roles 块:多行 "  Role: [dir, dir]"。输出为 ROLES=Role=d1,d2;Role2=d3(注释已在 [] 外)
+roles = []
+rm = re.search(r'^roles:[^\n]*\n(.*?)(?=^\S|\Z)', fm, re.M | re.S)
+if rm:
+    for line in rm.group(1).splitlines():
+        lm = re.match(r'^\s+([A-Za-z][A-Za-z0-9_]*):\s*\[(.*?)\]', line)
+        if lm:
+            dirs = [d.strip() for d in lm.group(2).split(',') if d.strip()]
+            roles.append(lm.group(1) + "=" + ",".join(dirs))
+print("ROLES=" + ";".join(roles))
+PY
+
+# 收集所有层的 frontmatter(第一遍),用于 depended_by 镜像校验。
+# macOS 自带 bash 3.2 无关联数组,用临时文件缓存:每行 "pkg|deps|depby"。
+LAYERS_TSV="$(mktemp)"
+trap 'rm -f "$PARSER" "$LAYERS_TSV"' EXIT
+
+# canonical_roles(层内轴的角色词表)从顶层 tech-context 读一次,供 roles 校验。
+CANON=""
+if [ -f "tech-context.md" ]; then
+    CANON="$(grep -oE '^canonical_roles:[[:space:]]*\[.*\]' tech-context.md \
+        | sed -E 's/^canonical_roles:[[:space:]]*\[(.*)\]/\1/' | tr ',' ' ' || true)"
+fi
+
+fail=0
+
+# ---- 第一遍:解析 + 单层校验(①②④),同时缓存供第三遍镜像校验 ----
+for tc in Packages/*/tech-context.md; do
+    [ -f "$tc" ] || continue
+    dir="$(dirname "$tc")"
+    pkg="$(basename "$dir")"
+
+    parsed="$(python3 "$PARSER" "$tc")"
+    if [ "$parsed" = "NO_FRONTMATTER" ]; then
+        echo "[check-frontmatter] ❌ $tc: 缺 frontmatter"
+        fail=1
+        continue
+    fi
+
+    layer="$(echo "$parsed"   | sed -n 's/^LAYER=//p')"
+    deps="$(echo "$parsed"    | sed -n 's/^DEPS=//p')"
+    depby="$(echo "$parsed"   | sed -n 's/^DEPBY=//p')"
+    testcmd="$(echo "$parsed" | sed -n 's/^TEST=//p')"
+    rolesline="$(echo "$parsed" | sed -n 's/^ROLES=//p')"
+
+    printf '%s|%s|%s\n' "$pkg" "$deps" "$depby" >> "$LAYERS_TSV"
+
+    # ① layer 名 == 目录名
+    if [ "$layer" != "$pkg" ]; then
+        echo "[check-frontmatter] ❌ $tc: layer='$layer' ≠ 目录名 '$pkg'"
+        fail=1
+    fi
+
+    # ② depends_on ⇄ Package.swift 的 path 依赖,双向一致
+    # 从 Package.swift 提取本地 path 依赖的包名(.package(path: "../Foo") -> Foo)
+    declared=""
+    if [ -f "$dir/Package.swift" ]; then
+        declared="$(grep -oE '\.package\(path:[[:space:]]*"[^"]+"' "$dir/Package.swift" \
+            | sed -E 's|.*/([^"/]+)".*|\1|' | sort -u || true)"
+    fi
+
+    # frontmatter 声明的每个 dep:必须真存在为目录、且 Package.swift 里真声明了
+    IFS=',' read -ra darr <<< "$deps"
+    for d in "${darr[@]:-}"; do
+        [ -z "$d" ] && continue
+        if [ ! -d "Packages/$d" ]; then
+            echo "[check-frontmatter] ❌ $tc: depends_on '$d' 是幽灵层(Packages/$d 不存在)"
+            fail=1
+        fi
+        if ! echo "$declared" | grep -qx "$d"; then
+            echo "[check-frontmatter] ❌ $tc: depends_on 有 '$d' 但 Package.swift 未声明该 path 依赖"
+            fail=1
+        fi
+    done
+
+    # Package.swift 声明的每个本地 path 依赖:frontmatter 必须列出
+    while IFS= read -r pd; do
+        [ -z "$pd" ] && continue
+        if ! echo ",$deps," | grep -q ",$pd,"; then
+            echo "[check-frontmatter] ❌ $tc: Package.swift 依赖 '$pd' 但 depends_on 漏写"
+            fail=1
+        fi
+    done <<< "$declared"
+
+    # ④ test 命令的 --package-path 路径存在
+    tp="$(echo "$testcmd" | grep -oE -- '--package-path[[:space:]]+[^[:space:]]+' | awk '{print $2}' || true)"
+    if [ -n "$tp" ] && [ ! -d "$tp" ]; then
+        echo "[check-frontmatter] ❌ $tc: test 引用的路径 '$tp' 不存在"
+        fail=1
+    fi
+
+    # ⑤ roles(层内轴):角色名在 canonical_roles 内;每个目录在本层源码根真实存在
+    # 源码根:SPM 约定 Packages/<pkg>/Sources/<pkg>/;目录或同名 .swift 文件都算存在。
+    if [ -n "$rolesline" ]; then
+        srcroot="$dir/Sources/$pkg"
+        # rolesline 形如 Role=d1,d2;Role2=d3
+        IFS=';' read -ra rentries <<< "$rolesline"
+        for entry in "${rentries[@]:-}"; do
+            [ -z "$entry" ] && continue
+            rname="${entry%%=*}"
+            rdirs="${entry#*=}"
+            # 角色名必须在 canonical_roles 词表内
+            if [ -n "$CANON" ] && ! echo " $CANON " | grep -q " $rname "; then
+                echo "[check-frontmatter] ❌ $tc: roles 角色 '$rname' 不在顶层 canonical_roles 词表内"
+                fail=1
+            fi
+            # 每个映射目录必须存在(目录 或 <name>.swift 文件)
+            IFS=',' read -ra ddirs <<< "$rdirs"
+            for d in "${ddirs[@]:-}"; do
+                [ -z "$d" ] && continue
+                if [ ! -d "$srcroot/$d" ] && [ ! -f "$srcroot/$d.swift" ]; then
+                    echo "[check-frontmatter] ❌ $tc: roles['$rname'] 的 '$d' 在 $srcroot/ 下不存在(非目录也非 $d.swift)"
+                    fail=1
+                fi
+            done
+        done
+    fi
+done
+
+# ---- 第二遍:depended_by 镜像校验(③,仅本地包)----
+# A.depends_on 含 B  ⟺  B.depended_by 含 A
+while IFS='|' read -r pkg deps _depby; do
+    [ -z "$pkg" ] && continue
+    IFS=',' read -ra darr <<< "$deps"
+    for b in "${darr[@]:-}"; do
+        [ -z "$b" ] && continue
+        # b 的 depended_by 从 TSV 查;非本地包(TSV 里没有)跳过——幽灵层已在②报过
+        b_line="$(grep -E "^$b\|" "$LAYERS_TSV" || true)"
+        [ -z "$b_line" ] && continue
+        b_depby="$(echo "$b_line" | cut -d'|' -f3)"
+        if ! echo ",$b_depby," | grep -q ",$pkg,"; then
+            echo "[check-frontmatter] ❌ Packages/$b/tech-context.md: '$pkg' 依赖它,但 depended_by 未列出 '$pkg'(镜像不一致)"
+            fail=1
+        fi
+    done
+done < "$LAYERS_TSV"
+
+if [ "$fail" -eq 0 ]; then
+    echo "[check-frontmatter] ✅ frontmatter 与代码一致"
+    exit 0
+else
+    echo "[check-frontmatter] 架构变了?更新对应层的 tech-context.md frontmatter 后重试。"
+    exit 1
+fi

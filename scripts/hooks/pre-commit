@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# AIDash pre-commit hook — 增量 SPM 级发现(秒级)。
+#
+# 只对本次暂存改动**涉及的 SPM 包**跑 swift build + test,并对暂存的 .swift
+# 跑 swiftlint。全量测试与 App/CLI 构建在 pre-push,不在这里(commit 应快)。
+#
+# 装法(每个 worktree 一次):
+#     git config core.hooksPath scripts/hooks
+#
+# 失败输出结构化,便于编排层解析出 {package, 失败原因} 并派对应层 subagent 修。
+# 逃生:纯 docs/非包改动自动跳过;紧急可 `git commit --no-verify`
+# (但 CI 仍会拦——不可跳过的门在服务端)。
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+[ -z "$staged" ] && exit 0
+
+# 改动映射到受影响的 SPM 包(Packages/<name>/...)
+pkgs="$(echo "$staged" | grep -oE '^Packages/[^/]+' | sort -u || true)"
+
+if [ -z "$pkgs" ]; then
+    echo "[pre-commit] 无 SPM 包改动;跳过包级 build/test。"
+else
+    fail=0
+    while IFS= read -r p; do
+        [ -z "$p" ] && continue
+        [ -d "$p" ] || continue
+        name="${p#Packages/}"
+        log="/tmp/aidash-precommit-$name.log"
+
+        echo "[pre-commit] swift build [$name]..."
+        if ! swift build --package-path "$p" > "$log" 2>&1; then
+            echo "[pre-commit] ❌ build 失败 [layer=$name]"
+            tail -20 "$log"
+            fail=1
+            continue
+        fi
+
+        echo "[pre-commit] swift test [$name]..."
+        if ! swift test --package-path "$p" >> "$log" 2>&1; then
+            echo "[pre-commit] ❌ test 失败 [layer=$name]"
+            tail -30 "$log"
+            fail=1
+        fi
+    done <<< "$pkgs"
+
+    if [ "$fail" -ne 0 ]; then
+        echo ""
+        echo "[pre-commit] 修复后重新 commit。勿用 --no-verify 绕过(CI 照样拦)。"
+        echo "[pre-commit] 分层修复:失败标了 layer=<包>,改该层前先读 Packages/<包>/tech-context.md。"
+        exit 1
+    fi
+fi
+
+# lint-staged:只对暂存的 .swift 跑 swiftlint(装了才跑)
+if command -v swiftlint >/dev/null 2>&1; then
+    swift_staged="$(echo "$staged" | grep '\.swift$' || true)"
+    if [ -n "$swift_staged" ]; then
+        echo "[pre-commit] swiftlint(暂存的 .swift)..."
+        lint_fail=0
+        while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            swiftlint lint --strict --quiet "$f" || lint_fail=1
+        done <<< "$swift_staged"
+        [ "$lint_fail" -eq 0 ] || { echo "[pre-commit] ❌ swiftlint 失败"; exit 1; }
+    fi
+fi
+
+echo "[pre-commit] all checks passed."
+exit 0

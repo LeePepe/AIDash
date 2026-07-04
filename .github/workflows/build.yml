@@ -53,6 +53,43 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Anti-rot — frontmatter matches code
+        run: scripts/hooks/check-frontmatter
+
+      - name: Anti-rot — tasks.md in sync with spec + single-layer
+        run: scripts/hooks/check-tasks-fresh
+
+      - name: Gate — code changes must include tests
+        # 改了 .swift 源码却没动任何测试文件 → 失败。逃生舱:PR 任一 commit
+        # message 含 "Allow-No-Tests:"。PR 用 base..head;push-to-main 用 before..after。
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          # 新分支/首次推送时 before 可能是全零;退化为只看最后一个 commit
+          if ! git cat-file -e "$base" 2>/dev/null; then
+            base="$head~1"
+          fi
+          changed="$(git diff --name-only "$base..$head")"
+          src="$(echo "$changed" | grep -E '\.swift$' | grep -vE '(^|/)Tests/|Tests?\.swift$' || true)"
+          tst="$(echo "$changed" | grep -E '(^|/)Tests/|Tests?\.swift$' || true)"
+          if [ -n "$src" ] && [ -z "$tst" ]; then
+            if git log "$base..$head" --format=%B | grep -qi '^Allow-No-Tests:'; then
+              echo "⚠️ 改了源码但无测试改动;因 Allow-No-Tests: 放行。"
+            else
+              echo "❌ 改了源码(.swift)但无测试改动。补测试或在 commit message 写 Allow-No-Tests: <原因>"
+              echo "$src"
+              exit 1
+            fi
+          fi
 
       - name: Select Xcode 26 (Swift 6.2)
         # Even on macos-26 the default xcode-select may point at an older

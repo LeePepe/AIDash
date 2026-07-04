@@ -1,0 +1,22 @@
+# SwiftLint — strict. Color math uses conventional single-letter names
+# (h/s/b, r/g/b) that mirror the canonical color-system.md; allow them.
+strict: true
+excluded:
+  - .build
+  - Tests
+disabled_rules:
+  - trailing_comma
+  - todo
+identifier_name:
+  min_length: 1          # color math: h, s, b, r, g, c, p, v
+  allowed_symbols: ["_"]
+line_length:
+  warning: 120
+  error: 160
+  ignores_comments: true
+type_body_length:
+  warning: 300
+  error: 500
+large_tuple:
+  warning: 3
+  error: 4

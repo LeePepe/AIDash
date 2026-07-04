@@ -24,6 +24,37 @@ before doing anything material.** It governs every decision below.
 | Agent quickstart (how to publish a briefing) | `specs/001-core-briefing-cli/quickstart.md` |
 | Task breakdown | `specs/001-core-briefing-cli/tasks.md` |
 | Original grill decisions (audit trail) | `docs/grill-2026-06-23-decisions.md` |
+| **Global technical context** (architecture, data flow, layers) | `tech-context.md` |
+| **Per-layer technical context** | `Packages/<X>/tech-context.md` |
+
+## Read Contract(读取契约)
+
+任务开始前,按你要碰的东西,先读对应文档 —— 不读就动手 = 违规。
+优先级:Constitution > spec > tech-context > plan > task > intuition。
+
+| 你要做的事 | 必读(前置) | 拿什么 |
+|---|---|---|
+| 任何任务 | `.specify/memory/constitution.md` | 不可违反的红线 |
+| 决定"做什么" / 改需求 | `specs/<当前>/spec.md` | 功能意图、验收标准、范围边界 |
+| 改全局架构 / 跨层设计 | `tech-context.md`(顶层) | 架构决策、数据流、分层规则 |
+| **改 `Packages/<X>/**`** | **`Packages/<X>/tech-context.md`** | 该层职责、依赖、红线、测试约定 |
+| 改 CI / hook / gate | 见 Constitution 的 Quality Gates 节 | 门禁约定 |
+
+### 分层路由(Layer Routing)—— 核心
+
+- 改哪个包,**先读那个包的 `tech-context.md`**(顶部 frontmatter 有 layer/依赖/红线)。
+- 改动只落在 **1 个层** → 一个 agent 直接做。
+- 改动跨 **2+ 层** → 任务太大,**按层拆**成 N 个子任务;每个子任务 = 一层 =
+  一个独立可 build/test 的 commit。
+- 单层内仍很大 → 按技术切面拆(lib / 接口 / UI / 格式化 / fixture / 文档 / 迁移)。
+- 做完发现别层也要动 → **记为新任务,不扩展原任务**。
+- 用行数/文件数当"任务大小"阈值是脆弱的;**layer 边界才是 scope 单元**。
+
+### 分层发现(Layer Discovery)
+
+lint / UT 失败时:解析失败路径 → 映射到 layer(哪个 Package)→ 派该层的修复
+(带上该层 `tech-context.md` frontmatter 的 `red_lines`)→ 只在该层内修 → 跑该层
+test 验证 → 若根因在别层,记为新任务,不跨层改。
 
 ## Hard constraints (from Constitution)
 
@@ -90,15 +121,26 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
 - **Conventional commits.** `feat:`, `fix:`, `refactor:`, `test:`,
   `docs:`, `chore:`.
 - **PR is the unit of merge.** Each PR closes one Multica issue.
-- **`main` is protected.** Two layers of CI gate every change:
-  1. **Local `pre-push` hook** (`scripts/hooks/pre-push`) — runs
-     `swift test` on `AIDashCore`, then `xcodegen generate`, then
-     `xcodebuild` for BOTH `AIDashApp` and the `aidash` CLI. Activated
-     per-worktree via `git config core.hooksPath scripts/hooks`.
-  2. **GitHub Actions** (`.github/workflows/build.yml`) — re-runs the
-     same gates on `macos-latest` for every PR against `main` and for
-     every push to `main`. This is the authoritative CI signal that the
-     Reviewer and PR Manager must confirm green before merge.
+- **`main` is protected.** Three gates guard every change (发现→修复解耦):
+  1. **Local `pre-commit` hook** (`scripts/hooks/pre-commit`) — 增量:只对本次
+     暂存改动涉及的 SPM 包跑 `swift build` + `swift test` + 对暂存 `.swift`
+     跑 swiftlint。秒级。**注意:顶层代码(`Apps/**`、`CLI/**`)不属于任何
+     `Packages/<X>` 层,pre-commit 不覆盖——它们的门禁落在 pre-push/CI 的全量
+     构建。**
+  2. **Local `pre-push` hook** (`scripts/hooks/pre-push`) — 全量:防腐校验
+     (frontmatter 对代码)、「改代码必带测试」门、`swift test`(AIDashCore)、
+     `xcodegen generate`、`xcodebuild` for BOTH `AIDashApp` and `aidash` CLI。
+     Activated per-worktree via `git config core.hooksPath scripts/hooks`.
+  3. **GitHub Actions** (`.github/workflows/build.yml`) — re-runs the same
+     gates(含防腐校验 + 改代码必带测试)on `macos-26` for every PR against
+     `main` and for every push to `main`. This is the authoritative CI signal;
+     只有它挡得住 `--no-verify`。**需在仓库 branch ruleset 里把此 job 设为
+     required status check**(脚本进 workflow ≠ 已 required)。
+- **改代码必带测试.** 改了 `.swift` 源码却没动任何测试文件 → pre-push / CI 拦。
+  逃生舱:任一 commit message 写 `Allow-No-Tests: <原因>`(仅限确无法测的改动)。
+- **防腐校验.** `scripts/hooks/check-frontmatter` 核对每层 `tech-context.md`
+  frontmatter 与代码一致(layer 名==目录名、`depends_on` ⇄ `Package.swift`
+  双向一致、`depended_by` 镜像、`test` 路径存在)。架构变了就更新对应层文档。
 - **Hooks live in `scripts/hooks/`** (under version control), activated
   via `git config core.hooksPath scripts/hooks`. `.git/hooks/` is
   per-worktree and ignored. Bypass with `--no-verify` is allowed only
