@@ -277,14 +277,14 @@ discriminator — reader sees the glyph first) AND the detail-tier
 typography recipe. `size` MUST NOT mutate either; size only controls how
 many items / how much of the payload the renderer chooses to show.
 
-| CardType | Icon (SF Symbol) | Icon tint | Primary font | Secondary font | Notes |
+| CardType | Icon (SF Symbol) | Icon tint (DesignKit `Classification`) | Primary font | Secondary font | Notes |
 |---|---|---|---|---|---|
-| `metric` | `chart.bar.fill` | `.blue` | `.system(size: 36, weight: .bold, design: .rounded)` | `.caption` `.secondary` for label | Hero number always large; unit + trend arrow inline |
-| `insight` | `sparkles` | `.purple` | `.title3.weight(.semibold)` | `.body` `.primary` for body | Title first, body wraps |
-| `digest` | `doc.text.fill` | `.teal` | `.headline` for section heading | `.body` `lineSpacing: 4` for paragraphs | Prose; section list expands `body` paragraphs |
-| `agentSummary` | `bubble.left.and.bubble.right.fill` | `.indigo` | `.headline` for agent name | `.callout` for completed; `.caption.monospaced()` for refs | Refs render as capsule chips |
-| `todoList` | `checklist` | `.green` | `.body` per row | `.caption2` for priority dot label | Each row leads with a priority color dot |
-| `trending` | `chart.line.uptrend.xyaxis` | `.orange` | `.callout.monospaced()` for score | `.body` for title | Scores right-aligned mono |
+| `metric` | `chart.bar.fill` | `.metric` (blue hue) | `.system(size: 36, weight: .bold, design: .rounded)` | `.caption` `.secondary` for label | Hero number always large; unit + trend arrow inline |
+| `insight` | `sparkles` | `.insight` (purple hue) | `.title3.weight(.semibold)` | `.body` `.primary` for body | Title first, body wraps |
+| `digest` | `doc.text.fill` | `.digest` (teal hue) | `.headline` for section heading | `.body` `lineSpacing: 4` for paragraphs | Prose; section list expands `body` paragraphs |
+| `agentSummary` | `bubble.left.and.bubble.right.fill` | `.agentSummary` (indigo hue) | `.headline` for agent name | `.callout` for completed; `.caption.monospaced()` for refs | Refs render as capsule chips |
+| `todoList` | `checklist` | `.todoList` (green hue) | `.body` per row | `.caption2` for priority dot label | Each row leads with a priority color dot |
+| `trending` | `chart.line.uptrend.xyaxis` | `.trending` (orange hue) | `.callout.monospaced()` for score | `.body` for title | Scores right-aligned mono |
 | `sectionHeader` | (no badge, no chrome) | — | `.title3.weight(.semibold)` | `.subheadline` `.secondary` | Renders with NO card chrome (raw header inside container) |
 
 #### Icon badge specification
@@ -303,11 +303,13 @@ ZStack {
 .frame(width: 32, height: 32)
 ```
 
-The icon tint colors above (`.blue` / `.purple` / `.teal` / `.indigo` /
-`.green` / `.orange`) are chosen to be visually distinguishable at a
-glance, follow Apple Settings app icon coding conventions, and adapt
-automatically to Dark Mode and accessibility settings (Increase
-Contrast). Custom hex literals are forbidden.
+The icon tint colors above come from the DesignKit `Classification` token
+(one case per CardType, resolved via the injected `Theme`). Each is a
+calibrated light/dark hex pair chosen to be visually distinguishable at a
+glance, follow Apple Settings app icon coding conventions, and carry a
+dark-mode variant. Views MUST read the tint from the token (never inline a
+`.blue`/`Color(hex:)` literal); the raw hex lives only in DesignKit's
+`ColorSystem` token source.
 
 #### Size = Geometry Only (geometry ladders)
 
@@ -402,11 +404,17 @@ headers act as anchors; cards carry the content.
 - Card vertical spacing inside a container: 12pt.
 - Grid column gap: 12pt.
 - Page horizontal padding: see §Page Chrome.
-- Only semantic colors: `.primary`, `.secondary`, `.tertiary` for
-  text; system colors (`.blue` / `.purple` / `.teal` / `.indigo` /
-  `.green` / `.orange` / `.red` / `.accentColor`) for type icon tints
-  and signal channels. Hardcoded `Color(red:..., green:..., blue:...)`
-  and `Color(hex:)` literals are forbidden (Quality Bar §I P1.4).
+- **Colors MUST come from a package token source**, never inlined in a
+  view. The token sources are: DesignKit's `ColorSystem` (seed-derived
+  `PrimaryPalette`), `Semantic` (success/warning/danger), and
+  `Classification` (per-CardType icon tints); plus AIDashUI's
+  `DesignTokens` for card-domain aliases. Text uses the system semantic
+  roles `.primary` / `.secondary` / `.tertiary` (these are roles, not
+  literals, and remain allowed). **Raw hex (`Color(hex:)`,
+  `Color(red:green:blue:)`) is permitted ONLY inside these token
+  sources.** A view MUST NOT inline a hex literal, nor a system color
+  (`.blue` / `.green` / …) as a signal channel — it consumes the token
+  instead (Quality Bar §I P1.4).
 
 ---
 
@@ -564,11 +572,15 @@ orthogonality contract:
 3. Corner radius that disagrees with the §Size = Geometry Only ladder
    (small=10 / medium=14 / wide=14 / hero=20), or shadow added to a
    card.
-4. Hardcoded color literals (`Color(red:, green:, blue:)`,
-   `Color(hex:)`) when a semantic color (`.primary`, `.secondary`,
-   `.green`, `.accentColor`, etc.) covers the case. Type icon tints
-   MUST come from the §Per-Type Visual Recipes table, not freshly
-   chosen.
+4. A **view** that inlines a color literal — raw hex (`Color(hex:)`,
+   `Color(red:green:blue:)`) OR a system color (`.blue`, `.green`,
+   `.accentColor`, …) used as a signal channel — instead of consuming a
+   package token. Raw hex inside a token source (DesignKit `ColorSystem`
+   / `Semantic` / `Classification`, or AIDashUI `DesignTokens`) is
+   compliant; inlining in a `CardView` / layout is the violation. Type
+   icon tints MUST come from the DesignKit `Classification` token per the
+   §Per-Type Visual Recipes table, not freshly chosen. (Text roles
+   `.primary` / `.secondary` / `.tertiary` are allowed.)
 5. `Container` view wrapping its child cards in its own
    `RoundedRectangle` / `background` — containers are typography +
    spacing only, not chrome.
@@ -684,4 +696,4 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.4.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-06-29
+**Version**: 1.5.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-07-04

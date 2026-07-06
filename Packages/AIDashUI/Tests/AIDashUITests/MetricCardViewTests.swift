@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 @MainActor
@@ -51,16 +52,18 @@ struct MetricCardViewTests {
         #expect(v.trendIconName(.flat) == "arrow.right")
     }
 
-    // MARK: - trendColor behavior (semantic color mapping)
+    // MARK: - trendColor behavior (semantic token mapping)
     //
     // Trend arrow color is METRIC CONTENT (signal direction), not card chrome.
     // Per constitution §Style = Semantic Signal Only this is allowed to stay.
+    // Colors resolve from the DesignKit theme tokens, not inline system colors.
 
-    @Test("trendColor maps up to green, down to red, flat to secondary")
+    @Test("trendColor maps up to theme.success, down to theme.danger, flat to secondary")
     func trendColors() {
         let v = view()
-        #expect(v.trendColor(.up) == .green)
-        #expect(v.trendColor(.down) == .red)
+        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
+        #expect(v.trendColor(.up) == theme.success)
+        #expect(v.trendColor(.down) == theme.danger)
         #expect(v.trendColor(.flat) == .secondary)
     }
 
@@ -73,7 +76,7 @@ struct MetricCardViewTests {
     @Test("Metric type carries the Per-Type icon badge contract")
     func metricBadgeContract() {
         #expect(CardType.metric.iconSymbol == "chart.bar.fill")
-        #expect(CardType.metric.iconTint == .blue)
+        #expect(CardType.metric.classification == .metric)
         #expect(CardType.metric.hasIconBadge)
     }
 

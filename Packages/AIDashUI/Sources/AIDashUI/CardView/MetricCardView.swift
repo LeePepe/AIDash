@@ -1,10 +1,12 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 public struct MetricCardView: View {
     let payload: MetricPayload
     let size: CardSize
     let style: CardStyle
+    @Environment(\.theme) private var theme
 
     public init(payload: MetricPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -117,8 +119,8 @@ public struct MetricCardView: View {
 
     func trendColor(_ trend: MetricPayload.Item.Trend) -> Color {
         switch trend {
-        case .up: return .green
-        case .down: return .red
+        case .up: return theme.success
+        case .down: return theme.danger
         case .flat: return .secondary
         }
     }

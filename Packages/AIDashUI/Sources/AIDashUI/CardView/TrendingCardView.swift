@@ -1,10 +1,12 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 public struct TrendingCardView: View {
     let payload: TrendingPayload
     let size: CardSize
     let style: CardStyle
+    @Environment(\.theme) private var theme
 
     public init(payload: TrendingPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -165,9 +167,9 @@ public struct TrendingCardView: View {
     private var sparklineColor: Color {
         switch style {
         case .neutral: return .secondary
-        case .success: return .green
-        case .warning: return .orange
-        case .accent:  return .accentColor
+        case .success: return theme.success
+        case .warning: return theme.warning
+        case .accent:  return theme.primary.primary
         }
     }
 }

@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 /// Tests for MY-1006: TrendingCardView user-visible strings must be sourced
@@ -122,7 +123,7 @@ struct TrendingCardViewLocalizationTests {
     func rendersTypeBadge() {
         #expect(CardType.trending.hasIconBadge)
         #expect(CardType.trending.iconSymbol == "chart.line.uptrend.xyaxis")
-        #expect(CardType.trending.iconTint == .orange)
+        #expect(CardType.trending.classification == .trending)
     }
 
     @Test("body materializes for every (size, style) combination")

@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 @MainActor
@@ -135,7 +136,7 @@ struct SectionHeaderCardViewTests {
     func noIconBadge() {
         #expect(!CardType.sectionHeader.hasIconBadge)
         #expect(CardType.sectionHeader.iconSymbol == nil)
-        #expect(CardType.sectionHeader.iconTint == nil)
+        #expect(CardType.sectionHeader.classification == nil)
     }
 
     @Test("renderer source applies no shared card chrome and no local background")

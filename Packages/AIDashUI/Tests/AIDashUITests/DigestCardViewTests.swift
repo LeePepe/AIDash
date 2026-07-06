@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 @MainActor
@@ -83,7 +84,7 @@ struct DigestCardViewTests {
     @Test("declares CardType.digest so it carries the constitution badge + tint")
     func badgeIsDigest() {
         #expect(CardType.digest.iconSymbol == "doc.text.fill")
-        #expect(CardType.digest.iconTint == .teal)
+        #expect(CardType.digest.classification == .digest)
         #expect(CardType.digest.hasIconBadge)
     }
 

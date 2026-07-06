@@ -171,3 +171,28 @@ public enum Semantic {
     public static func warning(isDark: Bool) -> Color { Color(hex: isDark ? "#FF9F0A" : "#FF9500") }
     public static func danger(isDark: Bool) -> Color { Color(hex: isDark ? "#FF453A" : "#FF3B30") }
 }
+
+// MARK: - Classification tints (FIXED — per-category discriminator colors)
+//
+// One tint per content category, used as the leading icon-badge color so a
+// reader tells categories apart by hue at a glance. These are NOT seed-derived:
+// they must stay mutually distinguishable regardless of the active seed. Values
+// are calibrated light/dark hex pairs tracking Apple's system palette (the hues
+// the app shipped with) so dark mode keeps a proper variant.
+
+public enum Classification: String, CaseIterable, Sendable {
+    case metric, insight, digest, agentSummary, todoList, trending
+
+    /// Resolved tint for the current color scheme. Light/dark hex pairs mirror
+    /// Apple's systemBlue/Purple/Teal/Indigo/Green/Orange.
+    public func tint(isDark: Bool) -> Color {
+        switch self {
+        case .metric:       return Color(hex: isDark ? "#0A84FF" : "#007AFF") // blue
+        case .insight:      return Color(hex: isDark ? "#BF5AF2" : "#AF52DE") // purple
+        case .digest:       return Color(hex: isDark ? "#40C8E0" : "#30B0C7") // teal
+        case .agentSummary: return Color(hex: isDark ? "#5E5CE6" : "#5856D6") // indigo
+        case .todoList:     return Color(hex: isDark ? "#30D158" : "#34C759") // green
+        case .trending:     return Color(hex: isDark ? "#FF9F0A" : "#FF9500") // orange
+        }
+    }
+}
