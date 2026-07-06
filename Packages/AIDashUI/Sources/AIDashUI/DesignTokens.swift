@@ -1,5 +1,6 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -116,35 +117,39 @@ extension CardType {
         }
     }
 
-    /// Tint color for the leading icon badge.
-    /// `sectionHeader` returns `nil` — it has no badge.
-    public var iconTint: Color? {
+    /// DesignKit classification token for this card type — the source of the
+    /// leading icon-badge tint. `sectionHeader` returns `nil` (no badge).
+    /// The tint color itself is resolved from the injected `Theme`, never
+    /// inlined here (constitution §Design System & Tokens).
+    public var classification: DesignKit.Classification? {
         switch self {
-        case .metric:        return .blue
-        case .insight:       return .purple
-        case .digest:        return .teal
-        case .agentSummary:  return .indigo
-        case .todoList:      return .green
-        case .trending:      return .orange
+        case .metric:        return .metric
+        case .insight:       return .insight
+        case .digest:        return .digest
+        case .agentSummary:  return .agentSummary
+        case .todoList:      return .todoList
+        case .trending:      return .trending
         case .sectionHeader: return nil
         }
     }
 
     /// True if this card type renders the leading 32×32 icon badge.
     public var hasIconBadge: Bool {
-        iconSymbol != nil && iconTint != nil
+        iconSymbol != nil && classification != nil
     }
 }
 
 public struct CardTypeBadge: View {
     public let type: CardType
+    @Environment(\.theme) private var theme
 
     public init(type: CardType) {
         self.type = type
     }
 
     public var body: some View {
-        if let symbol = type.iconSymbol, let tint = type.iconTint {
+        if let symbol = type.iconSymbol, let classification = type.classification {
+            let tint = theme.classificationTint(classification)
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(tint.opacity(0.15))
@@ -262,13 +267,15 @@ public enum AIDashChrome {
     /// Opacity applied to `.separator` for the hairline overlay.
     public static let hairlineOpacity: Double = 0.5
 
-    /// Stripe color per `style`. `neutral` returns `nil` — no stripe drawn.
-    public static func stripeColor(for style: CardStyle) -> Color? {
+    /// Stripe color per `style`, resolved from the theme's semantic/primary
+    /// tokens. `neutral` returns `nil` — no stripe drawn. Colors come from
+    /// DesignKit, never inlined (constitution §Design System & Tokens).
+    public static func stripeColor(for style: CardStyle, theme: Theme) -> Color? {
         switch style {
         case .neutral: return nil
-        case .success: return .green
-        case .warning: return .orange
-        case .accent:  return .accentColor
+        case .success: return theme.success
+        case .warning: return theme.warning
+        case .accent:  return theme.primary.primary
         }
     }
 }
@@ -278,6 +285,7 @@ public enum AIDashChrome {
 public struct CardChromeModifier: ViewModifier {
     public let size: CardSize
     public let style: CardStyle
+    @Environment(\.theme) private var theme
 
     public init(size: CardSize, style: CardStyle) {
         self.size = size
@@ -298,7 +306,7 @@ public struct CardChromeModifier: ViewModifier {
                 )
             )
             .overlay(alignment: .leading) {
-                if let stripe = AIDashChrome.stripeColor(for: style) {
+                if let stripe = AIDashChrome.stripeColor(for: style, theme: theme) {
                     Rectangle()
                         .fill(stripe)
                         .frame(width: AIDashChrome.stripeWidth)

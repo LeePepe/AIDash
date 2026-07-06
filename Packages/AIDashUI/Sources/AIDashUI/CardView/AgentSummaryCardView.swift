@@ -1,10 +1,12 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 public struct AgentSummaryCardView: View {
     let payload: AgentSummaryPayload
     let size: CardSize
     let style: CardStyle
+    @Environment(\.theme) private var theme
 
     public init(payload: AgentSummaryPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -118,7 +120,7 @@ public struct AgentSummaryCardView: View {
     private func completedRow(_ item: AgentSummaryPayload.Completed) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(theme.success)
                 .font(.caption)
                 .accessibilityHidden(true)
             if let url = URLPolicy.validate(item.ref) {

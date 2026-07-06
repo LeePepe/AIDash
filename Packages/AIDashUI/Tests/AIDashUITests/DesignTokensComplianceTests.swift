@@ -2,6 +2,7 @@ import Testing
 import SwiftUI
 import Foundation
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 // MARK: - DesignTokensComplianceTests (MY-1060)
@@ -55,8 +56,8 @@ struct DesignTokensComplianceTests {
             // matrix entry just pins the high-level contract.
             #expect(type.iconSymbol == nil,
                     "sectionHeader must NOT declare an SF Symbol")
-            #expect(type.iconTint == nil,
-                    "sectionHeader must NOT declare an icon tint")
+            #expect(type.classification == nil,
+                    "sectionHeader must NOT declare a classification token")
             #expect(!type.hasIconBadge,
                     "sectionHeader must NOT render a badge")
             #expect(recipe.primary != AIDashTypography.section,
@@ -66,10 +67,11 @@ struct DesignTokensComplianceTests {
             #expect(!renderer.contains("CardTypeBadge("),
                     "sectionHeader renderer must NOT render a CardTypeBadge")
         } else {
-            // 1. Every content type has both a symbol and a tint — the
-            //    icon badge is mandatory per §Per-Type Visual Recipes.
+            // 1. Every content type has both a symbol and a classification
+            //    token — the icon badge is mandatory per §Per-Type Visual
+            //    Recipes; the tint color resolves from that token via Theme.
             #expect(type.iconSymbol != nil, "\(type) must declare an SF Symbol")
-            #expect(type.iconTint != nil, "\(type) must declare a tint color")
+            #expect(type.classification != nil, "\(type) must declare a classification token")
             #expect(type.hasIconBadge, "\(type) must render a badge")
 
             // 2. Typography comes from the per-type recipe (Detail tier),
@@ -97,12 +99,12 @@ struct DesignTokensComplianceTests {
                 "sectionHeader MUST be included in the type matrix even though its chrome contract differs")
     }
 
-    @Test("Per-type badge tints are all distinct (visual discriminator contract)")
+    @Test("Per-type badge classification tokens are all distinct (visual discriminator contract)")
     func iconTintsAreDistinct() {
-        let tints = Self.contentCardTypes.compactMap { $0.iconTint }
-        let uniqueTintDescriptions = Set(tints.map { String(describing: $0) })
-        #expect(uniqueTintDescriptions.count == tints.count,
-                "every content card type must use a distinct icon tint")
+        let tokens = Self.contentCardTypes.compactMap { $0.classification }
+        let uniqueTokens = Set(tokens.map { $0.rawValue })
+        #expect(uniqueTokens.count == tokens.count,
+                "every content card type must use a distinct classification token")
     }
 
     @Test("Per-type icon symbols are all distinct (visual discriminator contract)")
@@ -138,7 +140,7 @@ struct DesignTokensComplianceTests {
     @Test("sectionHeader CardType declares no icon badge")
     func sectionHeaderHasNoBadge() {
         #expect(CardType.sectionHeader.iconSymbol == nil)
-        #expect(CardType.sectionHeader.iconTint == nil)
+        #expect(CardType.sectionHeader.classification == nil)
         #expect(!CardType.sectionHeader.hasIconBadge)
     }
 
@@ -222,7 +224,7 @@ struct DesignTokensComplianceTests {
         // exactly one CardTypeBadge — at the body's top level, never
         // inside a `switch size` branch.
         #expect(CardType.metric.iconSymbol == "chart.bar.fill", "size=\(size) must not change badge symbol")
-        #expect(CardType.metric.iconTint == .blue, "size=\(size) must not change badge tint")
+        #expect(CardType.metric.classification == .metric, "size=\(size) must not change badge classification")
 
         let source = try Self.rendererSource(for: .metric)
         let badgeOccurrences = source.components(separatedBy: "CardTypeBadge(type: .metric)").count - 1
@@ -297,20 +299,21 @@ struct DesignTokensComplianceTests {
     // tinted fill.
 
     @Test(
-        "metric x medium x style: stripe color is the ONLY style affordance — neutral=nil, success=green, warning=orange, accent=accentColor",
+        "metric x medium x style: stripe color is the ONLY style affordance — neutral=nil, others resolve from theme tokens",
         arguments: CardStyle.allCases
     )
     func metricStyleOrthogonalityStripeColor(style: CardStyle) {
+        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
         switch style {
         case .neutral:
-            #expect(AIDashChrome.stripeColor(for: .neutral) == nil,
+            #expect(AIDashChrome.stripeColor(for: .neutral, theme: theme) == nil,
                     "neutral style MUST have no stripe")
         case .success:
-            #expect(AIDashChrome.stripeColor(for: .success) == .green)
+            #expect(AIDashChrome.stripeColor(for: .success, theme: theme) == theme.success)
         case .warning:
-            #expect(AIDashChrome.stripeColor(for: .warning) == .orange)
+            #expect(AIDashChrome.stripeColor(for: .warning, theme: theme) == theme.warning)
         case .accent:
-            #expect(AIDashChrome.stripeColor(for: .accent) == .accentColor)
+            #expect(AIDashChrome.stripeColor(for: .accent, theme: theme) == theme.primary.primary)
         }
     }
 

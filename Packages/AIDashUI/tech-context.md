@@ -12,7 +12,7 @@ red_lines:
   - 无 App 侧 LLM 调用:内容是 agent 撰写的,不在视图层生成
   - 无 fatalError / try! / as!,渲染失败走优雅 UI 回退
 roles:                              # 层内轴:类角色 → 目录(角色顺序见顶层 canonical_roles)
-  Types:   [DesignTokens]          # 设计令牌:颜色/间距/字号单源,纯值,不依赖任何视图
+  Types:   [DesignTokens]          # 几何/排版/chrome 令牌:纯值,不依赖任何视图(颜色来自 DesignKit)
   Runtime: [Layout]                # 容器布局引擎:Grid/List/Hero/Auto,消费 Tokens
   UI:      [CardView]              # 类型渲染器 + 视图:依赖 Layout + Tokens,最上层
 test: swift test --package-path Packages/AIDashUI
@@ -40,7 +40,10 @@ owns: [BriefingView, ContainerView, CardRouter, DesignTokens, AutoLayout, GridLa
   `TrendingCardView` `SectionHeaderCardView` …)。
 - **Layout/**:`AutoLayout` `GridLayout` `ListLayout` `HeroLayout` +
   `ContainerView` `BriefingView`。
-- **DesignTokens.swift**:颜色/间距/字号/圆角的单一来源。**所有视觉值走它**。
+- **DesignTokens.swift**:卡片域**几何/排版/chrome**令牌的单一来源(`AIDashTypography`
+  `AIDashSize` `AIDashChrome` `CardTypeBadge` `CardChromeModifier`)。**颜色不在此**——
+  颜色来自 DesignKit,视图经 `@Environment(\.theme)` 读 `Theme` 解析
+  (`classificationTint`/`success`/`warning`/`danger`/`primary`)。
 - **Prototype/**:设计原型(`KPICardPrototype` `HeatmapPrototype`
   `ModernBriefingPrototype` 等)+ `ProtoTheme`/`ProtoDesign`/`PrimaryPalette`。
   原型用于探索,不是生产渲染路径。
@@ -49,8 +52,8 @@ owns: [BriefingView, ContainerView, CardRouter, DesignTokens, AutoLayout, GridLa
 ## 设计令牌纪律(重点红线)
 
 constitution 把"维度混淆"列为 P0、"令牌漂移"列为 P1。实操:
-- 颜色/间距/字号/圆角一律从 `DesignTokens` 取,不写魔法值(如 `.padding(16)` 应为
-  token)。
+- 间距/字号/圆角一律从 `DesignTokens` 取,颜色从 DesignKit 的 `Theme` 取;不写魔法值
+  (如 `.padding(16)` 应为 token),不内联颜色字面量(系统色或 hex)。
 - type/size/style 三维度各司其职,渲染时不得交叉判断(如"某 type 就强制某 size")。
 
 ## 依赖方向

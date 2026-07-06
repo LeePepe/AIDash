@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 @MainActor
@@ -107,7 +108,7 @@ struct InsightCardViewTests {
     @Test("Insight type carries the Per-Type icon badge contract")
     func insightBadgeContract() {
         #expect(CardType.insight.iconSymbol == "sparkles")
-        #expect(CardType.insight.iconTint == .purple)
+        #expect(CardType.insight.classification == .insight)
         #expect(CardType.insight.hasIconBadge)
     }
 
