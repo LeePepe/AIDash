@@ -11,6 +11,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  swiftlint:
+    name: swiftlint (root config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: ghcr.io/realm/swiftlint:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint (root .swiftlint.yml, strict)
+        # Same config + flags as pre-commit (per-file) and pre-push (full).
+        # This is the authoritative, unbypassable style gate — the only one
+        # that holds against `git commit/push --no-verify`.
+        run: swiftlint lint --strict --config .swiftlint.yml
+
   require-tests:
     name: require-tests (改代码必带测试)
     runs-on: ubuntu-latest

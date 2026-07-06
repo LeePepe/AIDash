@@ -1,5 +1,10 @@
 # SwiftLint — strict. Color math uses conventional single-letter names
 # (h/s/b, r/g/b) that mirror the canonical color-system.md; allow them.
+#
+# NOTE: the repo-root `.swiftlint.yml` is the single source of truth enforced
+# by pre-commit / pre-push / CI across ALL packages (this dir included). This
+# local config only applies when swiftlint is run scoped to this package in
+# isolation, and is kept a strict subset of the root. Change the root first.
 strict: true
 excluded:
   - .build
