@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 @MainActor
@@ -73,7 +74,7 @@ struct AgentSummaryCardViewTests {
     @Test("declares CardType.agentSummary so it carries the constitution badge + tint")
     func badgeIsAgentSummary() {
         #expect(CardType.agentSummary.iconSymbol == "bubble.left.and.bubble.right.fill")
-        #expect(CardType.agentSummary.iconTint == .indigo)
+        #expect(CardType.agentSummary.classification == .agentSummary)
         #expect(CardType.agentSummary.hasIconBadge)
     }
 

@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 @MainActor
@@ -90,15 +91,15 @@ struct DesignTokensFoundationTests {
         #expect(CardType.sectionHeader.iconSymbol == nil)
     }
 
-    @Test("CardType.iconTint uses only allowlisted system colors")
-    func iconTintMapping() {
-        #expect(CardType.metric.iconTint == .blue)
-        #expect(CardType.insight.iconTint == .purple)
-        #expect(CardType.digest.iconTint == .teal)
-        #expect(CardType.agentSummary.iconTint == .indigo)
-        #expect(CardType.todoList.iconTint == .green)
-        #expect(CardType.trending.iconTint == .orange)
-        #expect(CardType.sectionHeader.iconTint == nil)
+    @Test("CardType.classification maps each content type to its DesignKit token")
+    func classificationMapping() {
+        #expect(CardType.metric.classification == .metric)
+        #expect(CardType.insight.classification == .insight)
+        #expect(CardType.digest.classification == .digest)
+        #expect(CardType.agentSummary.classification == .agentSummary)
+        #expect(CardType.todoList.classification == .todoList)
+        #expect(CardType.trending.classification == .trending)
+        #expect(CardType.sectionHeader.classification == nil)
     }
 
     @Test("CardType.hasIconBadge true for content cards, false for sectionHeader")
@@ -109,15 +110,15 @@ struct DesignTokensFoundationTests {
         #expect(!CardType.sectionHeader.hasIconBadge)
     }
 
-    @Test("Every content card type has a symbol AND a tint, sectionHeader has neither")
+    @Test("Every content card type has a symbol AND a classification, sectionHeader has neither")
     func iconBadgeContractIsTotal() {
         for type in CardType.allCases {
             let symbol = type.iconSymbol
-            let tint = type.iconTint
+            let classification = type.classification
             if type == .sectionHeader {
-                #expect(symbol == nil && tint == nil)
+                #expect(symbol == nil && classification == nil)
             } else {
-                #expect(symbol != nil && tint != nil, "\(type) must define both icon and tint")
+                #expect(symbol != nil && classification != nil, "\(type) must define both icon and classification")
             }
         }
     }
@@ -200,12 +201,13 @@ struct DesignTokensFoundationTests {
 
     // MARK: - Style → stripe
 
-    @Test("AIDashChrome.stripeColor: neutral=nil, success=green, warning=orange, accent=accentColor")
+    @Test("AIDashChrome.stripeColor: neutral=nil, others resolve from theme tokens")
     func stripeColorMapping() {
-        #expect(AIDashChrome.stripeColor(for: .neutral) == nil)
-        #expect(AIDashChrome.stripeColor(for: .success) == .green)
-        #expect(AIDashChrome.stripeColor(for: .warning) == .orange)
-        #expect(AIDashChrome.stripeColor(for: .accent) == .accentColor)
+        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
+        #expect(AIDashChrome.stripeColor(for: .neutral, theme: theme) == nil)
+        #expect(AIDashChrome.stripeColor(for: .success, theme: theme) == theme.success)
+        #expect(AIDashChrome.stripeColor(for: .warning, theme: theme) == theme.warning)
+        #expect(AIDashChrome.stripeColor(for: .accent, theme: theme) == theme.primary.primary)
     }
 
     @Test("AIDashChrome carries only stripe + hairline tokens (no flat radius/padding)")

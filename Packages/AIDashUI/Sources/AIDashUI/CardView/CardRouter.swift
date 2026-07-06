@@ -1,11 +1,13 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 /// Routes a `CardModel` to the corresponding type-specific card view by decoding
 /// its `payloadJSON` via `CardType.decode` (preserving `.iso8601` date handling).
 /// On decode failure, renders a generic fallback placeholder (FR-032).
 public struct CardRouter: View {
     let card: CardModel
+    @Environment(\.theme) private var theme
 
     public init(card: CardModel) {
         self.card = card
@@ -54,7 +56,7 @@ public struct CardRouter: View {
     private var fallbackView: some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
+                .foregroundStyle(theme.warning)
                 .accessibilityHidden(true)
             Text(Self.fallbackTitle)
                 .font(.headline)

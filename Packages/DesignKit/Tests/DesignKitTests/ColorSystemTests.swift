@@ -24,6 +24,27 @@ struct ColorSystemTests {
         #expect(chartPalette(seed: Seed.teal.color, isDark: false).count == 8)
         #expect(chartPalette(seed: Seed.teal.color, isDark: true).count == 8)
     }
+
+    @Test("classification tints are golden fixed values")
+    func classificationGolden() {
+        #expect(Classification.allCases.count == 6)
+        // Light golden values (mirror Apple system palette). Locks the token so a
+        // repo's copy can't silently drift.
+        #expect(Classification.metric.tint(isDark: false) == Color(hex: "#007AFF"))
+        #expect(Classification.insight.tint(isDark: false) == Color(hex: "#AF52DE"))
+        #expect(Classification.trending.tint(isDark: false) == Color(hex: "#FF9500"))
+        // Dark variant differs from light (dark mode is honored, not identical).
+        #expect(Classification.metric.tint(isDark: true) != Classification.metric.tint(isDark: false))
+    }
+
+    @Test("classification tints are pairwise distinguishable")
+    func classificationDistinct() {
+        for isDark in [false, true] {
+            let tints = Classification.allCases.map { $0.tint(isDark: isDark) }
+            let unique = Set(tints.map { String(describing: $0) })
+            #expect(unique.count == Classification.allCases.count)
+        }
+    }
 }
 
 @Suite("Theme")

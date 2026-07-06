@@ -22,6 +22,11 @@ public struct Theme: Sendable {
     public var warning: Color { Semantic.warning(isDark: isDark) }
     public var danger: Color { Semantic.danger(isDark: isDark) }
 
+    /// Per-category icon-badge tint, resolved for the current color scheme.
+    public func classificationTint(_ kind: Classification) -> Color {
+        kind.tint(isDark: isDark)
+    }
+
     public init(seed: Seed = .appleBlue, neutral: Neutral = .slate, isDark: Bool = false) {
         self.seed = seed
         self.neutral = neutral

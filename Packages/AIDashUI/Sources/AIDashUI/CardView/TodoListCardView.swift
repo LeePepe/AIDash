@@ -1,5 +1,6 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 public struct TodoListCardView: View {
     let payload: TodoListPayload
@@ -125,6 +126,7 @@ public struct TodoListCardView: View {
 private struct TodoItemRow: View {
     let item: TodoListPayload.Item
     let showDue: Bool
+    @Environment(\.theme) private var theme
 
     var body: some View {
         HStack(spacing: 8) {
@@ -161,10 +163,10 @@ private struct TodoItemRow: View {
 
     private var priorityColor: Color {
         switch item.priority {
-        case .high: return .red
-        case .medium: return .orange
-        case .low: return .blue
-        case nil: return .gray
+        case .high: return theme.danger
+        case .medium: return theme.warning
+        case .low: return theme.primary.primary
+        case nil: return .secondary
         }
     }
 }

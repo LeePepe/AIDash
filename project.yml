@@ -24,6 +24,8 @@ packages:
     path: Packages/AIDashCore
   AIDashUI:
     path: Packages/AIDashUI
+  DesignKit:
+    path: Packages/DesignKit
   swift-argument-parser:
     url: https://github.com/apple/swift-argument-parser
     from: "1.5.0"
@@ -52,6 +54,7 @@ targets:
     dependencies:
       - package: AIDashCore
       - package: AIDashUI
+      - package: DesignKit
 
   AIDashAppTests:
     type: bundle.unit-test

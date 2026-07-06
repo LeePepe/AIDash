@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import AIDashCore
 import AIDashUI
+import DesignKit
 
 /// The main briefing window scene. Hosts BriefingView when the
 /// CloudKit container is ready, or shows an error state on failure.
@@ -26,6 +27,7 @@ public struct BriefingWindowScene: Scene {
                 switch state {
                 case .ready(let container):
                     BriefingView()
+                        .designTheme(seed: .appleBlue, neutral: .slate)
                         .modelContainer(container)
                 case .failed(let reason):
                     ICloudUnavailableView(reason: reason)

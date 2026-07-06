@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
 
 @MainActor
@@ -73,7 +74,7 @@ struct TodoListCardViewTests {
     func rendersTypeBadge() {
         #expect(CardType.todoList.hasIconBadge)
         #expect(CardType.todoList.iconSymbol == "checklist")
-        #expect(CardType.todoList.iconTint == .green)
+        #expect(CardType.todoList.classification == .todoList)
     }
 
     @Test("body materializes for every (size, style) combination without crashing")
