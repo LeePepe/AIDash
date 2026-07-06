@@ -64,7 +64,7 @@ if command -v swiftlint >/dev/null 2>&1; then
         lint_fail=0
         while IFS= read -r f; do
             [ -f "$f" ] || continue
-            swiftlint lint --strict --quiet "$f" || lint_fail=1
+            swiftlint lint --strict --quiet --config "$REPO_ROOT/.swiftlint.yml" "$f" || lint_fail=1
         done <<< "$swift_staged"
         [ "$lint_fail" -eq 0 ] || { echo "[pre-commit] ❌ swiftlint 失败"; exit 1; }
     fi

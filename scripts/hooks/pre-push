@@ -91,6 +91,23 @@ if [ -n "$gate_base" ] && [ -n "$gate_head" ]; then
     fi
 fi
 
+# Lint gate — full-repo swiftlint with the root config (single source of
+# truth shared by pre-commit and CI). Fails fast, before the slow build.
+# Graceful skip if swiftlint is not installed locally (CI enforces it).
+if [ -f "$REPO_ROOT/.swiftlint.yml" ]; then
+    if command -v swiftlint >/dev/null 2>&1; then
+        echo "[pre-push] swiftlint (root config)..."
+        if ! swiftlint lint --strict --quiet --config "$REPO_ROOT/.swiftlint.yml" \
+                > /tmp/aidash-pre-push-lint.log 2>&1; then
+            echo "[pre-push] FAILED: swiftlint"
+            tail -40 /tmp/aidash-pre-push-lint.log
+            exit 1
+        fi
+    else
+        echo "[pre-push] WARNING: swiftlint not installed; skipping lint gate (CI enforces it)."
+    fi
+fi
+
 # Test gate — Core package only (fast, no Xcode required for SPM tests).
 if [ -d "Packages/AIDashCore" ]; then
     echo "[pre-push] swift test (AIDashCore)..."

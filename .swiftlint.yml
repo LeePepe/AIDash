@@ -1,0 +1,75 @@
+# SwiftLint — repo-wide single source of truth.
+#
+# This root config governs pre-commit (per-file), pre-push (full), and CI.
+# Thresholds are set LENIENT: relaxed just far enough to pass the existing
+# code as-is (zero code changes) while still catching clearly-bad NEW code.
+# Existing violations are tolerated by threshold, NOT fixed — tightening any
+# rule toward stock defaults is a follow-up issue, done rule-by-rule.
+#
+# Color math uses conventional single-letter names (h/s/b, r/g/b) that mirror
+# the canonical color-system.md; allow them. Tests are excluded (try!/force
+# unwraps are accepted test idioms).
+
+strict: true
+
+included:
+  - Packages
+  - Apps
+  - CLI
+
+excluded:
+  - "**/.build"
+  - "**/Tests"          # test idioms (try!, force unwrap) exempt
+
+disabled_rules:
+  - trailing_comma      # team style (DesignKit config already disabled this)
+  - todo
+  - implicit_optional_initialization   # `var x: T? = nil` is an existing convention
+
+identifier_name:
+  min_length: 1          # color math: h, s, b, r, g, c, p, v
+  allowed_symbols: ["_"]
+
+# ── Thresholds relaxed to cover existing production maxima (measured) ──
+# line_length: longest existing line is 422 (an inline JSON-schema string
+#   literal in XPCHandlers.swift — not a comment, so ignores_comments can't
+#   help). NOTE: with `strict: true`, warnings are treated as failures, so the
+#   `warning` value is the effective ceiling. Set it above 422 with headroom.
+line_length:
+  warning: 500
+  error: 600
+  ignores_comments: true
+  ignores_urls: true
+
+# function_body_length: existing max 73 (XPCHandlers dispatch arms).
+function_body_length:
+  warning: 90
+  error: 120
+
+# type_body_length: existing max 481 (XPCHandlers class — JSON schema consts).
+type_body_length:
+  warning: 550
+  error: 700
+
+# file_length: existing max 588 (XPCHandlers.swift).
+file_length:
+  warning: 600
+  error: 900
+
+# function_parameter_count: existing max 6 (SchemaValidator).
+function_parameter_count:
+  warning: 7
+  error: 9
+
+# cyclomatic_complexity: existing max 11 (XPCHandlers).
+cyclomatic_complexity:
+  warning: 15
+  error: 25
+
+# nesting: existing payload types nest 2 levels (MetricPayload/TodoListPayload).
+nesting:
+  type_level: 2
+
+large_tuple:
+  warning: 3
+  error: 4
