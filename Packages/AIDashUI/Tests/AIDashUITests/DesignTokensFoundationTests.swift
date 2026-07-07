@@ -12,13 +12,13 @@ struct DesignTokensFoundationTests {
 
     @Test("AIDashSpacing matches constitution §Spacing & Color Tokens")
     func spacingConstants() {
-        #expect(AIDashSpacing.containerVertical == 24)
+        #expect(AIDashSpacing.containerVertical == 32)
         #expect(AIDashSpacing.containerHeaderToFirstCard == 12)
         #expect(AIDashSpacing.cardVertical == 12)
-        #expect(AIDashSpacing.gridGap == 12)
+        #expect(AIDashSpacing.gridGap == 16)
         #expect(AIDashSpacing.pageHorizontalMac == 24)
         #expect(AIDashSpacing.pageHorizontalCompact == 20)
-        #expect(AIDashSpacing.pageVertical == 24)
+        #expect(AIDashSpacing.pageVertical == 28)
     }
 
     // MARK: - Size ladder
@@ -210,11 +210,10 @@ struct DesignTokensFoundationTests {
         #expect(AIDashChrome.stripeColor(for: .accent, theme: theme) == theme.primary.primary)
     }
 
-    @Test("AIDashChrome carries only stripe + hairline tokens (no flat radius/padding)")
+    @Test("AIDashChrome carries only stripe + border tokens (no flat radius/padding)")
     func chromeConstants() {
         #expect(AIDashChrome.stripeWidth == 3)
-        #expect(AIDashChrome.hairlineWidth == 0.5)
-        #expect(AIDashChrome.hairlineOpacity == 0.5)
+        #expect(AIDashChrome.hairlineWidth == 1)
     }
 
     // MARK: - Card chrome modifier wiring

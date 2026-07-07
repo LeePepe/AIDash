@@ -42,29 +42,29 @@ struct MetricCardViewTests {
         #expect(v.formattedValue(1_000_000) == "1000000.0")
     }
 
-    // MARK: - trendIconName behavior (SF Symbol mapping)
+    // MARK: - trendGlyph behavior (arrow glyph mapping)
 
-    @Test("trendIconName maps each trend to the correct SF Symbol")
-    func trendIconNames() {
+    @Test("trendGlyph maps each trend to the correct arrow glyph")
+    func trendGlyphs() {
         let v = view()
-        #expect(v.trendIconName(.up) == "arrow.up")
-        #expect(v.trendIconName(.down) == "arrow.down")
-        #expect(v.trendIconName(.flat) == "arrow.right")
+        #expect(v.trendGlyph(.up) == "↑")
+        #expect(v.trendGlyph(.down) == "↓")
+        #expect(v.trendGlyph(.flat) == "→")
     }
 
-    // MARK: - trendColor behavior (semantic token mapping)
+    // MARK: - trendTone behavior (status-pill tone mapping)
     //
-    // Trend arrow color is METRIC CONTENT (signal direction), not card chrome.
-    // Per constitution §Style = Semantic Signal Only this is allowed to stay.
-    // Colors resolve from the DesignKit theme tokens, not inline system colors.
+    // Trend is METRIC CONTENT (signal direction), rendered as a content-level
+    // StatusPill per constitution §Content-Level Status Pills — driven by the
+    // payload's trend, not the card style. Tones resolve inside DesignKit's
+    // StatusPill from theme tokens, never inline system colors.
 
-    @Test("trendColor maps up to theme.success, down to theme.danger, flat to secondary")
-    func trendColors() {
+    @Test("trendTone maps up to success, down to danger, flat to neutral")
+    func trendTones() {
         let v = view()
-        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
-        #expect(v.trendColor(.up) == theme.success)
-        #expect(v.trendColor(.down) == theme.danger)
-        #expect(v.trendColor(.flat) == .secondary)
+        #expect(v.trendTone(.up) == .success)
+        #expect(v.trendTone(.down) == .danger)
+        #expect(v.trendTone(.flat) == .neutral)
     }
 
     // MARK: - Token contract assertions

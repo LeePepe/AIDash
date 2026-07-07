@@ -238,20 +238,39 @@ public enum AIDashSize {
 // §Spacing & Color Tokens + §Page Chrome.
 
 public enum AIDashSpacing {
-    /// 24pt between containers.
-    public static let containerVertical: CGFloat = 24
+    /// 32pt between containers.
+    public static let containerVertical: CGFloat = 32
     /// 12pt between a container's header and its first card.
     public static let containerHeaderToFirstCard: CGFloat = 12
     /// 12pt between cards inside a container.
     public static let cardVertical: CGFloat = 12
-    /// 12pt grid column gap.
-    public static let gridGap: CGFloat = 12
+    /// 16pt grid column gap.
+    public static let gridGap: CGFloat = 16
     /// 24pt page horizontal padding on macOS.
     public static let pageHorizontalMac: CGFloat = 24
     /// 20pt page horizontal padding on iOS / iPadOS.
     public static let pageHorizontalCompact: CGFloat = 20
-    /// 24pt top/bottom page padding.
-    public static let pageVertical: CGFloat = 24
+    /// 28pt top/bottom page padding.
+    public static let pageVertical: CGFloat = 28
+}
+
+// MARK: - Spacing ladder (raw scale)
+//
+// north-star §2 — the ONLY permitted raw spacing values. In-card element
+// spacing MUST come from this ladder (or the semantic AIDashSpacing above),
+// never a freshly-typed number.
+
+public enum AIDashSpace {
+    public static let s2: CGFloat = 2
+    public static let s4: CGFloat = 4
+    public static let s8: CGFloat = 8
+    public static let s12: CGFloat = 12
+    public static let s16: CGFloat = 16
+    public static let s20: CGFloat = 20
+    public static let s24: CGFloat = 24
+    public static let s28: CGFloat = 28
+    public static let s32: CGFloat = 32
+    public static let s40: CGFloat = 40
 }
 
 // MARK: - Chrome (stripe + hairline only)
@@ -262,10 +281,9 @@ public enum AIDashSpacing {
 public enum AIDashChrome {
     /// Width of the left-edge accent stripe drawn for non-neutral styles.
     public static let stripeWidth: CGFloat = 3
-    /// Width of the hairline overlay that defines card edges.
-    public static let hairlineWidth: CGFloat = 0.5
-    /// Opacity applied to `.separator` for the hairline overlay.
-    public static let hairlineOpacity: Double = 0.5
+    /// Width of the 1px border overlay that defines card edges
+    /// (`theme.neutrals.border`, luminance-tier elevation per §Card Chrome).
+    public static let hairlineWidth: CGFloat = 1
 
     /// Stripe color per `style`, resolved from the theme's semantic/primary
     /// tokens. `neutral` returns `nil` — no stripe drawn. Colors come from
@@ -298,10 +316,10 @@ public struct CardChromeModifier: ViewModifier {
         return content
             .padding(AIDashSize.padding(size))
             .frame(minHeight: AIDashSize.minHeight(size), alignment: .topLeading)
-            .background(.background.secondary, in: shape)
+            .background(theme.neutrals.card, in: shape)
             .overlay(
                 shape.strokeBorder(
-                    Self.separatorColor.opacity(AIDashChrome.hairlineOpacity),
+                    theme.neutrals.border,
                     lineWidth: AIDashChrome.hairlineWidth
                 )
             )
@@ -313,16 +331,6 @@ public struct CardChromeModifier: ViewModifier {
                 }
             }
             .clipShape(shape)
-    }
-
-    private static var separatorColor: Color {
-        #if canImport(UIKit)
-        return Color(UIColor.separator)
-        #elseif canImport(AppKit)
-        return Color(NSColor.separatorColor)
-        #else
-        return Color.gray
-        #endif
     }
 }
 

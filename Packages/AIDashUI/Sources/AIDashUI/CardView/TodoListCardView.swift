@@ -126,11 +126,10 @@ public struct TodoListCardView: View {
 private struct TodoItemRow: View {
     let item: TodoListPayload.Item
     let showDue: Bool
-    @Environment(\.theme) private var theme
 
     var body: some View {
         HStack(spacing: 8) {
-            priorityIndicator
+            priorityPill
             Text(item.title)
                 .font(TodoListCardView.recipe.primary)
                 .lineLimit(2)
@@ -144,12 +143,33 @@ private struct TodoItemRow: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Priority as a content-level status pill (§Content-Level Status Pills):
+    /// high=danger, medium=warning, low=primary. A row with no priority
+    /// renders no pill (pills reflect a payload value).
     @ViewBuilder
-    private var priorityIndicator: some View {
-        Circle()
-            .fill(priorityColor)
-            .frame(width: 8, height: 8)
-            .accessibilityLabel(priorityLabel)
+    private var priorityPill: some View {
+        if let tone = priorityTone {
+            StatusPill(priorityText, tone: tone)
+                .accessibilityLabel(priorityLabel)
+        }
+    }
+
+    private var priorityText: String {
+        switch item.priority {
+        case .high: return "High"
+        case .medium: return "Med"
+        case .low: return "Low"
+        case nil: return ""
+        }
+    }
+
+    private var priorityTone: PillTone? {
+        switch item.priority {
+        case .high: return .danger
+        case .medium: return .warning
+        case .low: return .primary
+        case nil: return nil
+        }
     }
 
     private var priorityLabel: String {
@@ -158,15 +178,6 @@ private struct TodoItemRow: View {
         case .medium: return "Medium priority"
         case .low: return "Low priority"
         case nil: return "No priority"
-        }
-    }
-
-    private var priorityColor: Color {
-        switch item.priority {
-        case .high: return theme.danger
-        case .medium: return theme.warning
-        case .low: return theme.primary.primary
-        case nil: return .secondary
         }
     }
 }

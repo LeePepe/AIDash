@@ -60,14 +60,13 @@ struct BriefingViewTests {
         #endif
     }
 
-    @Test("pageBackground is exposed (page draws its own background, not card chrome)")
-    func pageBackgroundExposed() {
-        // Smoke: the page-background token can be read at runtime and is
-        // not the default clear color. The actual NSColor / UIColor
-        // identity is verified by the source-level check below since
-        // SwiftUI Color comparison is not reliable across platforms.
-        let bg = BriefingView.pageBackground
-        _ = bg
+    @Test("BriefingView paints the page in the lowest luminance tier (theme.neutrals.bg)")
+    func pageBackgroundIsNeutralBg() throws {
+        // The page draws its own background one luminance tier below the
+        // card, so cards visually float (§Page Chrome).
+        let source = try Self.briefingViewSource()
+        #expect(source.contains("theme.neutrals.bg"),
+                "BriefingView must paint the page in theme.neutrals.bg")
     }
 
     @Test("BriefingView source uses Page Chrome tokens, not magic numbers")
@@ -82,12 +81,10 @@ struct BriefingViewTests {
                 "page horizontal padding (iOS) must come from AIDashSpacing.pageHorizontalCompact")
         #expect(source.contains("AIDashSpacing.containerVertical"),
                 "container-to-container spacing must come from AIDashSpacing.containerVertical")
-        #expect(source.contains("NSColor.windowBackgroundColor")
-                || !source.contains("import AppKit"),
-                "macOS branch must use NSColor.windowBackgroundColor")
-        #expect(source.contains(".systemGroupedBackground")
-                || !source.contains("import UIKit"),
-                "iOS branch must use systemGroupedBackground")
+        #expect(source.contains("theme.neutrals.bg"),
+                "page background must be theme.neutrals.bg (lowest luminance tier)")
+        #expect(source.contains("Space.contentMaxWidth"),
+                "page content must be capped at Space.contentMaxWidth (1200pt)")
     }
 
     @Test("BriefingView source does not reintroduce containerStub or stub helpers")
