@@ -1,10 +1,12 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 public struct InsightCardView: View {
     let payload: InsightPayload
     let size: CardSize
     let style: CardStyle
+    @Environment(\.theme) private var theme
 
     public init(payload: InsightPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -23,6 +25,11 @@ public struct InsightCardView: View {
         .cardChrome(size: size, style: style)
     }
 
+    // Insight renders as a PULL-QUOTE, distinct from digest's article layout:
+    // a bold title statement, then the body as a large quote set off by a
+    // thick leading accent rule. This makes "one key observation" read
+    // differently at a glance from a prose digest or a checklist.
+
     @ViewBuilder
     private var content: some View {
         let recipe = AIDashTypography.detail(for: .insight)
@@ -34,29 +41,41 @@ public struct InsightCardView: View {
             EmptyView()
 
         case .medium:
-            Text(truncatedBody)
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
+            quoteBody(truncatedBody, recipe: recipe)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
 
         case .wide:
-            Text(payload.body)
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
+            quoteBody(payload.body, recipe: recipe)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
 
         case .hero:
-            Text(payload.body)
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
+            quoteBody(payload.body, recipe: recipe)
             if let citations = payload.citations, !citations.isEmpty {
                 citationLinks(citations: citations)
             }
         }
+    }
+
+    /// The body as a pull-quote: a thick accent rule on the leading edge +
+    /// larger, softer quote text. The rule color is the seed primary (a token,
+    /// never inlined) — this is content emphasis, not `style` chrome.
+    @ViewBuilder
+    private func quoteBody(_ text: String, recipe: AIDashTypography.DetailRecipe) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Capsule(style: .continuous)
+                .fill(theme.primary.primary)
+                .frame(width: 3)
+            Text(text)
+                .font(.title3)
+                .foregroundStyle(.primary)
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     var truncatedBody: String {

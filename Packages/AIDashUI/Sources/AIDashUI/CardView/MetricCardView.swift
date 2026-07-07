@@ -61,10 +61,14 @@ public struct MetricCardView: View {
 
     // MARK: - KPI cell
     //
-    // Layout (north-star §6): label (caption) → value + trend pill row (ring
-    // gauge inline trailing when the metric is a ratio) → Spacer pushing the
-    // sparkline to a common baseline at the card bottom. This keeps a grid of
-    // KPI cards visually aligned instead of stranding the chart in mid-card.
+    // Uniform three-band skeleton so a grid of KPI cards aligns (north-star §6):
+    //   1. label (caption, uppercase) + optional context sub-label
+    //   2. value + unit + trend pill row
+    //   3. a FIXED-height viz band pinned to the card bottom — a sparkline
+    //      (full width) or a ring gauge (trailing). Both占同高, so a ratio card
+    //      and a series card end up the same height with no dead space.
+
+    private static let vizBandHeight: CGFloat = 52
 
     private func kpiCell(_ item: MetricPayload.Item) -> some View {
         let recipe = AIDashTypography.detail(for: .metric)
@@ -73,21 +77,31 @@ public struct MetricCardView: View {
                 .font(recipe.secondary)
                 .foregroundStyle(recipe.secondaryColor)
                 .textCase(.uppercase)
+                .lineLimit(1)
 
-            HStack(alignment: .center, spacing: AIDashSpace.s8) {
-                valueRow(item, recipe: recipe)
-                if item.ratio != nil {
-                    Spacer(minLength: AIDashSpace.s8)
-                    ringGauge(item)
-                }
-            }
+            valueRow(item, recipe: recipe)
 
-            if item.ratio == nil {
-                Spacer(minLength: AIDashSpace.s12)
-                sparkline(item)
-            }
+            Spacer(minLength: AIDashSpace.s8)
+
+            vizBand(item)
+                .frame(height: Self.vizBandHeight)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The bottom viz band — same height whether it draws a ring, a sparkline,
+    /// or nothing, so cards in a grid stay flush.
+    @ViewBuilder
+    private func vizBand(_ item: MetricPayload.Item) -> some View {
+        if item.ratio != nil {
+            HStack {
+                Spacer()
+                ringGauge(item)
+            }
+        } else {
+            sparkline(item)
+                .frame(maxWidth: .infinity)
+        }
     }
 
     private func valueRow(
@@ -116,7 +130,7 @@ public struct MetricCardView: View {
     @ViewBuilder
     private func ringGauge(_ item: MetricPayload.Item) -> some View {
         if let ratio = item.ratio {
-            RingGauge(value: ratio, size: 56, color: vizColor(item))
+            RingGauge(value: ratio, size: Self.vizBandHeight, color: vizColor(item))
         }
     }
 
@@ -124,7 +138,6 @@ public struct MetricCardView: View {
     private func sparkline(_ item: MetricPayload.Item) -> some View {
         if let series = item.series, series.count > 1 {
             Sparkline(data: series, color: vizColor(item))
-                .frame(height: 40)
         }
     }
 

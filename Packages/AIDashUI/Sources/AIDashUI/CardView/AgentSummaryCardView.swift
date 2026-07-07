@@ -65,14 +65,12 @@ public struct AgentSummaryCardView: View {
         agentNameText
             .lineLimit(1)
 
-        ForEach(Array(payload.completed.prefix(2).enumerated()), id: \.offset) { _, item in
-            completedRow(item)
+        if let stats = payload.stats, !stats.isEmpty {
+            statChips(stats)
         }
 
-        if let stat = mostRelevantStat {
-            Text("\(stat.label): \(formattedStatValue(stat.value))")
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
+        ForEach(Array(payload.completed.prefix(2).enumerated()), id: \.offset) { _, item in
+            completedRow(item)
         }
     }
 
@@ -81,12 +79,12 @@ public struct AgentSummaryCardView: View {
         agentNameText
             .lineLimit(1)
 
-        ForEach(Array(payload.completed.prefix(5).enumerated()), id: \.offset) { _, item in
-            completedRow(item)
+        if let stats = payload.stats, !stats.isEmpty {
+            statChips(stats)
         }
 
-        if let stats = payload.stats, !stats.isEmpty {
-            statsLayout(stats)
+        ForEach(Array(payload.completed.prefix(5).enumerated()), id: \.offset) { _, item in
+            completedRow(item)
         }
     }
 
@@ -151,6 +149,39 @@ public struct AgentSummaryCardView: View {
         }
     }
 
+    /// Battle-report stat chips shown at the TOP of the card — a horizontal
+    /// row of number-over-label chips, so agentSummary reads "stats first" and
+    /// looks distinct from a digest/insight prose card. The chip surface is a
+    /// sibling Capsule (not `.background`, which chrome guards reserve for the
+    /// shared cardChrome modifier) filled from the neutral inner token.
+    @ViewBuilder
+    private func statChips(_ stats: [AgentSummaryPayload.Stat]) -> some View {
+        HStack(spacing: AIDashSpace.s8) {
+            ForEach(Array(stats.prefix(4).enumerated()), id: \.offset) { _, stat in
+                statChip(stat)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func statChip(_ stat: AgentSummaryPayload.Stat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(formattedStatValue(stat.value))
+                .font(.system(.title3, design: .rounded).weight(.bold))
+            Text(stat.label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, AIDashSpace.s12)
+        .padding(.vertical, AIDashSpace.s8)
+        .overlay {
+            Capsule(style: .continuous)
+                .strokeBorder(theme.neutrals.border, lineWidth: 1)
+        }
+    }
+
     /// Stats row that adapts to variable stat counts/labels without
     /// horizontal overflow. Uses a wrapping grid so long labels reflow
     /// to a new line instead of clipping.
@@ -175,10 +206,6 @@ public struct AgentSummaryCardView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    private var mostRelevantStat: AgentSummaryPayload.Stat? {
-        payload.stats?.first
     }
 
     private func formattedStatValue(_ value: Double) -> String {
