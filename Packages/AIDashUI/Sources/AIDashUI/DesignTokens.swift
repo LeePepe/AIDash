@@ -185,12 +185,15 @@ public enum AIDashSize {
     /// Minimum card height in points.
     public static func minHeight(_ size: CardSize) -> CGFloat {
         switch size {
-        case .small:  return 96
-        case .medium: return 140
+        case .small:  return 148
+        case .medium: return 148
         case .wide:   return 140
         case .hero:   return 280
         }
     }
+
+    // Note: small and medium share 148pt so a grid mixing 1-col KPI cards and
+    // 2-col metric cards aligns to a common row height (north-star §6).
 
     /// Card corner radius in points. Single source of truth for both the card
     /// background shape and the hairline overlay stroke.
@@ -222,14 +225,15 @@ public enum AIDashSize {
     }
 
     /// Container grid column count for the given viewport width.
-    /// iPhone = 1, iPad portrait = 2, iPad landscape / Mac small = 3,
-    /// Mac large = 4. Breakpoints chosen to match Apple's regular/compact size
-    /// classes and standard Mac window widths.
+    /// Targets ~240pt columns (north-star §1: adaptive KPI grid, min ~220),
+    /// so a standard Mac window reaches 3–4 columns and cards stay dense
+    /// rather than stretching into sparse strips. iPhone stays single-column.
     public static func columnCount(forWidth width: CGFloat) -> Int {
-        if width < 480 { return 1 }
-        if width < 768 { return 2 }
-        if width < 1100 { return 3 }
-        return 4
+        if width < 340 { return 1 }
+        if width < 620 { return 2 }
+        if width < 900 { return 3 }
+        if width < 1180 { return 4 }
+        return 5
     }
 }
 

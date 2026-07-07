@@ -30,12 +30,12 @@ public struct MetricCardView: View {
         switch size {
         case .small:
             if let item = payload.items.first {
-                metricCell(item)
+                kpiCell(item)
             }
         case .medium:
             HStack(alignment: .top, spacing: 16) {
                 ForEach(Array(payload.items.prefix(2).enumerated()), id: \.offset) { _, item in
-                    metricCell(item)
+                    kpiCell(item)
                 }
             }
         case .wide:
@@ -47,80 +47,118 @@ public struct MetricCardView: View {
                 spacing: 12
             ) {
                 ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
-                    metricCell(item)
+                    kpiCell(item)
                 }
             }
         case .hero:
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
-                    metricCell(item)
+                    kpiCell(item)
                 }
             }
         }
     }
 
-    // MARK: - Components
+    // MARK: - KPI cell
+    //
+    // Layout (north-star §6): label (caption) → value + trend pill row (ring
+    // gauge inline trailing when the metric is a ratio) → Spacer pushing the
+    // sparkline to a common baseline at the card bottom. This keeps a grid of
+    // KPI cards visually aligned instead of stranding the chart in mid-card.
 
-    private func metricCell(_ item: MetricPayload.Item) -> some View {
+    private func kpiCell(_ item: MetricPayload.Item) -> some View {
         let recipe = AIDashTypography.detail(for: .metric)
         return VStack(alignment: .leading, spacing: AIDashSpace.s8) {
-            metricValue(item, recipe: recipe)
             Text(item.label)
                 .font(recipe.secondary)
                 .foregroundStyle(recipe.secondaryColor)
-            dataViz(item)
+                .textCase(.uppercase)
+
+            HStack(alignment: .center, spacing: AIDashSpace.s8) {
+                valueRow(item, recipe: recipe)
+                if item.ratio != nil {
+                    Spacer(minLength: AIDashSpace.s8)
+                    ringGauge(item)
+                }
+            }
+
+            if item.ratio == nil {
+                Spacer(minLength: AIDashSpace.s12)
+                sparkline(item)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Content-level data-viz beside the number (north-star §6/§7):
-    /// a `ratio` renders a ring gauge (replacing the sparkline); otherwise a
-    /// `series` renders a sparkline. Render size is fixed — it does NOT
-    /// branch on the card's `size` dimension (§Metric Data-Viz).
-    @ViewBuilder
-    private func dataViz(_ item: MetricPayload.Item) -> some View {
-        if let ratio = item.ratio {
-            RingGauge(value: ratio, color: vizColor(item.trend))
-        } else if let series = item.series, series.count > 1 {
-            Sparkline(data: series, color: vizColor(item.trend))
-                .frame(height: 40)
-        }
-    }
-
-    /// Sparkline / gauge tint follows the item's trend semantics; a metric
-    /// with no trend uses the seed primary (a chart token, never inlined).
-    private func vizColor(_ trend: MetricPayload.Item.Trend?) -> Color {
-        switch trend {
-        case .up: return theme.success
-        case .down: return theme.danger
-        case .flat, nil: return theme.primary.primary
-        }
-    }
-
-    private func metricValue(
+    private func valueRow(
         _ item: MetricPayload.Item,
         recipe: AIDashTypography.DetailRecipe
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s4) {
             Text(formattedValue(item.value))
                 .font(recipe.primary)
-
             if let unit = item.unit {
                 Text(unit)
-                    .font(recipe.secondary)
+                    .font(.title3)
                     .foregroundStyle(recipe.secondaryColor)
             }
-
             if let trend = item.trend {
-                trendPill(trend)
+                trendPill(item, trend: trend)
             }
         }
     }
 
-    /// Trend rendered as a content-level status pill (§Content-Level Status
-    /// Pills) — a directional arrow glyph inside a colored capsule. This is a
-    /// content signal driven by the payload's `trend`, not the card `style`.
-    private func trendPill(_ trend: MetricPayload.Item.Trend) -> some View {
-        StatusPill(trendGlyph(trend), tone: trendTone(trend))
+    // MARK: - Data-viz (north-star §6/§7)
+    //
+    // Render size is fixed — it does NOT branch on the card's `size` dimension
+    // (§Metric Data-Viz). A ratio renders a ring gauge; a series a sparkline.
+
+    @ViewBuilder
+    private func ringGauge(_ item: MetricPayload.Item) -> some View {
+        if let ratio = item.ratio {
+            RingGauge(value: ratio, size: 56, color: vizColor(item))
+        }
+    }
+
+    @ViewBuilder
+    private func sparkline(_ item: MetricPayload.Item) -> some View {
+        if let series = item.series, series.count > 1 {
+            Sparkline(data: series, color: vizColor(item))
+                .frame(height: 40)
+        }
+    }
+
+    /// Semantic color for the metric's viz + trend pill. Colored by OUTCOME
+    /// (good = success, bad = danger), not by raw direction, using the
+    /// payload's `higherIsBetter`. When `higherIsBetter` is absent the metric
+    /// makes no good/bad claim and renders in the neutral seed primary.
+    private func vizColor(_ item: MetricPayload.Item) -> Color {
+        switch outcome(item) {
+        case .good:    return theme.success
+        case .bad:     return theme.danger
+        case .neutral: return theme.primary.primary
+        }
+    }
+
+    private enum Outcome { case good, bad, neutral }
+
+    /// Maps (trend direction × higherIsBetter) to a good/bad/neutral outcome.
+    /// `flat`, a missing trend, or a missing `higherIsBetter` → neutral.
+    private func outcome(_ item: MetricPayload.Item) -> Outcome {
+        guard let trend = item.trend, let higherIsBetter = item.higherIsBetter else {
+            return .neutral
+        }
+        switch trend {
+        case .up:   return higherIsBetter ? .good : .bad
+        case .down: return higherIsBetter ? .bad : .good
+        case .flat: return .neutral
+        }
+    }
+
+    /// Trend as a content-level status pill (§Content-Level Status Pills):
+    /// an arrow glyph colored by OUTCOME, not direction, driven by the payload.
+    private func trendPill(_ item: MetricPayload.Item, trend: MetricPayload.Item.Trend) -> some View {
+        StatusPill(trendGlyph(trend), tone: outcomeTone(item))
     }
 
     /// Unicode arrow glyph for the trend, rendered as pill text.
@@ -132,11 +170,12 @@ public struct MetricCardView: View {
         }
     }
 
-    func trendTone(_ trend: MetricPayload.Item.Trend) -> PillTone {
-        switch trend {
-        case .up: return .success
-        case .down: return .danger
-        case .flat: return .neutral
+    /// Pill tone by outcome (good/bad/neutral), consistent with the viz color.
+    func outcomeTone(_ item: MetricPayload.Item) -> PillTone {
+        switch outcome(item) {
+        case .good:    return .success
+        case .bad:     return .danger
+        case .neutral: return .neutral
         }
     }
 

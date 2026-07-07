@@ -238,18 +238,18 @@ struct DesignTokensComplianceTests {
     )
     func metricSizeOrthogonalityChromeGeometry(size: CardSize) {
         // Expected geometry ladder per constitution §Size = Geometry Only:
-        // small=10/96/(12,14), medium=14/140/16, wide=14/140/(16,20), hero=20/280/24.
+        // small=10/148/(12,14), medium=14/148/16, wide=14/140/(16,20), hero=20/280/24.
         let radius = AIDashSize.cornerRadius(size)
         let minH = AIDashSize.minHeight(size)
         let pad = AIDashSize.padding(size)
         switch size {
         case .small:
             #expect(radius == 10)
-            #expect(minH == 96)
+            #expect(minH == 148)
             #expect(pad.leading == 12 && pad.trailing == 12 && pad.top == 14 && pad.bottom == 14)
         case .medium:
             #expect(radius == 14)
-            #expect(minH == 140)
+            #expect(minH == 148)
             #expect(pad.top == 16 && pad.bottom == 16 && pad.leading == 16 && pad.trailing == 16)
         case .wide:
             #expect(radius == 14)
@@ -362,7 +362,7 @@ struct DesignTokensComplianceTests {
                 "style=\(style) must not change medium corner radius")
         #expect(AIDashSize.padding(.medium).leading == 16,
                 "style=\(style) must not change medium padding")
-        #expect(AIDashSize.minHeight(.medium) == 140,
+        #expect(AIDashSize.minHeight(.medium) == 148,
                 "style=\(style) must not change medium min-height")
     }
 

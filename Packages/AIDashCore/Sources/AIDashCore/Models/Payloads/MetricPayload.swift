@@ -12,6 +12,13 @@ public struct MetricPayload: CardPayloadProtocol {
         /// sparkline for ratio-type metrics per north-star §6). Absent →
         /// no gauge. Validated to `0...1` in `validateInvariants()`.
         public let ratio: Double?
+        /// Whether a higher `value` / an upward `trend` is a GOOD thing.
+        /// Drives semantic coloring: color = "good"(success) vs "bad"(danger)
+        /// per outcome, NOT per direction. E.g. build time trending down is
+        /// good → `higherIsBetter: false`; open incidents up is bad →
+        /// `higherIsBetter: true` still colors an up-trend red. Absent →
+        /// treated as neutral (no good/bad claim; renders in a neutral tone).
+        public let higherIsBetter: Bool?
 
         public enum Trend: String, Codable, Sendable {
             case up, down, flat
@@ -23,7 +30,8 @@ public struct MetricPayload: CardPayloadProtocol {
             unit: String? = nil,
             trend: Trend? = nil,
             series: [Double]? = nil,
-            ratio: Double? = nil
+            ratio: Double? = nil,
+            higherIsBetter: Bool? = nil
         ) {
             self.label = label
             self.value = value
@@ -31,6 +39,7 @@ public struct MetricPayload: CardPayloadProtocol {
             self.trend = trend
             self.series = series
             self.ratio = ratio
+            self.higherIsBetter = higherIsBetter
         }
     }
 

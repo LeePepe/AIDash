@@ -45,6 +45,14 @@ public struct BriefingView: View {
             .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        #if os(macOS)
+        // Keep the large date header clear of the traffic-light / titlebar
+        // overlay. Without this the first line collides with the window
+        // controls on a full-height content window.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Color.clear.frame(height: 28)
+        }
+        #endif
         .background(theme.neutrals.bg)
     }
 

@@ -76,16 +76,16 @@ struct GridLayoutTests {
         #expect(GridLayout.columnCount(for: nil, width: 600) == 2)
     }
 
-    @Test("nil size class with medium width produces 3 columns")
-    func nilMediumProduces3Columns() {
-        // AIDashSize.columnCount: 768 ≤ width < 1100 → 3 columns
-        #expect(GridLayout.columnCount(for: nil, width: 900) == 3)
+    @Test("nil size class with medium width produces 4 columns")
+    func nilMediumProduces4Columns() {
+        // AIDashSize.columnCount: 900 ≤ width < 1180 → 4 columns
+        #expect(GridLayout.columnCount(for: nil, width: 900) == 4)
     }
 
-    @Test("nil size class with wide width produces 4 columns")
-    func nilWideProduces4Columns() {
-        // AIDashSize.columnCount: width ≥ 1100 → 4 columns
-        #expect(GridLayout.columnCount(for: nil, width: 1200) == 4)
+    @Test("nil size class with wide width produces 5 columns")
+    func nilWideProduces5Columns() {
+        // AIDashSize.columnCount: width ≥ 1180 → 5 columns
+        #expect(GridLayout.columnCount(for: nil, width: 1200) == 5)
     }
 
     // MARK: - TokenGrid wiring
@@ -107,7 +107,7 @@ struct GridLayoutTests {
     }
 }
 
-fileprivate func readLayoutSource(_ filename: String) throws -> String {
+private func readLayoutSource(_ filename: String) throws -> String {
     var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     for _ in 0..<8 {
         let candidate = dir

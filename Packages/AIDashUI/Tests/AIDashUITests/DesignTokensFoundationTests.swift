@@ -31,10 +31,10 @@ struct DesignTokensFoundationTests {
         #expect(AIDashSize.cornerRadius(.hero) == 20)
     }
 
-    @Test("AIDashSize.minHeight follows the 96/140/140/280 ladder")
+    @Test("AIDashSize.minHeight follows the 148/148/140/280 ladder")
     func minHeightLadder() {
-        #expect(AIDashSize.minHeight(.small) == 96)
-        #expect(AIDashSize.minHeight(.medium) == 140)
+        #expect(AIDashSize.minHeight(.small) == 148)
+        #expect(AIDashSize.minHeight(.medium) == 148)
         #expect(AIDashSize.minHeight(.wide) == 140)
         #expect(AIDashSize.minHeight(.hero) == 280)
     }
@@ -66,16 +66,18 @@ struct DesignTokensFoundationTests {
         #expect(AIDashSize.gridSpan(.hero) == .max)
     }
 
-    @Test("AIDashSize.columnCount maps viewport widths to 1/2/3/4 columns")
+    @Test("AIDashSize.columnCount maps viewport widths to ~240pt columns")
     func columnCount() {
         #expect(AIDashSize.columnCount(forWidth: 320) == 1)   // iPhone
-        #expect(AIDashSize.columnCount(forWidth: 479) == 1)
-        #expect(AIDashSize.columnCount(forWidth: 480) == 2)   // iPad portrait
-        #expect(AIDashSize.columnCount(forWidth: 767) == 2)
-        #expect(AIDashSize.columnCount(forWidth: 768) == 3)   // iPad landscape / small Mac
-        #expect(AIDashSize.columnCount(forWidth: 1099) == 3)
-        #expect(AIDashSize.columnCount(forWidth: 1100) == 4)  // large Mac
-        #expect(AIDashSize.columnCount(forWidth: 2000) == 4)
+        #expect(AIDashSize.columnCount(forWidth: 339) == 1)
+        #expect(AIDashSize.columnCount(forWidth: 340) == 2)
+        #expect(AIDashSize.columnCount(forWidth: 619) == 2)
+        #expect(AIDashSize.columnCount(forWidth: 620) == 3)
+        #expect(AIDashSize.columnCount(forWidth: 899) == 3)
+        #expect(AIDashSize.columnCount(forWidth: 900) == 4)   // typical Mac window
+        #expect(AIDashSize.columnCount(forWidth: 1179) == 4)
+        #expect(AIDashSize.columnCount(forWidth: 1180) == 5)  // wide Mac
+        #expect(AIDashSize.columnCount(forWidth: 2000) == 5)
     }
 
     // MARK: - Icon badge contract

@@ -52,19 +52,31 @@ struct MetricCardViewTests {
         #expect(v.trendGlyph(.flat) == "→")
     }
 
-    // MARK: - trendTone behavior (status-pill tone mapping)
+    // MARK: - outcomeTone behavior (semantic good/bad coloring)
     //
-    // Trend is METRIC CONTENT (signal direction), rendered as a content-level
-    // StatusPill per constitution §Content-Level Status Pills — driven by the
-    // payload's trend, not the card style. Tones resolve inside DesignKit's
-    // StatusPill from theme tokens, never inline system colors.
+    // Trend is METRIC CONTENT, rendered as a content-level StatusPill per
+    // constitution §Content-Level Status Pills. Color is by OUTCOME (good =
+    // success, bad = danger), driven by (trend × higherIsBetter), NOT by raw
+    // direction. Absent higherIsBetter → neutral (no good/bad claim).
 
-    @Test("trendTone maps up to success, down to danger, flat to neutral")
-    func trendTones() {
+    @Test("outcomeTone colors by good/bad outcome, not raw direction")
+    func outcomeTones() {
         let v = view()
-        #expect(v.trendTone(.up) == .success)
-        #expect(v.trendTone(.down) == .danger)
-        #expect(v.trendTone(.flat) == .neutral)
+        // higherIsBetter = true: up is good (success), down is bad (danger)
+        let moreIsBetter = MetricPayload.Item(label: "PRs", value: 3, trend: .up, higherIsBetter: true)
+        #expect(v.outcomeTone(moreIsBetter) == .success)
+        let moreIsBetterDown = MetricPayload.Item(label: "PRs", value: 3, trend: .down, higherIsBetter: true)
+        #expect(v.outcomeTone(moreIsBetterDown) == .danger)
+        // higherIsBetter = false: down is good (build time falling), up is bad
+        let lessIsBetter = MetricPayload.Item(label: "Build", value: 124, trend: .down, higherIsBetter: false)
+        #expect(v.outcomeTone(lessIsBetter) == .success)
+        let lessIsBetterUp = MetricPayload.Item(label: "Build", value: 124, trend: .up, higherIsBetter: false)
+        #expect(v.outcomeTone(lessIsBetterUp) == .danger)
+        // No higherIsBetter, or flat trend → neutral
+        let noClaim = MetricPayload.Item(label: "X", value: 1, trend: .up)
+        #expect(v.outcomeTone(noClaim) == .neutral)
+        let flat = MetricPayload.Item(label: "X", value: 1, trend: .flat, higherIsBetter: true)
+        #expect(v.outcomeTone(flat) == .neutral)
     }
 
     // MARK: - Token contract assertions

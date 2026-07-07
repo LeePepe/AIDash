@@ -145,9 +145,9 @@ public enum Neutral: String, CaseIterable, Sendable {
     public func palette(isDark: Bool) -> Neutrals {
         switch (self, isDark) {
         case (.slate, false):
-            return Neutrals(bg: Color(hex: "#F9F9FB"), card: Color(hex: "#FFFFFF"), inner: Color(hex: "#F0F0F3"),
+            return Neutrals(bg: Color(hex: "#EDEEF2"), card: Color(hex: "#FFFFFF"), inner: Color(hex: "#F4F5F8"),
                             text1: Color(hex: "#1C2024"), text2: Color(hex: "#60646C"), text3: Color(hex: "#80838D"),
-                            border: Color(hex: "#D9D9E0"))
+                            border: Color(hex: "#CDD0D8"))
         case (.slate, true):
             return Neutrals(bg: Color(hex: "#111113"), card: Color(hex: "#18191B"), inner: Color(hex: "#212225"),
                             text1: Color(hex: "#EDEEF0"), text2: Color(hex: "#B0B4BA"), text3: Color(hex: "#777B84"),
