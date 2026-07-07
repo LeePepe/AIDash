@@ -35,6 +35,11 @@ public struct InsightCardView: View {
         let recipe = AIDashTypography.detail(for: .insight)
         Text(payload.title)
             .font(recipe.primary)
+        if size != .small, let subtitle = payload.subtitle, !subtitle.isEmpty {
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
 
         switch size {
         case .small:

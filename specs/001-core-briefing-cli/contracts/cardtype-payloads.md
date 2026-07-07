@@ -29,6 +29,8 @@ public struct MetricPayload: Codable, Sendable {
         public let trend: Trend?
         public let series: [Double]?   // optional sparkline history
         public let ratio: Double?      // optional 0...1 ring-gauge ratio
+        public let higherIsBetter: Bool?  // semantic color: good vs bad, not up vs down
+        public let context: String?    // sub-label: project / scope / time range
 
         public enum Trend: String, Codable, Sendable {
             case up, down, flat

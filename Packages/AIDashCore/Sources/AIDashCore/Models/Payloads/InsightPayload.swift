@@ -10,11 +10,15 @@ public struct InsightPayload: CardPayloadProtocol {
     }
 
     public let title: String
+    /// Optional context sub-label under the title (project / scope / time
+    /// range, e.g. "Sapphire · this week"). Content only; absent → none.
+    public let subtitle: String?
     public let body: String
     public let citations: [Citation]?
 
-    public init(title: String, body: String, citations: [Citation]? = nil) {
+    public init(title: String, subtitle: String? = nil, body: String, citations: [Citation]? = nil) {
         self.title = title
+        self.subtitle = subtitle
         self.body = body
         self.citations = citations
     }

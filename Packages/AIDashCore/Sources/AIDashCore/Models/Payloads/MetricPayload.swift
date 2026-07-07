@@ -19,6 +19,11 @@ public struct MetricPayload: CardPayloadProtocol {
         /// `higherIsBetter: true` still colors an up-trend red. Absent →
         /// treated as neutral (no good/bad claim; renders in a neutral tone).
         public let higherIsBetter: Bool?
+        /// Optional context sub-label rendered under the metric label — the
+        /// project / scope / time range this number is about (e.g.
+        /// "Sapphire · this week"). Absent → no sub-label. Content only; the
+        /// app never derives this, agents supply it.
+        public let context: String?
 
         public enum Trend: String, Codable, Sendable {
             case up, down, flat
@@ -31,7 +36,8 @@ public struct MetricPayload: CardPayloadProtocol {
             trend: Trend? = nil,
             series: [Double]? = nil,
             ratio: Double? = nil,
-            higherIsBetter: Bool? = nil
+            higherIsBetter: Bool? = nil,
+            context: String? = nil
         ) {
             self.label = label
             self.value = value
@@ -40,6 +46,7 @@ public struct MetricPayload: CardPayloadProtocol {
             self.series = series
             self.ratio = ratio
             self.higherIsBetter = higherIsBetter
+            self.context = context
         }
     }
 

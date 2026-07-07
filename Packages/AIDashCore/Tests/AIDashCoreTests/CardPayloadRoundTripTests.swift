@@ -73,6 +73,23 @@ struct CardPayloadRoundTripTests {
         #expect(decoded?.items.first?.ratio == nil)
     }
 
+    @Test func metricPayloadContextAndOutcomeRoundTrip() throws {
+        let payload = MetricPayload(items: [
+            MetricPayload.Item(
+                label: "Build time", value: 124, unit: "s", trend: .down,
+                series: [180, 124], higherIsBetter: false, context: "CI · 7d"
+            ),
+        ])
+        let decoded = try roundTrip(payload)
+        #expect(decoded.items[0].higherIsBetter == false)
+        #expect(decoded.items[0].context == "CI · 7d")
+        // Legacy payload without the new keys decodes to nil.
+        let legacy = Data(#"{"items":[{"label":"PRs","value":3}]}"#.utf8)
+        let old = try CardType.metric.decode(legacy) as? MetricPayload
+        #expect(old?.items.first?.higherIsBetter == nil)
+        #expect(old?.items.first?.context == nil)
+    }
+
     // MARK: InsightPayload
 
     @Test func insightPayloadRoundTrip() throws {

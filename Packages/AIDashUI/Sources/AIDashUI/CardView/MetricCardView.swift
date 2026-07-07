@@ -73,11 +73,19 @@ public struct MetricCardView: View {
     private func kpiCell(_ item: MetricPayload.Item) -> some View {
         let recipe = AIDashTypography.detail(for: .metric)
         return VStack(alignment: .leading, spacing: AIDashSpace.s8) {
-            Text(item.label)
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
-                .textCase(.uppercase)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.label)
+                    .font(recipe.secondary)
+                    .foregroundStyle(recipe.secondaryColor)
+                    .textCase(.uppercase)
+                    .lineLimit(1)
+                if let context = item.context, !context.isEmpty {
+                    Text(context)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
 
             valueRow(item, recipe: recipe)
 

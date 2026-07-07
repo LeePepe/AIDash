@@ -10,11 +10,15 @@ public struct DigestPayload: CardPayloadProtocol {
     }
 
     public let title: String
+    /// Optional context sub-label under the title (project / scope / time
+    /// range, e.g. "Sapphire · yesterday"). Content only; absent → none.
+    public let subtitle: String?
     public let body: String
     public let sections: [Section]?
 
-    public init(title: String, body: String, sections: [Section]? = nil) {
+    public init(title: String, subtitle: String? = nil, body: String, sections: [Section]? = nil) {
         self.title = title
+        self.subtitle = subtitle
         self.body = body
         self.sections = sections
     }

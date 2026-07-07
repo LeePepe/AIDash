@@ -36,10 +36,12 @@ public struct DigestCardView: View {
 
         case .medium:
             titleText
+            subtitleText
             bodyText(truncatedBody)
 
         case .wide:
             titleText
+            subtitleText
             bodyText(payload.body)
             if let sections = payload.sections, let first = sections.first {
                 sectionView(first)
@@ -47,12 +49,22 @@ public struct DigestCardView: View {
 
         case .hero:
             titleText
+            subtitleText
             bodyText(payload.body)
             if let sections = payload.sections {
                 ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                     sectionView(section)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var subtitleText: some View {
+        if let subtitle = payload.subtitle, !subtitle.isEmpty {
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
