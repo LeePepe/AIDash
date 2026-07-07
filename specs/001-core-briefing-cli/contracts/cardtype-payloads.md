@@ -27,6 +27,8 @@ public struct MetricPayload: Codable, Sendable {
         public let value: Double
         public let unit: String?
         public let trend: Trend?
+        public let series: [Double]?   // optional sparkline history
+        public let ratio: Double?      // optional 0...1 ring-gauge ratio
 
         public enum Trend: String, Codable, Sendable {
             case up, down, flat
@@ -40,9 +42,9 @@ public struct MetricPayload: Codable, Sendable {
 ```json
 {
   "items": [
-    {"label": "PRs merged", "value": 3, "trend": "up"},
+    {"label": "PRs merged", "value": 3, "trend": "up", "series": [1, 2, 2, 3]},
     {"label": "Build time", "value": 124, "unit": "s", "trend": "down"},
-    {"label": "Test coverage", "value": 87.5, "unit": "%", "trend": "flat"},
+    {"label": "Test coverage", "value": 87.5, "unit": "%", "ratio": 0.875},
     {"label": "Active issues", "value": 12}
   ]
 }
@@ -52,9 +54,10 @@ public struct MetricPayload: Codable, Sendable {
 - `small`: show only `items[0]` (largest font, primary metric)
 - `medium`: show `items[0...1]` side by side
 - `wide`: show all items in a horizontal strip or grid
-- `hero`: show all items prominently with trend chart sparkline (post-v1)
+- `hero`: show all items prominently
+- `series` present → mini sparkline beside the value; `ratio` present → ring gauge (replaces sparkline for ratio-type metrics)
 
-**Validation**: `items.count >= 1`.
+**Validation**: `items.count >= 1`; each `ratio`, when present, is within `0...1`.
 
 ---
 

@@ -48,6 +48,31 @@ struct CardPayloadRoundTripTests {
         #expect(dispatched is MetricPayload)
     }
 
+    @Test func metricPayloadSeriesRatioRoundTrip() throws {
+        let payload = MetricPayload(items: [
+            MetricPayload.Item(
+                label: "Coverage",
+                value: 87.5,
+                unit: "%",
+                trend: .up,
+                series: [80, 82, 85, 87.5],
+                ratio: 0.875
+            ),
+        ])
+        let decoded = try roundTrip(payload)
+        #expect(decoded.items[0].series == [80, 82, 85, 87.5])
+        #expect(decoded.items[0].ratio == 0.875)
+    }
+
+    /// Legacy records predate `series`/`ratio`; a payload without those keys
+    /// must decode with both fields as `nil` (backward-compat, FR forward-notes).
+    @Test func metricPayloadLegacyDecodesWithoutSeriesRatio() throws {
+        let legacy = Data(#"{"items":[{"label":"PRs","value":3}]}"#.utf8)
+        let decoded = try CardType.metric.decode(legacy) as? MetricPayload
+        #expect(decoded?.items.first?.series == nil)
+        #expect(decoded?.items.first?.ratio == nil)
+    }
+
     // MARK: InsightPayload
 
     @Test func insightPayloadRoundTrip() throws {
