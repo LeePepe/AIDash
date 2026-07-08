@@ -102,10 +102,8 @@ public struct MetricCardView: View {
     @ViewBuilder
     private func vizBand(_ item: MetricPayload.Item) -> some View {
         if item.ratio != nil {
-            HStack {
-                Spacer()
-                ringGauge(item)
-            }
+            ringGauge(item)
+                .frame(maxWidth: .infinity, alignment: .center)
         } else {
             sparkline(item)
                 .frame(maxWidth: .infinity)

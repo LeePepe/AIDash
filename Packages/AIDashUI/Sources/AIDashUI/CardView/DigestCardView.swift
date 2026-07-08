@@ -18,10 +18,16 @@ public struct DigestCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 content
             }
-            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: contentMaxWidth, alignment: .leading)
             Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
+    }
+
+    /// A full-row `wide` digest lets its section columns spread across the card;
+    /// smaller sizes keep a comfortable reading measure.
+    private var contentMaxWidth: CGFloat {
+        size == .wide ? 900 : 680
     }
 
     private var recipe: AIDashTypography.DetailRecipe {
@@ -100,12 +106,16 @@ public struct DigestCardView: View {
         .padding(.top, 4)
     }
 
-    /// `wide` sections laid out in equal columns so a full-row digest fills its
-    /// width instead of stranding one section on the left (design-review r4).
+    /// `wide` sections laid out in equal columns (with a hairline divider
+    /// between them) so a full-row digest fills its width symmetrically instead
+    /// of stranding one section on the left (design-review r4/r5).
     @ViewBuilder
     private func sectionColumns(_ sections: [DigestPayload.Section]) -> some View {
-        HStack(alignment: .top, spacing: 24) {
-            ForEach(Array(sections.prefix(3).enumerated()), id: \.offset) { _, section in
+        HStack(alignment: .top, spacing: 20) {
+            ForEach(Array(sections.prefix(3).enumerated()), id: \.offset) { index, section in
+                if index > 0 {
+                    Divider()
+                }
                 sectionView(section)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
