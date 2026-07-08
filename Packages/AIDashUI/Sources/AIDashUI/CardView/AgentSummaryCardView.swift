@@ -20,7 +20,8 @@ public struct AgentSummaryCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 680, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
     }
@@ -176,10 +177,7 @@ public struct AgentSummaryCardView: View {
         }
         .padding(.horizontal, AIDashSpace.s12)
         .padding(.vertical, AIDashSpace.s8)
-        .overlay {
-            Capsule(style: .continuous)
-                .strokeBorder(theme.neutrals.border, lineWidth: 1)
-        }
+        .statChipSurface()
     }
 
     /// Stats row that adapts to variable stat counts/labels without

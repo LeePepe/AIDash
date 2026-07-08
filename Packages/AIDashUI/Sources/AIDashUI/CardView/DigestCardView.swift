@@ -18,7 +18,8 @@ public struct DigestCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 680, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
     }

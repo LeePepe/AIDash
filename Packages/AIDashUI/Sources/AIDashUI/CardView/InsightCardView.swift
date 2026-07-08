@@ -20,15 +20,16 @@ public struct InsightCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 640, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
     }
 
-    // Insight renders as a PULL-QUOTE, distinct from digest's article layout:
-    // a bold title statement, then the body as a large quote set off by a
-    // thick leading accent rule. This makes "one key observation" read
-    // differently at a glance from a prose digest or a checklist.
+    // Insight renders as a single lead STATEMENT set in an inner-elevation
+    // panel — distinct from digest's multi-section article and from a plain
+    // prose paragraph. The panel + larger rounded type reads as "one takeaway"
+    // at a glance, and fills the card instead of a thin quote rule.
 
     @ViewBuilder
     private var content: some View {
@@ -46,41 +47,37 @@ public struct InsightCardView: View {
             EmptyView()
 
         case .medium:
-            quoteBody(truncatedBody, recipe: recipe)
+            leadStatement(truncatedBody)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
 
         case .wide:
-            quoteBody(payload.body, recipe: recipe)
+            leadStatement(payload.body)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
 
         case .hero:
-            quoteBody(payload.body, recipe: recipe)
+            leadStatement(payload.body)
             if let citations = payload.citations, !citations.isEmpty {
                 citationLinks(citations: citations)
             }
         }
     }
 
-    /// The body as a pull-quote: a thick accent rule on the leading edge +
-    /// larger, softer quote text. The rule color is the seed primary (a token,
-    /// never inlined) — this is content emphasis, not `style` chrome.
+    /// The body as a lead statement inside an inner-elevation panel (§5): a
+    /// larger medium-weight rounded line on the `neutrals.inner` surface, so
+    /// insight reads as a single emphasised takeaway rather than body prose.
     @ViewBuilder
-    private func quoteBody(_ text: String, recipe: AIDashTypography.DetailRecipe) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Capsule(style: .continuous)
-                .fill(theme.primary.primary)
-                .frame(width: 3)
-            Text(text)
-                .font(.title3)
-                .foregroundStyle(.primary)
-                .lineSpacing(4)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .fixedSize(horizontal: false, vertical: true)
+    private func leadStatement(_ text: String) -> some View {
+        Text(text)
+            .font(.system(.title3, design: .rounded).weight(.medium))
+            .foregroundStyle(.primary)
+            .lineSpacing(5)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .innerSurface(padding: 14)
     }
 
     var truncatedBody: String {

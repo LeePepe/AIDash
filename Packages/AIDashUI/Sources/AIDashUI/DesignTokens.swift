@@ -345,4 +345,47 @@ extension View {
     public func cardChrome(size: CardSize, style: CardStyle) -> some View {
         modifier(CardChromeModifier(size: size, style: style))
     }
+
+    /// Wrap content in the §5 inner-elevation block: `theme.neutrals.inner`
+    /// fill (one luminance tier above the card) + `10pt` continuous corners +
+    /// `12pt` padding. This is the sanctioned way for a card to nest an inner
+    /// panel (e.g. an insight lead statement) without a renderer inlining its
+    /// own `.background(...)` — the modifier lives in the token layer, so the
+    /// renderer chrome guards stay satisfied.
+    public func innerSurface(padding: CGFloat = 12) -> some View {
+        modifier(InnerSurfaceModifier(padding: padding))
+    }
+
+    /// Fill an already-padded view with the `neutrals.inner` surface clipped to
+    /// a Capsule — the sanctioned inner-elevation fill for pill-shaped stat
+    /// chips, kept in the token layer so renderers don't inline `.background`.
+    public func statChipSurface() -> some View {
+        modifier(StatChipSurfaceModifier())
+    }
+}
+
+public struct StatChipSurfaceModifier: ViewModifier {
+    @Environment(\.theme) private var theme
+    public init() {}
+    public func body(content: Content) -> some View {
+        content.background(theme.neutrals.inner, in: Capsule(style: .continuous))
+    }
+}
+
+public struct InnerSurfaceModifier: ViewModifier {
+    public let padding: CGFloat
+    @Environment(\.theme) private var theme
+
+    public init(padding: CGFloat = 12) {
+        self.padding = padding
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(
+                theme.neutrals.inner,
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+    }
 }

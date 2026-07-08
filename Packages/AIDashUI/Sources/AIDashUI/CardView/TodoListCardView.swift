@@ -21,7 +21,8 @@ public struct TodoListCardView: View {
                 Divider()
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 560, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
     }
