@@ -64,15 +64,17 @@ public struct MetricCardView: View {
     // Uniform three-band skeleton so a grid of KPI cards aligns (north-star §6):
     //   1. label (caption, uppercase) + optional context sub-label
     //   2. value + unit + trend pill row
-    //   3. a FIXED-height viz band pinned to the card bottom — a sparkline
-    //      (full width) or a ring gauge (trailing). Both占同高, so a ratio card
-    //      and a series card end up the same height with no dead space.
+    //   3. a FIXED-height viz band directly under the value (12pt gap) — a
+    //      sparkline (full width) or a ring gauge. Both占同高, so a ratio card
+    //      and a series card end up the same height. A trailing zero-min
+    //      Spacer absorbs any extra grid-row height at the card BOTTOM, so
+    //      the value→viz band never stretches into a dead zone.
 
     private static let vizBandHeight: CGFloat = 52
 
     private func kpiCell(_ item: MetricPayload.Item) -> some View {
         let recipe = AIDashTypography.detail(for: .metric)
-        return VStack(alignment: .leading, spacing: AIDashSpace.s8) {
+        return VStack(alignment: .leading, spacing: AIDashSpace.s12) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.label)
                     .font(recipe.secondary)
@@ -89,10 +91,15 @@ public struct MetricCardView: View {
 
             valueRow(item, recipe: recipe)
 
-            Spacer(minLength: AIDashSpace.s8)
-
+            // Value → sparkline stay tight (12pt). Any height the grid row
+            // grants beyond the natural content pools BELOW the viz band, so
+            // the number-to-chart band never voids into a "sparse" dead zone
+            // (north-star §0 病一). The trailing spacer keeps the card bottom-
+            // padded rather than mid-stretched.
             vizBand(item)
                 .frame(height: Self.vizBandHeight)
+
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

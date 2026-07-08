@@ -64,6 +64,29 @@ struct SnapshotRenderTests {
             width: 1000,
             to: "render"
         )
+
+        // Variant: EVERYTHING in one grid container, mixed sizes only. Proves
+        // TokenGrid packs 4 small KPIs + a wide digest + medium prose into a
+        // single greedy-packed grid without separate containers.
+        let unified = container("Today", .grid, [
+            card(.metric, .small, .neutral, #"{"items":[{"label":"PRs merged","value":12,"trend":"up","higherIsBetter":true,"context":"Sapphire","series":[4,6,5,8,7,10,9,12]}]}"#),
+            card(.metric, .small, .neutral, #"{"items":[{"label":"Build time","value":124,"unit":"s","trend":"down","higherIsBetter":false,"context":"CI · 7d","series":[180,170,165,150,148,140,132,124]}]}"#),
+            card(.metric, .small, .neutral, #"{"items":[{"label":"Coverage","value":87,"unit":"%","ratio":0.87,"context":"Sapphire"}]}"#),
+            card(.metric, .small, .neutral, #"{"items":[{"label":"Open incidents","value":3,"trend":"up","higherIsBetter":false,"context":"today","series":[0,1,1,2,1,2,2,3]}]}"#),
+            card(.digest, .wide, .neutral, #"{"title":"A strong, incident-light day","subtitle":"All repos · yesterday","body":"Twelve PRs merged across Sapphire and Basalt, with the v9-blocking crash finally resolved. Build times are trending down.","sections":[{"heading":"Shipped","paragraphs":["SAP-301 crash fix.","Cache rework cut CI 30%."]},{"heading":"Blocking","paragraphs":["Perf review due 5pm."]}]}"#),
+            card(.insight, .medium, .accent, #"{"title":"Build-cache rework is paying off","subtitle":"Sapphire CI","body":"Median CI dropped 180s to 124s — the biggest developer-time win this sprint."}"#),
+            card(.todoList, .medium, .warning, #"{"items":[{"title":"Reply to perf review","priority":"high"},{"title":"Decide Q3 priorities","priority":"high"},{"title":"Review changelog","priority":"medium"}]}"#),
+        ])
+        render(
+            VStack(alignment: .leading, spacing: 16) {
+                Text("2026-07-08").font(.largeTitle.bold())
+                ContainerView(container: unified)
+            }
+            .padding(24)
+            .background(Color(hex: "#EDEEF2")),
+            width: 1000,
+            to: "render-unified"
+        )
     }
 
     // MARK: - In-memory model builders
