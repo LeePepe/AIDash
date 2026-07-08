@@ -44,13 +44,15 @@ card --container-id "$C_KPI" --id "22222222-0000-0000-0000-000000000004" \
   --payload '{"items":[{"label":"Open incidents","value":3,"trend":"up","higherIsBetter":false,"context":"all repos · today","series":[0,1,1,2,1,2,3,3]}]}'
 
 # ────────────────────────────────────────────────────────────────
-# Container 2 — HERO digest + wide insight (hero layout).
+# Container 2 — Yesterday: full-row digest + half-width insight (grid).
+# Prose cards use grid + medium (2-up) so short cards pair side by side
+# instead of stretching full-width into a sparse strip.
 # ────────────────────────────────────────────────────────────────
 "$AIDASH" container put --quiet --briefing-date today --id "$C_ADO" \
-  --title "Yesterday in review" --order 20 --layout hero
+  --title "Yesterday in review" --order 20 --layout grid
 
 card --container-id "$C_ADO" --id "33333333-0000-0000-0000-000000000001" \
-  --type digest --size hero --style neutral \
+  --type digest --size wide --style neutral \
   --payload '{
     "title":"A strong, incident-light day",
     "subtitle":"All repos · yesterday",
@@ -62,17 +64,17 @@ card --container-id "$C_ADO" --id "33333333-0000-0000-0000-000000000001" \
   }'
 
 card --container-id "$C_ADO" --id "33333333-0000-0000-0000-000000000002" \
-  --type insight --size wide --style accent \
+  --type insight --size medium --style accent \
   --payload '{"title":"Build-cache rework is paying off","subtitle":"Sapphire CI · this week","body":"Median CI dropped from 180s to 124s over the week — the single biggest developer-time win this sprint. Consider extending the same cache strategy to the integration suite."}'
 
 # ────────────────────────────────────────────────────────────────
-# Container 3 — TODAY: todo list (wide) + agent summary, grid layout.
+# Container 3 — TODAY: todo + agent summary side by side (grid + medium).
 # ────────────────────────────────────────────────────────────────
 "$AIDASH" container put --quiet --briefing-date today --id "$C_TODAY" \
   --title "Today" --order 30 --layout grid
 
 card --container-id "$C_TODAY" --id "44444444-0000-0000-0000-000000000001" \
-  --type todoList --size wide --style warning \
+  --type todoList --size medium --style warning \
   --payload '{"items":[
     {"title":"Reply to performance-review feedback","priority":"high"},
     {"title":"Decide Q3 priorities with staff+","priority":"high"},

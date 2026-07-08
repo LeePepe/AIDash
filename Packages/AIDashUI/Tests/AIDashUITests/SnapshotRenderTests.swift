@@ -43,11 +43,11 @@ struct SnapshotRenderTests {
             card(.metric, .small, .neutral, #"{"items":[{"label":"Open incidents","value":3,"trend":"up","higherIsBetter":false,"context":"all repos · today","series":[0,1,1,2,1,2,3,3]}]}"#),
         ])
 
-        let today = container("Today", .hero, [
-            card(.digest, .hero, .neutral, #"{"title":"A strong, incident-light day","subtitle":"All repos · yesterday","body":"Twelve PRs merged across Sapphire and Basalt, with the v9-blocking crash finally resolved. The design-system migration crossed 70%. Build times are trending down.","sections":[{"heading":"Shipped","paragraphs":["SAP-301 crash fix (unblocks v9).","Cache rework cut CI 30%."]},{"heading":"Blocking today","paragraphs":["Perf review feedback due 5pm."]}]}"#),
-            card(.insight, .wide, .accent, #"{"title":"Build-cache rework is paying off","subtitle":"Sapphire CI · this week","body":"Median CI dropped 180s to 124s over the week — the single biggest developer-time win this sprint."}"#),
-            card(.agentSummary, .wide, .success, #"{"agentName":"Multica","completed":[{"title":"Merged 3 Sapphire PRs"},{"title":"Regenerated changelog"}],"stats":[{"label":"PRs","value":3},{"label":"Reviews","value":9},{"label":"Hours","value":6.5}]}"#),
-            card(.todoList, .wide, .warning, #"{"items":[{"title":"Reply to perf review","priority":"high"},{"title":"Decide Q3 priorities","priority":"high"},{"title":"Review changelog","priority":"medium"},{"title":"Archive branches","priority":"low"}]}"#),
+        let today = container("Today", .grid, [
+            card(.digest, .wide, .neutral, #"{"title":"A strong, incident-light day","subtitle":"All repos · yesterday","body":"Twelve PRs merged across Sapphire and Basalt, with the v9-blocking crash finally resolved. The design-system migration crossed 70%. Build times are trending down.","sections":[{"heading":"Shipped","paragraphs":["SAP-301 crash fix (unblocks v9).","Cache rework cut CI 30%."]},{"heading":"Blocking today","paragraphs":["Perf review feedback due 5pm."]}]}"#),
+            card(.insight, .medium, .accent, #"{"title":"Build-cache rework is paying off","subtitle":"Sapphire CI · this week","body":"Median CI dropped 180s to 124s over the week — the single biggest developer-time win this sprint."}"#),
+            card(.agentSummary, .medium, .success, #"{"agentName":"Multica","completed":[{"title":"Merged 3 Sapphire PRs"},{"title":"Regenerated changelog"}],"stats":[{"label":"PRs","value":3},{"label":"Reviews","value":9},{"label":"Hours","value":6.5}]}"#),
+            card(.todoList, .medium, .warning, #"{"items":[{"title":"Reply to perf review","priority":"high"},{"title":"Decide Q3 priorities","priority":"high"},{"title":"Review changelog","priority":"medium"},{"title":"Archive branches","priority":"low"}]}"#),
         ])
 
         render(

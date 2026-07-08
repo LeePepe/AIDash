@@ -30,10 +30,15 @@ Briefing (一天一个)
 | **card.style** | `neutral` `success` `warning` `accent` | 状态色(只加左侧彩色竖条) |
 
 ### layout 怎么选 (决定是不是多列)
-- `grid` → **多列自适应网格**。宽屏最多 4 列。**KPI 小卡、并列卡片必用这个。**
+- `grid` → **多列自适应网格**。宽屏最多 4-5 列。**KPI 小卡、并列卡片必用这个。**
 - `hero` → 大卡主导，小卡填缝。适合"头条 + 补充"。
 - `list` → **强制单列**，每张卡占满整行。适合榜单、长列表。**别滥用——全用 list 就是"单列"病根。**
 - `auto` → 按卡片各自 size 自动排。
+
+> ⚠️ **正文卡(digest/insight/agentSummary/todoList)不要用 `list`/`hero`+全 `wide`**。
+> 短内容的正文卡占满整行 = 右侧一大片空白("满屏拉稀")。
+> **正确做法**:容器用 `layout: grid`,正文卡用 `size: medium`,它们会**两两并排**。
+> 只有真正长的文章式 digest 才用 `size: wide`(占整行)。
 
 ### size 怎么选 (决定占几列 + 卡多大)
 | size | 占列 | 最小高 | 用途 |
@@ -170,26 +175,28 @@ Briefing (一天一个)
 ```
 Briefing (today)
 ├─ Container "Overview"      layout: grid    ← KPI 墙
-│   ├─ metric small success  (series → 绿 sparkline)
+│   ├─ metric small neutral  (series → sparkline, higherIsBetter)
 │   ├─ metric small neutral  (series → sparkline)
-│   ├─ metric small accent   (ratio  → 环形图)
-│   └─ metric small warning  (series → sparkline)
-├─ Container "Yesterday"     layout: hero    ← 头条叙事
-│   ├─ digest  hero  neutral (带 sections)
-│   └─ insight wide  accent  (带 citations)
-├─ Container "Today"         layout: grid
-│   ├─ todoList wide  warning (混合 priority)
-│   └─ agentSummary medium success
+│   ├─ metric small neutral  (ratio  → 环形图)
+│   └─ metric small neutral  (series → sparkline)
+├─ Container "Yesterday"     layout: grid    ← 正文卡两列
+│   ├─ digest  wide   neutral (长文章占整行, 带 sections)
+│   └─ insight medium accent  (半宽)
+├─ Container "Today"         layout: grid    ← 两两并排
+│   ├─ todoList     medium warning (混合 priority)
+│   └─ agentSummary medium success (stat chips)
 └─ Container "Trending"      layout: list
     └─ trending hero  neutral (≥5 条带 score)
 ```
+> 注:KPI 卡建议 `style: neutral`——语义色交给 sparkline/胶囊(好=绿坏=红),避免"左色条+图表"双套色。
 
 ---
 
 ## 4. 反单调清单 (每次生成前自检 —— 违反=界面变丑)
 
 - [ ] **至少 2 个 container 用 `grid` 或 `hero`**,不是全 `list`(否则全单列)。
-- [ ] **size 混用**:同屏要有 small(KPI) + hero/wide(叙事),不要全 wide。
+- [ ] **正文卡(digest/insight/agent/todo)用 `grid`+`medium` 两两并排**,别用 `list`/全 `wide`(否则右侧空一半)。只有长文章 digest 才 `wide` 占整行。
+- [ ] **size 混用**:同屏要有 small(KPI) + medium/wide(正文),不要全 wide。
 - [ ] **style 混用**:出现 ≥3 种 style,不要全 neutral(否则全无色)。
 - [ ] **type 混用**:一屏至少 4 种 type(否则"每张都一样")。
 - [ ] **每个 metric 都带 `series` 或 `ratio`**(否则数字旁光秃秃没图)。

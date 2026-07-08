@@ -71,7 +71,7 @@ public struct DigestCardView: View {
 
     private var titleText: Text {
         Text(payload.title)
-            .font(recipe.primary)
+            .font(.title3.weight(.semibold))
     }
 
     private func bodyText(_ text: String) -> some View {

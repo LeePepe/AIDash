@@ -154,13 +154,13 @@ private struct TodoItemRow: View {
             Text(item.title)
                 .font(TodoListCardView.recipe.primary)
                 .lineLimit(2)
+            priorityPill
             Spacer(minLength: 8)
             if showDue, let due = item.due {
                 Text(due, style: .date)
                     .font(TodoListCardView.recipe.secondary)
                     .foregroundStyle(.tertiary)
             }
-            priorityPill
         }
         .accessibilityElement(children: .combine)
     }

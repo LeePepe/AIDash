@@ -177,9 +177,23 @@ public struct MetricCardView: View {
     }
 
     /// Trend as a content-level status pill (§Content-Level Status Pills):
-    /// an arrow glyph colored by OUTCOME, not direction, driven by the payload.
+    /// an arrow glyph + the delta magnitude when a series is present, colored
+    /// by OUTCOME (not direction), driven by the payload.
     private func trendPill(_ item: MetricPayload.Item, trend: MetricPayload.Item.Trend) -> some View {
-        StatusPill(trendGlyph(trend), tone: outcomeTone(item))
+        StatusPill(trendLabel(item, trend: trend), tone: outcomeTone(item))
+    }
+
+    /// Pill text: an arrow, plus the last-step delta from `series` when it can
+    /// be computed (e.g. "↑ 2"). Falls back to the bare arrow.
+    func trendLabel(_ item: MetricPayload.Item, trend: MetricPayload.Item.Trend) -> String {
+        let glyph = trendGlyph(trend)
+        if let series = item.series, series.count >= 2 {
+            let delta = abs(series[series.count - 1] - series[series.count - 2])
+            if delta > 0 {
+                return "\(glyph) \(formattedValue(delta))"
+            }
+        }
+        return glyph
     }
 
     /// Unicode arrow glyph for the trend, rendered as pill text.
