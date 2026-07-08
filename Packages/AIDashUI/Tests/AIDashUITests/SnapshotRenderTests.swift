@@ -40,7 +40,7 @@ struct SnapshotRenderTests {
             card(.metric, .small, .neutral, #"{"items":[{"label":"PRs merged","value":12,"trend":"up","higherIsBetter":true,"context":"Sapphire · this week","series":[4,6,5,8,7,10,9,12]}]}"#),
             card(.metric, .small, .neutral, #"{"items":[{"label":"Build time","value":124,"unit":"s","trend":"down","higherIsBetter":false,"context":"CI median · 7d","series":[180,170,165,150,148,140,132,124]}]}"#),
             card(.metric, .small, .neutral, #"{"items":[{"label":"Coverage","value":87,"unit":"%","ratio":0.87,"context":"Sapphire"}]}"#),
-            card(.metric, .small, .neutral, #"{"items":[{"label":"Open incidents","value":3,"trend":"up","higherIsBetter":false,"context":"all repos · today","series":[0,1,1,2,1,2,3,3]}]}"#),
+            card(.metric, .small, .neutral, #"{"items":[{"label":"Open incidents","value":3,"trend":"up","higherIsBetter":false,"context":"all repos · today","series":[0,1,1,2,1,2,2,3]}]}"#),
         ])
 
         let today = container("Today", .grid, [
@@ -52,6 +52,10 @@ struct SnapshotRenderTests {
 
         render(
             VStack(alignment: .leading, spacing: 32) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("2026-07-08").font(.largeTitle.bold())
+                    Text("Published just now").font(.caption).foregroundStyle(.secondary)
+                }
                 ContainerView(container: overview)
                 ContainerView(container: today)
             }

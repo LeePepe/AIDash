@@ -124,8 +124,8 @@ public struct MetricCardView: View {
                     .font(.title3)
                     .foregroundStyle(recipe.secondaryColor)
             }
-            if let trend = item.trend {
-                trendPill(item, trend: trend)
+            if let trend = item.trend, let label = trendLabel(item, trend: trend) {
+                StatusPill(label, tone: outcomeTone(item))
             }
         }
     }
@@ -138,7 +138,18 @@ public struct MetricCardView: View {
     @ViewBuilder
     private func ringGauge(_ item: MetricPayload.Item) -> some View {
         if let ratio = item.ratio {
-            RingGauge(value: ratio, size: Self.vizBandHeight, color: vizColor(item))
+            RingGauge(value: ratio, size: Self.vizBandHeight, color: ratioColor(item), showLabel: false)
+        }
+    }
+
+    /// Ring color: use good/bad semantics when declared; a plain ratio with no
+    /// `higherIsBetter` reads as achievement → success (not primary blue), so
+    /// the ring matches the sparklines' outcome coloring.
+    private func ratioColor(_ item: MetricPayload.Item) -> Color {
+        switch outcome(item) {
+        case .good: return theme.success
+        case .bad:  return theme.danger
+        case .neutral: return item.higherIsBetter == nil ? theme.success : theme.primary.primary
         }
     }
 
@@ -176,22 +187,15 @@ public struct MetricCardView: View {
         }
     }
 
-    /// Trend as a content-level status pill (§Content-Level Status Pills):
-    /// an arrow glyph + the delta magnitude when a series is present, colored
-    /// by OUTCOME (not direction), driven by the payload.
-    private func trendPill(_ item: MetricPayload.Item, trend: MetricPayload.Item.Trend) -> some View {
-        StatusPill(trendLabel(item, trend: trend), tone: outcomeTone(item))
-    }
-
-    /// Pill text: an arrow, plus the last-step delta from `series` when it can
-    /// be computed (e.g. "↑ 2"). Falls back to the bare arrow.
-    func trendLabel(_ item: MetricPayload.Item, trend: MetricPayload.Item.Trend) -> String {
+    /// Pill text: an arrow + the last-step delta from `series` (e.g. "↑ 2").
+    /// Returns nil when a series is present but the delta is zero (a lone arrow
+    /// carries no information — hide the pill entirely). With no series, shows
+    /// the bare directional arrow.
+    func trendLabel(_ item: MetricPayload.Item, trend: MetricPayload.Item.Trend) -> String? {
         let glyph = trendGlyph(trend)
         if let series = item.series, series.count >= 2 {
             let delta = abs(series[series.count - 1] - series[series.count - 2])
-            if delta > 0 {
-                return "\(glyph) \(formattedValue(delta))"
-            }
+            return delta > 0 ? "\(glyph) \(formattedValue(delta))" : nil
         }
         return glyph
     }

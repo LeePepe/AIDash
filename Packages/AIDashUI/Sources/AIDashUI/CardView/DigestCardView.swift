@@ -44,14 +44,16 @@ public struct DigestCardView: View {
             titleText
             subtitleText
             bodyText(payload.body)
-            if let sections = payload.sections, let first = sections.first {
-                sectionView(first)
+                .frame(maxWidth: 640, alignment: .leading)
+            if let sections = payload.sections, !sections.isEmpty {
+                sectionColumns(sections)
             }
 
         case .hero:
             titleText
             subtitleText
             bodyText(payload.body)
+                .frame(maxWidth: 640, alignment: .leading)
             if let sections = payload.sections {
                 ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                     sectionView(section)
@@ -96,6 +98,18 @@ public struct DigestCardView: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    /// `wide` sections laid out in equal columns so a full-row digest fills its
+    /// width instead of stranding one section on the left (design-review r4).
+    @ViewBuilder
+    private func sectionColumns(_ sections: [DigestPayload.Section]) -> some View {
+        HStack(alignment: .top, spacing: 24) {
+            ForEach(Array(sections.prefix(3).enumerated()), id: \.offset) { _, section in
+                sectionView(section)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     private var truncatedBody: String {
