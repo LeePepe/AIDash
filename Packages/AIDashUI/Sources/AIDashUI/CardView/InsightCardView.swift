@@ -1,10 +1,12 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 public struct InsightCardView: View {
     let payload: InsightPayload
     let size: CardSize
     let style: CardStyle
+    @Environment(\.theme) private var theme
 
     public init(payload: InsightPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -18,45 +20,64 @@ public struct InsightCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 640, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
     }
+
+    // Insight renders as a single lead STATEMENT set in an inner-elevation
+    // panel — distinct from digest's multi-section article and from a plain
+    // prose paragraph. The panel + larger rounded type reads as "one takeaway"
+    // at a glance, and fills the card instead of a thin quote rule.
 
     @ViewBuilder
     private var content: some View {
         let recipe = AIDashTypography.detail(for: .insight)
         Text(payload.title)
             .font(recipe.primary)
+        if size != .small, let subtitle = payload.subtitle, !subtitle.isEmpty {
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
 
         switch size {
         case .small:
             EmptyView()
 
         case .medium:
-            Text(truncatedBody)
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
+            leadStatement(truncatedBody)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
 
         case .wide:
-            Text(payload.body)
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
+            leadStatement(payload.body)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
 
         case .hero:
-            Text(payload.body)
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
+            leadStatement(payload.body)
             if let citations = payload.citations, !citations.isEmpty {
                 citationLinks(citations: citations)
             }
         }
+    }
+
+    /// The body as a lead statement inside an inner-elevation panel (§5): a
+    /// larger medium-weight rounded line on the `neutrals.inner` surface, so
+    /// insight reads as a single emphasised takeaway rather than body prose.
+    @ViewBuilder
+    private func leadStatement(_ text: String) -> some View {
+        Text(text)
+            .font(.system(.title3, design: .rounded).weight(.medium))
+            .foregroundStyle(.primary)
+            .lineSpacing(5)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .innerSurface(padding: 14)
     }
 
     var truncatedBody: String {

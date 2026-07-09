@@ -18,9 +18,16 @@ public struct DigestCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: contentMaxWidth, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
+    }
+
+    /// A full-row `wide` digest lets its section columns spread across the card;
+    /// smaller sizes keep a comfortable reading measure.
+    private var contentMaxWidth: CGFloat {
+        size == .wide ? 900 : 680
     }
 
     private var recipe: AIDashTypography.DetailRecipe {
@@ -36,18 +43,23 @@ public struct DigestCardView: View {
 
         case .medium:
             titleText
+            subtitleText
             bodyText(truncatedBody)
 
         case .wide:
             titleText
+            subtitleText
             bodyText(payload.body)
-            if let sections = payload.sections, let first = sections.first {
-                sectionView(first)
+                .frame(maxWidth: 640, alignment: .leading)
+            if let sections = payload.sections, !sections.isEmpty {
+                sectionColumns(sections)
             }
 
         case .hero:
             titleText
+            subtitleText
             bodyText(payload.body)
+                .frame(maxWidth: 640, alignment: .leading)
             if let sections = payload.sections {
                 ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                     sectionView(section)
@@ -56,9 +68,18 @@ public struct DigestCardView: View {
         }
     }
 
+    @ViewBuilder
+    private var subtitleText: some View {
+        if let subtitle = payload.subtitle, !subtitle.isEmpty {
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var titleText: Text {
         Text(payload.title)
-            .font(recipe.primary)
+            .font(.title3.weight(.semibold))
     }
 
     private func bodyText(_ text: String) -> some View {
@@ -83,6 +104,22 @@ public struct DigestCardView: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    /// `wide` sections laid out in equal columns (with a hairline divider
+    /// between them) so a full-row digest fills its width symmetrically instead
+    /// of stranding one section on the left (design-review r4/r5).
+    @ViewBuilder
+    private func sectionColumns(_ sections: [DigestPayload.Section]) -> some View {
+        HStack(alignment: .top, spacing: 20) {
+            ForEach(Array(sections.prefix(3).enumerated()), id: \.offset) { index, section in
+                if index > 0 {
+                    Divider()
+                }
+                sectionView(section)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     private var truncatedBody: String {

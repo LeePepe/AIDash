@@ -136,12 +136,14 @@ public struct RingGauge: View {
     private let size: CGFloat
     private let stroke: CGFloat
     private let color: Color?
+    private let showLabel: Bool
 
-    public init(value: Double, size: CGFloat = 56, stroke: CGFloat = 6, color: Color? = nil) {
+    public init(value: Double, size: CGFloat = 56, stroke: CGFloat = 6, color: Color? = nil, showLabel: Bool = true) {
         self.value = value
         self.size = size
         self.stroke = stroke
         self.color = color
+        self.showLabel = showLabel
     }
 
     public var body: some View {
@@ -152,7 +154,9 @@ public struct RingGauge: View {
                 .trim(from: 0, to: clamped)
                 .stroke(color ?? theme.primary.primary, style: StrokeStyle(lineWidth: stroke, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text("\(Int(clamped * 100))%").font(TypeScale.meta.monospacedDigit()).fontWeight(.semibold)
+            if showLabel {
+                Text("\(Int(clamped * 100))%").font(TypeScale.meta.monospacedDigit()).fontWeight(.semibold)
+            }
         }
         .frame(width: size, height: size)
     }

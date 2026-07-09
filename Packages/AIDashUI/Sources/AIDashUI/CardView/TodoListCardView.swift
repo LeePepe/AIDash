@@ -16,12 +16,33 @@ public struct TodoListCardView: View {
     public var body: some View {
         HStack(alignment: .top, spacing: 12) {
             CardTypeBadge(type: .todoList)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                Divider()
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 560, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
+    }
+
+    // MARK: - Checklist header (title + count) — gives the card a distinct
+    // "to-do list" identity vs the other prose cards.
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(Self.titleLabel)
+                .font(AIDashTypography.section)
+                .tracking(AIDashTypography.sectionTracking)
+                .foregroundStyle(AIDashTypography.sectionColor)
+                .textCase(.uppercase)
+            Text("\(payload.items.count)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Size-driven content selection (geometry/density only)
@@ -40,21 +61,11 @@ public struct TodoListCardView: View {
         }
     }
 
-    // MARK: - Small: count + highest-priority item title
+    // MARK: - Small: highest-priority item only
 
     @ViewBuilder
     private var smallContent: some View {
-        let highestPriority = itemsSortedByPriority.first
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text("\(payload.items.count)")
-                .font(Self.recipe.primary)
-                .fontWeight(.semibold)
-            Text("items")
-                .font(Self.recipe.secondary)
-                .foregroundStyle(Self.recipe.secondaryColor)
-        }
-        .accessibilityElement(children: .combine)
-        if let item = highestPriority {
+        if let item = itemsSortedByPriority.first {
             TodoItemRow(item: item, showDue: false)
         }
     }
@@ -105,6 +116,13 @@ public struct TodoListCardView: View {
 
     static let recipe = AIDashTypography.detail(for: .todoList)
 
+    private static let titleLabel = String(
+        localized: "todo_list.title",
+        defaultValue: "Tasks",
+        bundle: .module,
+        comment: "Header label at the top of a to-do list card, followed by the item count."
+    )
+
     private var itemsSortedByPriority: [TodoListPayload.Item] {
         payload.items.sorted { lhs, rhs in
             priorityWeight(lhs.priority) > priorityWeight(rhs.priority)
@@ -126,30 +144,54 @@ public struct TodoListCardView: View {
 private struct TodoItemRow: View {
     let item: TodoListPayload.Item
     let showDue: Bool
-    @Environment(\.theme) private var theme
 
     var body: some View {
-        HStack(spacing: 8) {
-            priorityIndicator
+        HStack(spacing: 10) {
+            Image(systemName: "circle")
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             Text(item.title)
                 .font(TodoListCardView.recipe.primary)
                 .lineLimit(2)
-            Spacer(minLength: 0)
+            priorityPill
+            Spacer(minLength: 8)
             if showDue, let due = item.due {
                 Text(due, style: .date)
                     .font(TodoListCardView.recipe.secondary)
-                    .foregroundStyle(TodoListCardView.recipe.secondaryColor)
+                    .foregroundStyle(.tertiary)
             }
         }
         .accessibilityElement(children: .combine)
     }
 
+    /// Priority as a content-level status pill (§Content-Level Status Pills):
+    /// high=danger, medium=warning, low=primary. A row with no priority
+    /// renders no pill (pills reflect a payload value).
     @ViewBuilder
-    private var priorityIndicator: some View {
-        Circle()
-            .fill(priorityColor)
-            .frame(width: 8, height: 8)
-            .accessibilityLabel(priorityLabel)
+    private var priorityPill: some View {
+        if let tone = priorityTone {
+            StatusPill(priorityText, tone: tone)
+                .accessibilityLabel(priorityLabel)
+        }
+    }
+
+    private var priorityText: String {
+        switch item.priority {
+        case .high: return "High"
+        case .medium: return "Med"
+        case .low: return "Low"
+        case nil: return ""
+        }
+    }
+
+    private var priorityTone: PillTone? {
+        switch item.priority {
+        case .high: return .danger
+        case .medium: return .warning
+        case .low: return .primary
+        case nil: return nil
+        }
     }
 
     private var priorityLabel: String {
@@ -158,15 +200,6 @@ private struct TodoItemRow: View {
         case .medium: return "Medium priority"
         case .low: return "Low priority"
         case nil: return "No priority"
-        }
-    }
-
-    private var priorityColor: Color {
-        switch item.priority {
-        case .high: return theme.danger
-        case .medium: return theme.warning
-        case .low: return theme.primary.primary
-        case nil: return .secondary
         }
     }
 }

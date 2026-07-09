@@ -12,13 +12,13 @@ struct DesignTokensFoundationTests {
 
     @Test("AIDashSpacing matches constitution §Spacing & Color Tokens")
     func spacingConstants() {
-        #expect(AIDashSpacing.containerVertical == 24)
+        #expect(AIDashSpacing.containerVertical == 32)
         #expect(AIDashSpacing.containerHeaderToFirstCard == 12)
         #expect(AIDashSpacing.cardVertical == 12)
-        #expect(AIDashSpacing.gridGap == 12)
+        #expect(AIDashSpacing.gridGap == 16)
         #expect(AIDashSpacing.pageHorizontalMac == 24)
         #expect(AIDashSpacing.pageHorizontalCompact == 20)
-        #expect(AIDashSpacing.pageVertical == 24)
+        #expect(AIDashSpacing.pageVertical == 28)
     }
 
     // MARK: - Size ladder
@@ -31,10 +31,10 @@ struct DesignTokensFoundationTests {
         #expect(AIDashSize.cornerRadius(.hero) == 20)
     }
 
-    @Test("AIDashSize.minHeight follows the 96/140/140/280 ladder")
+    @Test("AIDashSize.minHeight follows the 148/148/140/280 ladder")
     func minHeightLadder() {
-        #expect(AIDashSize.minHeight(.small) == 96)
-        #expect(AIDashSize.minHeight(.medium) == 140)
+        #expect(AIDashSize.minHeight(.small) == 148)
+        #expect(AIDashSize.minHeight(.medium) == 148)
         #expect(AIDashSize.minHeight(.wide) == 140)
         #expect(AIDashSize.minHeight(.hero) == 280)
     }
@@ -66,16 +66,18 @@ struct DesignTokensFoundationTests {
         #expect(AIDashSize.gridSpan(.hero) == .max)
     }
 
-    @Test("AIDashSize.columnCount maps viewport widths to 1/2/3/4 columns")
+    @Test("AIDashSize.columnCount maps viewport widths to ~240pt columns")
     func columnCount() {
         #expect(AIDashSize.columnCount(forWidth: 320) == 1)   // iPhone
-        #expect(AIDashSize.columnCount(forWidth: 479) == 1)
-        #expect(AIDashSize.columnCount(forWidth: 480) == 2)   // iPad portrait
-        #expect(AIDashSize.columnCount(forWidth: 767) == 2)
-        #expect(AIDashSize.columnCount(forWidth: 768) == 3)   // iPad landscape / small Mac
-        #expect(AIDashSize.columnCount(forWidth: 1099) == 3)
-        #expect(AIDashSize.columnCount(forWidth: 1100) == 4)  // large Mac
-        #expect(AIDashSize.columnCount(forWidth: 2000) == 4)
+        #expect(AIDashSize.columnCount(forWidth: 339) == 1)
+        #expect(AIDashSize.columnCount(forWidth: 340) == 2)
+        #expect(AIDashSize.columnCount(forWidth: 619) == 2)
+        #expect(AIDashSize.columnCount(forWidth: 620) == 3)
+        #expect(AIDashSize.columnCount(forWidth: 899) == 3)
+        #expect(AIDashSize.columnCount(forWidth: 900) == 4)   // typical Mac window
+        #expect(AIDashSize.columnCount(forWidth: 1179) == 4)
+        #expect(AIDashSize.columnCount(forWidth: 1180) == 5)  // wide Mac
+        #expect(AIDashSize.columnCount(forWidth: 2000) == 5)
     }
 
     // MARK: - Icon badge contract
@@ -143,10 +145,10 @@ struct DesignTokensFoundationTests {
         }
     }
 
-    @Test("Metric detail recipe: 36pt rounded bold primary, caption secondary, .secondary color")
+    @Test("Metric detail recipe: 36pt rounded bold tabular-figure primary, caption secondary, .secondary color")
     func metricDetailRecipe() {
         let r = AIDashTypography.detail(for: .metric)
-        #expect(r.primary == .system(size: 36, weight: .bold, design: .rounded))
+        #expect(r.primary == .system(size: 36, weight: .bold, design: .rounded).monospacedDigit())
         #expect(r.secondary == .caption)
         #expect(r.secondaryColor == .secondary)
         #expect(r.secondaryLineSpacing == 0)
@@ -210,11 +212,10 @@ struct DesignTokensFoundationTests {
         #expect(AIDashChrome.stripeColor(for: .accent, theme: theme) == theme.primary.primary)
     }
 
-    @Test("AIDashChrome carries only stripe + hairline tokens (no flat radius/padding)")
+    @Test("AIDashChrome carries only stripe + border tokens (no flat radius/padding)")
     func chromeConstants() {
         #expect(AIDashChrome.stripeWidth == 3)
-        #expect(AIDashChrome.hairlineWidth == 0.5)
-        #expect(AIDashChrome.hairlineOpacity == 0.5)
+        #expect(AIDashChrome.hairlineWidth == 1)
     }
 
     // MARK: - Card chrome modifier wiring
