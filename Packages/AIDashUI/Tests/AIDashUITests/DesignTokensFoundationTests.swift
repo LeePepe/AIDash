@@ -145,10 +145,10 @@ struct DesignTokensFoundationTests {
         }
     }
 
-    @Test("Metric detail recipe: 36pt rounded bold primary, caption secondary, .secondary color")
+    @Test("Metric detail recipe: 36pt rounded bold tabular-figure primary, caption secondary, .secondary color")
     func metricDetailRecipe() {
         let r = AIDashTypography.detail(for: .metric)
-        #expect(r.primary == .system(size: 36, weight: .bold, design: .rounded))
+        #expect(r.primary == .system(size: 36, weight: .bold, design: .rounded).monospacedDigit())
         #expect(r.secondary == .caption)
         #expect(r.secondaryColor == .secondary)
         #expect(r.secondaryLineSpacing == 0)

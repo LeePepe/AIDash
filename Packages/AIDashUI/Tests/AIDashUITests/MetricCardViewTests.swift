@@ -92,10 +92,10 @@ struct MetricCardViewTests {
         #expect(CardType.metric.hasIconBadge)
     }
 
-    @Test("Metric primary font is 36pt rounded bold, secondary is .caption .secondary")
+    @Test("Metric primary font is 36pt rounded bold tabular figures, secondary is .caption .secondary")
     func metricTypographyMatchesRecipe() {
         let recipe = AIDashTypography.detail(for: .metric)
-        #expect(recipe.primary == .system(size: 36, weight: .bold, design: .rounded))
+        #expect(recipe.primary == .system(size: 36, weight: .bold, design: .rounded).monospacedDigit())
         #expect(recipe.secondary == .caption)
         #expect(recipe.secondaryColor == .secondary)
     }

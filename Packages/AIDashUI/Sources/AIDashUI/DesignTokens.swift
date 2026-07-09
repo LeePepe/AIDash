@@ -50,8 +50,12 @@ public enum AIDashTypography {
     public static func detail(for type: CardType) -> DetailRecipe {
         switch type {
         case .metric:
+            // KPI value: rounded-bold display digit. `monospacedDigit()` gives
+            // tabular figures so numbers don't jitter as values change and so a
+            // column of KPI cards keeps its digits vertically aligned — the
+            // redesign audit's "data-heavy interfaces want tabular figures".
             return DetailRecipe(
-                primary: .system(size: 36, weight: .bold, design: .rounded),
+                primary: .system(size: 36, weight: .bold, design: .rounded).monospacedDigit(),
                 secondary: .caption,
                 secondaryColor: .secondary
             )
