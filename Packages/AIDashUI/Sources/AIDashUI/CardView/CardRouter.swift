@@ -14,12 +14,10 @@ public struct CardRouter: View {
     }
 
     public var body: some View {
+        // Passthrough: each routed card owns its chrome via `.cardChrome`.
+        // The router MUST NOT add a second background/border (doing so
+        // double-wrapped the card with a mismatched corner radius).
         cardContent
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(.separator)
-            )
     }
 
     @ViewBuilder
@@ -64,8 +62,8 @@ public struct CardRouter: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
+        .cardChrome(size: card.size, style: card.style)
         .accessibilityElement(children: .combine)
     }
 

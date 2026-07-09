@@ -1,13 +1,10 @@
 import SwiftUI
 import SwiftData
 import AIDashCore
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
+import DesignKit
 
 public struct BriefingView: View {
+    @Environment(\.theme) private var theme
     @Query private var todaysBriefings: [BriefingModel]
     @Query private var latestPublished: [BriefingModel]
 
@@ -45,9 +42,18 @@ public struct BriefingView: View {
             }
             .padding(.horizontal, Self.pageHorizontalPadding)
             .padding(.vertical, AIDashSpacing.pageVertical)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .background(Self.pageBackground)
+        #if os(macOS)
+        // Keep the large date header clear of the traffic-light / titlebar
+        // overlay. Without this the first line collides with the window
+        // controls on a full-height content window.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Color.clear.frame(height: 28)
+        }
+        #endif
+        .background(theme.neutrals.bg)
     }
 
     @ViewBuilder
@@ -152,9 +158,9 @@ public struct BriefingView: View {
     // MARK: - Page chrome tokens
     //
     // Sourced from .specify/memory/constitution.md §Page Chrome and
-    // §Spacing & Color Tokens. The page background sits one hierarchy
-    // step BELOW the card's `.background.secondary`, so cards visually
-    // float without needing a shadow.
+    // §Spacing & Color Tokens. The page background is `theme.neutrals.bg`,
+    // one luminance tier BELOW the card surface, so cards visually float
+    // without needing a shadow.
 
     /// Horizontal padding for the page. Mac gets 24pt; iOS / iPad get
     /// 20pt. Honoring the platform compile-time channel keeps the
@@ -164,19 +170,6 @@ public struct BriefingView: View {
         return AIDashSpacing.pageHorizontalMac
         #else
         return AIDashSpacing.pageHorizontalCompact
-        #endif
-    }
-
-    /// Page background. macOS uses `windowBackgroundColor`; iOS / iPadOS
-    /// use `systemGroupedBackground`. Both are one step *below* the
-    /// card's `.background.secondary`.
-    static var pageBackground: Color {
-        #if canImport(UIKit)
-        return Color(.systemGroupedBackground)
-        #elseif canImport(AppKit)
-        return Color(NSColor.windowBackgroundColor)
-        #else
-        return Color.clear
         #endif
     }
 

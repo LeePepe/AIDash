@@ -42,29 +42,41 @@ struct MetricCardViewTests {
         #expect(v.formattedValue(1_000_000) == "1000000.0")
     }
 
-    // MARK: - trendIconName behavior (SF Symbol mapping)
+    // MARK: - trendGlyph behavior (arrow glyph mapping)
 
-    @Test("trendIconName maps each trend to the correct SF Symbol")
-    func trendIconNames() {
+    @Test("trendGlyph maps each trend to the correct arrow glyph")
+    func trendGlyphs() {
         let v = view()
-        #expect(v.trendIconName(.up) == "arrow.up")
-        #expect(v.trendIconName(.down) == "arrow.down")
-        #expect(v.trendIconName(.flat) == "arrow.right")
+        #expect(v.trendGlyph(.up) == "↑")
+        #expect(v.trendGlyph(.down) == "↓")
+        #expect(v.trendGlyph(.flat) == "→")
     }
 
-    // MARK: - trendColor behavior (semantic token mapping)
+    // MARK: - outcomeTone behavior (semantic good/bad coloring)
     //
-    // Trend arrow color is METRIC CONTENT (signal direction), not card chrome.
-    // Per constitution §Style = Semantic Signal Only this is allowed to stay.
-    // Colors resolve from the DesignKit theme tokens, not inline system colors.
+    // Trend is METRIC CONTENT, rendered as a content-level StatusPill per
+    // constitution §Content-Level Status Pills. Color is by OUTCOME (good =
+    // success, bad = danger), driven by (trend × higherIsBetter), NOT by raw
+    // direction. Absent higherIsBetter → neutral (no good/bad claim).
 
-    @Test("trendColor maps up to theme.success, down to theme.danger, flat to secondary")
-    func trendColors() {
+    @Test("outcomeTone colors by good/bad outcome, not raw direction")
+    func outcomeTones() {
         let v = view()
-        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
-        #expect(v.trendColor(.up) == theme.success)
-        #expect(v.trendColor(.down) == theme.danger)
-        #expect(v.trendColor(.flat) == .secondary)
+        // higherIsBetter = true: up is good (success), down is bad (danger)
+        let moreIsBetter = MetricPayload.Item(label: "PRs", value: 3, trend: .up, higherIsBetter: true)
+        #expect(v.outcomeTone(moreIsBetter) == .success)
+        let moreIsBetterDown = MetricPayload.Item(label: "PRs", value: 3, trend: .down, higherIsBetter: true)
+        #expect(v.outcomeTone(moreIsBetterDown) == .danger)
+        // higherIsBetter = false: down is good (build time falling), up is bad
+        let lessIsBetter = MetricPayload.Item(label: "Build", value: 124, trend: .down, higherIsBetter: false)
+        #expect(v.outcomeTone(lessIsBetter) == .success)
+        let lessIsBetterUp = MetricPayload.Item(label: "Build", value: 124, trend: .up, higherIsBetter: false)
+        #expect(v.outcomeTone(lessIsBetterUp) == .danger)
+        // No higherIsBetter, or flat trend → neutral
+        let noClaim = MetricPayload.Item(label: "X", value: 1, trend: .up)
+        #expect(v.outcomeTone(noClaim) == .neutral)
+        let flat = MetricPayload.Item(label: "X", value: 1, trend: .flat, higherIsBetter: true)
+        #expect(v.outcomeTone(flat) == .neutral)
     }
 
     // MARK: - Token contract assertions
@@ -80,10 +92,10 @@ struct MetricCardViewTests {
         #expect(CardType.metric.hasIconBadge)
     }
 
-    @Test("Metric primary font is 36pt rounded bold, secondary is .caption .secondary")
+    @Test("Metric primary font is 36pt rounded bold tabular figures, secondary is .caption .secondary")
     func metricTypographyMatchesRecipe() {
         let recipe = AIDashTypography.detail(for: .metric)
-        #expect(recipe.primary == .system(size: 36, weight: .bold, design: .rounded))
+        #expect(recipe.primary == .system(size: 36, weight: .bold, design: .rounded).monospacedDigit())
         #expect(recipe.secondary == .caption)
         #expect(recipe.secondaryColor == .secondary)
     }

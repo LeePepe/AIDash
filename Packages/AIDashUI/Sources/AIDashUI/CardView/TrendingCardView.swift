@@ -194,9 +194,9 @@ private struct TrendingItemRow: View {
                 .lineLimit(titleLineLimit)
             Spacer(minLength: 0)
             if showScore, let score = item.score {
-                Text(formattedScore(score))
-                    .font(TrendingCardView.recipe.primary)
-                    .foregroundStyle(.secondary)
+                // Score as a neutral content-level pill (§Content-Level Status
+                // Pills) — a numeric badge, driven by the payload's `score`.
+                StatusPill(formattedScore(score), tone: .neutral)
             }
         }
         .accessibilityElement(children: .combine)

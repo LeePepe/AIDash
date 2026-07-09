@@ -7,7 +7,7 @@ red_lines:                          # 投影自 constitution §Design System & T
   - 颜色单源:seed→token(makePrimaryPalette)+ Semantic + Classification 是唯一入口;raw hex 仅允许在本层 token 源
   - 一个 seed 主题全局;语义色(success/warning/danger)与分类 tint(Classification)固定,不得新增第二套调色板
   - elevation = 明度分层(bg < card < inner)+ 1px border,不用阴影
-  - status 用彩色 pill(StatusPill),不用灰字表达状态
+  - status 用彩色 pill(StatusPill)作内容级信号(payload 字段驱动,非 style),不用灰字表达状态
   - 只依赖 Apple 框架;新增非 Apple 依赖需 docs/adr/ 下 ADR
   - Swift 6 严格并发;生产代码禁 fatalError / try! / as!
 roles:                              # 层内轴:类角色 → 目录(角色顺序见顶层 canonical_roles)
@@ -55,7 +55,7 @@ DesignKit 管视觉。AIDashUI 同时依赖二者。
 - **运行时注入**:`AIDashApp` 在 `BriefingWindowScene` 用
   `.designTheme(seed: .appleBlue, neutral: .slate)` 注入 `Theme`;视图据此解析所有颜色,
   自动随 colorScheme 出深/浅色变体。
-- **宪法依据**:constitution 1.5.0 §Design System & Tokens + Quality Bar §I P1.4——
+- **宪法依据**:constitution 1.6.0 §Design System & Tokens + Quality Bar §I P1.4——
   颜色 MUST 来自 package token 源,视图 MUST NOT 内联颜色。分类 tint 用固定 light/dark
   hex 对(非 seed 派生),保证 6 色恒可区分且保留深色模式。
 

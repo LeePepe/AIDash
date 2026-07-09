@@ -50,8 +50,12 @@ public enum AIDashTypography {
     public static func detail(for type: CardType) -> DetailRecipe {
         switch type {
         case .metric:
+            // KPI value: rounded-bold display digit. `monospacedDigit()` gives
+            // tabular figures so numbers don't jitter as values change and so a
+            // column of KPI cards keeps its digits vertically aligned — the
+            // redesign audit's "data-heavy interfaces want tabular figures".
             return DetailRecipe(
-                primary: .system(size: 36, weight: .bold, design: .rounded),
+                primary: .system(size: 36, weight: .bold, design: .rounded).monospacedDigit(),
                 secondary: .caption,
                 secondaryColor: .secondary
             )
@@ -185,12 +189,15 @@ public enum AIDashSize {
     /// Minimum card height in points.
     public static func minHeight(_ size: CardSize) -> CGFloat {
         switch size {
-        case .small:  return 96
-        case .medium: return 140
+        case .small:  return 148
+        case .medium: return 148
         case .wide:   return 140
         case .hero:   return 280
         }
     }
+
+    // Note: small and medium share 148pt so a grid mixing 1-col KPI cards and
+    // 2-col metric cards aligns to a common row height (north-star §6).
 
     /// Card corner radius in points. Single source of truth for both the card
     /// background shape and the hairline overlay stroke.
@@ -222,14 +229,15 @@ public enum AIDashSize {
     }
 
     /// Container grid column count for the given viewport width.
-    /// iPhone = 1, iPad portrait = 2, iPad landscape / Mac small = 3,
-    /// Mac large = 4. Breakpoints chosen to match Apple's regular/compact size
-    /// classes and standard Mac window widths.
+    /// Targets ~240pt columns (north-star §1: adaptive KPI grid, min ~220),
+    /// so a standard Mac window reaches 3–4 columns and cards stay dense
+    /// rather than stretching into sparse strips. iPhone stays single-column.
     public static func columnCount(forWidth width: CGFloat) -> Int {
-        if width < 480 { return 1 }
-        if width < 768 { return 2 }
-        if width < 1100 { return 3 }
-        return 4
+        if width < 340 { return 1 }
+        if width < 620 { return 2 }
+        if width < 900 { return 3 }
+        if width < 1180 { return 4 }
+        return 5
     }
 }
 
@@ -238,20 +246,39 @@ public enum AIDashSize {
 // §Spacing & Color Tokens + §Page Chrome.
 
 public enum AIDashSpacing {
-    /// 24pt between containers.
-    public static let containerVertical: CGFloat = 24
+    /// 32pt between containers.
+    public static let containerVertical: CGFloat = 32
     /// 12pt between a container's header and its first card.
     public static let containerHeaderToFirstCard: CGFloat = 12
     /// 12pt between cards inside a container.
     public static let cardVertical: CGFloat = 12
-    /// 12pt grid column gap.
-    public static let gridGap: CGFloat = 12
+    /// 16pt grid column gap.
+    public static let gridGap: CGFloat = 16
     /// 24pt page horizontal padding on macOS.
     public static let pageHorizontalMac: CGFloat = 24
     /// 20pt page horizontal padding on iOS / iPadOS.
     public static let pageHorizontalCompact: CGFloat = 20
-    /// 24pt top/bottom page padding.
-    public static let pageVertical: CGFloat = 24
+    /// 28pt top/bottom page padding.
+    public static let pageVertical: CGFloat = 28
+}
+
+// MARK: - Spacing ladder (raw scale)
+//
+// north-star §2 — the ONLY permitted raw spacing values. In-card element
+// spacing MUST come from this ladder (or the semantic AIDashSpacing above),
+// never a freshly-typed number.
+
+public enum AIDashSpace {
+    public static let s2: CGFloat = 2
+    public static let s4: CGFloat = 4
+    public static let s8: CGFloat = 8
+    public static let s12: CGFloat = 12
+    public static let s16: CGFloat = 16
+    public static let s20: CGFloat = 20
+    public static let s24: CGFloat = 24
+    public static let s28: CGFloat = 28
+    public static let s32: CGFloat = 32
+    public static let s40: CGFloat = 40
 }
 
 // MARK: - Chrome (stripe + hairline only)
@@ -262,10 +289,9 @@ public enum AIDashSpacing {
 public enum AIDashChrome {
     /// Width of the left-edge accent stripe drawn for non-neutral styles.
     public static let stripeWidth: CGFloat = 3
-    /// Width of the hairline overlay that defines card edges.
-    public static let hairlineWidth: CGFloat = 0.5
-    /// Opacity applied to `.separator` for the hairline overlay.
-    public static let hairlineOpacity: Double = 0.5
+    /// Width of the 1px border overlay that defines card edges
+    /// (`theme.neutrals.border`, luminance-tier elevation per §Card Chrome).
+    public static let hairlineWidth: CGFloat = 1
 
     /// Stripe color per `style`, resolved from the theme's semantic/primary
     /// tokens. `neutral` returns `nil` — no stripe drawn. Colors come from
@@ -298,10 +324,10 @@ public struct CardChromeModifier: ViewModifier {
         return content
             .padding(AIDashSize.padding(size))
             .frame(minHeight: AIDashSize.minHeight(size), alignment: .topLeading)
-            .background(.background.secondary, in: shape)
+            .background(theme.neutrals.card, in: shape)
             .overlay(
                 shape.strokeBorder(
-                    Self.separatorColor.opacity(AIDashChrome.hairlineOpacity),
+                    theme.neutrals.border,
                     lineWidth: AIDashChrome.hairlineWidth
                 )
             )
@@ -314,16 +340,6 @@ public struct CardChromeModifier: ViewModifier {
             }
             .clipShape(shape)
     }
-
-    private static var separatorColor: Color {
-        #if canImport(UIKit)
-        return Color(UIColor.separator)
-        #elseif canImport(AppKit)
-        return Color(NSColor.separatorColor)
-        #else
-        return Color.gray
-        #endif
-    }
 }
 
 extension View {
@@ -332,5 +348,48 @@ extension View {
     /// constitution; renderers MUST consume this modifier.
     public func cardChrome(size: CardSize, style: CardStyle) -> some View {
         modifier(CardChromeModifier(size: size, style: style))
+    }
+
+    /// Wrap content in the §5 inner-elevation block: `theme.neutrals.inner`
+    /// fill (one luminance tier above the card) + `10pt` continuous corners +
+    /// `12pt` padding. This is the sanctioned way for a card to nest an inner
+    /// panel (e.g. an insight lead statement) without a renderer inlining its
+    /// own `.background(...)` — the modifier lives in the token layer, so the
+    /// renderer chrome guards stay satisfied.
+    public func innerSurface(padding: CGFloat = 12) -> some View {
+        modifier(InnerSurfaceModifier(padding: padding))
+    }
+
+    /// Fill an already-padded view with the `neutrals.inner` surface clipped to
+    /// a Capsule — the sanctioned inner-elevation fill for pill-shaped stat
+    /// chips, kept in the token layer so renderers don't inline `.background`.
+    public func statChipSurface() -> some View {
+        modifier(StatChipSurfaceModifier())
+    }
+}
+
+public struct StatChipSurfaceModifier: ViewModifier {
+    @Environment(\.theme) private var theme
+    public init() {}
+    public func body(content: Content) -> some View {
+        content.background(theme.neutrals.inner, in: Capsule(style: .continuous))
+    }
+}
+
+public struct InnerSurfaceModifier: ViewModifier {
+    public let padding: CGFloat
+    @Environment(\.theme) private var theme
+
+    public init(padding: CGFloat = 12) {
+        self.padding = padding
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(
+                theme.neutrals.inner,
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
     }
 }

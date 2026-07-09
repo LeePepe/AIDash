@@ -119,6 +119,9 @@ constitutional violation and the Reviewer MUST 🔴 FAIL.
   accent=accentColor; `neutral` = no stripe). Filling the whole card
   with a colored background tint is forbidden — it cannot be
   distinguished at low opacity and dominates the visual at high opacity.
+  A colored status pill (`StatusPill`) is NOT a `style` affordance — it
+  is a **content signal** (like a trend arrow), driven by payload fields,
+  not by the `style` dimension. See §Content-Level Status Pills.
 
 The type icon's tint color and the style stripe color are independent
 channels and do not conflict by construction: the icon sits at the top
@@ -345,6 +348,42 @@ are identical across all four `style` values.
 Trend arrows inside `metric` cards may still use red / green — these are
 content (signal direction), not card chrome.
 
+#### Content-Level Status Pills
+
+Card **content** may express status with a colored pill (DesignKit's
+`StatusPill`: `Capsule()` filled at `color.opacity(0.16)` with
+full-saturation text/icon). This is the same "content, not chrome"
+exception the trend arrow already carries — the pill is driven by
+**payload fields**, never by the card's `style` dimension:
+
+- `todoList` item `priority` → tone (high=danger, medium=warning,
+  low=primary).
+- `metric` item `trend` → optional tone (up=success, down=danger,
+  flat=neutral).
+- `trending` item `score` → neutral tone.
+
+Constraints so pills stay a content signal and not a second chrome
+channel: the pill color comes from the semantic/primary **tokens**
+(never an inlined hex or system color); a pill reflects a payload value,
+so a card whose payload carries no status field renders none; and the
+`style` dimension remains stripe-only (§Style). Payloads MUST NOT invent
+a status field solely to draw a pill — only the fields above drive pills.
+
+#### Metric Data-Viz (sparkline / ring gauge)
+
+`metric` items may carry optional visualization data, rendered beside the
+value to give numbers visual context (north-star §6/§7):
+
+- `series: [Double]?` → a mini sparkline (line + area gradient, axes
+  hidden), colored from a chart/semantic token.
+- `ratio: Double?` (0…1) → a ring gauge, which **replaces** the sparkline
+  for ratio-type metrics.
+
+Both are optional content: absent → nothing drawn. The chart's fixed
+render height is geometry-neutral — it MUST NOT branch on the card's
+`size` dimension (that would conflate size with type; §Size = Geometry
+Only). Data-viz components live in DesignKit (`Sparkline`, `RingGauge`).
+
 #### Card Chrome (shared structure, size-scaled geometry)
 
 Every card view shares the same outer chrome structure and rendering
@@ -352,16 +391,16 @@ recipe. Per-card override is forbidden. The only values that change
 across cards are geometry (corner radius, padding — both driven by
 `size`) and the optional left stripe (driven by `style`).
 
-- Background: `.background.secondary` (HierarchicalShapeStyle —
-  automatically renders as `secondarySystemGroupedBackground` on iOS /
-  iPadOS and `controlBackgroundColor` on macOS, sitting one step above
-  the page background).
+- Background: `theme.neutrals.card` — the middle luminance tier of the
+  DesignKit neutral system (page `bg` < card `card` < inner `inner`).
+  Cards float via luminance tiers, not shadow. (Supersedes the earlier
+  `.background.secondary` material approach; see 1.6.0 migration note.)
 - Corner radius: per §Size = Geometry Only ladder (10 / 14 / 14 / 20).
 - Inner padding: per §Size = Geometry Only ladder.
-- Shadow: none (flat with material depth).
-- Border: hairline 0.5pt `.separator.opacity(0.5)` overlay for edge
-  definition. No other borders. The left 3pt stripe (when `style !=
-  .neutral`) sits inside the rounded shape, not as a separate border.
+- Shadow: none (flat, luminance-tier depth).
+- Border: 1px `theme.neutrals.border` overlay for edge definition. No
+  other borders. The left 3pt stripe (when `style != .neutral`) sits
+  inside the rounded shape, not as a separate border.
 
 The single allowed structural variant is the `sectionHeader` card type,
 which has **no chrome at all** — it renders as a typography-only
@@ -375,13 +414,16 @@ Cards MUST visually float above a slightly darker page background — if
 the page background and card background are identical, the cards
 disappear into the canvas (the failure mode observed on 2026-06-29).
 
-- Page background: `Color(NSColor.windowBackgroundColor)` (macOS) /
-  `Color(.systemGroupedBackground)` (iOS / iPadOS). These are one
-  hierarchy step *below* the card's `.background.secondary`, so the
-  card naturally appears elevated without needing a shadow.
+- Page background: `theme.neutrals.bg` — the lowest luminance tier, one
+  step *below* the card's `theme.neutrals.card`, so cards appear elevated
+  without a shadow. (Supersedes the earlier system `windowBackgroundColor`
+  / `systemGroupedBackground`; see 1.6.0 migration note.)
+- Content max width: page content is capped at `1200pt` and horizontally
+  centered (`Space.contentMaxWidth`), so ultra-wide windows do not
+  stretch cards into sparse strips.
 - Page horizontal padding: 24pt (Mac) / 20pt (iOS / iPad).
 - Page vertical padding (top of briefing, bottom of last container):
-  24pt.
+  28pt.
 
 #### Container Chrome
 
@@ -391,7 +433,7 @@ container is rendered as:
 1. An overview-tier title line (and optional subtitle line).
 2. 12pt vertical spacing.
 3. The cards laid out by the container's `layout` (auto/list/grid/hero).
-4. 24pt vertical spacing before the next container.
+4. 32pt vertical spacing before the next container.
 
 This is intentional: nesting "card inside titled box inside scroll
 view" produces the "everything looks the same" failure mode. Section
@@ -399,10 +441,10 @@ headers act as anchors; cards carry the content.
 
 #### Spacing & Color Tokens
 
-- Container vertical spacing: 24pt between containers; 12pt between
+- Container vertical spacing: 32pt between containers; 12pt between
   container header and first card.
 - Card vertical spacing inside a container: 12pt.
-- Grid column gap: 12pt.
+- Grid column gap: 16pt.
 - Page horizontal padding: see §Page Chrome.
 - **Colors MUST come from a package token source**, never inlined in a
   view. The token sources are: DesignKit's `ColorSystem` (seed-derived
@@ -551,7 +593,10 @@ These violate the Principle VI orthogonality guarantee:
    material, padding, or shadow. `style` only controls the left stripe
    presence + color.
 3. A `CardView` rendering its own `background(Color.X.opacity(N))`
-   driven by `style`. Whole-card colored fills are forbidden.
+   driven by `style`. Whole-card colored fills are forbidden. (A
+   content-level `StatusPill` — a small `Capsule` driven by a payload
+   field, not by `style` — is NOT a whole-card fill and is allowed per
+   §Content-Level Status Pills.)
 4. A renderer that uses overview-tier typography for card content, or
    detail-tier typography for container titles / section dividers. The
    two tiers are not interchangeable.
@@ -597,7 +642,10 @@ For any PR touching `Packages/AIDashUI/Sources/AIDashUI/**`:
 2. For each modified view, walk the per-type recipe table and confirm
    typography matches the CardType row.
 3. Confirm size-switches do not change font / padding / chrome.
-4. Confirm style-switches only toggle the left stripe.
+4. Confirm style-switches only toggle the left stripe. (Content-level
+   `StatusPill`s and `metric` sparkline/ring data-viz are driven by
+   payload fields, not `style` — they are content signals, not chrome;
+   see §Content-Level Status Pills, §Metric Data-Viz.)
 5. Confirm spacing constants come from the §Spacing & Color Tokens
    list, not freshly-invented numbers.
 
@@ -696,4 +744,32 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.5.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-07-04
+**Version**: 1.6.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-07-07
+
+<!--
+1.6.0 — MINOR (material expansion of existing §Design System & Tokens
+constraints; no principle removed or inverted). Aligns the constitution
+with design/north-star.md so the briefing UI can realize the modern
+dashboard language DesignKit already ships.
+
+Changes:
+- §Card Chrome: card background `.background.secondary` → `theme.neutrals.card`;
+  border 0.5pt `.separator` → 1px `theme.neutrals.border` (luminance-tier
+  elevation, no shadow).
+- §Page Chrome: page background system color → `theme.neutrals.bg`; add a
+  1200pt centered content max width; page vertical padding 24 → 28.
+- §Spacing & Color Tokens / §Container Chrome: container spacing 24 → 32;
+  grid column gap 12 → 16.
+- New §Content-Level Status Pills: colored `StatusPill` allowed as a
+  payload-driven content signal (extends the trend-arrow "content not
+  chrome" exception); `style` stays stripe-only. Quality Bar §I P0.3 and
+  reviewer step 4 clarified so pills are not flagged as style-driven fills.
+- New §Metric Data-Viz: optional `series`→sparkline / `ratio`→ring gauge
+  on metric items; render height is size-neutral.
+
+Migration note: existing AIDashUI compliance tests pin the old chrome/
+spacing literals and MUST be updated in lockstep with the AIDashUI
+implementation PR. Stored briefings are unaffected (new metric fields are
+optional and decode to nil on old records).
+-->
+
