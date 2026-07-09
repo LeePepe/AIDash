@@ -72,6 +72,7 @@ struct AppLauncherTests {
         } catch let error as XPCError {
             #expect(error.code == "xpc.app_launch_failed")
             #expect(error.message.contains("Could not launch AIDash.app"))
+            #expect(error.message.contains("AIDASH_APP_PATH"))
         } catch {
             Issue.record("Unexpected error type: \(error)")
         }
