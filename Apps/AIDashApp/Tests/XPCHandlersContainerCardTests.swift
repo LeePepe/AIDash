@@ -228,6 +228,86 @@ struct XPCHandlersContainerCardTests {
         }
     }
 
+    /// Anti-drift guard: the hand-written JSON Schema strings in
+    /// `handleSchemaList` are maintained separately from the Codable payload
+    /// models, so a field added to a model (e.g. metric `series`/`ratio`) can
+    /// silently go missing from `aidash schema list`. This test fully-populates
+    /// each payload, encodes it, walks every JSON key, and asserts each one is
+    /// declared in that type's advertised schema `properties` — so any new
+    /// model field forces a matching schema update.
+    @Test("schema.list advertises every field the payload models can emit")
+    func schemaListCoversAllModelFields() async throws {
+        let handlers = try XPCTestSupport.makeHandlers()
+        struct Empty: Codable {}
+        let response = try await XPCTestSupport.send(handlers, command: "schema.list", params: Empty())
+        let result = try XPCTestSupport.decodeResult(SchemaListResult.self, from: response)
+
+        // Fully-populated instances — every optional field set — so the encoded
+        // JSON exercises the whole surface, not just required fields.
+        let fixtures: [CardType: any Encodable] = [
+            .metric: MetricPayload(items: [
+                .init(label: "PRs", value: 3, unit: "s", trend: .up,
+                      series: [1, 2, 3], ratio: 0.5, higherIsBetter: true, context: "Sapphire")
+            ]),
+            .insight: InsightPayload(
+                title: "t", subtitle: "s", body: "b",
+                citations: [.init(label: "l", url: "u")]
+            ),
+            .digest: DigestPayload(
+                title: "t", subtitle: "s", body: "b",
+                sections: [.init(heading: "h", paragraphs: ["p"])]
+            ),
+        ]
+
+        for (type, payload) in fixtures {
+            let schemaString = try #require(result.payloads[type.rawValue],
+                                            "no schema for \(type.rawValue)")
+            let declared = Self.schemaPropertyKeys(schemaString)
+            let emitted = try Self.jsonKeys(of: payload)
+            let missing = emitted.subtracting(declared)
+            #expect(missing.isEmpty,
+                    "\(type.rawValue) schema is missing fields the model emits: \(missing.sorted())")
+        }
+    }
+
+    /// Every `properties` key anywhere in a JSON Schema document (recursively,
+    /// so nested `items`/object schemas are covered).
+    private static func schemaPropertyKeys(_ schema: String) -> Set<String> {
+        guard let data = schema.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) else { return [] }
+        var keys: Set<String> = []
+        func walk(_ node: Any) {
+            guard let obj = node as? [String: Any] else {
+                if let arr = node as? [Any] { arr.forEach(walk) }
+                return
+            }
+            if let props = obj["properties"] as? [String: Any] {
+                keys.formUnion(props.keys)
+            }
+            obj.values.forEach(walk)
+        }
+        walk(root)
+        return keys
+    }
+
+    /// Every object key anywhere in an encoded payload (recursively), i.e. the
+    /// set of field names the model can actually put on the wire.
+    private static func jsonKeys(of value: some Encodable) throws -> Set<String> {
+        let data = try JSONEncoder().encode(value)
+        let root = try JSONSerialization.jsonObject(with: data)
+        var keys: Set<String> = []
+        func walk(_ node: Any) {
+            if let obj = node as? [String: Any] {
+                keys.formUnion(obj.keys)
+                obj.values.forEach(walk)
+            } else if let arr = node as? [Any] {
+                arr.forEach(walk)
+            }
+        }
+        walk(root)
+        return keys
+    }
+
     // MARK: - Unknown command
 
     @Test("dispatch on unknown command returns schema.unknown_command")

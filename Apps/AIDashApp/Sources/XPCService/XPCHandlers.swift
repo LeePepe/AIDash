@@ -526,10 +526,10 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     private static let payloadSchemas: [String: String] = {
         var schemas: [String: String] = [:]
         schemas[CardType.metric.rawValue] = """
-        {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"unit":{"type":"string"},"trend":{"type":"string","enum":["up","down","flat"]}}}}}}
+        {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"unit":{"type":"string"},"trend":{"type":"string","enum":["up","down","flat"]},"series":{"type":"array","items":{"type":"number"}},"ratio":{"type":"number","minimum":0,"maximum":1},"higherIsBetter":{"type":"boolean"},"context":{"type":"string"}}}}}}
         """
         schemas[CardType.insight.rawValue] = """
-        {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"body":{"type":"string","minLength":1},"citations":{"type":"array","items":{"type":"object","required":["label","url"],"properties":{"label":{"type":"string"},"url":{"type":"string"}}}}}}
+        {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"citations":{"type":"array","items":{"type":"object","required":["label","url"],"properties":{"label":{"type":"string"},"url":{"type":"string"}}}}}}
         """
         schemas[CardType.agentSummary.rawValue] = """
         {"type":"object","required":["agentName","completed"],"properties":{"agentName":{"type":"string","minLength":1},"completed":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"ref":{"type":"string"}}}},"stats":{"type":"array","items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"}}}}}}
@@ -541,7 +541,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         {"type":"object","required":["topic","items"],"properties":{"topic":{"type":"string","minLength":1},"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title","url"],"properties":{"title":{"type":"string"},"url":{"type":"string"},"score":{"type":"number"}}}}}}
         """
         schemas[CardType.digest.rawValue] = """
-        {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"body":{"type":"string","minLength":1},"sections":{"type":"array","items":{"type":"object","required":["heading","paragraphs"],"properties":{"heading":{"type":"string"},"paragraphs":{"type":"array","items":{"type":"string"}}}}}}}
+        {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"sections":{"type":"array","items":{"type":"object","required":["heading","paragraphs"],"properties":{"heading":{"type":"string"},"paragraphs":{"type":"array","items":{"type":"string"}}}}}}}
         """
         schemas[CardType.sectionHeader.rawValue] = """
         {"type":"object","required":["title"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"}}}
