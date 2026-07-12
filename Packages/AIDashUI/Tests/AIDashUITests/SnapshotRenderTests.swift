@@ -14,22 +14,25 @@ import AIDashCore
 struct SnapshotRenderTests {
 
     private func render(_ view: some View, width: CGFloat, to name: String) {
-        let host = view
-            .frame(width: width)
-            .designTheme(seed: .appleBlue, neutral: .slate)
-        let renderer = ImageRenderer(content: host)
-        renderer.scale = 2
-        #if canImport(AppKit)
-        guard let nsImage = renderer.nsImage,
-              let tiff = nsImage.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            Issue.record("ImageRenderer produced no image for \(name)")
-            return
+        for (suffix, scheme) in [("", ColorScheme.light), ("-dark", ColorScheme.dark)] {
+            let host = view
+                .frame(width: width)
+                .designTheme(seed: .lime, neutral: .slate)
+                .environment(\.colorScheme, scheme)
+            let renderer = ImageRenderer(content: host)
+            renderer.scale = 2
+            #if canImport(AppKit)
+            guard let nsImage = renderer.nsImage,
+                  let tiff = nsImage.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:]) else {
+                Issue.record("ImageRenderer produced no image for \(name)\(suffix)")
+                continue
+            }
+            let url = URL(fileURLWithPath: "/tmp/aidash-shots/\(name)\(suffix).png")
+            try? png.write(to: url)
+            #endif
         }
-        let url = URL(fileURLWithPath: "/tmp/aidash-shots/\(name).png")
-        try? png.write(to: url)
-        #endif
     }
 
     @Test("render OVERVIEW KPI grid + prose cards to /tmp/aidash-shots")
@@ -60,7 +63,7 @@ struct SnapshotRenderTests {
                 ContainerView(container: today)
             }
             .padding(24)
-            .background(Color(hex: "#EDEEF2")),
+            .frame(maxWidth: .infinity, alignment: .leading),
             width: 1000,
             to: "render"
         )
@@ -83,7 +86,7 @@ struct SnapshotRenderTests {
                 ContainerView(container: unified)
             }
             .padding(24)
-            .background(Color(hex: "#EDEEF2")),
+            .frame(maxWidth: .infinity, alignment: .leading),
             width: 1000,
             to: "render-unified"
         )

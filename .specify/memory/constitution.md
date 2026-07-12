@@ -271,7 +271,14 @@ words.
   font / color — they are not interchangeable.
 
 The briefing's top-level date header is the one exception that uses
-neither tier — it uses `.largeTitle.bold()` once at the very top.
+neither tier — it is the **masthead**. It renders once at the very top and
+may use a terminal/monospaced treatment: `AIDashTypography.masthead`
+(`.system(size: 34, weight: .bold, design: .monospaced)`) for the date, with
+an optional status line (`AIDashTypography.mastheadStatus`, monospaced
+caption) for the product mark + publish/sync state, closed by a 1px
+`theme.neutrals.border` rule. This masthead exception does not license a
+third *content* tier — card content stays in the detail tier. (Cockpit theme,
+constitution 1.7.0.)
 
 #### Per-Type Visual Recipes (icon badge + typography, detail tier)
 
@@ -369,20 +376,26 @@ so a card whose payload carries no status field renders none; and the
 `style` dimension remains stripe-only (§Style). Payloads MUST NOT invent
 a status field solely to draw a pill — only the fields above drive pills.
 
-#### Metric Data-Viz (sparkline / ring gauge)
+#### Metric Data-Viz (sparkline / bar-spark / ring / segmented gauge)
 
 `metric` items may carry optional visualization data, rendered beside the
 value to give numbers visual context (north-star §6/§7):
 
-- `series: [Double]?` → a mini sparkline (line + area gradient, axes
-  hidden), colored from a chart/semantic token.
-- `ratio: Double?` (0…1) → a ring gauge, which **replaces** the sparkline
-  for ratio-type metrics.
+- `series: [Double]?` → a mini trend chart: either a **sparkline** (line +
+  area gradient) or a **bar-spark** (`Sparkbars`, discrete bars normalized
+  across the series' own min…max so a gentle slope still reads), axes hidden,
+  colored from a chart/semantic token. The cockpit theme uses the bar-spark.
+- `ratio: Double?` (0…1) → a ratio gauge — either a **ring gauge**
+  (`RingGauge`) or a **segmented capacity gauge** (`SegmentedGauge`, a row of
+  lit/unlit segments) — which **replaces** the trend chart for ratio-type
+  metrics. The cockpit theme uses the segmented gauge.
 
 Both are optional content: absent → nothing drawn. The chart's fixed
 render height is geometry-neutral — it MUST NOT branch on the card's
 `size` dimension (that would conflate size with type; §Size = Geometry
-Only). Data-viz components live in DesignKit (`Sparkline`, `RingGauge`).
+Only). Data-viz components live in DesignKit (`Sparkline`, `Sparkbars`,
+`RingGauge`, `SegmentedGauge`); which trend/ratio form is drawn is a theme
+choice, not a payload or `size` concern. (Cockpit theme, constitution 1.7.0.)
 
 #### Card Chrome (shared structure, size-scaled geometry)
 
@@ -744,7 +757,38 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.6.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-07-07
+**Version**: 1.7.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-07-12
+
+<!--
+1.7.0 — MINOR (material expansion of §Design System & Tokens; no principle
+removed or inverted). Introduces the "Dark Cockpit" theme: the same
+data-driven card system, re-skinned via the theme/token layer to read as a
+terminal/instrument console. Keeps design/north-star.md's "Cockpit theme"
+section in sync.
+
+Changes:
+- §Two-Level Typography Hierarchy: the single top-level date-header exception
+  is respecified as the **masthead**, which may use a monospaced terminal
+  treatment (`AIDashTypography.masthead` / `mastheadStatus`) + a 1px rule. No
+  third *content* tier is created — card content stays in the detail tier, so
+  "exactly two typography systems" for content is preserved.
+- §Metric Data-Viz: the allowed trend/ratio viz forms are expanded — `series`
+  may render a **bar-spark** (`Sparkbars`) as well as a sparkline; `ratio`
+  may render a **segmented capacity gauge** (`SegmentedGauge`) as well as a
+  ring. Which form is drawn is a theme choice, still size-neutral.
+- Theme seed: the app now injects `Seed.lime` (electric-lime cockpit accent),
+  a DesignKit `ColorSystem` token add within the existing seed-derived-primary
+  rule. The fixed `neutral/success/warning/accent` semantics are UNCHANGED, so
+  §Style and §Design Fidelity §H.2 are unaffected; the accent stripe still
+  resolves to `theme.primary.primary`.
+
+Migration note: AIDashUI compliance/unit tests that pin the metric numeral
+font (`.rounded`→`.monospaced`) and the trend glyphs (`↑↓→`→`▲▼▬`) were
+updated in lockstep with the implementation PR. DesignKit gained `Seed.lime`,
+`Sparkbars`, and `SegmentedGauge` (additive; `Sparkline`/`RingGauge` retained).
+Stored briefings are unaffected (no schema change; new viz forms read the same
+optional `series`/`ratio` fields).
+-->
 
 <!--
 1.6.0 — MINOR (material expansion of existing §Design System & Tokens
@@ -772,4 +816,5 @@ spacing literals and MUST be updated in lockstep with the AIDashUI
 implementation PR. Stored briefings are unaffected (new metric fields are
 optional and decode to nil on old records).
 -->
+
 
