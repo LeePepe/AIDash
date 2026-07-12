@@ -38,6 +38,14 @@ public enum AIDashTypography {
     /// Masthead status line (e.g. "SYSTEMS NOMINAL", "PUBLISHED · SYNCED").
     public static let mastheadStatus: Font = .system(size: 10, weight: .semibold, design: .monospaced)
 
+    /// Unit suffix that trails a metric value (e.g. `$`, `%`, `s`). Monospaced
+    /// medium at 20pt so it sits on the 36pt value's baseline as a deliberate
+    /// suffix — heavier than the old `.title3` gray, which read as
+    /// floating-point cruft next to the tabular value. Kept as a named token so
+    /// the metric renderer stays free of hardcoded `.system(size:)` literals
+    /// (constitution §Quality Bar P1.1).
+    public static let metricUnit: Font = .system(size: 20, weight: .medium, design: .monospaced)
+
     /// Detail-tier typography recipe for a single `CardType`.
     /// `sectionHeader` is NOT a content card; its row exists only to keep callers
     /// from special-casing the enum.
@@ -213,6 +221,11 @@ public enum AIDashSize {
     // Note: small and medium share 148pt so a grid mixing 1-col KPI cards and
     // 2-col metric cards aligns to a common row height (north-star §6).
 
+    /// Collapsed min height for a card rendering an empty state (badge + a
+    /// single caption line). Well below the populated `minHeight` ladder so an
+    /// empty card reads as "nothing to report" rather than a dead-tall box.
+    public static let emptyMinHeight: CGFloat = 88
+
     /// Card corner radius in points. Single source of truth for both the card
     /// background shape and the hairline overlay stroke.
     public static func cornerRadius(_ size: CardSize) -> CGFloat {
@@ -253,6 +266,25 @@ public enum AIDashSize {
         if width < 1180 { return 4 }
         return 5
     }
+
+    /// Column count for a wide metric card's INTERNAL KPI grid, chosen to
+    /// balance rows and avoid a lone orphan in the last row.
+    ///
+    /// The old rule locked to 4 columns, so a real 9-item metric grid wrapped
+    /// 4/4/1 — one KPI stranded beside three empty columns (the failure seen on
+    /// live agent data). Instead, cap density at `maxColumns` (4), compute the
+    /// row count that cap implies, then spread items evenly across those rows.
+    /// 9 items → 3 rows → 3 columns → a clean 3/3/3; 5 → 2 rows → 3 cols → 3/2;
+    /// 7 → 2 rows → 4 cols → 4/3. Every count ≤ 12 lands orphan-free.
+    public static func kpiColumnCount(forItems count: Int, maxColumns: Int = 4) -> Int {
+        guard count > 1 else { return 1 }
+        let cap = max(1, maxColumns)
+        let rows = Int((Double(count) / Double(cap)).rounded(.up))
+        // Spread `count` items across `rows` rows as evenly as possible; the
+        // widest row is the column count. rows ≥ 1 here (count ≥ 2).
+        return Int((Double(count) / Double(rows)).rounded(.up))
+    }
+
 }
 
 // MARK: - Spacing
@@ -325,11 +357,13 @@ public enum AIDashChrome {
 public struct CardChromeModifier: ViewModifier {
     public let size: CardSize
     public let style: CardStyle
+    public let minHeightOverride: CGFloat?
     @Environment(\.theme) private var theme
 
-    public init(size: CardSize, style: CardStyle) {
+    public init(size: CardSize, style: CardStyle, minHeightOverride: CGFloat? = nil) {
         self.size = size
         self.style = style
+        self.minHeightOverride = minHeightOverride
     }
 
     public func body(content: Content) -> some View {
@@ -337,7 +371,10 @@ public struct CardChromeModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return content
             .padding(AIDashSize.padding(size))
-            .frame(minHeight: AIDashSize.minHeight(size), alignment: .topLeading)
+            .frame(
+                minHeight: minHeightOverride ?? AIDashSize.minHeight(size),
+                alignment: .topLeading
+            )
             .background(theme.neutrals.card, in: shape)
             .overlay(
                 shape.strokeBorder(
@@ -360,8 +397,17 @@ extension View {
     /// Apply the §Card Chrome contract — background, padding, hairline overlay,
     /// and optional left stripe. Per-card override is forbidden by the
     /// constitution; renderers MUST consume this modifier.
-    public func cardChrome(size: CardSize, style: CardStyle) -> some View {
-        modifier(CardChromeModifier(size: size, style: style))
+    ///
+    /// `minHeight` overrides the size-derived min height for the one sanctioned
+    /// case where a card carries no content to fill it — an empty state — so it
+    /// collapses instead of leaving a dead-tall box. Callers MUST NOT use it to
+    /// resize populated cards (that would break grid row alignment).
+    public func cardChrome(
+        size: CardSize,
+        style: CardStyle,
+        minHeight: CGFloat? = nil
+    ) -> some View {
+        modifier(CardChromeModifier(size: size, style: style, minHeightOverride: minHeight))
     }
 
     /// Wrap content in the §5 inner-elevation block: `theme.neutrals.inner`

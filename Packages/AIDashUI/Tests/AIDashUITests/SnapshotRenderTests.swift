@@ -90,6 +90,46 @@ struct SnapshotRenderTests {
             width: 1000,
             to: "render-unified"
         )
+
+        // Variant: REAL agent data (large magnitudes + a 9-item wide metric +
+        // sparse hero/list cards) — the case that broke on live data. Proves
+        // formattedValue abbreviates (217836228 → 218M) and nothing overflows.
+        let trends = container("趋势指标", .auto, [
+            // A single 9-item metric payload is one irreducible JSON literal;
+            // it can't wrap, so exempt just this line from line_length.
+            // swiftlint:disable:next line_length
+            card(.metric, .wide, .neutral, #"{"items":[{"label":"成本","value":1013.79,"unit":"$","trend":"down","higherIsBetter":false,"series":[1408.19,728.46,1063.87,833.82,491.59,1837.16,698.83,2493.94,4523.19,2180.19,2854.52,2717.9,2013.81,1013.79]},{"label":"Token","value":217836228,"trend":"down","series":[325255254,142186521,209118076,175099598,106793163,405750768,176161328,685800284,1236175928,498605887,720861036,767046007,511537245,217836228]},{"label":"请求数","value":1301,"trend":"down","series":[6136,4440,2240,2232,1459,3883,2439,7066,12657,4595,8604,6990,4428,1301]},{"label":"浪费额","value":112.3,"unit":"$","trend":"down","higherIsBetter":false,"series":[228.16,187.96,147.7,113.22,50.05,185.56,90.72,104.87,123.18,55.67,286.45,312.23,267.49,112.3]},{"label":"完成任务","value":0,"trend":"down","higherIsBetter":true,"series":[49,6,2,13,14,75,45,247,394,37,143,92,26,0]},{"label":"会话数","value":4,"trend":"down","higherIsBetter":true,"series":[24,9,23,18,7,26,13,78,121,19,78,19,12,4]},{"label":"完成 issue","value":1,"trend":"down","higherIsBetter":true,"series":[10,1,1,5,2,5,11,49,72,5,26,9,7,1]},{"label":"开 PR","value":1,"trend":"flat","higherIsBetter":true,"series":[2,2,2,1,2,2,3,0,0,2,0,7,1,1]},{"label":"自动化占比","value":100,"unit":"%","ratio":1.0,"trend":"flat","higherIsBetter":true}]}"#),
+        ])
+        render(
+            VStack(alignment: .leading, spacing: 16) {
+                Text("2026-07-12").font(.largeTitle.bold())
+                ContainerView(container: trends)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading),
+            width: 1000,
+            to: "render-realdata"
+        )
+
+        // Variant: SPARSE / EMPTY cards mixed into a grid — a valid-but-empty
+        // metric payload (a quiet day) must render the neutral empty state, not
+        // a bare-badge box. Sits beside a populated small KPI for contrast.
+        let sparse = container("Sparse", .grid, [
+            card(.metric, .small, .neutral, #"{"items":[{"label":"完成任务","value":0,"trend":"flat","higherIsBetter":true}]}"#),
+            card(.metric, .small, .neutral, #"{"items":[]}"#),
+            card(.metric, .medium, .neutral, #"{"items":[]}"#),
+            card(.metric, .wide, .neutral, #"{"items":[]}"#),
+        ])
+        render(
+            VStack(alignment: .leading, spacing: 16) {
+                Text("2026-07-12").font(.largeTitle.bold())
+                ContainerView(container: sparse)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading),
+            width: 1000,
+            to: "render-sparse"
+        )
     }
 
     // MARK: - In-memory model builders

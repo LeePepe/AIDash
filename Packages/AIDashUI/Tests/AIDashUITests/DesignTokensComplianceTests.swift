@@ -81,7 +81,10 @@ struct DesignTokensComplianceTests {
 
             // 3. The renderer source consumes the shared cardChrome modifier
             //    (which carries background, border, padding, corner radius).
-            #expect(renderer.contains(".cardChrome(size: size, style: style)"),
+            //    The size/style args must be wired through; a trailing
+            //    `minHeight:` override (the sanctioned empty-state collapse) is
+            //    allowed, so match the prefix rather than the whole call.
+            #expect(renderer.contains(".cardChrome(size: size, style: style"),
                     "\(type) renderer must apply the shared cardChrome modifier")
             #expect(renderer.contains("CardTypeBadge(type: .\(type.rawValue))"),
                     "\(type) renderer must render the shared 32x32 type badge")
