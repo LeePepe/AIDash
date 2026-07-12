@@ -115,6 +115,18 @@
         }
       }
     },
+    "metric.empty" : {
+      "comment" : "Shown inside a metric card when its payload decoded successfully but has no items to plot.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No metric data"
+          }
+        }
+      }
+    },
     "trending.more_items %lld" : {
       "comment" : "Trailing line on a Trending card listing how many additional items were truncated. %lld is the overflow count (always ≥ 1).",
       "extractionState" : "manual",

@@ -33,13 +33,26 @@ struct MetricCardViewTests {
         #expect(v.formattedValue(1.04) == "1.0") // rounds down to 1 decimal
     }
 
-    @Test("formattedValue switches to decimal form at one million even for whole values")
+    @Test("formattedValue abbreviates large magnitudes on a K/M/B/T ladder")
     func formattedValueLargeNumbers() {
         let v = view()
-        // 999_999 is whole and below threshold → "%.0f"
-        #expect(v.formattedValue(999_999) == "999999")
-        // 1_000_000 is whole but at threshold → falls through to "%.1f"
-        #expect(v.formattedValue(1_000_000) == "1000000.0")
+        // 4-digit counts stay literal (no abbreviation below 10K).
+        #expect(v.formattedValue(1301) == "1301")
+        #expect(v.formattedValue(9999) == "9999")
+        // 5-digit+ compress to K; trailing .0 trimmed.
+        #expect(v.formattedValue(10_000) == "10K")
+        #expect(v.formattedValue(12_657) == "12.7K")
+        // Millions / billions / trillions.
+        #expect(v.formattedValue(217_836_228) == "217.8M")
+        #expect(v.formattedValue(1_000_000) == "1M")
+        #expect(v.formattedValue(2_500_000_000) == "2.5B")
+        #expect(v.formattedValue(3_000_000_000_000) == "3T")
+        // Boundary: rounding tips the mantissa to 1000 → promote to next unit
+        // ("1M", not "1000K"; "1B", not "1000M").
+        #expect(v.formattedValue(999_999) == "1M")
+        #expect(v.formattedValue(999_999_999) == "1B")
+        // Negatives keep their sign.
+        #expect(v.formattedValue(-42_000) == "-42K")
     }
 
     // MARK: - trendGlyph behavior (arrow glyph mapping)
@@ -126,6 +139,18 @@ struct MetricCardViewTests {
     @Test("body does not crash when payload has a single item across all sizes")
     func bodyHandlesSingleItem() {
         let payload = MetricPayload(items: [.init(label: "Solo", value: 1)])
+        for size in CardSize.allCases {
+            let v = MetricCardView(payload: payload, size: size, style: .neutral)
+            _ = v.body
+        }
+    }
+
+    @Test("body renders the empty state without crashing when items are empty")
+    func bodyHandlesEmptyItems() {
+        // A valid metric payload with no items (a quiet day on real agent
+        // data) must render the CardEmptyState, not a bare-badge box. Exercise
+        // every size so no size branch reintroduces a blank render.
+        let payload = MetricPayload(items: [])
         for size in CardSize.allCases {
             let v = MetricCardView(payload: payload, size: size, style: .neutral)
             _ = v.body

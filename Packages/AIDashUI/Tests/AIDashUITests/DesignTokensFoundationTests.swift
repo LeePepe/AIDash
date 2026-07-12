@@ -80,6 +80,42 @@ struct DesignTokensFoundationTests {
         #expect(AIDashSize.columnCount(forWidth: 2000) == 5)
     }
 
+    @Test("AIDashSize.kpiColumnCount balances rows so the last row has no orphan")
+    func kpiColumnCount() {
+        // Degenerate: 0 or 1 item → single column.
+        #expect(AIDashSize.kpiColumnCount(forItems: 0) == 1)
+        #expect(AIDashSize.kpiColumnCount(forItems: 1) == 1)
+        // Small counts fit one row up to the 4-column cap.
+        #expect(AIDashSize.kpiColumnCount(forItems: 2) == 2)
+        #expect(AIDashSize.kpiColumnCount(forItems: 3) == 3)
+        #expect(AIDashSize.kpiColumnCount(forItems: 4) == 4)
+        // 5 → 2 rows → 3 cols (3/2), never 4/1.
+        #expect(AIDashSize.kpiColumnCount(forItems: 5) == 3)
+        // 6 → 2 rows → 3 cols (3/3).
+        #expect(AIDashSize.kpiColumnCount(forItems: 6) == 3)
+        // 7 → 2 rows → 4 cols (4/3).
+        #expect(AIDashSize.kpiColumnCount(forItems: 7) == 4)
+        // 8 → 2 rows → 4 cols (4/4).
+        #expect(AIDashSize.kpiColumnCount(forItems: 8) == 4)
+        // 9 → 3 rows → 3 cols (3/3/3) — the real-data case that used to strand
+        // one KPI in a 4/4/1 wrap.
+        #expect(AIDashSize.kpiColumnCount(forItems: 9) == 3)
+        // Larger counts stay within the density cap and avoid a lone orphan.
+        #expect(AIDashSize.kpiColumnCount(forItems: 10) == 4)  // 3 rows → 4 (4/4/2)
+        #expect(AIDashSize.kpiColumnCount(forItems: 12) == 4)  // 3 rows → 4 (4/4/4)
+
+        // Property: across the realistic range (agents emit ≤ ~12 KPIs per
+        // grid), the greedy last row is never a lone orphan when more than one
+        // row is used. (13 is the smallest count that orphans at every column
+        // width ≤ 4 — 13 % 4 == 13 % 3 == 13 % 2 == 1 — and is outside range.)
+        for count in 2...12 {
+            let cols = AIDashSize.kpiColumnCount(forItems: count)
+            let remainder = count % cols
+            let rows = Int((Double(count) / Double(cols)).rounded(.up))
+            #expect(rows == 1 || remainder != 1, "count \(count) → \(cols) cols leaves an orphan")
+        }
+    }
+
     // MARK: - Icon badge contract
 
     @Test("CardType.iconSymbol matches the Per-Type Visual Recipes table")
@@ -132,6 +168,13 @@ struct DesignTokensFoundationTests {
         #expect(AIDashTypography.section == .system(.caption2, design: .rounded, weight: .semibold))
         #expect(AIDashTypography.sectionColor == .secondary)
         #expect(AIDashTypography.sectionTracking == 0.6)
+    }
+
+    @Test("AIDashTypography.metricUnit is a 20pt monospaced medium suffix glyph")
+    func metricUnitTypography() {
+        // Heavier than the old `.title3` gray so `$`/`%` read as a deliberate
+        // unit suffix, not floating-point cruft next to the 36pt tabular value.
+        #expect(AIDashTypography.metricUnit == .system(size: 20, weight: .medium, design: .monospaced))
     }
 
     @Test("AIDashTypography.detail returns a recipe for every CardType")
