@@ -47,9 +47,10 @@ struct MetricCardViewTests {
     @Test("trendGlyph maps each trend to the correct arrow glyph")
     func trendGlyphs() {
         let v = view()
-        #expect(v.trendGlyph(.up) == "↑")
-        #expect(v.trendGlyph(.down) == "↓")
-        #expect(v.trendGlyph(.flat) == "→")
+        // Cockpit instrument glyphs: filled triangles for direction, bar for flat.
+        #expect(v.trendGlyph(.up) == "▲")
+        #expect(v.trendGlyph(.down) == "▼")
+        #expect(v.trendGlyph(.flat) == "▬")
     }
 
     // MARK: - outcomeTone behavior (semantic good/bad coloring)
@@ -92,10 +93,10 @@ struct MetricCardViewTests {
         #expect(CardType.metric.hasIconBadge)
     }
 
-    @Test("Metric primary font is 36pt rounded bold tabular figures, secondary is .caption .secondary")
+    @Test("Metric primary font is 36pt monospaced bold tabular figures, secondary is .caption .secondary")
     func metricTypographyMatchesRecipe() {
         let recipe = AIDashTypography.detail(for: .metric)
-        #expect(recipe.primary == .system(size: 36, weight: .bold, design: .rounded).monospacedDigit())
+        #expect(recipe.primary == .system(size: 36, weight: .bold, design: .monospaced).monospacedDigit())
         #expect(recipe.secondary == .caption)
         #expect(recipe.secondaryColor == .secondary)
     }

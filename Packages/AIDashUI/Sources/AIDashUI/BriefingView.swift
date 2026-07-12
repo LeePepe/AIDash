@@ -58,7 +58,33 @@ public struct BriefingView: View {
 
     @ViewBuilder
     private func header(for briefing: BriefingModel, isFallback: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 10) {
+            // Terminal masthead top line: product mark + live sync status.
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(verbatim: "AIDASH")
+                    .font(AIDashTypography.mastheadStatus)
+                    .tracking(2)
+                    .foregroundStyle(theme.primary.primary)
+                Text(verbatim: "// DAILY BRIEFING")
+                    .font(AIDashTypography.mastheadStatus)
+                    .tracking(1.4)
+                    .foregroundStyle(theme.neutrals.text3)
+                Spacer()
+                if let publishedAt = briefing.publishedAt {
+                    HStack(spacing: 6) {
+                        Circle().fill(theme.success).frame(width: 7, height: 7)
+                        Text(
+                            "briefing.published.relative \(publishedAt.formatted(.relative(presentation: .named)))",
+                            tableName: "Localizable",
+                            bundle: .module,
+                            comment: "Caption showing how long ago the briefing was published. Parameter: a localized relative time string like 'yesterday'."
+                        )
+                        .font(AIDashTypography.mastheadStatus)
+                        .foregroundStyle(theme.neutrals.text2)
+                    }
+                }
+            }
+
             if isFallback {
                 HStack(spacing: 8) {
                     Image(systemName: "clock.arrow.circlepath")
@@ -73,21 +99,19 @@ public struct BriefingView: View {
                 .foregroundStyle(.secondary)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityElement(children: .combine)
             }
+
+            // The date reads as a terminal display value.
             Text(briefing.date)
-                .font(.largeTitle.bold())
-            if let publishedAt = briefing.publishedAt {
-                Text(
-                    "briefing.published.relative \(publishedAt.formatted(.relative(presentation: .named)))",
-                    tableName: "Localizable",
-                    bundle: .module,
-                    comment: "Caption showing how long ago the briefing was published. Parameter: a localized relative time string like 'yesterday'."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
+                .font(AIDashTypography.masthead)
+                .foregroundStyle(theme.neutrals.text1)
+
+            // Hairline rule under the masthead, cockpit console style.
+            Rectangle()
+                .fill(theme.neutrals.border)
+                .frame(height: 1)
         }
     }
 

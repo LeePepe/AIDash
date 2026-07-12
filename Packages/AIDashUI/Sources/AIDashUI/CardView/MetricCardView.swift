@@ -143,7 +143,7 @@ public struct MetricCardView: View {
     @ViewBuilder
     private func ringGauge(_ item: MetricPayload.Item) -> some View {
         if let ratio = item.ratio {
-            RingGauge(value: ratio, size: Self.vizBandHeight, color: ratioColor(item), showLabel: false)
+            SegmentedGauge(value: ratio, color: ratioColor(item))
         }
     }
 
@@ -161,7 +161,12 @@ public struct MetricCardView: View {
     @ViewBuilder
     private func sparkline(_ item: MetricPayload.Item) -> some View {
         if let series = item.series, series.count > 1 {
-            Sparkline(data: series, color: vizColor(item))
+            Sparkbars(
+                data: series,
+                color: vizColor(item),
+                height: Self.vizBandHeight,
+                baseline: theme.neutrals.border
+            )
         }
     }
 
@@ -205,12 +210,14 @@ public struct MetricCardView: View {
         return glyph
     }
 
-    /// Unicode arrow glyph for the trend, rendered as pill text.
+    /// Unicode arrow glyph for the trend, rendered as pill text. Filled
+    /// triangles (▲ ▼) plus a bar (▬) for flat give the cockpit its
+    /// instrument-panel read; direction is the glyph, good/bad is the tone.
     func trendGlyph(_ trend: MetricPayload.Item.Trend) -> String {
         switch trend {
-        case .up: return "↑"
-        case .down: return "↓"
-        case .flat: return "→"
+        case .up: return "▲"
+        case .down: return "▼"
+        case .flat: return "▬"
         }
     }
 

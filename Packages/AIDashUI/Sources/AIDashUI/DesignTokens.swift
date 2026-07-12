@@ -25,6 +25,19 @@ public enum AIDashTypography {
     /// Overview-tier letter spacing. Apply with `.tracking(AIDashTypography.sectionTracking)`.
     public static let sectionTracking: CGFloat = 0.6
 
+    // MARK: Masthead (the one top-level date-header exception)
+    //
+    // Constitution §Two-Level Typography Hierarchy grants the briefing's
+    // top-level date header a single exception that uses neither tier. The
+    // cockpit theme renders that masthead as a terminal readout: a monospaced
+    // bold date. This is the ONLY masthead-tier token — it is not for content.
+
+    /// The briefing date masthead — monospaced terminal readout.
+    public static let masthead: Font = .system(size: 34, weight: .bold, design: .monospaced)
+
+    /// Masthead status line (e.g. "SYSTEMS NOMINAL", "PUBLISHED · SYNCED").
+    public static let mastheadStatus: Font = .system(size: 10, weight: .semibold, design: .monospaced)
+
     /// Detail-tier typography recipe for a single `CardType`.
     /// `sectionHeader` is NOT a content card; its row exists only to keep callers
     /// from special-casing the enum.
@@ -50,12 +63,13 @@ public enum AIDashTypography {
     public static func detail(for type: CardType) -> DetailRecipe {
         switch type {
         case .metric:
-            // KPI value: rounded-bold display digit. `monospacedDigit()` gives
+            // KPI value: monospaced-bold display digit. `monospacedDigit()` gives
             // tabular figures so numbers don't jitter as values change and so a
-            // column of KPI cards keeps its digits vertically aligned — the
-            // redesign audit's "data-heavy interfaces want tabular figures".
+            // column of KPI cards keeps its digits vertically aligned. The
+            // cockpit theme uses `design: .monospaced` (not `.rounded`) so the
+            // metric row reads as instrument-panel precision.
             return DetailRecipe(
-                primary: .system(size: 36, weight: .bold, design: .rounded).monospacedDigit(),
+                primary: .system(size: 36, weight: .bold, design: .monospaced).monospacedDigit(),
                 secondary: .caption,
                 secondaryColor: .secondary
             )

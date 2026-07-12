@@ -27,7 +27,7 @@ public struct BriefingWindowScene: Scene {
                 switch state {
                 case .ready(let container):
                     BriefingView()
-                        .designTheme(seed: .appleBlue, neutral: .slate)
+                        .designTheme(seed: .lime, neutral: .slate)
                         .modelContainer(container)
                 case .failed(let reason):
                     ICloudUnavailableView(reason: reason)

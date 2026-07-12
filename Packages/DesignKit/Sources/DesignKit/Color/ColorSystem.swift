@@ -27,7 +27,7 @@ public extension Color {
 // MARK: - Preset seeds (identical to the web port)
 
 public enum Seed: String, CaseIterable, Sendable {
-    case blue, purple, teal, orange, appleBlue
+    case blue, purple, teal, orange, appleBlue, lime
 
     public var hex: String {
         switch self {
@@ -36,6 +36,10 @@ public enum Seed: String, CaseIterable, Sendable {
         case .teal: return "#12A594"
         case .orange: return "#F76B15"
         case .appleBlue: return "#007AFF"
+        // Electric-lime cockpit signal. The light value is deepened so the
+        // accent survives on a white ground; makePrimaryPalette lifts the
+        // dark value on near-black. Calibrated in the cockpit prototype.
+        case .lime: return "#5A8A00"
         }
     }
 
@@ -149,9 +153,9 @@ public enum Neutral: String, CaseIterable, Sendable {
                             text1: Color(hex: "#1C2024"), text2: Color(hex: "#60646C"), text3: Color(hex: "#80838D"),
                             border: Color(hex: "#CDD0D8"))
         case (.slate, true):
-            return Neutrals(bg: Color(hex: "#111113"), card: Color(hex: "#18191B"), inner: Color(hex: "#212225"),
+            return Neutrals(bg: Color(hex: "#0E0F12"), card: Color(hex: "#1A1C20"), inner: Color(hex: "#242629"),
                             text1: Color(hex: "#EDEEF0"), text2: Color(hex: "#B0B4BA"), text3: Color(hex: "#777B84"),
-                            border: Color(hex: "#363A3F"))
+                            border: Color(hex: "#3C4046"))
         case (.neutral, false):
             return Neutrals(bg: Color(hex: "#FAFAFA"), card: Color(hex: "#FFFFFF"), inner: Color(hex: "#F5F5F5"),
                             text1: Color(hex: "#171717"), text2: Color(hex: "#525252"), text3: Color(hex: "#737373"),
