@@ -15,18 +15,34 @@ public struct MetricCardView: View {
     }
 
     public var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        let isEmpty = payload.items.isEmpty
+        // Collapse the card to a compact height when empty so the "no data"
+        // caption reads as intentional, not a broken tall box (review P1).
+        let emptyHeight: CGFloat? = isEmpty ? AIDashSize.emptyMinHeight : nil
+        return HStack(alignment: isEmpty ? .center : .top, spacing: 12) {
             CardTypeBadge(type: .metric)
             VStack(alignment: .leading, spacing: 8) {
                 content
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .cardChrome(size: size, style: style)
+        .cardChrome(size: size, style: style, minHeight: emptyHeight)
     }
 
     @ViewBuilder
     private var content: some View {
+        if payload.items.isEmpty {
+            // Valid payload, no metrics to plot — render the sanctioned empty
+            // state so the card reads as "nothing to report" rather than a
+            // broken bare-badge box (the failure on sparse real data).
+            CardEmptyState(message: Self.emptyMessage)
+        } else {
+            populatedContent
+        }
+    }
+
+    @ViewBuilder
+    private var populatedContent: some View {
         switch size {
         case .small:
             if let item = payload.items.first {
@@ -41,10 +57,10 @@ public struct MetricCardView: View {
         case .wide:
             LazyVGrid(
                 columns: Array(
-                    repeating: GridItem(.flexible(), spacing: 12),
-                    count: max(1, min(payload.items.count, 4))
+                    repeating: GridItem(.flexible(), spacing: AIDashSpace.s16),
+                    count: AIDashSize.kpiColumnCount(forItems: payload.items.count)
                 ),
-                spacing: 12
+                spacing: AIDashSpace.s16
             ) {
                 ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
                     kpiCell(item)
@@ -71,6 +87,10 @@ public struct MetricCardView: View {
     //      the value→viz band never stretches into a dead zone.
 
     private static let vizBandHeight: CGFloat = 52
+
+    /// Reserved height for the trend-pill row so cells with and without a pill
+    /// keep their viz bands on the same baseline across a KPI grid.
+    private static let pillRowHeight: CGFloat = 20
 
     private func kpiCell(_ item: MetricPayload.Item) -> some View {
         let recipe = AIDashTypography.detail(for: .metric)
@@ -117,20 +137,44 @@ public struct MetricCardView: View {
         }
     }
 
+    /// Value line + a trend-delta pill on its own row beneath it.
+    ///
+    /// The number and unit share a baseline; the trend pill sits on a SEPARATE
+    /// line so a wide delta (e.g. "▼ 293.7M") never competes with the big
+    /// tabular value for horizontal space and wrap-folds inside a narrow KPI
+    /// cell — the failure seen on real 9-item metric grids.
     private func valueRow(
         _ item: MetricPayload.Item,
         recipe: AIDashTypography.DetailRecipe
     ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s4) {
-            Text(formattedValue(item.value))
-                .font(recipe.primary)
-            if let unit = item.unit {
-                Text(unit)
-                    .font(.title3)
-                    .foregroundStyle(recipe.secondaryColor)
+        VStack(alignment: .leading, spacing: AIDashSpace.s4) {
+            HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s4) {
+                Text(formattedValue(item.value))
+                    .font(recipe.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                if let unit = item.unit {
+                    // Unit reads as a proper suffix, not floating-point cruft:
+                    // a monospaced medium glyph on the value's baseline via the
+                    // `metricUnit` token (kept out of the renderer as a literal
+                    // so the P1.1 no-hardcoded-font guard stays satisfied).
+                    Text(unit)
+                        .font(AIDashTypography.metricUnit)
+                        .foregroundStyle(recipe.secondaryColor)
+                        .lineLimit(1)
+                }
             }
-            if let trend = item.trend, let label = trendLabel(item, trend: trend) {
-                StatusPill(label, tone: outcomeTone(item))
+            // Reserve the pill row's height whether or not a pill is drawn, so
+            // every KPI cell in a grid keeps its value → pill → viz band on the
+            // same baselines. Without this, a cell with no trend (e.g. flat
+            // "开 PR") loses a row and its sparkline rides up out of alignment.
+            ZStack(alignment: .leading) {
+                Color.clear.frame(height: Self.pillRowHeight)
+                if let trend = item.trend, let label = trendLabel(item, trend: trend) {
+                    StatusPill(label, tone: outcomeTone(item))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
         }
     }
@@ -149,12 +193,14 @@ public struct MetricCardView: View {
 
     /// Ring color: use good/bad semantics when declared; a plain ratio with no
     /// `higherIsBetter` reads as achievement → success (not primary blue), so
-    /// the ring matches the sparklines' outcome coloring.
+    /// the ring matches the sparklines' outcome coloring. A ratio that DOES
+    /// declare `higherIsBetter` but is flat makes no good/bad claim → neutral
+    /// gray, consistent with the sparkbar neutral (never the seed olive).
     private func ratioColor(_ item: MetricPayload.Item) -> Color {
         switch outcome(item) {
         case .good: return theme.success
         case .bad:  return theme.danger
-        case .neutral: return item.higherIsBetter == nil ? theme.success : theme.primary.primary
+        case .neutral: return item.higherIsBetter == nil ? theme.success : theme.neutrals.text2
         }
     }
 
@@ -173,12 +219,19 @@ public struct MetricCardView: View {
     /// Semantic color for the metric's viz + trend pill. Colored by OUTCOME
     /// (good = success, bad = danger), not by raw direction, using the
     /// payload's `higherIsBetter`. When `higherIsBetter` is absent the metric
-    /// makes no good/bad claim and renders in the neutral seed primary.
+    /// makes no good/bad claim and renders in a neutral gray.
+    ///
+    /// The neutral case MUST NOT reuse the seed primary: with a lime seed its
+    /// olive derivative sits at nearly the same hue as `theme.success`, so a
+    /// grid mixing good/neutral bars reads as all-green and the three-state
+    /// (good / bad / neutral) collapses — worst in dark. Neutral bars use
+    /// `theme.neutrals.text2` so green stays reserved for a genuine good
+    /// outcome, matching the neutral pill's gray.
     private func vizColor(_ item: MetricPayload.Item) -> Color {
         switch outcome(item) {
         case .good:    return theme.success
         case .bad:     return theme.danger
-        case .neutral: return theme.primary.primary
+        case .neutral: return theme.neutrals.text2
         }
     }
 
@@ -232,11 +285,67 @@ public struct MetricCardView: View {
 
     // MARK: - Helpers
 
+    /// Caption for the empty state when a metric payload carries no items.
+    /// Localized per constitution §F.1 so it renders in the reader's language.
+    private static let emptyMessage = String(
+        localized: "metric.empty",
+        defaultValue: "No metric data",
+        bundle: .module,
+        comment: "Shown inside a metric card when its payload decoded successfully but has no items to plot."
+    )
+
+    /// Formats a metric value for a compact instrument readout.
+    ///
+    /// Large magnitudes are abbreviated (K/M/B/T) so a real value like
+    /// `217_836_228` reads as `217.8M` instead of overflowing the tabular
+    /// display digit onto a second line. Small values render as plain
+    /// integers (no trailing `.0`) or with up to one decimal. This is the
+    /// single formatter for both the KPI value and the trend-delta pill, so
+    /// both stay short on real agent data.
     func formattedValue(_ value: Double) -> String {
-        if value == value.rounded() && value < 1_000_000 {
-            return String(format: "%.0f", value)
+        let sign = value < 0 ? "-" : ""
+        let m = abs(value)
+
+        // Below 10K: literal integer (4-digit counts like 1301 stay exact) or
+        // one decimal for fractional values (keep the .0 so 1.04 → "1.0").
+        if m < 10_000 {
+            if m == m.rounded() { return sign + String(format: "%.0f", m) }
+            return sign + String(format: "%.1f", m)
         }
-        return String(format: "%.1f", value)
+
+        // Abbreviate on a 1000× ladder starting at K (1e3). Advance to the
+        // largest unit whose mantissa stays under 1000.
+        let suffixes = ["K", "M", "B", "T"]
+        var magnitude = 1_000.0
+        var index = 0
+        while index < suffixes.count - 1, m / (magnitude * 1_000) >= 1 {
+            magnitude *= 1_000
+            index += 1
+        }
+
+        // Rounding the mantissa to one decimal can tip a boundary value up to
+        // 1000.0 (e.g. 999_999 / 1e3 = 999.999 → "1000.0K"). When it does, and
+        // a larger unit exists, promote so it reads "1M" instead of "1000K".
+        var scaled = m / magnitude
+        if roundedToTenth(scaled) >= 1_000, index < suffixes.count - 1 {
+            magnitude *= 1_000
+            index += 1
+            scaled = m / magnitude
+        }
+        return sign + trimDecimal(scaled) + suffixes[index]
+    }
+
+    /// Rounds to one decimal place (matches what `%.1f` displays), used to
+    /// detect the 999.95→1000.0 boundary before formatting.
+    private func roundedToTenth(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+
+    /// One-decimal string with a trailing `.0` trimmed (e.g. `218.0`→`218`,
+    /// `1.01`→`1.0`), keeping abbreviations tight.
+    private func trimDecimal(_ value: Double) -> String {
+        let s = String(format: "%.1f", value)
+        return s.hasSuffix(".0") ? String(s.dropLast(2)) : s
     }
 }
 
