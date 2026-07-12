@@ -128,6 +128,81 @@ public struct Sparkline: View {
     }
 }
 
+// MARK: - Sparkbars — discrete bar-spark (cockpit density)
+
+/// A compact bar chart for a short time series. Normalizes across the series'
+/// own min..max (with a floor) so the trend SHAPE reads even when values sit
+/// far from zero — a gentle downslope should not render as N near-equal bars.
+/// Mirrors the cockpit prototype's `BarSpark`.
+public struct Sparkbars: View {
+    private let data: [Double]
+    private let color: Color
+    private let barHeight: CGFloat
+    private let baseline: Color?
+
+    public init(data: [Double], color: Color, height: CGFloat = 30, baseline: Color? = nil) {
+        self.data = data
+        self.color = color
+        self.barHeight = height
+        self.baseline = baseline
+    }
+
+    public var body: some View {
+        let lo = data.min() ?? 0
+        let hi = data.max() ?? 1
+        let span = max(hi - lo, 0.0001)
+        VStack(spacing: 0) {
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(Array(data.enumerated()), id: \.offset) { _, v in
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(color.opacity(0.85))
+                        .frame(height: max(2, barHeight * norm(v, lo: lo, span: span)))
+                }
+            }
+            .frame(height: barHeight)
+            if let baseline {
+                Rectangle().fill(baseline).frame(height: 1)
+            }
+        }
+    }
+
+    private func norm(_ v: Double, lo: Double, span: Double) -> CGFloat {
+        0.25 + 0.75 * CGFloat((v - lo) / span)
+    }
+}
+
+// MARK: - SegmentedGauge — ratio as a capacity bar (cockpit instrument)
+
+/// A ratio rendered as a row of lit/unlit segments — reads as an instrument
+/// capacity gauge, denser and more legible at small sizes than a ring.
+/// Mirrors the cockpit prototype's segmented coverage bar.
+public struct SegmentedGauge: View {
+    @Environment(\.theme) private var theme
+    private let value: Double
+    private let segments: Int
+    private let color: Color?
+
+    public init(value: Double, segments: Int = 20, color: Color? = nil) {
+        self.value = value
+        self.segments = segments
+        self.color = color
+    }
+
+    public var body: some View {
+        let clamped = min(1, max(0, value))
+        let filled = Int((Double(segments) * clamped).rounded())
+        let lit = color ?? theme.primary.primary
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(0..<segments, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(i < filled ? lit : theme.neutrals.border)
+                    .frame(height: i < filled ? 22 : 14)
+            }
+        }
+        .frame(height: 30, alignment: .center)
+    }
+}
+
 // MARK: - RingGauge — ratio as an arc
 
 public struct RingGauge: View {
