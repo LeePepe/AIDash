@@ -55,8 +55,28 @@ struct MetricCardViewTests {
         #expect(v.formattedValue(-42_000) == "-42K")
     }
 
-    // MARK: - trendGlyph behavior (arrow glyph mapping)
+    // MARK: - isFlat behavior (flat-series viz gate)
 
+    @Test("isFlat treats constant / near-constant series as flat, varying series as not")
+    func isFlatDetection() {
+        // Real flat agent series — range is 0% of the mean → flat, no chart.
+        #expect(MetricCardView.isFlat([100, 100, 100, 100, 100, 100]))
+        #expect(MetricCardView.isFlat([59, 59, 59, 59, 59, 59]))
+        #expect(MetricCardView.isFlat([41, 41, 41, 41, 41, 41]))
+        // A genuinely rising series (42→250, range ≈ 136% of mean) is NOT flat.
+        #expect(!MetricCardView.isFlat([42, 84, 125, 167, 208, 250]))
+        // A gentle but real downslope (range ≈ 30% of mean) is NOT flat.
+        #expect(!MetricCardView.isFlat([180, 170, 165, 150, 140, 132]))
+        // Sub-2% jitter counts as flat (noise, not signal).
+        #expect(MetricCardView.isFlat([1000, 1001, 1000, 999, 1000]))
+        // 3% range clears the 2% threshold → not flat.
+        #expect(!MetricCardView.isFlat([100, 103, 100, 101]))
+        // Degenerate inputs never crash; empty is flat.
+        #expect(MetricCardView.isFlat([]))
+        #expect(MetricCardView.isFlat([7]))
+    }
+
+    // MARK: - trendGlyph behavior (arrow glyph mapping)
     @Test("trendGlyph maps each trend to the correct arrow glyph")
     func trendGlyphs() {
         let v = view()

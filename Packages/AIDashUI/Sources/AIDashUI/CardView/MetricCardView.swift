@@ -49,8 +49,11 @@ public struct MetricCardView: View {
                 kpiCell(item)
             }
         case .medium:
+            // Up to 3 KPIs so a 2-up medium card reads as a dense mini-table
+            // (e.g. a breakdown) rather than two numbers floating in a wide box
+            // (product register: density is earned, not avoided).
             HStack(alignment: .top, spacing: 16) {
-                ForEach(Array(payload.items.prefix(2).enumerated()), id: \.offset) { _, item in
+                ForEach(Array(payload.items.prefix(3).enumerated()), id: \.offset) { _, item in
                     kpiCell(item)
                 }
             }
@@ -86,14 +89,15 @@ public struct MetricCardView: View {
     //      Spacer absorbs any extra grid-row height at the card BOTTOM, so
     //      the value→viz band never stretches into a dead zone.
 
-    private static let vizBandHeight: CGFloat = 52
+    nonisolated private static let vizBandHeight: CGFloat = 52
 
     /// Reserved height for the trend-pill row so cells with and without a pill
     /// keep their viz bands on the same baseline across a KPI grid.
-    private static let pillRowHeight: CGFloat = 20
+    nonisolated private static let pillRowHeight: CGFloat = 20
 
     private func kpiCell(_ item: MetricPayload.Item) -> some View {
         let recipe = AIDashTypography.detail(for: .metric)
+        let viz = vizKind(item)
         return VStack(alignment: .leading, spacing: AIDashSpace.s12) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.label)
@@ -109,31 +113,90 @@ public struct MetricCardView: View {
                 }
             }
 
-            valueRow(item, recipe: recipe)
+            // Reserve the pill row ONLY for a cell that draws a viz band — that
+            // cell needs its band baseline-aligned with a pilled sibling's band
+            // (which sits below a pill). A chart-less flat cell (no pill, no
+            // band) reserves nothing and stays compact; top-alignment keeps the
+            // grid row tidy without the empty 20pt strip.
+            valueRow(item, recipe: recipe, showsPillRow: showsAnyPill && viz != .none)
 
-            // Value → sparkline stay tight (12pt). Any height the grid row
-            // grants beyond the natural content pools BELOW the viz band, so
-            // the number-to-chart band never voids into a "sparse" dead zone
-            // (north-star §0 病一). The trailing spacer keeps the card bottom-
-            // padded rather than mid-stretched.
-            vizBand(item)
-                .frame(height: Self.vizBandHeight)
+            // Only draw the viz band when it carries signal. A flat or near-
+            // constant series (e.g. real [100,100,…]) renders as a meaningless
+            // uniform strip, so `vizKind` collapses it to `.none` and the band
+            // (and its 52pt) simply isn't emitted — the cell shrinks to content
+            // instead of pooling grid slack into a dead zone (the "too much
+            // whitespace" failure on real agent data).
+            if viz != .none {
+                vizBand(item, kind: viz)
+                    .frame(height: viz.height)
+            }
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The bottom viz band — same height whether it draws a ring, a sparkline,
-    /// or nothing, so cards in a grid stay flush.
+    /// What data-viz a KPI cell should draw, if any.
+    private enum VizKind {
+        case gauge     // a ratio → SegmentedGauge
+        case sparkbars // a series that actually varies
+        case none      // flat / too-short series, or no viz data → draw nothing
+
+        /// Height the band reserves. A gauge reads fine shorter than a spark.
+        var height: CGFloat {
+            switch self {
+            case .gauge:    return 44
+            case .sparkbars: return MetricCardView.vizBandHeight
+            case .none:     return 0
+            }
+        }
+    }
+
+    /// Decide the viz for a KPI: a ratio always gauges; a series only draws
+    /// bars when it carries signal (≥3 points AND not flat); otherwise nothing.
+    private func vizKind(_ item: MetricPayload.Item) -> VizKind {
+        if item.ratio != nil { return .gauge }
+        if let series = item.series, series.count >= 3, !Self.isFlat(series) {
+            return .sparkbars
+        }
+        return .none
+    }
+
+    /// A series is "flat" when its peak-to-trough range is a negligible
+    /// fraction (<2%) of its own average magnitude — e.g. [100,100,…] or
+    /// [59,59,…]. Such a series carries no trend, so a bar-spark of it is
+    /// noise. A genuinely rising series like [42,84,…,250] is NOT flat and
+    /// keeps its chart.
+    static func isFlat(_ series: [Double]) -> Bool {
+        guard let lo = series.min(), let hi = series.max() else { return true }
+        let mean = series.reduce(0, +) / Double(series.count)
+        let denom = max(abs(mean), 1)
+        return (hi - lo) / denom < 0.02
+    }
+
+    /// True when ANY item in the payload draws a trend pill, so the whole grid
+    /// reserves the pill row and cells stay baseline-aligned. When no item has
+    /// a trend (e.g. an all-flat throughput card), the row isn't reserved at
+    /// all — reclaiming ~20pt/cell of dead space.
+    private var showsAnyPill: Bool {
+        payload.items.contains { item in
+            guard let trend = item.trend else { return false }
+            return trendLabel(item, trend: trend) != nil
+        }
+    }
+
+    /// The bottom viz band for the resolved `kind`.
     @ViewBuilder
-    private func vizBand(_ item: MetricPayload.Item) -> some View {
-        if item.ratio != nil {
+    private func vizBand(_ item: MetricPayload.Item, kind: VizKind) -> some View {
+        switch kind {
+        case .gauge:
             ringGauge(item)
                 .frame(maxWidth: .infinity, alignment: .center)
-        } else {
+        case .sparkbars:
             sparkline(item)
                 .frame(maxWidth: .infinity)
+        case .none:
+            EmptyView()
         }
     }
 
@@ -143,9 +206,15 @@ public struct MetricCardView: View {
     /// line so a wide delta (e.g. "▼ 293.7M") never competes with the big
     /// tabular value for horizontal space and wrap-folds inside a narrow KPI
     /// cell — the failure seen on real 9-item metric grids.
+    ///
+    /// `showsPillRow` reserves the pill row's fixed height so cells stay
+    /// baseline-aligned across a grid — but ONLY when some item in the payload
+    /// actually has a pill. An all-flat card (no trends anywhere) passes
+    /// `false` and reclaims the row entirely.
     private func valueRow(
         _ item: MetricPayload.Item,
-        recipe: AIDashTypography.DetailRecipe
+        recipe: AIDashTypography.DetailRecipe,
+        showsPillRow: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: AIDashSpace.s4) {
             HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s4) {
@@ -164,16 +233,17 @@ public struct MetricCardView: View {
                         .lineLimit(1)
                 }
             }
-            // Reserve the pill row's height whether or not a pill is drawn, so
-            // every KPI cell in a grid keeps its value → pill → viz band on the
-            // same baselines. Without this, a cell with no trend (e.g. flat
-            // "开 PR") loses a row and its sparkline rides up out of alignment.
-            ZStack(alignment: .leading) {
-                Color.clear.frame(height: Self.pillRowHeight)
-                if let trend = item.trend, let label = trendLabel(item, trend: trend) {
-                    StatusPill(label, tone: outcomeTone(item))
-                        .lineLimit(1)
-                        .fixedSize()
+            // Reserve the pill row's height only when the grid draws pills at
+            // all, so cells with and without a pill share a baseline — but an
+            // all-flat card drops the row entirely rather than padding dead air.
+            if showsPillRow {
+                ZStack(alignment: .leading) {
+                    Color.clear.frame(height: Self.pillRowHeight)
+                    if let trend = item.trend, let label = trendLabel(item, trend: trend) {
+                        StatusPill(label, tone: outcomeTone(item))
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
                 }
             }
         }
