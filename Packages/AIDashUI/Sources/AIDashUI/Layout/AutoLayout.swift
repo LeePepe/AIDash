@@ -33,14 +33,28 @@ struct TokenGrid: View {
     }
 
     var body: some View {
-        TokenGridLayout(
-            spans: cards.map { AIDashSize.gridSpan($0.size) },
+        // Resolve each card's content-derived effective size ONCE, then feed
+        // the same value to both the grid span and the card render — so a
+        // downgraded card (e.g. a thin digest tagged `hero`) shrinks its column
+        // span AND its geometry coherently. `collapseToList` disables the
+        // downgrade (list forces full-row). Pass-through types (metric etc.)
+        // resolve back to their authored size, so their layout is unchanged.
+        let resolved: [(card: CardModel, size: CardSize)] = cards.map { card in
+            (card, EffectiveCardSize.resolve(
+                type: card.type,
+                authored: card.size,
+                payloadJSON: card.payloadJSON,
+                collapseToList: collapseToList
+            ))
+        }
+        return TokenGridLayout(
+            spans: resolved.map { AIDashSize.gridSpan($0.size) },
             collapseToList: collapseToList,
             columnGap: AIDashSpacing.gridGap,
             rowGap: AIDashSpacing.cardVertical
         ) {
-            ForEach(cards, id: \.id) { card in
-                CardRouter(card: card)
+            ForEach(resolved, id: \.card.id) { entry in
+                CardRouter(card: entry.card, effectiveSize: entry.size)
             }
         }
     }

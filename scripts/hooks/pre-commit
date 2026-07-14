@@ -57,10 +57,27 @@ else
 fi
 
 # lint-staged:只对暂存的 .swift 跑 swiftlint(装了才跑)
+#
+# NOTE: `swiftlint lint <explicit-file>` IGNORES the config's `excluded:`
+# globs — that filtering only applies when SwiftLint discovers files itself.
+# So we must apply the same exclusions here, or test idioms (try! / force
+# unwrap / fileprivate) that `.swiftlint.yml` deliberately exempts under
+# `**/Tests` would be flagged. Read the excluded path segments straight from
+# the config so the two never drift.
 if command -v swiftlint >/dev/null 2>&1; then
     swift_staged="$(echo "$staged" | grep '\.swift$' || true)"
+    # Path segments SwiftLint is configured to exclude (e.g. Tests, .build),
+    # extracted from the `excluded:` block of .swiftlint.yml (strip the
+    # leading **/ and any trailing /** so we match on the segment name).
+    excluded_segs="$(awk '/^excluded:/{f=1;next} /^[^[:space:]-]/{f=0} f && /^[[:space:]]*-/{sub(/#.*/,""); gsub(/[",]/,""); gsub(/\*\*\//,""); gsub(/\/\*\*/,""); gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]+$/,""); print}' "$REPO_ROOT/.swiftlint.yml" || true)"
+    if [ -n "$swift_staged" ] && [ -n "$excluded_segs" ]; then
+        while IFS= read -r seg; do
+            [ -z "$seg" ] && continue
+            swift_staged="$(echo "$swift_staged" | grep -v "/${seg}/" | grep -v "^${seg}/" || true)"
+        done <<< "$excluded_segs"
+    fi
     if [ -n "$swift_staged" ]; then
-        echo "[pre-commit] swiftlint(暂存的 .swift)..."
+        echo "[pre-commit] swiftlint(暂存的 .swift,已排除 tests/.build)..."
         lint_fail=0
         while IFS= read -r f; do
             [ -f "$f" ] || continue

@@ -339,6 +339,37 @@ Container grid columns adapt by viewport: iPhone = 1 col, iPad portrait
 col. The card's own size token tells the grid how many columns to span;
 the grid itself decides total column count.
 
+##### Content-derived effective size (downgrade-only)
+
+The authored `size` is an **upper bound**, not an exact instruction.
+Publishers (a cron, an agent) routinely tag short content with an
+oversized `size` — a one-line digest as `hero`, a single-item to-do as
+`wide` — which renders as a large, half-empty card (full-row span + a
+tall min-height floor with nothing to fill it).
+
+The renderer therefore computes an **effective size** from the payload's
+content richness and renders at the smaller of (authored, justified):
+
+- It only ever **shrinks** — an explicitly-`small` card stays small; a
+  card is never grown past its authored size.
+- It leaves the stored `size` **unchanged** (no schema change; the model
+  is untouched).
+- It applies the **same** effective size to both the grid column span and
+  the card's own geometry (min-height, corner radius, padding), so width
+  and height stay coherent — a downgrade is geometry chosen to fit
+  content, never a semantic change and never a typography change (detail
+  tier still governs type).
+- `metric`, `trending`, and `sectionHeader` are **exempt** (their sizing
+  is deliberate); `list` layout (`collapseToList`) disables it (list
+  forces full-row by contract).
+
+The single source of truth is `EffectiveCardSize.resolve(...)` in
+AIDashCore; `TokenGrid` resolves once and feeds both the span and the
+`CardRouter` render size. Richness thresholds (section count, body
+length, item count) are heuristic and conservative — because the resolver
+only ever shrinks, a wrong guess yields a slightly-too-small (or
+unchanged) card, never a broken layout.
+
 #### Style = Semantic Signal Only (left stripe, no background fill)
 
 `style` does not change card chrome. It adds (or omits) a 3pt left-edge
@@ -757,9 +788,19 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.7.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-07-12
+**Version**: 1.8.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-07-14
 
 <!--
+1.8.0 — MINOR (material addition to §Size = Geometry Only; no principle
+removed or inverted). Adds "Content-derived effective size (downgrade-only)":
+the authored `size` becomes an upper bound and the renderer may shrink it to
+fit thin content, so oversized-but-empty prose cards render compact. Stored
+`size` is untouched (no schema change); existing briefings re-render more
+compactly for thin oversized cards. Single source of truth is
+`EffectiveCardSize.resolve` in AIDashCore, consumed by TokenGrid (span) and
+CardRouter (render). Metric/trending/sectionHeader exempt; list layout
+disabled. Keeps design/north-star.md's size ladder in sync.
+
 1.7.0 — MINOR (material expansion of §Design System & Tokens; no principle
 removed or inverted). Introduces the "Dark Cockpit" theme: the same
 data-driven card system, re-skinned via the theme/token layer to read as a
