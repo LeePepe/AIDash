@@ -201,4 +201,31 @@ struct CardRouterTests {
             #expect(decoded is CardPayloadProtocol)
         }
     }
+
+    // MARK: - Effective size (content-derived downgrade)
+
+    @Test("effectiveSize defaults to the authored size when omitted")
+    func effectiveSizeDefaultsToAuthored() {
+        let card = makeCard(
+            type: .digest, size: .hero,
+            payloadJSON: encode(DigestPayload(title: "T", body: "B"))
+        )
+        let router = CardRouter(card: card)
+        #expect(router.effectiveSize == .hero)
+        #expect(router.card.size == .hero)
+    }
+
+    @Test("effectiveSize is decoupled from the stored authored size")
+    func effectiveSizeDecoupledFromStored() {
+        // A thin digest authored `hero` that the grid resolved down to `small`:
+        // the router renders at `small` while the stored card stays `hero`.
+        let card = makeCard(
+            type: .digest, size: .hero,
+            payloadJSON: encode(DigestPayload(title: "T", body: "one line"))
+        )
+        let router = CardRouter(card: card, effectiveSize: .small)
+        #expect(router.effectiveSize == .small)
+        #expect(router.card.size == .hero) // stored card untouched
+        _ = router.body // materialise — must not crash rendering at the downgraded size
+    }
 }

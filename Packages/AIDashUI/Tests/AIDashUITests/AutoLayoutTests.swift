@@ -76,6 +76,53 @@ struct AutoLayoutTests {
         #expect(!source.contains(".background("),
                 "AutoLayout must not paint its own background")
     }
+
+    // MARK: - Content-derived effective span
+    //
+    // A prose card authored larger than its content justifies (e.g. a one-line
+    // digest tagged `hero`) must span as its DOWNGRADED size, so it no longer
+    // hogs a full row half-empty.
+
+    @Test("a thin hero digest spans as small, packing inline with KPIs")
+    func thinHeroDigestDowngradesSpan() {
+        // Same resolution the grid performs, then pack with metric KPIs.
+        let thinDigest = CardModel(
+            id: "d", type: .digest, size: .hero, style: .neutral,
+            payloadJSON: encode(DigestPayload(title: "T", body: "one line"))
+        )
+        let kpi = { (i: Int) in
+            CardModel(id: "k\(i)", type: .metric, size: .small, style: .neutral,
+                      payloadJSON: encode(MetricPayload(items: [.init(label: "A", value: 1)])))
+        }
+        let cards = [thinDigest, kpi(1), kpi(2), kpi(3)]
+
+        let spans = cards.map { card in
+            AIDashSize.gridSpan(EffectiveCardSize.resolve(
+                type: card.type, authored: card.size, payloadJSON: card.payloadJSON))
+        }
+        // Thin hero digest resolved to small → span 1 (not .max/full-row).
+        #expect(spans[0] == 1)
+
+        // With a 4-column grid, all four now fit on ONE row (1+1+1+1), instead
+        // of the digest forcing its own full-row and stranding the KPIs.
+        let rows = TokenGrid.packRows(Array(cards.enumerated()), totalColumns: 4) { spans[$0.offset] }
+        #expect(rows.count == 1)
+        #expect(rows[0].count == 4)
+    }
+
+    @Test("a rich multi-section wide digest keeps its full-row span")
+    func richDigestKeepsSpan() {
+        let rich = CardModel(
+            id: "d", type: .digest, size: .wide, style: .neutral,
+            payloadJSON: encode(DigestPayload(
+                title: "T", body: String(repeating: "x", count: 500),
+                sections: [.init(heading: "a", paragraphs: ["p"]),
+                           .init(heading: "b", paragraphs: ["p"])]))
+        )
+        let span = AIDashSize.gridSpan(EffectiveCardSize.resolve(
+            type: rich.type, authored: rich.size, payloadJSON: rich.payloadJSON))
+        #expect(span == AIDashSize.gridSpan(.wide)) // unchanged — content justifies wide
+    }
 }
 
 /// Reads a Swift source file from `Sources/AIDashUI/Layout/<filename>` by

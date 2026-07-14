@@ -7,10 +7,16 @@ import DesignKit
 /// On decode failure, renders a generic fallback placeholder (FR-032).
 public struct CardRouter: View {
     let card: CardModel
+    /// The geometry size to render at — normally the content-derived *effective*
+    /// size resolved by the grid (a downgrade of `card.size` when the payload is
+    /// too thin to justify the authored size). Defaults to `card.size` so a
+    /// router used in isolation renders at the authored geometry.
+    let effectiveSize: CardSize
     @Environment(\.theme) private var theme
 
-    public init(card: CardModel) {
+    public init(card: CardModel, effectiveSize: CardSize? = nil) {
         self.card = card
+        self.effectiveSize = effectiveSize ?? card.size
     }
 
     public var body: some View {
@@ -33,19 +39,19 @@ public struct CardRouter: View {
     private func routedView(for payload: any CardPayloadProtocol) -> some View {
         switch payload {
         case let p as MetricPayload:
-            MetricCardView(payload: p, size: card.size, style: card.style)
+            MetricCardView(payload: p, size: effectiveSize, style: card.style)
         case let p as InsightPayload:
-            InsightCardView(payload: p, size: card.size, style: card.style)
+            InsightCardView(payload: p, size: effectiveSize, style: card.style)
         case let p as AgentSummaryPayload:
-            AgentSummaryCardView(payload: p, size: card.size, style: card.style)
+            AgentSummaryCardView(payload: p, size: effectiveSize, style: card.style)
         case let p as TodoListPayload:
-            TodoListCardView(payload: p, size: card.size, style: card.style)
+            TodoListCardView(payload: p, size: effectiveSize, style: card.style)
         case let p as TrendingPayload:
-            TrendingCardView(payload: p, size: card.size, style: card.style)
+            TrendingCardView(payload: p, size: effectiveSize, style: card.style)
         case let p as DigestPayload:
-            DigestCardView(payload: p, size: card.size, style: card.style)
+            DigestCardView(payload: p, size: effectiveSize, style: card.style)
         case let p as SectionHeaderPayload:
-            SectionHeaderCardView(payload: p, size: card.size, style: card.style)
+            SectionHeaderCardView(payload: p, size: effectiveSize, style: card.style)
         default:
             fallbackView
         }
