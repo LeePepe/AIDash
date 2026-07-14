@@ -86,6 +86,50 @@ struct MetricCardViewTests {
         #expect(v.trendGlyph(.flat) == "▬")
     }
 
+    // MARK: - pillLabel: a trend pill is never suppressed by a missing chart
+    //
+    // Regression: the flat-series viz gate must NOT drop a trend pill. A KPI
+    // with a flat series (draws no chart) but a real period-over-period trend
+    // still has to show its pill — pill rendering is decoupled from the viz
+    // band's presence.
+
+    @Test("pillLabel keeps the pill for a flat series that still carries a trend")
+    func pillSurvivesFlatSeries() {
+        let v = view()
+        // A series flat by MAGNITUDE (isFlat true → no chart) but whose last
+        // step still moved: [1000,1000,1000,1001]. isFlat looks at the whole
+        // range vs mean (<2% → flat, no chart), while trendLabel looks at the
+        // last delta (1 → non-zero → a pill). The pill must survive the missing
+        // chart — this is the regression the flat-gate could have introduced.
+        let flatMagnitudeMovedLast = MetricPayload.Item(
+            label: "Tokens", value: 1001, trend: .up,
+            series: [1000, 1000, 1000, 1001], higherIsBetter: true
+        )
+        #expect(MetricCardView.isFlat([1000, 1000, 1000, 1001])) // <2% range → no chart
+        #expect(v.pillLabel(for: flatMagnitudeMovedLast) != nil) // …but pill stays
+
+        // A trend with NO series at all → bare directional glyph pill, and
+        // certainly no chart. Must still produce a pill.
+        let trendNoSeries = MetricPayload.Item(
+            label: "PRs", value: 12, trend: .up, higherIsBetter: true
+        )
+        #expect(v.pillLabel(for: trendNoSeries) != nil)
+    }
+
+    @Test("pillLabel returns nil only when there is no trend signal")
+    func pillNilWithoutTrend() {
+        let v = view()
+        // No trend at all → no pill.
+        let noTrend = MetricPayload.Item(label: "Coverage", value: 87)
+        #expect(v.pillLabel(for: noTrend) == nil)
+        // Trend present but the series' last delta is zero → trendLabel nil →
+        // no pill (a lone arrow with no movement carries no information).
+        let flatDelta = MetricPayload.Item(
+            label: "Open", value: 3, trend: .up, series: [3, 3]
+        )
+        #expect(v.pillLabel(for: flatDelta) == nil)
+    }
+
     // MARK: - outcomeTone behavior (semantic good/bad coloring)
     //
     // Trend is METRIC CONTENT, rendered as a content-level StatusPill per
