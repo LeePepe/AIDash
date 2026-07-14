@@ -55,8 +55,28 @@ struct MetricCardViewTests {
         #expect(v.formattedValue(-42_000) == "-42K")
     }
 
-    // MARK: - trendGlyph behavior (arrow glyph mapping)
+    // MARK: - isFlat behavior (flat-series viz gate)
 
+    @Test("isFlat treats constant / near-constant series as flat, varying series as not")
+    func isFlatDetection() {
+        // Real flat agent series — range is 0% of the mean → flat, no chart.
+        #expect(MetricCardView.isFlat([100, 100, 100, 100, 100, 100]))
+        #expect(MetricCardView.isFlat([59, 59, 59, 59, 59, 59]))
+        #expect(MetricCardView.isFlat([41, 41, 41, 41, 41, 41]))
+        // A genuinely rising series (42→250, range ≈ 136% of mean) is NOT flat.
+        #expect(!MetricCardView.isFlat([42, 84, 125, 167, 208, 250]))
+        // A gentle but real downslope (range ≈ 30% of mean) is NOT flat.
+        #expect(!MetricCardView.isFlat([180, 170, 165, 150, 140, 132]))
+        // Sub-2% jitter counts as flat (noise, not signal).
+        #expect(MetricCardView.isFlat([1000, 1001, 1000, 999, 1000]))
+        // 3% range clears the 2% threshold → not flat.
+        #expect(!MetricCardView.isFlat([100, 103, 100, 101]))
+        // Degenerate inputs never crash; empty is flat.
+        #expect(MetricCardView.isFlat([]))
+        #expect(MetricCardView.isFlat([7]))
+    }
+
+    // MARK: - trendGlyph behavior (arrow glyph mapping)
     @Test("trendGlyph maps each trend to the correct arrow glyph")
     func trendGlyphs() {
         let v = view()
@@ -64,6 +84,50 @@ struct MetricCardViewTests {
         #expect(v.trendGlyph(.up) == "▲")
         #expect(v.trendGlyph(.down) == "▼")
         #expect(v.trendGlyph(.flat) == "▬")
+    }
+
+    // MARK: - pillLabel: a trend pill is never suppressed by a missing chart
+    //
+    // Regression: the flat-series viz gate must NOT drop a trend pill. A KPI
+    // with a flat series (draws no chart) but a real period-over-period trend
+    // still has to show its pill — pill rendering is decoupled from the viz
+    // band's presence.
+
+    @Test("pillLabel keeps the pill for a flat series that still carries a trend")
+    func pillSurvivesFlatSeries() {
+        let v = view()
+        // A series flat by MAGNITUDE (isFlat true → no chart) but whose last
+        // step still moved: [1000,1000,1000,1001]. isFlat looks at the whole
+        // range vs mean (<2% → flat, no chart), while trendLabel looks at the
+        // last delta (1 → non-zero → a pill). The pill must survive the missing
+        // chart — this is the regression the flat-gate could have introduced.
+        let flatMagnitudeMovedLast = MetricPayload.Item(
+            label: "Tokens", value: 1001, trend: .up,
+            series: [1000, 1000, 1000, 1001], higherIsBetter: true
+        )
+        #expect(MetricCardView.isFlat([1000, 1000, 1000, 1001])) // <2% range → no chart
+        #expect(v.pillLabel(for: flatMagnitudeMovedLast) != nil) // …but pill stays
+
+        // A trend with NO series at all → bare directional glyph pill, and
+        // certainly no chart. Must still produce a pill.
+        let trendNoSeries = MetricPayload.Item(
+            label: "PRs", value: 12, trend: .up, higherIsBetter: true
+        )
+        #expect(v.pillLabel(for: trendNoSeries) != nil)
+    }
+
+    @Test("pillLabel returns nil only when there is no trend signal")
+    func pillNilWithoutTrend() {
+        let v = view()
+        // No trend at all → no pill.
+        let noTrend = MetricPayload.Item(label: "Coverage", value: 87)
+        #expect(v.pillLabel(for: noTrend) == nil)
+        // Trend present but the series' last delta is zero → trendLabel nil →
+        // no pill (a lone arrow with no movement carries no information).
+        let flatDelta = MetricPayload.Item(
+            label: "Open", value: 3, trend: .up, series: [3, 3]
+        )
+        #expect(v.pillLabel(for: flatDelta) == nil)
     }
 
     // MARK: - outcomeTone behavior (semantic good/bad coloring)
