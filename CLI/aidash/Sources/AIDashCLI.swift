@@ -103,20 +103,7 @@ struct ContainerCommand: AsyncParsableCommand {
 }
 
 // ContainerPutCommand: real implementation in Commands/ContainerPutCommand.swift
-
-struct ContainerDeleteCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "delete",
-        abstract: "Delete a container and its child cards."
-    )
-
-    func run() async throws {
-        throw XPCError(
-            code: "internal.not_implemented",
-            message: "container delete is not yet implemented (T175)"
-        )
-    }
-}
+// ContainerDeleteCommand: real implementation in Commands/ContainerDeleteCommand.swift (T175)
 
 // MARK: - Card
 
@@ -132,20 +119,7 @@ struct CardCommand: AsyncParsableCommand {
 }
 
 // `CardPutCommand` is defined in `Commands/CardPutCommand.swift` (T054).
-
-struct CardDeleteCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "delete",
-        abstract: "Delete a card."
-    )
-
-    func run() async throws {
-        throw XPCError(
-            code: "internal.not_implemented",
-            message: "card delete is not yet implemented (T176)"
-        )
-    }
-}
+// `CardDeleteCommand` is defined in `Commands/CardDeleteCommand.swift` (T176).
 
 // MARK: - Events
 
