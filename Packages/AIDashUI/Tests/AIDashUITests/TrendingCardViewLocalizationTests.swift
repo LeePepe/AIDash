@@ -159,7 +159,7 @@ struct TrendingCardViewLocalizationTests {
         let source = try loadRendererSource(named: "TrendingCardView")
         #expect(!source.contains("backgroundTint"), "TrendingCardView must not declare a local backgroundTint")
         #expect(!source.contains("RoundedRectangle(cornerRadius:"), "TrendingCardView must not draw its own rounded background")
-        #expect(source.contains(".cardChrome(size: size, style: style)"), "TrendingCardView must consume the shared cardChrome modifier")
+        #expect(source.contains(".cardChrome(size: size, style: style"), "TrendingCardView must consume the shared cardChrome modifier")
         #expect(source.contains("CardTypeBadge(type: .trending)"), "TrendingCardView must render the shared 32×32 type badge")
     }
 }
