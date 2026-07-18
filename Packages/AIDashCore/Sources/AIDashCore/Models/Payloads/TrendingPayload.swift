@@ -3,11 +3,21 @@ public struct TrendingPayload: CardPayloadProtocol {
         public let title: String
         public let url: String
         public let score: Double?
+        /// Optional change in `score` since the previous snapshot (e.g. daily
+        /// star delta). Rendered as a ▲/▼ pill; absent (nil) on a first
+        /// snapshot. Optional for forward-compat: older records decode as nil.
+        public let delta: Double?
+        /// Optional short classification tag (e.g. "AI-agent", "设计"). Rendered
+        /// as a small tag beside the item. Optional for forward-compat.
+        public let category: String?
 
-        public init(title: String, url: String, score: Double? = nil) {
+        public init(title: String, url: String, score: Double? = nil,
+                    delta: Double? = nil, category: String? = nil) {
             self.title = title
             self.url = url
             self.score = score
+            self.delta = delta
+            self.category = category
         }
     }
 
