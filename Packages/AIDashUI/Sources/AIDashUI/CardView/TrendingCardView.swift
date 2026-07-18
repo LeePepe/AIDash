@@ -21,7 +21,16 @@ public struct TrendingCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .cardChrome(size: size, style: style)
+        .cardChrome(size: size, style: style, minHeight: chromeMinHeight)
+    }
+
+    // The hero radar is an adaptive grid whose height depends entirely on how
+    // many rows the columns wrap into — a fixed 280pt hero strut leaves a dead
+    // band under a short tier (e.g. a single-row "拓展视野"). Let the card hug
+    // its content instead by flooring at the low empty-height. Other sizes pass
+    // nil so cardChrome applies the standard per-size floor.
+    private var chromeMinHeight: CGFloat? {
+        size == .hero ? AIDashSize.emptyMinHeight : nil
     }
 
     // MARK: - Size-driven content selection (geometry/density only)
@@ -82,16 +91,33 @@ public struct TrendingCardView: View {
         }
     }
 
-    // MARK: - Hero: topic + top-10, each a scannable recommendation row
+    // MARK: - Hero: topic + an adaptive multi-column grid of repo cells.
+    //
+    // On a wide dashboard a single-column list strands a huge empty middle
+    // column (the row content hugs the left, the pills hug the right). An
+    // adaptive grid instead packs each repo into a self-contained cell and
+    // reflows to as many columns as the width affords (≈2 at 1000pt, 3 at
+    // 2000pt), collapsing to one column when narrow. Cells are separated by
+    // spacing only — no per-cell background (chrome lives in cardChrome).
 
     @ViewBuilder
     private var heroContent: some View {
         topicLabel
-        let top10 = Array(payload.items.prefix(10))
-        ForEach(Array(top10.enumerated()), id: \.offset) { index, item in
-            TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
+        LazyVGrid(columns: Self.gridColumns, alignment: .leading,
+                  spacing: AIDashSpace.s24) {
+            let top10 = Array(payload.items.prefix(10))
+            ForEach(Array(top10.enumerated()), id: \.offset) { index, item in
+                TrendingRepoCell(item: item, rank: index + 1)
+            }
         }
     }
+
+    // Reflow by available width: each column is ≥ 360pt, so the grid fits more
+    // columns as the card widens and drops to one when it's narrow.
+    private static let gridColumns = [
+        GridItem(.adaptive(minimum: 360, maximum: 620),
+                 spacing: AIDashSpace.s24, alignment: .top)
+    ]
 
     @ViewBuilder
     private var topicLabel: some View {
@@ -251,7 +277,112 @@ private struct TrendingItemRow: View {
     private static let gutter: CGFloat = rankWidth + 8
 }
 
-// MARK: - Previews
+// MARK: - TrendingRepoCell
+//
+// The hero grid cell: one repo as a self-contained recommendation block that
+// tiles into columns. Unlike TrendingItemRow (a full-width line for compact
+// sizes), this stacks vertically so it stays legible at ~360–620pt wide:
+//   1. rank · repo Link · Δ pill        (title line; Δ sits with the name)
+//   2. the reason ("why it's worth a look")
+//   3. star count · category tag         (footer, de-emphasized)
+// Separated from siblings by grid spacing only — no per-cell background.
+
+private struct TrendingRepoCell: View {
+    @Environment(\.theme) private var theme
+    let item: TrendingPayload.Item
+    let rank: Int
+
+    private var url: URL? { URL(string: item.url) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AIDashSpace.s4) {
+            titleLine
+            if let reason = item.reason, !reason.isEmpty {
+                Text(reason)
+                    .font(TypeScale.meta)
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, Self.gutter)
+            }
+            footer
+                .padding(.leading, Self.gutter)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    // Line 1: rank · repo link · Δ pill (the change is part of the headline).
+    private var titleLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s8) {
+            Text("\(rank)")
+                .font(TrendingCardView.recipe.primary)
+                .foregroundStyle(theme.neutrals.text3)
+                .frame(width: Self.rankWidth, alignment: .trailing)
+            repoLink
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let deltaLabel = deltaPillLabel {
+                StatusPill(deltaLabel.text, tone: deltaLabel.tone)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // Footer: star count (neutral pill) + category tag. Both optional.
+    private var footer: some View {
+        HStack(spacing: AIDashSpace.s8) {
+            if let score = item.score {
+                StatusPill(formattedScore(score), tone: .neutral)
+            }
+            if let category = item.category, !category.isEmpty {
+                StatusPill(category, tone: .neutral)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private var repoLink: some View {
+        if let url {
+            Link(destination: url) {
+                Text(item.title)
+                    .font(TrendingCardView.recipe.secondary)
+                    .foregroundStyle(theme.primary.primary)
+            }
+            .buttonStyle(.plain)
+        } else {
+            Text(item.title)
+                .font(TrendingCardView.recipe.secondary)
+                .foregroundStyle(TrendingCardView.recipe.secondaryColor)
+        }
+    }
+
+    private var deltaPillLabel: (text: String, tone: PillTone)? {
+        guard let delta = item.delta, delta != 0 else { return nil }
+        let glyph = delta > 0 ? "▲" : "▼"
+        return ("\(glyph) \(formattedScore(abs(delta)))",
+                delta > 0 ? .success : .danger)
+    }
+
+    private var accessibilityLabel: String {
+        var parts = ["\(rank). \(item.title)"]
+        if let score = item.score { parts.append("\(formattedScore(score)) stars") }
+        if let d = item.delta, d != 0 { parts.append("\(d > 0 ? "up" : "down") \(formattedScore(abs(d)))") }
+        if let c = item.category, !c.isEmpty { parts.append(c) }
+        if let r = item.reason, !r.isEmpty { parts.append(r) }
+        return parts.joined(separator: ", ")
+    }
+
+    private func formattedScore(_ score: Double) -> String {
+        if score >= 1000 { return String(format: "%.1fk", score / 1000) }
+        return String(format: "%.0f", score)
+    }
+
+    private static let rankWidth: CGFloat = 24
+    private static let gutter: CGFloat = rankWidth + AIDashSpace.s8
+}
 
 #Preview("Small — Neutral") {
     TrendingCardView(
