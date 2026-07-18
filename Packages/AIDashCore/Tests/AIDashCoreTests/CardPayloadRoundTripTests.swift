@@ -200,6 +200,35 @@ struct CardPayloadRoundTripTests {
         #expect(dispatched is TrendingPayload)
     }
 
+    @Test func trendingPayloadRoundTripWithDeltaAndCategory() throws {
+        let payload = TrendingPayload(
+            topic: "GitHub 工具雷达",
+            items: [
+                TrendingPayload.Item(title: "owner/repo", url: "https://github.com/owner/repo",
+                                     score: 93459, delta: 412, category: "AI-agent"),
+                TrendingPayload.Item(title: "owner/down", url: "https://github.com/owner/down",
+                                     score: 100, delta: -5, category: "工具"),
+            ]
+        )
+        let decoded = try roundTrip(payload)
+        #expect(decoded.items[0].delta == 412)
+        #expect(decoded.items[0].category == "AI-agent")
+        #expect(decoded.items[1].delta == -5)
+        #expect(decoded.items[1].category == "工具")
+    }
+
+    @Test func trendingPayloadDecodesLegacyJSONWithoutNewFields() throws {
+        // Forward-compat: a record produced before delta/category existed must
+        // still decode, with both new fields resolving to nil.
+        let legacy = Data("""
+        {"topic":"t","items":[{"title":"a","url":"https://x","score":10}]}
+        """.utf8)
+        let decoded = try decoder.decode(TrendingPayload.self, from: legacy)
+        #expect(decoded.items[0].delta == nil)
+        #expect(decoded.items[0].category == nil)
+        #expect(decoded.items[0].score == 10)
+    }
+
     // MARK: DigestPayload
 
     @Test func digestPayloadRoundTrip() throws {

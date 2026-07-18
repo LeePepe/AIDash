@@ -538,7 +538,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"priority":{"type":"string","enum":["low","medium","high"]},"due":{"type":"string","format":"date-time"},"ref":{"type":"string"}}}}}}
         """
         schemas[CardType.trending.rawValue] = """
-        {"type":"object","required":["topic","items"],"properties":{"topic":{"type":"string","minLength":1},"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title","url"],"properties":{"title":{"type":"string"},"url":{"type":"string"},"score":{"type":"number"}}}}}}
+        {"type":"object","required":["topic","items"],"properties":{"topic":{"type":"string","minLength":1},"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title","url"],"properties":{"title":{"type":"string"},"url":{"type":"string"},"score":{"type":"number"},"delta":{"type":"number"},"category":{"type":"string"}}}}}}
         """
         schemas[CardType.digest.rawValue] = """
         {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"sections":{"type":"array","items":{"type":"object","required":["heading","paragraphs"],"properties":{"heading":{"type":"string"},"paragraphs":{"type":"array","items":{"type":"string"}}}}}}}
