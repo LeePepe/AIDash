@@ -130,6 +130,26 @@ struct SnapshotRenderTests {
             width: 1000,
             to: "render-sparse"
         )
+
+        // Variant: GitHub 工具雷达 — the redesigned trending card. Each row is a
+        // recommendation block: clickable repo link, star + Δ pill, a one-line
+        // reason, and a category tag. No score sparkline. Renders the real radar
+        // container so the redesign can be inspected directly.
+        // swiftlint:disable line_length
+        let radar = container("GitHub 工具雷达", .auto, [
+            card(.trending, .hero, .accent, #"{"topic":"值得现在看 · 多关联 Financial","items":[{"title":"VoltAgent/awesome-design-md","url":"https://github.com/VoltAgent/awesome-design-md","score":102743,"delta":12,"category":"设计系统/AI编码","reason":"DESIGN.md 让 AI agents 生成匹配 UI，直接加速 AIDashUI 的设计系统建设"},{"title":"TauricResearch/TradingAgents","url":"https://github.com/TauricResearch/TradingAgents","score":93459,"delta":412,"category":"AI-agent/交易投资","reason":"多 Agent LLM 金融交易框架，与 Financial 项目直接相关，可用于交易策略开发"},{"title":"ZhuLinsen/daily_stock_analysis","url":"https://github.com/ZhuLinsen/daily_stock_analysis","score":57689,"delta":-8,"category":"AI-agent/交易投资","reason":"LLM 驱动的量化交易系统，与 Financial 的交易分析需求高度契合"},{"title":"HKUDS/OpenHarness","url":"https://github.com/HKUDS/OpenHarness","score":14887,"category":"AI-agent 框架","reason":"开源 Agent 框架，与 AIDash 的智能助手系统直接相关，可参考其架构设计"},{"title":"oh-my-mermaid/oh-my-mermaid","url":"https://github.com/oh-my-mermaid/oh-my-mermaid","score":1793,"delta":3,"category":"开发工具","reason":"用 Claude Code 自动生成架构图，适合理解复杂系统"}]}"#),
+        ])
+        // swiftlint:enable line_length
+        render(
+            VStack(alignment: .leading, spacing: 16) {
+                Text("2026-07-17").font(.largeTitle.bold())
+                ContainerView(container: radar)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading),
+            width: 1000,
+            to: "render-radar"
+        )
     }
 
     // MARK: - In-memory model builders

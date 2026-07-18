@@ -32,37 +32,51 @@ struct TrendingCardViewLocalizationTests {
         #expect(many.contains("42"))
     }
 
-    @Test("sparkline accessibility label is non-empty and stable")
-    func sparklineAccessibilityLabelIsStable() {
-        let label = TrendingCardView.sparklineAccessibilityLabel
+    // MARK: - Radar redesign (clickable link + reason + delta)
 
-        #expect(!label.isEmpty)
-        // Same call site must return the same value — these are catalog-backed.
-        #expect(TrendingCardView.sparklineAccessibilityLabel == label)
+    @Test("hero body materializes for radar items with reason + category + delta")
+    func heroBodyWithRadarFields() {
+        let payload = TrendingPayload(
+            topic: "值得现在看",
+            items: [
+                .init(title: "owner/up", url: "https://github.com/owner/up",
+                      score: 93459, delta: 412, category: "AI-agent",
+                      reason: "多 Agent LLM 框架，与 Financial 项目直接相关"),
+                .init(title: "owner/down", url: "https://github.com/owner/down",
+                      score: 100, delta: -3, category: "工具",
+                      reason: "白板工具，拓展工具库"),
+                .init(title: "owner/day1", url: "https://github.com/owner/day1",
+                      score: 50, delta: nil, category: "学习", reason: nil),
+            ]
+        )
+        for style in CardStyle.allCases {
+            let view = TrendingCardView(payload: payload, size: .hero, style: style)
+            _ = view.body
+        }
     }
 
-    @Test("sparkline empty-value string is non-empty")
-    func sparklineEmptyValueIsNonEmpty() {
-        let value = TrendingCardView.sparklineEmptyValue
-
-        #expect(!value.isEmpty)
+    @Test("row body materializes when url is unparseable (link falls back to text)")
+    func rowFallsBackWhenURLInvalid() {
+        let payload = TrendingPayload(
+            topic: "t",
+            items: [.init(title: "no url", url: "", score: 1, reason: "still renders")]
+        )
+        let view = TrendingCardView(payload: payload, size: .hero, style: .neutral)
+        _ = view.body
     }
 
-    @Test("sparkline range string includes min and max")
-    func sparklineRangeIncludesBothBounds() {
-        let value = TrendingCardView.sparklineRangeValue(min: 12, max: 487)
-
-        #expect(!value.isEmpty)
-        #expect(value.contains("12"))
-        #expect(value.contains("487"))
+    @Test("renderer opens the item URL via a Link (clickable repo name)")
+    func sourceUsesLinkForRepo() throws {
+        let source = try loadRendererSource(named: "TrendingCardView")
+        #expect(source.contains("Link(destination:"),
+                "repo name must be a Link so it opens GitHub")
     }
 
-    @Test("sparkline range string varies with bounds")
-    func sparklineRangeVariesWithBounds() {
-        let a = TrendingCardView.sparklineRangeValue(min: 1, max: 10)
-        let b = TrendingCardView.sparklineRangeValue(min: 50, max: 60)
-
-        #expect(a != b)
+    @Test("renderer no longer draws the zero-information score sparkline")
+    func sourceHasNoSparkline() throws {
+        let source = try loadRendererSource(named: "TrendingCardView")
+        #expect(!source.contains("ScoreSparkline"),
+                "the monotonic score-distribution sparkline was removed (list is already sorted)")
     }
 
     @Test("hero body materializes for payloads with and without scores")
