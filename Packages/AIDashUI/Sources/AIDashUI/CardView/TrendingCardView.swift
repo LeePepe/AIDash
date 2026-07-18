@@ -192,7 +192,17 @@ private struct TrendingItemRow: View {
                 .font(TrendingCardView.recipe.secondary)
                 .foregroundStyle(TrendingCardView.recipe.secondaryColor)
                 .lineLimit(titleLineLimit)
+            if let category = item.category, !category.isEmpty {
+                // Classification tag — a neutral content pill beside the title.
+                StatusPill(category, tone: .neutral)
+            }
             Spacer(minLength: 0)
+            if let deltaLabel = deltaPillLabel {
+                // Score change since the previous snapshot (e.g. daily star
+                // delta): ▲/▼ + magnitude. Higher score is good, so up→success,
+                // down→danger — matching the metric cockpit's trend-pill tone.
+                StatusPill(deltaLabel.text, tone: deltaLabel.tone)
+            }
             if showScore, let score = item.score {
                 // Score as a neutral content-level pill (§Content-Level Status
                 // Pills) — a numeric badge, driven by the payload's `score`.
@@ -200,6 +210,16 @@ private struct TrendingItemRow: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// The delta pill's text + tone, or nil when there's no delta signal.
+    /// A zero delta carries no information (a lone arrow) so it's hidden; the
+    /// day-1 case (delta == nil) likewise renders nothing.
+    private var deltaPillLabel: (text: String, tone: PillTone)? {
+        guard let delta = item.delta, delta != 0 else { return nil }
+        let glyph = delta > 0 ? "▲" : "▼"
+        return ("\(glyph) \(formattedScore(abs(delta)))",
+                delta > 0 ? .success : .danger)
     }
 
     // Per constitution §E.2: hero and wide must wrap (no truncation).
@@ -326,6 +346,23 @@ private struct ScoreSparkline: View {
         ),
         size: .hero,
         style: .warning
+    )
+    .padding()
+}
+
+#Preview("Hero — Radar (delta + category)") {
+    TrendingCardView(
+        payload: TrendingPayload(
+            topic: "值得现在看 · 多关联 Financial",
+            items: [
+                .init(title: "TauricResearch/TradingAgents", url: "https://github.com/TauricResearch/TradingAgents", score: 93459, delta: 412, category: "AI-agent"),
+                .init(title: "VoltAgent/awesome-design-md", url: "https://github.com/VoltAgent/awesome-design-md", score: 102743, delta: 12, category: "设计"),
+                .init(title: "HKUDS/OpenHarness", url: "https://github.com/HKUDS/OpenHarness", score: 14887, delta: -3, category: "框架"),
+                .init(title: "oh-my-mermaid/oh-my-mermaid", url: "https://github.com/oh-my-mermaid/oh-my-mermaid", score: 1793, delta: nil, category: "工具"),
+            ]
+        ),
+        size: .hero,
+        style: .accent
     )
     .padding()
 }
