@@ -10,14 +10,19 @@ public struct TrendingPayload: CardPayloadProtocol {
         /// Optional short classification tag (e.g. "AI-agent", "设计"). Rendered
         /// as a small tag beside the item. Optional for forward-compat.
         public let category: String?
+        /// Optional one-line rationale ("why this is worth a look"). Rendered as
+        /// a secondary line under the title. Optional for forward-compat.
+        public let reason: String?
 
         public init(title: String, url: String, score: Double? = nil,
-                    delta: Double? = nil, category: String? = nil) {
+                    delta: Double? = nil, category: String? = nil,
+                    reason: String? = nil) {
             self.title = title
             self.url = url
             self.score = score
             self.delta = delta
             self.category = category
+            self.reason = reason
         }
     }
 

@@ -80,6 +80,32 @@ the process** has the corresponding `MachServices` entry. Therefore:
   executable path. Use unattended uptime via `RunAtLoad` plus
   on-demand re-spawn from the mach port, not via `KeepAlive`.
 
+### LaunchAgent registration: plain `launchctl`, NOT `SMAppService` (2026-07-19)
+
+The agent is registered by writing a plist to `~/Library/LaunchAgents/` and
+running `launchctl bootstrap` — **not** `SMAppService.agent(...)`. Root cause of
+the switch: `SMAppService` attaches a Lightweight Code Requirement / Launch
+Constraint (LWCR) to the job. A DerivedData Debug build is re-signed with a fresh
+cdhash on every build, so the cached LWCR stops matching and macOS SIGKILLs
+launchd's on-demand spawn (`CODESIGNING` / "Launch Constraint Violation", exit 78
+`EX_CONFIG`), wedging the mach port — the recurring "XPC dead until I open Xcode"
+failure. A plain `launchctl`-bootstrapped job carries **no LWCR** and spawns the
+per-build binary fine. The installer (`LaunchdAgentInstaller`) rewrites the plist
++ re-bootstraps whenever the plist's `Program` differs from the running build, so
+a rebuild self-heals. `scripts/dev/reset-xpc.sh` clears a wedged job.
+
+### Agent-mode boot (`AIDASH_XPC_AGENT=1`)
+
+The launchd plist sets `EnvironmentVariables={AIDASH_XPC_AGENT:1}`. When the app
+process sees it (`RunMode.decide`), it takes the **headless agent path**: force
+local-only SwiftData (the CloudKit mirror `os_crash`/SIGTRAPs in a windowless
+launchd-agent context), skip the menubar + window, and start the XPC listener.
+A normal GUI/Xcode launch lacks the var and behaves as before. An XCTest host
+(`XCTestConfigurationFilePath` present) is a third mode that skips the launchd
+install and the machService-listener resume (both have side effects / trap inside
+a test process). The listener is no longer gated on CloudKit `.ready` — it always
+gets a container (local-only fallback), so a CloudKit hiccup never leaves XPC dead.
+
 ---
 
 ## Obj-C protocol
