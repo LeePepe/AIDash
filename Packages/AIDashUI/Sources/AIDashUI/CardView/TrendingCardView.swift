@@ -6,7 +6,6 @@ public struct TrendingCardView: View {
     let payload: TrendingPayload
     let size: CardSize
     let style: CardStyle
-    @Environment(\.theme) private var theme
 
     public init(payload: TrendingPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -22,7 +21,16 @@ public struct TrendingCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .cardChrome(size: size, style: style)
+        .cardChrome(size: size, style: style, minHeight: chromeMinHeight)
+    }
+
+    // The hero radar is an adaptive grid whose height depends entirely on how
+    // many rows the columns wrap into — a fixed 280pt hero strut leaves a dead
+    // band under a short tier (e.g. a single-row "拓展视野"). Let the card hug
+    // its content instead by flooring at the low empty-height. Other sizes pass
+    // nil so cardChrome applies the standard per-size floor.
+    private var chromeMinHeight: CGFloat? {
+        size == .hero ? AIDashSize.emptyMinHeight : nil
     }
 
     // MARK: - Size-driven content selection (geometry/density only)
@@ -83,38 +91,39 @@ public struct TrendingCardView: View {
         }
     }
 
-    // MARK: - Hero: topic + top-10 with titles + scores + sparkline
+    // MARK: - Hero: topic + an adaptive multi-column grid of repo cells.
+    //
+    // On a wide dashboard a single-column list strands a huge empty middle
+    // column (the row content hugs the left, the pills hug the right). An
+    // adaptive grid instead packs each repo into a self-contained cell and
+    // reflows to as many columns as the width affords (≈2 at 1000pt, 3 at
+    // 2000pt), collapsing to one column when narrow. Cells are separated by
+    // spacing only — no per-cell background (chrome lives in cardChrome).
 
     @ViewBuilder
     private var heroContent: some View {
         topicLabel
-        let top10 = Array(payload.items.prefix(10))
-        let scoredCount = top10.compactMap(\.score).count
-        if scoredCount >= 2 {
-            ScoreSparkline(items: top10, tint: sparklineColor)
-                .frame(height: 40)
-                .accessibilityElement()
-                .accessibilityLabel(Self.sparklineAccessibilityLabel)
-                .accessibilityValue(sparklineAccessibilityValue(for: top10))
-        }
-        ForEach(Array(top10.enumerated()), id: \.offset) { index, item in
-            TrendingItemRow(item: item, rank: index + 1, showScore: true, size: size)
+        LazyVGrid(columns: Self.gridColumns, alignment: .leading,
+                  spacing: AIDashSpace.s24) {
+            let top10 = Array(payload.items.prefix(10))
+            ForEach(Array(top10.enumerated()), id: \.offset) { index, item in
+                TrendingRepoCell(item: item, rank: index + 1)
+            }
         }
     }
+
+    // Reflow by available width: each column is ≥ 360pt, so the grid fits more
+    // columns as the card widens and drops to one when it's narrow.
+    private static let gridColumns = [
+        GridItem(.adaptive(minimum: 360, maximum: 620),
+                 spacing: AIDashSpace.s24, alignment: .top)
+    ]
 
     @ViewBuilder
     private var topicLabel: some View {
         Text(payload.topic)
             .font(Self.recipe.secondary)
             .foregroundStyle(.secondary)
-    }
-
-    private func sparklineAccessibilityValue(for items: [TrendingPayload.Item]) -> String {
-        let scores = items.compactMap(\.score)
-        guard let max = scores.max(), let min = scores.min() else {
-            return Self.sparklineEmptyValue
-        }
-        return Self.sparklineRangeValue(min: Int(min), max: Int(max))
     }
 
     // MARK: - Localized strings
@@ -131,85 +140,100 @@ public struct TrendingCardView: View {
         )
     }
 
-    static let sparklineAccessibilityLabel = String(
-        localized: "trending.sparkline.accessibility_label",
-        defaultValue: "Score distribution sparkline",
-        bundle: .module,
-        comment: "VoiceOver label for the Hero Trending card's score-distribution sparkline element."
-    )
-
-    static let sparklineEmptyValue = String(
-        localized: "trending.sparkline.accessibility_value.empty",
-        defaultValue: "No scores available",
-        bundle: .module,
-        comment: "VoiceOver value for the Trending sparkline when no items in the visible window carry a score."
-    )
-
-    static func sparklineRangeValue(min: Int, max: Int) -> String {
-        String(
-            localized: "trending.sparkline.accessibility_value.range \(min) \(max)",
-            bundle: .module,
-            comment: "VoiceOver value for the Trending sparkline describing the min/max of scored items. The integers are the minimum and maximum scores."
-        )
-    }
-
     // MARK: - Typography recipe
 
     static let recipe = AIDashTypography.detail(for: .trending)
-
-    // MARK: - Sparkline color
-    //
-    // The sparkline is data, not chrome — it visualizes the score series. Its
-    // tint is derived from `style` only as a content-coloring hint (matches
-    // the metric trend-arrow precedent in §Style table). It does NOT change
-    // card background, padding, radius, or any other chrome dimension.
-
-    private var sparklineColor: Color {
-        switch style {
-        case .neutral: return .secondary
-        case .success: return theme.success
-        case .warning: return theme.warning
-        case .accent:  return theme.primary.primary
-        }
-    }
 }
 
 // MARK: - TrendingItemRow
+//
+// A scannable recommendation block, not a bare ranking line. Two rows:
+//   1. rank · repo name (a Link that opens GitHub) · star count + Δ pill
+//   2. the one-line reason ("why it's worth a look") · category tag
+// The reason is the point; the rank is just an index, so it's de-emphasized.
+// Rows with neither reason nor category collapse to the single title line.
 
 private struct TrendingItemRow: View {
+    @Environment(\.theme) private var theme
     let item: TrendingPayload.Item
     let rank: Int
     let showScore: Bool
     let size: CardSize
 
+    private var url: URL? { URL(string: item.url) }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            titleLine
+            if hasDetailLine {
+                detailLine
+                    .padding(.leading, Self.gutter)   // align under the title, past the rank
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    // Line 1: rank · title (link) · Δ pill · star pill.
+    private var titleLine: some View {
         HStack(spacing: 8) {
             Text("\(rank)")
                 .font(TrendingCardView.recipe.primary)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .trailing)
-            Text(item.title)
-                .font(TrendingCardView.recipe.secondary)
-                .foregroundStyle(TrendingCardView.recipe.secondaryColor)
+                .foregroundStyle(theme.neutrals.text3)   // an index, not the point
+                .frame(width: Self.rankWidth, alignment: .trailing)
+            titleView
                 .lineLimit(titleLineLimit)
-            if let category = item.category, !category.isEmpty {
-                // Classification tag — a neutral content pill beside the title.
-                StatusPill(category, tone: .neutral)
-            }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
             if let deltaLabel = deltaPillLabel {
-                // Score change since the previous snapshot (e.g. daily star
-                // delta): ▲/▼ + magnitude. Higher score is good, so up→success,
-                // down→danger — matching the metric cockpit's trend-pill tone.
+                // Δ since the previous snapshot: ▲/▼ + magnitude. Higher score
+                // is good, so up→success, down→danger (metric-cockpit tone).
                 StatusPill(deltaLabel.text, tone: deltaLabel.tone)
             }
             if showScore, let score = item.score {
-                // Score as a neutral content-level pill (§Content-Level Status
-                // Pills) — a numeric badge, driven by the payload's `score`.
                 StatusPill(formattedScore(score), tone: .neutral)
             }
         }
-        .accessibilityElement(children: .combine)
+    }
+
+    // The repo name is the primary affordance: a Link to its GitHub page,
+    // tinted with the brand primary so it reads as tappable. Falls back to
+    // plain text when the url is unparseable (never a dead link).
+    @ViewBuilder
+    private var titleView: some View {
+        if let url {
+            Link(destination: url) {
+                Text(item.title)
+                    .font(TrendingCardView.recipe.secondary)
+                    .foregroundStyle(theme.primary.primary)
+            }
+            .buttonStyle(.plain)
+        } else {
+            Text(item.title)
+                .font(TrendingCardView.recipe.secondary)
+                .foregroundStyle(TrendingCardView.recipe.secondaryColor)
+        }
+    }
+
+    // Line 2: reason (the "why") + trailing category tag. Either may be absent.
+    private var detailLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if let reason = item.reason, !reason.isEmpty {
+                Text(reason)
+                    .font(TypeScale.meta)
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if let category = item.category, !category.isEmpty {
+                StatusPill(category, tone: .neutral)
+            }
+        }
+    }
+
+    private var hasDetailLine: Bool {
+        (item.reason?.isEmpty == false) || (item.category?.isEmpty == false)
     }
 
     /// The delta pill's text + tone, or nil when there's no delta signal.
@@ -231,6 +255,15 @@ private struct TrendingItemRow: View {
         }
     }
 
+    private var accessibilityLabel: String {
+        var parts = ["\(rank). \(item.title)"]
+        if let score = item.score { parts.append("\(formattedScore(score)) stars") }
+        if let d = item.delta, d != 0 { parts.append("\(d > 0 ? "up" : "down") \(formattedScore(abs(d)))") }
+        if let c = item.category, !c.isEmpty { parts.append(c) }
+        if let r = item.reason, !r.isEmpty { parts.append(r) }
+        return parts.joined(separator: ", ")
+    }
+
     private func formattedScore(_ score: Double) -> String {
         if score >= 1000 {
             let k = score / 1000
@@ -238,43 +271,118 @@ private struct TrendingItemRow: View {
         }
         return String(format: "%.0f", score)
     }
+
+    private static let rankWidth: CGFloat = 24
+    // Left inset for line 2 so the reason aligns under the title, not the rank.
+    private static let gutter: CGFloat = rankWidth + 8
 }
 
-// MARK: - ScoreSparkline
+// MARK: - TrendingRepoCell
+//
+// The hero grid cell: one repo as a self-contained recommendation block that
+// tiles into columns. Unlike TrendingItemRow (a full-width line for compact
+// sizes), this stacks vertically so it stays legible at ~360–620pt wide:
+//   1. rank · repo Link · Δ pill        (title line; Δ sits with the name)
+//   2. the reason ("why it's worth a look")
+//   3. star count · category tag         (footer, de-emphasized)
+// Separated from siblings by grid spacing only — no per-cell background.
 
-private struct ScoreSparkline: View {
-    let items: [TrendingPayload.Item]
-    let tint: Color
+private struct TrendingRepoCell: View {
+    @Environment(\.theme) private var theme
+    let item: TrendingPayload.Item
+    let rank: Int
+
+    private var url: URL? { URL(string: item.url) }
 
     var body: some View {
-        GeometryReader { geometry in
-            let scores = items.compactMap(\.score)
-            if scores.count >= 2 {
-                let maxScore = scores.max() ?? 1
-                let minScore = scores.min() ?? 0
-                let range = maxScore - minScore
-                let normalizedScores = scores.map { score in
-                    range > 0 ? (score - minScore) / range : 0.5
-                }
-                Path { path in
-                    let stepX = geometry.size.width / CGFloat(normalizedScores.count - 1)
-                    for (index, value) in normalizedScores.enumerated() {
-                        let x = CGFloat(index) * stepX
-                        let y = geometry.size.height * (1 - CGFloat(value))
-                        if index == 0 {
-                            path.move(to: CGPoint(x: x, y: y))
-                        } else {
-                            path.addLine(to: CGPoint(x: x, y: y))
-                        }
-                    }
-                }
-                .stroke(tint, lineWidth: 2)
+        VStack(alignment: .leading, spacing: AIDashSpace.s4) {
+            titleLine
+            if let reason = item.reason, !reason.isEmpty {
+                Text(reason)
+                    .font(TypeScale.meta)
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, Self.gutter)
             }
+            footer
+                .padding(.leading, Self.gutter)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    // Line 1: rank · repo link · Δ pill (the change is part of the headline).
+    private var titleLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s8) {
+            Text("\(rank)")
+                .font(TrendingCardView.recipe.primary)
+                .foregroundStyle(theme.neutrals.text3)
+                .frame(width: Self.rankWidth, alignment: .trailing)
+            repoLink
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let deltaLabel = deltaPillLabel {
+                StatusPill(deltaLabel.text, tone: deltaLabel.tone)
+            }
+            Spacer(minLength: 0)
         }
     }
-}
 
-// MARK: - Previews
+    // Footer: star count (neutral pill) + category tag. Both optional.
+    private var footer: some View {
+        HStack(spacing: AIDashSpace.s8) {
+            if let score = item.score {
+                StatusPill(formattedScore(score), tone: .neutral)
+            }
+            if let category = item.category, !category.isEmpty {
+                StatusPill(category, tone: .neutral)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private var repoLink: some View {
+        if let url {
+            Link(destination: url) {
+                Text(item.title)
+                    .font(TrendingCardView.recipe.secondary)
+                    .foregroundStyle(theme.primary.primary)
+            }
+            .buttonStyle(.plain)
+        } else {
+            Text(item.title)
+                .font(TrendingCardView.recipe.secondary)
+                .foregroundStyle(TrendingCardView.recipe.secondaryColor)
+        }
+    }
+
+    private var deltaPillLabel: (text: String, tone: PillTone)? {
+        guard let delta = item.delta, delta != 0 else { return nil }
+        let glyph = delta > 0 ? "▲" : "▼"
+        return ("\(glyph) \(formattedScore(abs(delta)))",
+                delta > 0 ? .success : .danger)
+    }
+
+    private var accessibilityLabel: String {
+        var parts = ["\(rank). \(item.title)"]
+        if let score = item.score { parts.append("\(formattedScore(score)) stars") }
+        if let d = item.delta, d != 0 { parts.append("\(d > 0 ? "up" : "down") \(formattedScore(abs(d)))") }
+        if let c = item.category, !c.isEmpty { parts.append(c) }
+        if let r = item.reason, !r.isEmpty { parts.append(r) }
+        return parts.joined(separator: ", ")
+    }
+
+    private func formattedScore(_ score: Double) -> String {
+        if score >= 1000 { return String(format: "%.1fk", score / 1000) }
+        return String(format: "%.0f", score)
+    }
+
+    private static let rankWidth: CGFloat = 24
+    private static let gutter: CGFloat = rankWidth + AIDashSpace.s8
+}
 
 #Preview("Small — Neutral") {
     TrendingCardView(
@@ -350,19 +458,20 @@ private struct ScoreSparkline: View {
     .padding()
 }
 
-#Preview("Hero — Radar (delta + category)") {
+#Preview("Hero — Radar (delta + category + reason)") {
     TrendingCardView(
         payload: TrendingPayload(
             topic: "值得现在看 · 多关联 Financial",
             items: [
-                .init(title: "TauricResearch/TradingAgents", url: "https://github.com/TauricResearch/TradingAgents", score: 93459, delta: 412, category: "AI-agent"),
-                .init(title: "VoltAgent/awesome-design-md", url: "https://github.com/VoltAgent/awesome-design-md", score: 102743, delta: 12, category: "设计"),
-                .init(title: "HKUDS/OpenHarness", url: "https://github.com/HKUDS/OpenHarness", score: 14887, delta: -3, category: "框架"),
-                .init(title: "oh-my-mermaid/oh-my-mermaid", url: "https://github.com/oh-my-mermaid/oh-my-mermaid", score: 1793, delta: nil, category: "工具"),
+                .init(title: "VoltAgent/awesome-design-md", url: "https://github.com/VoltAgent/awesome-design-md", score: 102743, delta: 12, category: "设计系统/AI编码", reason: "DESIGN.md 让 AI agents 生成匹配 UI，直接加速 AIDashUI 的设计系统建设"),
+                .init(title: "TauricResearch/TradingAgents", url: "https://github.com/TauricResearch/TradingAgents", score: 93459, delta: 412, category: "AI-agent/交易投资", reason: "多 Agent LLM 金融交易框架，与 Financial 项目直接相关，可用于交易策略开发"),
+                .init(title: "HKUDS/OpenHarness", url: "https://github.com/HKUDS/OpenHarness", score: 14887, delta: -3, category: "AI-agent 框架", reason: "开源 Agent 框架，与 AIDash 的智能助手系统直接相关，可参考其架构设计"),
+                .init(title: "oh-my-mermaid/oh-my-mermaid", url: "https://github.com/oh-my-mermaid/oh-my-mermaid", score: 1793, delta: nil, category: "开发工具", reason: "用 Claude Code 自动生成架构图，适合理解复杂系统"),
             ]
         ),
         size: .hero,
         style: .accent
     )
+    .frame(width: 560)
     .padding()
 }

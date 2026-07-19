@@ -6,11 +6,19 @@ import DesignKit
 
 /// The main briefing window scene. Hosts BriefingView when the
 /// CloudKit container is ready, or shows an error state on failure.
+///
+/// `headless` (macOS agent mode): the window content is empty so the
+/// launchd-spawned XPC agent presents no UI. Kept as ONE Scene type (rather
+/// than branching to `Settings` in the App body) because SwiftUI's SceneBuilder
+/// won't return two different Scene types from `App.body` cleanly; varying the
+/// window *content* is the well-supported pattern.
 public struct BriefingWindowScene: Scene {
     let state: CloudKitContainer.InitState
+    let headless: Bool
 
-    public init(state: CloudKitContainer.InitState) {
+    public init(state: CloudKitContainer.InitState, headless: Bool = false) {
         self.state = state
+        self.headless = headless
     }
 
     public var body: some Scene {
@@ -24,13 +32,17 @@ public struct BriefingWindowScene: Scene {
             // `_NSDetectedLayoutRecursion` warning Apple has marked as a future
             // hard crash.
             Group {
-                switch state {
-                case .ready(let container):
-                    BriefingView()
-                        .designTheme(seed: .lime, neutral: .slate)
-                        .modelContainer(container)
-                case .failed(let reason):
-                    ICloudUnavailableView(reason: reason)
+                if headless {
+                    EmptyView()
+                } else {
+                    switch state {
+                    case .ready(let container):
+                        BriefingView()
+                            .designTheme(seed: .lime, neutral: .slate)
+                            .modelContainer(container)
+                    case .failed(let reason):
+                        ICloudUnavailableView(reason: reason)
+                    }
                 }
             }
             .frame(minWidth: 720, minHeight: 480)

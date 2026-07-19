@@ -25,6 +25,27 @@ public final class CloudKitContainer {
         self.state = state
     }
 
+    /// A container that NEVER attaches the CloudKit mirror — always local-only.
+    ///
+    /// Used by the headless XPC agent (launchd-spawned): even when an iCloud
+    /// account is present, `NSPersistentCloudKitContainer` SIGTRAPs when brought
+    /// up in a windowless launchd-agent context. Forcing local-only sidesteps
+    /// that entirely; the agent only needs SwiftData to serve XPC reads/writes.
+    static func localOnly() -> CloudKitContainer {
+        let schema = Schema([
+            BriefingModel.self, ContainerModel.self,
+            CardModel.self, UserEventModel.self,
+        ])
+        let config = Self.makeConfiguration(schema: schema, mode: .localOnly)
+        do {
+            let container = try ModelContainer(for: schema, configurations: config)
+            return CloudKitContainer(state: .ready(container))
+        } catch {
+            logger.error("Local-only container init failed: \(error.localizedDescription, privacy: .private)")
+            return CloudKitContainer(state: .failed(reason: Self.iCloudUnavailableMessage))
+        }
+    }
+
     private init() {
         let schema = Schema([
             BriefingModel.self,

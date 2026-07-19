@@ -37,16 +37,13 @@ targets:
     sources:
       - path: Apps/AIDashApp/Sources
       - path: Apps/AIDashApp/Resources/Localizable.xcstrings
-      - path: Apps/AIDashApp/Resources/com.tianpli.aidash.plist
-        platform: macOS
-        buildPhase:
-          copyFiles:
-            destination: wrapper
-            subpath: Contents/Library/LaunchAgents
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash
         PRODUCT_NAME: AIDash
+        # Swift module name is pinned to AIDashApp (not the AIDash product name)
+        # so `@testable import AIDashApp` in the app-target tests resolves.
+        PRODUCT_MODULE_NAME: AIDashApp
         INFOPLIST_FILE: Apps/AIDashApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: Apps/AIDashApp/AIDashApp.entitlements
         ENABLE_HARDENED_RUNTIME: YES
@@ -65,6 +62,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.tests
         GENERATE_INFOPLIST_FILE: YES
+        # The host app's PRODUCT_NAME is `AIDash` (not the target name
+        # `AIDashApp`), so XcodeGen's default TEST_HOST of
+        # `…/AIDashApp.app/AIDashApp` doesn't exist and the test bundle can't
+        # load. Pin TEST_HOST + BUNDLE_LOADER to the real product so the
+        # app-target tests (RunMode, LaunchdAgentInstaller, live XPC e2e) run.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AIDash.app/Contents/MacOS/AIDash"
+        BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: AIDashApp
       - package: AIDashCore
