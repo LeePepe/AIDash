@@ -177,6 +177,71 @@ import Testing
     #expect(decoded.events[0].action == .star)
 }
 
+// MARK: - events.pull itemRef filter (spec 002 D1 / T001)
+
+@Test func eventsPullParamsWithItemRefFilterRoundTrip() throws {
+    let since = Date(timeIntervalSince1970: 1_000_000)
+    let original = EventsPullParams(
+        since: since,
+        until: nil,
+        cardId: "radar-1",
+        action: .star,
+        itemRef: "https://github.com/vapor/vapor"
+    )
+
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let data = try encoder.encode(original)
+    let decoded = try decoder.decode(EventsPullParams.self, from: data)
+
+    #expect(decoded.itemRef == "https://github.com/vapor/vapor")
+    #expect(decoded.cardId == "radar-1")
+    #expect(decoded.action == .star)
+}
+
+@Test func eventsPullParamsLegacyJSONWithoutItemRefDecodesAsNil() throws {
+    // Simulates a payload from a pre-itemRef CLI. Forward-compat: itemRef
+    // must decode as nil, filter is inactive.
+    let legacyJSON = """
+    {
+      "since": "2026-01-01T00:00:00Z",
+      "until": null,
+      "cardId": null,
+      "action": null
+    }
+    """.data(using: .utf8)!
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let decoded = try decoder.decode(EventsPullParams.self, from: legacyJSON)
+    #expect(decoded.itemRef == nil)
+    #expect(decoded.cardId == nil)
+    #expect(decoded.action == nil)
+}
+
+@Test func eventsPullResultRoundTripPreservesItemRef() throws {
+    let event = UserEvent(
+        id: "evt-item",
+        timestamp: Date(timeIntervalSince1970: 1_600_000),
+        device: "Mac",
+        cardId: "radar-1",
+        action: .star,
+        itemRef: "https://github.com/apple/swift"
+    )
+    let original = EventsPullResult(events: [event], count: 1)
+
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let data = try encoder.encode(original)
+    let decoded = try decoder.decode(EventsPullResult.self, from: data)
+
+    #expect(decoded.events[0].itemRef == "https://github.com/apple/swift")
+}
+
 // MARK: - schema.list
 
 @Test func schemaListParamsRoundTrip() throws {

@@ -128,8 +128,27 @@ public struct UserEvent: Codable, Sendable {
     public let device: String         // "Tianpli 的 iPhone [3F2A4B1C]"
     public let cardId: String
     public let action: UserEventAction
+    public let itemRef: String?       // optional; item-level ref within the card
 }
 ```
+
+**`itemRef` (added spec 002 D1 / T001, 2026-07-20)** — optional stable
+identifier of the specific item within the card that the event targets. For a
+`trending` radar card, this is the item's `url` (e.g. GitHub repo URL). Absent
+(nil) for whole-card events (`.done`/`.star` on the whole card). Optional and
+forward-compat: older records / older JSON without this key decode as nil (same
+pattern used for `TrendingPayload.Item.delta` / `category` / `reason`). Core
+provides a factory helper `UserEvent.star(cardId:itemRef:device:)` that mints a
+fresh UUID and current timestamp for item-level star events.
+
+**D2 decision (2026-07-20)** — star is a toggle but stays **append-only**. v1
+emits only `.star` events; the UI derives the current filled state from
+"star events emitted by this account for this `(cardId, itemRef)` pair" (last
+event wins on duplicates; agents dedupe by `itemRef+cardId`). No
+`UserEventAction.unstar` case is added in v1; if a downstream enrichment
+consumer later needs an explicit revoke signal, add it in a follow-up spec.
+This satisfies constitution principle I (events are append-only, never
+deleted or mutated).
 
 ### Per-CardType payload structs
 
@@ -371,14 +390,16 @@ public final class UserEventModel {
     public var device: String = ""
     public var cardId: String = ""
     public var actionRaw: String = UserEventAction.done.rawValue
+    public var itemRef: String? = nil     // added spec 002 D1 (T001)
 
     public init(id: String, timestamp: Date, device: String,
-                cardId: String, action: UserEventAction) {
+                cardId: String, action: UserEventAction, itemRef: String? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.device = device
         self.cardId = cardId
         self.actionRaw = action.rawValue
+        self.itemRef = itemRef
     }
 
     public var action: UserEventAction? { UserEventAction(rawValue: actionRaw) }
