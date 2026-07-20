@@ -171,11 +171,14 @@ private struct TrendingItemRow: View {
             }
         }
         .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
+        // .contain (not .combine) so the trailing star button keeps its own
+        // accessibility element and label — VoiceOver users need to reach it
+        // as a distinct control (44pt hit target, "Star / Unstar <name>").
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityLabel)
     }
 
-    // Line 1: rank · title (link) · Δ pill · star pill.
+    // Line 1: rank · title (link) · Δ pill · star pill · star button.
     private var titleLine: some View {
         HStack(spacing: 8) {
             Text("\(rank)")
@@ -193,6 +196,9 @@ private struct TrendingItemRow: View {
             if showScore, let score = item.score {
                 StatusPill(formattedScore(score), tone: .neutral)
             }
+            // Star affordance — trailing, so it never breaks the rank/title
+            // scan. Rendered from the environment (no local state).
+            StarActionButton(itemRef: item.url, itemTitle: item.title)
         }
     }
 
@@ -309,11 +315,14 @@ private struct TrendingRepoCell: View {
                 .padding(.leading, Self.gutter)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        // .contain (not .combine) so the trailing star button keeps its own
+        // accessibility element and label — VoiceOver users need to reach it
+        // as a distinct control.
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityLabel)
     }
 
-    // Line 1: rank · repo link · Δ pill (the change is part of the headline).
+    // Line 1: rank · repo link · Δ pill · star (change + star sit with the name).
     private var titleLine: some View {
         HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s8) {
             Text("\(rank)")
@@ -327,6 +336,9 @@ private struct TrendingRepoCell: View {
                 StatusPill(deltaLabel.text, tone: deltaLabel.tone)
             }
             Spacer(minLength: 0)
+            // Trailing star affordance — always visible so the target is
+            // consistently reachable across cells.
+            StarActionButton(itemRef: item.url, itemTitle: item.title)
         }
     }
 
