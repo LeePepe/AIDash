@@ -10,7 +10,7 @@ struct AutoLayoutTests {
     private func encode<T: Encodable>(_ value: T) -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        return try! encoder.encode(value)
+        return (try? encoder.encode(value)) ?? Data()
     }
 
     @Test("initializes with cards and style")
@@ -130,7 +130,7 @@ struct AutoLayoutTests {
 /// that verify layouts delegate to `TokenGrid` without branching on
 /// `CardType` or painting their own chrome (SwiftUI's view graph does not
 /// expose enough to assert this at runtime).
-fileprivate func readLayoutSource(_ filename: String) throws -> String {
+private func readLayoutSource(_ filename: String) throws -> String {
     var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     for _ in 0..<8 {
         let candidate = dir

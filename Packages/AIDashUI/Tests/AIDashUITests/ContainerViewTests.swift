@@ -134,7 +134,7 @@ struct ContainerViewTests {
     func containerHasNoPanelChrome() throws {
         let source = try Self.containerViewSource()
 
-        #expect(!source.contains(".background(") ,
+        #expect(!source.contains(".background("),
                 "ContainerView must not call .background — containers carry typography + spacing only")
         #expect(!source.contains("RoundedRectangle("),
                 "ContainerView must not draw a RoundedRectangle around its cards")
