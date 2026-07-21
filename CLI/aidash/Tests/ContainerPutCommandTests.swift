@@ -517,7 +517,7 @@ extension GlobalOptions {
         if json { args.append("--json") }
         if quiet { args.append("--quiet") }
         // ParsableArguments must succeed for empty input too.
-        return (try? GlobalOptions.parse(args)) ?? (try! GlobalOptions.parse([]))
+        return (try? GlobalOptions.parse(args)) ?? GlobalOptions()
     }
 }
 

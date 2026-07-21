@@ -151,7 +151,7 @@ struct BriefingPublishCommandTests {
         let payload = json?["data"] as? [String: Any]
         try #require(payload != nil)
         #expect(payload?["date"] as? String == "2026-06-24")
-        #expect(payload?["publishedAt"] as? String != nil)
+        #expect(payload?["publishedAt"] is String)
     }
 
     @Test("briefing publish in --quiet mode emits nothing on stdout")
@@ -290,7 +290,7 @@ struct BriefingPublishCommandTests {
 // MARK: - handleExecuteError (XPCClient.execute throws-only path)
 
 @Suite("BriefingPublishCommand.handleExecuteError")
-struct BriefingPublishCommandHandleExecuteErrorTests {
+struct BriefingPublishExecuteErrorTests {
 
     @Test("local xpc.* error is rethrown (central handler maps to exit 2)")
     func localXpcErrorRethrown() throws {

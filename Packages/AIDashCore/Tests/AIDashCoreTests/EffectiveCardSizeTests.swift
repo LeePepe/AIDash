@@ -17,7 +17,7 @@ struct EffectiveCardSizeTests {
     }()
 
     private func json(_ payload: some Encodable) -> Data {
-        try! encoder.encode(payload)
+        (try? encoder.encode(payload)) ?? Data()
     }
 
     /// Resolve from an authored size + a payload value (encodes then resolves).

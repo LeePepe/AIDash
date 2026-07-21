@@ -22,7 +22,7 @@ struct CardRouterTests {
     private func encode<T: Encodable>(_ value: T) -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        return try! encoder.encode(value)
+        return (try? encoder.encode(value)) ?? Data()
     }
 
     // MARK: - Successful routing for each CardType
@@ -132,7 +132,7 @@ struct CardRouterTests {
         // Encode a MetricPayload but declare the card as .insight
         let metricPayload = MetricPayload(items: [.init(label: "X", value: 1)])
         let encoder = JSONEncoder()
-        let data = try! encoder.encode(metricPayload)
+        let data = (try? encoder.encode(metricPayload)) ?? Data()
         let card = makeCard(type: .insight, payloadJSON: data)
 
         // InsightPayload requires "title" and "body" — MetricPayload JSON won't decode as InsightPayload

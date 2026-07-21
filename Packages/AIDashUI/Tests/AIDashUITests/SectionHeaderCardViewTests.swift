@@ -89,10 +89,10 @@ struct SectionHeaderCardViewTests {
     @Test("vertical padding scales monotonically: small ≤ medium ≤ wide ≤ hero")
     func verticalPaddingMonotonic() {
         let payload = SectionHeaderPayload(title: "Title")
-        let small  = SectionHeaderCardView(payload: payload, size: .small,  style: .neutral)
+        let small  = SectionHeaderCardView(payload: payload, size: .small, style: .neutral)
         let medium = SectionHeaderCardView(payload: payload, size: .medium, style: .neutral)
-        let wide   = SectionHeaderCardView(payload: payload, size: .wide,   style: .neutral)
-        let hero   = SectionHeaderCardView(payload: payload, size: .hero,   style: .neutral)
+        let wide   = SectionHeaderCardView(payload: payload, size: .wide, style: .neutral)
+        let hero   = SectionHeaderCardView(payload: payload, size: .hero, style: .neutral)
 
         #expect(small.verticalPadding < medium.verticalPadding)
         #expect(medium.verticalPadding <= wide.verticalPadding)
@@ -104,10 +104,10 @@ struct SectionHeaderCardViewTests {
     @Test("subtitle spacing scales monotonically: small ≤ medium ≤ wide ≤ hero")
     func subtitleSpacingMonotonic() {
         let payload = SectionHeaderPayload(title: "Title", subtitle: "Sub")
-        let small  = SectionHeaderCardView(payload: payload, size: .small,  style: .neutral)
+        let small  = SectionHeaderCardView(payload: payload, size: .small, style: .neutral)
         let medium = SectionHeaderCardView(payload: payload, size: .medium, style: .neutral)
-        let wide   = SectionHeaderCardView(payload: payload, size: .wide,   style: .neutral)
-        let hero   = SectionHeaderCardView(payload: payload, size: .hero,   style: .neutral)
+        let wide   = SectionHeaderCardView(payload: payload, size: .wide, style: .neutral)
+        let hero   = SectionHeaderCardView(payload: payload, size: .hero, style: .neutral)
 
         #expect(small.subtitleSpacing < medium.subtitleSpacing)
         #expect(medium.subtitleSpacing < wide.subtitleSpacing)

@@ -10,7 +10,7 @@ struct ListLayoutTests {
     private func encode<T: Encodable>(_ value: T) -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        return try! encoder.encode(value)
+        return (try? encoder.encode(value)) ?? Data()
     }
 
     @Test("initializes with cards and style")
@@ -69,7 +69,7 @@ struct ListLayoutTests {
     }
 }
 
-fileprivate func readLayoutSource(_ filename: String) throws -> String {
+private func readLayoutSource(_ filename: String) throws -> String {
     var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     for _ in 0..<8 {
         let candidate = dir

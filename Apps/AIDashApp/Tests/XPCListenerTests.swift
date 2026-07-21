@@ -121,8 +121,7 @@ private func liveCall(_ conn: NSXPCConnection, command: String,
             cont.resume(throwing: XPCError(code: "e2e.proxy", message: "no proxy")); return
         }
         proxy.execute(requestData: requestData) { data in
-            do { cont.resume(returning: try XPCTestSupport.jsonDecoder.decode(XPCResponse.self, from: data)) }
-            catch { cont.resume(throwing: error) }
+            do { cont.resume(returning: try XPCTestSupport.jsonDecoder.decode(XPCResponse.self, from: data)) } catch { cont.resume(throwing: error) }
         }
     }
 }

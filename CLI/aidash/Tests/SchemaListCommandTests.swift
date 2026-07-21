@@ -22,9 +22,9 @@ struct SchemaListCommandTests {
             containerLayouts: ["auto", "list", "grid", "hero"],
             userEventActions: ["done", "star"],
             payloads: payloads ?? [
-                "metric":  #"{"type":"object","properties":{"items":{"type":"array"}}}"#,
+                "metric": #"{"type":"object","properties":{"items":{"type":"array"}}}"#,
                 "insight": #"{"type":"object","properties":{"title":{"type":"string"}}}"#,
-                "digest":  #"{"type":"object","properties":{"body":{"type":"string"}}}"#,
+                "digest": #"{"type":"object","properties":{"body":{"type":"string"}}}"#,
             ]
         )
     }
@@ -112,9 +112,9 @@ struct SchemaListCommandTests {
     func markdownPayloadsAreSorted() {
         // Insertion order is intentionally non-alphabetical to prove sorting.
         let result = Self.sampleResult(payloads: [
-            "zeta":  #"{"type":"object"}"#,
+            "zeta": #"{"type":"object"}"#,
             "alpha": #"{"type":"object"}"#,
-            "mu":    #"{"type":"object"}"#,
+            "mu": #"{"type":"object"}"#,
         ])
 
         let md = SchemaListRendering.renderMarkdown(result)
