@@ -137,7 +137,7 @@ struct TokenGridPackingTests {
     }
 }
 
-fileprivate func readLayoutSource(_ filename: String) throws -> String {
+private func readLayoutSource(_ filename: String) throws -> String {
     var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     for _ in 0..<8 {
         let candidate = dir

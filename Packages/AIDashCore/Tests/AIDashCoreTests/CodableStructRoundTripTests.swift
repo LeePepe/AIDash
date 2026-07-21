@@ -220,7 +220,7 @@ struct CodableStructRoundTripTests {
         // Simulates a payload written by a pre-itemRef producer (older CloudKit
         // record, older CLI). The forward-compat contract requires it to decode
         // without error and expose itemRef == nil.
-        let legacyJSON = """
+        let legacyJSON = Data("""
         {
           "id": "evt-legacy-1",
           "timestamp": "2026-01-01T00:00:00Z",
@@ -228,7 +228,7 @@ struct CodableStructRoundTripTests {
           "cardId": "card-legacy",
           "action": "done"
         }
-        """.data(using: .utf8)!
+        """.utf8)
 
         let decoded = try decoder.decode(UserEvent.self, from: legacyJSON)
         #expect(decoded.id == "evt-legacy-1")
