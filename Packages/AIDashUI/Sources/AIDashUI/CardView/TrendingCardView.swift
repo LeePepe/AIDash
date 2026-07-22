@@ -155,6 +155,7 @@ public struct TrendingCardView: View {
 
 private struct TrendingItemRow: View {
     @Environment(\.theme) private var theme
+    @Environment(\.starredItemRefs) private var starredItemRefs
     let item: TrendingPayload.Item
     let rank: Int
     let showScore: Bool
@@ -163,16 +164,26 @@ private struct TrendingItemRow: View {
     private var url: URL? { URL(string: item.url) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            titleLine
-            if hasDetailLine {
-                detailLine
-                    .padding(.leading, Self.gutter)   // align under the title, past the rank
+        // The star button sits outside the combined accessibility element so
+        // VoiceOver keeps it as its own actionable control (constitution
+        // §E.5 governs the row content itself).
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                titleLine
+                if hasDetailLine {
+                    detailLine
+                        .padding(.leading, Self.gutter)   // align under the title, past the rank
+                }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityLabel)
+            StarItemButton(
+                itemRef: item.url,
+                itemTitle: item.title,
+                isStarred: starredItemRefs.contains(item.url)
+            )
         }
         .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
     }
 
     // Line 1: rank · title (link) · Δ pill · star pill.
@@ -289,28 +300,36 @@ private struct TrendingItemRow: View {
 
 private struct TrendingRepoCell: View {
     @Environment(\.theme) private var theme
+    @Environment(\.starredItemRefs) private var starredItemRefs
     let item: TrendingPayload.Item
     let rank: Int
 
     private var url: URL? { URL(string: item.url) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AIDashSpace.s4) {
-            titleLine
-            if let reason = item.reason, !reason.isEmpty {
-                Text(reason)
-                    .font(TypeScale.meta)
-                    .foregroundStyle(theme.neutrals.text2)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: AIDashSpace.s4) {
+                titleLine
+                if let reason = item.reason, !reason.isEmpty {
+                    Text(reason)
+                        .font(TypeScale.meta)
+                        .foregroundStyle(theme.neutrals.text2)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, Self.gutter)
+                }
+                footer
                     .padding(.leading, Self.gutter)
             }
-            footer
-                .padding(.leading, Self.gutter)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityLabel)
+            StarItemButton(
+                itemRef: item.url,
+                itemTitle: item.title,
+                isStarred: starredItemRefs.contains(item.url)
+            )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
     }
 
     // Line 1: rank · repo link · Δ pill (the change is part of the headline).
@@ -382,6 +401,69 @@ private struct TrendingRepoCell: View {
 
     private static let rankWidth: CGFloat = 24
     private static let gutter: CGFloat = rankWidth + AIDashSpace.s8
+}
+
+// MARK: - StarItemButton
+//
+// Spec 002 (star feedback loop, D3/D4): every radar item carries a star
+// toggle that is deliberately more prominent than a status pill — a
+// filled/outline SF Symbol tinted with the brand primary, a larger hit
+// target, and a snappy replace animation on tap. The button only emits an
+// intent through the injected `onStarItem` environment closure; when nothing
+// is injected (previews, snapshots) it degrades to a visual no-op.
+//
+// Per D2 the toggle only ever *emits* a star (there is no unstar event in
+// v1): repeated taps are idempotent — the App layer dedupes by
+// cardId+itemRef — and the filled state is inferred from already-persisted
+// star events via `starredItemRefs`.
+
+private struct StarItemButton: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.onStarItem) private var onStarItem
+    @Environment(\.currentCardId) private var currentCardId
+    let itemRef: String
+    let itemTitle: String
+    let isStarred: Bool
+
+    /// Optimistic fill: the persisted star event only flows back through
+    /// `starredItemRefs` on the next SwiftData refresh, so the tap flips the
+    /// glyph immediately (spec 002 US1: filled within 100ms).
+    @State private var tappedStar = false
+
+    private var filled: Bool { isStarred || tappedStar }
+
+    var body: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.2)) { tappedStar = true }
+            onStarItem?(currentCardId, itemRef)
+        } label: {
+            Image(systemName: filled ? "star.fill" : "star")
+                .font(TrendingCardView.recipe.secondary.weight(.semibold))
+                .foregroundStyle(filled ? theme.primary.primary : theme.neutrals.text3)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(minWidth: AIDashSpacing.starButtonHitTarget,
+                       minHeight: AIDashSpacing.starButtonHitTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(filled ? Self.starredLabel(itemTitle) : Self.starLabel(itemTitle))
+    }
+
+    private static func starLabel(_ title: String) -> String {
+        String(
+            localized: "trending.star_button.label \(title)",
+            bundle: .module,
+            comment: "VoiceOver label for the star button on a radar item that is not yet starred. The parameter is the item title (repo name)."
+        )
+    }
+
+    private static func starredLabel(_ title: String) -> String {
+        String(
+            localized: "trending.star_button.label.starred \(title)",
+            bundle: .module,
+            comment: "VoiceOver label for the star button on a radar item that is already starred. The parameter is the item title (repo name)."
+        )
+    }
 }
 
 #Preview("Small — Neutral") {

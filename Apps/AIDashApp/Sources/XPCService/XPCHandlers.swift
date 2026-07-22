@@ -491,15 +491,22 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
         let fetchedEvents = try context.fetch(descriptor)
 
-        let events = fetchedEvents.map { model in
-            UserEvent(
-                id: model.id,
-                timestamp: model.timestamp,
-                device: model.device,
-                cardId: model.cardId,
-                action: model.action ?? .done
-            )
-        }
+        // `itemRef` is filtered in memory rather than in the predicate: the
+        // optional-filter combination matrix is already 2^3, and event volume
+        // is tiny (append-only user taps), so a post-fetch filter keeps the
+        // predicate readable at no measurable cost.
+        let events = fetchedEvents
+            .filter { params.itemRef == nil || $0.itemRef == params.itemRef }
+            .map { model in
+                UserEvent(
+                    id: model.id,
+                    timestamp: model.timestamp,
+                    device: model.device,
+                    cardId: model.cardId,
+                    action: model.action ?? .done,
+                    itemRef: model.itemRef
+                )
+            }
 
         let result = EventsPullResult(events: events, count: events.count)
         return try JSONEncoder.xpc.encode(result)
