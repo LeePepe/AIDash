@@ -99,23 +99,55 @@ public final class LaunchdAgentInstaller {
     public func registerIfNeeded() -> RegistrationOutcome {
         let exec = execPath()
         let url = plistURL()
-        let plan = Self.decide(currentExec: exec, installedExec: installedExec(url))
-        log.info("LaunchAgent install plan: \(String(describing: plan)) for exec \(exec, privacy: .public)")
+        let recordedExec = installedExec(url)
+        let loaded = isJobLoaded()
+        let plan = Self.decide(currentExec: exec, installedExec: recordedExec,
+                               jobLoaded: loaded)
+        log.info("LaunchAgent install plan: \(String(describing: plan), privacy: .public) for exec \(exec, privacy: .public) (plistExec=\(recordedExec ?? "nil", privacy: .public), jobLoaded=\(loaded, privacy: .public))")
 
         switch plan {
         case .upToDate:
             return .registered
         case .install:
+            // Make the reason explicit: a rebuild (path mismatch) vs. a job that
+            // fell out of launchd while the plist stayed (the self-heal case).
+            if recordedExec == exec && !loaded {
+                log.info("LaunchAgent plist matches but launchd job is not loaded — self-healing via reinstall.")
+            }
             return performInstall(exec: exec, url: url)
         }
     }
 
-    /// What to do given the running executable and the plist's recorded one.
-    /// Pure + injectable-free so tests exercise the branch logic directly.
+    /// Whether launchd currently has our agent job loaded in the GUI domain.
+    ///
+    /// Reuses the injected `launchctl` seam: `launchctl print gui/<uid>/<label>`
+    /// exits 0 when the job is loaded, non-zero when it isn't. Fail-safe: ANY
+    /// non-zero (a genuinely-absent job, or a transient launchctl/permission
+    /// hiccup) is treated as "not loaded", so `decide` errs toward an idempotent
+    /// reinstall rather than risk short-circuiting past a wedged mach service.
+    private func isJobLoaded() -> Bool {
+        launchctl(["print", "gui/\(getuid())/\(Self.label)"])
+    }
+
+    /// What to do given the running executable, the plist's recorded one, and
+    /// whether launchd actually has the job loaded. Pure + injectable-free so
+    /// tests exercise the branch logic directly.
     enum Plan: Equatable { case upToDate, install }
 
-    static func decide(currentExec: String, installedExec: String?) -> Plan {
-        installedExec == currentExec ? .upToDate : .install
+    /// A launch is up-to-date ONLY when both hold:
+    ///   1. the plist's `Program` matches the running exec (no rebuild since), AND
+    ///   2. launchd currently has the job loaded.
+    ///
+    /// The second condition is the root-cause fix (2026-07): a plist file can
+    /// sit on disk with a matching path while the launchd job is booted out
+    /// (reset-xpc, logout/reboot, manual bootout, DerivedData purge). The old
+    /// path-only check short-circuited to `.upToDate` in that state and skipped
+    /// bootstrap, so the mach service had no vendor and every push failed with
+    /// "listener never checked in" until someone ran reset-xpc by hand. Gating
+    /// on `jobLoaded` makes any subsequent app launch self-heal via `.install`.
+    static func decide(currentExec: String, installedExec: String?,
+                       jobLoaded: Bool) -> Plan {
+        (installedExec == currentExec && jobLoaded) ? .upToDate : .install
     }
 
     private func performInstall(exec: String, url: URL) -> RegistrationOutcome {
