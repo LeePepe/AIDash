@@ -46,7 +46,7 @@ struct CardTypeDecodeTests {
         let data = try encoder.encode(payload)
         let result = try CardType.todoList.decode(data)
         #expect(result is TodoListPayload)
-        let decoded = result as! TodoListPayload
+        let decoded = try #require(result as? TodoListPayload)
         #expect(decoded.items[0].due != nil)
     }
 

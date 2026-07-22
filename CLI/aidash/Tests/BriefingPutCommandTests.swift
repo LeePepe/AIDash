@@ -284,7 +284,7 @@ struct BriefingPutCommandTests {
 // MARK: - handleExecuteError (XPCClient.execute throws-only path)
 
 @Suite("BriefingPutCommand.handleExecuteError")
-struct BriefingPutCommandHandleExecuteErrorTests {
+struct BriefingPutExecuteErrorTests {
 
     @Test("local xpc.* error is rethrown (central handler maps to exit 2)")
     func localXpcErrorRethrown() throws {

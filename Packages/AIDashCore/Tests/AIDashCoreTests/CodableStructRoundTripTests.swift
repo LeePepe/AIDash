@@ -193,6 +193,64 @@ struct CodableStructRoundTripTests {
         let data = try encoder.encode(event)
         let decoded = try decoder.decode(UserEvent.self, from: data)
         #expect(decoded.action == .star)
+        #expect(decoded.itemRef == nil)
+    }
+
+    // MARK: - UserEvent.itemRef (spec 002 D1 / T001)
+
+    @Test func userEventWithItemRefRoundTrip() throws {
+        let ts = Date(timeIntervalSince1970: Double(Int(Date().timeIntervalSince1970)))
+        let event = UserEvent(
+            id: "evt-item-1",
+            timestamp: ts,
+            device: "Mac [CAFEBABE]",
+            cardId: "radar-card-42",
+            action: .star,
+            itemRef: "https://github.com/vapor/vapor"
+        )
+        let data = try encoder.encode(event)
+        let decoded = try decoder.decode(UserEvent.self, from: data)
+        #expect(decoded.id == "evt-item-1")
+        #expect(decoded.action == .star)
+        #expect(decoded.itemRef == "https://github.com/vapor/vapor")
+        #expect(decoded.cardId == "radar-card-42")
+    }
+
+    @Test func userEventLegacyJSONWithoutItemRefDecodesAsNil() throws {
+        // Simulates a payload written by a pre-itemRef producer (older CloudKit
+        // record, older CLI). The forward-compat contract requires it to decode
+        // without error and expose itemRef == nil.
+        let legacyJSON = Data("""
+        {
+          "id": "evt-legacy-1",
+          "timestamp": "2026-01-01T00:00:00Z",
+          "device": "iPhone [DEADBEEF]",
+          "cardId": "card-legacy",
+          "action": "done"
+        }
+        """.utf8)
+
+        let decoded = try decoder.decode(UserEvent.self, from: legacyJSON)
+        #expect(decoded.id == "evt-legacy-1")
+        #expect(decoded.action == .done)
+        #expect(decoded.itemRef == nil)
+    }
+
+    @Test func userEventWithItemRefEmitsKey() throws {
+        let event = UserEvent(
+            id: "evt-emit",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            device: "Mac",
+            cardId: "card-x",
+            action: .star,
+            itemRef: "https://github.com/apple/swift"
+        )
+        let data = try encoder.encode(event)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(json.contains("\"itemRef\""))
+        // JSONEncoder escapes forward slashes; check the host substring instead
+        #expect(json.contains("github.com"))
+        #expect(json.contains("apple"))
     }
 
 }
