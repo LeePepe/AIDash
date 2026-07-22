@@ -132,4 +132,59 @@ struct InsightCardViewTests {
         )
         _ = view.body
     }
+
+    // MARK: - MY-1305: `.small` must render non-empty body
+    //
+    // Regression: `EffectiveCardSize.insightSize` downgrades authored `.wide`
+    // to `.small` for citation-less short-body insight cards (e.g. the
+    // "数据源健康" card at ~35 chars). Before this fix `.small` rendered
+    // `EmptyView()` in the body position, so the card showed only its title
+    // with a blank area beneath. `.small` must now expose the body via
+    // `renderedBody` and route it into `leadStatement`.
+
+    @Test("small size renders the non-empty body text (MY-1305)")
+    func smallSizeRendersBody() {
+        let payload = InsightPayload(
+            title: "数据源健康",
+            body: "数据源: raven✅ multica✅ ADO✅ state.db✅"
+        )
+        let view = InsightCardView(payload: payload, size: .small, style: .warning)
+
+        #expect(!view.renderedBody.isEmpty)
+        #expect(view.renderedBody == payload.body)
+    }
+
+    @Test("small size truncates a long body (uses truncatedBody)")
+    func smallSizeTruncatesLongBody() {
+        let longBody = String(repeating: "A", count: 200)
+        let payload = InsightPayload(title: "T", body: longBody)
+        let view = InsightCardView(payload: payload, size: .small, style: .neutral)
+
+        #expect(view.renderedBody == view.truncatedBody)
+        #expect(view.renderedBody.hasSuffix("\u{2026}"))
+    }
+
+    @Test("medium size renders the truncated body")
+    func mediumSizeRendersTruncatedBody() {
+        let view = InsightCardView(payload: samplePayload, size: .medium, style: .neutral)
+        #expect(view.renderedBody == view.truncatedBody)
+    }
+
+    @Test("wide size renders the full body (not truncated)")
+    func wideSizeRendersFullBody() {
+        let longBody = String(repeating: "A", count: 200)
+        let payload = InsightPayload(title: "T", body: longBody)
+        let view = InsightCardView(payload: payload, size: .wide, style: .neutral)
+
+        #expect(view.renderedBody == longBody)
+    }
+
+    @Test("hero size renders the full body (not truncated)")
+    func heroSizeRendersFullBody() {
+        let longBody = String(repeating: "A", count: 200)
+        let payload = InsightPayload(title: "T", body: longBody)
+        let view = InsightCardView(payload: payload, size: .hero, style: .neutral)
+
+        #expect(view.renderedBody == longBody)
+    }
 }

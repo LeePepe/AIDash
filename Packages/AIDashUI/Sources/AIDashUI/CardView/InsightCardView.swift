@@ -44,7 +44,16 @@ public struct InsightCardView: View {
 
         switch size {
         case .small:
-            EmptyView()
+            // MY-1305: `.small` must still render the body — the earlier
+            // `EmptyView()` branch structurally dropped the body when a
+            // wide-authored short-body insight (e.g. the "数据源健康" health
+            // card) was downgraded by `EffectiveCardSize.insightSize`, leaving
+            // only the title on screen. Route through `leadStatement` with the
+            // truncated body so `.small` stays compact.
+            leadStatement(truncatedBody)
+            if let citations = payload.citations, !citations.isEmpty {
+                collapsedCitations(count: citations.count)
+            }
 
         case .medium:
             leadStatement(truncatedBody)
@@ -63,6 +72,19 @@ public struct InsightCardView: View {
             if let citations = payload.citations, !citations.isEmpty {
                 citationLinks(citations: citations)
             }
+        }
+    }
+
+    /// The body text that lands inside `leadStatement` for the current size.
+    /// Exposed for tests so `.small` regressions (empty body) are directly
+    /// observable without a snapshot harness. Mirrors the switch above:
+    /// `.small` / `.medium` use `truncatedBody`; `.wide` / `.hero` use full body.
+    var renderedBody: String {
+        switch size {
+        case .small, .medium:
+            return truncatedBody
+        case .wide, .hero:
+            return payload.body
         }
     }
 
