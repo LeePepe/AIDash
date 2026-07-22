@@ -14,42 +14,100 @@ import Foundation
 @Suite("LaunchdAgentInstaller")
 struct LaunchdAgentInstallerTests {
 
-    // MARK: - decide(): install only when the plist points at a different build
+    // MARK: - decide(): up-to-date only when path matches AND job is loaded
 
-    @Test("up-to-date when installed exec matches the running exec")
-    func upToDateWhenMatching() {
+    @Test("up-to-date when installed exec matches AND job is loaded")
+    func upToDateWhenMatchingAndLoaded() {
         #expect(LaunchdAgentInstaller.decide(
-            currentExec: "/a/AIDash", installedExec: "/a/AIDash") == .upToDate)
+            currentExec: "/a/AIDash", installedExec: "/a/AIDash",
+            jobLoaded: true) == .upToDate)
+    }
+
+    @Test("install when plist matches but launchd job is NOT loaded (self-heal)")
+    func installWhenMatchingButNotLoaded() {
+        // The root-cause regression guard: a matching plist on disk must NOT be
+        // trusted when launchd has booted the job out — reinstall to self-heal.
+        #expect(LaunchdAgentInstaller.decide(
+            currentExec: "/a/AIDash", installedExec: "/a/AIDash",
+            jobLoaded: false) == .install)
     }
 
     @Test("install when the plist is absent")
     func installWhenAbsent() {
         #expect(LaunchdAgentInstaller.decide(
-            currentExec: "/a/AIDash", installedExec: nil) == .install)
+            currentExec: "/a/AIDash", installedExec: nil,
+            jobLoaded: true) == .install)
     }
 
     @Test("install when the plist points at a stale build (rebuild self-heals)")
     func installWhenStale() {
         #expect(LaunchdAgentInstaller.decide(
-            currentExec: "/new/AIDash", installedExec: "/old/AIDash") == .install)
+            currentExec: "/new/AIDash", installedExec: "/old/AIDash",
+            jobLoaded: true) == .install)
     }
 
     // MARK: - registerIfNeeded(): up-to-date is a cheap no-op
 
-    @Test("up-to-date launch writes nothing and runs no launchctl")
+    @Test("up-to-date launch writes nothing and runs no bootout/bootstrap")
     func upToDateIsNoOp() {
         var wrote = false
         var launchctlCalls: [[String]] = []
         let sut = LaunchdAgentInstaller(
             execPath: { "/a/AIDash" },
             plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
-            installedExec: { _ in "/a/AIDash" },   // already matches
+            installedExec: { _ in "/a/AIDash" },   // path matches
             writePlist: { _, _ in wrote = true },
+            // print (job-loaded query) succeeds ⇒ loaded; nothing else runs.
             launchctl: { launchctlCalls.append($0); return true }
         )
         #expect(sut.registerIfNeeded() == .registered)
         #expect(wrote == false)
-        #expect(launchctlCalls.isEmpty)
+        // Only the read-only `print` query ran — no bootout/bootstrap.
+        #expect(launchctlCalls.allSatisfy { $0.first == "print" })
+        #expect(!launchctlCalls.contains { $0.first == "bootout" })
+        #expect(!launchctlCalls.contains { $0.first == "bootstrap" })
+    }
+
+    // MARK: - registerIfNeeded(): the self-heal case (the root-cause fix)
+
+    @Test("matching plist but unloaded job triggers write + bootout + bootstrap")
+    func unloadedJobSelfHeals() {
+        var written: Data?
+        var launchctlCalls: [[String]] = []
+        let sut = LaunchdAgentInstaller(
+            execPath: { "/a/AIDash" },
+            plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
+            installedExec: { _ in "/a/AIDash" },   // path MATCHES…
+            writePlist: { _, data in written = data },
+            // …but `print` reports the job is NOT loaded ⇒ must reinstall.
+            launchctl: { args in
+                launchctlCalls.append(args)
+                return args.first == "print" ? false : true
+            }
+        )
+        #expect(sut.registerIfNeeded() == .registered)
+        #expect(written != nil)                                   // rewrote plist
+        #expect(launchctlCalls.contains { $0.first == "bootout" })
+        #expect(launchctlCalls.contains { $0.first == "bootstrap" })
+    }
+
+    @Test("fail-safe: a failing job-loaded query is treated as unloaded → install")
+    func failSafeQueryTreatedAsUnloaded() {
+        var launchctlCalls: [[String]] = []
+        let sut = LaunchdAgentInstaller(
+            execPath: { "/a/AIDash" },
+            plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
+            installedExec: { _ in "/a/AIDash" },   // path matches
+            writePlist: { _, _ in },
+            // `print` returns false (simulating a launchctl hiccup, not a
+            // definitive "absent") — fail-safe still reinstalls.
+            launchctl: { args in
+                launchctlCalls.append(args)
+                return args.first == "print" ? false : true
+            }
+        )
+        #expect(sut.registerIfNeeded() == .registered)
+        #expect(launchctlCalls.contains { $0.first == "bootstrap" })
     }
 
     // MARK: - registerIfNeeded(): a rebuild rewrites + bootout + bootstrap
@@ -67,10 +125,12 @@ struct LaunchdAgentInstallerTests {
         )
         #expect(sut.registerIfNeeded() == .registered)
         #expect(written != nil)
-        // bootout precedes bootstrap; both target the gui domain.
-        #expect(launchctlCalls.count == 2)
-        #expect(launchctlCalls[0].first == "bootout")
-        #expect(launchctlCalls[1].first == "bootstrap")
+        // The reinstall's mutating calls are bootout then bootstrap, in order
+        // (a read-only `print` query may precede them; filter to the mutations).
+        let mutations = launchctlCalls.filter { $0.first == "bootout" || $0.first == "bootstrap" }
+        #expect(mutations.count == 2)
+        #expect(mutations[0].first == "bootout")
+        #expect(mutations[1].first == "bootstrap")
     }
 
     @Test("bootstrap failure is reported as .failed")
@@ -100,7 +160,10 @@ struct LaunchdAgentInstallerTests {
         )
         let outcome = sut.registerIfNeeded()
         #expect(outcome.isHealthy == false)
-        #expect(launchctlCalls.isEmpty)   // never reached launchctl
+        // A read-only `print` job-loaded query may run first, but the mutating
+        // bootout/bootstrap must never be reached once the write fails.
+        #expect(!launchctlCalls.contains { $0.first == "bootout" })
+        #expect(!launchctlCalls.contains { $0.first == "bootstrap" })
     }
 
     // MARK: - plist authoring
