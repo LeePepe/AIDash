@@ -37,7 +37,7 @@ public struct BriefingWindowScene: Scene {
                 } else {
                     switch state {
                     case .ready(let container):
-                        BriefingView()
+                        StarFeedbackScope(container: container)
                             .designTheme(seed: .lime, neutral: .slate)
                             .modelContainer(container)
                     case .failed(let reason):
@@ -54,6 +54,38 @@ public struct BriefingWindowScene: Scene {
         .defaultSize(width: 1024, height: 720)
         .windowResizability(.contentMinSize)
         #endif
+    }
+}
+
+/// App-side bridge for the spec 002 star feedback loop. The UI layer emits a
+/// star *intent* via the `onStarItem` environment closure (D4); this scope
+/// injects the real append-only writer plus the set of already-starred item
+/// refs derived from persisted star events, so radar rows render filled vs.
+/// outline without the UI layer ever touching SwiftData.
+private struct StarFeedbackScope: View {
+    let container: ModelContainer
+
+    /// Every persisted star event that targets a specific item. Filled state
+    /// is inferred from emitted events (spec 002 D2: append-only, no unstar
+    /// in v1), so this doubles as the cross-restart / cross-device memory of
+    /// what the user starred (US2).
+    @Query private var starEvents: [UserEventModel]
+
+    init(container: ModelContainer) {
+        self.container = container
+        let starRaw = UserEventAction.star.rawValue
+        _starEvents = Query(filter: #Predicate {
+            $0.actionRaw == starRaw && $0.itemRef != nil
+        })
+    }
+
+    var body: some View {
+        let writer = UserEventWriter(container: container)
+        BriefingView()
+            .environment(\.onStarItem) { cardId, itemRef in
+                writer.star(cardId: cardId, itemRef: itemRef)
+            }
+            .environment(\.starredItemRefs, Set(starEvents.compactMap(\.itemRef)))
     }
 }
 

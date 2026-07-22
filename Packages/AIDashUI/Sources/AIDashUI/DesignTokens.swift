@@ -306,6 +306,18 @@ public enum AIDashSpacing {
     public static let pageHorizontalCompact: CGFloat = 20
     /// 28pt top/bottom page padding.
     public static let pageVertical: CGFloat = 28
+    /// Minimum tap target for the trending radar's per-item star button
+    /// (spec 002 D3: the star affordance is deliberately more prominent than
+    /// a status pill). Constitution §E.3: 28pt on macOS, 44pt on touch
+    /// platforms. Lives here (not in the renderer) so renderers stay free of
+    /// `#if os` chrome branches and literal geometry.
+    public static var starButtonHitTarget: CGFloat {
+        #if os(macOS)
+        return 28
+        #else
+        return 44
+        #endif
+    }
 }
 
 // MARK: - Spacing ladder (raw scale)

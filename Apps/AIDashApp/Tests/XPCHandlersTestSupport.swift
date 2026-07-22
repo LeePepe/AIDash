@@ -16,6 +16,13 @@ import AIDashCore
 enum XPCTestSupport {
 
     static func makeHandlers() throws -> XPCHandlers {
+        try makeHandlersWithContainer().handlers
+    }
+
+    /// Same as `makeHandlers()` but also returns the in-memory container, so
+    /// suites can seed rows (e.g. user events, which have no XPC write path)
+    /// directly into the store the handlers serve.
+    static func makeHandlersWithContainer() throws -> (handlers: XPCHandlers, container: ModelContainer) {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: BriefingModel.self,
@@ -24,7 +31,7 @@ enum XPCTestSupport {
             UserEventModel.self,
             configurations: config
         )
-        return XPCHandlers(container: container)
+        return (XPCHandlers(container: container), container)
     }
 
     static let jsonEncoder: JSONEncoder = {

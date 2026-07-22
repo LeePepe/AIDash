@@ -23,7 +23,10 @@ public struct CardRouter: View {
         // Passthrough: each routed card owns its chrome via `.cardChrome`.
         // The router MUST NOT add a second background/border (doing so
         // double-wrapped the card with a mismatched corner radius).
+        // `currentCardId` lets payload-driven views (spec 002 star button)
+        // attribute per-item events to this card without seeing the model.
         cardContent
+            .environment(\.currentCardId, card.id)
     }
 
     @ViewBuilder

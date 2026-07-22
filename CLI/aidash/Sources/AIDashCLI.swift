@@ -133,19 +133,8 @@ struct EventsCommand: AsyncParsableCommand {
     )
 }
 
-struct EventsPullCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "pull",
-        abstract: "Pull user events since a given timestamp."
-    )
-
-    func run() async throws {
-        throw XPCError(
-            code: "internal.not_implemented",
-            message: "events pull is not yet implemented (T170)"
-        )
-    }
-}
+// `EventsPullCommand` is defined in `Commands/EventsPullCommand.swift`
+// (spec 002 T002 — the read half of the star feedback loop).
 
 // MARK: - Schema
 
