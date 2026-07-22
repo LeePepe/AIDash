@@ -67,5 +67,108 @@ struct UserEventWriterTests {
 
         #expect(try fetchEvents(container).count == 2)
     }
+
+    // MARK: - Done write path (MY-1309 / T002)
+
+    @Test("done appends one UserEventModel with action=done, itemRef, device")
+    func doneAppendsEvent() async throws {
+        let (writer, container) = try makeWriter()
+        let ref = "title:abc123"
+
+        writer.done(cardId: "todo-card-1", itemRef: ref)
+
+        let events = try fetchEvents(container)
+        let event = try #require(events.first)
+        #expect(events.count == 1)
+        #expect(event.action == .done)
+        #expect(event.cardId == "todo-card-1")
+        #expect(event.itemRef == ref)
+        #expect(!event.id.isEmpty)
+        #expect(!event.device.isEmpty)
+    }
+
+    @Test("done is a toggle — repeated taps append additional rows (not idempotent)")
+    func doneToggleAppendsEachTap() async throws {
+        let (writer, container) = try makeWriter()
+        let ref = "title:abc123"
+
+        writer.done(cardId: "todo-card-1", itemRef: ref)
+        writer.done(cardId: "todo-card-1", itemRef: ref)
+
+        #expect(try fetchEvents(container).count == 2)
+    }
+
+    // MARK: - Done inference (doneItemRefs)
+
+    @Test("doneItemRefs infers checked set from odd-count of .done events per itemRef")
+    func doneItemRefsInfersOddCounts() async throws {
+        let (writer, container) = try makeWriter()
+
+        // Item A: 1x done -> checked
+        writer.done(cardId: "todo-card-1", itemRef: "title:a")
+        // Item B: 2x done -> unchecked (toggled back off)
+        writer.done(cardId: "todo-card-1", itemRef: "title:b")
+        writer.done(cardId: "todo-card-1", itemRef: "title:b")
+        // Item C: 3x done -> checked again
+        writer.done(cardId: "todo-card-1", itemRef: "title:c")
+        writer.done(cardId: "todo-card-1", itemRef: "title:c")
+        writer.done(cardId: "todo-card-1", itemRef: "title:c")
+
+        let events = try fetchEvents(container)
+        let checked = UserEventWriter.doneItemRefs(cardId: "todo-card-1", in: events)
+
+        #expect(checked == ["title:a", "title:c"])
+    }
+
+    @Test("doneItemRefs is scoped by cardId — other cards' events are ignored")
+    func doneItemRefsScopedByCardId() async throws {
+        let (writer, container) = try makeWriter()
+
+        writer.done(cardId: "todo-card-1", itemRef: "title:a")
+        writer.done(cardId: "todo-card-2", itemRef: "title:a")
+
+        let events = try fetchEvents(container)
+        let checkedCard1 = UserEventWriter.doneItemRefs(cardId: "todo-card-1", in: events)
+        let checkedCard2 = UserEventWriter.doneItemRefs(cardId: "todo-card-2", in: events)
+
+        #expect(checkedCard1 == ["title:a"])
+        #expect(checkedCard2 == ["title:a"])
+    }
+
+    @Test("doneItemRefs ignores non-done actions and nil itemRefs")
+    func doneItemRefsIgnoresIrrelevantEvents() async throws {
+        let (writer, container) = try makeWriter()
+
+        // A star event on the same card — must be ignored.
+        writer.star(cardId: "todo-card-1", itemRef: "title:a")
+        // A real done event.
+        writer.done(cardId: "todo-card-1", itemRef: "title:b")
+
+        // Inject a nil-itemRef done event directly (whole-card, which no
+        // caller emits today but the helper must stay defensive).
+        let ctx = ModelContext(container)
+        ctx.insert(UserEventModel(
+            id: UUID().uuidString,
+            timestamp: Date(),
+            device: "test-device",
+            cardId: "todo-card-1",
+            action: .done,
+            itemRef: nil
+        ))
+        try ctx.save()
+
+        let events = try fetchEvents(container)
+        let checked = UserEventWriter.doneItemRefs(cardId: "todo-card-1", in: events)
+
+        #expect(checked == ["title:b"])
+    }
+
+    @Test("doneItemRefs returns empty when no matching events exist")
+    func doneItemRefsEmpty() async throws {
+        let (_, container) = try makeWriter()
+        let events = try fetchEvents(container)
+        let checked = UserEventWriter.doneItemRefs(cardId: "todo-card-1", in: events)
+        #expect(checked.isEmpty)
+    }
 }
 #endif
