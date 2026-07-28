@@ -8,6 +8,8 @@ public enum CardType: String, Codable, Sendable, CaseIterable {
     case trending
     case digest
     case sectionHeader
+    case barList
+    case stackedBar
 }
 
 extension CardType {
@@ -22,6 +24,8 @@ extension CardType {
         case .trending:      return try decoder.decode(TrendingPayload.self, from: data)
         case .digest:        return try decoder.decode(DigestPayload.self, from: data)
         case .sectionHeader: return try decoder.decode(SectionHeaderPayload.self, from: data)
+        case .barList:       return try decoder.decode(BarListPayload.self, from: data)
+        case .stackedBar:    return try decoder.decode(StackedBarPayload.self, from: data)
         }
     }
 

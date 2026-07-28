@@ -349,6 +349,39 @@ struct SchemaValidatorTests {
         )
     }
 
+    @Test func cardPut_validBarList_doesNotThrow() throws {
+        let payload = try JSONEncoder().encode(
+            BarListPayload(items: [
+                BarListPayload.Item(label: "runtime-offline", value: 39, valueText: "39%", semantic: "warning"),
+            ])
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "barList",
+            size: "medium",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
+    @Test func cardPut_validStackedBar_doesNotThrow() throws {
+        let payload = try JSONEncoder().encode(
+            StackedBarPayload(segments: [
+                StackedBarPayload.Segment(label: "end_turn", value: 70, semantic: "success"),
+                StackedBarPayload.Segment(label: "max_tokens", value: 5, semantic: "warning"),
+            ], title: "会话质量")
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "stackedBar",
+            size: "wide",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
     @Test func cardPut_unknownType_throws() {
         do {
             try SchemaValidator.validateCardPut(
