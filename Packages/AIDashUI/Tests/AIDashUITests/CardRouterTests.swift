@@ -106,6 +106,31 @@ struct CardRouterTests {
         #expect(decoded?.subtitle == "Subtitle")
     }
 
+    @Test("routes barList card with valid payload")
+    func routesBarList() throws {
+        let payload = BarListPayload(items: [.init(label: "runtime-offline", value: 39, valueText: "39%", semantic: "warning")])
+        let card = makeCard(type: .barList, payloadJSON: encode(payload))
+
+        let decoded = try card.type.decode(card.payloadJSON) as? BarListPayload
+        #expect(decoded?.items.first?.label == "runtime-offline")
+        #expect(decoded?.items.first?.semantic == "warning")
+        _ = CardRouter(card: card).body
+    }
+
+    @Test("routes stackedBar card with valid payload")
+    func routesStackedBar() throws {
+        let payload = StackedBarPayload(segments: [
+            .init(label: "end_turn", value: 70, semantic: "success"),
+            .init(label: "max_tokens", value: 5, semantic: "warning"),
+        ], title: "会话质量")
+        let card = makeCard(type: .stackedBar, payloadJSON: encode(payload))
+
+        let decoded = try card.type.decode(card.payloadJSON) as? StackedBarPayload
+        #expect(decoded?.title == "会话质量")
+        #expect(decoded?.segments.count == 2)
+        _ = CardRouter(card: card).body
+    }
+
     // MARK: - Fallback on decode failure
 
     @Test("renders fallback for invalid JSON")
@@ -193,6 +218,10 @@ struct CardRouterTests {
                 data = encode(DigestPayload(title: "T", body: "B"))
             case .sectionHeader:
                 data = encode(SectionHeaderPayload(title: "H"))
+            case .barList:
+                data = encode(BarListPayload(items: [.init(label: "L", value: 1)]))
+            case .stackedBar:
+                data = encode(StackedBarPayload(segments: [.init(label: "S", value: 1)]))
             }
 
             let card = makeCard(type: cardType, payloadJSON: data)

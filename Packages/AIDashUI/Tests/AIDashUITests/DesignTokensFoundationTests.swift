@@ -126,6 +126,8 @@ struct DesignTokensFoundationTests {
         #expect(CardType.agentSummary.iconSymbol == "bubble.left.and.bubble.right.fill")
         #expect(CardType.todoList.iconSymbol == "checklist")
         #expect(CardType.trending.iconSymbol == "chart.line.uptrend.xyaxis")
+        #expect(CardType.barList.iconSymbol == "chart.bar.xaxis")
+        #expect(CardType.stackedBar.iconSymbol == "chart.bar.doc.horizontal")
         #expect(CardType.sectionHeader.iconSymbol == nil)
     }
 
@@ -137,6 +139,8 @@ struct DesignTokensFoundationTests {
         #expect(CardType.agentSummary.classification == .agentSummary)
         #expect(CardType.todoList.classification == .todoList)
         #expect(CardType.trending.classification == .trending)
+        #expect(CardType.barList.classification == .barList)
+        #expect(CardType.stackedBar.classification == .stackedBar)
         #expect(CardType.sectionHeader.classification == nil)
     }
 

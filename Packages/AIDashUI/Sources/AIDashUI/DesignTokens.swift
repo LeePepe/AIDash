@@ -118,6 +118,22 @@ public enum AIDashTypography {
                 secondary: .subheadline,
                 secondaryColor: .secondary
             )
+        case .barList:
+            // Row label reads as the primary scan target; the value + bar are
+            // the payoff. Monospaced label keeps a column of rankings aligned.
+            return DetailRecipe(
+                primary: .callout,
+                secondary: .caption.monospacedDigit(),
+                secondaryColor: .primary
+            )
+        case .stackedBar:
+            // Legend labels are compact; the bar itself is the headline, so the
+            // legend stays quiet (caption / secondary color).
+            return DetailRecipe(
+                primary: .subheadline.weight(.medium),
+                secondary: .caption2,
+                secondaryColor: .secondary
+            )
         }
     }
 }
@@ -140,6 +156,8 @@ extension CardType {
         case .todoList:      return "checklist"
         case .trending:      return "chart.line.uptrend.xyaxis"
         case .sectionHeader: return nil
+        case .barList:       return "chart.bar.xaxis"
+        case .stackedBar:    return "chart.bar.doc.horizontal"
         }
     }
 
@@ -156,6 +174,8 @@ extension CardType {
         case .todoList:      return .todoList
         case .trending:      return .trending
         case .sectionHeader: return nil
+        case .barList:       return .barList
+        case .stackedBar:    return .stackedBar
         }
     }
 
