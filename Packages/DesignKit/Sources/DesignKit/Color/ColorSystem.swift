@@ -185,7 +185,7 @@ public enum Semantic {
 // the app shipped with) so dark mode keeps a proper variant.
 
 public enum Classification: String, CaseIterable, Sendable {
-    case metric, insight, digest, agentSummary, todoList, trending
+    case metric, insight, digest, agentSummary, todoList, trending, barList, stackedBar
 
     /// Resolved tint for the current color scheme. Light/dark hex pairs mirror
     /// Apple's systemBlue/Purple/Teal/Indigo/Green/Orange.
@@ -197,6 +197,13 @@ public enum Classification: String, CaseIterable, Sendable {
         case .agentSummary: return Color(hex: isDark ? "#5E5CE6" : "#5856D6") // indigo
         case .todoList:     return Color(hex: isDark ? "#30D158" : "#34C759") // green
         case .trending:     return Color(hex: isDark ? "#FF9F0A" : "#FF9500") // orange
+        // barList is a neutral ranking (failure root cause / app focus /
+        // commits): a low-key brown that reads as "just data", NOT an alarm
+        // hue — a red/pink tint would false-alarm a neutral leaderboard.
+        case .barList:      return Color(hex: isDark ? "#B58A63" : "#A2845E") // brown
+        // stackedBar is a composition-of-a-whole (session quality / model
+        // tiers): a warm yellow badge, distinct from the orange trending hue.
+        case .stackedBar:   return Color(hex: isDark ? "#FFD426" : "#FFCC00") // yellow
         }
     }
 }
