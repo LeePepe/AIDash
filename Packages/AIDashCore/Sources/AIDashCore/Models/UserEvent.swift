@@ -53,10 +53,11 @@ extension UserEvent {
     /// TodoList card. Generates a fresh UUID and current timestamp; caller only
     /// supplies stable identifiers.
     ///
-    /// Per parent MY-1307 / spec 002 D2: append-only; toggle state is inferred
-    /// from the emitted event history for `(cardId, itemRef)`. There is no
-    /// `.undone` action — the UI re-clicks emit another `.done`, and higher
-    /// layers reduce the sequence to a current state.
+    /// Per parent MY-1307 / spec 003 §8: append-only with **latest-wins**
+    /// semantics. Toggle state for `(cardId, itemRef)` is derived from the
+    /// most recent event in that pair's history — a `.done` marks the item
+    /// complete, and a subsequent `.undone` (see `UserEvent.undone(...)`)
+    /// clears the completion. Events are never mutated or deleted.
     public static func done(cardId: String, itemRef: String, device: String) -> UserEvent {
         UserEvent(
             id: UUID().uuidString,
@@ -64,6 +65,26 @@ extension UserEvent {
             device: device,
             cardId: cardId,
             action: .done,
+            itemRef: itemRef
+        )
+    }
+
+    /// Core-layer factory for an `undone` event targeting a specific item
+    /// within a TodoList card, emitted when the user clears a previously
+    /// marked-done item. Generates a fresh UUID and current timestamp;
+    /// caller only supplies stable identifiers.
+    ///
+    /// Per parent MY-1307 / spec 003 §8: append-only with **latest-wins**
+    /// semantics — an `.undone` appended after a `.done` clears the item's
+    /// completed state; a subsequent `.done` re-completes it. Events are
+    /// never mutated or deleted (constitution §I).
+    public static func undone(cardId: String, itemRef: String, device: String) -> UserEvent {
+        UserEvent(
+            id: UUID().uuidString,
+            timestamp: Date(),
+            device: device,
+            cardId: cardId,
+            action: .undone,
             itemRef: itemRef
         )
     }
