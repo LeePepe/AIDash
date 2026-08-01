@@ -73,6 +73,26 @@ struct CardTypeDecodeTests {
         #expect(result is SectionHeaderPayload)
     }
 
+    @Test func decodeBarList() throws {
+        let payload = BarListPayload(items: [
+            .init(label: "runtime-offline", value: 39, valueText: "39%", semantic: "warning")
+        ])
+        let data = try encoder.encode(payload)
+        let result = try CardType.barList.decode(data)
+        #expect(result is BarListPayload)
+    }
+
+    @Test func decodeStackedBar() throws {
+        let payload = StackedBarPayload(segments: [
+            .init(label: "end_turn", value: 70, semantic: "success"),
+            .init(label: "tool_use", value: 25),
+            .init(label: "max_tokens", value: 5, semantic: "warning")
+        ], title: "会话质量")
+        let data = try encoder.encode(payload)
+        let result = try CardType.stackedBar.decode(data)
+        #expect(result is StackedBarPayload)
+    }
+
     // MARK: - validate throws on invalid data
 
     @Test func validateThrowsOnInvalidJSON() {

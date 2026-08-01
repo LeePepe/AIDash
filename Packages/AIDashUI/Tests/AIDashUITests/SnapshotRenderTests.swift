@@ -151,6 +151,28 @@ struct SnapshotRenderTests {
             width: 1960,   // real dashboard width — where the row goes "too empty"
             to: "render-radar"
         )
+
+        // Variant: the two NEW card types — barList (failure root cause with a
+        // semantic hot row + a pure-ranking app-focus card) and stackedBar
+        // (session quality with a warning segment + categorical model tiers).
+        // swiftlint:disable line_length
+        let newCards = container("AI 效能 · 时间与产出", .grid, [
+            card(.barList, .medium, .neutral, #"{"items":[{"label":"runtime-offline","value":39,"valueText":"39%","semantic":"warning"},{"label":"codex-init-fail","value":21,"valueText":"21%"},{"label":"queue-timeout","value":14,"valueText":"14%"},{"label":"rate-limited","value":9,"valueText":"9%"}]}"#),
+            card(.barList, .medium, .neutral, #"{"items":[{"label":"cmux","value":4.4,"valueText":"4.4min"},{"label":"Chrome","value":1.4,"valueText":"1.4min"},{"label":"Outlook","value":1.3,"valueText":"1.3min"}]}"#),
+            card(.stackedBar, .medium, .neutral, #"{"title":"会话质量","segments":[{"label":"end_turn","value":70,"semantic":"success"},{"label":"tool_use","value":25},{"label":"max_tokens","value":5,"semantic":"warning"}]}"#),
+            card(.stackedBar, .medium, .neutral, #"{"title":"模型分层","segments":[{"label":"opus-4.6-1m","value":73.5},{"label":"opus-4.7","value":18},{"label":"gpt-5.4","value":8.5}]}"#),
+        ])
+        // swiftlint:enable line_length
+        render(
+            VStack(alignment: .leading, spacing: 16) {
+                Text("2026-07-26").font(.largeTitle.bold())
+                ContainerView(container: newCards)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading),
+            width: 1000,
+            to: "render-new-cards"
+        )
     }
 
     // MARK: - In-memory model builders

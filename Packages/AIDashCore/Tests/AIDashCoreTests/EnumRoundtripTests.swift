@@ -45,7 +45,7 @@ struct EnumRoundtripTests {
     }
 
     @Test func cardTypeCount() {
-        #expect(CardType.allCases.count == 7)
+        #expect(CardType.allCases.count == 9)
     }
 
     @Test func userEventActionExcludesHide() {

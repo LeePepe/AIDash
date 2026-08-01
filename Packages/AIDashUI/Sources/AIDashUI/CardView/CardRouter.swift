@@ -55,6 +55,10 @@ public struct CardRouter: View {
             DigestCardView(payload: p, size: effectiveSize, style: card.style)
         case let p as SectionHeaderPayload:
             SectionHeaderCardView(payload: p, size: effectiveSize, style: card.style)
+        case let p as BarListPayload:
+            BarListCardView(payload: p, size: effectiveSize, style: card.style)
+        case let p as StackedBarPayload:
+            StackedBarCardView(payload: p, size: effectiveSize, style: card.style)
         default:
             fallbackView
         }

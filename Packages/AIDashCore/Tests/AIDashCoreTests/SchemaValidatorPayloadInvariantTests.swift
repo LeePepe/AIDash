@@ -236,6 +236,46 @@ struct SchemaValidatorPayloadInvariantTests {
         }
     }
 
+    @Test func cardPut_barList_emptyItems_throws() {
+        let payload = Data("{\"items\":[]}".utf8)
+        do {
+            try SchemaValidator.validateCardPut(
+                containerId: "550E8400-E29B-41D4-A716-446655440000",
+                id: "660E8400-E29B-41D4-A716-446655440000",
+                type: "barList",
+                size: "medium",
+                style: "neutral",
+                payload: payload
+            )
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.payload_decode_failed")
+            #expect(error.field == "items")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    @Test func cardPut_stackedBar_emptySegments_throws() {
+        let payload = Data("{\"segments\":[]}".utf8)
+        do {
+            try SchemaValidator.validateCardPut(
+                containerId: "550E8400-E29B-41D4-A716-446655440000",
+                id: "660E8400-E29B-41D4-A716-446655440000",
+                type: "stackedBar",
+                size: "wide",
+                style: "neutral",
+                payload: payload
+            )
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.payload_decode_failed")
+            #expect(error.field == "segments")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
     @Test func cardPut_decodeFailed_reportsFirstFailingKey() {
         // Missing required "items" key entirely — should report "items" as the failing field
         let payload = Data("{\"not_items\": 42}".utf8)

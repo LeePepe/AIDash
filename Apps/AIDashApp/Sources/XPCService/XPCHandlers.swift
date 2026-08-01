@@ -553,6 +553,8 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         schemas[CardType.sectionHeader.rawValue] = """
         {"type":"object","required":["title"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"}}}
         """
+        schemas[CardType.barList.rawValue] = #"{"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"valueText":{"type":"string"},"semantic":{"type":"string"}}}}}}"#
+        schemas[CardType.stackedBar.rawValue] = #"{"type":"object","required":["segments"],"properties":{"title":{"type":"string"},"segments":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"semantic":{"type":"string"}}}}}}"#
         return schemas
     }()
 

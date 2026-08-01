@@ -413,6 +413,8 @@ struct DesignTokensComplianceTests {
         case .todoList:      name = "TodoListCardView"
         case .trending:      name = "TrendingCardView"
         case .sectionHeader: name = "SectionHeaderCardView"
+        case .barList:       name = "BarListCardView"
+        case .stackedBar:    name = "StackedBarCardView"
         }
         let url = try sourceFile(named: "\(name).swift",
                                  under: ["Sources", "AIDashUI", "CardView"])

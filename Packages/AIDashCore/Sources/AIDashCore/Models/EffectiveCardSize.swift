@@ -18,8 +18,9 @@ import Foundation
 /// effective size to both the grid span and the card's own geometry keeps width
 /// and height coherent.
 ///
-/// `metric`, `trending`, and `sectionHeader` are pass-through (their sizing is
-/// deliberate): they always return the authored size unchanged.
+/// `metric`, `trending`, `sectionHeader`, `barList`, and `stackedBar` are
+/// pass-through (their sizing is deliberate): they always return the authored
+/// size unchanged.
 public enum EffectiveCardSize {
 
     // MARK: - Thresholds (heuristic, downgrade-only, CJK-conservative)
@@ -84,14 +85,15 @@ public enum EffectiveCardSize {
     // MARK: - Per-type justification
 
     /// The largest size the payload's richness justifies, or `nil` for
-    /// pass-through types (metric / trending / sectionHeader) and undecoded
+    /// pass-through types (metric / trending / sectionHeader / barList /
+    /// stackedBar) and undecoded
     /// payloads — both meaning "leave the authored size alone".
     private static func justifiedSize(
         type: CardType,
         payload: (any CardPayloadProtocol)?
     ) -> CardSize? {
         switch type {
-        case .metric, .trending, .sectionHeader:
+        case .metric, .trending, .sectionHeader, .barList, .stackedBar:
             return nil // deliberate sizing — never downgrade
 
         case .digest:

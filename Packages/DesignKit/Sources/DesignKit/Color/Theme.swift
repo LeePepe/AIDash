@@ -38,6 +38,26 @@ public struct Theme: Sendable {
 
     /// Chart color by index, wrapping the 8-stop palette.
     public func chart(_ i: Int) -> Color { charts[i % charts.count] }
+
+    /// Categorical chart color for a PURE-CATEGORY slot (e.g. a stackedBar's
+    /// model-tier segments), by category ordinal.
+    ///
+    /// The raw 8-stop `charts` palette walks the hue wheel in small steps, so
+    /// adjacent stops (chart(0)/chart(1)) are near-identical and stop 0 sits on
+    /// the seed hue — bad for telling 3–4 categories apart and for keeping them
+    /// clear of the fixed semantic green/warning/danger. `chartCategorical`
+    /// remaps the ordinal through the sequence `[1, 3, 7, 2, 4, 0, 5]`, whose
+    /// first four entries are pairwise ≥40° apart in hue and each ≥22° away
+    /// from the semantic hues — so a legend of categories reads as distinct,
+    /// non-semantic swatches. Wraps for ordinals beyond the sequence length.
+    public func chartCategorical(_ i: Int) -> Color {
+        let order = Self.categoricalOrder
+        return chart(order[i % order.count])
+    }
+
+    /// Slot-remap sequence for `chartCategorical` — see its doc comment for the
+    /// hue-separation rationale. Kept as a named constant so tests can pin it.
+    public static let categoricalOrder = [1, 3, 7, 2, 4, 0, 5]
 }
 
 // MARK: - Design tokens (shape, spacing, type) — one language, all platforms

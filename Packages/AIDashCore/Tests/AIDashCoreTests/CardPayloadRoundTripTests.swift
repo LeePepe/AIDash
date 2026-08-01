@@ -278,6 +278,74 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.subtitle == nil)
     }
 
+    // MARK: BarListPayload
+
+    @Test func barListPayloadRoundTrip() throws {
+        let payload = BarListPayload(items: [
+            BarListPayload.Item(label: "runtime-offline", value: 39, valueText: "39%", semantic: "warning"),
+            BarListPayload.Item(label: "codex-init-fail", value: 21, valueText: "21%"),
+            BarListPayload.Item(label: "queue-timeout", value: 12),
+        ])
+        let decoded = try roundTrip(payload)
+        #expect(decoded.items.count == 3)
+        #expect(decoded.items[0].label == "runtime-offline")
+        #expect(decoded.items[0].value == 39)
+        #expect(decoded.items[0].valueText == "39%")
+        #expect(decoded.items[0].semantic == "warning")
+        #expect(decoded.items[1].semantic == nil)
+        #expect(decoded.items[2].valueText == nil)
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.barList.decode(data)
+        #expect(dispatched is BarListPayload)
+    }
+
+    @Test func barListPayloadDecodesLegacyMinimalItem() throws {
+        // An item with only the required label/value keys decodes with both
+        // optional fields resolving to nil (forward-compat).
+        let legacy = Data(#"{"items":[{"label":"AIDash","value":48}]}"#.utf8)
+        let decoded = try decoder.decode(BarListPayload.self, from: legacy)
+        #expect(decoded.items[0].valueText == nil)
+        #expect(decoded.items[0].semantic == nil)
+        #expect(decoded.items[0].value == 48)
+    }
+
+    // MARK: StackedBarPayload
+
+    @Test func stackedBarPayloadRoundTrip() throws {
+        let payload = StackedBarPayload(
+            segments: [
+                StackedBarPayload.Segment(label: "end_turn", value: 70, semantic: "success"),
+                StackedBarPayload.Segment(label: "tool_use", value: 25),
+                StackedBarPayload.Segment(label: "max_tokens", value: 5, semantic: "warning"),
+            ],
+            title: "会话质量"
+        )
+        let decoded = try roundTrip(payload)
+        #expect(decoded.title == "会话质量")
+        #expect(decoded.segments.count == 3)
+        #expect(decoded.segments[0].label == "end_turn")
+        #expect(decoded.segments[0].semantic == "success")
+        #expect(decoded.segments[1].semantic == nil)
+        #expect(decoded.segments[2].semantic == "warning")
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.stackedBar.decode(data)
+        #expect(dispatched is StackedBarPayload)
+    }
+
+    @Test func stackedBarPayloadNoTitleRoundTrip() throws {
+        let payload = StackedBarPayload(segments: [
+            StackedBarPayload.Segment(label: "opus-4.6", value: 73.5),
+            StackedBarPayload.Segment(label: "gpt-5.4", value: 26.5),
+        ])
+        let decoded = try roundTrip(payload)
+        #expect(decoded.title == nil)
+        #expect(decoded.segments.count == 2)
+    }
+
     // MARK: Protocol conformance
 
     @Test func allTypesConformToCardPayloadProtocol() throws {
@@ -290,8 +358,10 @@ struct CardPayloadRoundTripTests {
             TrendingPayload(topic: "t", items: [TrendingPayload.Item(title: "t", url: "u")]),
             DigestPayload(title: "t", body: "b"),
             SectionHeaderPayload(title: "t"),
+            BarListPayload(items: [BarListPayload.Item(label: "x", value: 1)]),
+            StackedBarPayload(segments: [StackedBarPayload.Segment(label: "x", value: 1)]),
         ]
-        #expect(payloads.count == 7)
+        #expect(payloads.count == 9)
     }
 
     // MARK: Dispatch mismatch
