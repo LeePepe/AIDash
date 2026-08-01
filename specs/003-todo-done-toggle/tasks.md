@@ -40,7 +40,7 @@
 - [ ] `UserEvent.done` doc-comment 反映 latest-wins。
 - [ ] `stableItemRef` 确定性测试仍全绿（同文案同 ref、大小写/空白差异同 ref、异文案异 ref）。
 - [ ] `swift test --package-path Packages/AIDashCore` 全绿。
-- [ ] data-model.md 已记录 undone + latest-wins。
+- [ ] `specs/001-core-briefing-cli/data-model.md` 已记录 undone + latest-wins。
 
 ---
 
