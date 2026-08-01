@@ -68,7 +68,7 @@ public enum ContainerLayout: String, Codable, Sendable, CaseIterable {
 }
 
 public enum UserEventAction: String, Codable, Sendable, CaseIterable {
-    case done, star
+    case done, star, undone
     // `hide` deferred to v2 per spec D17
 }
 ```
@@ -149,6 +149,16 @@ event wins on duplicates; agents dedupe by `itemRef+cardId`). No
 consumer later needs an explicit revoke signal, add it in a follow-up spec.
 This satisfies constitution principle I (events are append-only, never
 deleted or mutated).
+
+**Spec 003 §8 decision (2026-08-01, MY-1307/T101)** — the TodoList done
+toggle is **latest-wins**. `UserEventAction.undone` is added alongside
+`.done`; higher layers reduce the per-`(cardId, itemRef)` event history to
+the current completed state by taking the newest event and mapping
+`.done → completed`, `.undone → not completed`. Events remain append-only
+(constitution §I) and the App remains the only writer (§II); "uncomplete"
+is expressed as a fresh `.undone` append, never as a delete or mutate of a
+prior `.done`. Core provides a factory helper
+`UserEvent.undone(cardId:itemRef:device:)` mirroring `.done(...)`.
 
 ### Per-CardType payload structs
 
