@@ -156,7 +156,7 @@ struct EffectiveCardSizeTests {
         #expect(resolve(.digest, .small, rich) == .small)
     }
 
-    @Test("metric / trending / sectionHeader are pass-through (never downgraded)")
+    @Test("metric / trending / sectionHeader / barList / stackedBar are pass-through (never downgraded)")
     func passThroughTypes() {
         let metric = MetricPayload(items: [.init(label: "solo", value: 1)])
         for size in CardSize.allCases {
@@ -166,6 +166,12 @@ struct EffectiveCardSizeTests {
         #expect(resolve(.trending, .hero, trending) == .hero)
         let header = SectionHeaderPayload(title: "H")
         #expect(resolve(.sectionHeader, .hero, header) == .hero)
+        // barList / stackedBar carry a single deliberate bar; a lone item must
+        // NOT shrink the authored size the way a thin digest would.
+        let barList = BarListPayload(items: [.init(label: "solo", value: 1)])
+        #expect(resolve(.barList, .hero, barList) == .hero)
+        let stacked = StackedBarPayload(segments: [.init(label: "solo", value: 1)])
+        #expect(resolve(.stackedBar, .hero, stacked) == .hero)
     }
 
     @Test("collapseToList preserves the authored size")

@@ -1,204 +1,240 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "agent_summary.hero_subtitle" : {
-      "comment" : "Pull-quote shown under the agent name in the hero Agent Summary card layout.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "spent the day on"
+  "sourceLanguage": "en",
+  "strings": {
+    "agent_summary.hero_subtitle": {
+      "comment": "Pull-quote shown under the agent name in the hero Agent Summary card layout.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "spent the day on"
           }
         }
       }
     },
-    "agent_summary.prs_label" : {
-      "comment" : "Suffix shown after a pull-request count in the small Agent Summary card layout.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "PRs"
+    "agent_summary.prs_label": {
+      "comment": "Suffix shown after a pull-request count in the small Agent Summary card layout.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PRs"
           }
         }
       }
     },
-    "briefing.empty.subtitle" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use the aidash CLI to publish your first one."
+    "bar_list.empty": {
+      "comment": "Shown inside a barList card when its payload decoded successfully but has no items to rank.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No data"
           }
         }
       }
     },
-    "briefing.empty.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No briefings yet"
+    "bar_list.more_items": {
+      "comment": "Trailing line on a barList card listing how many additional rows were truncated. The integer is the overflow count (always ≥ 1).",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%lld more"
           }
         }
       }
     },
-    "briefing.empty_containers.subtitle" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This briefing was published without any sections."
+    "briefing.empty.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the aidash CLI to publish your first one."
           }
         }
       }
     },
-    "briefing.empty_containers.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No sections in this briefing"
+    "briefing.empty.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No briefings yet"
           }
         }
       }
     },
-    "briefing.fallback.banner %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No new briefing today — showing latest (%1$@)"
+    "briefing.empty_containers.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This briefing was published without any sections."
           }
         }
       }
     },
-    "briefing.published.relative %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Published %1$@"
+    "briefing.empty_containers.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No sections in this briefing"
           }
         }
       }
     },
-    "card_router.fallback.detail" : {
-      "comment" : "Caption shown in the CardRouter fallback placeholder. %@ is the card type raw value (e.g. metric, insight).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Could not decode %@ payload."
+    "briefing.fallback.banner %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No new briefing today — showing latest (%1$@)"
           }
         }
       }
     },
-    "card_router.fallback.title" : {
-      "comment" : "Headline shown in the CardRouter fallback placeholder when a card payload cannot be decoded.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Card unavailable"
+    "briefing.published.relative %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Published %1$@"
           }
         }
       }
     },
-    "metric.empty" : {
-      "comment" : "Shown inside a metric card when its payload decoded successfully but has no items to plot.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No metric data"
+    "card_router.fallback.detail": {
+      "comment": "Caption shown in the CardRouter fallback placeholder. %@ is the card type raw value (e.g. metric, insight).",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not decode %@ payload."
           }
         }
       }
     },
-    "trending.more_items %lld" : {
-      "comment" : "Trailing line on a Trending card listing how many additional items were truncated. %lld is the overflow count (always ≥ 1).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "+%1$lld more"
+    "card_router.fallback.title": {
+      "comment": "Headline shown in the CardRouter fallback placeholder when a card payload cannot be decoded.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card unavailable"
           }
         }
       }
     },
-    "trending.sparkline.accessibility_label" : {
-      "comment" : "VoiceOver label for the Hero Trending card's score-distribution sparkline element.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Score distribution sparkline"
+    "metric.empty": {
+      "comment": "Shown inside a metric card when its payload decoded successfully but has no items to plot.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No metric data"
           }
         }
       }
     },
-    "trending.sparkline.accessibility_value.empty" : {
-      "comment" : "VoiceOver value for the Trending sparkline when no items in the visible window carry a score.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No scores available"
+    "stacked_bar.empty": {
+      "comment": "Shown inside a stackedBar card when its payload decoded successfully but has no segments to plot.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No data"
           }
         }
       }
     },
-    "trending.sparkline.accessibility_value.range %lld %lld" : {
-      "comment" : "VoiceOver value for the Trending sparkline describing the min/max of scored items. %1$lld is the minimum score, %2$lld is the maximum score.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scores range from %1$lld to %2$lld"
+    "trending.more_items %lld": {
+      "comment": "Trailing line on a Trending card listing how many additional items were truncated. %lld is the overflow count (always ≥ 1).",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%1$lld more"
           }
         }
       }
     },
-    "trending.star_button.label %@" : {
-      "comment" : "VoiceOver label for the star button on a radar item that is not yet starred. %@ is the item title (repo name).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Star %@"
+    "trending.sparkline.accessibility_label": {
+      "comment": "VoiceOver label for the Hero Trending card's score-distribution sparkline element.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Score distribution sparkline"
           }
         }
       }
     },
-    "trending.star_button.label.starred %@" : {
-      "comment" : "VoiceOver label for the star button on a radar item that is already starred. %@ is the item title (repo name).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Starred %@"
+    "trending.sparkline.accessibility_value.empty": {
+      "comment": "VoiceOver value for the Trending sparkline when no items in the visible window carry a score.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No scores available"
+          }
+        }
+      }
+    },
+    "trending.sparkline.accessibility_value.range %lld %lld": {
+      "comment": "VoiceOver value for the Trending sparkline describing the min/max of scored items. %1$lld is the minimum score, %2$lld is the maximum score.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scores range from %1$lld to %2$lld"
+          }
+        }
+      }
+    },
+    "trending.star_button.label %@": {
+      "comment": "VoiceOver label for the star button on a radar item that is not yet starred. %@ is the item title (repo name).",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Star %@"
+          }
+        }
+      }
+    },
+    "trending.star_button.label.starred %@": {
+      "comment": "VoiceOver label for the star button on a radar item that is already starred. %@ is the item title (repo name).",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starred %@"
           }
         }
       }
     }
   },
-  "version" : "1.0"
+  "version": "1.0"
 }
