@@ -1,6 +1,8 @@
 import Foundation
 import os
+#if os(macOS)
 import Security
+#endif
 import SwiftData
 import AIDashCore
 
@@ -114,7 +116,16 @@ public final class CloudKitContainer {
     /// entitlement and returns `true` only if it grants CloudKit access.
     /// Returns `false` for unsigned binaries or when the entitlement is absent
     /// — exactly the cases where attaching the mirror would crash the process.
+    ///
+    /// The SecCode path only exists on macOS. On iOS the app is always a
+    /// provision-signed GUI process (no headless launchd agent context), the
+    /// entitlement is guaranteed by the provisioning profile, and there is no
+    /// equivalent SecCode API — so the gate degenerates to `true` and the
+    /// downstream `ubiquityIdentityToken` check in `isCloudKitAvailable()`
+    /// still gracefully falls back to local-only when the user has no iCloud
+    /// account signed in.
     private static func hasCloudKitEntitlement() -> Bool {
+        #if os(macOS)
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return false }
 
@@ -133,6 +144,9 @@ public final class CloudKitContainer {
         else { return false }
 
         return services.contains("CloudKit") || services.contains("CloudKit-Anonymous")
+        #else
+        return true
+        #endif
     }
 
     /// CloudKit private-database container identifier. Must match the
