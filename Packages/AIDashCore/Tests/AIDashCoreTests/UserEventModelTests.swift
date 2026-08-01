@@ -133,6 +133,38 @@ struct UserEventModelTests {
         #expect(a.id != b.id)
     }
 
+    // MARK: - UserEvent.undone factory (MY-1371 / T101, spec 003 §8 latest-wins)
+
+    @Test func undoneFactoryProducesItemLevelUndoneEvent() {
+        let before = Date()
+        let event = UserEvent.undone(
+            cardId: "todo-card-today",
+            itemRef: "https://github.com/foo/bar/issues/42",
+            device: "Mac [12345678]"
+        )
+        let after = Date()
+
+        #expect(event.action == .undone)
+        #expect(event.cardId == "todo-card-today")
+        #expect(event.itemRef == "https://github.com/foo/bar/issues/42")
+        #expect(event.device == "Mac [12345678]")
+        #expect(!event.id.isEmpty)
+        #expect(UUID(uuidString: event.id) != nil)
+        #expect(event.timestamp >= before && event.timestamp <= after)
+    }
+
+    @Test func undoneFactoryMintsUniqueIDs() {
+        let a = UserEvent.undone(cardId: "c", itemRef: "x", device: "d")
+        let b = UserEvent.undone(cardId: "c", itemRef: "x", device: "d")
+        #expect(a.id != b.id)
+    }
+
+    @Test func undoneActionRawValueIsUndone() {
+        // Explicitly guard the rawValue so JSON payloads / SwiftData mirrors
+        // stay in sync with the "undone" wire string.
+        #expect(UserEventAction.undone.rawValue == "undone")
+    }
+
     // MARK: - UserEvent.stableItemRef helper (MY-1308 / T001)
 
     @Test func stableItemRefPrefersExplicitRef() {
