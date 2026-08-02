@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- cost/by-model-window — cost per model within a date window (CST).
 -- Parameterized slice of spend by model_canon for a single day (or any range),
 -- so the digest's "值不值" card can show yesterday's model mix rather than the

@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- health/agent-scorecard — reliability + speed + token burn per multica agent.
 -- Cycle time from ISO ts_start/ts_end (julianday diff -> seconds). Only
 -- multica_run rows carry agent_id; claude_job rows are excluded.

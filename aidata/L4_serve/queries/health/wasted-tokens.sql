@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- health/wasted-tokens — tokens burned on runs that did not complete.
 -- Uses multica_run tokens (the corrected, populated field). Shows each terminal
 -- status's token share so cancelled/failed waste is explicit.

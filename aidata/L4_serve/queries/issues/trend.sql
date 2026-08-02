@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- issues/trend — the ordered view: as issues progress (by issue_number ==
 -- creation order), how do token spend / run count / failure & retry rates move?
 -- Spine: fact_issue ⋈ fact_task (per-issue tokens live on the multica runs).

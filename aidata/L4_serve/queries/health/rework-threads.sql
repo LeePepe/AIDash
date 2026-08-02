@@ -1,4 +1,5 @@
 -- aidata-attach: multica_comment
+-- aidata-tier: explore
 -- health/rework-threads — per-issue Engineer<->Reviewer back-and-forth from the
 -- comment thread graph. A truer rework signal than run-count (rework-loops.sql):
 -- it counts who was @-mentioned across the conversation, not just retries.
