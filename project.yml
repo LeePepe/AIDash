@@ -45,8 +45,10 @@ targets:
         # so `@testable import AIDashApp` in the app-target tests resolves.
         PRODUCT_MODULE_NAME: AIDashApp
         INFOPLIST_FILE: Apps/AIDashApp/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Apps/AIDashApp/AIDashApp.entitlements
-        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Apps/AIDashApp/AIDashApp.macOS.entitlements
+        CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: Apps/AIDashApp/AIDashApp.iOS.entitlements
+        CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: Apps/AIDashApp/AIDashApp.iOS.entitlements
+        ENABLE_HARDENED_RUNTIME[sdk=macosx*]: YES
         INFOPLIST_KEY_LSUIElement[sdk=macosx*]: YES
     dependencies:
       - package: AIDashCore
