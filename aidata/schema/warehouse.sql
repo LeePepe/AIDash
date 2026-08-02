@@ -112,6 +112,14 @@ CREATE INDEX IF NOT EXISTS idx_issue_workspace ON fact_issue(workspace_id);
 -- Source: multica runs + claude jobs. multica runs DO carry tokens
 -- (499/508 populated, ~2.54B total — the warehouse's richest cost signal);
 -- claude jobs carry cumulative `tokens`.
+--
+-- MIXED GRAIN — the two sources are NOT symmetric, and the asymmetry is large
+-- enough to change what a query means (measured):
+--   multica_run  ~12,143 rows — 100% carry issue_id, 786 carry `error`
+--   claude_job       ~21 rows —   0% carry issue_id,   0 carry `error`
+-- So any analysis grouping by issue_id or reading `error` describes multica_run
+-- ALONE, even without an explicit `source` filter. Say so in the query comment
+-- when that is the intent; add `WHERE source = 'multica_run'` when it is not.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS fact_task (
     task_id         TEXT PRIMARY KEY,
@@ -124,8 +132,16 @@ CREATE TABLE IF NOT EXISTS fact_task (
     max_attempts    INTEGER,
     tokens          INTEGER,            -- multica_run (richest signal) + claude_job; see block comment
     agent_id        TEXT,
-    session_id      TEXT,               -- bridge to fact_request / fact_turn
-    pr_url          TEXT,               -- bridge to fact_pr (URL string join)
+    -- HONEST KEY (measured): resolves to fact_request.session_uuid on only ~13%
+    -- of rows — the runtime records a usable session id only where it routed as
+    -- claude-cli. Do NOT write an analysis that assumes this joins; anything
+    -- built on it describes that 13% slice, not all tasks.
+    session_id      TEXT,
+    -- HONEST KEY (measured): resolves to fact_pr on ~0.03% of rows (4 of 12k).
+    -- fact_pr itself holds 6 rows because its source (pr_cache reading
+    -- ~/.claude/gh-pr-status-cache.json) covers almost nothing. This bridge is
+    -- effectively dead — treat it as absent until pr_cache coverage improves.
+    pr_url          TEXT,
     error           TEXT,               -- failure/STUCK root-cause text (multica_run); NULL for claude_job. Multi-line for codex stacktraces — classify by prefix in L4.
     trigger_summary TEXT,               -- what kicked off the run: contains "[@Role](...)" mentions (multica_run); NULL for claude_job. Drives rework-sequence signals.
     -- CST calendar day of `ts_start` (ISO-Z text). See the header note on CST bucketing.
@@ -241,6 +257,17 @@ CREATE INDEX IF NOT EXISTS idx_github_pr_cst_merged ON fact_github_pr(cst_merged
 -- ---------------------------------------------------------------------------
 -- dim_model — price map for cost derivation (raven/claude carry no cost).
 -- USD per 1M tokens. Loaded from schema/dim_model.csv.
+--
+-- SCD Type 1 (overwrite, no history). Cost is derived ONCE at L2 by
+-- adapters/raven.py::_cost() and stored in fact_request.cost_usd, so editing a
+-- price does NOT retroactively change history — UNLESS you re-run
+-- `normalize --source raven`, which silently reprices every historical row at
+-- today's rates. If you need historical fidelity after a price change, do not
+-- re-normalize raven; add the model as a new row instead.
+--
+-- Related: `cli.py merge` alone will NOT pick up a price edit — L3 only copies
+-- cost_usd from L2. Run `normalize --source raven` first (the sentinel for a
+-- missed price is test_warehouse_integrity::test_no_tokens_without_cost).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dim_model (
     model               TEXT PRIMARY KEY,
@@ -252,6 +279,16 @@ CREATE TABLE IF NOT EXISTS dim_model (
 
 -- ---------------------------------------------------------------------------
 -- dim_session — per-session rollup (populated during merge from facts).
+--
+-- NAMED `dim_`, BUT IT IS A DERIVED FACT, not a conformed dimension. It carries
+-- additive measures (request_count / total_tokens / total_cost_usd) aggregated
+-- FROM fact_request, rather than descriptive attributes of an independent
+-- entity. Two consequences worth knowing before building on it:
+--   - It is 100% claude-cli (measured): fact_request.session_uuid is only
+--     resolvable for that client, so this covers one slice of traffic, not all.
+--   - Its measures must never be joined onto fact_request and re-summed —
+--     that double-counts. Read it standalone (behavior/runaway-sessions does).
+-- The name is kept for compatibility; treat it as `dws_session` conceptually.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dim_session (
     session_id      TEXT PRIMARY KEY,
