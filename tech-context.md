@@ -13,6 +13,9 @@ macOS/iPadOS/iOS App(用户侧)读展示,两者经 CloudKit 同步。核心是�
 ## 架构总览
 
 ```
+┌─ aidata/(Python,上游数据生产)── L1 采集→L2 归一→L3 合并→L4 查询→L5 digest
+│      │ 产出卡片 payload(JSON)
+│      ▼
 ┌─ aidash CLI(macOS,agent 侧)── 写 briefing
 │      │ XPC(瘦客户端)
 │      ▼
@@ -42,6 +45,7 @@ macOS/iPadOS/iOS App(用户侧)读展示,两者经 CloudKit 同步。核心是�
 | **AIDashUI** | 跨平台 SwiftUI 视图、布局、卡片语义令牌 | Core + DesignKit | `Packages/AIDashUI/tech-context.md` |
 | **AIDashApp** | macOS/iPadOS/iOS App target(XcodeGen 管理) | UI + Core | (app target,见 project.yml) |
 | **aidash CLI** | Swift Argument Parser CLI,仅 macOS | **仅 Core**,禁 import UI | (CLI target) |
+| **aidata** | **非 SPM(Python)**。上游数据生产 L1-L5,产出卡片 payload | 无(不 import Swift) | `aidata/tech-context.md` |
 
 ## 依赖方向(单向,包边界强制)
 
@@ -51,6 +55,11 @@ DesignKit  ← AIDashUI           (DesignKit 零本地依赖,与 Core 平级但�
 AIDashCore ← aidash CLI        (CLI 绝不 import UI)
 ```
 方向单向不可逆。改动跨越这条边界 = 信号:任务太大或分层错了,应拆(见分层路由)。
+
+**aidata 不在这张图里**:它是 Python,与 Swift 包无编译期依赖,只有**单向数据流**
+`aidata/ ──JSON payload──> aidash CLI ──XPC──> App`。契约是 payload 形状(由
+AIDashCore 定义),跨语言无编译器把关 —— 靠 `.claude/skills/aidash-content/` 的
+layer-through 路由 + `contract_check.sh` 兜底。
 
 ## 两条依赖轴(层间 + 层内)
 
@@ -83,9 +92,11 @@ canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
 - 改 `Packages/AIDashCore/**` → 先读 `Packages/AIDashCore/tech-context.md`
 - 改 `Packages/DesignKit/**` → 先读 `Packages/DesignKit/tech-context.md`
 - 改 `Packages/AIDashUI/**` → 先读 `Packages/AIDashUI/tech-context.md`
+- 改 `aidata/**`(Python 数据层)→ 先读 `aidata/tech-context.md`
 - 改跨 2+ 层 → 任务太大,按层拆成独立可 build/test 的 commit
 - 收尾遗留 → 记为新任务,不扩展原任务
 
 ## 构建 / 测试
 
 见 `AGENTS.md → Build commands`。快速门:`swift test --package-path Packages/AIDashCore`。
+Python 数据层的门是独立的(Swift CI 不覆盖):`/usr/bin/python3 -m pytest aidata/tests/ -q`。

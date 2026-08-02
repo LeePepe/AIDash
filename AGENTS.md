@@ -26,6 +26,7 @@ before doing anything material.** It governs every decision below.
 | Original grill decisions (audit trail) | `docs/grill-2026-06-23-decisions.md` |
 | **Global technical context** (architecture, data flow, layers) | `tech-context.md` |
 | **Per-layer technical context** | `Packages/<X>/tech-context.md` |
+| **aidata 数据层**(Python,上游内容生产) | `aidata/tech-context.md` |
 | **Design system / seed color source** (canonical) | `Packages/DesignKit/tech-context.md` |
 | CI / quality gates 说明 | `docs/ci-gates.md` |
 | Daily digest + aidash push-chain 运维 | `docs/daily-digest-and-aidash-push-chain.md` |
@@ -44,12 +45,14 @@ before doing anything material.** It governs every decision below.
 | 决定"做什么" / 改需求 | `specs/<当前>/spec.md` | 功能意图、验收标准、范围边界 |
 | 改全局架构 / 跨层设计 | `tech-context.md`(顶层) | 架构决策、数据流、分层规则 |
 | **改 `Packages/<X>/**`** | **`Packages/<X>/tech-context.md`** | 该层职责、依赖、红线、测试约定 |
+| **改 `aidata/**`**(Python 数据层) | **`aidata/tech-context.md`** | L1-L5 分层、契约、config_local 约定、cron 双维护点 |
 | **改颜色/组件视觉** | **`Packages/DesignKit/tech-context.md`** | seed 色彩系统单源、组件词汇、设计红线 |
 | 改 CI / hook / gate | 见 Constitution 的 Quality Gates 节 | 门禁约定 |
 
 ### 分层路由(Layer Routing)—— 核心
 
 - 改哪个包,**先读那个包的 `tech-context.md`**(顶部 frontmatter 有 layer/依赖/红线)。
+  Python 数据层同理:改 `aidata/**` 先读 `aidata/tech-context.md`。
 - 改动只落在 **1 个层** → 一个 agent 直接做。
 - 改动跨 **2+ 层** → 任务太大,**按层拆**成 N 个子任务;每个子任务 = 一层 =
   一个独立可 build/test 的 commit。
@@ -102,6 +105,24 @@ aidash CLI (macOS only; depends on Core only; MUST NOT import UI)
 
 The SPM package boundaries enforce this — do not break it.
 
+### aidata(Python 数据层)不在这张图里
+
+`aidata/` 是**上游内容生产**,不是 Swift 包:它不 import 任何 Swift 代码,Swift
+侧也不 import 它。耦合点是**单向数据流** —— aidata 产出卡片 payload(JSON),经
+`aidash` CLI 的 XPC 推给 App:
+
+```
+aidata/ (Python, L1→L5)  ──JSON payload──>  aidash CLI  ──XPC──>  AIDashApp
+```
+
+契约是 payload 的形状,由 `AIDashCore/Models/Payloads/` 定义。跨语言没有编译器
+把关,所以用 `.claude/skills/aidash-content/` 的 layer-through 路由 +
+`scripts/contract_check.sh` 兜底。改 briefing 内容一律走那个 skill。
+
+**Swift 门禁(swiftlint / require-tests / build+test / check-frontmatter)只覆盖
+`.swift` 与 `Packages/*`,不覆盖 `aidata/`。** Python 侧的安全网只有它自己的
+pytest:`/usr/bin/python3 -m pytest aidata/tests/ -q` —— 改了就要跑。
+
 ## Build commands
 
 ```bash
@@ -121,6 +142,10 @@ xcodebuild -scheme AIDashApp -destination "platform=iOS Simulator,name=iPad Pro,
 # Build the aidash CLI (macOS only). MUST pass before any push that
 # touches CLI/aidash/** or project.yml.
 xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build
+
+# Test the aidata Python data layer (NOT covered by the Swift CI gates).
+# 注意用 /usr/bin/python3(装了 pytest);cron 链用的 homebrew python3 没装。
+/usr/bin/python3 -m pytest aidata/tests/ -q
 ```
 
 ## Git workflow
