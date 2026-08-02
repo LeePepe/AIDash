@@ -71,6 +71,18 @@
         }
       }
     },
+    "briefing.navigation.title": {
+      "comment": "Inline navigation-bar title shown at the top of the BriefingView screen on iOS/iPadOS.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily Briefing"
+          }
+        }
+      }
+    },
     "briefing.empty_containers.subtitle": {
       "extractionState": "manual",
       "localizations": {
