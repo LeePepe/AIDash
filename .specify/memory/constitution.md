@@ -30,7 +30,7 @@ the public API for agents — agents shell out to `aidash …`, they do not talk
 to CloudKit, files, or any internal API directly.
 
 ```
-Agent (Python/shell)
+Agent (Python/shell — in this repo, `aidata/`)
   └─> aidash CLI (Swift binary, macOS only)
         └─> CloudKit Private DB (briefings record type)
 
@@ -46,6 +46,13 @@ Agent (Python/shell)
 The two record types are independent. The app never writes briefings; the CLI
 never writes events. This boundary is the most important one in the project —
 violations are constitutional, not stylistic.
+
+`aidata/` living in this repo does **not** soften that boundary. It is an agent
+like any other: it holds no CloudKit credentials, opens no network path to
+CloudKit, and reaches the app only by shelling out to `aidash`. Sharing a
+repository buys atomic commits across the producer/renderer seam — it grants no
+new privileges. Any change that lets Python touch CloudKit, the app's storage,
+or an internal API directly is a constitutional violation.
 
 ### III. Glanceable Daily Briefing (NON-NEGOTIABLE)
 
@@ -170,7 +177,8 @@ independently, not jointly.
 
 ### Module Architecture
 
-Two SwiftPM packages, two app/CLI targets, one workspace:
+Three SwiftPM packages, two app/CLI targets, one Python data layer, one
+workspace:
 
 ```
 AIDash/
@@ -179,20 +187,38 @@ AIDash/
 │   │                     schema validation. Zero UI deps. Used by both App
 │   │                     and CLI to guarantee schema is sourced from one
 │   │                     place.
-│   └── AIDashUI/         Cross-platform SwiftUI views: type renderers,
-│                         container layouts, briefing scaffold. Depends on
-│                         Core.
+│   ├── AIDashUI/         Cross-platform SwiftUI views: type renderers,
+│   │                     container layouts, briefing scaffold. Depends on
+│   │                     Core + DesignKit.
+│   └── DesignKit/        Seed color system + shared SwiftUI component
+│                         vocabulary. Zero local deps.
 ├── Apps/
 │   └── AIDashApp/        macOS + iPadOS + iPhone app target (XcodeGen
 │                         managed). Depends on UI + Core.
 ├── CLI/
 │   └── aidash/           Swift Argument Parser CLI, macOS-only.
 │                         Depends on Core. Does not depend on UI.
+├── aidata/               Python data layer (L1 collect → L2 normalize →
+│                         L3 merge → L4 serve → L5 digest). The sole
+│                         producer of briefing content. NOT a SwiftPM
+│                         package; imports no Swift, is imported by none.
+├── Configs/
+│   └── Identity.xcconfig Bundle ID / CloudKit container / dev team —
+│                         single source, with a git-ignored local override.
 └── project.yml           XcodeGen config for app + CLI targets.
 ```
 
-Dependency direction is unidirectional: `UI → Core`, `App → UI + Core`,
-`CLI → Core`. The CLI may never import UI. The package boundary enforces this.
+Dependency direction is unidirectional: `UI → Core`, `UI → DesignKit`,
+`App → UI + Core`, `CLI → Core`. The CLI may never import UI. The package
+boundary enforces this.
+
+`aidata/` sits **outside** that graph. It couples to the Swift side by a
+one-way **data flow**, not a compile-time dependency: it emits card payloads
+(JSON) that reach the app through the `aidash` CLI's XPC seam. The contract is
+the payload *shape*, defined by `AIDashCore/Models/Payloads/`. No compiler
+checks it across the language boundary, so briefing-content changes MUST go
+through the layer-through discipline in `.claude/skills/aidash-content/` and
+its `contract_check.sh` lint.
 
 ### Persistence
 
@@ -755,6 +781,43 @@ Every PR must pass before merge:
    corresponding ADR under `docs/adr/`.
 4. If the PR adds or changes a card type, both the strongly-typed payload
    struct and the round-trip test exist.
+5. If the PR touches `aidata/**`, `/usr/bin/python3 -m pytest aidata/tests/ -q`
+   passes. **The Swift CI gates (swiftlint, require-tests, build+test) match on
+   `.swift` and `Packages/*` only — they do not cover the Python layer at all.**
+   Its own pytest suite is the only safety net, so it must be run by hand until
+   a Python CI job exists.
+
+### No Identity in Version Control (NON-NEGOTIABLE)
+
+This is a **public** repository. Account, employer, and machine identifiers MUST
+NOT be committed — not in code, tests, fixtures, docs, or plan/spec prose.
+Concretely: work email addresses, employer project/repo codenames, Apple
+Developer Team IDs, provisioning-profile UUIDs, account GUIDs, workspace IDs.
+
+Each such value belongs in a git-ignored local override, with a committed
+`.example` template and an empty/placeholder default in the tracked file:
+
+| Layer | Tracked default | Local override |
+|---|---|---|
+| Python (`aidata/`) | `config.py` (empty defaults) | `config_local.py` |
+| Swift build config | `Configs/Identity.xcconfig` | `Configs/Identity.local.xcconfig` |
+
+Two invariants follow:
+
+- **A fresh clone with no override must build and pass tests.** Every source
+  that needs an identifier degrades to a no-op (ADR-23) rather than crashing.
+  Tests MUST be hermetic — identical results with and without the override.
+- **Sample data is neutral.** Preview payloads, fixtures, and doc examples use
+  invented names (`Atlas`, `ABC-123`, `me@example.com`), never real project
+  codenames or issue keys.
+
+Bundle IDs are exempt: an app's bundle identifier is public by nature, and the
+XPC mach-service name must match it literally (it lives in a SwiftPM package
+that cannot read xcconfig, so it is a hand-synced constant).
+
+A redaction commit does not clean git history. If an identifier has already
+been pushed, removing it requires a history rewrite, and GitHub still serves
+the old objects from cache for a while.
 
 ### User Feedback, Not Manual Test Gates
 
@@ -788,9 +851,28 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.8.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-07-14
+**Version**: 1.9.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-02
 
 <!--
+1.9.0 — MINOR (new section + material expansions; no principle removed or
+inverted). Records aidata's move into this repo and the public-repo hygiene it
+forced:
+  · §Module Architecture — tree was stale (missing DesignKit); adds `aidata/`
+    (Python data layer, outside the SwiftPM dependency graph, coupled only by a
+    one-way data flow through the CLI's XPC seam) and `Configs/`.
+  · §II — names aidata as the agent in the data-flow diagram, and states
+    explicitly that co-locating it grants NO new privileges: it still holds no
+    CloudKit identity and reaches the app only via `aidash`. Same boundary,
+    now harder to misread.
+  · §Quality Gates — adds gate 5 (aidata pytest) and states plainly that the
+    Swift CI gates do not cover `aidata/**` at all.
+  · §No Identity in Version Control (NEW, NON-NEGOTIABLE) — this repo is public;
+    identifiers live in git-ignored local overrides with committed `.example`
+    templates. Two invariants: a fresh clone with no override must build and
+    test green, and sample data must be neutral. Bundle IDs exempt (public by
+    nature, and the XPC mach-service name must match literally from a SwiftPM
+    package that cannot read xcconfig).
+-->
 1.8.0 — MINOR (material addition to §Size = Geometry Only; no principle
 removed or inverted). Adds "Content-derived effective size (downgrade-only)":
 the authored `size` becomes an upper bound and the renderer may shrink it to

@@ -114,6 +114,10 @@ macOS 专属 Security API（`SecCode`/`SecCodeCopySelf`/`SecCodeCopyStaticCode`/
 runner），替换 bundleID/scheme、**去掉 widget/HealthKit/GlitchTip/Aptabase**：
 
 - `fastlane/Appfile`：`app_identifier("<AIDASH_BUNDLE_ID>")` + `team_id("<DEVELOPMENT_TEAM>")`。
+  > 这两个值的**单源**是 `Configs/Identity.xcconfig`（真实 Team ID 在 git-ignored 的
+  > `Configs/Identity.local.xcconfig`，见宪法 §No Identity in Version Control）。
+  > `Appfile` 本身进版本库，所以**不要把真实 Team ID 写死进去** —— 从环境变量读
+  > （CI 用 secret，本地从 xcconfig 解析），否则会把身份标识带回公开仓库。
 - `fastlane/Fastfile`：`ios beta` lane：ASC API Key（.p8 base64，`is_key_content_base64:true`）；
   `sh("cd .. && xcodegen generate")`；`latest_testflight_build_number`（**不传 version**，全局
   单调递增，next=latest+1）；`get_provisioning_profile(force:true)` 拉单个 app bundleID 的

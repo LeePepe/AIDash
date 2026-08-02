@@ -38,10 +38,13 @@ append-only `UserEvent(action: .star, itemRef: <repoURL>)`。这条事件即成�
    L3 分析 + 明日雷达排序放大被星标的工具
 ```
 
-> aidata 侧（L1 采集脚本 + L2 富化）是**另一个 repo**（`~/Development/Personal/aidata`）
-> 的改动，**不在本 spec 的 AIDash 交付范围内**。本 spec 交付 aidata 消费它的两个前提：
-> ①**写回能力**（app 目前从不写 events）②**读回能力**（`aidash events pull` 目前是
-> T170 stub）。aidata 侧作为 follow-up 单列。
+> aidata 侧（L1 采集脚本 + L2 富化）**不在本 spec 的 AIDash 交付范围内**。本 spec
+> 交付 aidata 消费它的两个前提：①**写回能力**（app 目前从不写 events）②**读回能力**
+> （`aidash events pull` 目前是 T170 stub）。aidata 侧作为 follow-up 单列。
+>
+> 注（2026-08-02）：本 spec 写作时 aidata 还是独立 repo（`~/Development/Personal/aidata`），
+> 现已并入本仓库的 `aidata/`。作用域划分不变 —— 这里说的仍是本 feature 只交付
+> Swift 侧的两个前提能力，aidata 侧的采集与富化另行推进。
 
 ---
 
@@ -133,7 +136,7 @@ CloudKit 存在。当闭包未注入（如预览/快照）时，星标按钮降�
 - App：事件写入服务 + 把 star action 接到 `BriefingView` environment（写回能力）。
 
 **Out of scope（follow-up，不在本 spec）**：
-- aidata 侧 L1 采集脚本 + L2 富化（另一个 repo `~/Development/Personal/aidata`）。
+- aidata 侧 L1 采集脚本 + L2 富化（现位于本仓库 `aidata/`；spec 写作时为独立 repo）。
 - app 内「收藏夹」浏览视图（宪法「glanceable 单一简报面」下不新增浏览面；v1 只发信号，
   由 agent 在明日雷达放大）。
 - `done` 动作接线到其它卡型（本 feature 只碰雷达条目的 star）。
