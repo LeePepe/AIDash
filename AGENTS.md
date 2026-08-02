@@ -172,9 +172,14 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
   3. **GitHub Actions** (`.github/workflows/build.yml`) — re-runs the same
      gates(含防腐校验 + 改代码必带测试 + `swiftlint` job)on `macos-26` for every
      PR against `main` and for every push to `main`. This is the authoritative
-     CI signal; 只有它挡得住 `--no-verify`。**需在仓库 branch ruleset 里把
-     `build + test (macOS 26)`、`require-tests`、`swiftlint (root config)` 都设为
-     required status check**(脚本进 workflow ≠ 已 required)。
+     CI signal; 只有它挡得住 `--no-verify`。
+     **实际 required status checks(ruleset `main protection`,2026-08-02 核实):**
+     `build + test (macOS 26)`、`claude-review`、`aidata (pytest + ruff)`,strict
+     模式开(分支须与 main 同步)。**注意 `require-tests` 与 `swiftlint (root config)`
+     两个 job 会跑但目前 NOT required** —— 它们红了不挡合并。要设为强制,改
+     ruleset(脚本进 workflow ≠ 已 required)。
+     另:ruleset 的 `bypass_actors` 含 admin 且 `bypass_mode: always`,所以
+     维护者本人直推/强推会被放行,remote 的提示只是告知而非拦截。
 - **SwiftLint 单源.** 根 `.swiftlint.yml` 是全仓库唯一 config(pre-commit/pre-push/CI
   共用)。阈值目前 lenient(放宽到覆盖既有代码,零改动兑绿),但仍拦明显糟糕的新代码;
   逐规则收紧是后续独立 issue。`Tests/` 豁免(`try!` 等惯例)。
