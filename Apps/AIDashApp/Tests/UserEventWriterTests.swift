@@ -68,14 +68,14 @@ struct UserEventWriterTests {
         #expect(try fetchEvents(container).count == 2)
     }
 
-    // MARK: - Done write path (MY-1309 / T002)
+    // MARK: - Done write path (MY-1372 / T102, latest-wins)
 
-    @Test("done appends one UserEventModel with action=done, itemRef, device")
-    func doneAppendsEvent() async throws {
+    @Test("setDone(done:true) appends one UserEventModel with action=done, itemRef, device")
+    func setDoneTrueAppendsDoneEvent() async throws {
         let (writer, container) = try makeWriter()
         let ref = "title:abc123"
 
-        writer.done(cardId: "todo-card-1", itemRef: ref)
+        writer.setDone(cardId: "todo-card-1", itemRef: ref, done: true)
 
         let events = try fetchEvents(container)
         let event = try #require(events.first)
@@ -87,88 +87,184 @@ struct UserEventWriterTests {
         #expect(!event.device.isEmpty)
     }
 
-    @Test("done is a toggle — repeated taps append additional rows (not idempotent)")
-    func doneToggleAppendsEachTap() async throws {
+    @Test("setDone(done:false) appends one UserEventModel with action=undone")
+    func setDoneFalseAppendsUndoneEvent() async throws {
         let (writer, container) = try makeWriter()
         let ref = "title:abc123"
 
-        writer.done(cardId: "todo-card-1", itemRef: ref)
-        writer.done(cardId: "todo-card-1", itemRef: ref)
-
-        #expect(try fetchEvents(container).count == 2)
-    }
-
-    // MARK: - Done inference (doneItemRefs)
-
-    @Test("doneItemRefs infers checked set from odd-count of .done events per itemRef")
-    func doneItemRefsInfersOddCounts() async throws {
-        let (writer, container) = try makeWriter()
-
-        // Item A: 1x done -> checked
-        writer.done(cardId: "todo-card-1", itemRef: "title:a")
-        // Item B: 2x done -> unchecked (toggled back off)
-        writer.done(cardId: "todo-card-1", itemRef: "title:b")
-        writer.done(cardId: "todo-card-1", itemRef: "title:b")
-        // Item C: 3x done -> checked again
-        writer.done(cardId: "todo-card-1", itemRef: "title:c")
-        writer.done(cardId: "todo-card-1", itemRef: "title:c")
-        writer.done(cardId: "todo-card-1", itemRef: "title:c")
+        writer.setDone(cardId: "todo-card-1", itemRef: ref, done: false)
 
         let events = try fetchEvents(container)
-        let checked = UserEventWriter.doneItemRefs(cardId: "todo-card-1", in: events)
-
-        #expect(checked == ["title:a", "title:c"])
+        let event = try #require(events.first)
+        #expect(events.count == 1)
+        #expect(event.action == .undone)
+        #expect(event.cardId == "todo-card-1")
+        #expect(event.itemRef == ref)
+        #expect(!event.id.isEmpty)
+        #expect(!event.device.isEmpty)
     }
 
-    @Test("doneItemRefs is scoped by cardId — other cards' events are ignored")
-    func doneItemRefsScopedByCardId() async throws {
+    @Test("setDone never dedups — repeated same-state taps append additional rows")
+    func setDoneNeverDedups() async throws {
         let (writer, container) = try makeWriter()
+        let ref = "title:abc123"
 
-        writer.done(cardId: "todo-card-1", itemRef: "title:a")
-        writer.done(cardId: "todo-card-2", itemRef: "title:a")
+        writer.setDone(cardId: "todo-card-1", itemRef: ref, done: true)
+        writer.setDone(cardId: "todo-card-1", itemRef: ref, done: true)
+        writer.setDone(cardId: "todo-card-1", itemRef: ref, done: false)
 
-        let events = try fetchEvents(container)
-        let checkedCard1 = UserEventWriter.doneItemRefs(cardId: "todo-card-1", in: events)
-        let checkedCard2 = UserEventWriter.doneItemRefs(cardId: "todo-card-2", in: events)
-
-        #expect(checkedCard1 == ["title:a"])
-        #expect(checkedCard2 == ["title:a"])
+        #expect(try fetchEvents(container).count == 3)
     }
 
-    @Test("doneItemRefs ignores non-done actions and nil itemRefs")
-    func doneItemRefsIgnoresIrrelevantEvents() async throws {
-        let (writer, container) = try makeWriter()
+    // MARK: - Done latest-wins inference (doneRefs)
 
-        // A star event on the same card — must be ignored.
-        writer.star(cardId: "todo-card-1", itemRef: "title:a")
-        // A real done event.
-        writer.done(cardId: "todo-card-1", itemRef: "title:b")
-
-        // Inject a nil-itemRef done event directly (whole-card, which no
-        // caller emits today but the helper must stay defensive).
+    /// Helper: manually build a `UserEventModel` with an explicit timestamp so
+    /// the latest-wins tests can control event ordering deterministically
+    /// (the real writer uses `Date()`, which serialises taps too closely to
+    /// distinguish reliably in a fast test).
+    private func insertEvent(
+        _ container: ModelContainer,
+        cardId: String,
+        itemRef: String?,
+        action: UserEventAction,
+        timestamp: Date,
+        id: String = UUID().uuidString,
+        device: String = "test-device"
+    ) throws {
         let ctx = ModelContext(container)
         ctx.insert(UserEventModel(
-            id: UUID().uuidString,
-            timestamp: Date(),
-            device: "test-device",
-            cardId: "todo-card-1",
-            action: .done,
-            itemRef: nil
+            id: id,
+            timestamp: timestamp,
+            device: device,
+            cardId: cardId,
+            action: action,
+            itemRef: itemRef
         ))
         try ctx.save()
-
-        let events = try fetchEvents(container)
-        let checked = UserEventWriter.doneItemRefs(cardId: "todo-card-1", in: events)
-
-        #expect(checked == ["title:b"])
     }
 
-    @Test("doneItemRefs returns empty when no matching events exist")
-    func doneItemRefsEmpty() async throws {
+    @Test("doneRefs latest-wins: done then undone -> ref NOT in set")
+    func doneRefsLatestWinsDoneThenUndone() async throws {
+        let (_, container) = try makeWriter()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .done, timestamp: t0)
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .undone, timestamp: t0.addingTimeInterval(1))
+
+        let events = try fetchEvents(container)
+        let refs = UserEventWriter.doneRefs(from: events)
+        #expect(refs.isEmpty)
+    }
+
+    @Test("doneRefs latest-wins: undone then done -> ref IN set")
+    func doneRefsLatestWinsUndoneThenDone() async throws {
+        let (_, container) = try makeWriter()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .undone, timestamp: t0)
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .done, timestamp: t0.addingTimeInterval(1))
+
+        let events = try fetchEvents(container)
+        let refs = UserEventWriter.doneRefs(from: events)
+        #expect(refs == ["title:a"])
+    }
+
+    @Test("doneRefs cross-device: two .done events on same ref stay done (do NOT cancel)")
+    func doneRefsCrossDeviceTwoDonesStayDone() async throws {
+        let (_, container) = try makeWriter()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .done, timestamp: t0,
+                        device: "device-A")
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .done, timestamp: t0.addingTimeInterval(5),
+                        device: "device-B")
+
+        let events = try fetchEvents(container)
+        let refs = UserEventWriter.doneRefs(from: events)
+        #expect(refs == ["title:a"])
+    }
+
+    @Test("doneRefs mixes items independently — some done, some undone, some untouched")
+    func doneRefsMixedItems() async throws {
+        let (_, container) = try makeWriter()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // a: done -> checked
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .done, timestamp: t0)
+        // b: done -> undone -> unchecked
+        try insertEvent(container, cardId: "c", itemRef: "title:b",
+                        action: .done, timestamp: t0)
+        try insertEvent(container, cardId: "c", itemRef: "title:b",
+                        action: .undone, timestamp: t0.addingTimeInterval(1))
+        // c: undone alone -> unchecked
+        try insertEvent(container, cardId: "c", itemRef: "title:c",
+                        action: .undone, timestamp: t0)
+        // d: done -> undone -> done -> checked
+        try insertEvent(container, cardId: "c", itemRef: "title:d",
+                        action: .done, timestamp: t0)
+        try insertEvent(container, cardId: "c", itemRef: "title:d",
+                        action: .undone, timestamp: t0.addingTimeInterval(1))
+        try insertEvent(container, cardId: "c", itemRef: "title:d",
+                        action: .done, timestamp: t0.addingTimeInterval(2))
+
+        let events = try fetchEvents(container)
+        let refs = UserEventWriter.doneRefs(from: events)
+        #expect(refs == ["title:a", "title:d"])
+    }
+
+    @Test("doneRefs ignores non-done/undone actions and nil itemRefs")
+    func doneRefsIgnoresIrrelevantEvents() async throws {
+        let (_, container) = try makeWriter()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // A star event — must be ignored.
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .star, timestamp: t0)
+        // A real done event.
+        try insertEvent(container, cardId: "c", itemRef: "title:b",
+                        action: .done, timestamp: t0)
+        // A nil-itemRef done event — must be ignored (whole-card, no caller
+        // emits today but the helper must stay defensive).
+        try insertEvent(container, cardId: "c", itemRef: nil,
+                        action: .done, timestamp: t0)
+
+        let events = try fetchEvents(container)
+        let refs = UserEventWriter.doneRefs(from: events)
+        #expect(refs == ["title:b"])
+    }
+
+    @Test("doneRefs returns empty when no matching events exist")
+    func doneRefsEmpty() async throws {
         let (_, container) = try makeWriter()
         let events = try fetchEvents(container)
-        let checked = UserEventWriter.doneItemRefs(cardId: "todo-card-1", in: events)
-        #expect(checked.isEmpty)
+        let refs = UserEventWriter.doneRefs(from: events)
+        #expect(refs.isEmpty)
+    }
+
+    @Test("doneRefs same-timestamp tie: larger id wins (deterministic)")
+    func doneRefsSameTimestampTiebreak() async throws {
+        let (_, container) = try makeWriter()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // Two events at the identical timestamp; the lexicographic-larger id
+        // (a `.undone`) must win, so the ref is NOT in the set.
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .done, timestamp: t0,
+                        id: "00000000-0000-0000-0000-000000000001")
+        try insertEvent(container, cardId: "c", itemRef: "title:a",
+                        action: .undone, timestamp: t0,
+                        id: "ffffffff-ffff-ffff-ffff-ffffffffffff")
+
+        let events = try fetchEvents(container)
+        let refs = UserEventWriter.doneRefs(from: events)
+        #expect(refs.isEmpty)
     }
 }
 #endif

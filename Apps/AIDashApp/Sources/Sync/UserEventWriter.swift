@@ -57,21 +57,36 @@ final class UserEventWriter {
         try? context.save()
     }
 
-    /// Appends a `done` event for (cardId, itemRef). Unlike `star`, `done` is
-    /// a *toggle*: repeated taps append additional `.done` rows and the
-    /// current "checked" state is inferred from the parity of the emitted
-    /// event count via `doneItemRefs(cardId:in:)` (spec 002 D2 pattern,
-    /// applied to `.done` per MY-1307).
+    /// Appends a `.done` or `.undone` event for `(cardId, itemRef)` matching
+    /// the caller's target state (`done: true` → `.done`, `false` → `.undone`).
     ///
-    /// Best-effort: a failed save is swallowed. Higher layers re-derive the
-    /// checked set from persisted events on the next render.
-    func done(cardId: String, itemRef: String) {
+    /// Semantics (parent MY-1307, spec 003 §8 — **latest-wins**, replacing the
+    /// legacy count-parity model):
+    /// - This method never dedups. Every tap appends exactly one row. Two
+    ///   consecutive taps of the same state on the same `(cardId, itemRef)`
+    ///   are allowed (e.g. cross-device races land two `.done` rows for the
+    ///   same item — that's fine, both are `.done` and the item stays done).
+    /// - The current checked flag for `(cardId, itemRef)` is derived from the
+    ///   most recent event in that pair's timeline via `doneRefs(from:)`.
+    /// - Best-effort: `try? save()` swallows storage failures so a dropped
+    ///   write degrades to "tap did not stick", never a crash. Higher layers
+    ///   re-derive checked state from persisted events on the next render.
+    ///
+    /// Star events remain governed by `star(...)`; this API only handles the
+    /// `.done` / `.undone` axis.
+    func setDone(cardId: String, itemRef: String, done: Bool) {
         let context = ModelContext(container)
-        let event = UserEvent.done(
-            cardId: cardId,
-            itemRef: itemRef,
-            device: DeviceIdentifier.current()
-        )
+        let event: UserEvent = done
+            ? UserEvent.done(
+                cardId: cardId,
+                itemRef: itemRef,
+                device: DeviceIdentifier.current()
+            )
+            : UserEvent.undone(
+                cardId: cardId,
+                itemRef: itemRef,
+                device: DeviceIdentifier.current()
+            )
         context.insert(UserEventModel(
             id: event.id,
             timestamp: event.timestamp,
@@ -84,35 +99,48 @@ final class UserEventWriter {
     }
 }
 
-// MARK: - Done toggle-from-events inference (MY-1309 / T002)
+// MARK: - Done latest-wins inference (MY-1372 / T102, spec 003 §8)
 
 extension UserEventWriter {
     /// Reduce a sequence of persisted `UserEventModel` rows to the set of
-    /// itemRefs currently in the "done" state under the given card.
+    /// itemRefs currently in the "done" state under **latest-wins** semantics
+    /// (parent MY-1307, spec 003 §8): for each `itemRef` group, keep only the
+    /// event with the most recent `timestamp`; if that winning event's
+    /// `action` is `.done`, the ref is in the resulting set; if it is
+    /// `.undone`, the ref is not. Events whose `action` is neither `.done`
+    /// nor `.undone`, or whose `itemRef` is nil, are ignored.
     ///
-    /// Toggle rule (parallels spec 002 D2 for star, applied to `.done` per
-    /// MY-1307): each `.done` event for a `(cardId, itemRef)` flips the
-    /// checked flag. An itemRef with an **odd** number of `.done` events is
-    /// currently done; **even** (including zero) is not. Events whose
-    /// `action` is not `.done`, whose `cardId` differs, or whose `itemRef`
-    /// is nil are ignored.
+    /// This is a pure function — callers are expected to pre-scope the input
+    /// to a single card via an `@Query` predicate (the legacy `cardId`
+    /// argument was removed together with the count-parity model in T102).
+    /// Passing rows from multiple cards will conflate items with colliding
+    /// refs across cards.
     ///
-    /// Callers typically pass an @Query-backed collection already filtered
-    /// to `actionRaw == "done"` — this function stays defensive and re-checks
-    /// so it is safe to use with any `UserEventModel` collection.
-    static func doneItemRefs<Events: Sequence>(
-        cardId: String,
-        in events: Events
+    /// Deterministic tiebreak: when two rows for the same ref share an exact
+    /// timestamp (e.g. two devices raced), the event with the lexicographic
+    /// larger `id` wins — this keeps latest-wins stable across replays and
+    /// avoids relying on SwiftData fetch order.
+    static func doneRefs<Events: Sequence>(
+        from events: Events
     ) -> Set<String> where Events.Element == UserEventModel {
-        var counts: [String: Int] = [:]
+        var winners: [String: UserEventModel] = [:]
         for event in events {
-            guard event.cardId == cardId,
-                  event.action == .done,
-                  let ref = event.itemRef else { continue }
-            counts[ref, default: 0] += 1
+            guard let ref = event.itemRef,
+                  let action = event.action,
+                  action == .done || action == .undone else { continue }
+            if let current = winners[ref] {
+                if event.timestamp > current.timestamp {
+                    winners[ref] = event
+                } else if event.timestamp == current.timestamp,
+                          event.id > current.id {
+                    winners[ref] = event
+                }
+            } else {
+                winners[ref] = event
+            }
         }
         var result: Set<String> = []
-        for (ref, count) in counts where count % 2 == 1 {
+        for (ref, winner) in winners where winner.action == .done {
             result.insert(ref)
         }
         return result
