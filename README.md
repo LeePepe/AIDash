@@ -26,7 +26,7 @@ tasks: [tasks.md](specs/001-core-briefing-cli/tasks.md)).
 Agent (Python / shell)
    │
    └─> aidash CLI (Swift binary, macOS only)
-          │ XPC (com.tianpli.aidash.xpc.v1)
+          │ XPC (<bundle id>.xpc.v1)
           ▼
    AIDash.app (macOS menubar host)
        ├── SwiftData + NSPersistentCloudKitContainer
@@ -76,13 +76,41 @@ xcodebuild -scheme aidash    -destination "platform=macOS" build
 
 ### 1. Swift 侧 —— `Configs/Identity.xcconfig`
 
-Bundle ID / CloudKit 容器 / 开发者团队的**单源**。改完跑 `xcodegen generate`。
+Bundle ID / CloudKit 容器 / 开发者团队的**单源**。
+
+其中 `AIDASH_DEVELOPMENT_TEAM` 在仓库里存的是占位符 `REPLACE_ME` —— Apple Team ID
+是可关联到真实身份的标识符,不该进公开仓库。Bundle ID 保留 `com.tianpli.aidash`
+作为默认值:它是这个 app 的公开身份(任何上架 app 的 bundle ID 都可见),不是凭据,
+而且 mach service 名必须与它字面一致(见下面的例外),留占位符反而会让全新 clone
+自相矛盾。fork 时把两者都换成你自己的即可。
+
+两种改法,推荐后者:
+
+**(a) 直接改 `Configs/Identity.xcconfig`** —— 简单,但它受版本控制,你的
+Team ID 会随提交进仓库。
+
+**(b) 本地覆盖(推荐)** —— 真实值不进版本库:
+
+```bash
+cp Configs/Identity.local.xcconfig.example Configs/Identity.local.xcconfig
+# 填入你的值,然后
+xcodegen generate
+```
+
+`Identity.local.xcconfig` 已 gitignore,在 `Identity.xcconfig` **末尾**被
+`#include?` 进来。xcconfig 是「后定义覆盖先定义」,所以 include 放末尾才能生效
+(放开头会被默认值反盖 —— 已实测)。带 `?` 表示文件不存在就静默跳过,因此全新
+clone 不做任何配置也能直接编译。
 
 | 变量 | 改成 | 去哪找 |
 |---|---|---|
 | `AIDASH_BUNDLE_PREFIX` | 你的反向域名(如 `com.yourname`) | 自定 |
-| `AIDASH_CLOUDKIT_CONTAINER` | 你在 CloudKit Dashboard 创建的容器 | [icloud.developer.apple.com](https://icloud.developer.apple.com/dashboard/) |
 | `AIDASH_DEVELOPMENT_TEAM` | 你的 10 位 Team ID | developer.apple.com → Membership |
+| `AIDASH_CLOUDKIT_CONTAINER` | 仅当容器名不遵循 `iCloud.<bundle id>` 惯例时才需设 | [icloud.developer.apple.com](https://icloud.developer.apple.com/dashboard/) |
+
+CloudKit 容器必须在 Dashboard 里**真实存在**且属于你的团队,否则 app 启动即
+`CKError 15/2000`。CI 用 `CODE_SIGNING_ALLOWED=NO`,所以占位符也能过 CI;
+但**本机带签名运行 app 必须填真实 Team ID**。
 
 这些值必须在**编译期**确定(entitlements 与 Info.plist 是构建产物,读不了运行时
 配置),所以是 xcconfig 而非普通配置文件。App 侧的 CloudKit 容器与 launchd label

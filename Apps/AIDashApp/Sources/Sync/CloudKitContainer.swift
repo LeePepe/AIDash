@@ -18,7 +18,7 @@ public final class CloudKitContainer {
     public let state: InitState
 
     private static let logger = Logger(
-        subsystem: "com.tianpli.aidash",
+        subsystem: Bundle.main.bundleIdentifier ?? "com.tianpli.aidash",
         category: "CloudKitContainer"
     )
 

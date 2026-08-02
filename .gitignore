@@ -26,6 +26,10 @@ Packages/*/.build/
 .vscode/
 .idea/
 
+# 本机身份覆盖(Bundle ID / CloudKit 容器 / Apple Team ID)。
+# 模板:Configs/Identity.local.xcconfig.example
+Configs/Identity.local.xcconfig
+
 # OS
 Thumbs.db
 

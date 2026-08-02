@@ -1,18 +1,31 @@
 // AIDash — 身份配置单源(Bundle ID / CloudKit 容器 / 开发者团队)
 //
-// fork 本项目后,**只需要改这一个文件**。这里的值会流向:
+// fork 本项目后,**只需要改这一个文件**(或用下面的本地覆盖机制)。这里的值流向:
 //   - project.yml            → PRODUCT_BUNDLE_IDENTIFIER(app / tests / CLI)
 //   - Info.plist             → CFBundleIdentifier
 //   - *.entitlements         → iCloud 容器标识符
 //   - LaunchdAgentInstaller  → launchd label
 //   - CloudKitContainer      → CloudKit 容器 + Logger subsystem
-//   - XPCProtocol            → mach service 名(App 与 CLI 必须一致)
 //
 // ⚠️ 这些值必须在**编译期**确定 —— entitlements 与 Info.plist 是构建产物,
 // 读不了运行时配置文件。所以这里是 xcconfig,不是 JSON/plist 配置。
 //
 // ⚠️ 改完必须重新安装:旧的 launchd agent 与已装 CLI 仍指向旧标识符。
 //    见 README「Fork 本项目」一节。
+
+// ---------------------------------------------------------------------------
+// 本地覆盖(可选,推荐)
+//
+// 本仓库是 public,所以下面的默认值是**占位符**,不含任何人的真实账号信息。
+// 不想改这个受版本控制的文件、又要本机能带签名跑,就把真实值写进
+// Configs/Identity.local.xcconfig(已 gitignore):
+//
+//     cp Configs/Identity.local.xcconfig.example Configs/Identity.local.xcconfig
+//
+// 该文件在**本文件末尾**被 include —— xcconfig 是「后定义覆盖先定义」,所以
+// include 必须在所有默认值之后,否则默认值会反过来盖掉本地值(已实测)。
+// `#include?`(带问号)= 文件不存在时静默跳过,所以全新 clone 直接能编译。
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // 1. Bundle ID 前缀 —— 换成你自己的反向域名(如 com.yourname)。
@@ -33,6 +46,13 @@ AIDASH_CLOUDKIT_CONTAINER = iCloud.$(AIDASH_BUNDLE_ID)
 
 // ---------------------------------------------------------------------------
 // 4. Apple 开发者团队 ID(10 位)。在 developer.apple.com → Membership 查。
-//    CI 用 CODE_SIGNING_ALLOWED=NO,所以留空也能过 CI,只影响本地签名运行。
+//    CI 用 CODE_SIGNING_ALLOWED=NO,所以留占位符也能过 CI;
+//    但**本机带签名运行 app 必须填真实值**(建议写进 Identity.local.xcconfig)。
 // ---------------------------------------------------------------------------
-AIDASH_DEVELOPMENT_TEAM = <DEVELOPMENT_TEAM>
+AIDASH_DEVELOPMENT_TEAM = REPLACE_ME
+
+// ---------------------------------------------------------------------------
+// 本地覆盖 —— 必须放在最后(见文件顶部说明:后定义覆盖先定义)。
+// 文件不存在时静默跳过。
+// ---------------------------------------------------------------------------
+#include? "Identity.local.xcconfig"

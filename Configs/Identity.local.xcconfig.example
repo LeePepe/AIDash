@@ -1,0 +1,20 @@
+// AIDash — 本机身份覆盖模板。复制成 Identity.local.xcconfig 后填真实值:
+//
+//     cp Configs/Identity.local.xcconfig.example Configs/Identity.local.xcconfig
+//
+// Identity.local.xcconfig 已 gitignore —— 你的 Bundle ID / CloudKit 容器 /
+// Apple Team ID 不会进版本库。它在 Identity.xcconfig 末尾被 include,所以这里
+// 定义的每个变量都会覆盖那边的占位符默认值;只写你要改的即可。
+//
+// 改完跑 `xcodegen generate` 让改动进入 AIDash.xcodeproj。
+
+// 你的反向域名前缀(AIDASH_BUNDLE_ID 默认由它拼出 <prefix>.aidash)。
+AIDASH_BUNDLE_PREFIX = com.yourname
+
+// Apple 开发者团队 ID(10 位)。developer.apple.com → Membership。
+// 本机带签名运行 app 必须填;CI 用 CODE_SIGNING_ALLOWED=NO,不需要。
+AIDASH_DEVELOPMENT_TEAM = ABCDE12345
+
+// 仅当你的 CloudKit 容器名不遵循 `iCloud.<bundle id>` 惯例时才需要设。
+// 容器必须在 CloudKit Dashboard 里真实存在,否则 app 启动即 CKError 15/2000。
+// AIDASH_CLOUDKIT_CONTAINER = iCloud.com.yourname.aidash

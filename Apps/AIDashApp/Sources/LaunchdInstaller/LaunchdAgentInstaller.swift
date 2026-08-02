@@ -3,7 +3,7 @@ import Foundation
 import AIDashCore
 import os
 
-/// Installs the app's XPC LaunchAgent that vends the `com.tianpli.aidash.xpc.v1`
+/// Installs the app's XPC LaunchAgent that vends the `<bundle id>.xpc.v1`
 /// mach service — using a **plain `launchctl bootstrap` of a hand-written plist**
 /// in `~/Library/LaunchAgents/`, NOT `SMAppService`.
 ///
@@ -65,7 +65,7 @@ public final class LaunchdAgentInstaller {
     /// Runs `launchctl bootout`/`bootstrap`; returns whether it succeeded.
     public typealias Launchctl = @MainActor (_ args: [String]) -> Bool
 
-    private let log = Logger(subsystem: "com.tianpli.aidash", category: "launchd")
+    private let log = Logger(subsystem: LaunchdAgentInstaller.label, category: "launchd")
     private let execPath: ExecPathProvider
     private let plistURL: PlistURLProvider
     private let installedExec: InstalledExecReader

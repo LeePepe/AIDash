@@ -3,7 +3,7 @@ import Foundation
 import AIDashCore
 
 /// Registers and accepts incoming XPC connections on the AIDash Mach service
-/// (`com.tianpli.aidash.xpc.v1`), and routes each connection to an injected
+/// (`<bundle id>.xpc.v1`), and routes each connection to an injected
 /// handlers object that conforms to `AIDashXPCServiceProtocol`.
 ///
 /// The listener is intentionally **not** `@MainActor` (Constitution §Concurrency
