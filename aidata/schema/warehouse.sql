@@ -2,6 +2,22 @@
 -- Three-grain star schema. Honestly models three grains + imperfect keys;
 -- does NOT flatten into one wide table. memory_* sources are NOT here (they
 -- stop at L2 and are queried directly).
+--
+-- CST day bucketing (ADR-22) — every timestamped fact carries a STORED
+-- generated column `cst_day` (plus a second one where a table has two
+-- meaningful dates, e.g. opened vs merged). It is the SINGLE definition of
+-- "which CST day did this happen on"; L4 queries GROUP BY / filter on it
+-- rather than re-deriving `date(..., '+8 hours')` inline.
+--
+-- Why a column and not a shared dim_date: the underlying timestamps are
+-- physically heterogeneous — epoch-ms integers (fact_request), ISO-Z text
+-- (fact_turn/fact_task), and ISO-with-offset text (fact_ado_pr). Joining a
+-- calendar table would still require writing the +8h conversion on each side,
+-- so it would not remove the duplication; a generated column does, and it can
+-- be indexed (day aggregation was a full scan + temp B-tree before).
+--
+-- Always `+8 hours`, NEVER `localtime` — localtime depends on the host
+-- timezone, which breaks reproducibility between a manual run and 04:00 cron.
 
 -- ---------------------------------------------------------------------------
 -- fact_request — grain = one API request. Source: raven.db `requests`.
@@ -27,12 +43,16 @@ CREATE TABLE IF NOT EXISTS fact_request (
     cost_usd        REAL,               -- derived via dim_model; NULL if tokens NULL
     session_uuid    TEXT,               -- reliable for claude-cli only
     has_session     INTEGER NOT NULL DEFAULT 0,
-    tool_call_count INTEGER             -- DEPRECATED: uniformly 0 in raven, do not use
+    tool_call_count INTEGER,            -- DEPRECATED: uniformly 0 in raven, do not use
+    -- CST calendar day of `ts` (epoch ms). See the header note on CST bucketing.
+    cst_day         TEXT GENERATED ALWAYS AS
+                    (date(ts/1000, 'unixepoch', '+8 hours')) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_req_ts ON fact_request(ts);
 CREATE INDEX IF NOT EXISTS idx_req_client ON fact_request(client);
 CREATE INDEX IF NOT EXISTS idx_req_session ON fact_request(session_uuid);
 CREATE INDEX IF NOT EXISTS idx_req_model_canon ON fact_request(model_canon);
+CREATE INDEX IF NOT EXISTS idx_req_cst_day ON fact_request(cst_day);
 
 -- ---------------------------------------------------------------------------
 -- fact_turn — grain = one conversation turn. Source: claude jsonl assistant lines.
@@ -54,9 +74,13 @@ CREATE TABLE IF NOT EXISTS fact_turn (
     cache_read          INTEGER,
     cache_creation      INTEGER,
     tool_calls          TEXT,               -- JSON array of tool names
-    finish_reason       TEXT                -- message.stop_reason: end_turn/tool_use/max_tokens (quality signal; max_tokens = truncated). NULL on streaming/control frames.
+    finish_reason       TEXT,               -- message.stop_reason: end_turn/tool_use/max_tokens (quality signal; max_tokens = truncated). NULL on streaming/control frames.
+    -- CST calendar day of `ts` (ISO-Z text). See the header note on CST bucketing.
+    cst_day             TEXT GENERATED ALWAYS AS
+                        (date(ts, '+8 hours')) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_turn_session ON fact_turn(session_id);
+CREATE INDEX IF NOT EXISTS idx_turn_cst_day ON fact_turn(cst_day);
 
 -- ---------------------------------------------------------------------------
 -- fact_issue — grain = one Multica issue. `issue_number` is the time-ordered
@@ -72,10 +96,15 @@ CREATE TABLE IF NOT EXISTS fact_issue (
     created_at      TEXT,
     workspace_id    TEXT,
     updated_at      TEXT,               -- ISO text; last edit (EXT-3). "今日完成" ≈ updated_at CST-day & status=done
-    project_id      TEXT                -- often NULL (workspace-level); degrade to per-workspace (EXT-1/ADR-22)
+    project_id      TEXT,               -- often NULL (workspace-level); degrade to per-workspace (EXT-1/ADR-22)
+    -- CST calendar day of `updated_at` — the axis "完成 issue（近似）" buckets on.
+    -- APPROXIMATE by nature: updated_at moves on ANY edit, not only completion (ADR-19).
+    cst_day         TEXT GENERATED ALWAYS AS
+                    (date(updated_at, '+8 hours')) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_issue_number ON fact_issue(issue_number);
 CREATE INDEX IF NOT EXISTS idx_issue_updated ON fact_issue(updated_at);
+CREATE INDEX IF NOT EXISTS idx_issue_cst_day ON fact_issue(cst_day);
 CREATE INDEX IF NOT EXISTS idx_issue_workspace ON fact_issue(workspace_id);
 
 -- ---------------------------------------------------------------------------
@@ -98,10 +127,14 @@ CREATE TABLE IF NOT EXISTS fact_task (
     session_id      TEXT,               -- bridge to fact_request / fact_turn
     pr_url          TEXT,               -- bridge to fact_pr (URL string join)
     error           TEXT,               -- failure/STUCK root-cause text (multica_run); NULL for claude_job. Multi-line for codex stacktraces — classify by prefix in L4.
-    trigger_summary TEXT                -- what kicked off the run: contains "[@Role](...)" mentions (multica_run); NULL for claude_job. Drives rework-sequence signals.
+    trigger_summary TEXT,               -- what kicked off the run: contains "[@Role](...)" mentions (multica_run); NULL for claude_job. Drives rework-sequence signals.
+    -- CST calendar day of `ts_start` (ISO-Z text). See the header note on CST bucketing.
+    cst_day         TEXT GENERATED ALWAYS AS
+                    (date(ts_start, '+8 hours')) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_task_issue ON fact_task(issue_id);
 CREATE INDEX IF NOT EXISTS idx_task_session ON fact_task(session_id);
+CREATE INDEX IF NOT EXISTS idx_task_cst_day ON fact_task(cst_day);
 
 -- ---------------------------------------------------------------------------
 -- fact_pr — grain = one PR. Source: gh-pr-status-cache + job children[].
@@ -138,8 +171,16 @@ CREATE TABLE IF NOT EXISTS fact_ado_pr (
     is_draft        INTEGER,            -- 0/1
     reviewers       TEXT,               -- JSON array of {name, vote}
     age_hours       REAL,               -- age at normalize time
-    repo            TEXT
+    repo            TEXT,
+    -- Two CST days: opened (created_date) and closed (closed_date). Both are
+    -- needed because the daily PR trend counts opens and merges separately.
+    cst_day         TEXT GENERATED ALWAYS AS
+                    (date(created_date, '+8 hours')) STORED,
+    cst_closed_day  TEXT GENERATED ALWAYS AS
+                    (date(closed_date, '+8 hours')) STORED
 );
+CREATE INDEX IF NOT EXISTS idx_ado_pr_cst_day ON fact_ado_pr(cst_day);
+CREATE INDEX IF NOT EXISTS idx_ado_pr_cst_closed ON fact_ado_pr(cst_closed_day);
 CREATE INDEX IF NOT EXISTS idx_ado_pr_created ON fact_ado_pr(created_date);
 
 -- ---------------------------------------------------------------------------
@@ -184,9 +225,18 @@ CREATE TABLE IF NOT EXISTS fact_github_pr (
     closed_date     TEXT,                   -- ISO text; set when closed/merged
     url             TEXT,
     is_draft        INTEGER,                -- 0/1
+    -- Two CST days: opened (created_date) and merged (merged_date), mirroring
+    -- fact_ado_pr. Note the ADO twin uses closed_date + status='completed' for
+    -- its merge signal; GitHub has an explicit merged_date, so no status filter.
+    cst_day         TEXT GENERATED ALWAYS AS
+                    (date(created_date, '+8 hours')) STORED,
+    cst_merged_day  TEXT GENERATED ALWAYS AS
+                    (date(merged_date, '+8 hours')) STORED,
     PRIMARY KEY (repo, pr_number)
 );
 CREATE INDEX IF NOT EXISTS idx_github_pr_created ON fact_github_pr(created_date);
+CREATE INDEX IF NOT EXISTS idx_github_pr_cst_day ON fact_github_pr(cst_day);
+CREATE INDEX IF NOT EXISTS idx_github_pr_cst_merged ON fact_github_pr(cst_merged_day);
 
 -- ---------------------------------------------------------------------------
 -- dim_model — price map for cost derivation (raven/claude carry no cost).

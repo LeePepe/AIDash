@@ -14,7 +14,7 @@ WITH cost AS (
     round(100.0 * sum(COALESCE(output_tokens, 0))
           / NULLIF(sum(COALESCE(total_tokens, 0)), 0), 2)        AS output_share_pct
   FROM fact_request
-  WHERE (:since IS NULL OR date(ts/1000, 'unixepoch', '+8 hours') >= :since)
+  WHERE (:since IS NULL OR cst_day >= :since)
 ),
 tasks AS (
   SELECT count(*) AS completed_tasks
