@@ -25,7 +25,13 @@ jobs:
       - name: Install test tooling
         # aidata is stdlib-only in production — no requirements file to install.
         # Only the test/lint tooling is needed.
-        run: python -m pip install --upgrade pip pytest ruff
+        #
+        # ruff is PINNED on purpose: it is a fast-moving linter whose default
+        # rule set changes between releases. An unpinned `pip install ruff`
+        # means a new release can turn CI red with no code change — exactly the
+        # flakiness a gate must not have. Bump this deliberately, with the
+        # resulting fixes in the same commit.
+        run: python -m pip install --upgrade pip pytest 'ruff==0.15.13'
       - name: pytest
         # The warehouse (L3_merge/warehouse.db) is a gitignored local artifact,
         # so integration tests that need it skip themselves here. The hermetic
