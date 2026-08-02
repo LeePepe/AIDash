@@ -1,4 +1,5 @@
 -- aidata-attach: memory_hermes_db
+-- aidata-tier: explore
 -- memory/hermes-inventory — Hermes fact store, grouped by category, with a
 -- dead-asset proxy. NOTE: retrieval_count/helpful_count are non-functional in
 -- this runtime (counters_functional = 0), so dead-asset detection FALLS BACK to

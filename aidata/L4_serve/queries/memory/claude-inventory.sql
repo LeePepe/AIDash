@@ -1,4 +1,5 @@
 -- aidata-attach: memory_claude
+-- aidata-tier: explore
 -- memory/claude-inventory — Claude Code memory notes, grouped by type.
 -- Reads the un-merged clean source directly (memory does NOT enter warehouse).
 SELECT

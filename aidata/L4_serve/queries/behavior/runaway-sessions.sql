@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- behavior/runaway-sessions — the long tail of huge sessions. dim_session is
 -- claude-cli-only (session_uuid reliable there), so this covers claude-cli
 -- spend. Duration from first_ts/last_ts (epoch ms) -> minutes.
