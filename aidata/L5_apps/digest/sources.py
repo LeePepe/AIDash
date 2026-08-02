@@ -145,7 +145,14 @@ def _series_from(rows: list[tuple], cols: list[str], day_col: str,
 
 
 def fetch_ado_pr_trends() -> AdoPrTrends:
-    """Fetch per-CST-day PRs opened/merged; degrade to empty + health."""
+    """Fetch per-CST-day ADO PRs opened/merged; degrade to empty + health.
+
+    Single-host. The digest reads `fetch_combined_pr_trends` (both hosts) —
+    this one is kept as a per-source view for ad-hoc use and for
+    tests/test_sources_m3.py's degrade-safety cases, which need one host in
+    isolation. NOT the seam _fetch_sources calls; freezing only this one in a
+    fixture leaves the digest's PR line live (tech-context.md 坑 ①).
+    """
     empty: list[tuple[str, float]] = []
     if not clean_path("ado_pr").exists():
         return AdoPrTrends(empty, empty,
@@ -165,9 +172,9 @@ def fetch_ado_pr_trends() -> AdoPrTrends:
 def fetch_github_pr_trends() -> AdoPrTrends:
     """Fetch per-CST-day GitHub PRs opened/merged; degrade to empty + health.
 
-    Reuses AdoPrTrends (same opened/merged/health shape). Feeds the same 昨日汇总
-    "开了 N 个 PR" line as ado_pr — the two are unioned in the digest so a PR on
-    either host is counted (fixes the "always 0" bug where only ADO was read).
+    Single-host twin of fetch_ado_pr_trends (same opened/merged/health shape);
+    same caveat — the digest reads the union, not this. Kept for symmetry and
+    ad-hoc per-host inspection.
     """
     empty: list[tuple[str, float]] = []
     if not clean_path("github_pr").exists():
@@ -185,37 +192,35 @@ def fetch_github_pr_trends() -> AdoPrTrends:
                            SourceHealth("github_pr", "error", str(exc)[:200]))
 
 
-def _sum_series(a: list[tuple[str, float]],
-                b: list[tuple[str, float]]) -> list[tuple[str, float]]:
-    """Add two per-day (day, count) series into one, summing shared days.
-
-    Returned sorted by day descending to match each source's own ordering.
-    """
-    totals: dict[str, float] = {}
-    for day, val in list(a) + list(b):
-        totals[day] = totals.get(day, 0.0) + val
-    return sorted(totals.items(), key=lambda kv: kv[0], reverse=True)
-
-
 def fetch_combined_pr_trends() -> AdoPrTrends:
-    """Union ADO + GitHub PR trends into one opened/merged series.
+    """PRs opened/merged per CST day across BOTH hosts, for the 昨日汇总 line.
 
-    The digest's "开了 N 个 PR（合并 N 个）" line must count PRs on BOTH hosts.
-    Previously only ado_pr was read, so all-GitHub days showed 0. Health is the
-    healthier of the two: `ok` if either source is ok (some data), else the ADO
-    health so a total absence still degrades cleanly (ADR-23).
+    The union itself lives in SQL (`trend/daily-pr`) — it is a composite metric
+    definition, so it belongs at the metric layer, not here. This function is
+    now only the degrade-safe wrapper (ADR-23): decide what to do when one or
+    both sources were never collected, which is availability logic, not
+    aggregation.
+
+    Health is the healthier of the two: `ok` if either source collected (the
+    query then legitimately reports the other as zero), else a combined
+    skipped/error state so a total absence still degrades cleanly.
     """
-    ado = fetch_ado_pr_trends()
-    gh = fetch_github_pr_trends()
-    opened = _sum_series(ado.opened, gh.opened)
-    merged = _sum_series(ado.merged, gh.merged)
-    if ado.health.state == "ok" or gh.health.state == "ok":
-        health = SourceHealth("pr", "ok")
-    else:
-        # Neither collected — surface a combined skipped/error state.
-        detail = f"ado={ado.health.state}; github={gh.health.state}"
-        health = SourceHealth("pr", "skipped:未采集", detail)
-    return AdoPrTrends(opened=opened, merged=merged, health=health)
+    empty: list[tuple[str, float]] = []
+    ado_present = clean_path("ado_pr").exists()
+    gh_present = clean_path("github_pr").exists()
+    if not ado_present and not gh_present:
+        return AdoPrTrends(empty, empty, SourceHealth(
+            "pr", "skipped:未采集", "ado=skipped:未采集; github=skipped:未采集"))
+    try:
+        rows, cols = serve.run_query("trend/daily-pr")
+        return AdoPrTrends(
+            opened=_series_from(rows, cols, "day", "opened"),
+            merged=_series_from(rows, cols, "day", "merged"),
+            health=SourceHealth("pr", "ok"),
+        )
+    except Exception as exc:
+        return AdoPrTrends(empty, empty,
+                           SourceHealth("pr", "error", str(exc)[:200]))
 
 
 def fetch_automation_trends() -> AutomationTrends:

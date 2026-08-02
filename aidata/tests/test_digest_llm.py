@@ -26,6 +26,10 @@ def frozen(monkeypatch):
     monkeypatch.setattr(app, "fetch_raven_trends", lambda: _FROZEN_TRENDS)
     monkeypatch.setattr(app, "fetch_multica_completed", lambda: _FROZEN_MULTICA)
     monkeypatch.setattr(app, "fetch_ado_pr_trends", lambda: _FROZEN_ADO)
+    # Freeze the seam _fetch_sources ACTUALLY calls. Freezing only
+    # fetch_ado_pr_trends leaves the PR line reading this machine's live
+    # warehouse — the exact trap recorded in tech-context.md 坑 ①.
+    monkeypatch.setattr(app, "fetch_combined_pr_trends", lambda: _FROZEN_ADO)
     monkeypatch.setattr(app, "fetch_automation_trends", lambda: _FROZEN_AUTOMATION)
     # Radar frozen to empty/degraded so build_digest stays hermetic (no
     # warehouse/LLM). A degraded radar renders no section — template unchanged.
