@@ -3,7 +3,7 @@
 import json
 import pytest
 
-from L5_apps.digest.proposals import read_pending, _coerce, Proposal
+from L5_apps.digest.proposals import read_pending, _coerce
 
 
 def _write(tmp_path, records):

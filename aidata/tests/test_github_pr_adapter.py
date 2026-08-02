@@ -12,6 +12,18 @@ import pytest
 import adapters.github_pr as ghpr
 
 
+@pytest.fixture(autouse=True)
+def _configured(monkeypatch):
+    """Pin the repo list so tests never depend on this machine's config.
+
+    GITHUB_PR_REPOS defaults to () (real values live in the git-ignored
+    config_local.py), so without this the collect tests would pass locally and
+    fail on a fresh clone / CI. test_collect_degrades_when_unconfigured covers
+    the empty case deliberately.
+    """
+    monkeypatch.setattr(ghpr, "GITHUB_PR_REPOS", ("owner/repo",))
+
+
 # One PR as `gh pr list --json ...` returns it (camelCase fields).
 _PR_OPEN = {
     "number": 122,
@@ -62,6 +74,17 @@ def test_collect_returns_0_on_bad_json(monkeypatch):
     monkeypatch.setattr(ghpr.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(ghpr.subprocess, "run",
                         lambda *a, **k: _Proc(0, "not json"))
+    assert ghpr.collect() == 0
+
+
+@pytest.mark.unit
+def test_collect_degrades_when_unconfigured(monkeypatch):
+    # ADR-23: on a machine with no config_local.py, GITHUB_PR_REPOS is () —
+    # collect must return 0 without writing anything.
+    monkeypatch.setattr(ghpr, "GITHUB_PR_REPOS", ())
+    monkeypatch.setattr(ghpr.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(ghpr, "write_raw_snapshot",
+                        lambda *a, **k: pytest.fail("should not write"))
     assert ghpr.collect() == 0
 
 

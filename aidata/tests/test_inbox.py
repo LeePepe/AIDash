@@ -7,7 +7,7 @@ Covers bucket aggregation, per-bucket quotas, priority sort, and degradation.
 import pytest
 
 from L5_apps.digest import inbox as inbox_mod
-from L5_apps.digest.inbox import build_inbox, InboxItem
+from L5_apps.digest.inbox import build_inbox
 from L5_apps.digest.proposals import Proposal
 
 

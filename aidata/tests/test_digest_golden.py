@@ -6,7 +6,8 @@ import L5_apps.digest.app as app
 from L5_apps.digest.app import build_digest
 from L5_apps.digest.sources import (
     RavenTrends, MulticaTrends, AdoPrTrends, AutomationTrends, SourceHealth,
-    RepoRadar,
+    RepoRadar, CostImprovement, ValueEfficiency, WorkByProject, AiEfficiency,
+    RankBundle, SegmentBundle, NewsRadar, ModelTier,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -58,17 +59,59 @@ def frozen_trends(monkeypatch):
     """Monkeypatch the digest app's data-fetch calls so build_digest never
     touches the (gitignored, local-only) warehouse.db / clean DBs. The frozen
     series below are point-in-time captures that produced the committed golden.
+
+    EVERY fetch_* that `_fetch_sources` calls must be frozen here. A source that
+    is left live reads the local warehouse, so the golden drifts as real data
+    lands and the test fails on a machine with data while passing on a fresh
+    clone. Sources whose output the committed golden does not render are frozen
+    to a degraded/empty bundle rather than a captured series — degraded sources
+    render nothing (ADR-23), so the golden stays independent of them.
+
+    When adding a new source to `_fetch_sources`, add it here too.
     """
     monkeypatch.setattr(app, "fetch_raven_trends", lambda: _FROZEN_TRENDS)
     monkeypatch.setattr(app, "fetch_multica_completed", lambda: _FROZEN_MULTICA)
-    monkeypatch.setattr(app, "fetch_ado_pr_trends", lambda: _FROZEN_ADO)
     monkeypatch.setattr(app, "fetch_automation_trends", lambda: _FROZEN_AUTOMATION)
+    # The "开了 N 个 PR" line reads the ADO+GitHub union, not ado_pr directly —
+    # freeze the seam the app actually calls, or live GitHub PRs leak in.
+    monkeypatch.setattr(app, "fetch_ado_pr_trends", lambda: _FROZEN_ADO)
+    monkeypatch.setattr(app, "fetch_combined_pr_trends", lambda: _FROZEN_ADO)
     # Radar is a separate source; freeze it to an empty/degraded bundle so the
     # golden stays independent of the local warehouse + LLM. A degraded radar
     # renders no section, so the committed golden is unaffected (its own
     # rendering is covered by test_aidash_radar / test_repo_radar_enrichment).
     monkeypatch.setattr(app, "fetch_repo_radar",
                         lambda: RepoRadar([], SourceHealth("github_repo", "skipped:未取")))
+
+    # Batch-2 / later sources: not rendered by this golden, so freeze each to a
+    # degraded empty bundle. Own rendering is covered by their own tests
+    # (test_batch2_cards, test_cost_improvement_card, test_value_efficiency_card,
+    # test_work_by_project_card).
+    _skipped = lambda name: SourceHealth(name, "skipped:未取")  # noqa: E731
+    monkeypatch.setattr(app, "fetch_cost_improvement",
+                        lambda: CostImprovement([], 0.0, 0, _skipped("cost_improvement")))
+    monkeypatch.setattr(app, "fetch_value_efficiency",
+                        lambda *a, **k: ValueEfficiency(0.0, 0, None, None, 7,
+                                                       _skipped("value_efficiency")))
+    monkeypatch.setattr(app, "fetch_work_by_project",
+                        lambda *a, **k: WorkByProject([], _skipped("work_by_project")))
+    monkeypatch.setattr(app, "fetch_ai_efficiency",
+                        lambda: AiEfficiency(
+                            cache=[], cache_savings=[], cache_health=_skipped("cache"),
+                            rework=[], rework_health=_skipped("rework"),
+                            failure=RankBundle([], _skipped("failure")),
+                            quality=SegmentBundle([], _skipped("quality")),
+                            planner_gap_count=0,
+                            planner_gap_health=_skipped("planner_gap"),
+                        ))
+    monkeypatch.setattr(app, "fetch_app_focus",
+                        lambda *a, **k: RankBundle([], _skipped("app_focus")))
+    monkeypatch.setattr(app, "fetch_commit_by_repo",
+                        lambda *a, **k: RankBundle([], _skipped("commit_by_repo")))
+    monkeypatch.setattr(app, "fetch_news_radar",
+                        lambda: NewsRadar([], _skipped("news")))
+    monkeypatch.setattr(app, "fetch_model_tier",
+                        lambda *a, **k: ModelTier([], _skipped("model_tier")))
 
 
 @pytest.mark.unit

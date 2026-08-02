@@ -781,11 +781,12 @@ Every PR must pass before merge:
    corresponding ADR under `docs/adr/`.
 4. If the PR adds or changes a card type, both the strongly-typed payload
    struct and the round-trip test exist.
-5. If the PR touches `aidata/**`, `/usr/bin/python3 -m pytest aidata/tests/ -q`
-   passes. **The Swift CI gates (swiftlint, require-tests, build+test) match on
-   `.swift` and `Packages/*` only — they do not cover the Python layer at all.**
-   Its own pytest suite is the only safety net, so it must be run by hand until
-   a Python CI job exists.
+5. The `aidata (pytest + ruff)` CI job passes — pytest, `ruff check`, and a
+   degrade-not-crash probe that imports every source with no `config_local.py`
+   present. Run it locally before pushing with
+   `/usr/bin/python3 -m pytest aidata/tests/ -q`.
+   Integration tests needing the gitignored `warehouse.db` skip themselves in
+   CI; the hermetic unit tests — including the digest golden — must pass.
 
 ### No Identity in Version Control (NON-NEGOTIABLE)
 

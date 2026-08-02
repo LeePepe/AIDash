@@ -4,14 +4,12 @@ serve.run_query and clean_path are monkeypatched, so no warehouse.db / state.db
 is needed and the degrade-not-crash paths (ADR-23) are proven deterministically.
 """
 
-from pathlib import Path
 
 import pytest
 
 import L5_apps.digest.sources as src
 from L5_apps.digest.sources import (
-    AdoPrTrends, AutomationTrends, SourceHealth,
-    fetch_ado_pr_trends, fetch_automation_trends,
+    AdoPrTrends, AutomationTrends, fetch_ado_pr_trends, fetch_automation_trends,
 )
 
 

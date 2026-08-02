@@ -1,9 +1,17 @@
+from pathlib import Path
+
 import pytest
 
 from L5_apps.digest.sources import fetch_raven_trends, RavenTrends, SourceHealth
 
+_WAREHOUSE = Path(__file__).resolve().parent.parent / "L3_merge" / "warehouse.db"
+
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not _WAREHOUSE.exists(),
+    reason="warehouse.db not built (gitignored local artifact) — run `cli.py merge`",
+)
 def test_fetch_raven_trends_returns_series_and_ok_health():
     t = fetch_raven_trends()
     assert isinstance(t, RavenTrends)

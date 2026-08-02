@@ -99,4 +99,4 @@ canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
 ## 构建 / 测试
 
 见 `AGENTS.md → Build commands`。快速门:`swift test --package-path Packages/AIDashCore`。
-Python 数据层的门是独立的(Swift CI 不覆盖):`/usr/bin/python3 -m pytest aidata/tests/ -q`。
+Python 数据层有独立 CI job `aidata (pytest + ruff)`:`/usr/bin/python3 -m pytest aidata/tests/ -q`。

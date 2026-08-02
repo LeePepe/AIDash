@@ -8,7 +8,7 @@ source snapshot is shared with the golden test so the numbers are representative
 import pytest
 
 from L5_apps.digest.aidash import (
-    Briefing, Container, Card, build_briefing, parse_sections,
+    Briefing, Card, build_briefing, parse_sections,
 )
 from L5_apps.digest.sources import (
     DigestSources, RavenTrends, MulticaTrends, AdoPrTrends, AutomationTrends,

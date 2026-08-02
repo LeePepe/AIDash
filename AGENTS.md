@@ -120,8 +120,9 @@ aidata/ (Python, L1→L5)  ──JSON payload──>  aidash CLI  ──XPC─�
 `scripts/contract_check.sh` 兜底。改 briefing 内容一律走那个 skill。
 
 **Swift 门禁(swiftlint / require-tests / build+test / check-frontmatter)只覆盖
-`.swift` 与 `Packages/*`,不覆盖 `aidata/`。** Python 侧的安全网只有它自己的
-pytest:`/usr/bin/python3 -m pytest aidata/tests/ -q` —— 改了就要跑。
+`.swift` 与 `Packages/*`,不覆盖 `aidata/`。** Python 层由**独立的 CI job**
+`aidata (pytest + ruff)` 把关:pytest + `ruff check` + 无 `config_local.py` 的
+降级探针。本地跑:`/usr/bin/python3 -m pytest aidata/tests/ -q`。
 
 ## Build commands
 
@@ -143,7 +144,7 @@ xcodebuild -scheme AIDashApp -destination "platform=iOS Simulator,name=iPad Pro,
 # touches CLI/aidash/** or project.yml.
 xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build
 
-# Test the aidata Python data layer (NOT covered by the Swift CI gates).
+# Test the aidata Python data layer (CI job: `aidata (pytest + ruff)`).
 # 注意用 /usr/bin/python3(装了 pytest);cron 链用的 homebrew python3 没装。
 /usr/bin/python3 -m pytest aidata/tests/ -q
 ```

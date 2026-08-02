@@ -1,4 +1,3 @@
-import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -6,6 +5,15 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 WAREHOUSE = ROOT / "L3_merge" / "warehouse.db"
+
+# The warehouse is a gitignored local artifact (built by `cli.py merge`). On a
+# fresh clone or in CI it does not exist, so these integration tests have
+# nothing to assert against — skip rather than fail. `pytest -m integration`
+# on a machine with a built warehouse still runs them for real.
+pytestmark = pytest.mark.skipif(
+    not WAREHOUSE.exists(),
+    reason="warehouse.db not built (gitignored local artifact) — run `cli.py merge`",
+)
 
 
 def _q(sql: str):

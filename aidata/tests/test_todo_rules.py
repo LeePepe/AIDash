@@ -1,7 +1,7 @@
 import pytest
 
 from L5_apps.digest.sources import RavenTrends, SourceHealth
-from L5_apps.digest.todo_rules import todo_candidates, Todo
+from L5_apps.digest.todo_rules import todo_candidates
 
 
 def _rt(**kw) -> RavenTrends:

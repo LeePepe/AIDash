@@ -80,7 +80,7 @@ def test_over_budget_truncates():
 @pytest.mark.unit
 def test_no_noise_no_fold_line():
     # A digest without any flat-streak alert must not emit a background-noise line.
-    md = "\n".join(l for l in FULL_MD.splitlines() if "🚩" not in l)
+    md = "\n".join(ln for ln in FULL_MD.splitlines() if "🚩" not in ln)
     out = must_see_layer(md)
     assert "🔇 背景噪音" not in out
 

@@ -17,6 +17,7 @@ Split by data dependency:
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -256,6 +257,10 @@ def test_missing_clean_db_is_not_fatal_at_connect(tmp_path, monkeypatch):
 # (a) THE backstop: every real query runs against the live warehouse
 # --------------------------------------------------------------------------- #
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parent.parent / "L3_merge" / "warehouse.db").exists(),
+    reason="warehouse.db not built (gitignored local artifact) — run `cli.py merge`",
+)
 def test_all_39_queries_run_against_live_warehouse():
     names = serve.list_queries()
     assert len(names) == 39, f"expected 39 queries, found {len(names)}"

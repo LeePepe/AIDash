@@ -11,6 +11,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  aidata:
+    name: aidata (pytest + ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test tooling
+        # aidata is stdlib-only in production — no requirements file to install.
+        # Only the test/lint tooling is needed.
+        run: python -m pip install --upgrade pip pytest ruff
+      - name: pytest
+        # The warehouse (L3_merge/warehouse.db) is a gitignored local artifact,
+        # so integration tests that need it skip themselves here. The hermetic
+        # unit tests — including the digest golden — must pass.
+        working-directory: aidata
+        run: python -m pytest tests/ -q
+      - name: ruff (production code + tests)
+        # Data layers are gitignored, but exclude them explicitly so a stray
+        # local artifact can never fail CI.
+        working-directory: aidata
+        run: ruff check . --exclude L1_collect,L2_normalize,L3_merge
+      - name: Degrade-not-crash — imports clean with no config_local.py
+        # config_local.py is git-ignored, so CI is the real "fresh clone" test:
+        # every source must degrade to a no-op rather than raise (ADR-23).
+        working-directory: aidata
+        run: |
+          set -euo pipefail
+          test ! -f config_local.py  # sanity: it must never be committed
+          python -c "
+          import config, adapters.ado_pr as ado, adapters.github_pr as gh
+          assert config.ADO_ORG == '', 'ADO_ORG should default empty'
+          assert config.MULTICA_WORKSPACES == (), 'workspaces should default empty'
+          assert config.GITHUB_PR_REPOS == (), 'GITHUB_PR_REPOS should default empty'
+          assert ado.collect() == 0, 'ado_pr must degrade to 0'
+          assert gh.collect() == 0, 'github_pr must degrade to 0'
+          print('degrade-not-crash OK')
+          "
+
   swiftlint:
     name: swiftlint (root config)
     runs-on: ubuntu-latest

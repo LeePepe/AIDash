@@ -84,8 +84,23 @@ Python 产出端和 Swift 渲染端,契约不再跨 repo 漂移。
 测试全部 hermetic ——不依赖 `config_local.py`、不打网络。`@pytest.mark.integration`
 标记的会读已构建的 warehouse.db,不存在时优雅跳过。
 
-> 已知:`test_digest_golden`、`test_warehouse_integrity`、`test_work_by_project_card`
-> 三个用例在迁入前即为失败状态(与本次迁移无关),尚未修复。
+CI job `aidata (pytest + ruff)` 跑三件事:pytest、`ruff check`、以及**没有
+`config_local.py` 时的降级探针**(import 全部源 + 断言 collect() == 0)。
+
+### 两个反复踩到的坑
+
+**① golden 测试必须冻结 `_fetch_sources` 调用的每一个 `fetch_*`。**
+漏一个 → 那个源读本机 warehouse → 真实数据一变 golden 就漂移:有数据的机器上
+失败、全新 clone 上通过。尤其注意**冻结 app 实际调用的那个 seam**:PR 那行走的是
+`fetch_combined_pr_trends`(ado+github 并集),只冻结 `fetch_ado_pr_trends` 不够。
+golden 不渲染的源冻成 degraded 空 bundle 即可(降级源不渲染,ADR-23)。
+**新增数据源时,记得同步加进 `tests/test_digest_golden.py` 的 `frozen_trends`。**
+
+**② 成本在 L2 算,不在 L3。** `dim_model.csv` 加了新模型价格后,只跑 `cli.py merge`
+**没用** —— L3 只是从 L2 拷 `cost_usd`,派生发生在 `adapters/raven.py` 的 normalize。
+必须 `cli.py normalize --source raven` 再 `cli.py merge`。
+`test_warehouse_integrity::test_no_tokens_without_cost` 就是这个缺口的哨兵:
+它红了通常意味着**出了新模型而价格表没跟上**(成本会少算),不是测试坏了。
 
 ## 运维:04:00 cron 链
 

@@ -7,8 +7,7 @@ import pytest
 
 from L5_apps.digest.llm import LLMError
 from L5_apps.digest.polish import (
-    PolishSlots, MAX_TLDR, MAX_TODO,
-    build_prompt, parse_slots, truncate, apply_slots, polish_digest,
+    PolishSlots, MAX_TLDR, build_prompt, parse_slots, truncate, apply_slots, polish_digest,
 )
 
 TEMPLATE = """# AI 使用日报 2026-07-09
@@ -104,7 +103,7 @@ def test_apply_slots_no_todos_leaves_template_todo():
 def test_apply_slots_caps_lengths():
     slots = PolishSlots(tldr="长" * 400, todos=("改" * 400,))
     out = apply_slots(TEMPLATE, slots)
-    tldr_line = next(l for l in out.splitlines() if "💡 点评" in l)
+    tldr_line = next(ln for ln in out.splitlines() if "💡 点评" in ln)
     # the commentary portion after the marker is capped
     assert len(tldr_line) <= len("> 💡 点评: ") + MAX_TLDR
 

@@ -1,6 +1,6 @@
 import pytest
 
-from L5_apps.digest.trends import compute_trend, flat_streak, Trend
+from L5_apps.digest.trends import compute_trend, flat_streak
 
 
 # Real golden series from warehouse (cost by CST day), newest-first.

@@ -7,7 +7,7 @@ the built warehouse if present.
 import pytest
 
 from L5_apps.digest.sources import (
-    fetch_multica_completed, MulticaTrends, SourceHealth,
+    fetch_multica_completed, MulticaTrends,
 )
 
 

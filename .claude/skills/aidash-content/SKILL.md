@@ -126,8 +126,10 @@ Each layer has its own gates (do NOT bypass):
 
 - **aidata (Python):** `/usr/bin/python3 -m pytest aidata/tests/ -q`, ruff; the
   digest template golden test must stay green; the LLM path is never golden-tested.
-  Note: the Python layer is NOT covered by AIDash's Swift CI gates — its tests are
-  your only safety net, so run them.
+  Gated in CI by the `aidata (pytest + ruff)` job, which also runs a
+  degrade-not-crash probe with no `config_local.py` — so a new source must
+  degrade to a no-op (ADR-23), and a new fetch must be frozen in the golden
+  fixture or it will leak live data and fail there.
 - **AIDash (Swift):** pre-commit (incremental per-package build+test+swiftlint), pre-push
   (frontmatter anti-corrosion, "改代码必带测试" gate, full swiftlint + Core tests +
   xcodegen + xcodebuild for app AND CLI), and GitHub Actions on `macos-26`. If you

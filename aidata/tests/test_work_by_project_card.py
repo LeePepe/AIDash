@@ -29,7 +29,7 @@ def test_container_has_metric_card_per_project():
     items = card.payload["items"]
     assert [i["label"] for i in items] == ["VitalStride", "WorkspaceA", "AIDash"]
     assert items[0]["value"] == 538
-    assert items[0]["unit"] == "turns"
+    assert items[0]["unit"] == "次交互"
     assert "14 会话" in items[0]["context"]
 
 
