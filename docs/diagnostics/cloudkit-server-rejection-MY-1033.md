@@ -48,16 +48,16 @@ A direct grep of `~/Library/MobileDevice/Provisioning Profiles/*.mobileprovision
 
 | Field | Value |
 | --- | --- |
-| Name | Mac Team Provisioning Profile: com.tianpli.aidash |
-| UUID | `<PROFILE_UUID>` |
+| Name | Mac Team Provisioning Profile: `<BUNDLE_ID>` |
+| UUID | `<PROFILE_UUID>`(本机签名凭据,不入库) |
 | TeamIdentifier | `<DEVELOPMENT_TEAM>` |
-| TeamName | <TEAM_NAME> |
+| TeamName | `<TEAM_NAME>` |
 | Platform | OSX |
-| AppIDName | `XC com tianpli aidash` |
+| AppIDName | `XC <bundle id with spaces>` |
 | ExpirationDate | 2027-06-26 |
 | IsXcodeManaged | true |
 
-The certificate chain inside the profile resolves to `Apple Development: <apple-dev-account> (RADE22GAMA)` issued under team `<DEVELOPMENT_TEAM>`, matching the codesign authority on the signed binary.
+The certificate chain inside the profile resolves to `Apple Development: <apple-dev-account> (<CERT_ID>)` issued under team `<DEVELOPMENT_TEAM>`, matching the codesign authority on the signed binary.
 
 ### D. Built-app codesign entitlements
 Inspected on the most recent real build:
@@ -67,7 +67,7 @@ Inspected on the most recent real build:
 ```
 $ codesign -dv ...
 Identifier=com.tianpli.aidash
-Authority=Apple Development: <apple-dev-account> (RADE22GAMA)
+Authority=Apple Development: <apple-dev-account> (<CERT_ID>)
 TeamIdentifier=<DEVELOPMENT_TEAM>
 Signature size=4784
 Runtime Version=26.5.0

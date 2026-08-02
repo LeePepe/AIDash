@@ -150,7 +150,7 @@ public struct DigestCardView: View {
     DigestCardView(
         payload: DigestPayload(
             title: "Tuesday at a glance",
-            body: "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention, including the ABC-301 crash that had been blocking the v9 release. The new design system migration is now 70% complete. Today's main blocker is the performance review feedback."
+            body: "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention, including the PROJ-301 crash that had been blocking the v9 release. The new design system migration is now 70% complete. Today's main blocker is the performance review feedback."
         ),
         size: .medium,
         style: .accent
@@ -186,7 +186,7 @@ public struct DigestCardView: View {
     DigestCardView(
         payload: DigestPayload(
             title: "Tuesday at a glance",
-            body: "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention, including the ABC-301 crash that had been blocking the v9 release.",
+            body: "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention, including the PROJ-301 crash that had been blocking the v9 release.",
             sections: [
                 .init(heading: "What got shipped", paragraphs: [
                     "Atlas merged 3 PRs overnight.",

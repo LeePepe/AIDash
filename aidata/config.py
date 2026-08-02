@@ -44,6 +44,7 @@ MULTICA_CONFIG = HOME / ".multica" / "config.json"
 # GitHub tool-radar source (github_repo). Scanning the folder keeps the radar
 # auto-synced with the stockpile — add a repo note → it's tracked next run. Read
 # -only; the adapter degrades to empty when the folder is absent (ADR-23).
+# Portable default; override in config_local.py if your stockpile lives elsewhere.
 COLLECTED_TOOLS_DIR = HOME / "Development" / "Personal" / "collected-tools"
 
 # local_git source — the roots we walk for `.git` repos to aggregate MY own
@@ -132,11 +133,12 @@ ADO_CREATOR_ID = ""
 
 # GitHub PRs (github_pr source) — my personal-project PRs live on GitHub, not
 # ADO. `gh pr list --author @me` is run per repo (reuses existing gh auth). The
-# digest's "开了 N 个 PR" line unions these with ado_pr. Add repos as they become
-# active; a repo that errors/has no PRs simply contributes nothing (ADR-23).
-GITHUB_PR_REPOS = (
-    "LeePepe/AIDash",
-)
+# digest's "开了 N 个 PR" line unions these with ado_pr. A repo that errors/has
+# no PRs simply contributes nothing (ADR-23).
+#
+# Empty by default (this repo is public — the repo list is personal). Set your
+# own in config_local.py; unset ⇒ the github_pr source is a no-op.
+GITHUB_PR_REPOS: tuple[str, ...] = ()
 
 # ---------------------------------------------------------------------------
 # AIDash CLI (aidash_events source) — resolves the `aidash` binary the same way

@@ -58,7 +58,7 @@ card --container-id "$C_ADO" --id "33333333-0000-0000-0000-000000000001" \
     "subtitle":"All repos · yesterday",
     "body":"Twelve PRs merged across Atlas and Basalt, with the v9-blocking crash finally resolved. The design-system migration crossed 70%. Build times are trending down after the cache rework.",
     "sections":[
-      {"heading":"Shipped","paragraphs":["ABC-301 crash fix (unblocks v9).","Cache rework cut CI ~30%."]},
+      {"heading":"Shipped","paragraphs":["PROJ-301 crash fix (unblocks v9).","Cache rework cut CI ~30%."]},
       {"heading":"Blocking today","paragraphs":["Perf review feedback due 5pm.","Q3 priority decision pending."]}
     ]
   }'
@@ -85,7 +85,7 @@ card --container-id "$C_TODAY" --id "44444444-0000-0000-0000-000000000001" \
 card --container-id "$C_TODAY" --id "44444444-0000-0000-0000-000000000002" \
   --type agentSummary --size medium --style success \
   --payload '{"agentName":"Multica","completed":[
-    {"title":"Merged 3 Atlas PRs","ref":"ABC-297..301"},
+    {"title":"Merged 3 Atlas PRs","ref":"PROJ-297..301"},
     {"title":"Regenerated changelog"}
   ],"stats":[{"label":"PRs","value":3},{"label":"Reviews","value":9}]}'
 

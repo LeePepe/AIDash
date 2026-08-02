@@ -126,7 +126,7 @@ public struct AgentSummaryPayload: Codable, Sendable {
 {
   "agentName": "multica/atlas",
   "completed": [
-    {"title": "Fixed ABC-301 crash on launch", "ref": "https://example.com/pr/4521"},
+    {"title": "Fixed PROJ-301 crash on launch", "ref": "https://example.com/pr/4521"},
     {"title": "Migrated Activity Tabs to new design system", "ref": "https://example.com/pr/4522"},
     {"title": "Added telemetry for tab switching", "ref": "https://example.com/pr/4530"}
   ],
@@ -252,7 +252,7 @@ public struct DigestPayload: Codable, Sendable {
 ```json
 {
   "title": "Tuesday at a glance",
-  "body": "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention, including the ABC-301 crash that had been blocking the v9 release. The new design system migration is now 70% complete. Today's main blocker is the performance review feedback — your director needs the response by 5 PM."
+  "body": "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention, including the PROJ-301 crash that had been blocking the v9 release. The new design system migration is now 70% complete. Today's main blocker is the performance review feedback — your director needs the response by 5 PM."
 }
 ```
 

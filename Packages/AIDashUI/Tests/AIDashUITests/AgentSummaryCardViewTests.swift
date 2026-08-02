@@ -10,7 +10,7 @@ struct AgentSummaryCardViewTests {
     private let samplePayload = AgentSummaryPayload(
         agentName: "multica/atlas",
         completed: [
-            .init(title: "Fixed ABC-301 crash on launch", ref: "https://example.com/pr/4521"),
+            .init(title: "Fixed PROJ-301 crash on launch", ref: "https://example.com/pr/4521"),
             .init(title: "Migrated Activity Tabs", ref: "https://example.com/pr/4522"),
         ],
         stats: [

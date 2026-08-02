@@ -8,16 +8,22 @@ options:
   groupSortPosition: top
   generateEmptyDirectories: true
 
+# 身份配置单源:Bundle ID / CloudKit 容器 / 开发者团队。
+# fork 后只改 Configs/Identity.xcconfig 一个文件即可,见该文件顶部说明。
+configFiles:
+  Debug: Configs/Identity.xcconfig
+  Release: Configs/Identity.xcconfig
+
 settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     CODE_SIGN_STYLE: Automatic
-    # Personal Apple Developer team (paid). Pinned here so `xcodegen generate`
-    # never wipes the team selection from AIDash.xcodeproj. CI uses
-    # CODE_SIGNING_ALLOWED=NO so this is ignored on macos-latest runners.
-    DEVELOPMENT_TEAM: <DEVELOPMENT_TEAM>
+    # Apple Developer team — 值来自 Configs/Identity.xcconfig。
+    # 固定在这里,避免 `xcodegen generate` 抹掉 AIDash.xcodeproj 里的 team 选择。
+    # CI 用 CODE_SIGNING_ALLOWED=NO,所以在 runner 上会被忽略。
+    DEVELOPMENT_TEAM: $(AIDASH_DEVELOPMENT_TEAM)
 
 packages:
   AIDashCore:
@@ -39,7 +45,7 @@ targets:
       - path: Apps/AIDashApp/Resources/Localizable.xcstrings
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash
+        PRODUCT_BUNDLE_IDENTIFIER: $(AIDASH_BUNDLE_ID)
         PRODUCT_NAME: AIDash
         # Swift module name is pinned to AIDashApp (not the AIDash product name)
         # so `@testable import AIDashApp` in the app-target tests resolves.
@@ -62,7 +68,7 @@ targets:
       - path: Apps/AIDashApp/Tests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.tests
+        PRODUCT_BUNDLE_IDENTIFIER: $(AIDASH_BUNDLE_ID).tests
         GENERATE_INFOPLIST_FILE: YES
         # The host app's PRODUCT_NAME is `AIDash` (not the target name
         # `AIDashApp`), so XcodeGen's default TEST_HOST of
@@ -82,7 +88,7 @@ targets:
       - path: CLI/aidash/Sources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.cli
+        PRODUCT_BUNDLE_IDENTIFIER: $(AIDASH_BUNDLE_ID).cli
         PRODUCT_NAME: aidash
         SKIP_INSTALL: NO
     dependencies:
@@ -108,7 +114,7 @@ targets:
         product: ArgumentParser
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tianpli.aidash.cli.tests
+        PRODUCT_BUNDLE_IDENTIFIER: $(AIDASH_BUNDLE_ID).cli.tests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:

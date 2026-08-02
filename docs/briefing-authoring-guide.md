@@ -97,7 +97,7 @@ Briefing (一天一个)
  "subtitle":"All repos · yesterday",
  "body":"Twelve PRs merged... build times trending down.",
  "sections":[
-   {"heading":"Shipped","paragraphs":["ABC-301 crash fix.","Cache cut CI 30%."]},
+   {"heading":"Shipped","paragraphs":["PROJ-301 crash fix.","Cache cut CI 30%."]},
    {"heading":"Blocking today","paragraphs":["Perf review due 5pm."]}
  ]}
 ```
@@ -153,7 +153,7 @@ Briefing (一天一个)
 ### `agentSummary` — 某 agent 今日战果
 ```json
 {"agentName":"Multica",
- "completed":[{"title":"Merged 3 Atlas PRs","ref":"ABC-297..301"},
+ "completed":[{"title":"Merged 3 Atlas PRs","ref":"PROJ-297..301"},
               {"title":"Regenerated changelog"}],
  "stats":[{"label":"PRs","value":3},{"label":"Reviews","value":9}]}
 ```

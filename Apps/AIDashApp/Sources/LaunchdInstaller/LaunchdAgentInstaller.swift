@@ -41,7 +41,11 @@ public final class LaunchdAgentInstaller {
         public var isHealthy: Bool { self == .registered }
     }
 
-    public static let label = "com.tianpli.aidash"
+    /// launchd job label. 从 app 的 bundle id 推导,所以改
+    /// `Configs/Identity.xcconfig` 的 `AIDASH_BUNDLE_ID` 后自动跟随。
+    /// ⚠️ 改了之后必须卸载旧 agent(`launchctl bootout`),否则旧 label 的
+    /// agent 仍在注册旧 mach service。见 README「Fork 本项目」。
+    public static let label: String = Bundle.main.bundleIdentifier ?? "com.tianpli.aidash"
     public static let machServiceName = XPCServiceConfiguration.machServiceName
     /// Env var the plist sets so the launchd-spawned process knows it is the
     /// headless XPC agent (listener-only boot). A user/Xcode launch lacks it.

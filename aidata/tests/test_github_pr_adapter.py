@@ -20,7 +20,7 @@ _PR_OPEN = {
     "createdAt": "2026-07-20T10:00:00Z",
     "mergedAt": None,
     "closedAt": None,
-    "url": "https://github.com/LeePepe/AIDash/pull/122",
+    "url": "https://github.com/owner/repo/pull/122",
     "isDraft": False,
 }
 _PR_MERGED = {
@@ -30,7 +30,7 @@ _PR_MERGED = {
     "createdAt": "2026-07-20T08:00:00Z",
     "mergedAt": "2026-07-20T12:00:00Z",
     "closedAt": "2026-07-20T12:00:00Z",
-    "url": "https://github.com/LeePepe/AIDash/pull/121",
+    "url": "https://github.com/owner/repo/pull/121",
     "isDraft": False,
 }
 
@@ -97,11 +97,11 @@ def test_collect_writes_prs_across_repos(monkeypatch):
 @pytest.mark.unit
 def test_normalize_one_row_per_pr(monkeypatch):
     raw = [
-        {**_PR_OPEN, "repo": "LeePepe/AIDash"},
+        {**_PR_OPEN, "repo": "owner/repo"},
         # a later snapshot of the same PR now merged -> last write wins
-        {**_PR_OPEN, "repo": "LeePepe/AIDash",
+        {**_PR_OPEN, "repo": "owner/repo",
          "state": "MERGED", "mergedAt": "2026-07-21T09:00:00Z"},
-        {**_PR_MERGED, "repo": "LeePepe/AIDash"},
+        {**_PR_MERGED, "repo": "owner/repo"},
     ]
     monkeypatch.setattr(ghpr, "read_raw", lambda src: raw)
     captured = {}
@@ -112,5 +112,5 @@ def test_normalize_one_row_per_pr(monkeypatch):
     assert n == 2  # two distinct PR numbers (122 deduped)
     rows = captured["rows"]
     assert rows[122]["merged_date"] == "2026-07-21T09:00:00Z"  # latest snapshot
-    assert rows[122]["repo"] == "LeePepe/AIDash"
+    assert rows[122]["repo"] == "owner/repo"
     assert rows[121]["state"] == "MERGED"

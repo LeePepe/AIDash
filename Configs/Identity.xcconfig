@@ -1,0 +1,38 @@
+// AIDash — 身份配置单源(Bundle ID / CloudKit 容器 / 开发者团队)
+//
+// fork 本项目后,**只需要改这一个文件**。这里的值会流向:
+//   - project.yml            → PRODUCT_BUNDLE_IDENTIFIER(app / tests / CLI)
+//   - Info.plist             → CFBundleIdentifier
+//   - *.entitlements         → iCloud 容器标识符
+//   - LaunchdAgentInstaller  → launchd label
+//   - CloudKitContainer      → CloudKit 容器 + Logger subsystem
+//   - XPCProtocol            → mach service 名(App 与 CLI 必须一致)
+//
+// ⚠️ 这些值必须在**编译期**确定 —— entitlements 与 Info.plist 是构建产物,
+// 读不了运行时配置文件。所以这里是 xcconfig,不是 JSON/plist 配置。
+//
+// ⚠️ 改完必须重新安装:旧的 launchd agent 与已装 CLI 仍指向旧标识符。
+//    见 README「Fork 本项目」一节。
+
+// ---------------------------------------------------------------------------
+// 1. Bundle ID 前缀 —— 换成你自己的反向域名(如 com.yourname)。
+// ---------------------------------------------------------------------------
+AIDASH_BUNDLE_PREFIX = com.tianpli
+
+// ---------------------------------------------------------------------------
+// 2. App 的 Bundle ID。CLI 与测试 target 在此基础上加后缀。
+// ---------------------------------------------------------------------------
+AIDASH_BUNDLE_ID = $(AIDASH_BUNDLE_PREFIX).aidash
+
+// ---------------------------------------------------------------------------
+// 3. CloudKit 容器。必须是你 Apple 开发者账号下**真实存在**的容器
+//    (CloudKit Dashboard 里创建),否则 app 启动即 CKError 15/2000。
+//    惯例是 iCloud. + Bundle ID。
+// ---------------------------------------------------------------------------
+AIDASH_CLOUDKIT_CONTAINER = iCloud.$(AIDASH_BUNDLE_ID)
+
+// ---------------------------------------------------------------------------
+// 4. Apple 开发者团队 ID(10 位)。在 developer.apple.com → Membership 查。
+//    CI 用 CODE_SIGNING_ALLOWED=NO,所以留空也能过 CI,只影响本地签名运行。
+// ---------------------------------------------------------------------------
+AIDASH_DEVELOPMENT_TEAM = <DEVELOPMENT_TEAM>

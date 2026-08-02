@@ -151,7 +151,18 @@ public final class CloudKitContainer {
 
     /// CloudKit private-database container identifier. Must match the
     /// `com.apple.developer.icloud-container-identifiers` entitlement.
-    internal static let cloudKitContainerIdentifier = "iCloud.com.tianpli.aidash"
+    ///
+    /// 从 app 自己的 bundle id 推导(约定 `iCloud.<bundle id>`),所以改
+    /// `Configs/Identity.xcconfig` 的 `AIDASH_BUNDLE_ID` 后这里自动跟随 ——
+    /// entitlement 用的 `$(AIDASH_CLOUDKIT_CONTAINER)` 默认也是同一个约定值。
+    /// 若你的容器名不遵循该约定,在 xcconfig 里单独设 `AIDASH_CLOUDKIT_CONTAINER`,
+    /// 并把下面的 fallback 常量改成同一个字符串。
+    internal static let cloudKitContainerIdentifier: String = {
+        if let bundleID = Bundle.main.bundleIdentifier, !bundleID.isEmpty {
+            return "iCloud.\(bundleID)"
+        }
+        return "iCloud.com.tianpli.aidash"
+    }()
 
     private static func makeConfiguration(
         schema: Schema,

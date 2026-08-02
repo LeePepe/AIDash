@@ -41,8 +41,31 @@ ADO_CREATOR_ID = "00000000-0000-0000-0000-000000000000"
 
 # ---------------------------------------------------------------------------
 # GitHub repos whose PRs authored by you feed the "开了 N 个 PR" line.
-# Overrides config.py's default; uncomment to change coverage.
+# `gh pr list --author @me` runs per repo, reusing your existing gh auth.
+# Empty (config.py's default) ⇒ the github_pr source collects nothing.
 # ---------------------------------------------------------------------------
-# GITHUB_PR_REPOS = (
-#     "owner/repo",
-# )
+GITHUB_PR_REPOS = (
+    "owner/repo",
+)
+
+# ---------------------------------------------------------------------------
+# Optional path overrides — config.py's defaults are already HOME-relative and
+# portable, so most people never need these. Uncomment only if your layout
+# differs. Every one of these degrades to "skip this source" when absent
+# (ADR-23), so a wrong path never crashes the digest.
+# ---------------------------------------------------------------------------
+# from pathlib import Path
+# import os
+# HOME = Path(os.path.expanduser("~"))
+#
+# # Roots walked for `.git` repos to aggregate your own commit activity.
+# # Keep this narrow — walking all of ~ is slow. Author email is read live from
+# # `git config --global user.email`, never configured here.
+# LOCAL_GIT_SCAN_ROOTS = (HOME / "Development",)
+#
+# # Curated watchlist folder for the GitHub tool-radar source (github_repo):
+# # one Markdown note per tool, each carrying a github.com/owner/repo URL.
+# COLLECTED_TOOLS_DIR = HOME / "Development" / "Personal" / "collected-tools"
+#
+# # multica CLI binary (falls back to a PATH lookup if this exact path is absent).
+# MULTICA_BIN = "/opt/homebrew/bin/multica"

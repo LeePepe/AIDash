@@ -110,10 +110,10 @@ macOS 专属 Security API（`SecCode`/`SecCodeCopySelf`/`SecCodeCopyStaticCode`/
 **depends_on**: [T201, T202]
 **test**: `fastlane` 语法（`ruby -c` / `fastlane lint` 视可用性）；workflow YAML 合法。真实上传由用户手动 `workflow_dispatch force=true` 验证（非 CI 阻塞）。
 
-参照 VitalStride（同 team `<DEVELOPMENT_TEAM>`、同 GitHub owner、AIDash 已有 `[self-hosted, aidash-mac]`
+参照 VitalStride（同 team `<DEVELOPMENT_TEAM>`(见 Configs/Identity.xcconfig)、同 GitHub owner、AIDash 已有 `[self-hosted, aidash-mac]`
 runner），替换 bundleID/scheme、**去掉 widget/HealthKit/GlitchTip/Aptabase**：
 
-- `fastlane/Appfile`：`app_identifier("com.tianpli.aidash")` + `team_id("<DEVELOPMENT_TEAM>")`。
+- `fastlane/Appfile`：`app_identifier("<AIDASH_BUNDLE_ID>")` + `team_id("<DEVELOPMENT_TEAM>")`。
 - `fastlane/Fastfile`：`ios beta` lane：ASC API Key（.p8 base64，`is_key_content_base64:true`）；
   `sh("cd .. && xcodegen generate")`；`latest_testflight_build_number`（**不传 version**，全局
   单调递增，next=latest+1）；`get_provisioning_profile(force:true)` 拉单个 app bundleID 的

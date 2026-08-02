@@ -52,7 +52,7 @@ iCloud。因此新生成的 briefing 要等 Mac GUI 开过一次后,iPhone 才�
   勾选交互天然两端可用。
 
 ### C. TestFlight 分发
-- 参照 VitalStride(同付费 team `<DEVELOPMENT_TEAM>`、同 GitHub owner、同架构)的
+- 参照 VitalStride(同付费 team `<DEVELOPMENT_TEAM>`(见 Configs/Identity.xcconfig)、同 GitHub owner、同架构)的
   fastlane + self-hosted runner + ASC API Key 方案:
   - `fastlane/Appfile` + `fastlane/Fastfile`(`ios beta` lane):ASC API Key(.p8 base64)auth、
     `xcodegen generate`、`latest_testflight_build_number`(全局单调递增)、manual 签名 +

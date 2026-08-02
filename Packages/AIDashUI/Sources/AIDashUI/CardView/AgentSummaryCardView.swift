@@ -242,7 +242,7 @@ public struct AgentSummaryCardView: View {
         payload: AgentSummaryPayload(
             agentName: "multica/atlas",
             completed: [
-                .init(title: "Fixed ABC-301 crash on launch")
+                .init(title: "Fixed PROJ-301 crash on launch")
             ],
             stats: [.init(label: "PRs", value: 3)]
         ),
@@ -258,7 +258,7 @@ public struct AgentSummaryCardView: View {
         payload: AgentSummaryPayload(
             agentName: "multica/atlas",
             completed: [
-                .init(title: "Fixed ABC-301 crash on launch", ref: "https://example.com/pr/4521"),
+                .init(title: "Fixed PROJ-301 crash on launch", ref: "https://example.com/pr/4521"),
                 .init(title: "Migrated Activity Tabs", ref: "https://example.com/pr/4522"),
             ],
             stats: [
@@ -278,7 +278,7 @@ public struct AgentSummaryCardView: View {
         payload: AgentSummaryPayload(
             agentName: "multica/atlas",
             completed: [
-                .init(title: "Fixed ABC-301 crash on launch", ref: "https://example.com/pr/4521"),
+                .init(title: "Fixed PROJ-301 crash on launch", ref: "https://example.com/pr/4521"),
                 .init(title: "Migrated Activity Tabs to new design system", ref: "https://example.com/pr/4522"),
                 .init(title: "Added telemetry for tab switching", ref: "https://example.com/pr/4530"),
             ],
@@ -300,7 +300,7 @@ public struct AgentSummaryCardView: View {
         payload: AgentSummaryPayload(
             agentName: "multica/atlas",
             completed: [
-                .init(title: "Fixed ABC-301 crash on launch", ref: "https://example.com/pr/4521"),
+                .init(title: "Fixed PROJ-301 crash on launch", ref: "https://example.com/pr/4521"),
                 .init(title: "Migrated Activity Tabs to new design system", ref: "https://example.com/pr/4522"),
                 .init(title: "Added telemetry for tab switching", ref: "https://example.com/pr/4530"),
             ],

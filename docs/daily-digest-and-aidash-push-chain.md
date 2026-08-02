@@ -166,8 +166,8 @@ aidash_digest_push.sh: 手动 oneshot 脚本，仅 cat 一份预写好的 payloa
 
 | 字段 | 值 |
 |---|---|
-| project_id | `<PROJECT_UUID>` |
-| workspace_id | `<WS_MY_UUID>` (my) |
+| project_id | 见本机 `~/.multica/config.json`(个人标识,不入库) |
+| workspace_id | 见本机 `~/.multica/config.json`(个人标识,不入库) |
 | issue 数 | 146 / 146 done (Phase 1 完成) |
 | 最近 commit | 16h 前（活跃） |
 | 状态分歧 | **Multica 146/146 done，但 repo 还在改** ← 待用户决策是否 reopen 进入下一阶段 |

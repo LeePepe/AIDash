@@ -6,7 +6,7 @@
 	<string>Development</string>
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
-		<string>iCloud.com.tianpli.aidash</string>
+		<string>$(AIDASH_CLOUDKIT_CONTAINER)</string>
 	</array>
 	<key>com.apple.developer.icloud-services</key>
 	<array>
@@ -14,7 +14,7 @@
 	</array>
 	<key>com.apple.developer.ubiquity-container-identifiers</key>
 	<array>
-		<string>iCloud.com.tianpli.aidash</string>
+		<string>$(AIDASH_CLOUDKIT_CONTAINER)</string>
 	</array>
 </dict>
 </plist>
