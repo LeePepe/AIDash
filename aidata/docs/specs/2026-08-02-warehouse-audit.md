@@ -5,6 +5,37 @@
 > 说明：本文是**设计蓝图**，非实现代码。实现见文末"分阶段 refine 计划"。
 > 方法：由 `layered-data-warehouse` skill 对 **main 分支 live 代码 + 活库**实地发现产出，非套模板。所有数字均为实测。
 
+> ## ⚠️ 实施后修订（2026-08-02，PR #140/#141/#142 落地后回填）
+>
+> 蓝图是设计时的判断；实施时的实测**推翻了其中三条**。原文保留不改（便于对照
+> 判断错在哪），修订集中记在这里：
+>
+> | # | 蓝图原本说 | 实测结果 | 处置 |
+> |---|---|---|---|
+> | 1 | 建 `dim_date` 日历维表收敛 CST | **消不掉重复**——join 日历表仍需在 fact 侧写 `+8h` 才能对上。且底层时间戳有 3 种物理格式，无法统一 join | 改用 **STORED 生成列 `cst_day`**（写死 schema 一处 + 可索引）。已落地 #140 |
+> | 2 | G1（日聚合该物化）**高优**，理由是"每天重扫 70 万行" | #140 加索引后收益塌了：`daily-cost` 0.66s、其余 ≤0.18s、**digest 全链 1.34s**。物化 4 张表最多省约 1 秒/天 | **G1 降级**，见下方"暂缓"说明 |
+> | 3 | Phase 3 把 15 支孤儿**移到 `explore/` 目录** | 这些路径 publish 在 README 用法示例和 `cli.py --help` 里，移动会把每一处都弄断 | 改用 **`-- aidata-tier: explore` marker**（沿用既有 `aidata-attach:` 风格），文件不动。已落地 #142 |
+>
+> **进度**：Phase 1 ✅ #140 · Phase 4 ✅ #141 · Phase 3 ✅ #142 · **Phase 2 暂缓**（见下）
+>
+> ### Phase 2（物化 `dws_daily_*`）为何暂缓
+>
+> 两条独立的理由，任一条都足以暂停：
+>
+> 1. **性能前提已不成立**（上表第 2 条）。省 1 秒/天，不足以支撑 4 张新表的复杂度。
+> 2. **`dws_daily_automation` 存在分层矛盾**：它的源 `state_db` 是 **L2-only**，
+>    不在 `MERGE_SOURCES` 里。而 `merge.py` 是 L3、按设计只读那 9 个合并源。
+>    要在 L3 物化一张来自"刻意不进 L3 的源"的表，就得破坏「memory/state_db 停
+>    L2」这条边界——**蓝图当时没考虑到这层冲突**。
+>
+> **仍然成立的部分**：G2（`_sum_series` 聚合漏在 L5）与性能**无关**，它是纯粹的
+> 分层越界——ADO∪GitHub 并集是复合指标口径，该在 SQL 里。若将来做 Phase 2，
+> 应只做 G2 这一张 PR 表（两表合计 662 行，物化是为口径归位不是为快），
+> 并跳过 `dws_daily_automation` 直到 state_db 的分层归属另行决定。
+>
+> **重启 Phase 2 的信号**：digest 全链超过约 10 秒，或 `fact_request` 再涨一个
+> 量级（当前 708k）。
+
 ---
 
 ## 📋 执行摘要
@@ -207,18 +238,17 @@
 
 ## 🔍 Gap 分析（现状 vs 分层理想）
 
-| # | Gap | 类型 | 现状（实测） | 目标 | 优先级 |
-|---|---|---|---|---|---|
-| **G1** | **日聚合该物化未物化** | 性能/复用 | `trend/daily-*` ×8 每次现算。`daily-cost` 实测 `SCAN fact_request`(708,375 行) + `USE TEMP B-TREE FOR GROUP BY`，0.21s CPU。无索引可用（`idx_req_ts` 对 `date(ts/1000,...)` 表达式无效） | 物化 `dws_daily_*` ×4，merge 时算一次 | **高** |
-| **G2** | **聚合逻辑漏在 L5** | 分层越界 | `sources.py::_sum_series` 在 Python 做 ADO∪GitHub 并集；`fetch_combined_pr_trends` 是复合指标 | 下沉到 `dws_daily_pr`，L5 回归纯 rows→dataclass 映射 | **高** |
-| **G3** | **缺 `dim_date`，CST 口径散落** | 一致性维度缺失 | `+8 hours` 在 **18 文件 39 处**重复。`cst.py::CST_DAY_EXPR` 常量定义了但**零复用**（grep 仅 1 处=定义处） | 建 `dim_date`（CST 日历），查询 join 而非各自 `+8h` | **高** |
-| **G4** | `dim_session` 名实不符 | 建模 | 命名为 dim，实为 `fact_request` 的会话级 rollup 事实。实测 12,278 行全 `client=claude-cli` | 要么更名 `dws_session`，要么在注释标注其事实性质 | 中 |
-| **G5** | **15/39 查询无消费者** | 治理 | `behavior/runaway-sessions`、`cost/context-waste`、`health/agent-scorecard`、`health/rework-loops`、`health/rework-threads`、`health/task-failures`、`health/wasted-tokens`、`issues/drill`、`issues/trend`、`memory/*`×2、`roi/by-client`、`roi/daily-cost`、`tools/usage-rank`、`cost/by-model-window` | 移到 `explore/`，明确不承诺契约；L4 只留 24 支生产口径 | 中 |
-| **G6** | **桥接键近乎失效** | honest keys | `fact_task.pr_url→fact_pr` 命中 **4/12,164 (0.03%)**；`fact_task.session_id→fact_request` **13%**。`fact_pr` 仅 6 行 | 要么修（pr_cache 采集面太窄），要么在 schema 注释显式标注"此 join 不可依赖" | 中 |
-| **G7** | **6 源零消费者** | 治理 | `browser_history`(2,644 行)、`hermes_tools`(983)、`memory_*`×3(58)、`aidash_events`(0) 无任何 L5 消费 | 决定：接入消费面 or 停采（`browser_history` 每天采 1.6M 却无人读） | 低 |
-| **G8** | `dim_model` 无 SCD | 治理 | Type 1 覆盖。改价后重跑 normalize 会**静默重写历史成本** | 加 `effective_from`/`effective_to`（Type 2），或至少文档化"改价不得重跑历史 normalize" | 低 |
-| **G9** | 数据质量校验偏薄 | 质量 | `test_warehouse_integrity` 仅 3 个断言（model_canon 存在、canon 折叠、有 token 必有 cost） | 补六维校验（见下） | 中 |
-
+| # | Gap | 类型 | 现状（实测） | 目标 | 优先级 | 状态 |
+|---|---|---|---|---|---|---|
+| **G1** | **日聚合该物化未物化** | 性能/复用 | `trend/daily-*` ×8 每次现算。`daily-cost` 实测 `SCAN fact_request`(708,375 行) + `USE TEMP B-TREE FOR GROUP BY`，0.21s CPU。无索引可用（`idx_req_ts` 对 `date(ts/1000,...)` 表达式无效） | 物化 `dws_daily_*` ×4，merge 时算一次 | **高** | ⏸ 暂缓 — 见顶部修订②（Phase 1 后收益塌了） |
+| **G2** | **聚合逻辑漏在 L5** | 分层越界 | `sources.py::_sum_series` 在 Python 做 ADO∪GitHub 并集；`fetch_combined_pr_trends` 是复合指标 | 下沉到 `dws_daily_pr`，L5 回归纯 rows→dataclass 映射 | **高** | ⏸ 暂缓 — 随 Phase 2；理由与 G1 不同，见顶部 |
+| **G3** | **缺 `dim_date`，CST 口径散落** | 一致性维度缺失 | `+8 hours` 在 **18 文件 39 处**重复。`cst.py::CST_DAY_EXPR` 常量定义了但**零复用**（grep 仅 1 处=定义处） | 建 `dim_date`（CST 日历），查询 join 而非各自 `+8h` | **高** | ✅ #140 — 改用生成列，非 dim_date |
+| **G4** | `dim_session` 名实不符 | 建模 | 命名为 dim，实为 `fact_request` 的会话级 rollup 事实。实测 12,278 行全 `client=claude-cli` | 要么更名 `dws_session`，要么在注释标注其事实性质 | 中 | ✅ #141 — schema 注释标注 |
+| **G5** | **15/39 查询无消费者** | 治理 | `behavior/runaway-sessions`、`cost/context-waste`、`health/agent-scorecard`、`health/rework-loops`、`health/rework-threads`、`health/task-failures`、`health/wasted-tokens`、`issues/drill`、`issues/trend`、`memory/*`×2、`roi/by-client`、`roi/daily-cost`、`tools/usage-rank`、`cost/by-model-window` | 移到 `explore/`，明确不承诺契约；L4 只留 24 支生产口径 | 中 | ✅ #142 — 改用 tier marker，非移动目录 |
+| **G6** | **桥接键近乎失效** | honest keys | `fact_task.pr_url→fact_pr` 命中 **4/12,164 (0.03%)**；`fact_task.session_id→fact_request` **13%**。`fact_pr` 仅 6 行 | 要么修（pr_cache 采集面太窄），要么在 schema 注释显式标注"此 join 不可依赖" | 中 | ✅ #141 — 注释 + 测试锁定为已知弱 |
+| **G7** | **6 源零消费者** | 治理 | `browser_history`(2,644 行)、`hermes_tools`(983)、`memory_*`×3(58)、`aidash_events`(0) 无任何 L5 消费 | 决定：接入消费面 or 停采（`browser_history` 每天采 1.6M 却无人读） | 低 | ○ 未做 — 需产品决策 |
+| **G8** | `dim_model` 无 SCD | 治理 | Type 1 覆盖。改价后重跑 normalize 会**静默重写历史成本** | 加 `effective_from`/`effective_to`（Type 2），或至少文档化"改价不得重跑历史 normalize" | 低 | ✅ #141 — schema 注释 |
+| **G9** | 数据质量校验偏薄 | 质量 | `test_warehouse_integrity` 仅 3 个断言（model_canon 存在、canon 折叠、有 token 必有 cost） | 补六维校验（见下） | 中 | ✅ #141 — 21 条六维断言 |
 ### 数据质量六维（逐项实测）
 
 | 维度 | 现状 | 判定 |
