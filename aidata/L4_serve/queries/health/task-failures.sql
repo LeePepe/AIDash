@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- health/task-failures — pipeline health: run outcomes, retry pressure, and
 -- which agents fail most. Source: fact_task (multica runs carry agent_id).
 SELECT

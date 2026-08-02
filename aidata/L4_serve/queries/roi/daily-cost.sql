@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- roi/daily-cost — per-day token spend + notional USD cost across all tools.
 -- Source: fact_request (raven). Cost is SUMmed from the stored cost_usd, which
 -- is derived once at L2 by adapters/raven.py::_cost() via dim_model — never

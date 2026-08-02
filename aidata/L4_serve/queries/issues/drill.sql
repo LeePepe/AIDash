@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- issues/drill — everything about one issue. Pass --param id=MY-1213.
 -- Joins runs, the raven token bridge (via run.session_id), and PR outcome.
 SELECT

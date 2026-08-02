@@ -56,9 +56,9 @@ override. `config_local.py` is git-ignored; never commit it.
 
 ### Query catalog
 
-The full set of named queries (35 across `behavior/ cost/ health/ inbox/ issues/
-memory/ radar/ roi/ trend/ work/`) is **self-describing — don't hand-maintain a
-list here** (it drifts). Discover them at runtime:
+The full set of named queries (across `behavior/ cost/ health/ inbox/ issues/
+memory/ news/ radar/ roi/ time/ tools/ trend/ work/`) is **self-describing —
+don't hand-maintain a list here** (it drifts). Discover them at runtime:
 
 ```bash
 python3 cli.py query --list          # authoritative, always current
@@ -69,6 +69,30 @@ Highlights: `cost/pareto` (spend concentration), `cost/model-downgrade`
 `health/rework-loops`, `behavior/runaway-sessions`, `roi/daily-cost` (per-CST-day
 spend). Run `collect → normalize → merge` in order; all three are **idempotent**
 (watermarks + PK dedup + snapshot hashing), so re-running never duplicates.
+
+#### Two tiers: production contract vs exploratory
+
+Queries split into two populations with very different lifetimes, declared by a
+header marker (same style as `-- aidata-attach:`):
+
+```sql
+-- aidata-tier: explore
+```
+
+- **production** (no marker) — consumed by the L5 digest. Their columns are a
+  **contract**: changing the shape breaks a briefing card. 24 of them today.
+- **explore** (marked) — no L5 consumer; they exist for ad-hoc investigation via
+  `cli.py query <name>`. Nothing downstream depends on their columns, so they can
+  be freely reshaped or deleted. 15 of them today.
+
+Both tiers are listed by `query --list` and run identically — the marker is
+documentation for humans and agents, not a runtime switch. `tests/test_query_tiers.py`
+keeps the two sets honest in both directions: a production query with no consumer
+fails (mark it explore), and an explore query that L5 imports fails (it is a
+contract in disguise).
+
+**Adding a query?** If the digest will read it, add no marker. If it is for your
+own investigation, mark it `explore` — otherwise the test fails, by design.
 
 ## AI-usage daily digest (M1)
 

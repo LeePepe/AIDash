@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- cost/context-waste — huge input, near-empty output. Paying to stuff big
 -- contexts (>50k input) for <20 output tokens: prompt bloat or misfires.
 SELECT count(*)                        AS requests,

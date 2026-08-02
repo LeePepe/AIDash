@@ -1,4 +1,5 @@
 -- aidata-attach: hermes_tools
+-- aidata-tier: explore
 -- tools/usage-rank — tool-call volume ranked by tool, descending (feeds a barList
 -- if surfaced, and the "工具调用分布" signal). Source: hermes_tools.tool_day, a
 -- L2-only clean DB ATTACHed directly by serve.py as `hermes_tools` (ADR-13), read

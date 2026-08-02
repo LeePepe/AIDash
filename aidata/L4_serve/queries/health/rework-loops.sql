@@ -1,3 +1,4 @@
+-- aidata-tier: explore
 -- health/rework-loops — issues showing rework: multiple runs, especially a
 -- cancelled run before a completed one. Run count per issue is the proxy.
 SELECT i.identifier,
