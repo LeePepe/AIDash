@@ -154,4 +154,6 @@ T001 (Core, Stage1) ──┬─► T002 (CLI,  Stage2)
 1. GUI 跑 app，渲染一张真实雷达卡，点两个仓库条目的星标。
 2. Mac 上 `aidash events pull --since <today> --action star --json` → 应返回 2 条，
    itemRef == 两个 repo url。
-3. （follow-up，aidata repo）aidata 用同命令拉回，富化雷达——不在本 feature。
+3. （follow-up，aidata 侧）aidata 用同命令拉回，富化雷达——不在本 feature。
+   注（2026-08-02）：aidata 写作时是独立 repo，现已并入本仓库的 `aidata/`。
+   仅位置变化，本 feature 的作用域与任务清单不变。
