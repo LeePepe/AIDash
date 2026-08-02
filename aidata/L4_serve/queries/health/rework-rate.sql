@@ -7,9 +7,14 @@
 -- Rework definition (same proxy as rework-loops): an issue whose multica_run
 -- history contains BOTH a cancelled run and a completed run — work that was
 -- thrown away and redone. Each issue is bucketed by the CST week of its FIRST
--- run (min ts_start), so an issue counts once. ts_start is ISO-8601 UTC text →
--- date(ts_start,'+8 hours') for the CST day; strftime %Y-%W gives the ISO-ish
--- week key. NULLIF guards the per-week denominator (degrade-safe).
+-- run (min ts_start), so an issue counts once.
+--
+-- NOTE: this one keeps the inline `+8 hours` on purpose. fact_task.cst_day is a
+-- per-ROW generated column, but the bucket key here is min(ts_start) computed
+-- ACROSS rows — an aggregate result, which no stored column can carry. Taking
+-- min(cst_day) would coincide only because both are monotonic in ts_start;
+-- converting the aggregate keeps the intent explicit. strftime %Y-%W then gives
+-- the ISO-ish week key. NULLIF guards the per-week denominator (degrade-safe).
 WITH per_issue AS (
   SELECT issue_id,
          min(ts_start)                                       AS first_ts,

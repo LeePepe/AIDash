@@ -3,8 +3,8 @@
 -- Source: fact_turn (assistant turns carry project / git_branch / skill).
 -- turns = assistant turns, out_ktok = output tokens (thousands), sessions =
 -- distinct working sessions. Bind :since (inclusive) / :until (exclusive) as
--- CST dates 'YYYY-MM-DD'; NULL → all-time. fact_turn.ts is ISO-8601 UTC, so
--- CST bucket via datetime(ts,'+8 hours') (ADR-2), NOT /1000 (that's epoch-ms).
+-- CST dates 'YYYY-MM-DD'; NULL → all-time. Filters on fact_turn.cst_day, the
+-- schema's single CST-day definition (indexed; see schema/warehouse.sql).
 SELECT
     project,
     count(*)                                        AS turns,
@@ -13,7 +13,7 @@ SELECT
 FROM fact_turn
 WHERE role = 'assistant'
   AND project IS NOT NULL AND project != ''
-  AND (:since IS NULL OR date(datetime(ts, '+8 hours')) >= :since)
-  AND (:until IS NULL OR date(datetime(ts, '+8 hours')) <  :until)
+  AND (:since IS NULL OR cst_day >= :since)
+  AND (:until IS NULL OR cst_day <  :until)
 GROUP BY project
 ORDER BY turns DESC;

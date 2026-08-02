@@ -8,9 +8,9 @@
 -- percentages describe only turns that actually reported a reason.
 --
 -- max_tokens = the model hit its output cap and was truncated → the response is
--- likely incomplete: max_tokens_pct trending up is a degradation signal. ts is
--- ISO-8601 UTC text → date(ts,'+8 hours') for the CST day (ADR-2).
-SELECT date(ts, '+8 hours')                                  AS day,
+-- likely incomplete: max_tokens_pct trending up is a degradation signal.
+-- Buckets on fact_turn.cst_day (generated from ts; see schema).
+SELECT cst_day                                               AS day,
        count(*)                                              AS turns_with_reason,
        sum(CASE WHEN finish_reason = 'end_turn'  THEN 1 ELSE 0 END) AS end_turn,
        sum(CASE WHEN finish_reason = 'tool_use'  THEN 1 ELSE 0 END) AS tool_use,
@@ -21,5 +21,5 @@ SELECT date(ts, '+8 hours')                                  AS day,
              / NULLIF(count(*), 0), 2)                       AS max_tokens_pct
 FROM fact_turn
 WHERE finish_reason IS NOT NULL
-GROUP BY day
+GROUP BY cst_day
 ORDER BY day DESC;

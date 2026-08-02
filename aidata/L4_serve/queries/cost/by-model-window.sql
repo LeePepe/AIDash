@@ -8,8 +8,8 @@ SELECT model_canon                                          AS model,
        round(sum(COALESCE(cost_usd, 0)), 2)                 AS cost_usd,
        round(sum(COALESCE(output_tokens, 0)) / 1000.0, 1)   AS out_ktok
 FROM fact_request
-WHERE (:since IS NULL OR date(ts/1000, 'unixepoch', '+8 hours') >= :since)
-  AND (:until IS NULL OR date(ts/1000, 'unixepoch', '+8 hours') <  :until)
+WHERE (:since IS NULL OR cst_day >= :since)
+  AND (:until IS NULL OR cst_day <  :until)
   AND cost_usd IS NOT NULL
 GROUP BY model_canon
 ORDER BY cost_usd DESC;
