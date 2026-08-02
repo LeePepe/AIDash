@@ -261,9 +261,16 @@ def test_missing_clean_db_is_not_fatal_at_connect(tmp_path, monkeypatch):
     not (Path(__file__).resolve().parent.parent / "L3_merge" / "warehouse.db").exists(),
     reason="warehouse.db not built (gitignored local artifact) — run `cli.py merge`",
 )
-def test_all_39_queries_run_against_live_warehouse():
+def test_all_queries_run_against_live_warehouse():
+    """Every query on disk executes — the backstop for ATTACH/schema changes.
+
+    Deliberately NOT pinned to a count. A hardcoded number tests nothing about
+    correctness (adding a query is normal) while breaking on every addition, so
+    it trains people to bump the constant without reading the failure. What
+    matters is that ALL of them run, whatever "all" currently means.
+    """
     names = serve.list_queries()
-    assert len(names) == 39, f"expected 39 queries, found {len(names)}"
+    assert names, "no queries discovered — is QUERIES_DIR wired correctly?"
     failures = []
     for name in names:
         try:
