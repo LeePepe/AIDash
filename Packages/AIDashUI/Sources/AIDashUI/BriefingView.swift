@@ -28,6 +28,30 @@ public struct BriefingView: View {
     }
 
     public var body: some View {
+        #if os(iOS)
+        // iOS wraps the shared scroll surface in a NavigationStack so the
+        // system navigation bar owns the top safe area and the content no
+        // longer drifts into the status bar. macOS keeps its titlebar
+        // overlay via the existing safeAreaInset — chrome untouched.
+        NavigationStack {
+            scrollBody
+                .navigationTitle(
+                    Text(
+                        "briefing.navigation.title",
+                        tableName: "Localizable",
+                        bundle: .module,
+                        comment: "Inline navigation-bar title shown at the top of the BriefingView screen on iOS/iPadOS."
+                    )
+                )
+                .navigationBarTitleDisplayMode(.inline)
+        }
+        #else
+        scrollBody
+        #endif
+    }
+
+    @ViewBuilder
+    private var scrollBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
                 if let briefing = todaysBriefings.first {

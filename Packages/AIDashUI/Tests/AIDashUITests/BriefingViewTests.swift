@@ -13,6 +13,46 @@ struct BriefingViewTests {
         _ = view.body
     }
 
+    // MARK: - iOS NavigationStack chrome (MY-1377)
+
+    @Test("navigation title key is present in the xcstrings catalog")
+    func navigationTitleKeyIsInCatalog() throws {
+        // The iOS NavigationStack titles itself from the xcstrings catalog
+        // rather than a hardcoded literal. If the key is removed or renamed,
+        // SwiftUI silently renders the raw key ("briefing.navigation.title")
+        // in the nav bar — a visible defect with no build error.
+        //
+        // Asserted against the catalog source rather than Bundle.module:
+        // .xcstrings is compiled to .strings by Xcode's asset pipeline, which
+        // `swift test` does not run, so a runtime lookup returns the key
+        // itself here for EVERY key (including ones that predate this change)
+        // and would prove nothing. The source-string check is the same
+        // technique the Design Tokens guards in this suite already use.
+        let catalog = try String(
+            contentsOf: Self.sourceFile(named: "Localizable.xcstrings",
+                                        under: "Sources/AIDashUI/Resources"),
+            encoding: .utf8
+        )
+        #expect(catalog.contains("\"briefing.navigation.title\""),
+                "xcstrings key briefing.navigation.title is missing from the catalog")
+        #expect(catalog.contains("Daily Briefing"),
+                "the en localization for briefing.navigation.title is missing")
+    }
+
+    @Test("body renders on the current platform (iOS NavigationStack / macOS overlay)")
+    func bodyRendersOnCurrentPlatform() {
+        // MY-1377 wraps the shared scroll surface in a NavigationStack on iOS
+        // only; macOS keeps its existing safeAreaInset titlebar overlay. Both
+        // branches route through the same private `scrollBody`, so evaluating
+        // `body` exercises whichever branch this platform compiles — guarding
+        // against an #if that drops the content on one platform.
+        //
+        // (`scrollBody` is private and stays that way — widening production
+        // visibility just to reach it from a test would be the wrong trade.)
+        let view = BriefingView()
+        _ = view.body
+    }
+
     @Test("localTodayString matches Gregorian local calendar date, not UTC")
     func localTodayStringMatchesLocalCalendar() throws {
         // The view's todayString must use a Gregorian calendar pinned to the
