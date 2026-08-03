@@ -185,14 +185,23 @@ def test_run_query_without_directive_attaches_no_l2_only(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# (d) 11 L2-only clean DBs on disk → still nowhere near the 10-attach limit
+# (d) every L2-only clean DB on disk → still nowhere near the 10-attach limit
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
-def test_eleven_l2_dbs_present_query_attaches_only_declared(tmp_path, monkeypatch):
-    """The bomb the fix defuses: with all 11 L2-only clean DBs present on disk,
-    the OLD serve.py would ATTACH all 11 and raise 'too many attached
-    databases'. On-demand ATTACH pulls in only what the query declares."""
-    assert len(L2_ONLY) == 11, "expected 11 L2-only sources"
+def test_all_l2_dbs_present_query_attaches_only_declared(tmp_path, monkeypatch):
+    """The bomb the fix defuses: with EVERY L2-only clean DB present on disk,
+    the OLD serve.py would ATTACH them all and raise 'too many attached
+    databases' (SQLite's compiled limit is 10). On-demand ATTACH pulls in only
+    what the query declares.
+
+    Not pinned to a count — the point is "all of them, however many that is",
+    and the pressure only grows as sources are added (12 as of hermes_messages).
+    A hardcoded number would fail on every new source while testing nothing.
+    """
+    assert len(L2_ONLY) > 10, (
+        f"only {len(L2_ONLY)} L2-only sources — fewer than SQLite's 10-attach "
+        "limit, so this test no longer exercises the failure it guards"
+    )
     q = "-- aidata-attach: state_db\nSELECT count(*) AS n FROM state_db.session;"
     _make_env(
         tmp_path,

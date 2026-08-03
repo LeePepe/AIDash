@@ -84,15 +84,68 @@ def test_collect_empty_is_zero_no_watermark(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
-def test_select_is_safe_columns_only():
-    # The token-accounting extension must never widen into prompt/credential
-    # columns. Assert the new cache/reasoning/end_reason columns are present AND
-    # the red-lined ones stay out.
-    for col in ("cache_read_tokens", "cache_write_tokens",
-                "reasoning_tokens", "end_reason"):
-        assert col in sdb._SELECT
-    for forbidden in ("system_prompt", "model_config", "origin_json", "billing_"):
-        assert forbidden not in sdb._SELECT
+def test_select_reads_all_columns():
+    """Collection is full-column by design (changed 2026-08-03).
+
+    The previous test asserted the opposite — that system_prompt/model_config/
+    billing_* stayed OUT. That allowlist was reversed deliberately: those fields
+    answer questions the warehouse otherwise cannot (which prompt/effort setting
+    produced which cost; provider-reported vs aidata-derived cost), and the repo
+    was made private so the exposure calculus changed.
+
+    `SELECT *` rather than a wider allowlist is also deliberate — an allowlist
+    silently drops columns Hermes adds later, and that failure is invisible.
+
+    Redaction still applies on the way to raw/ (rawio.write_raw -> redact_obj),
+    but note what it can and cannot do: it matches credential SHAPES (keys,
+    bearer tokens, emails). Prose inside system_prompt is NOT redacted.
+    """
+    assert "SELECT *" in sdb._SELECT
+    assert "FROM sessions" in sdb._SELECT
+    # The watermark predicate must survive any rewrite, or collect() re-reads
+    # the entire table on every run.
+    assert "started_at > ?" in sdb._SELECT
+
+
+@pytest.mark.unit
+def test_clean_schema_stores_prompt_identity_not_prompt_text():
+    """L2 keeps a hash + short preview, never the ~15 KB prompt body.
+
+    Full text lives in raw/. Storing it again in the clean DB would multiply a
+    ~203 MB field for no query benefit — grouping by hash answers the actual
+    question ("did prompt X cost more than Y?").
+    """
+    assert "system_prompt_sha" in sdb._CLEAN_COLS
+    assert "system_prompt_preview" in sdb._CLEAN_COLS
+    assert "system_prompt" not in sdb._CLEAN_COLS
+
+
+@pytest.mark.unit
+def test_prompt_identity_is_stable_and_bounded():
+    sha_a, preview_a, len_a = sdb._prompt_identity("x" * 5000)
+    sha_b, _, _ = sdb._prompt_identity("x" * 5000)
+    sha_c, _, _ = sdb._prompt_identity("y" * 5000)
+    assert sha_a == sha_b, "same prompt must hash identically (grouping key)"
+    assert sha_a != sha_c
+    assert len(preview_a) == sdb._PREVIEW_CHARS
+    assert len_a == 5000, "length reflects the ORIGINAL, not the preview"
+    assert sdb._prompt_identity(None) == (None, None, None)
+    assert sdb._prompt_identity("") == (None, None, None)
+
+
+@pytest.mark.unit
+def test_model_config_parses_and_degrades():
+    effort, enabled, iters = sdb._model_config(
+        '{"max_iterations": 60, "reasoning_config": '
+        '{"enabled": true, "effort": "medium"}, "max_tokens": null}'
+    )
+    assert (effort, enabled, iters) == ("medium", 1, 60)
+    # Degrade-safe (ADR-23): malformed/absent config must not raise — an upstream
+    # config-shape change cannot be allowed to break the whole normalize.
+    assert sdb._model_config("not json") == (None, None, None)
+    assert sdb._model_config(None) == (None, None, None)
+    assert sdb._model_config("[1,2,3]") == (None, None, None)
+    assert sdb._model_config('{"reasoning_config": "wrong-type"}') == (None, None, None)
 
 
 @pytest.mark.unit

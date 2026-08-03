@@ -210,6 +210,7 @@ SOURCES = (
     "ado_pr",
     "state_db",
     "hermes_tools",
+    "hermes_messages",
     "memory_claude",
     "memory_hermes_db",
     "memory_hermes_md",
