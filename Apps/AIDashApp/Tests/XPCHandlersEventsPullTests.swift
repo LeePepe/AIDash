@@ -100,5 +100,69 @@ struct XPCHandlersEventsPullTests {
         let event = try #require(result.events.first)
         #expect(event.itemRef == nil)
     }
+
+    // MARK: - Spec 005 D2/D5: cardType round-trip
+
+    @Test("events.pull maps cardType back into UserEvent for a whole-card star event")
+    func cardTypeSurvivesRoundTrip() async throws {
+        // Regression guard for the gap this task closed: handleEventsPull's
+        // UserEvent(...) construction previously omitted `cardType`, so it
+        // was persisted (UserEventModel.cardType) but never reached the wire
+        // format `aidash events pull` consumers read — the whole-card star
+        // event would have been indistinguishable from a per-item one with a
+        // dropped itemRef. See XPCHandlers.swift `handleEventsPull`.
+        let (handlers, container) = try XPCTestSupport.makeHandlersWithContainer()
+        let context = ModelContext(container)
+        context.insert(UserEventModel(
+            id: UUID().uuidString,
+            timestamp: Date(),
+            device: "test-device",
+            cardId: "trending-card-1",
+            action: .star,
+            itemRef: nil,
+            cardType: "trending"
+        ))
+        try context.save()
+
+        let response = try await XPCTestSupport.send(
+            handlers,
+            command: "events.pull",
+            params: EventsPullParams(since: .distantPast, until: nil, cardId: nil, action: nil)
+        )
+
+        #expect(response.ok == true)
+        let result = try XPCTestSupport.decodeResult(EventsPullResult.self, from: response)
+        let event = try #require(result.events.first)
+        #expect(result.events.count == 1)
+        #expect(event.action == .star)
+        #expect(event.itemRef == nil)
+        #expect(event.cardType == "trending")
+    }
+
+    @Test("events.pull keeps cardType nil for events written before the field existed")
+    func legacyEventKeepsNilCardType() async throws {
+        let (handlers, container) = try XPCTestSupport.makeHandlersWithContainer()
+        let context = ModelContext(container)
+        context.insert(UserEventModel(
+            id: UUID().uuidString,
+            timestamp: Date(),
+            device: "test-device",
+            cardId: "radar-card-1",
+            action: .star,
+            itemRef: "https://github.com/a/b"
+        ))
+        try context.save()
+
+        let response = try await XPCTestSupport.send(
+            handlers,
+            command: "events.pull",
+            params: EventsPullParams(since: .distantPast, until: nil, cardId: nil, action: nil)
+        )
+
+        #expect(response.ok == true)
+        let result = try XPCTestSupport.decodeResult(EventsPullResult.self, from: response)
+        let event = try #require(result.events.first)
+        #expect(event.cardType == nil)
+    }
 }
 #endif

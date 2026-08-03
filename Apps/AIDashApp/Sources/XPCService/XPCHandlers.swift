@@ -504,7 +504,8 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
                     device: model.device,
                     cardId: model.cardId,
                     action: model.action ?? .done,
-                    itemRef: model.itemRef
+                    itemRef: model.itemRef,
+                    cardType: model.cardType
                 )
             }
 
