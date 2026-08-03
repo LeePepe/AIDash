@@ -30,6 +30,7 @@ from L5_apps.digest.sources import (  # noqa: F401 — fetch_ado_pr_trends re-ex
     fetch_combined_pr_trends,
     # batch-2 (L5 数据接入批2): AI 效能 + 时间与产出 + 新闻雷达 + 模型分层.
     fetch_ai_efficiency, fetch_app_focus, fetch_commit_by_repo,
+    fetch_cost_by_project, fetch_model_by_project,
     fetch_news_radar, fetch_model_tier,
 )
 from L5_apps.digest.render import render_digest
@@ -86,6 +87,11 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         commit_by_repo=fetch_commit_by_repo(day_since, day_until),
         news_radar=fetch_news_radar(),
         model_tier=fetch_model_tier(),
+        # Attribution uses the REPORTED day (day_since), matching the day the
+        # trend arrows describe — attributing yesterday's spike to projects is
+        # only meaningful against yesterday's spend.
+        cost_by_project=fetch_cost_by_project(day_since),
+        model_by_project=fetch_model_by_project(day_since),
     )
 
 

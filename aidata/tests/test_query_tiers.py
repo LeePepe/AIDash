@@ -39,10 +39,19 @@ VALID_TIERS = {"explore"}
 # Every query name L5 references as a string literal. This is how the digest
 # actually addresses queries (serve.run_query("trend/daily-cost")), so it is the
 # real consumer set — not a hand-maintained list that would drift.
-QUERY_REF = re.compile(
-    r'"((?:trend|cost|roi|health|work|radar|news|time|inbox|issues|behavior'
-    r'|memory|tools)/[a-z0-9-]+)"'
-)
+# Query names L5 references as string literals. The directory prefixes are
+# derived from disk rather than hardcoded: a hand-written alternation silently
+# stops matching when a new query directory appears (`attribution/` did exactly
+# that), and the failure looks like "production query has no consumer" — a
+# misleading symptom pointing at the wrong file.
+def _query_ref_pattern() -> re.Pattern[str]:
+    prefixes = sorted({p.name for p in QUERIES.iterdir() if p.is_dir()})
+    assert prefixes, "no query directories found — is QUERIES_DIR wired?"
+    return re.compile(r'"((?:' + "|".join(map(re.escape, prefixes))
+                      + r')/[a-z0-9-]+)"')
+
+
+QUERY_REF = _query_ref_pattern()
 
 
 def _all_queries() -> set[str]:
