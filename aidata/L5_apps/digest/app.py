@@ -31,6 +31,8 @@ from L5_apps.digest.sources import (  # noqa: F401 — fetch_ado_pr_trends re-ex
     # batch-2 (L5 数据接入批2): AI 效能 + 时间与产出 + 新闻雷达 + 模型分层.
     fetch_ai_efficiency, fetch_app_focus, fetch_commit_by_repo,
     fetch_news_radar, fetch_model_tier,
+    # 你最常收藏的卡型 (spec 005 T007/US5).
+    fetch_card_interest,
 )
 from L5_apps.digest.render import render_digest
 from L5_apps.digest.llm import LLMClient, LLMError, default_client
@@ -86,6 +88,7 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         commit_by_repo=fetch_commit_by_repo(day_since, day_until),
         news_radar=fetch_news_radar(),
         model_tier=fetch_model_tier(),
+        card_interest=fetch_card_interest(since),
     )
 
 

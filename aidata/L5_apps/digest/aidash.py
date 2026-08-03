@@ -774,6 +774,39 @@ def _model_tier_card(mmdd: str, model_tier) -> "Card | None":
     return _stacked_card(_kuid(mmdd, 19), model_tier, "模型分层占比")
 
 
+# ---- 你最常收藏的卡型 (spec 005 T007/US5) -----------------------------------
+def _card_interest_body(card_interest, top_n: int = 3) -> str:
+    """Plain-text Top-N body: which card TYPES the user whole-card-stars most.
+
+    Returns "" when there's no usable signal (no data / degraded source), so
+    the caller can omit the card entirely (ADR-23) rather than render an empty
+    insight. `card_interest.types` is already descending (behavior/card-interest
+    orders by star_count desc, card_type asc as tiebreak)."""
+    if card_interest is None or card_interest.health.state != "ok":
+        return ""
+    types = card_interest.types
+    if not types:
+        return ""
+    lines = [f"{i}. {t.card_type} · {t.star_count} 次"
+             for i, t in enumerate(types[:top_n], start=1)]
+    return "\n".join(lines)
+
+
+def _card_interest_container(mmdd: str, card_interest) -> "Container | None":
+    """卡型兴趣: one insight card, "你最常收藏的卡型 Top-N" (spec 005 US5).
+
+    Reuses the existing `insight` CardType (§I: no new CardType). Placed right
+    after 可改良 (order 50) and before the GitHub 工具雷达 (order 60). Returns
+    None when the source is degraded/empty — the container is simply absent
+    (ADR-23), the digest still produced."""
+    body = _card_interest_body(card_interest)
+    if not body:
+        return None
+    card = Card(_kuid(mmdd, 24), "insight", "wide",
+                {"title": "你最常收藏的卡型 Top-N", "body": body})
+    return Container(_cuid(mmdd, 11), "卡型兴趣", 55, (card,), layout="list")
+
+
 def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
                    must_see: str) -> Briefing:
     """Map the digest into a Briefing (pure). `report_date` is the RUN date.
@@ -828,6 +861,12 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
 
     # GitHub 工具雷达 (§radar): curated watchlist stars/delta, split by tier.
     containers.extend(_radar_containers(mmdd, getattr(sources, "repo_radar", None)))
+
+    # 卡型兴趣 (spec 005 US5): "你最常收藏的卡型 Top-N", right after 可改良 (order 55).
+    card_interest_container = _card_interest_container(
+        mmdd, getattr(sources, "card_interest", None))
+    if card_interest_container:
+        containers.append(card_interest_container)
 
     # 📰 新闻雷达 (order 80): newest headlines by topic, at the参考/探索 tail.
     news_container = _news_container(mmdd, getattr(sources, "news_radar", None))

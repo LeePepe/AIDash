@@ -1,8 +1,4 @@
 -- aidata-attach: aidash_events
--- aidata-tier: explore
--- (T006 lands this query on its own commit; T007 wires it into L5's
--- fetch_card_interest and removes this marker — see aidata/tests/test_query_tiers.py's
--- production-must-have-an-L5-consumer contract.)
 -- behavior/card-interest — spec 005 (star every card) US5: which card TYPES the
 -- user whole-card-stars most, over a rolling window (default caller-side 7
 -- CST days, ADR-22). Source: aidash_events.user_event, a L2-only clean DB
