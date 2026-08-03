@@ -89,7 +89,12 @@ _WRAPPERS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("bash_io", re.compile(r"^<bash-(input|stdout|stderr)>")),
     ("interrupted", re.compile(r"^\[Request interrupted")),
     ("image", re.compile(r"^\[image")),
-    ("injected", re.compile(r"^<[a-z][a-z0-9_-]*>")),
+    # Named harness tags only. A catch-all `^<[a-z-]+>` would also swallow
+    # genuine input that opens with markup (`<div>`, `<html>`), mislabelling my
+    # own words as injected — the one error this source most needs to avoid.
+    ("injected", re.compile(
+        r"^<(system-reminder|environment_context|user_instructions|"
+        r"user_shell_command|turn_aborted|task|local-command-[a-z]+)>")),
     ("injected", re.compile(r"^# AGENTS\.md")),
     ("injected", re.compile(r"^You are running as a local coding agent")),
 )
@@ -111,12 +116,22 @@ def _classify(text: str, originator: str | None) -> str:
 
 
 def _iso_to_epoch(ts: Any) -> float | None:
+    """ISO-8601 -> epoch seconds. A naive string is read as UTC, never local.
+
+    `datetime.fromisoformat` treats a tz-less string as LOCAL time, which would
+    make the derived CST day depend on the host timezone — exactly what ADR-22
+    forbids. Codex writes `Z` today, so this never fires in practice; the
+    explicit fallback keeps it correct if that ever changes.
+    """
     if not isinstance(ts, str) or not ts:
         return None
     try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
 
 
 def _cst_day(ts: Any) -> str | None:
@@ -165,12 +180,31 @@ def collect() -> int:
 
     for path in CODEX_SESSIONS_DIR.glob("**/*.jsonl"):
         key = str(path)
+        # Relative path, not just the filename: sessions live under a
+        # YYYY/MM/DD tree, so two dates can hold the same basename and would
+        # otherwise mint identical ids at the same offset.
+        try:
+            rel_path = str(path.relative_to(CODEX_SESSIONS_DIR))
+        except ValueError:
+            rel_path = path.name
         start = offsets.get(key, 0)
         try:
             size = path.stat().st_size
         except OSError:
             continue
-        if size <= start:
+        if size < start:
+            # Truncated: the stored offset now points past EOF, so a plain
+            # `size <= start` would skip this file forever. Restart from zero.
+            #
+            # Safe against the id-collision this would otherwise raise: ids are
+            # `<relpath>:<offset>`, so re-reading DIFFERENT content at the same
+            # offset would overwrite an unrelated record. That cannot happen
+            # here — Codex names each file `rollout-<ISO>-<session-uuid>.jsonl`
+            # (verified: zero duplicate basenames across all 7,540 files), so a
+            # given path is one append-only session. A file can shrink, but it
+            # cannot come back holding a different session's prompts.
+            start = 0
+        elif size == start:
             continue
 
         # session_meta is the FIRST record, so it must be read from byte 0 even
@@ -185,8 +219,25 @@ def collect() -> int:
         batch: list[dict[str, Any]] = []
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             fh.seek(start)
-            for line in fh:
-                line = line.strip()
+            # `fh.tell()` is exact and legal here. It is NOT usable inside a
+            # `for line in fh` loop ("telling position disabled by next()
+            # call"), which is why this reads via explicit readline().
+            #
+            # Do NOT compute the offset by summing len(line.encode()): in text
+            # mode that is not the true byte position. Universal newlines turn
+            # \r\n into \n (1 byte short per line) and errors="replace" turns
+            # one bad byte into U+FFFD (2 bytes long). Either way the running
+            # total drifts from the real file position — and this value is the
+            # watermark, is compared against st_size, and forms prompt_id, so
+            # drift means a resume seeks mid-line and silently drops records.
+            line_offset = fh.tell()
+            while True:
+                raw_line = fh.readline()
+                if not raw_line:
+                    break
+                current_offset = line_offset
+                line_offset = fh.tell()
+                line = raw_line.strip()
                 if not line:
                     continue
                 try:
@@ -197,12 +248,16 @@ def collect() -> int:
                 if text is None:
                     continue
                 batch.append({
-                    "id": f"{path.name}:{len(batch)}:{obj.get('timestamp')}",
+                    # Absolute file offset, NOT a batch index: an index
+                    # restarts at 0 on every resume, so one file collected in
+                    # two passes can mint duplicate ids and let normalize's
+                    # last-write-wins silently drop a row.
+                    "id": f"{rel_path}:{current_offset}",
                     "timestamp": obj.get("timestamp"),
                     "text": text,
                     **meta,
                 })
-            new_offsets[key] = fh.tell()
+            new_offsets[key] = line_offset
         if batch:
             total += write_raw(SOURCE, batch)
 
@@ -237,7 +292,6 @@ def _row(rec: dict[str, Any]) -> dict[str, Any] | None:
     prompt_id = rec.get("id")
     if not isinstance(text, str) or not text or not prompt_id:
         return None
-    is_human = rec.get("originator") in HUMAN_ORIGINATORS
     source_kind = _classify(text, rec.get("originator"))
     prefix = text[:_PREFIX_CHARS]
     return {
@@ -249,9 +303,11 @@ def _row(rec: dict[str, Any]) -> dict[str, Any] | None:
         "ts": _iso_to_epoch(rec.get("timestamp")),
         "source_kind": source_kind,
         "text_len": len(text),
-        # Body kept only for tier A. Wrapper-demoted records stay in tier A's
-        # originator but carry no preview either — they are not my words.
-        "text_preview": text[:_PREVIEW_CHARS] if is_human else None,
+        # Body kept ONLY for `typed`. Keyed off source_kind, not originator:
+        # 232 of 583 interactive records are CLI-generated wrappers
+        # (slash_command / task_notification / ...), and storing their bodies
+        # would put machine text in the column that answers "what did I write".
+        "text_preview": text[:_PREVIEW_CHARS] if source_kind == "typed" else None,
         "prompt_sha": hashlib.sha256(prefix.encode("utf-8")).hexdigest()[:16],
         "prefix_100": prefix,
         "cwd": rec.get("cwd"),

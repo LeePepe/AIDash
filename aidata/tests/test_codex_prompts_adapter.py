@@ -240,6 +240,170 @@ def test_normalize_dedupes_and_counts(monkeypatch):
 
 
 @pytest.mark.unit
+def test_wrapper_records_carry_no_body():
+    """Demoted records must not keep a preview — the review caught this.
+
+    `text_preview` keys off source_kind, not originator. Measured on live data:
+    232 of 583 interactive records are CLI wrappers, so gating on originator
+    would leave machine text sitting in the column that answers "what did I
+    write".
+    """
+    row = cx._row({"id": "p1", "text": "<command-name>/clear</command-name>",
+                   "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"})
+    assert row["source_kind"] == "slash_command"
+    assert row["text_preview"] is None
+    # A real typed prompt in the same session still keeps its body.
+    kept = cx._row({"id": "p2", "text": "真的输入", "originator": "codex-tui",
+                    "timestamp": "2026-08-03T04:00:00Z"})
+    assert kept["text_preview"] == "真的输入"
+
+
+@pytest.mark.unit
+def test_markup_input_is_not_mislabelled_injected():
+    """A prompt opening with markup is mine, not harness injection."""
+    for text in ("<div>这段 HTML 怎么改</div>", "<html> 帮我看这个"):
+        assert cx._classify(text, "codex-tui") == "typed"
+    # Named harness tags are still caught.
+    assert cx._classify("<environment_context>x", "codex-tui") == "injected"
+    assert cx._classify("<turn_aborted> y", "codex-tui") == "injected"
+
+
+@pytest.mark.unit
+def test_naive_timestamp_is_read_as_utc_not_local():
+    """ADR-22: the CST day must never depend on the host timezone."""
+    # 20:00 UTC -> next CST day. If the naive string were read as local time,
+    # this would land on a different day on a non-UTC machine.
+    assert cx._cst_day("2026-08-02T20:00:00") == "2026-08-03"
+    assert cx._cst_day("2026-08-02T20:00:00Z") == "2026-08-03"
+
+
+@pytest.mark.unit
+def test_truncated_file_is_recollected(monkeypatch, tmp_path):
+    """A rotated/truncated file must not be skipped forever.
+
+    With `size <= start` the stale offset would sit past EOF and the file would
+    never be read again — silent data loss with no error anywhere.
+    """
+    log = tmp_path / "r.jsonl"
+    log.write_text(_meta(session="s1") + "\n" + _user_msg("after truncation") + "\n",
+                   encoding="utf-8")
+    monkeypatch.setattr(cx, "CODEX_SESSIONS_DIR", tmp_path)
+    # Watermark from before truncation: larger than the file now is.
+    monkeypatch.setattr(cx, "get_watermark", lambda source: {str(log): 999_999})
+    captured = {}
+    monkeypatch.setattr(cx, "write_raw",
+                        lambda s, records: captured.setdefault("recs", list(records))
+                        and 0 or len(captured["recs"]))
+    monkeypatch.setattr(cx, "set_watermark", lambda s, v: None)
+
+    assert cx.collect() == 1
+    assert captured["recs"][0]["text"] == "after truncation"
+
+
+@pytest.mark.unit
+def test_prompt_id_is_stable_across_resumes(monkeypatch, tmp_path):
+    """The id must not shift when a file is collected in two passes.
+
+    A batch-relative index restarts at 0 on resume, so the same record could be
+    minted under two different ids (or two records under one), and normalize's
+    last-write-wins would silently drop a row.
+    """
+    log = tmp_path / "s.jsonl"
+    head = _meta(session="s1") + "\n" + _user_msg("first") + "\n"
+    tail = _user_msg("second") + "\n"
+    log.write_text(head + tail, encoding="utf-8")
+    monkeypatch.setattr(cx, "CODEX_SESSIONS_DIR", tmp_path)
+
+    def _run(watermark):
+        seen = {}
+        monkeypatch.setattr(cx, "get_watermark", lambda source: watermark)
+        monkeypatch.setattr(cx, "write_raw",
+                            lambda s, records: seen.setdefault("recs", list(records))
+                            and 0 or len(seen["recs"]))
+        monkeypatch.setattr(cx, "set_watermark",
+                            lambda s, v: seen.__setitem__("wm", v))
+        cx.collect()
+        return seen
+
+    full = _run(None)
+    ids_full = {r["text"]: r["id"] for r in full["recs"]}
+    # Now simulate having stopped after the first prompt, then resuming.
+    resumed = _run({str(log): len(head.encode())})
+    assert [r["text"] for r in resumed["recs"]] == ["second"]
+    assert resumed["recs"][0]["id"] == ids_full["second"], (
+        "the same record must keep the same id whether read in one pass or two"
+    )
+
+
+@pytest.mark.unit
+def test_offset_is_exact_with_multibyte_and_crlf(monkeypatch, tmp_path):
+    """The watermark must be a REAL byte offset, not a re-encoded guess.
+
+    The first version of this fix summed `len(line.encode())`, which drifts in
+    text mode: universal newlines collapse \\r\\n to \\n (1 byte short per
+    line) and errors="replace" expands one bad byte to U+FFFD (2 bytes long).
+    Because this value is the watermark, is compared against st_size, and forms
+    prompt_id, drift makes a resume seek mid-line and silently drop records.
+
+    The original test could not catch that — its fixture was pure ASCII + LF.
+    This one writes CRLF, multibyte text, and an invalid UTF-8 byte, then
+    asserts the watermark equals the file's true size.
+    """
+    log = tmp_path / "x.jsonl"
+    payload = (
+        (_meta(session="s1") + "\r\n").encode("utf-8")
+        + (_user_msg("中文多字节输入") + "\r\n").encode("utf-8")
+        + b'{"type":"event_msg","payload":{"type":"user_message",'
+          b'"message":"bad\xff byte"}}' + b"\r\n"
+    )
+    log.write_bytes(payload)
+
+    monkeypatch.setattr(cx, "CODEX_SESSIONS_DIR", tmp_path)
+    monkeypatch.setattr(cx, "get_watermark", lambda source: None)
+    seen = {}
+
+    def _cap(source, records):
+        seen["recs"] = list(records)
+        return len(seen["recs"])
+
+    monkeypatch.setattr(cx, "write_raw", _cap)
+    monkeypatch.setattr(cx, "set_watermark",
+                        lambda s, v: seen.__setitem__("wm", v))
+
+    cx.collect()
+    assert seen["wm"][str(log)] == log.stat().st_size, (
+        "watermark drifted from the real byte size — a resume would seek "
+        "mid-line and lose records"
+    )
+    # And the ids must be real offsets within the file, not running totals.
+    for rec in seen["recs"]:
+        offset = int(rec["id"].rsplit(":", 1)[1])
+        assert 0 <= offset < log.stat().st_size
+
+
+@pytest.mark.unit
+def test_prompt_id_uses_relative_path(monkeypatch, tmp_path):
+    """Sessions live under YYYY/MM/DD — a bare basename collides across dates."""
+    for day in ("01", "02"):
+        d = tmp_path / "2026" / "08" / day
+        d.mkdir(parents=True)
+        (d / "rollout-same.jsonl").write_text(
+            _meta(session=f"s{day}") + "\n" + _user_msg("x") + "\n",
+            encoding="utf-8")
+
+    monkeypatch.setattr(cx, "CODEX_SESSIONS_DIR", tmp_path)
+    monkeypatch.setattr(cx, "get_watermark", lambda source: None)
+    ids: list[str] = []
+    monkeypatch.setattr(cx, "write_raw",
+                        lambda s, records: ids.extend(r["id"] for r in records) or 1)
+    monkeypatch.setattr(cx, "set_watermark", lambda s, v: None)
+
+    cx.collect()
+    assert len(ids) == 2
+    assert len(set(ids)) == 2, f"same-basename files collided: {ids}"
+
+
+@pytest.mark.unit
 def test_cst_day_uses_fixed_offset():
     """ADR-22: explicit +8h, never localtime."""
     assert cx._cst_day("2026-08-02T20:00:00.000Z") == "2026-08-03"
