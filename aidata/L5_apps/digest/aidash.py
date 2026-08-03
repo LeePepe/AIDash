@@ -710,6 +710,33 @@ def _ai_efficiency_container(mmdd: str, ai) -> "Container | None":
                      subtitle="AI 效能因果度量 · 业界少见")
 
 
+def _attribution_container(mmdd: str, cost_by_project,
+                           model_by_project) -> "Container | None":
+    """💸 成本归因 (order 22): WHY the trend arrows moved.
+
+    Sits immediately after 趋势指标 (order 20) on purpose — it exists to
+    explain the arrows directly above it. Every other card in the briefing
+    reports a single dimension, so a "+968%" tells you something changed but
+    not where to look; this splits the same spend across projects, then across
+    project x model.
+
+    Both cards are barLists (existing CardType, no new renderer needed).
+    Omitted entirely when attribution is unavailable, rather than showing an
+    empty frame (ADR-23).
+    """
+    cards: list[Card] = []
+    project_card = _bar_card(_kuid(mmdd, 32), cost_by_project, style="neutral")
+    if project_card:
+        cards.append(project_card)
+    model_card = _bar_card(_kuid(mmdd, 33), model_by_project, style="neutral")
+    if model_card:
+        cards.append(model_card)
+    if not cards:
+        return None
+    return Container(_cuid(mmdd, 11), "成本归因", 22, tuple(cards),
+                     layout="auto", subtitle="钱花在哪个项目 · 哪个模型")
+
+
 def _time_output_container(mmdd: str, app_focus, commit_by_repo) -> "Container | None":
     """⏱ 时间与产出 (order 28, §design): app 焦点 + 跨仓 commit barLists."""
     cards: list[Card] = []
@@ -805,6 +832,13 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
             _cuid(mmdd, 2), "趋势指标", 20,
             (Card(_kuid(mmdd, 3), "metric", "wide", {"items": metrics}),),
             layout="auto"))
+
+    # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
+    attribution_container = _attribution_container(
+        mmdd, getattr(sources, "cost_by_project", None),
+        getattr(sources, "model_by_project", None))
+    if attribution_container:
+        containers.append(attribution_container)
 
     # 🧠 AI 效能 (order 25) + ⏱ 时间与产出 (order 28): batch-2 差异化 sections,
     # placed right after the trend metrics and before the prose 昨日汇总 (order 30).

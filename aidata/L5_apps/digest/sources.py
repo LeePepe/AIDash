@@ -431,6 +431,15 @@ class DigestSources:
     app_focus: "RankBundle" = field(
         default_factory=lambda: RankBundle([], SourceHealth("gecko", "skipped:未取"))
     )
+    # ── attribution (§07-17 目标⑤「为什么」): the cross-source layer ──
+    # Every other bundle above is single-dimension. These two answer "why did
+    # the number move", which no trend arrow can.
+    cost_by_project: "RankBundle" = field(
+        default_factory=lambda: RankBundle([], SourceHealth("attribution", "skipped:未取"))
+    )
+    model_by_project: "RankBundle" = field(
+        default_factory=lambda: RankBundle([], SourceHealth("attribution", "skipped:未取"))
+    )
     commit_by_repo: "RankBundle" = field(
         default_factory=lambda: RankBundle([], SourceHealth("local_git", "skipped:未取"))
     )
@@ -745,6 +754,55 @@ def fetch_ai_efficiency() -> "AiEfficiency":
 
 
 # ---- ⏱ 时间与产出 -------------------------------------------------------
+def fetch_cost_by_project(day: str | None, top_n: int = 6) -> "RankBundle":
+    """Where the day's spend actually went, as a descending barList.
+
+    This is the attribution layer: every other trend card reports one
+    dimension, so "cost up 968%" carries no cause. Attributing it to project
+    turns the same number into somewhere to look.
+
+    Cost is allocated across a session's projects in proportion to turns — a
+    session touches 1.68 projects on average, so summing per project would
+    double-count (see the query header). Degrades to empty + non-ok health
+    when the warehouse or query fails (ADR-23).
+    """
+    try:
+        rows, idx = _rows("attribution/cost-by-project", {"day": day})
+        pi, ci, pci = idx["project"], idx["cost_usd"], idx["cost_pct"]
+        ranked = [(str(r[pi]), float(r[ci] or 0), float(r[pci] or 0))
+                  for r in rows]
+        items = _fold_top_n(
+            ranked, top_n,
+            value_text=lambda pct: f"{pct:.0f}%",
+            semantic=lambda _label: None,
+        )
+        return RankBundle(items, SourceHealth("attribution", "ok"))
+    except Exception as exc:
+        return RankBundle([], SourceHealth("attribution", "error", str(exc)[:200]))
+
+
+def fetch_model_by_project(day: str | None, top_n: int = 5) -> "RankBundle":
+    """Top project x model spend pairs — what the money was spent ON.
+
+    Pairs with `fetch_cost_by_project`: that one says where, this says on what,
+    so "opus dominates spend" becomes "AIDash runs opus-5 for $1293". Labels
+    read "project · model". Degrades to empty + non-ok health (ADR-23).
+    """
+    try:
+        rows, idx = _rows("attribution/model-by-project", {"day": day})
+        pi, mi, ci = idx["project"], idx["model"], idx["cost_usd"]
+        ranked = [(f"{r[pi]} · {r[mi]}", float(r[ci] or 0), float(r[ci] or 0))
+                  for r in rows]
+        items = _fold_top_n(
+            ranked, top_n,
+            value_text=lambda c: f"${c:.0f}",
+            semantic=lambda _label: None,
+        )
+        return RankBundle(items, SourceHealth("attribution", "ok"))
+    except Exception as exc:
+        return RankBundle([], SourceHealth("attribution", "error", str(exc)[:200]))
+
+
 def fetch_app_focus(since: str | None, until: str | None,
                     top_n: int = 6) -> "RankBundle":
     """Per-app focus minutes over [since, until) as a descending barList.

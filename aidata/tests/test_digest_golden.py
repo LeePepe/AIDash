@@ -112,6 +112,14 @@ def frozen_trends(monkeypatch):
                         lambda: NewsRadar([], _skipped("news")))
     monkeypatch.setattr(app, "fetch_model_tier",
                         lambda *a, **k: ModelTier([], _skipped("model_tier")))
+    # Attribution reads the live warehouse, so it must be frozen here or the
+    # golden drifts with real spend (test_fixture_completeness enforces this).
+    # Degraded-empty: attribution renders no section, so the committed golden
+    # is unaffected; its own rendering is covered by test_cost_attribution.
+    monkeypatch.setattr(app, "fetch_cost_by_project",
+                        lambda *a, **k: RankBundle([], _skipped("attribution")))
+    monkeypatch.setattr(app, "fetch_model_by_project",
+                        lambda *a, **k: RankBundle([], _skipped("attribution")))
 
 
 @pytest.mark.unit
