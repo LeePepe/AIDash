@@ -180,7 +180,8 @@ spec 003 §8 语义,本 spec 不改)。
 
 **In scope**(按 layer):
 - **Core**(`AIDashCore`):`UserEvent`/`UserEventModel` 加可选 `cardType`;整卡 star
-  工厂 `UserEvent.starCard(cardId:cardType:device:)`(itemRef=nil);`data-model.md` 记录。
+  工厂 `UserEvent.starCard(cardId:cardType:device:)`(itemRef=nil);
+  `specs/001-core-briefing-cli/data-model.md` 记录。
 - **UI**(`AIDashUI`):(a)新增 4 个 environment 值(D4 表);(b)整卡 star 按钮
   (CardRouter 层,覆盖所有卡型,sectionHeader 除外);(c)`TodoItemRow` 完成圈换
   Button + 接 `onToggleDone` + `doneItemRefs` 驱动填充态。
