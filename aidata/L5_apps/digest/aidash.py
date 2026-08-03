@@ -710,17 +710,45 @@ def _ai_efficiency_container(mmdd: str, ai) -> "Container | None":
                      subtitle="AI 效能因果度量 · 业界少见")
 
 
-def _attribution_container(mmdd: str, cost_by_project,
-                           model_by_project) -> "Container | None":
+def _leverage_card(mmdd: str, lev) -> "Card | None":
+    """One typed prompt, priced — the only human/machine ratio on the board.
+
+    Rendered as a metric so the headline number reads at a glance; the
+    secondary items give it context (a $40 prompt that fired 46 requests is a
+    deep agentic loop, the same $40 over 3 requests is an expensive model).
+    """
+    if lev is None or getattr(lev, "health", None) is None:
+        return None
+    if lev.health.state != "ok" or not lev.prompts:
+        return None
+    # MetricPayload.Item.value is a Double in the Swift schema — a formatted
+    # string ("$38.5") is rejected with schema.payload_decode_failed, and the
+    # push logs only "card put exit 1", so the card silently vanishes from the
+    # app while the local build still shows it. Keep the number numeric and put
+    # the symbol in `unit`.
+    items = [
+        {"label": "每条输入成本", "value": round(lev.usd_per_prompt, 1),
+         "unit": "USD", "trend": "flat"},
+        {"label": "每条触发请求", "value": round(lev.requests_per_prompt, 1),
+         "unit": "次", "trend": "flat"},
+        {"label": "我发了", "value": float(lev.prompts), "unit": "条",
+         "trend": "flat"},
+    ]
+    return Card(_kuid(mmdd, 34), "metric", "wide",
+                {"title": "人机杠杆", "items": items})
+
+
+def _attribution_container(mmdd: str, cost_by_project, model_by_project,
+                           leverage=None, rework_by_workspace=None) -> "Container | None":
     """💸 成本归因 (order 22): WHY the trend arrows moved.
 
     Sits immediately after 趋势指标 (order 20) on purpose — it exists to
     explain the arrows directly above it. Every other card in the briefing
     reports a single dimension, so a "+968%" tells you something changed but
     not where to look; this splits the same spend across projects, then across
-    project x model.
+    project x model, then prices it against the one input that is mine.
 
-    Both cards are barLists (existing CardType, no new renderer needed).
+    Cards are barLists + one metric (existing CardTypes, no new renderer).
     Omitted entirely when attribution is unavailable, rather than showing an
     empty frame (ADR-23).
     """
@@ -731,10 +759,16 @@ def _attribution_container(mmdd: str, cost_by_project,
     model_card = _bar_card(_kuid(mmdd, 33), model_by_project, style="neutral")
     if model_card:
         cards.append(model_card)
+    leverage_card = _leverage_card(mmdd, leverage)
+    if leverage_card:
+        cards.append(leverage_card)
+    rework_card = _bar_card(_kuid(mmdd, 35), rework_by_workspace, style="neutral")
+    if rework_card:
+        cards.append(rework_card)
     if not cards:
         return None
     return Container(_cuid(mmdd, 11), "成本归因", 22, tuple(cards),
-                     layout="auto", subtitle="钱花在哪个项目 · 哪个模型")
+                     layout="auto", subtitle="钱花在哪个项目 · 哪个模型 · 每条输入值多少")
 
 
 def _time_output_container(mmdd: str, app_focus, commit_by_repo) -> "Container | None":
@@ -869,7 +903,9 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
     attribution_container = _attribution_container(
         mmdd, getattr(sources, "cost_by_project", None),
-        getattr(sources, "model_by_project", None))
+        getattr(sources, "model_by_project", None),
+        getattr(sources, "leverage", None),
+        getattr(sources, "rework_by_workspace", None))
     if attribution_container:
         containers.append(attribution_container)
 
