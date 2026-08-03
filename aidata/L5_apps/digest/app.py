@@ -32,6 +32,8 @@ from L5_apps.digest.sources import (  # noqa: F401 — fetch_ado_pr_trends re-ex
     fetch_ai_efficiency, fetch_app_focus, fetch_commit_by_repo,
     fetch_cost_by_project, fetch_model_by_project,
     fetch_news_radar, fetch_model_tier,
+    # 你最常收藏的卡型 (spec 005 T007/US5).
+    fetch_card_interest,
 )
 from L5_apps.digest.render import render_digest
 from L5_apps.digest.llm import LLMClient, LLMError, default_client
@@ -92,6 +94,7 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         # only meaningful against yesterday's spend.
         cost_by_project=fetch_cost_by_project(day_since),
         model_by_project=fetch_model_by_project(day_since),
+        card_interest=fetch_card_interest(since),
     )
 
 

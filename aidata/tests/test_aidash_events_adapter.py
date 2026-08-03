@@ -21,7 +21,9 @@ class _Proc:
 
 
 # A well-formed ok:true envelope: one star event carrying a repo itemRef, one
-# whole-card done event whose itemRef is null.
+# whole-card done event whose itemRef is null. The star event also carries a
+# cardType (whole-card star, spec 005 D2); the done event predates the field
+# (no cardType key at all) to exercise the forward-compat default-to-NULL path.
 _ENVELOPE = {
     "ok": True,
     "requestId": "req-1",
@@ -35,6 +37,7 @@ _ENVELOPE = {
                 "cardId": "github-radar",
                 "action": "star",
                 "itemRef": "https://github.com/TauricResearch/TradingAgents",
+                "cardType": "trending",
             },
             {
                 "id": "evt-done-1",
@@ -96,13 +99,15 @@ def test_collect_parses_envelope_and_advances_watermark(monkeypatch):
     n = ae.collect()
     assert n == 2
     by_id = {r["id"]: r for r in written}
-    # star event carries the correct repo itemRef
+    # star event carries the correct repo itemRef + cardType
     assert by_id["evt-star-1"]["action"] == "star"
     assert by_id["evt-star-1"]["itemRef"] == \
         "https://github.com/TauricResearch/TradingAgents"
-    # whole-card done event: itemRef is null
+    assert by_id["evt-star-1"]["cardType"] == "trending"
+    # whole-card done event: itemRef is null, no cardType key at all (old event)
     assert by_id["evt-done-1"]["action"] == "done"
     assert by_id["evt-done-1"]["itemRef"] is None
+    assert "cardType" not in by_id["evt-done-1"]
     # watermark advanced to the MAX event timestamp
     assert store[ae.SOURCE] == "2026-07-21T10:30:00Z"
 
@@ -237,7 +242,7 @@ def test_normalize_maps_fields_and_actions(monkeypatch):
     raw = [
         {"id": "e1", "timestamp": "2026-07-20T09:00:00Z", "device": "Mac",
          "cardId": "radar", "action": "star",
-         "itemRef": "https://github.com/a/b"},
+         "itemRef": "https://github.com/a/b", "cardType": "trending"},
         {"id": "e2", "timestamp": "2026-07-21T10:00:00Z", "device": "Mac",
          "cardId": "todo", "action": "done", "itemRef": None},
     ]
@@ -252,13 +257,16 @@ def test_normalize_maps_fields_and_actions(monkeypatch):
     monkeypatch.setattr(ae, "write_clean", _cap)
     assert ae.normalize() == 2
     assert captured["cols"] == \
-        ("event_id", "ts", "device", "card_id", "action", "item_ref")
+        ("event_id", "ts", "device", "card_id", "action", "item_ref",
+         "card_type")
     r1 = captured["rows"]["e1"]
     assert r1["action"] == "star"
     assert r1["item_ref"] == "https://github.com/a/b"
+    assert r1["card_type"] == "trending"
     r2 = captured["rows"]["e2"]
     assert r2["action"] == "done"
     assert r2["item_ref"] is None  # whole-card event stays NULL
+    assert r2["card_type"] is None  # no cardType key on this (older) event
 
 
 @pytest.mark.unit

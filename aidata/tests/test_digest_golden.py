@@ -7,7 +7,7 @@ from L5_apps.digest.app import build_digest
 from L5_apps.digest.sources import (
     RavenTrends, MulticaTrends, AdoPrTrends, AutomationTrends, SourceHealth,
     RepoRadar, CostImprovement, ValueEfficiency, WorkByProject, AiEfficiency,
-    RankBundle, SegmentBundle, NewsRadar, ModelTier,
+    RankBundle, SegmentBundle, NewsRadar, ModelTier, CardInterest,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -120,6 +120,8 @@ def frozen_trends(monkeypatch):
                         lambda *a, **k: RankBundle([], _skipped("attribution")))
     monkeypatch.setattr(app, "fetch_model_by_project",
                         lambda *a, **k: RankBundle([], _skipped("attribution")))
+    monkeypatch.setattr(app, "fetch_card_interest",
+                        lambda *a, **k: CardInterest([], _skipped("aidash_events")))
 
 
 @pytest.mark.unit

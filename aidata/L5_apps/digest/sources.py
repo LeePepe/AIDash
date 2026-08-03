@@ -449,6 +449,16 @@ class DigestSources:
     model_tier: "ModelTier" = field(
         default_factory=lambda: ModelTier([], SourceHealth("state_db", "skipped:未取"))
     )
+    # 你最常收藏的卡型 Top-N (spec 005 T007/US5): whole-card star interest, most-
+    # starred first. Defaults to a skipped/empty bundle so older constructors
+    # (tests, golden fixture) keep working; _fetch_sources() populates it in the
+    # real pipeline. CardInterest is defined later in this module (same
+    # forward-ref pattern as RepoRadar/AiEfficiency above).
+    card_interest: "CardInterest" = field(
+        default_factory=lambda: CardInterest(
+            [], SourceHealth("aidash_events", "skipped:未取")
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -885,3 +895,39 @@ def fetch_model_tier(top_n: int = 5) -> "ModelTier":
         return ModelTier(segs, SourceHealth("state_db", "ok"))
     except Exception as exc:
         return ModelTier([], SourceHealth("state_db", "error", str(exc)[:200]))
+
+
+# ---- 你最常收藏的卡型 (spec 005 T007/US5) ---------------------------------
+@dataclass(frozen=True)
+class CardTypeStar:
+    """One card type's whole-card star count, over the caller's window."""
+    card_type: str
+    star_count: int
+
+
+@dataclass(frozen=True)
+class CardInterest:
+    """Whole-card star counts by card_type, descending (behavior/card-interest).
+    Degrades to empty + non-ok health so the producer omits the insight card
+    (ADR-23) — a source that was never collected reports "skipped:未采集"."""
+    types: list[CardTypeStar]
+    health: SourceHealth
+
+
+def fetch_card_interest(since: str | None) -> "CardInterest":
+    """Fetch whole-card star counts by card_type over [since, now].
+
+    `since` is a CST date 'YYYY-MM-DD' (the caller computes the rolling 7-day
+    window, ADR-22); None means all-time (serve.py auto-binds a missing param
+    to NULL). aidash_events is L2-only (never merged into warehouse), so a
+    fresh worktree with no collected events is the normal case, not an error —
+    reported as "skipped:未采集" same as gecko/local_git/state_db above."""
+    if not clean_path("aidash_events").exists():
+        return CardInterest([], SourceHealth("aidash_events", "skipped:未采集"))
+    try:
+        rows, idx = _rows("behavior/card-interest", {"since": since})
+        ti, si = idx["card_type"], idx["star_count"]
+        types = [CardTypeStar(str(r[ti]), int(r[si] or 0)) for r in rows]
+        return CardInterest(types, SourceHealth("aidash_events", "ok"))
+    except Exception as exc:
+        return CardInterest([], SourceHealth("aidash_events", "error", str(exc)[:200]))
