@@ -46,7 +46,7 @@ _TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 # snapshot, then the cheap DB/memory sources, then the slower/optional new L1
 # sources (news, aidash_events, local_git, browser_history, gecko) last so their
 # per-source budget can't starve the reliable snapshot sources.
-SOURCES="raven claude_jsonl claude_prompts multica_issue multica_run multica_comment claude_job github_repo github_pr pr_cache ado_pr state_db hermes_tools hermes_messages memory_claude memory_hermes_db memory_hermes_md news aidash_events local_git browser_history gecko"
+SOURCES="raven claude_jsonl claude_prompts codex_prompts multica_issue multica_run multica_comment claude_job github_repo github_pr pr_cache ado_pr state_db hermes_tools hermes_messages memory_claude memory_hermes_db memory_hermes_md news aidash_events local_git browser_history gecko"
 for src in $SOURCES; do
   echo "[aidata-digest]   collect $src (budget ${PER_SOURCE_TIMEOUT}s)"
   if [ -n "$_TIMEOUT_BIN" ]; then
