@@ -40,6 +40,7 @@ Degrade-safe (ADR-23): a missing DB collects 0 and normalizes to 0 — never rai
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from config import HERMES_STATE_DB
@@ -109,13 +110,92 @@ def _truthy(value: Any) -> int:
     return 1 if value not in (None, "", [], {}) else 0
 
 
+# ---------------------------------------------------------------------------
+# clarify — Hermes's ask-the-user tool, mined from raw we already collected.
+#
+# Each `tool_name='clarify'` message's `content` is a self-contained JSON blob:
+#   {"question": ..., "choices_offered": [...], "user_response": ...}
+# so no pairing across rows is needed (unlike Claude's tool_use/tool_result).
+#
+# The trap: 104 of 225 responses (47%) are not answers at all — they are a
+# timeout sentinel Hermes writes when I never replied. Counting those as
+# choices would invent decisions I never made, so they are flagged rather than
+# silently kept (and rather than dropped, which would hide how often I ignore
+# the question — itself a signal).
+# ---------------------------------------------------------------------------
+_TIMEOUT_SENTINEL = "The user did not provide a response"
+
+_CLARIFY_DDL = """
+CREATE TABLE clarify (
+    ask_id      TEXT PRIMARY KEY,
+    agent       TEXT,
+    session_id  TEXT,
+    day         TEXT,
+    ts          REAL,
+    question    TEXT,
+    options     TEXT,          -- JSON array of offered choices
+    chosen      TEXT,          -- NULL when it timed out
+    is_timeout  INTEGER        -- 1 = never answered, NOT a choice
+)
+"""
+_CLARIFY_COLS = ("ask_id", "agent", "session_id", "day", "ts", "question",
+                 "options", "chosen", "is_timeout")
+
+
+def _clarify_row(rec: dict[str, Any]) -> dict[str, Any] | None:
+    """Parse one clarify message into a Q&A row. None when unusable."""
+    mid = rec.get("id")
+    if not mid:
+        return None
+    raw = rec.get("content")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        blob = json.loads(raw)
+    except (ValueError, TypeError):
+        # 2 of 225 rows are unparseable; degrade rather than fail the normalize.
+        return None
+    if not isinstance(blob, dict):
+        return None
+    question = blob.get("question")
+    if not question:
+        return None
+    response = blob.get("user_response")
+    timed_out = isinstance(response, str) and response.startswith(_TIMEOUT_SENTINEL)
+    choices = blob.get("choices_offered")
+    return {
+        "ask_id": str(mid),
+        "agent": "hermes",
+        "session_id": rec.get("session_id"),
+        "day": epoch_s_to_cst_day(rec.get("timestamp")),
+        "ts": rec.get("timestamp"),
+        "question": question,
+        "options": json.dumps(choices if isinstance(choices, list) else [],
+                              ensure_ascii=False),
+        # ~19% of real answers are free text I typed instead of picking, so
+        # `chosen` is not guaranteed to appear in `options`.
+        "chosen": None if timed_out else response,
+        "is_timeout": 1 if timed_out else 0,
+    }
+
+
 def normalize() -> int:
-    """One row per message, keyed by message id (last write wins)."""
+    """Rebuild both tables. Returns the message count (the headline number).
+
+    `clarify` is derived from the SAME raw records — no extra collection pass.
+    The Q&A blobs were already captured when message bodies started being
+    collected; this only parses them out.
+    """
     rows: dict[str, dict[str, Any]] = {}
+    clarify: dict[str, dict[str, Any]] = {}
     for rec in read_raw(SOURCE):
         mid = rec.get("id")
         if not mid:
             continue
+        if rec.get("tool_name") == "clarify":
+            ask = _clarify_row(rec)
+            if ask:
+                clarify[ask["ask_id"]] = ask
         clen, preview = _preview(rec.get("content"))
         rows[str(mid)] = {
             "message_id": str(mid),
@@ -132,5 +212,7 @@ def normalize() -> int:
             "has_reasoning": _truthy(
                 rec.get("reasoning") or rec.get("reasoning_content")),
         }
+    write_clean(SOURCE, "clarify", _CLARIFY_DDL, list(clarify.values()),
+                _CLARIFY_COLS)
     return write_clean(SOURCE, "message", _CLEAN_DDL, list(rows.values()),
                        _CLEAN_COLS)
