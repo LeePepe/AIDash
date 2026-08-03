@@ -70,6 +70,16 @@ HERMES_STATE_DB = HOME / ".hermes" / "state.db"
 # (hash + prefix only) — see the adapter docstring. Degrades to 0 when absent.
 CODEX_SESSIONS_DIR = HOME / ".codex" / "sessions"
 
+# Kimi Code session logs (kimi_prompts source) — the real event log lives at
+# sessions/<workdir>/<session>/agents/<agent>/wire.jsonl, where every
+# `turn.prompt` carries an explicit `origin.kind` (user / system_trigger /
+# injection / ...). That single field is the cleanest human-vs-machine
+# discriminator of any source here. NOT `user-history/` — that is a
+# shell-history-style buffer with no timestamp or session id (it does preserve
+# slash commands as typed, its one advantage). L2-only; degrades to 0 when
+# Kimi is not installed (ADR-23).
+KIMI_SESSIONS_DIR = HOME / ".kimi-code" / "sessions"
+
 # Chrome browsing history (browser_history source) — the local SQLite the
 # browser writes visits into. L2-only source (not merged): the digest can
 # query its clean DB directly for a domain-level "what did I look up / which
@@ -221,6 +231,7 @@ SOURCES = (
     "hermes_messages",
     "claude_prompts",
     "codex_prompts",
+    "kimi_prompts",
     "memory_claude",
     "memory_hermes_db",
     "memory_hermes_md",
