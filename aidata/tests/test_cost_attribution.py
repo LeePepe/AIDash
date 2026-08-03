@@ -22,6 +22,22 @@ class _FakeRows:
         return self.rows, self.cols
 
 
+class _Exists:
+    """Stand-in for a clean_path() result whose file is present."""
+
+    @staticmethod
+    def exists() -> bool:
+        return True
+
+
+class _Missing:
+    """Stand-in for a clean_path() result whose file was never collected."""
+
+    @staticmethod
+    def exists() -> bool:
+        return False
+
+
 # --------------------------------------------------------------------------- #
 # fetch_cost_by_project
 # --------------------------------------------------------------------------- #
@@ -127,3 +143,122 @@ def test_fetch_sources_wires_attribution():
     }
     assert "fetch_cost_by_project" in called
     assert "fetch_model_by_project" in called
+
+
+# --------------------------------------------------------------------------- #
+# Round 2: leverage (human/machine ratio) + rework attribution
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_leverage_prices_one_typed_prompt(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [(86, 12, 3310.27, 38.49, 46.2, 17.7, 68.0)],
+        ["prompts", "sessions", "cost_usd", "usd_per_prompt",
+         "requests_per_prompt", "out_ktok_per_prompt", "avg_prompt_chars"]))
+    monkeypatch.setattr(s, "clean_path", lambda name: _Exists())
+    lev = s.fetch_leverage("2026-08-02")
+    assert lev.health.state == "ok"
+    assert lev.prompts == 86
+    assert lev.usd_per_prompt == 38.49
+
+
+@pytest.mark.unit
+def test_leverage_skips_a_day_with_no_typing(monkeypatch):
+    """Dividing by zero prompts is meaningless — omit rather than show 0."""
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [(0, 0, 0.0, 0.0, 0.0, 0.0, 0.0)],
+        ["prompts", "sessions", "cost_usd", "usd_per_prompt",
+         "requests_per_prompt", "out_ktok_per_prompt", "avg_prompt_chars"]))
+    monkeypatch.setattr(s, "clean_path", lambda name: _Exists())
+    assert s.fetch_leverage("2026-08-02").health.state != "ok"
+
+
+@pytest.mark.unit
+def test_leverage_degrades_when_source_absent(monkeypatch):
+    monkeypatch.setattr(s, "clean_path", lambda name: _Missing())
+    lev = s.fetch_leverage(None)
+    assert lev.prompts == 0
+    assert lev.health.state.startswith("skipped")
+
+
+@pytest.mark.unit
+def test_rework_drops_workspaces_below_min_sample(monkeypatch):
+    """A rate over a handful of issues is noise wearing a percentage sign.
+
+    Measured on the 7-day window: one workspace showed 0% across 22 issues,
+    which reads as "healthy" but means "too few to tell". Small samples are
+    dropped, not rendered.
+    """
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [("ws-big", 1138, 787, 69.2, 68493.0),
+         ("ws-small", 22, 0, 0.0, 0.0)],
+        ["workspace_id", "issues", "rework_issues", "rework_pct", "rework_ktok"]))
+    monkeypatch.setattr(s, "clean_path", lambda name: _Exists())
+    bundle = s.fetch_rework_by_workspace(None, min_issues=30)
+    assert [i.label for i in bundle.items] == ["ws-big"]
+
+
+@pytest.mark.unit
+def test_rework_reports_insufficient_sample(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [("ws-small", 5, 1, 20.0, 10.0)],
+        ["workspace_id", "issues", "rework_issues", "rework_pct", "rework_ktok"]))
+    monkeypatch.setattr(s, "clean_path", lambda name: _Exists())
+    bundle = s.fetch_rework_by_workspace(None, min_issues=30)
+    assert bundle.items == []
+    assert "样本不足" in bundle.health.state
+
+
+@pytest.mark.unit
+def test_rework_uses_all_time_window_not_the_weekly_one():
+    """Rework needs cancel-then-complete, which takes days to accumulate."""
+    import ast
+    import inspect
+
+    from L5_apps.digest import app
+
+    tree = ast.parse(inspect.getsource(app._fetch_sources))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "fetch_rework_by_workspace"):
+            assert node.args and isinstance(node.args[0], ast.Constant), (
+                "rework must be passed an explicit all-time (None) window, "
+                "not the 7-day `since` used by spend attribution"
+            )
+            assert node.args[0].value is None
+            return
+    raise AssertionError("fetch_rework_by_workspace not wired")
+
+
+# --------------------------------------------------------------------------- #
+# Payload schema — the failure mode that hides itself
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_metric_values_are_numeric_not_formatted_strings():
+    """MetricPayload.Item.value is a Double in the Swift schema.
+
+    A formatted string ("$38.5") builds fine in Python and renders fine in any
+    local inspection, but the app rejects it with schema.payload_decode_failed
+    — and the push path logs only "card put exit 1". The card then silently
+    disappears from the briefing while every local check still shows it. This
+    was a real bug, caught only by reading the pushed briefing back.
+    """
+    from L5_apps.digest.aidash import _leverage_card
+
+    lev = s.Leverage(prompts=86, usd_per_prompt=38.49, requests_per_prompt=46.2,
+                     avg_prompt_chars=68, health=s.SourceHealth("leverage", "ok"))
+    card = _leverage_card("0803", lev)
+    assert card is not None
+    for item in card.payload["items"]:
+        assert isinstance(item["value"], (int, float)), (
+            f"{item['label']}: value must be numeric for the Swift schema, "
+            f"got {type(item['value']).__name__} ({item['value']!r})"
+        )
+        assert not isinstance(item["value"], bool)
+
+
+@pytest.mark.unit
+def test_leverage_card_omitted_when_unhealthy():
+    from L5_apps.digest.aidash import _leverage_card
+
+    assert _leverage_card("0803", None) is None
+    assert _leverage_card("0803", s.Leverage.empty()) is None

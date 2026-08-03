@@ -440,6 +440,10 @@ class DigestSources:
     model_by_project: "RankBundle" = field(
         default_factory=lambda: RankBundle([], SourceHealth("attribution", "skipped:未取"))
     )
+    leverage: "Leverage" = field(default_factory=lambda: Leverage.empty())
+    rework_by_workspace: "RankBundle" = field(
+        default_factory=lambda: RankBundle([], SourceHealth("multica_run", "skipped:未取"))
+    )
     commit_by_repo: "RankBundle" = field(
         default_factory=lambda: RankBundle([], SourceHealth("local_git", "skipped:未取"))
     )
@@ -801,6 +805,88 @@ def fetch_model_by_project(day: str | None, top_n: int = 5) -> "RankBundle":
         return RankBundle(items, SourceHealth("attribution", "ok"))
     except Exception as exc:
         return RankBundle([], SourceHealth("attribution", "error", str(exc)[:200]))
+
+
+@dataclass(frozen=True)
+class Leverage:
+    """One typed prompt, priced — the human/machine ratio.
+
+    Every other bundle measures the machine alone. This divides that by the one
+    input that is entirely mine, so it is the only figure here that says what a
+    sentence of mine sets in motion. `ok` is False when nothing was typed that
+    day (division would be meaningless) or the query failed.
+    """
+    prompts: int
+    usd_per_prompt: float
+    requests_per_prompt: float
+    avg_prompt_chars: int
+    health: SourceHealth
+
+    @staticmethod
+    def empty(state: str = "skipped:未取") -> "Leverage":
+        return Leverage(0, 0.0, 0.0, 0, SourceHealth("leverage", state))
+
+
+def fetch_leverage(day: str | None) -> "Leverage":
+    """What one thing I typed cost the machine. Degrades to empty (ADR-23).
+
+    Reads only `source_kind='typed'`: 93% of "user" lines are tool results and
+    harness injections, so counting those would make the denominator lie.
+    """
+    if not clean_path("claude_prompts").exists():
+        return Leverage.empty("skipped:未采集")
+    try:
+        rows, idx = _rows("attribution/leverage-per-prompt", {"day": day})
+        if not rows or not rows[0][idx["prompts"]]:
+            return Leverage.empty("skipped:当日无输入")
+        r = rows[0]
+        return Leverage(
+            prompts=int(r[idx["prompts"]] or 0),
+            usd_per_prompt=float(r[idx["usd_per_prompt"]] or 0),
+            requests_per_prompt=float(r[idx["requests_per_prompt"]] or 0),
+            avg_prompt_chars=int(r[idx["avg_prompt_chars"]] or 0),
+            health=SourceHealth("leverage", "ok"),
+        )
+    except Exception as exc:
+        return Leverage(0, 0.0, 0.0, 0,
+                        SourceHealth("leverage", "error", str(exc)[:200]))
+
+
+def fetch_rework_by_workspace(since: str | None, top_n: int = 5,
+                              min_issues: int = 30) -> "RankBundle":
+    """Rework rate per workspace as a descending barList.
+
+    `health/rework-rate` gives one global number; this says which workspace it
+    is concentrated in, which is the difference between knowing a cost exists
+    and knowing where to look. Workspace UUIDs are mapped to friendly names
+    here (config.MULTICA_WORKSPACES is gitignored, so the SQL cannot do it).
+
+    Workspaces below `min_issues` are dropped rather than shown: a rate over a
+    handful of issues is noise wearing a percentage sign. Measured on the
+    7-day window, one workspace had 0 rework across 22 issues — rendering
+    "0%" there reads as "healthy" when it actually means "too few to tell".
+    """
+    if not clean_path("multica_run").exists():
+        return RankBundle([], SourceHealth("multica_run", "skipped:未采集"))
+    try:
+        rows, idx = _rows("attribution/rework-by-workspace", {"since": since})
+        wi, pi, ii = idx["workspace_id"], idx["rework_pct"], idx["issues"]
+        ranked = [
+            (_WS_NAMES.get(str(r[wi]), str(r[wi])[:8]),
+             float(r[pi] or 0), float(r[pi] or 0))
+            for r in rows
+            if int(r[ii] or 0) >= min_issues
+        ]
+        if not ranked:
+            return RankBundle([], SourceHealth("multica_run", "skipped:样本不足"))
+        items = _fold_top_n(
+            ranked, top_n,
+            value_text=lambda pct: f"{pct:.0f}%",
+            semantic=lambda _label: None,
+        )
+        return RankBundle(items, SourceHealth("multica_run", "ok"))
+    except Exception as exc:
+        return RankBundle([], SourceHealth("multica_run", "error", str(exc)[:200]))
 
 
 def fetch_app_focus(since: str | None, until: str | None,
