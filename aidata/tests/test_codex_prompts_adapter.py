@@ -336,6 +336,74 @@ def test_prompt_id_is_stable_across_resumes(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
+def test_offset_is_exact_with_multibyte_and_crlf(monkeypatch, tmp_path):
+    """The watermark must be a REAL byte offset, not a re-encoded guess.
+
+    The first version of this fix summed `len(line.encode())`, which drifts in
+    text mode: universal newlines collapse \\r\\n to \\n (1 byte short per
+    line) and errors="replace" expands one bad byte to U+FFFD (2 bytes long).
+    Because this value is the watermark, is compared against st_size, and forms
+    prompt_id, drift makes a resume seek mid-line and silently drop records.
+
+    The original test could not catch that — its fixture was pure ASCII + LF.
+    This one writes CRLF, multibyte text, and an invalid UTF-8 byte, then
+    asserts the watermark equals the file's true size.
+    """
+    log = tmp_path / "x.jsonl"
+    payload = (
+        (_meta(session="s1") + "\r\n").encode("utf-8")
+        + (_user_msg("中文多字节输入") + "\r\n").encode("utf-8")
+        + b'{"type":"event_msg","payload":{"type":"user_message",'
+          b'"message":"bad\xff byte"}}' + b"\r\n"
+    )
+    log.write_bytes(payload)
+
+    monkeypatch.setattr(cx, "CODEX_SESSIONS_DIR", tmp_path)
+    monkeypatch.setattr(cx, "get_watermark", lambda source: None)
+    seen = {}
+
+    def _cap(source, records):
+        seen["recs"] = list(records)
+        return len(seen["recs"])
+
+    monkeypatch.setattr(cx, "write_raw", _cap)
+    monkeypatch.setattr(cx, "set_watermark",
+                        lambda s, v: seen.__setitem__("wm", v))
+
+    cx.collect()
+    assert seen["wm"][str(log)] == log.stat().st_size, (
+        "watermark drifted from the real byte size — a resume would seek "
+        "mid-line and lose records"
+    )
+    # And the ids must be real offsets within the file, not running totals.
+    for rec in seen["recs"]:
+        offset = int(rec["id"].rsplit(":", 1)[1])
+        assert 0 <= offset < log.stat().st_size
+
+
+@pytest.mark.unit
+def test_prompt_id_uses_relative_path(monkeypatch, tmp_path):
+    """Sessions live under YYYY/MM/DD — a bare basename collides across dates."""
+    for day in ("01", "02"):
+        d = tmp_path / "2026" / "08" / day
+        d.mkdir(parents=True)
+        (d / "rollout-same.jsonl").write_text(
+            _meta(session=f"s{day}") + "\n" + _user_msg("x") + "\n",
+            encoding="utf-8")
+
+    monkeypatch.setattr(cx, "CODEX_SESSIONS_DIR", tmp_path)
+    monkeypatch.setattr(cx, "get_watermark", lambda source: None)
+    ids: list[str] = []
+    monkeypatch.setattr(cx, "write_raw",
+                        lambda s, records: ids.extend(r["id"] for r in records) or 1)
+    monkeypatch.setattr(cx, "set_watermark", lambda s, v: None)
+
+    cx.collect()
+    assert len(ids) == 2
+    assert len(set(ids)) == 2, f"same-basename files collided: {ids}"
+
+
+@pytest.mark.unit
 def test_cst_day_uses_fixed_offset():
     """ADR-22: explicit +8h, never localtime."""
     assert cx._cst_day("2026-08-02T20:00:00.000Z") == "2026-08-03"

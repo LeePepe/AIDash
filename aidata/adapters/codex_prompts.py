@@ -180,15 +180,29 @@ def collect() -> int:
 
     for path in CODEX_SESSIONS_DIR.glob("**/*.jsonl"):
         key = str(path)
+        # Relative path, not just the filename: sessions live under a
+        # YYYY/MM/DD tree, so two dates can hold the same basename and would
+        # otherwise mint identical ids at the same offset.
+        try:
+            rel_path = str(path.relative_to(CODEX_SESSIONS_DIR))
+        except ValueError:
+            rel_path = path.name
         start = offsets.get(key, 0)
         try:
             size = path.stat().st_size
         except OSError:
             continue
         if size < start:
-            # Truncated or rotated: the stored offset now points past EOF, so
-            # `size <= start` would skip this file forever. Restart from zero —
-            # normalize dedupes on prompt_id, so re-reading costs nothing.
+            # Truncated: the stored offset now points past EOF, so a plain
+            # `size <= start` would skip this file forever. Restart from zero.
+            #
+            # Safe against the id-collision this would otherwise raise: ids are
+            # `<relpath>:<offset>`, so re-reading DIFFERENT content at the same
+            # offset would overwrite an unrelated record. That cannot happen
+            # here — Codex names each file `rollout-<ISO>-<session-uuid>.jsonl`
+            # (verified: zero duplicate basenames across all 7,540 files), so a
+            # given path is one append-only session. A file can shrink, but it
+            # cannot come back holding a different session's prompts.
             start = 0
         elif size == start:
             continue
@@ -205,17 +219,24 @@ def collect() -> int:
         batch: list[dict[str, Any]] = []
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             fh.seek(start)
-            # Offset is tracked by hand rather than via fh.tell(): calling
-            # tell() inside a `for line in fh` loop raises
-            # "telling position disabled by next() call". Read explicitly so
-            # each line's absolute start offset is known.
-            offset = start
+            # `fh.tell()` is exact and legal here. It is NOT usable inside a
+            # `for line in fh` loop ("telling position disabled by next()
+            # call"), which is why this reads via explicit readline().
+            #
+            # Do NOT compute the offset by summing len(line.encode()): in text
+            # mode that is not the true byte position. Universal newlines turn
+            # \r\n into \n (1 byte short per line) and errors="replace" turns
+            # one bad byte into U+FFFD (2 bytes long). Either way the running
+            # total drifts from the real file position — and this value is the
+            # watermark, is compared against st_size, and forms prompt_id, so
+            # drift means a resume seeks mid-line and silently drops records.
+            line_offset = fh.tell()
             while True:
                 raw_line = fh.readline()
                 if not raw_line:
                     break
-                line_offset = offset
-                offset += len(raw_line.encode("utf-8"))
+                current_offset = line_offset
+                line_offset = fh.tell()
                 line = raw_line.strip()
                 if not line:
                     continue
@@ -231,12 +252,12 @@ def collect() -> int:
                     # restarts at 0 on every resume, so one file collected in
                     # two passes can mint duplicate ids and let normalize's
                     # last-write-wins silently drop a row.
-                    "id": f"{path.name}:{line_offset}",
+                    "id": f"{rel_path}:{current_offset}",
                     "timestamp": obj.get("timestamp"),
                     "text": text,
                     **meta,
                 })
-            new_offsets[key] = offset
+            new_offsets[key] = line_offset
         if batch:
             total += write_raw(SOURCE, batch)
 
