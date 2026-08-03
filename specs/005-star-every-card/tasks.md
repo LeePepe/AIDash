@@ -14,7 +14,7 @@
 `UserEventModel` 加**可选** `cardType: String?`,forward-compat 同 `itemRef`
 (旧记录/旧 JSON 无键 → nil)。新增整卡 star 工厂
 `UserEvent.starCard(cardId:cardType:device:)`(`action=.star, itemRef=nil,
-cardType=<非空>`)。在 `data-model.md` 记录该字段。
+cardType=<非空>`)。在 `specs/001-core-briefing-cli/data-model.md` 记录该字段。
 
 **Acceptance**:
 - [ ] `UserEvent` round-trip 编解码测试覆盖 `cardType` 存在 / 缺席(nil)两路。
