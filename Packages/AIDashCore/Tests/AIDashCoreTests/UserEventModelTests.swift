@@ -248,4 +248,58 @@ struct UserEventModelTests {
         #expect(UserEvent.stableItemRef(for: a) == UserEvent.stableItemRef(for: b))
         #expect(UserEvent.stableItemRef(for: a).hasPrefix("title:"))
     }
+
+    // MARK: - cardType (spec 005 D2 / T001)
+
+    @Test func modelCardTypeDefaultsToNil() {
+        let event = UserEventModel(
+            id: UUID().uuidString,
+            timestamp: .now,
+            device: "Mac [ABCDEF]",
+            cardId: "card-plain",
+            action: .done
+        )
+        #expect(event.cardType == nil)
+    }
+
+    @Test func modelCardTypeIsPersistedWhenProvided() {
+        let event = UserEventModel(
+            id: UUID().uuidString,
+            timestamp: .now,
+            device: "Mac [ABCDEF]",
+            cardId: "digest-card-1",
+            action: .star,
+            itemRef: nil,
+            cardType: "trending"
+        )
+        #expect(event.cardType == "trending")
+        #expect(event.itemRef == nil)
+    }
+
+    // MARK: - UserEvent.starCard factory (spec 005 D1/D2 / T001)
+
+    @Test func starCardFactoryProducesWholeCardStarEvent() {
+        let before = Date()
+        let event = UserEvent.starCard(
+            cardId: "digest-card-1",
+            cardType: "trending",
+            device: "Mac [12345678]"
+        )
+        let after = Date()
+
+        #expect(event.action == .star)
+        #expect(event.cardId == "digest-card-1")
+        #expect(event.itemRef == nil)
+        #expect(event.cardType == "trending")
+        #expect(event.device == "Mac [12345678]")
+        #expect(!event.id.isEmpty)
+        #expect(UUID(uuidString: event.id) != nil)
+        #expect(event.timestamp >= before && event.timestamp <= after)
+    }
+
+    @Test func starCardFactoryMintsUniqueIDs() {
+        let a = UserEvent.starCard(cardId: "c", cardType: "trending", device: "d")
+        let b = UserEvent.starCard(cardId: "c", cardType: "trending", device: "d")
+        #expect(a.id != b.id)
+    }
 }

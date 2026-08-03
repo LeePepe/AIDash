@@ -13,6 +13,7 @@ public struct CardRouter: View {
     /// router used in isolation renders at the authored geometry.
     let effectiveSize: CardSize
     @Environment(\.theme) private var theme
+    @Environment(\.starredCardIds) private var starredCardIds
 
     public init(card: CardModel, effectiveSize: CardSize? = nil) {
         self.card = card
@@ -25,7 +26,13 @@ public struct CardRouter: View {
         // double-wrapped the card with a mismatched corner radius).
         // `currentCardId` lets payload-driven views (spec 002 star button)
         // attribute per-item events to this card without seeing the model.
+        //
+        // The star overlay is attached here (not inside `cardContent`) so it
+        // covers the fallback placeholder too — a card whose payload failed to
+        // decode still has a `card.type`/`card.id` and is just as starrable
+        // (spec 005 D1: "every card type except sectionHeader").
         cardContent
+            .overlay(alignment: .topTrailing) { starCardOverlay }
             .environment(\.currentCardId, card.id)
     }
 
@@ -35,6 +42,26 @@ public struct CardRouter: View {
             routedView(for: payload)
         } else {
             fallbackView
+        }
+    }
+
+    // Spec 005 D1/D4/D5: every card type except sectionHeader (which has no
+    // chrome to anchor to, and is a typography-only divider per its own
+    // header comment) gets a whole-card star button in its top-trailing
+    // corner. It floats over the routed view's own chrome/padding rather than
+    // participating in card layout, so it can never alter a card's
+    // size/style/chrome dimensions (constitution §VI: star is a content
+    // signal, not a size/style axis).
+    @ViewBuilder
+    private var starCardOverlay: some View {
+        if card.type != .sectionHeader {
+            WholeCardStarButton(
+                cardId: card.id,
+                cardType: card.type,
+                isStarred: starredCardIds.contains(card.id)
+            )
+            .padding(.trailing, AIDashSpace.s8)
+            .padding(.top, AIDashSpace.s8)
         }
     }
 

@@ -57,11 +57,13 @@ public struct BriefingWindowScene: Scene {
     }
 }
 
-/// App-side bridge for the spec 002 star feedback loop. The UI layer emits a
-/// star *intent* via the `onStarItem` environment closure (D4); this scope
-/// injects the real append-only writer plus the set of already-starred item
-/// refs derived from persisted star events, so radar rows render filled vs.
-/// outline without the UI layer ever touching SwiftData.
+/// App-side bridge for the spec 002 star feedback loop, extended in spec 005
+/// D3 for whole-card star + TODO done toggle. The UI layer emits intents via
+/// injected environment closures (never touching SwiftData directly, per
+/// constitution §II D4); this scope injects the real append-only writer plus
+/// the persisted state each intent's button needs to render filled/checked,
+/// so the UI degrades to "everything unstarred/unchecked" if a query ever
+/// comes back empty rather than crashing.
 private struct StarFeedbackScope: View {
     let container: ModelContainer
 
@@ -71,21 +73,44 @@ private struct StarFeedbackScope: View {
     /// what the user starred (US2).
     @Query private var starEvents: [UserEventModel]
 
+    /// Every persisted whole-card star event (spec 005 D1: `itemRef == nil`).
+    /// Kept as a separate query from `starEvents` (itemRef != nil) since the
+    /// two star axes are independent — a card being starred says nothing
+    /// about whether any of its items are starred, and vice versa.
+    @Query private var cardStarEvents: [UserEventModel]
+
+    /// Every persisted done/undone event, scoped down to the current
+    /// `doneItemRefs` set via `UserEventWriter.doneRefs(from:)`'s
+    /// latest-wins reducer (spec 003 §8, spec 005 D3).
+    @Query private var doneEvents: [UserEventModel]
+
     init(container: ModelContainer) {
         self.container = container
         let starRaw = UserEventAction.star.rawValue
         _starEvents = Query(filter: #Predicate {
             $0.actionRaw == starRaw && $0.itemRef != nil
         })
+        _cardStarEvents = Query(filter: #Predicate {
+            $0.actionRaw == starRaw && $0.itemRef == nil
+        })
+        let doneRaw = UserEventAction.done.rawValue
+        let undoneRaw = UserEventAction.undone.rawValue
+        _doneEvents = Query(filter: #Predicate {
+            $0.actionRaw == doneRaw || $0.actionRaw == undoneRaw
+        })
     }
 
     var body: some View {
         let writer = UserEventWriter(container: container)
+        // Intent closures come from the shared `StarFeedbackActions` factory so
+        // the spec 005 §6 wiring test exercises the exact same code path (see
+        // StarFeedbackActions.swift). The filled/checked state sets are derived
+        // here from `@Query` and injected alongside.
         BriefingView()
-            .environment(\.onStarItem) { cardId, itemRef in
-                writer.star(cardId: cardId, itemRef: itemRef)
-            }
+            .starFeedbackActions(StarFeedbackActions(writer: writer))
             .environment(\.starredItemRefs, Set(starEvents.compactMap(\.itemRef)))
+            .environment(\.starredCardIds, Set(cardStarEvents.map(\.cardId)))
+            .environment(\.doneItemRefs, UserEventWriter.doneRefs(from: doneEvents))
     }
 }
 

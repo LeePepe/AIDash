@@ -57,7 +57,65 @@ final class UserEventWriter {
         try? context.save()
     }
 
-    /// Appends a `.done` or `.undone` event for `(cardId, itemRef)` matching
+    /// Appends a whole-card star event (spec 005 D1/D2/D3) unless an identical
+    /// one already exists. Distinct from `star(cardId:itemRef:)`: this targets
+    /// the *card itself* (`itemRef == nil`), tagged with `cardType` so
+    /// downstream aggregation can group star counts by card type without
+    /// joining through the date-scoped `cardId`. The two star axes (whole-card
+    /// vs per-item) coexist independently — starring a card does not star its
+    /// items and vice versa.
+    ///
+    /// `itemRef` is accepted (rather than dropped) to keep this call symmetric
+    /// with `star(cardId:itemRef:)` at call sites, but the whole-card path is
+    /// only meaningful when it is nil; a non-nil value is routed to the
+    /// existing per-item `star(cardId:itemRef:)` instead of silently
+    /// discarding the caller's intent.
+    ///
+    /// Same dedup/best-effort contract as `star(cardId:itemRef:)`: idempotent
+    /// per `(cardId, cardType)` (repeated taps do not append duplicate rows),
+    /// and a failed fetch/save is swallowed — the filled state re-derives from
+    /// persisted events on the next render.
+    func star(cardId: String, itemRef: String?, cardType: String) {
+        guard let itemRef else {
+            starCard(cardId: cardId, cardType: cardType)
+            return
+        }
+        star(cardId: cardId, itemRef: itemRef)
+    }
+
+    /// Whole-card star write (see `star(cardId:itemRef:cardType:)` above for
+    /// the full contract). Split out as its own method so the dedup fetch
+    /// only ever queries `itemRef == nil` rows.
+    private func starCard(cardId: String, cardType: String) {
+        let context = ModelContext(container)
+        let starRaw = UserEventAction.star.rawValue
+        let descriptor = FetchDescriptor<UserEventModel>(
+            predicate: #Predicate { event in
+                event.cardId == cardId &&
+                event.itemRef == nil &&
+                event.actionRaw == starRaw &&
+                event.cardType == cardType
+            }
+        )
+        let existing = (try? context.fetchCount(descriptor)) ?? 0
+        guard existing == 0 else { return }
+
+        let event = UserEvent.starCard(
+            cardId: cardId,
+            cardType: cardType,
+            device: DeviceIdentifier.current()
+        )
+        context.insert(UserEventModel(
+            id: event.id,
+            timestamp: event.timestamp,
+            device: event.device,
+            cardId: event.cardId,
+            action: event.action,
+            itemRef: event.itemRef,
+            cardType: event.cardType
+        ))
+        try? context.save()
+    }
     /// the caller's target state (`done: true` → `.done`, `false` → `.undone`).
     ///
     /// Semantics (parent MY-1307, spec 003 §8 — **latest-wins**, replacing the

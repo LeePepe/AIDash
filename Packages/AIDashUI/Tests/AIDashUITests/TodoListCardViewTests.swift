@@ -102,6 +102,50 @@ struct TodoListCardViewTests {
         #expect(source.contains(".cardChrome(size: size, style: style)"), "TodoListCardView must consume the shared cardChrome modifier")
         #expect(source.contains("CardTypeBadge(type: .todoList)"), "TodoListCardView must render the shared 32×32 type badge")
     }
+
+    // MARK: - Spec 005 D3/D4: TodoItemRow completion toggle
+
+    @Test("body materializes with onToggleDone + doneItemRefs injected, for done and not-done items alike")
+    func bodyMaterializesWithDoneToggleInjected() {
+        let payload = TodoListPayload(items: sampleItems)
+        let doneRef = UserEvent.stableItemRef(for: sampleItems[0])
+        for size in CardSize.allCases {
+            let view = TodoListCardView(payload: payload, size: size, style: .neutral)
+                .environment(\.onToggleDone) { _, _, _ in }
+                .environment(\.doneItemRefs, [doneRef])
+            _ = BodyProbe(wrapped: view).body
+        }
+    }
+
+    @Test("with no onToggleDone injected, the row still materializes (graceful no-op degrade)")
+    func bodyMaterializesWithoutOnToggleDoneInjected() {
+        let payload = TodoListPayload(items: sampleItems)
+        let view = TodoListCardView(payload: payload, size: .wide, style: .neutral)
+        _ = view.body
+    }
+
+    @Test("stableItemRef is a pure function of the item, matching what the row uses as its doneItemRefs key")
+    func stableItemRefMatchesRowKey() {
+        // TodoItemRow computes `itemRef` via `UserEvent.stableItemRef(for: item)`
+        // (see TodoListCardView.swift) and looks it up in `doneItemRefs` to
+        // decide `isDone`. Pin that this is deterministic and distinguishes
+        // items, since that's the contract `onToggleDone`/`doneItemRefs` rely on
+        // end-to-end.
+        let ref1 = UserEvent.stableItemRef(for: sampleItems[0])
+        let ref2 = UserEvent.stableItemRef(for: sampleItems[1])
+        #expect(ref1 == UserEvent.stableItemRef(for: sampleItems[0]))
+        #expect(ref1 != ref2)
+    }
+
+    @Test("renderer source turns the completion circle into a real Button wired to onToggleDone")
+    func sourceHasDoneToggleButton() throws {
+        let source = try loadRendererSource(named: "TodoListCardView")
+        #expect(source.contains("@Environment(\\.onToggleDone) private var onToggleDone"))
+        #expect(source.contains("@Environment(\\.doneItemRefs) private var doneItemRefs"))
+        #expect(source.contains("onToggleDone?(currentCardId, itemRef, target)"))
+        #expect(!source.contains("Image(systemName: \"circle\")\n                .accessibilityHidden(true)"),
+                "the completion circle must no longer be a static, non-interactive decoration")
+    }
 }
 
 // MARK: - Source loader (used by chrome-guard tests)

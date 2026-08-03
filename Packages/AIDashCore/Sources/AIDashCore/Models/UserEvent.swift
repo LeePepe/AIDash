@@ -13,6 +13,13 @@ public struct UserEvent: Codable, Sendable {
     /// forward-compat: older records / older JSON without this key decode as
     /// nil (same pattern as TrendingPayload.Item's delta/category/reason).
     public let itemRef: String?
+    /// Optional `CardType.rawValue` of the card the event was emitted from
+    /// (e.g. "trending", "todoList"). Added spec 005 D2 (2026-08-03): the L5
+    /// `cardId` is date-scoped and does not encode card type, so aggregating
+    /// "star counts per card type" needs the type carried on the event itself.
+    /// Optional and forward-compat, same pattern as `itemRef`: older records /
+    /// older JSON without this key decode as nil.
+    public let cardType: String?
 
     public init(
         id: String,
@@ -20,7 +27,8 @@ public struct UserEvent: Codable, Sendable {
         device: String,
         cardId: String,
         action: UserEventAction,
-        itemRef: String? = nil
+        itemRef: String? = nil,
+        cardType: String? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -28,6 +36,7 @@ public struct UserEvent: Codable, Sendable {
         self.cardId = cardId
         self.action = action
         self.itemRef = itemRef
+        self.cardType = cardType
     }
 }
 
@@ -86,6 +95,28 @@ extension UserEvent {
             cardId: cardId,
             action: .undone,
             itemRef: itemRef
+        )
+    }
+
+    /// Core-layer factory for a whole-card star event (spec 005 D1/D2,
+    /// 2026-08-03): `itemRef` is always nil (the "whole card" sentinel
+    /// established by spec 002 D1), and `cardType` carries the
+    /// `CardType.rawValue` of the starred card so downstream aggregation can
+    /// group by card type without needing to decode/join the card itself.
+    /// Generates a fresh UUID and current timestamp; caller only supplies
+    /// stable identifiers.
+    ///
+    /// `cardType` must be non-empty — callers should pass
+    /// `card.type.rawValue`, which is never empty for any `CardType` case.
+    public static func starCard(cardId: String, cardType: String, device: String) -> UserEvent {
+        UserEvent(
+            id: UUID().uuidString,
+            timestamp: Date(),
+            device: device,
+            cardId: cardId,
+            action: .star,
+            itemRef: nil,
+            cardType: cardType
         )
     }
 }
