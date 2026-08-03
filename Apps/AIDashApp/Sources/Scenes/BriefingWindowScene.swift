@@ -102,18 +102,14 @@ private struct StarFeedbackScope: View {
 
     var body: some View {
         let writer = UserEventWriter(container: container)
+        // Intent closures come from the shared `StarFeedbackActions` factory so
+        // the spec 005 §6 wiring test exercises the exact same code path (see
+        // StarFeedbackActions.swift). The filled/checked state sets are derived
+        // here from `@Query` and injected alongside.
         BriefingView()
-            .environment(\.onStarItem) { cardId, itemRef in
-                writer.star(cardId: cardId, itemRef: itemRef)
-            }
+            .starFeedbackActions(StarFeedbackActions(writer: writer))
             .environment(\.starredItemRefs, Set(starEvents.compactMap(\.itemRef)))
-            .environment(\.onStarCard) { cardId, cardType in
-                writer.star(cardId: cardId, itemRef: nil, cardType: cardType)
-            }
             .environment(\.starredCardIds, Set(cardStarEvents.map(\.cardId)))
-            .environment(\.onToggleDone) { cardId, itemRef, done in
-                writer.setDone(cardId: cardId, itemRef: itemRef, done: done)
-            }
             .environment(\.doneItemRefs, UserEventWriter.doneRefs(from: doneEvents))
     }
 }
