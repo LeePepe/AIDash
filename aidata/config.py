@@ -62,6 +62,14 @@ LOCAL_GIT_SCAN_ROOTS = (
 # digest queries its clean DB directly, like the memory_* sources.
 HERMES_STATE_DB = HOME / ".hermes" / "state.db"
 
+# Codex session logs (codex_prompts source) — one JSONL per session under a
+# YYYY/MM/DD tree. L2-only. Each file's FIRST record is `session_meta`, whose
+# `originator` says who drove the session: `codex-tui`/`Codex Desktop` = me at
+# a keyboard, `multica-agent-sdk`/`codex_exec` = automation. That field is what
+# splits the source into "my prompts" (body kept) and "machine prompts"
+# (hash + prefix only) — see the adapter docstring. Degrades to 0 when absent.
+CODEX_SESSIONS_DIR = HOME / ".codex" / "sessions"
+
 # Chrome browsing history (browser_history source) — the local SQLite the
 # browser writes visits into. L2-only source (not merged): the digest can
 # query its clean DB directly for a domain-level "what did I look up / which
@@ -212,6 +220,7 @@ SOURCES = (
     "hermes_tools",
     "hermes_messages",
     "claude_prompts",
+    "codex_prompts",
     "memory_claude",
     "memory_hermes_db",
     "memory_hermes_md",
