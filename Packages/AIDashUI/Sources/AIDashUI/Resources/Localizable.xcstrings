@@ -151,6 +151,30 @@
         }
       }
     },
+    "card_router.star_card.label": {
+      "comment": "VoiceOver label for the whole-card star button on a card that is not yet starred.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Star this card"
+          }
+        }
+      }
+    },
+    "card_router.star_card.label.starred": {
+      "comment": "VoiceOver label for the whole-card star button on a card that is already starred.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card starred"
+          }
+        }
+      }
+    },
     "metric.empty": {
       "comment": "Shown inside a metric card when its payload decoded successfully but has no items to plot.",
       "extractionState": "manual",
@@ -171,6 +195,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "No data"
+          }
+        }
+      }
+    },
+    "todo_list.done_toggle.label.done %@": {
+      "comment": "VoiceOver label for a TodoList item's completion toggle when the item is marked done. %@ is the item title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark %1$@ as not done"
+          }
+        }
+      }
+    },
+    "todo_list.done_toggle.label.not_done %@": {
+      "comment": "VoiceOver label for a TodoList item's completion toggle when the item is not yet done. %@ is the item title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark %1$@ as done"
           }
         }
       }

@@ -16,15 +16,22 @@ public final class UserEventModel {
     /// Nil for whole-card events; nil for records written before this field
     /// existed. CloudKit-compatible: optional scalar with default value.
     public var itemRef: String? = nil
+    /// Optional `CardType.rawValue` of the card the event was emitted from.
+    /// Added spec 005 D2: nil for records written before this field existed
+    /// (forward-compat, same pattern as `itemRef`). CloudKit-compatible:
+    /// optional scalar with default value.
+    public var cardType: String? = nil
 
     public init(id: String, timestamp: Date, device: String,
-                cardId: String, action: UserEventAction, itemRef: String? = nil) {
+                cardId: String, action: UserEventAction, itemRef: String? = nil,
+                cardType: String? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.device = device
         self.cardId = cardId
         self.actionRaw = action.rawValue
         self.itemRef = itemRef
+        self.cardType = cardType
     }
 
     public var action: UserEventAction? { UserEventAction(rawValue: actionRaw) }

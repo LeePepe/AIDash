@@ -129,6 +129,7 @@ public struct UserEvent: Codable, Sendable {
     public let cardId: String
     public let action: UserEventAction
     public let itemRef: String?       // optional; item-level ref within the card
+    public let cardType: String?      // optional; CardType.rawValue of the source card
 }
 ```
 
@@ -159,6 +160,20 @@ the current completed state by taking the newest event and mapping
 is expressed as a fresh `.undone` append, never as a delete or mutate of a
 prior `.done`. Core provides a factory helper
 `UserEvent.undone(cardId:itemRef:device:)` mirroring `.done(...)`.
+
+**`cardType` (added spec 005 D2, 2026-08-03)** — optional `CardType.rawValue`
+of the card the event was emitted from (e.g. `"trending"`, `"todoList"`).
+Additive and forward-compat, same pattern as `itemRef`: older records / older
+JSON without this key decode as nil, and no ADR is required (no dependency or
+concurrency change). Needed because the L5 `cardId` (`_kuid(mmdd, n)`) is
+date-scoped and does not encode card type — the type must travel with the
+event itself for aidata to aggregate "star counts per card type" without a
+fragile join. `UserEvent.starCard(cardId:cardType:device:)` mints a whole-card
+star event (`action == .star`, `itemRef == nil`, `cardType` non-empty),
+reusing the `itemRef == nil` "whole card" sentinel spec 002 D1 established.
+The existing single-item `star`/`done`/`undone` factories are unchanged in
+this pass (v1 scope is the whole-card path); a future spec may extend them
+to accept an optional `cardType` too, since the field is nil-safe by design.
 
 ### Per-CardType payload structs
 
@@ -401,15 +416,18 @@ public final class UserEventModel {
     public var cardId: String = ""
     public var actionRaw: String = UserEventAction.done.rawValue
     public var itemRef: String? = nil     // added spec 002 D1 (T001)
+    public var cardType: String? = nil    // added spec 005 D2 (T001)
 
     public init(id: String, timestamp: Date, device: String,
-                cardId: String, action: UserEventAction, itemRef: String? = nil) {
+                cardId: String, action: UserEventAction, itemRef: String? = nil,
+                cardType: String? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.device = device
         self.cardId = cardId
         self.actionRaw = action.rawValue
         self.itemRef = itemRef
+        self.cardType = cardType
     }
 
     public var action: UserEventAction? { UserEventAction(rawValue: actionRaw) }
