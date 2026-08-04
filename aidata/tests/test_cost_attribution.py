@@ -262,3 +262,61 @@ def test_leverage_card_omitted_when_unhealthy():
 
     assert _leverage_card("0803", None) is None
     assert _leverage_card("0803", s.Leverage.empty()) is None
+
+
+# --------------------------------------------------------------------------- #
+# Tool cross — the dimension hermes_tools could never provide
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_tool_cross_ranks_by_cost_per_call_not_volume(monkeypatch):
+    """Raw call counts are what hermes_tools already showed, and they answered
+    nothing ("terminal 2577 times" — so what). Ranking by tokens-per-call
+    surfaces the tools that are individually expensive, which is actionable.
+    """
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [("terminal", 48451, 3838, 275.92, 5.7, 50.0),
+         ("execute_code", 2113, 181, 25.06, 11.9, 0.0)],
+        ["tool", "calls", "sessions", "mtokens", "ktok_per_call",
+         "automated_pct"]))
+    monkeypatch.setattr(s, "clean_path", lambda name: _Exists())
+    bundle = s.fetch_tool_cross(None)
+    # execute_code is 23x rarer than terminal but twice as heavy per call, so
+    # it must outrank it.
+    assert bundle.items[0].label.startswith("execute_code")
+    assert bundle.items[0].value_text == "11.9 Ktok"
+
+
+@pytest.mark.unit
+def test_tool_cross_label_carries_automation_share(monkeypatch):
+    """Cost and autonomy together say something neither says alone: an
+    expensive tool at 0% automated is work still on me."""
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [("write_file", 5825, 1773, 27.68, 4.8, 86.0)],
+        ["tool", "calls", "sessions", "mtokens", "ktok_per_call",
+         "automated_pct"]))
+    monkeypatch.setattr(s, "clean_path", lambda name: _Exists())
+    assert s.fetch_tool_cross(None).items[0].label == "write_file · 自动 86%"
+
+
+@pytest.mark.unit
+def test_tool_cross_drops_rare_tools(monkeypatch):
+    """A per-call average over a handful of calls is noise."""
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [("common", 500, 50, 10.0, 5.0, 10.0),
+         ("rare", 3, 1, 9.0, 3000.0, 0.0)],
+        ["tool", "calls", "sessions", "mtokens", "ktok_per_call",
+         "automated_pct"]))
+    monkeypatch.setattr(s, "clean_path", lambda name: _Exists())
+    labels = [i.label for i in s.fetch_tool_cross(None).items]
+    assert any(x.startswith("common") for x in labels)
+    assert not any(x.startswith("rare") for x in labels), (
+        "a 3-call tool must not top the ranking on a meaningless average"
+    )
+
+
+@pytest.mark.unit
+def test_tool_cross_degrades_when_source_absent(monkeypatch):
+    monkeypatch.setattr(s, "clean_path", lambda name: _Missing())
+    bundle = s.fetch_tool_cross(None)
+    assert bundle.items == []
+    assert bundle.health.state.startswith("skipped")
