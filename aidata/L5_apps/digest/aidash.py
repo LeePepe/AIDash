@@ -656,10 +656,11 @@ def _series_metric_item(label: str, series, unit: str,
     return item
 
 
-def _ai_efficiency_container(mmdd: str, ai) -> "Container | None":
+def _ai_efficiency_container(mmdd: str, ai, tool_cross=None) -> "Container | None":
     """🧠 AI 效能 (order 25, §design 差异化核心): cache/返工 metrics + 失败根因
-    barList + 会话质量 stackedBar + planner-gap insight. Only the cards whose
-    source is healthy render; the container is omitted if none survive (ADR-23).
+    barList + 会话质量 stackedBar + 工具成本 barList + planner-gap insight. Only
+    the cards whose source is healthy render; the container is omitted if none
+    survive (ADR-23).
     """
     if ai is None:
         return None
@@ -693,6 +694,14 @@ def _ai_efficiency_container(mmdd: str, ai) -> "Container | None":
     quality_card = _stacked_card(_kuid(mmdd, 22), ai.quality, "会话质量")
     if quality_card:
         cards.append(quality_card)
+
+    # 工具成本 barList — belongs here rather than in 成本归因 because it is a
+    # workflow question ("which tool drags the most weight, and have I handed
+    # it off"), not a spend question. Ranked by tokens-per-call; the label
+    # carries the automated share.
+    tool_card = _bar_card(_kuid(mmdd, 36), tool_cross, style="neutral")
+    if tool_card:
+        cards.append(tool_card)
 
     # planner-gap 聚合 → insight (only when there IS a gap; a 0 count is not a
     # finding worth a card).
@@ -879,7 +888,8 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     # 🧠 AI 效能 (order 25) + ⏱ 时间与产出 (order 28): batch-2 差异化 sections,
     # placed right after the trend metrics and before the prose 昨日汇总 (order 30).
     ai_container = _ai_efficiency_container(
-        mmdd, getattr(sources, "ai_efficiency", None))
+        mmdd, getattr(sources, "ai_efficiency", None),
+        getattr(sources, "tool_cross", None))
     if ai_container:
         containers.append(ai_container)
     time_container = _time_output_container(

@@ -444,6 +444,9 @@ class DigestSources:
     rework_by_workspace: "RankBundle" = field(
         default_factory=lambda: RankBundle([], SourceHealth("multica_run", "skipped:未取"))
     )
+    tool_cross: "RankBundle" = field(
+        default_factory=lambda: RankBundle([], SourceHealth("hermes_messages", "skipped:未取"))
+    )
     commit_by_repo: "RankBundle" = field(
         default_factory=lambda: RankBundle([], SourceHealth("local_git", "skipped:未取"))
     )
@@ -887,6 +890,48 @@ def fetch_rework_by_workspace(since: str | None, top_n: int = 5,
         return RankBundle(items, SourceHealth("multica_run", "ok"))
     except Exception as exc:
         return RankBundle([], SourceHealth("multica_run", "error", str(exc)[:200]))
+
+
+def fetch_tool_cross(since: str | None, top_n: int = 6) -> "RankBundle":
+    """Tool usage crossed with token weight — the cost of a tool CALL.
+
+    Ranked by tokens-per-call rather than raw call count on purpose: a call
+    count is what `hermes_tools` already showed and it answered nothing
+    ("terminal 2577 times" — so what). Tokens-per-call surfaces the tools that
+    are individually expensive, which is the actionable end (measured:
+    execute_code 11.9 Ktok/call vs write_file 4.8).
+
+    The label carries the automated share, because the two together say
+    something neither says alone: an expensive tool that is 0% automated is
+    work still on me, an expensive one at 86% is work already handed off.
+
+    Degrades to empty + non-ok health when Hermes was not collected (ADR-23).
+    """
+    if not clean_path("hermes_messages").exists():
+        return RankBundle([], SourceHealth("hermes_messages", "skipped:未采集"))
+    try:
+        rows, idx = _rows("attribution/tool-cross", {"since": since})
+        ti, ki = idx["tool"], idx["ktok_per_call"]
+        ai, ci = idx["automated_pct"], idx["calls"]
+        ranked = [
+            (f"{r[ti]} · 自动 {int(r[ai] or 0)}%",
+             float(r[ki] or 0), float(r[ki] or 0))
+            for r in rows
+            # A tool seen a handful of times has a meaningless per-call average.
+            if int(r[ci] or 0) >= 100
+        ]
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        if not ranked:
+            return RankBundle([], SourceHealth("hermes_messages", "skipped:样本不足"))
+        items = _fold_top_n(
+            ranked, top_n,
+            value_text=lambda k: f"{k:.1f} Ktok",
+            semantic=lambda _label: None,
+        )
+        return RankBundle(items, SourceHealth("hermes_messages", "ok"))
+    except Exception as exc:
+        return RankBundle([], SourceHealth("hermes_messages", "error",
+                                           str(exc)[:200]))
 
 
 def fetch_app_focus(since: str | None, until: str | None,
