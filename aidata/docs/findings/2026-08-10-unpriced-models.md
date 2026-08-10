@@ -1,8 +1,8 @@
 # Finding: 两个新模型没有定价，70 行有 token 无成本（2026-08-10）
 
 - **日期**: 2026-08-10
-- **状态**: **待办** —— 需要用户提供定价后补 `schema/dim_model.csv`
-- **严重度**: 中（成本类指标偏低报，且会随使用量放大）
+- **状态**: **已解决** —— 决定：不定价，只看 token
+- **严重度**: 低（成本口径按设计留 NULL，用量完整可测）
 - **发现方式**: `pytest` 的 `test_no_tokens_without_cost` 数据质量门禁失败
 
 ---
@@ -50,24 +50,36 @@ AssertionError: 70 rows have tokens but no cost
 `gpt-5.6-terra` / `gpt-5.6-luna` 看名字像是内部代号/未公开发布的型号，
 **没有可查的公开定价**，所以这一条必须由用户拍板。
 
-## 怎么修（拿到定价后）
+## 怎么修（已定：不定价，只看 token）
 
-在 `aidata/schema/dim_model.csv` 追加两行（单位：USD per 1M token）：
+**决定：这两个模型不进 `dim_model.csv`，`cost_usd` 就留 NULL，用量按 token 衡量。**
 
-```csv
-gpt-5.6-terra,<input>,<output>,<cache_read>,<cache_write>
-gpt-5.6-luna,<input>,<output>,<cache_read>,<cache_write>
-```
+理由见上——定价是事实不是猜测，而这两个看名字是内部代号/未公开型号，
+没有可查的公开价。编一个数字会让 70 行从「诚实的 NULL」变成
+「看起来精确的错数」，后者更危险。
 
-同代 `gpt-5.x` 现有行的形状可作参考（`gpt-5.5` = `1.25,10.00,0.125,0`），
-但**不要直接照抄**——除非确认这两个型号同价。
+实现：`config.py` 新增 `UNPRICED_MODELS`，`test_no_tokens_without_cost`
+只豁免这个**显式名单**里的模型。配套加了 `test_unpriced_models_still_carry_tokens`
+——豁免的是**缺价格**，绝不是缺用量，这两个模型的 token 必须照常填满。
 
-然后重建并验证：
+名单**故意保持窄**：新出现的无定价模型**应该**继续把门禁弄失败、
+大声报出来，而不是悄悄混进豁免集。已做变异验证：把 `terra` 从名单里
+拿掉，门禁立刻失败——证明它还会咬人，不是一个永远为真的空门。
+
+哪天拿到真实定价，就把名字从 `UNPRICED_MODELS` 移除、往
+`schema/dim_model.csv` 加一行（USD per 1M token），然后：
 
 ```bash
 python3 cli.py normalize --source raven && python3 cli.py merge
-pytest -q tests/test_warehouse_integrity.py::test_no_tokens_without_cost
+pytest -q tests/test_warehouse_integrity.py
 ```
+
+## 读数时注意
+
+`gpt-5.6-terra` / `gpt-5.6-luna` 的这些请求**不计入任何美元口径**
+（日成本、成本归因、每条 prompt 成本都不含它们），但**完整计入 token 口径**。
+所以看成本卡片时，它们是「不可见」的；看 token 用量时是全的。
+这是有意的取舍，不是 bug。
 
 ## 顺带修掉的两个（已解决，非本 finding 范围）
 

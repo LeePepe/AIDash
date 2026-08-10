@@ -114,6 +114,21 @@ GECKO_DB = HOME / "Library" / "Application Support" / "ai.hexly.gecko" / "gecko.
 # multica CLI binary (falls back to PATH lookup if this exact path is absent)
 MULTICA_BIN = "/opt/homebrew/bin/multica"
 
+# Models that have NO published price, and so are deliberately measured in
+# TOKENS ONLY — `cost_usd` stays NULL for their rows, on purpose.
+#
+# Pricing is a fact, not a guess. Inventing a rate for an unpriced model would
+# be strictly worse than the NULL: it turns an honest gap into a precise-looking
+# wrong number that flows into every cost-attribution card and never trips a
+# data-quality gate again. A NULL is visible; a fabricated dollar figure is not.
+#
+# `test_no_tokens_without_cost` exempts exactly these names, and a sibling test
+# asserts their token counts are still populated — the exemption is about a
+# MISSING PRICE, never about missing usage. Keep this list narrow: a NEW
+# unpriced model SHOULD fail that gate loudly rather than quietly join the
+# exempt set. Remove a name here the moment a real price is known.
+UNPRICED_MODELS: tuple[str, ...] = ("gpt-5.6-terra", "gpt-5.6-luna")
+
 # Workspaces the digest collects from (ADR-5 / EXT-2): an explicit allow-list of
 # (uuid, friendly_name); the friendly name is used verbatim in the digest's
 # per-workspace breakdown. Each workspace keeps its OWN watermark (ADR-19) —

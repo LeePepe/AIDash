@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from config import UNPRICED_MODELS
+
 ROOT = Path(__file__).resolve().parent.parent
 WAREHOUSE = ROOT / "L3_merge" / "warehouse.db"
 
@@ -44,9 +46,35 @@ def test_model_canon_collapses_names():
 def test_no_tokens_without_cost():
     # The v2 headline fix: every row that has BOTH tokens must have a cost.
     # (NULL-token rows legitimately stay NULL — excluded here.)
+    #
+    # UNPRICED_MODELS is the one sanctioned escape hatch. Some models have no
+    # published price at all (internal/codename builds), and inventing a number
+    # would be worse than a NULL: a made-up rate turns an honest gap into a
+    # precise-looking wrong number that flows into the cost-attribution cards
+    # and never trips a gate again. So those rows stay NULL on purpose and are
+    # measured in TOKENS, not dollars.
+    #
+    # The exemption is deliberately narrow — an explicit name list, not a
+    # predicate — so a NEW unpriced model still fails this test loudly instead
+    # of silently joining the exempt set. Adding a name here is a decision.
+    exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)
     n = int(_q(
         "SELECT count(*) FROM fact_request "
         "WHERE cost_usd IS NULL AND input_tokens IS NOT NULL "
-        "AND output_tokens IS NOT NULL;"
+        f"AND output_tokens IS NOT NULL AND model_canon NOT IN ({exempt});"
     ))
-    assert n == 0, f"{n} rows have tokens but no cost"
+    assert n == 0, f"{n} rows have tokens but no cost (and are not in UNPRICED_MODELS)"
+
+
+@pytest.mark.integration
+def test_unpriced_models_still_carry_tokens():
+    # The flip side of the exemption: an unpriced model must still be fully
+    # measurable in tokens. If these rows lost their token counts too they
+    # would be invisible everywhere, not just in the dollar columns — the
+    # exemption is about MISSING PRICE, never about missing usage.
+    exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)
+    n = int(_q(
+        "SELECT count(*) FROM fact_request "
+        f"WHERE model_canon IN ({exempt}) AND total_tokens IS NULL;"
+    ))
+    assert n == 0, f"{n} unpriced-model rows also lack tokens — usage must stay measurable"
