@@ -14,7 +14,11 @@ struct DesignTokensFoundationTests {
     func spacingConstants() {
         #expect(AIDashSpacing.containerVertical == 32)
         #expect(AIDashSpacing.containerHeaderToFirstCard == 12)
-        #expect(AIDashSpacing.cardVertical == 12)
+        // MY-1306: 12 → 14. A multi-card container now separates its cards by
+        // SPACE rather than contrast (the hairline was damped in lockstep), so
+        // the gap widened. Rule A's tighter bare variant sits beside it.
+        #expect(AIDashSpacing.cardVertical == 14)
+        #expect(AIDashSpacing.containerHeaderToBareContent == 10)
         #expect(AIDashSpacing.gridGap == 16)
         #expect(AIDashSpacing.pageHorizontalMac == 24)
         #expect(AIDashSpacing.pageHorizontalCompact == 20)

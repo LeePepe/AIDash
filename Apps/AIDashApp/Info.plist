@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
 		<string>MacOSX</string>
@@ -29,5 +29,30 @@
 	<string>26.0</string>
 	<key>MinimumOSVersion</key>
 	<string>26.0</string>
+	<!-- 以下三键仅 iOS 生效(UIKit 键,macOS 忽略),但 App Store 上传校验会硬查:
+	     · UILaunchScreen 缺失 → "A launch configuration or launch storyboard
+	       or xib must be provided unless the app requires full screen"。
+	       空 dict = 用系统默认(纯背景色)启动画面,AIDash 无需自定义启动图。
+	     · 方向声明缺失 → "All interface orientations must be supported unless
+	       the app requires full screen"。AIDash 是看板类 app,iPad 上要能分屏
+	       多任务,所以不走 UIRequiresFullScreen,而是老实支持 iPad 全部 4 个方向
+	       (iPhone 不声明 upside-down,与系统惯例一致)。
+	     构建期这两条只是 warning,上传期才变成 Invalid bundle —— 所以必须在
+	     TestFlight lane 落地的同一批改动里补上,否则第一次上传必挂。 -->
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 </dict>
 </plist>

@@ -1,0 +1,23 @@
+# AIDash — fastlane app 身份。
+#
+# ⚠️ 本仓库是 public。宪法 §No Identity in Version Control:Apple Developer
+# Team ID 属于禁止进版本库的标识符,所以这里**不写死** —— 从环境变量读,
+# 兜底解析 git-ignored 的 Configs/Identity.local.xcconfig。
+#   - CI:workflow 注入 secrets.ASC_TEAM_ID(见 .github/workflows/testflight.yml)
+#   - 本机:Configs/Identity.local.xcconfig 的 AIDASH_DEVELOPMENT_TEAM
+#
+# Bundle ID 是豁免项(宪法明确:bundle identifier 公开性质,且 XPC mach-service
+# 名必须字面匹配),所以可以直接写。默认值与 Configs/Identity.xcconfig 一致。
+#
+# 认证走 App Store Connect API Key(.p8,见 Fastfile),不需要 apple_id / 密码,
+# 所以这里不设 apple_id —— 也就没有 2FA 交互,能在无人值守的 runner 上跑。
+
+# ⚠️ 这里刻意不用 require_relative:fastlane 是把 Appfile 的**内容**读出来
+# `eval` 的(credentials_manager/appfile_config.rb),eval 出来的代码没有
+# __FILE__/__dir__,require_relative 直接抛 "cannot infer basepath" (LoadError)。
+# eval 前 fastlane 已 Dir.chdir 到本文件所在目录,所以用 Dir.pwd 拼绝对路径。
+# (Fastfile 不同 —— 它是正常 load 的,那边用 require_relative 没问题。)
+require File.expand_path("identity.rb", Dir.pwd)
+
+app_identifier(AIDash::Identity.app_identifier)
+team_id(AIDash::Identity.team_id)
