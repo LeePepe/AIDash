@@ -459,7 +459,9 @@ choice, not a payload or `size` concern. (Cockpit theme, constitution 1.7.0.)
 Every card view shares the same outer chrome structure and rendering
 recipe. Per-card override is forbidden. The only values that change
 across cards are geometry (corner radius, padding — both driven by
-`size`) and the optional left stripe (driven by `style`).
+`size`), the optional left stripe (driven by `style`), and whether the
+frame is drawn at all (driven by the container's card COUNT — see
+§Container Chrome Modes below).
 
 - Background: `theme.neutrals.card` — the middle luminance tier of the
   DesignKit neutral system (page `bg` < card `card` < inner `inner`).
@@ -468,15 +470,42 @@ across cards are geometry (corner radius, padding — both driven by
 - Corner radius: per §Size = Geometry Only ladder (10 / 14 / 14 / 20).
 - Inner padding: per §Size = Geometry Only ladder.
 - Shadow: none (flat, luminance-tier depth).
-- Border: 1px `theme.neutrals.border` overlay for edge definition. No
-  other borders. The left 3pt stripe (when `style != .neutral`) sits
-  inside the rounded shape, not as a separate border.
+- Border: 1px `theme.neutrals.border` overlay at `0.08` opacity for edge
+  definition. No other borders. The left 3pt stripe at `0.9` opacity
+  (when `style != .neutral`) sits inside the rounded shape, not as a
+  separate border. Both are damped so a multi-card container separates
+  its cards by SPACE rather than by contrast.
 
 The single allowed structural variant is the `sectionHeader` card type,
 which has **no chrome at all** — it renders as a typography-only
 divider so containers can group cards with a sub-heading without
 nesting containers (Principle III, spec D9). The `sectionHeader` also
 omits the leading icon badge.
+
+#### Container Chrome Modes (count-driven, never type-driven)
+
+A container renders as "title layer + card layer". When it holds exactly
+ONE card those two layers express the same grouping, so the reader sees a
+frame inside a frame. The card frame is therefore keyed on the
+container's effective card count — and on NOTHING else:
+
+- **count == 1 → `bare`.** The card draws no background, no hairline, no
+  corner radius, no padding, and no min height. Its content sits directly
+  on the page background, left-aligned with the container title, and the
+  header gap tightens from 12pt to 10pt. `style` is not lost: it moves to
+  a 3pt vertical bar at the LEFT OF THE TITLE, the height of the title
+  line. A card's whole-BODY inner panel (`InnerSurfaceRole.body`) also
+  collapses here — keeping it would regrow the removed frame one level
+  inward. Local `emphasis` panels (chip groups, embedded gauges) stay.
+- **count >= 2 → `framed`.** The full §Card Chrome frame, damped as
+  described above.
+
+The decision function takes an `Int` and returns a mode. It MUST NOT
+consult `CardType`, `CardSize`, or `CardStyle` — the three orthogonal
+card dimensions stay unconflated (§Principle VI), and a degenerate count
+(0, or negative) degrades to `framed` rather than trapping. The resolved
+mode travels down the SwiftUI environment, defaulting to `framed` so a
+card rendered outside any container keeps its frame.
 
 #### Page Chrome (where cards sit)
 
@@ -500,8 +529,10 @@ disappear into the canvas (the failure mode observed on 2026-06-29).
 Containers MUST NOT wrap their cards in their own colored panel. A
 container is rendered as:
 
-1. An overview-tier title line (and optional subtitle line).
-2. 12pt vertical spacing.
+1. An overview-tier title line (and optional subtitle line), preceded by
+   the 3pt `style` bar when the container is in `bare` mode.
+2. 12pt vertical spacing (10pt in `bare` mode — no card padding is left
+   to absorb the gap).
 3. The cards laid out by the container's `layout` (auto/list/grid/hero).
 4. 32pt vertical spacing before the next container.
 
@@ -512,8 +543,8 @@ headers act as anchors; cards carry the content.
 #### Spacing & Color Tokens
 
 - Container vertical spacing: 32pt between containers; 12pt between
-  container header and first card.
-- Card vertical spacing inside a container: 12pt.
+  container header and first card (10pt when the container is `bare`).
+- Card vertical spacing inside a container: 14pt.
 - Grid column gap: 16pt.
 - Page horizontal padding: see §Page Chrome.
 - **Colors MUST come from a package token source**, never inlined in a
@@ -852,7 +883,36 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.9.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-02
+**Version**: 1.10.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-10
+
+<!--
+1.10.0 — MINOR (new section + material expansion of §Card Chrome /
+§Container Chrome / §Spacing & Color Tokens; no principle removed or
+inverted). Removes the "title + single card" double frame (MY-1306): a
+container's title layer and a lone card's frame expressed the SAME
+grouping, so every single-card container ("昨日汇总" and friends) read as a
+box inside a box.
+
+Changes:
+- New §Container Chrome Modes — the card frame is keyed on the container's
+  effective card COUNT: 1 → `bare` (no background / hairline / radius /
+  padding / min height; content flush with the title; `style` moves to a
+  3pt title-side bar; a whole-body inner panel collapses), ≥2 → `framed`.
+  The decision function takes an `Int` and MUST NOT consult
+  `CardType`/`CardSize`/`CardStyle`; a degenerate count degrades to
+  `framed`. Resolved mode travels the environment, default `framed`.
+- §Card Chrome: hairline gains `0.08` opacity, stripe gains `0.9` — the
+  frame becomes a boundary HINT, so cards separate by space, not contrast.
+- §Container Chrome / §Spacing & Color Tokens: card vertical spacing
+  12 → 14; header-to-first-card gains a 10pt `bare` variant.
+
+Migration note: AIDashUI tests that pinned `cardVertical == 12` were
+updated in lockstep with the implementation PR; the damped hairline /
+stripe and the new `bare` branch are covered by
+`ContainerChromeModeTests`. Stored briefings are unaffected — no schema
+change, and the mode is derived at render time from the card count a
+container already carries.
+-->
 
 <!--
 1.9.0 — MINOR (new section + material expansions; no principle removed or
