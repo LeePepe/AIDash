@@ -191,10 +191,26 @@ public final class CloudKitContainer {
     /// PURE path derivation — no filesystem writes, no migration. Safe to call
     /// from tests and from anywhere that just wants to know where the store
     /// lives. `prepareStoreURL()` is the one that has side effects.
+    ///
+    /// The path is the app container's Application Support directory, spelled
+    /// ABSOLUTELY from the real home:
+    ///   ~/Library/Containers/<bundleID>/Data/Library/Application Support/AIDash
+    ///
+    /// That choice is what actually makes the location sandbox-independent, and
+    /// it is not the obvious one. Pinning to `~/Library/Application Support`
+    /// looks cleaner but a SANDBOXED build cannot write there, so it would have
+    /// to fall back to SwiftData's default — leaving sandboxed and unsandboxed
+    /// builds on two different databases, i.e. the split-brain unfixed. The
+    /// container path is the one location BOTH postures can reach: a sandboxed
+    /// process resolves it as its own container (it is literally what
+    /// `NSHomeDirectory()` returns there), and an unsandboxed process can open
+    /// it as a plain absolute path. One path, one store, either way.
     internal static func storeURL() -> URL? {
         #if os(macOS)
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.tianpli.aidash"
         return realHomeDirectory()
-            .appendingPathComponent("Library/Application Support/AIDash", isDirectory: true)
+            .appendingPathComponent("Library/Containers/\(bundleID)/Data/Library/Application Support/AIDash",
+                                    isDirectory: true)
             .appendingPathComponent("AIDash.store")
         #else
         return nil
@@ -218,11 +234,13 @@ public final class CloudKitContainer {
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {
-            // A sandboxed build genuinely cannot create a directory under the
-            // real home, so it degrades to SwiftData's default rather than
-            // failing container creation (§D). NOTE: that also means the
-            // sandboxed/unsandboxed split-brain is NOT fixed for sandboxed
-            // builds — the pin only holds for the unsandboxed install.
+            // Both postures can normally create this directory — a sandboxed
+            // process owns its container, and an unsandboxed one has full home
+            // access — so reaching here means something genuinely unusual (disk
+            // full, a file occupying the path, revoked permissions). Degrade to
+            // SwiftData's default rather than failing container creation (§D):
+            // the app still launches. It does mean THIS launch reads a
+            // different store, so the failure is logged rather than swallowed.
             logger.warning("Pinned store dir unavailable (\(error.localizedDescription, privacy: .public)); using SwiftData default.")
             return nil
         }
@@ -238,23 +256,28 @@ public final class CloudKitContainer {
     ///
     /// `FileManager.homeDirectoryForCurrentUser` / `NSHomeDirectory()` are
     /// container-relative: in a sandboxed process they return
-    /// `~/Library/Containers/<bundleID>/Data`, NOT `/Users/<name>`. Building the
-    /// "pinned" path from either of those would just re-derive a container path
-    /// and leave the store forking on sandbox posture — the exact bug this is
-    /// meant to close. `getpwuid_r` reads the passwd database directly and is
-    /// the documented sandbox-independent answer.
-    ///
-    /// A sandboxed build then genuinely CANNOT create that directory (no
-    /// entitlement for it), which is what makes `storeURL()`'s catch branch
-    /// reachable and meaningful: it degrades to SwiftData's default instead of
-    /// failing launch.
+    /// `~/Library/Containers/<bundleID>/Data`, NOT `/Users/<name>`. Deriving the
+    /// pinned path from either would make it mean a DIFFERENT directory in each
+    /// sandbox posture — the exact fork this is meant to close. `getpwuid_r`
+    /// reads the passwd database directly and is the documented
+    /// sandbox-independent answer, so the absolute container path it builds
+    /// names the same bytes to a sandboxed and an unsandboxed process alike.
     internal static func realHomeDirectory() -> URL {
+        // `pw.pw_dir` points INTO `buffer`, so the string must be copied out
+        // while the buffer pointer is still guaranteed valid. Swift only
+        // guarantees an `&array` pointer for the duration of the call it is
+        // passed to, so reading pw_dir after the call returns would be UB.
+        // withUnsafeMutableBufferPointer keeps the lifetime explicit.
         var buffer = [CChar](repeating: 0, count: 4096)
-        var pw = passwd()
-        var result: UnsafeMutablePointer<passwd>?
-        if getpwuid_r(getuid(), &pw, &buffer, buffer.count, &result) == 0,
-           result != nil, let dir = pw.pw_dir {
-            return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
+        let home: String? = buffer.withUnsafeMutableBufferPointer { buf in
+            var pw = passwd()
+            var result: UnsafeMutablePointer<passwd>?
+            guard getpwuid_r(getuid(), &pw, buf.baseAddress, buf.count, &result) == 0,
+                  result != nil, let dir = pw.pw_dir else { return nil }
+            return String(cString: dir)
+        }
+        if let home, !home.isEmpty {
+            return URL(fileURLWithPath: home, isDirectory: true)
         }
         // Fall back rather than trap; a container-relative home is still a
         // usable location, just not sandbox-independent.
@@ -357,10 +380,20 @@ public final class CloudKitContainer {
             // Publish sidecars first and the main store LAST, so `pinned` never
             // exists while its sidecars are missing — that ordering is what
             // makes the "skip if pinned exists" guard safe.
+            //
+            // Clear the destination first. The guard only checks `pinned`
+            // itself, so an ORPHAN `pinned-wal` (left by an interrupted run on
+            // an older build) would make every future moveItem throw and the
+            // migration would fail-and-roll-back forever. Removing a sidecar
+            // that has no store to belong to is safe — it is unreadable on its
+            // own — and it is the difference between self-healing and a
+            // permanent deadlock.
             for suffix in ["-shm", "-wal", ""] {
                 let staged = staging.appendingPathComponent(pinned.lastPathComponent + suffix)
                 guard fm.fileExists(atPath: staged.path) else { continue }
-                try fm.moveItem(at: staged, to: URL(fileURLWithPath: pinned.path + suffix))
+                let dest = URL(fileURLWithPath: pinned.path + suffix)
+                try? fm.removeItem(at: dest)
+                try fm.moveItem(at: staged, to: dest)
                 published.append(suffix)
             }
         } catch {

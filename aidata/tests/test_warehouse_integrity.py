@@ -88,6 +88,13 @@ def test_unpriced_models_still_carry_tokens():
     # measurable in tokens. If these rows lost their token counts too they
     # would be invisible everywhere, not just in the dollar columns — the
     # exemption is about MISSING PRICE, never about missing usage.
+    #
+    # Note on the 2 `gpt-5.6-luna` / `codex-tui` rows the finding doc lists as
+    # having NULL input/output tokens: they are NOT a violation here. This gate
+    # checks `total_tokens`, which raven populates for those rows (verified:
+    # 0 of 72 unpriced-model rows have a NULL total_tokens, including those 2).
+    # Per-field NULLs are a legitimate upstream shape — the invariant that
+    # matters is that overall USAGE stays measurable.
     if not UNPRICED_MODELS:
         pytest.skip("no unpriced models — nothing to assert")
     exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)

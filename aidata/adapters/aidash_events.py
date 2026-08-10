@@ -248,8 +248,10 @@ def collect() -> int:
     ids_at_newest = {str(e["id"]) for e in batch if str(e["timestamp"]) == newest}
     if ts == newest:
         ids_at_newest |= set(seen or ())
-    if ts is None or newest >= ts:
-        set_watermark(SOURCE, {"ts": newest, "ids": sorted(ids_at_newest)})
+    # Unconditional: `_is_new` already guarantees every event in `batch` is at
+    # or after `ts`, so `newest >= ts` always holds here. Writing it as a
+    # condition would imply a "don't advance" path that cannot occur.
+    set_watermark(SOURCE, {"ts": newest, "ids": sorted(ids_at_newest)})
     return written
 
 

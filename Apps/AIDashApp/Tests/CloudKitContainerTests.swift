@@ -127,26 +127,31 @@ import AIDashCore
 // MARK: - Pinned store URL (sandbox-independent)
 
 @MainActor
-@Test func storeURLIsPinnedOutsideTheSandboxContainerOnMacOS() throws {
+@Test func storeURLResolvesIdenticallyInBothSandboxPostures() throws {
     // SwiftData's default store path is resolved relative to the running
     // process's container, so it MOVES when the same app runs sandboxed
     // (Xcode/dev) vs unsandboxed (ad-hoc fixed install). That split-brain
     // orphaned a real append-only star event on 2026-08-03: `events pull`
     // answered ok:true/count:0 against a freshly created store while the
-    // event sat in the abandoned one. Pinning makes store identity
-    // independent of sandbox posture.
+    // event sat in the abandoned one. Pinning to one absolute path that BOTH
+    // postures can reach makes store identity independent of packaging.
     #if os(macOS)
     // storeURL() is now a PURE path derivation — calling it must not create
     // directories or move files. (It previously did both, and running this very
     // test relocated the developer's real store and left an empty one behind,
     // which would have permanently suppressed the real migration.)
     let url = try #require(CloudKitContainer.storeURL())
-    #expect(url.path.hasSuffix("Library/Application Support/AIDash/AIDash.store"))
-    // The whole point: the path is derived from the REAL home, so it never
-    // lands inside a per-app sandbox container regardless of sandbox posture.
-    // (Asserted via realHomeDirectory() rather than the literal string, so this
-    // holds whether or not the TEST process itself happens to be sandboxed.)
+    let bundleID = Bundle.main.bundleIdentifier ?? "com.tianpli.aidash"
+    // The container path spelled ABSOLUTELY from the real home is the one
+    // location both sandbox postures resolve to the same bytes: a sandboxed
+    // process sees it as its own container, an unsandboxed one opens it as a
+    // plain path. Pinning to ~/Library/Application Support instead would be
+    // unreachable from a sandboxed build and would leave the split-brain unfixed.
+    #expect(url.path.hasSuffix(
+        "Library/Containers/\(bundleID)/Data/Library/Application Support/AIDash/AIDash.store"))
     #expect(url.path.hasPrefix(CloudKitContainer.realHomeDirectory().path))
+    // Derived from the REAL home, never from a container-relative home — that
+    // is what keeps the answer identical in both postures.
     #expect(!CloudKitContainer.realHomeDirectory().path.contains("/Library/Containers/"))
     // Purity: calling it twice yields the same answer and, critically, the
     // second call cannot have been influenced by a directory the first created.
