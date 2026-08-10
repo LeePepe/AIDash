@@ -5,8 +5,7 @@ card — marking a todo `done` or `star`-ing a radar item (e.g. a GitHub repo) �
 and exposes them via `aidash events pull`. This adapter is the L1 collector that
 pulls those feedback events back into aidata as an L2-only source (它是「已采集
 反馈事件」，不进 warehouse、暂无 L4/L5 消费者): aidata now also sees how the user
-reacted to the briefing it produced. NOTE: this source currently has NO raw shard
-and NO clean DB on disk — the collect path exists but no events have landed yet.
+reacted to the briefing it produced.
 
 L1 collect: `aidash events pull --since <watermark> --json`, parse the envelope
 (`{"data":{"count":N,"events":[...]},"ok":true}`), redact + append each event,
