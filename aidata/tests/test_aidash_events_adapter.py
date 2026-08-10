@@ -311,3 +311,57 @@ def test_normalize_unknown_action_becomes_null(monkeypatch):
     monkeypatch.setattr(ae, "write_clean", _cap)
     ae.normalize()
     assert captured["rows"][0]["action"] is None
+
+
+# --- inclusive-watermark re-pull guard (BUG B) ------------------------------
+#
+# `events pull --since` is INCLUSIVE on the app side (XPCHandlers predicate is
+# `timestamp >= since`, and the CLI documents "Lower bound, inclusive"). The
+# watermark we persist is the timestamp of an event we ALREADY wrote, so the
+# boundary event comes back on every subsequent run. Before the fix that event
+# was re-appended to a NEW day's raw shard each time — one real star ended up
+# duplicated across the 08-03 / 08-06 / 08-07 shards on disk.
+#
+# Raw is append-only and is the source of truth, so a duplicate there is a real
+# integrity defect even though L2's id-keying happens to mask it.
+
+@pytest.mark.unit
+def test_collect_drops_boundary_event_already_at_watermark(monkeypatch):
+    """Re-pull that returns ONLY the boundary event writes nothing."""
+    monkeypatch.setattr(ae, "_aidash_bin", lambda: "/usr/local/bin/aidash")
+    monkeypatch.setattr(ae.subprocess, "run", _ok_proc)
+    # Watermark sits at the NEWEST event in _ENVELOPE, so both events in the
+    # envelope are at-or-before it — exactly the steady state after a prior run.
+    store: dict[str, object] = {ae.SOURCE: "2026-07-21T10:30:00Z"}
+    monkeypatch.setattr(ae, "get_watermark", lambda s: store.get(s))
+    monkeypatch.setattr(ae, "set_watermark", lambda s, v: store.__setitem__(s, v))
+    written: list[dict] = []
+    monkeypatch.setattr(ae, "write_raw",
+                        lambda s, recs: written.extend(recs) or len(written))
+
+    assert ae.collect() == 0
+    assert written == []  # nothing re-appended to raw
+    assert store[ae.SOURCE] == "2026-07-21T10:30:00Z"  # watermark unmoved
+
+
+@pytest.mark.unit
+def test_collect_keeps_only_events_strictly_after_watermark(monkeypatch):
+    """A mixed re-pull writes the new event only, and advances the watermark."""
+    monkeypatch.setattr(ae, "_aidash_bin", lambda: "/usr/local/bin/aidash")
+    monkeypatch.setattr(ae.subprocess, "run", _ok_proc)
+    # Watermark at the OLDER event: the star is a re-pull, the done is genuinely new.
+    store: dict[str, object] = {ae.SOURCE: "2026-07-20T09:00:00Z"}
+    monkeypatch.setattr(ae, "get_watermark", lambda s: store.get(s))
+    monkeypatch.setattr(ae, "set_watermark", lambda s, v: store.__setitem__(s, v))
+    written: list[dict] = []
+
+    def _cap(source, records):
+        recs = list(records)
+        written.extend(recs)
+        return len(recs)
+
+    monkeypatch.setattr(ae, "write_raw", _cap)
+
+    assert ae.collect() == 1
+    assert [r["id"] for r in written] == ["evt-done-1"]
+    assert store[ae.SOURCE] == "2026-07-21T10:30:00Z"

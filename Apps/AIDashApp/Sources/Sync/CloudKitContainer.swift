@@ -164,12 +164,59 @@ public final class CloudKitContainer {
         return "iCloud.com.tianpli.aidash"
     }()
 
+    /// Explicit, sandbox-independent store location (macOS only).
+    ///
+    /// SwiftData's default store path is resolved relative to the *running
+    /// process's* container, so it silently MOVES when the same app runs
+    /// sandboxed (Xcode/dev build → `~/Library/Containers/<bundleID>/Data/…`)
+    /// versus unsandboxed (the ad-hoc fixed install → `~/Library/…`). Two
+    /// stores then exist side by side and neither can see the other's rows.
+    ///
+    /// That is not hypothetical: a star event recorded on 2026-08-03 was
+    /// orphaned exactly this way when `scripts/dev/install-fixed-build.sh`
+    /// deployed an unsandboxed Release build — `events pull` kept answering
+    /// `ok:true, count:0` against a *different, freshly created* store while
+    /// the event sat in the abandoned one. Append-only events (Constitution
+    /// §I) must not be able to go missing because of a packaging change.
+    ///
+    /// Pinning the path makes the store identity independent of sandbox
+    /// posture. iOS is deliberately excluded: it is always sandboxed, its
+    /// container path is already stable, and an absolute home-relative URL
+    /// would be wrong there.
+    internal static func storeURL() -> URL? {
+        #if os(macOS)
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/AIDash", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            // A sandboxed build cannot write outside its container. Fall back
+            // to SwiftData's default rather than failing container creation —
+            // degrading to the old behavior beats not launching (§D).
+            logger.warning("Pinned store dir unavailable (\(error.localizedDescription, privacy: .public)); using SwiftData default.")
+            return nil
+        }
+        return dir.appendingPathComponent("AIDash.store")
+        #else
+        return nil
+        #endif
+    }
+
     private static func makeConfiguration(
         schema: Schema,
         mode: StorageMode
     ) -> ModelConfiguration {
+        let url = storeURL()
         switch mode {
         case .cloudKit:
+            if let url {
+                return ModelConfiguration(
+                    schema: schema,
+                    url: url,
+                    allowsSave: true,
+                    cloudKitDatabase: .private(cloudKitContainerIdentifier)
+                )
+            }
             return ModelConfiguration(
                 schema: schema,
                 isStoredInMemoryOnly: false,
@@ -179,6 +226,14 @@ public final class CloudKitContainer {
             )
         case .localOnly:
             logger.notice("iCloud unavailable; using local-only store without CloudKit sync.")
+            if let url {
+                return ModelConfiguration(
+                    schema: schema,
+                    url: url,
+                    allowsSave: true,
+                    cloudKitDatabase: .none
+                )
+            }
             return ModelConfiguration(
                 schema: schema,
                 isStoredInMemoryOnly: false,

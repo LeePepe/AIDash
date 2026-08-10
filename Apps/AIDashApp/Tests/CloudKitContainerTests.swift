@@ -123,3 +123,27 @@ import AIDashCore
         #expect(!reason.contains("NSError"))
     }
 }
+
+// MARK: - Pinned store URL (sandbox-independent)
+
+@MainActor
+@Test func storeURLIsPinnedOutsideTheSandboxContainerOnMacOS() {
+    // SwiftData's default store path is resolved relative to the running
+    // process's container, so it MOVES when the same app runs sandboxed
+    // (Xcode/dev) vs unsandboxed (ad-hoc fixed install). That split-brain
+    // orphaned a real append-only star event on 2026-08-03: `events pull`
+    // answered ok:true/count:0 against a freshly created store while the
+    // event sat in the abandoned one. Pinning makes store identity
+    // independent of sandbox posture.
+    #if os(macOS)
+    let url = try? #require(CloudKitContainer.storeURL())
+    let path = url?.path ?? ""
+    #expect(path.hasSuffix("Library/Application Support/AIDash/AIDash.store"))
+    // The whole point: never inside a per-app sandbox container.
+    #expect(!path.contains("/Library/Containers/"))
+    #else
+    // iOS is always sandboxed and its container path is already stable, so the
+    // SwiftData default is correct there — an absolute home path would be wrong.
+    #expect(CloudKitContainer.storeURL() == nil)
+    #endif
+}

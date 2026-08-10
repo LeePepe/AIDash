@@ -7,6 +7,14 @@ pulls those feedback events back into aidata as an L2-only source (它是「已�
 反馈事件」，不进 warehouse、暂无 L4/L5 消费者): aidata now also sees how the user
 reacted to the briefing it produced.
 
+Operational state: one event has landed so far (2026-08-03, a radar star). Raw
+shards live under `L1_collect/raw/aidash_events/`, the clean DB at
+`L2_normalize/clean/aidash_events.db`. The 08-03 / 08-06 / 08-07 shards each
+hold the SAME event id — an inclusive-watermark re-pull artifact from before
+`collect()` grew its strict `>` guard (see the comment there); L2 dedupes by
+event id, so the clean DB was never wrong. Those raw lines are left in place:
+raw is append-only and is not rewritten.
+
 L1 collect: `aidash events pull --since <watermark> --json`, parse the envelope
 (`{"data":{"count":N,"events":[...]},"ok":true}`), redact + append each event,
 advance the watermark to the newest event `timestamp`. A living source (like
@@ -135,9 +143,29 @@ def collect() -> int:
     if not events:  # None (degrade) or [] (empty) → nothing to write
         return 0
 
-    # Keep only well-formed events carrying an id + timestamp we can key/window on.
+    # Keep only well-formed events carrying an id + timestamp we can key/window
+    # on, AND drop anything at-or-before the watermark.
+    #
+    # That second filter matters: `events pull --since` is INCLUSIVE on the app
+    # side (the XPC predicate is `timestamp >= since`, and the CLI documents
+    # "Lower bound, inclusive"), while the watermark we persist is the timestamp
+    # of an event we already wrote. So the boundary event comes back on EVERY
+    # run. Raw is append-only, so without this it gets re-appended to a new day's
+    # shard each time — one real star ended up duplicated across three shards
+    # before this guard existed. Using a strict `>` cursor here also matches what
+    # every sibling adapter does at the query (raven / gecko / hermes_tools all
+    # use `WHERE timestamp > ?`); this source is the outlier only because it
+    # borrows the CLI's window semantics instead of owning the comparison.
+    #
+    # Known tie caveat: this also drops a DISTINCT event sharing the boundary
+    # event's exact second. Timestamps are second-granularity and the app already
+    # dedupes stars by (cardId, itemRef), so the realistic loss is a `done` and a
+    # `star` landing in the same second. If that ever matters, the robust variant
+    # is an id-based guard (persist the ids seen at the watermark second and
+    # exclude only those) — deliberately not done yet, to keep the cursor simple.
     batch = [e for e in events
-             if isinstance(e, dict) and e.get("id") and e.get("timestamp")]
+             if isinstance(e, dict) and e.get("id") and e.get("timestamp")
+             and (watermark is None or str(e["timestamp"]) > watermark)]
     if not batch:
         return 0
 
