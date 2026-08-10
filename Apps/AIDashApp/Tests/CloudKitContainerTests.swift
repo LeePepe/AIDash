@@ -214,9 +214,11 @@ import AIDashCore
 @MainActor
 @Test func adoptLeavesLegacySetIntactWhenTheMainStoreCannotMove() throws {
     #if os(macOS)
-    // If the main .store move fails, the sidecars must NOT be moved either.
-    // A legacy store stripped of its -wal loses every committed-but-not-
-    // checkpointed row — the exact loss this migration exists to prevent.
+    // Migration is all-or-nothing. A partial result would be UNRECOVERABLE:
+    // adoption is skipped forever once `pinned` exists, so a store published
+    // without its -wal would permanently strand every committed-but-not-
+    // checkpointed row. On failure nothing may be published and the legacy set
+    // must survive untouched so the next launch can retry.
     let fm = FileManager.default
     let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
@@ -226,12 +228,55 @@ import AIDashCore
     try Data("store".utf8).write(to: legacy)
     try Data("wal".utf8).write(to: URL(fileURLWithPath: legacy.path + "-wal"))
 
-    // Destination directory does not exist → the main move fails.
-    let pinned = tmp.appendingPathComponent("missing-dir/AIDash.store")
+    // A FILE where the store's parent directory should be: staging cannot be
+    // created underneath it, so the migration genuinely fails.
+    let blocker = tmp.appendingPathComponent("blocker")
+    try Data("not a directory".utf8).write(to: blocker)
+    let pinned = blocker.appendingPathComponent("AIDash.store")
     CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
 
+    // Legacy survives in full…
     #expect(fm.fileExists(atPath: legacy.path))
-    #expect(fm.fileExists(atPath: legacy.path + "-wal"))  // sidecar stayed put
+    #expect(fm.fileExists(atPath: legacy.path + "-wal"))
+    // …and nothing was published, so the next launch retries rather than
+    // seeing a pinned store and skipping forever.
+    #expect(!fm.fileExists(atPath: pinned.path))
     #expect(!fm.fileExists(atPath: pinned.path + "-wal"))
+    #endif
+}
+
+@MainActor
+@Test func adoptSkipsEntirelyWhenSomethingAlreadyOccupiesThePinnedPath() throws {
+    #if os(macOS)
+    // The `fileExists(pinned)` guard is what makes migration run exactly once.
+    // It must also hold for a non-file occupant: if anything sits at the pinned
+    // path, adopt does nothing at all — no sidecar published beside it, legacy
+    // untouched. (An orphan `pinned-wal` would be worse than doing nothing: a
+    // later successful adopt would publish a store next to a STALE wal from a
+    // different database.)
+    //
+    // NOTE on coverage: the `catch`-branch rollback inside adoptLegacyStore is
+    // NOT exercised here. Reaching it needs a publish that fails partway, which
+    // requires filesystem permissions this test cannot arrange portably. The
+    // rollback is written defensively but is currently unproven by test.
+    let fm = FileManager.default
+    let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tmp) }
+
+    let legacy = tmp.appendingPathComponent("default.store")
+    try Data("store".utf8).write(to: legacy)
+    try Data("wal".utf8).write(to: URL(fileURLWithPath: legacy.path + "-wal"))
+
+    let dest = tmp.appendingPathComponent("dest", isDirectory: true)
+    try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+    let pinned = dest.appendingPathComponent("AIDash.store")
+    try fm.createDirectory(at: pinned, withIntermediateDirectories: true)
+
+    CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+
+    #expect(!fm.fileExists(atPath: pinned.path + "-wal"))
+    #expect(fm.fileExists(atPath: legacy.path))
+    #expect(fm.fileExists(atPath: legacy.path + "-wal"))
     #endif
 }

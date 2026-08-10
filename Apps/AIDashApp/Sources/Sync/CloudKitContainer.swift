@@ -304,6 +304,17 @@ public final class CloudKitContainer {
 
     /// Testable core of the migration: `candidates` is injected so the behavior
     /// can be exercised against a temp directory instead of the real home.
+    ///
+    /// COPY-then-publish, never move-in-place. The destination is only put in
+    /// its final position once the WHOLE file set (store + `-wal` + `-shm`) has
+    /// landed. A partial migration is unrecoverable: `adopt` is skipped forever
+    /// once `pinned` exists, so a store published without its `-wal` would
+    /// permanently strand every committed-but-not-checkpointed row.
+    ///
+    /// Staging into a sibling directory and publishing at the end makes the
+    /// visible outcome all-or-nothing. On any failure everything published so
+    /// far is rolled back and the legacy set is left exactly as it was, so the
+    /// next launch simply retries.
     internal static func adoptLegacyStore(from candidates: [URL], to pinned: URL) {
         let fm = FileManager.default
         guard !fm.fileExists(atPath: pinned.path) else { return }
@@ -315,28 +326,58 @@ public final class CloudKitContainer {
             return (l ?? .distantPast) < (r ?? .distantPast)
         }) else { return }
 
-        // Move the main store FIRST and bail out if it fails. The sidecars must
-        // never be moved away from a store that stayed behind: a legacy store
-        // stripped of its -wal loses every committed-but-not-checkpointed row,
-        // which is precisely the loss this function exists to prevent. Failing
-        // here leaves the legacy set intact and recoverable by hand.
+        // More than one legacy store means the split-brain left data on BOTH
+        // sides. Only the most recently used one is adopted — SwiftData stores
+        // cannot be merged file-wise, and adopting one is strictly better than
+        // adopting none. Say so loudly: the other store still holds rows this
+        // migration does NOT recover, and only a human can decide what to do
+        // with them.
+        if existing.count > 1 {
+            let others = existing.filter { $0 != legacy }.map(\.path).joined(separator: ", ")
+            logger.warning("Multiple legacy stores found; adopting the most recent. NOT migrated: \(others, privacy: .public)")
+        }
+
+        let staging = pinned.deletingLastPathComponent()
+            .appendingPathComponent(".adopt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: staging) }
+
+        var published: [String] = []
         do {
-            try fm.moveItem(at: legacy, to: pinned)
+            try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+            // Copy the whole set first — the legacy files stay intact until the
+            // publish step, so any failure here costs nothing.
+            for suffix in ["", "-wal", "-shm"] {
+                let from = URL(fileURLWithPath: legacy.path + suffix)
+                guard fm.fileExists(atPath: from.path) else { continue }
+                try fm.copyItem(
+                    at: from,
+                    to: staging.appendingPathComponent(pinned.lastPathComponent + suffix)
+                )
+            }
+            // Publish sidecars first and the main store LAST, so `pinned` never
+            // exists while its sidecars are missing — that ordering is what
+            // makes the "skip if pinned exists" guard safe.
+            for suffix in ["-shm", "-wal", ""] {
+                let staged = staging.appendingPathComponent(pinned.lastPathComponent + suffix)
+                guard fm.fileExists(atPath: staged.path) else { continue }
+                try fm.moveItem(at: staged, to: URL(fileURLWithPath: pinned.path + suffix))
+                published.append(suffix)
+            }
         } catch {
-            logger.error("Legacy store adopt aborted; leaving it intact: \(error.localizedDescription, privacy: .public)")
+            // Roll back whatever was already published: a half-written pinned
+            // set would block the retry on every future launch.
+            for suffix in published {
+                try? fm.removeItem(at: URL(fileURLWithPath: pinned.path + suffix))
+            }
+            logger.error("Legacy store adopt failed; legacy left intact, will retry: \(error.localizedDescription, privacy: .public)")
             return
         }
 
-        // -wal / -shm must travel with the store or committed rows are lost.
-        for suffix in ["-wal", "-shm"] {
-            let from = URL(fileURLWithPath: legacy.path + suffix)
-            let to = URL(fileURLWithPath: pinned.path + suffix)
-            guard fm.fileExists(atPath: from.path) else { continue }
-            do {
-                try fm.moveItem(at: from, to: to)
-            } catch {
-                logger.error("Legacy store adopt failed for \(suffix, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
+        // Only now retire the originals. Leaving them behind invites a future
+        // build resolving the old path and reviving stale data as a third
+        // divergent store; failing to delete is harmless, so it is best-effort.
+        for suffix in ["", "-wal", "-shm"] {
+            try? fm.removeItem(at: URL(fileURLWithPath: legacy.path + suffix))
         }
         logger.notice("Adopted legacy SwiftData store into the pinned location.")
     }

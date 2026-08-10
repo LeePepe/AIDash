@@ -332,9 +332,11 @@ def test_collect_drops_boundary_event_already_at_watermark(monkeypatch):
     """Re-pull that returns ONLY the boundary event writes nothing."""
     monkeypatch.setattr(ae, "_aidash_bin", lambda: "/usr/local/bin/aidash")
     monkeypatch.setattr(ae.subprocess, "run", _ok_proc)
-    # Watermark sits at the NEWEST event in _ENVELOPE, so both events in the
-    # envelope are at-or-before it — exactly the steady state after a prior run.
-    store: dict[str, object] = {ae.SOURCE: "2026-07-21T10:30:00Z"}
+    # Cursor sits at the NEWEST event in _ENVELOPE and records its id, so both
+    # events are already collected — the steady state after a prior run.
+    store: dict[str, object] = {
+        ae.SOURCE: {"ts": "2026-07-21T10:30:00Z", "ids": ["evt-done-1"]}
+    }
     monkeypatch.setattr(ae, "get_watermark", lambda s: store.get(s))
     monkeypatch.setattr(ae, "set_watermark", lambda s, v: store.__setitem__(s, v))
     written: list[dict] = []
@@ -343,7 +345,9 @@ def test_collect_drops_boundary_event_already_at_watermark(monkeypatch):
 
     assert ae.collect() == 0
     assert written == []  # nothing re-appended to raw
-    assert store[ae.SOURCE] == "2026-07-21T10:30:00Z"  # watermark unmoved
+    assert store[ae.SOURCE] == {
+        "ts": "2026-07-21T10:30:00Z", "ids": ["evt-done-1"],
+    }  # cursor unmoved
 
 
 @pytest.mark.unit
@@ -351,8 +355,11 @@ def test_collect_keeps_only_events_strictly_after_watermark(monkeypatch):
     """A mixed re-pull writes the new event only, and advances the watermark."""
     monkeypatch.setattr(ae, "_aidash_bin", lambda: "/usr/local/bin/aidash")
     monkeypatch.setattr(ae.subprocess, "run", _ok_proc)
-    # Watermark at the OLDER event: the star is a re-pull, the done is genuinely new.
-    store: dict[str, object] = {ae.SOURCE: "2026-07-20T09:00:00Z"}
+    # Cursor at the OLDER event (with its id): the star is a re-pull that the id
+    # set excludes, the done is genuinely new.
+    store: dict[str, object] = {
+        ae.SOURCE: {"ts": "2026-07-20T09:00:00Z", "ids": ["evt-star-1"]}
+    }
     monkeypatch.setattr(ae, "get_watermark", lambda s: store.get(s))
     monkeypatch.setattr(ae, "set_watermark", lambda s, v: store.__setitem__(s, v))
     written: list[dict] = []
@@ -433,7 +440,13 @@ def test_collect_keeps_distinct_event_in_the_boundary_second(monkeypatch):
 
 @pytest.mark.unit
 def test_collect_reads_legacy_bare_string_watermark(monkeypatch):
-    """A plain-string watermark from before the cursor change still works."""
+    """A plain-string watermark from before the cursor change still works.
+
+    It carries NO id set, so the boundary second is RE-COLLECTED rather than
+    skipped: a duplicate raw line is deduped at L2 and is recoverable, whereas
+    skipping a never-collected same-second sibling would be permanent. Bounded
+    and self-healing — the cursor written here carries real ids.
+    """
     monkeypatch.setattr(ae, "_aidash_bin", lambda: "/usr/local/bin/aidash")
     monkeypatch.setattr(ae.subprocess, "run", _ok_proc)
     store: dict[str, object] = {ae.SOURCE: "2026-07-20T09:00:00Z"}  # old format
@@ -448,5 +461,8 @@ def test_collect_reads_legacy_bare_string_watermark(monkeypatch):
 
     monkeypatch.setattr(ae, "write_raw", _cap)
 
-    assert ae.collect() == 1
-    assert [r["id"] for r in written] == ["evt-done-1"]
+    assert ae.collect() == 2
+    assert [r["id"] for r in written] == ["evt-star-1", "evt-done-1"]
+    assert store[ae.SOURCE] == {
+        "ts": "2026-07-21T10:30:00Z", "ids": ["evt-done-1"],
+    }

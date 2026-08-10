@@ -141,12 +141,11 @@ def _cursor(watermark: Any) -> tuple[str | None, frozenset[str] | None]:
     Two on-disk shapes are accepted, so an existing state.json keeps working:
       * `{"ts": "...", "ids": [...]}` — the current compound cursor
       * `"2026-08-03T02:30:39Z"` — the legacy bare string, written before ids
-        were tracked. Its id set is UNKNOWN, which is not the same as empty:
-        an empty set would mean "nothing collected at that second" and would
-        re-collect the boundary event. `None` means "unknown" and is treated as
-        the old behavior (exclude the whole second) — correct for legacy state,
-        and self-healing: the first run under the new format writes a real id
-        set, so the ambiguity lasts exactly one run.
+        were tracked. Its id set is UNKNOWN (`None`), which is not the same as
+        empty: empty asserts "nothing was collected at that second". `_is_new`
+        resolves unknown by re-collecting that second — a duplicate raw line
+        (deduped at L2) is recoverable, a skipped event is not. Self-healing:
+        the next run writes a real id set, so it happens at most once.
 
     Anything unrecognized degrades to "no watermark", which is safe: the worst
     case is re-pulling and re-writing, never silently skipping.
@@ -157,10 +156,9 @@ def _cursor(watermark: Any) -> tuple[str | None, frozenset[str] | None]:
         if not ts:
             return None, None
         # A malformed/absent `ids` is UNKNOWN, not empty — same rule as the
-        # legacy string below. Empty would mean "nothing collected at that
-        # second" and would re-collect the boundary event; unknown excludes the
-        # whole second, which is the safe direction (a duplicate in append-only
-        # raw is worse than one deferred same-second sibling).
+        # legacy string below. `_is_new` re-collects an unknown second rather
+        # than skipping it: a duplicate raw line is deduped at L2, a skipped
+        # event is lost for good.
         if not isinstance(ids, list):
             return str(ts), None
         return str(ts), frozenset(str(i) for i in ids)
@@ -179,18 +177,28 @@ def _is_new(event: dict[str, Any], ts: str | None, seen: frozenset[str] | None) 
     the same second) must still be collected. A pure timestamp `>` would drop it
     permanently, since the cursor never moves back.
 
-    `seen is None` means a legacy string watermark whose ids were never
-    recorded. With no way to tell the boundary event from its same-second
-    siblings, exclude the whole second — re-appending a known duplicate to
-    append-only raw is the worse of the two errors.
+    `seen is None` means the id set is UNKNOWN (a legacy bare-string watermark,
+    or a malformed `ids`). Those events are treated as NEW — i.e. the boundary
+    second is re-collected once.
+
+    That direction is deliberate, and it is the OPPOSITE of what an earlier
+    revision did. The two failure modes are not symmetric:
+      * re-collecting a known event → a duplicate line in append-only raw,
+        which `normalize()` collapses by event id. Recoverable, invisible
+        downstream, costs one line.
+      * skipping the whole second → an event that was never collected is
+        skipped FOREVER, because the cursor only moves forward.
+    Trading permanent loss for the avoidance of a benign duplicate is the wrong
+    trade for append-only feedback data (Constitution §I). The cost is bounded:
+    the very next run writes a real id set, so this happens at most once.
     """
     if ts is None:
         return True
     stamp = str(event["timestamp"])
     if stamp > ts:
         return True
-    if stamp == ts and seen is not None:
-        return str(event["id"]) not in seen
+    if stamp == ts:
+        return seen is None or str(event["id"]) not in seen
     return False
 
 
