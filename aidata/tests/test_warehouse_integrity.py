@@ -63,10 +63,17 @@ def test_no_tokens_without_cost():
     # would otherwise render `NOT IN ()`, which SQLite rejects as a syntax
     # error — the gate would explode instead of passing, right at the moment it
     # should simply become unconditional again.
+    # `model_canon IS NULL` must stay INSIDE the gate. SQLite evaluates
+    # `NULL NOT IN (...)` to NULL, not true, so a bare NOT IN silently drops
+    # every NULL-model row from the count — verified: 2 rows, `NOT IN` counts 1.
+    # model_canon() returns None for empty/None input and _cost() returns None
+    # in the same case, so "tokens present, cost NULL, model_canon NULL" is a
+    # REAL shape this gate is supposed to catch. Excluding it would widen the
+    # exemption far beyond the explicit name list this comment promises.
     clause = ""
     if UNPRICED_MODELS:
         exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)
-        clause = f" AND model_canon NOT IN ({exempt})"
+        clause = f" AND (model_canon IS NULL OR model_canon NOT IN ({exempt}))"
     n = int(_q(
         "SELECT count(*) FROM fact_request "
         "WHERE cost_usd IS NULL AND input_tokens IS NOT NULL "

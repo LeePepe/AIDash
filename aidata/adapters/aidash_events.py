@@ -154,8 +154,16 @@ def _cursor(watermark: Any) -> tuple[str | None, frozenset[str] | None]:
     if isinstance(watermark, dict):
         ts = watermark.get("ts")
         ids = watermark.get("ids")
-        return (str(ts) if ts else None,
-                frozenset(str(i) for i in ids) if isinstance(ids, list) else frozenset())
+        if not ts:
+            return None, None
+        # A malformed/absent `ids` is UNKNOWN, not empty — same rule as the
+        # legacy string below. Empty would mean "nothing collected at that
+        # second" and would re-collect the boundary event; unknown excludes the
+        # whole second, which is the safe direction (a duplicate in append-only
+        # raw is worse than one deferred same-second sibling).
+        if not isinstance(ids, list):
+            return str(ts), None
+        return str(ts), frozenset(str(i) for i in ids)
     if isinstance(watermark, str) and watermark:
         return watermark, None  # legacy: id set unknown
     return None, None

@@ -188,20 +188,44 @@ public final class CloudKitContainer {
     /// legacy default store rather than silently starting empty beside it —
     /// see `adoptLegacyStoreIfNeeded`. Pinning without adopting would have
     /// re-created the exact bug this is meant to fix, one directory over.
+    /// PURE path derivation — no filesystem writes, no migration. Safe to call
+    /// from tests and from anywhere that just wants to know where the store
+    /// lives. `prepareStoreURL()` is the one that has side effects.
     internal static func storeURL() -> URL? {
         #if os(macOS)
-        let dir = realHomeDirectory()
+        return realHomeDirectory()
             .appendingPathComponent("Library/Application Support/AIDash", isDirectory: true)
+            .appendingPathComponent("AIDash.store")
+        #else
+        return nil
+        #endif
+    }
+
+    /// Resolve the store URL AND make it usable: create the directory and, on
+    /// first run, adopt any legacy store. Returns nil to fall back to
+    /// SwiftData's default when the directory cannot be created.
+    ///
+    /// Split from `storeURL()` on purpose. Folding these side effects into a
+    /// getter meant merely *asking* for the path created a directory and moved
+    /// real files — a unit test that called it relocated the developer's actual
+    /// store and, worse, left an EMPTY pinned store behind, which permanently
+    /// suppresses the real migration (adoption is skipped once the destination
+    /// exists). Path math and data movement must not share a function.
+    internal static func prepareStoreURL() -> URL? {
+        #if os(macOS)
+        guard let pinned = storeURL() else { return nil }
+        let dir = pinned.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {
-            // A sandboxed build cannot write outside its container. Fall back
-            // to SwiftData's default rather than failing container creation —
-            // degrading to the old behavior beats not launching (§D).
+            // A sandboxed build genuinely cannot create a directory under the
+            // real home, so it degrades to SwiftData's default rather than
+            // failing container creation (§D). NOTE: that also means the
+            // sandboxed/unsandboxed split-brain is NOT fixed for sandboxed
+            // builds — the pin only holds for the unsandboxed install.
             logger.warning("Pinned store dir unavailable (\(error.localizedDescription, privacy: .public)); using SwiftData default.")
             return nil
         }
-        let pinned = dir.appendingPathComponent("AIDash.store")
         adoptLegacyStoreIfNeeded(pinned: pinned)
         return pinned
         #else
@@ -291,15 +315,27 @@ public final class CloudKitContainer {
             return (l ?? .distantPast) < (r ?? .distantPast)
         }) else { return }
 
+        // Move the main store FIRST and bail out if it fails. The sidecars must
+        // never be moved away from a store that stayed behind: a legacy store
+        // stripped of its -wal loses every committed-but-not-checkpointed row,
+        // which is precisely the loss this function exists to prevent. Failing
+        // here leaves the legacy set intact and recoverable by hand.
+        do {
+            try fm.moveItem(at: legacy, to: pinned)
+        } catch {
+            logger.error("Legacy store adopt aborted; leaving it intact: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+
         // -wal / -shm must travel with the store or committed rows are lost.
-        for suffix in ["", "-wal", "-shm"] {
+        for suffix in ["-wal", "-shm"] {
             let from = URL(fileURLWithPath: legacy.path + suffix)
             let to = URL(fileURLWithPath: pinned.path + suffix)
             guard fm.fileExists(atPath: from.path) else { continue }
             do {
                 try fm.moveItem(at: from, to: to)
             } catch {
-                logger.error("Legacy store adopt failed for \(suffix.isEmpty ? "store" : suffix, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                logger.error("Legacy store adopt failed for \(suffix, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
         logger.notice("Adopted legacy SwiftData store into the pinned location.")
@@ -310,7 +346,7 @@ public final class CloudKitContainer {
         schema: Schema,
         mode: StorageMode
     ) -> ModelConfiguration {
-        let url = storeURL()
+        let url = prepareStoreURL()
         switch mode {
         case .cloudKit:
             if let url {

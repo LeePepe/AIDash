@@ -136,6 +136,10 @@ import AIDashCore
     // event sat in the abandoned one. Pinning makes store identity
     // independent of sandbox posture.
     #if os(macOS)
+    // storeURL() is now a PURE path derivation — calling it must not create
+    // directories or move files. (It previously did both, and running this very
+    // test relocated the developer's real store and left an empty one behind,
+    // which would have permanently suppressed the real migration.)
     let url = try #require(CloudKitContainer.storeURL())
     #expect(url.path.hasSuffix("Library/Application Support/AIDash/AIDash.store"))
     // The whole point: the path is derived from the REAL home, so it never
@@ -144,6 +148,9 @@ import AIDashCore
     // holds whether or not the TEST process itself happens to be sandboxed.)
     #expect(url.path.hasPrefix(CloudKitContainer.realHomeDirectory().path))
     #expect(!CloudKitContainer.realHomeDirectory().path.contains("/Library/Containers/"))
+    // Purity: calling it twice yields the same answer and, critically, the
+    // second call cannot have been influenced by a directory the first created.
+    #expect(CloudKitContainer.storeURL() == url)
     #else
     // iOS is always sandboxed and its container path is already stable, so the
     // SwiftData default is correct there — an absolute home path would be wrong.
@@ -201,5 +208,30 @@ import AIDashCore
 
     #expect(try String(contentsOf: pinned, encoding: .utf8) == "current")
     #expect(fm.fileExists(atPath: legacy.path))  // untouched
+    #endif
+}
+
+@MainActor
+@Test func adoptLeavesLegacySetIntactWhenTheMainStoreCannotMove() throws {
+    #if os(macOS)
+    // If the main .store move fails, the sidecars must NOT be moved either.
+    // A legacy store stripped of its -wal loses every committed-but-not-
+    // checkpointed row — the exact loss this migration exists to prevent.
+    let fm = FileManager.default
+    let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tmp) }
+
+    let legacy = tmp.appendingPathComponent("default.store")
+    try Data("store".utf8).write(to: legacy)
+    try Data("wal".utf8).write(to: URL(fileURLWithPath: legacy.path + "-wal"))
+
+    // Destination directory does not exist → the main move fails.
+    let pinned = tmp.appendingPathComponent("missing-dir/AIDash.store")
+    CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+
+    #expect(fm.fileExists(atPath: legacy.path))
+    #expect(fm.fileExists(atPath: legacy.path + "-wal"))  // sidecar stayed put
+    #expect(!fm.fileExists(atPath: pinned.path + "-wal"))
     #endif
 }
