@@ -57,11 +57,20 @@ def test_no_tokens_without_cost():
     # The exemption is deliberately narrow — an explicit name list, not a
     # predicate — so a NEW unpriced model still fails this test loudly instead
     # of silently joining the exempt set. Adding a name here is a decision.
-    exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)
+    #
+    # The empty-list short-circuit matters: the finding doc tells the next
+    # reader to REMOVE a name once a real price is known, and emptying the tuple
+    # would otherwise render `NOT IN ()`, which SQLite rejects as a syntax
+    # error — the gate would explode instead of passing, right at the moment it
+    # should simply become unconditional again.
+    clause = ""
+    if UNPRICED_MODELS:
+        exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)
+        clause = f" AND model_canon NOT IN ({exempt})"
     n = int(_q(
         "SELECT count(*) FROM fact_request "
         "WHERE cost_usd IS NULL AND input_tokens IS NOT NULL "
-        f"AND output_tokens IS NOT NULL AND model_canon NOT IN ({exempt});"
+        f"AND output_tokens IS NOT NULL{clause};"
     ))
     assert n == 0, f"{n} rows have tokens but no cost (and are not in UNPRICED_MODELS)"
 
@@ -72,6 +81,8 @@ def test_unpriced_models_still_carry_tokens():
     # measurable in tokens. If these rows lost their token counts too they
     # would be invisible everywhere, not just in the dollar columns — the
     # exemption is about MISSING PRICE, never about missing usage.
+    if not UNPRICED_MODELS:
+        pytest.skip("no unpriced models — nothing to assert")
     exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)
     n = int(_q(
         "SELECT count(*) FROM fact_request "

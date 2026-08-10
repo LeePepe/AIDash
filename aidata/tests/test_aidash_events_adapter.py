@@ -108,8 +108,10 @@ def test_collect_parses_envelope_and_advances_watermark(monkeypatch):
     assert by_id["evt-done-1"]["action"] == "done"
     assert by_id["evt-done-1"]["itemRef"] is None
     assert "cardType" not in by_id["evt-done-1"]
-    # watermark advanced to the MAX event timestamp
-    assert store[ae.SOURCE] == "2026-07-21T10:30:00Z"
+    # Cursor advanced to the MAX event timestamp, carrying the ids seen there.
+    assert store[ae.SOURCE] == {
+        "ts": "2026-07-21T10:30:00Z", "ids": ["evt-done-1"],
+    }
 
 
 @pytest.mark.unit
@@ -364,4 +366,87 @@ def test_collect_keeps_only_events_strictly_after_watermark(monkeypatch):
 
     assert ae.collect() == 1
     assert [r["id"] for r in written] == ["evt-done-1"]
-    assert store[ae.SOURCE] == "2026-07-21T10:30:00Z"
+    assert store[ae.SOURCE] == {
+        "ts": "2026-07-21T10:30:00Z", "ids": ["evt-done-1"],
+    }
+
+
+# --- same-second distinct event must survive (id-based cursor) ---------------
+#
+# A pure timestamp `>` cursor drops a DISTINCT event that shares the boundary
+# event's exact second. Timestamps are second-granularity and a `done` + a
+# `star` can easily land in the same second, so that is a real loss window, not
+# a theoretical one: once the watermark records that second, the sibling event
+# is never written to raw and never comes back.
+#
+# The cursor is therefore (timestamp, seen-ids-at-that-second): exclude only the
+# ids already collected at the boundary second, not the whole second.
+
+_SAME_SECOND_ENVELOPE = {
+    "ok": True,
+    "data": {
+        "count": 2,
+        "events": [
+            {   # already collected on a previous run
+                "id": "evt-star-boundary",
+                "timestamp": "2026-07-21T10:30:00Z",
+                "device": "Mac-1", "cardId": "github-radar",
+                "action": "star", "itemRef": "https://github.com/a/b",
+            },
+            {   # DISTINCT event, same second — must NOT be dropped
+                "id": "evt-done-same-second",
+                "timestamp": "2026-07-21T10:30:00Z",
+                "device": "Mac-1", "cardId": "todo-list",
+                "action": "done", "itemRef": None,
+            },
+        ],
+    },
+}
+
+
+@pytest.mark.unit
+def test_collect_keeps_distinct_event_in_the_boundary_second(monkeypatch):
+    monkeypatch.setattr(ae, "_aidash_bin", lambda: "/usr/local/bin/aidash")
+    monkeypatch.setattr(ae.subprocess, "run",
+                        lambda *a, **k: _Proc(0, json.dumps(_SAME_SECOND_ENVELOPE)))
+    # Prior run collected ONLY the star at that second.
+    store: dict[str, object] = {
+        ae.SOURCE: {"ts": "2026-07-21T10:30:00Z", "ids": ["evt-star-boundary"]}
+    }
+    monkeypatch.setattr(ae, "get_watermark", lambda s: store.get(s))
+    monkeypatch.setattr(ae, "set_watermark", lambda s, v: store.__setitem__(s, v))
+    written: list[dict] = []
+
+    def _cap(source, records):
+        recs = list(records)
+        written.extend(recs)
+        return len(recs)
+
+    monkeypatch.setattr(ae, "write_raw", _cap)
+
+    assert ae.collect() == 1
+    assert [r["id"] for r in written] == ["evt-done-same-second"]
+    # BOTH ids at that second are now recorded, so neither returns next run.
+    assert store[ae.SOURCE]["ts"] == "2026-07-21T10:30:00Z"
+    assert set(store[ae.SOURCE]["ids"]) == {"evt-star-boundary", "evt-done-same-second"}
+
+
+@pytest.mark.unit
+def test_collect_reads_legacy_bare_string_watermark(monkeypatch):
+    """A plain-string watermark from before the cursor change still works."""
+    monkeypatch.setattr(ae, "_aidash_bin", lambda: "/usr/local/bin/aidash")
+    monkeypatch.setattr(ae.subprocess, "run", _ok_proc)
+    store: dict[str, object] = {ae.SOURCE: "2026-07-20T09:00:00Z"}  # old format
+    monkeypatch.setattr(ae, "get_watermark", lambda s: store.get(s))
+    monkeypatch.setattr(ae, "set_watermark", lambda s, v: store.__setitem__(s, v))
+    written: list[dict] = []
+
+    def _cap(source, records):
+        recs = list(records)
+        written.extend(recs)
+        return len(recs)
+
+    monkeypatch.setattr(ae, "write_raw", _cap)
+
+    assert ae.collect() == 1
+    assert [r["id"] for r in written] == ["evt-done-1"]

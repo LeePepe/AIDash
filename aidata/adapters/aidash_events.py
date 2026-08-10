@@ -15,11 +15,15 @@ hold the SAME event id — an inclusive-watermark re-pull artifact from before
 event id, so the clean DB was never wrong. Those raw lines are left in place:
 raw is append-only and is not rewritten.
 
-L1 collect: `aidash events pull --since <watermark> --json`, parse the envelope
+L1 collect: `aidash events pull --since <cursor ts> --json`, parse the envelope
 (`{"data":{"count":N,"events":[...]},"ok":true}`), redact + append each event,
-advance the watermark to the newest event `timestamp`. A living source (like
-news / github_repo): 0 events today is a perfectly valid empty result, and once
-the user starts interacting the next run eats the backlog.
+advance the cursor. The cursor is `{"ts": <newest>, "ids": [...]}` — a bare
+timestamp is NOT enough because `--since` is inclusive AND stamps are only
+second-granular, so the ids collected at that second are tracked to tell a
+re-pull from a genuine same-second sibling. A legacy bare-string watermark is
+still read (its id set is unknown → the whole second is excluded, once).
+A living source (like news / github_repo): 0 events today is a perfectly valid
+empty result, and once the user starts interacting the next run eats the backlog.
 
 L2 normalize: one row per event id (last-write-wins). `item_ref` (the starred
 repo URL for radar events; NULL for whole-card events) is preserved verbatim so
@@ -131,41 +135,88 @@ def _events_since(watermark: str | None) -> list[dict[str, Any]] | None:
     return events if isinstance(events, list) else []
 
 
+def _cursor(watermark: Any) -> tuple[str | None, frozenset[str] | None]:
+    """Normalize a stored watermark into `(timestamp, ids_seen_at_that_timestamp)`.
+
+    Two on-disk shapes are accepted, so an existing state.json keeps working:
+      * `{"ts": "...", "ids": [...]}` — the current compound cursor
+      * `"2026-08-03T02:30:39Z"` — the legacy bare string, written before ids
+        were tracked. Its id set is UNKNOWN, which is not the same as empty:
+        an empty set would mean "nothing collected at that second" and would
+        re-collect the boundary event. `None` means "unknown" and is treated as
+        the old behavior (exclude the whole second) — correct for legacy state,
+        and self-healing: the first run under the new format writes a real id
+        set, so the ambiguity lasts exactly one run.
+
+    Anything unrecognized degrades to "no watermark", which is safe: the worst
+    case is re-pulling and re-writing, never silently skipping.
+    """
+    if isinstance(watermark, dict):
+        ts = watermark.get("ts")
+        ids = watermark.get("ids")
+        return (str(ts) if ts else None,
+                frozenset(str(i) for i in ids) if isinstance(ids, list) else frozenset())
+    if isinstance(watermark, str) and watermark:
+        return watermark, None  # legacy: id set unknown
+    return None, None
+
+
+def _is_new(event: dict[str, Any], ts: str | None, seen: frozenset[str] | None) -> bool:
+    """True when this event has not been collected yet.
+
+    Strictly after the cursor second is new. WITHIN the cursor second the id
+    decides — that is the whole point of tracking ids: `events pull --since` is
+    inclusive, so the boundary second always comes back, but a DISTINCT event
+    sharing that second (a `done` and a `star` a moment apart, both stamped to
+    the same second) must still be collected. A pure timestamp `>` would drop it
+    permanently, since the cursor never moves back.
+
+    `seen is None` means a legacy string watermark whose ids were never
+    recorded. With no way to tell the boundary event from its same-second
+    siblings, exclude the whole second — re-appending a known duplicate to
+    append-only raw is the worse of the two errors.
+    """
+    if ts is None:
+        return True
+    stamp = str(event["timestamp"])
+    if stamp > ts:
+        return True
+    if stamp == ts and seen is not None:
+        return str(event["id"]) not in seen
+    return False
+
+
 def collect() -> int:
-    """Pull new feedback events, redact+append, advance the timestamp watermark.
+    """Pull new feedback events, redact+append, advance the cursor.
 
     Returns records written (0 on any degrade path: no CLI, XPC down, timeout,
     ok:false, OR a legitimately empty result). Never raises — the app being
     down is the common case and must not fail the whole `collect` run.
     """
     watermark = get_watermark(SOURCE)
-    events = _events_since(watermark)
+    ts, seen = _cursor(watermark)
+    events = _events_since(ts)
     if not events:  # None (degrade) or [] (empty) → nothing to write
         return 0
 
-    # Keep only well-formed events carrying an id + timestamp we can key/window
-    # on, AND drop anything at-or-before the watermark.
+    # Keep well-formed events (id + timestamp) that the cursor says are new.
     #
-    # That second filter matters: `events pull --since` is INCLUSIVE on the app
-    # side (the XPC predicate is `timestamp >= since`, and the CLI documents
-    # "Lower bound, inclusive"), while the watermark we persist is the timestamp
-    # of an event we already wrote. So the boundary event comes back on EVERY
-    # run. Raw is append-only, so without this it gets re-appended to a new day's
-    # shard each time — one real star ended up duplicated across three shards
-    # before this guard existed. Using a strict `>` cursor here also matches what
-    # every sibling adapter does at the query (raven / gecko / hermes_tools all
-    # use `WHERE timestamp > ?`); this source is the outlier only because it
-    # borrows the CLI's window semantics instead of owning the comparison.
+    # `events pull --since` is INCLUSIVE on the app side (the XPC predicate is
+    # `timestamp >= since`, and the CLI documents "Lower bound, inclusive"),
+    # while the cursor sits ON an event we already wrote. So the boundary event
+    # comes back on EVERY run. Raw is append-only, so without a guard it gets
+    # re-appended to a new day's shard each time — one real star ended up
+    # duplicated across three shards before this existed.
     #
-    # Known tie caveat: this also drops a DISTINCT event sharing the boundary
-    # event's exact second. Timestamps are second-granularity and the app already
-    # dedupes stars by (cardId, itemRef), so the realistic loss is a `done` and a
-    # `star` landing in the same second. If that ever matters, the robust variant
-    # is an id-based guard (persist the ids seen at the watermark second and
-    # exclude only those) — deliberately not done yet, to keep the cursor simple.
+    # The guard is (timestamp, ids-at-that-timestamp) rather than a bare `>`:
+    # timestamps are second-granularity, so a bare `>` would also drop a
+    # DISTINCT event that merely shares the boundary second, and it would drop
+    # it FOREVER (the cursor never moves back). Sibling adapters can use a plain
+    # `WHERE timestamp > ?` because their sources have finer stamps; this one
+    # cannot.
     batch = [e for e in events
              if isinstance(e, dict) and e.get("id") and e.get("timestamp")
-             and (watermark is None or str(e["timestamp"]) > watermark)]
+             and _is_new(e, ts, seen)]
     if not batch:
         return 0
 
@@ -173,9 +224,16 @@ def collect() -> int:
     # append — itemRef is a public repo URL, but the red line stays uniform.
     written = write_raw(SOURCE, batch)
 
+    # Advance to (newest second, every id collected AT that second). The id set
+    # must include ids carried over from the previous cursor when the second is
+    # unchanged — otherwise the events we just excluded would look new again on
+    # the next run and get re-appended, reviving the duplication this fixes.
     newest = max(str(e["timestamp"]) for e in batch)  # ISO8601 sorts lexically
-    if watermark is None or newest > watermark:
-        set_watermark(SOURCE, newest)
+    ids_at_newest = {str(e["id"]) for e in batch if str(e["timestamp"]) == newest}
+    if ts == newest:
+        ids_at_newest |= set(seen or ())
+    if ts is None or newest >= ts:
+        set_watermark(SOURCE, {"ts": newest, "ids": sorted(ids_at_newest)})
     return written
 
 

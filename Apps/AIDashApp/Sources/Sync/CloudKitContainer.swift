@@ -183,9 +183,14 @@ public final class CloudKitContainer {
     /// posture. iOS is deliberately excluded: it is always sandboxed, its
     /// container path is already stable, and an absolute home-relative URL
     /// would be wrong there.
+    ///
+    /// On first run the pinned location does not exist yet, so we ADOPT the
+    /// legacy default store rather than silently starting empty beside it —
+    /// see `adoptLegacyStoreIfNeeded`. Pinning without adopting would have
+    /// re-created the exact bug this is meant to fix, one directory over.
     internal static func storeURL() -> URL? {
         #if os(macOS)
-        let dir = FileManager.default.homeDirectoryForCurrentUser
+        let dir = realHomeDirectory()
             .appendingPathComponent("Library/Application Support/AIDash", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -196,11 +201,110 @@ public final class CloudKitContainer {
             logger.warning("Pinned store dir unavailable (\(error.localizedDescription, privacy: .public)); using SwiftData default.")
             return nil
         }
-        return dir.appendingPathComponent("AIDash.store")
+        let pinned = dir.appendingPathComponent("AIDash.store")
+        adoptLegacyStoreIfNeeded(pinned: pinned)
+        return pinned
         #else
         return nil
         #endif
     }
+
+    #if os(macOS)
+    /// The user's REAL home directory, even inside the App Sandbox.
+    ///
+    /// `FileManager.homeDirectoryForCurrentUser` / `NSHomeDirectory()` are
+    /// container-relative: in a sandboxed process they return
+    /// `~/Library/Containers/<bundleID>/Data`, NOT `/Users/<name>`. Building the
+    /// "pinned" path from either of those would just re-derive a container path
+    /// and leave the store forking on sandbox posture — the exact bug this is
+    /// meant to close. `getpwuid_r` reads the passwd database directly and is
+    /// the documented sandbox-independent answer.
+    ///
+    /// A sandboxed build then genuinely CANNOT create that directory (no
+    /// entitlement for it), which is what makes `storeURL()`'s catch branch
+    /// reachable and meaningful: it degrades to SwiftData's default instead of
+    /// failing launch.
+    internal static func realHomeDirectory() -> URL {
+        var buffer = [CChar](repeating: 0, count: 4096)
+        var pw = passwd()
+        var result: UnsafeMutablePointer<passwd>?
+        if getpwuid_r(getuid(), &pw, &buffer, buffer.count, &result) == 0,
+           result != nil, let dir = pw.pw_dir {
+            return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
+        }
+        // Fall back rather than trap; a container-relative home is still a
+        // usable location, just not sandbox-independent.
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    /// Legacy SwiftData default store locations, newest-usable first.
+    ///
+    /// `default.store` is what SwiftData creates when no `url:` is given. It
+    /// resolves differently depending on the running process's sandbox state,
+    /// which is exactly how the app ended up with two divergent stores.
+    internal static func legacyStoreURLs() -> [URL] {
+        let home = realHomeDirectory()
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.tianpli.aidash"
+        return [
+            // Unsandboxed (ad-hoc fixed install) — the most recently active one.
+            home.appendingPathComponent("Library/Application Support/default.store"),
+            // Sandboxed (Xcode/dev build).
+            home.appendingPathComponent(
+                "Library/Containers/\(bundleID)/Data/Library/Application Support/default.store"
+            ),
+        ]
+    }
+
+    /// Move an existing legacy store into the pinned location, ONCE.
+    ///
+    /// Without this, pinning the path would itself orphan data: on the first
+    /// launch after the change the pinned file does not exist, SwiftData would
+    /// happily create a fresh empty store, and every row already on disk —
+    /// including append-only events that may never have synced — would become
+    /// invisible. That is the very failure this whole change exists to stop,
+    /// just relocated one directory over.
+    ///
+    /// Picks the legacy candidate with the most recent modification time (the
+    /// store the app actually used last) and moves it plus its `-wal`/`-shm`
+    /// sidecars, which carry committed-but-not-checkpointed rows. Copying only
+    /// the main file would silently drop whatever is still in the WAL.
+    ///
+    /// Deliberately a MOVE, not a copy: leaving the original behind invites a
+    /// future build resolving the old path and resurrecting stale data as a
+    /// third divergent store. Best-effort throughout — a failure here must
+    /// never block launch (§D); worst case the app starts on the pinned store
+    /// and the legacy file stays untouched for manual recovery.
+    internal static func adoptLegacyStoreIfNeeded(pinned: URL) {
+        adoptLegacyStore(from: legacyStoreURLs(), to: pinned)
+    }
+
+    /// Testable core of the migration: `candidates` is injected so the behavior
+    /// can be exercised against a temp directory instead of the real home.
+    internal static func adoptLegacyStore(from candidates: [URL], to pinned: URL) {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: pinned.path) else { return }
+
+        let existing = candidates.filter { fm.fileExists(atPath: $0.path) }
+        guard let legacy = existing.max(by: { lhs, rhs in
+            let l = (try? fm.attributesOfItem(atPath: lhs.path)[.modificationDate] as? Date) ?? nil
+            let r = (try? fm.attributesOfItem(atPath: rhs.path)[.modificationDate] as? Date) ?? nil
+            return (l ?? .distantPast) < (r ?? .distantPast)
+        }) else { return }
+
+        // -wal / -shm must travel with the store or committed rows are lost.
+        for suffix in ["", "-wal", "-shm"] {
+            let from = URL(fileURLWithPath: legacy.path + suffix)
+            let to = URL(fileURLWithPath: pinned.path + suffix)
+            guard fm.fileExists(atPath: from.path) else { continue }
+            do {
+                try fm.moveItem(at: from, to: to)
+            } catch {
+                logger.error("Legacy store adopt failed for \(suffix.isEmpty ? "store" : suffix, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        logger.notice("Adopted legacy SwiftData store into the pinned location.")
+    }
+    #endif
 
     private static func makeConfiguration(
         schema: Schema,
