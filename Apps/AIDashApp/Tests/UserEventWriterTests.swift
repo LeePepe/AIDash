@@ -266,5 +266,76 @@ struct UserEventWriterTests {
         let refs = UserEventWriter.doneRefs(from: events)
         #expect(refs.isEmpty)
     }
+
+    // MARK: - Whole-card star write path (spec 005 D1/D2/D3)
+
+    @Test("star(cardId:itemRef:nil:cardType:) appends one row with action=star, itemRef=nil, cardType")
+    func wholeCardStarAppendsEvent() async throws {
+        let (writer, container) = try makeWriter()
+
+        writer.star(cardId: "trending-card-1", itemRef: nil, cardType: "trending")
+
+        let events = try fetchEvents(container)
+        let event = try #require(events.first)
+        #expect(events.count == 1)
+        #expect(event.action == .star)
+        #expect(event.cardId == "trending-card-1")
+        #expect(event.itemRef == nil)
+        #expect(event.cardType == "trending")
+        #expect(!event.id.isEmpty)
+        #expect(!event.device.isEmpty)
+    }
+
+    @Test("repeated whole-card star for the same cardId+cardType is idempotent")
+    func repeatedWholeCardStarIsIdempotent() async throws {
+        let (writer, container) = try makeWriter()
+
+        writer.star(cardId: "trending-card-1", itemRef: nil, cardType: "trending")
+        writer.star(cardId: "trending-card-1", itemRef: nil, cardType: "trending")
+
+        #expect(try fetchEvents(container).count == 1)
+    }
+
+    @Test("whole-card star under a different card still appends")
+    func wholeCardStarDifferentCardAppends() async throws {
+        let (writer, container) = try makeWriter()
+
+        writer.star(cardId: "trending-card-1", itemRef: nil, cardType: "trending")
+        writer.star(cardId: "trending-card-2", itemRef: nil, cardType: "trending")
+
+        #expect(try fetchEvents(container).count == 2)
+    }
+
+    @Test("whole-card star and per-item star on the same card coexist as separate rows")
+    func wholeCardStarAndItemStarCoexist() async throws {
+        let (writer, container) = try makeWriter()
+        let repoURL = "https://github.com/a/b"
+
+        writer.star(cardId: "trending-card-1", itemRef: repoURL)
+        writer.star(cardId: "trending-card-1", itemRef: nil, cardType: "trending")
+
+        let events = try fetchEvents(container)
+        #expect(events.count == 2)
+        #expect(events.contains { $0.itemRef == repoURL })
+        #expect(events.contains { $0.itemRef == nil && $0.cardType == "trending" })
+    }
+
+    @Test("star(cardId:itemRef:cardType:) with a non-nil itemRef routes to the existing per-item star path")
+    func starWithNonNilItemRefRoutesToPerItemPath() async throws {
+        // Confirms the 3-argument overload doesn't silently discard a caller's
+        // per-item intent if it's ever invoked with itemRef != nil — it must
+        // behave identically to calling `star(cardId:itemRef:)` directly,
+        // including the itemRef-scoped dedup (not the cardType-scoped one).
+        let (writer, container) = try makeWriter()
+        let repoURL = "https://github.com/a/b"
+
+        writer.star(cardId: "radar-card-1", itemRef: repoURL, cardType: "trending")
+
+        let events = try fetchEvents(container)
+        let event = try #require(events.first)
+        #expect(events.count == 1)
+        #expect(event.itemRef == repoURL)
+        #expect(event.cardType == nil) // per-item star path never sets cardType
+    }
 }
 #endif

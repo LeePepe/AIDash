@@ -38,4 +38,57 @@ struct StarActionEnvironmentTests {
         #expect(received?.itemRef == "https://github.com/a/b")
         #expect(values.starredItemRefs.contains("https://github.com/a/b"))
     }
+
+    // MARK: - Spec 005 D4: whole-card star + done-toggle environment values
+
+    @Test("onStarCard defaults to nil → whole-card star button degrades to a no-op")
+    func onStarCardDefaultsToNil() {
+        #expect(EnvironmentValues().onStarCard == nil)
+    }
+
+    @Test("starredCardIds defaults to empty → every card renders outline")
+    func starredCardIdsDefaultsToEmpty() {
+        #expect(EnvironmentValues().starredCardIds.isEmpty)
+    }
+
+    @Test("onToggleDone defaults to nil → done toggle degrades to a no-op")
+    func onToggleDoneDefaultsToNil() {
+        #expect(EnvironmentValues().onToggleDone == nil)
+    }
+
+    @Test("doneItemRefs defaults to empty → every TODO item renders unchecked")
+    func doneItemRefsDefaultsToEmpty() {
+        #expect(EnvironmentValues().doneItemRefs.isEmpty)
+    }
+
+    @Test("injected onStarCard receives the cardId + cardType it was given")
+    @MainActor
+    func injectedOnStarCardRoundTrips() {
+        var values = EnvironmentValues()
+        var received: (cardId: String, cardType: String)?
+        values.onStarCard = { cardId, cardType in received = (cardId, cardType) }
+        values.starredCardIds = ["digest-card-1"]
+
+        values.onStarCard?("digest-card-1", "trending")
+
+        #expect(received?.cardId == "digest-card-1")
+        #expect(received?.cardType == "trending")
+        #expect(values.starredCardIds.contains("digest-card-1"))
+    }
+
+    @Test("injected onToggleDone receives the cardId + itemRef + done it was given")
+    @MainActor
+    func injectedOnToggleDoneRoundTrips() {
+        var values = EnvironmentValues()
+        var received: (cardId: String, itemRef: String, done: Bool)?
+        values.onToggleDone = { cardId, itemRef, done in received = (cardId, itemRef, done) }
+        values.doneItemRefs = ["title:abc"]
+
+        values.onToggleDone?("todo-card-1", "title:abc", true)
+
+        #expect(received?.cardId == "todo-card-1")
+        #expect(received?.itemRef == "title:abc")
+        #expect(received?.done == true)
+        #expect(values.doneItemRefs.contains("title:abc"))
+    }
 }

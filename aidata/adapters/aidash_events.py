@@ -17,7 +17,13 @@ the user starts interacting the next run eats the backlog.
 L2 normalize: one row per event id (last-write-wins). `item_ref` (the starred
 repo URL for radar events; NULL for whole-card events) is preserved verbatim so
 a FUTURE join against github_repo's radar is possible — this adapter does NOT do
-that join.
+that join. `card_type` (spec 005 D2: the card's `CardType.rawValue` at the time
+of the event, e.g. "insight"/"todoList") is preserved the same way — verbatim,
+NULL when the source event has no `cardType` key (older app builds / forward-
+compat, same posture as `item_ref`). It exists so L4 can aggregate whole-card
+star interest PER CARD TYPE without joining back through the date-scoped
+`_kuid` card id, which does not encode type (see aidata/L5_apps/digest/aidash.py
+`_kuid`).
 
 Degrade-not-crash (ADR-23): `events pull` rides XPC, which depends on the AIDash
 app being alive and its mach service healthy — historically the flakiest link.
@@ -153,10 +159,12 @@ CREATE TABLE user_event (
     device TEXT,
     card_id TEXT,
     action TEXT,
-    item_ref TEXT
+    item_ref TEXT,
+    card_type TEXT
 )
 """
-_CLEAN_COLS = ("event_id", "ts", "device", "card_id", "action", "item_ref")
+_CLEAN_COLS = ("event_id", "ts", "device", "card_id", "action", "item_ref",
+              "card_type")
 
 
 def _norm_action(action: Any) -> str | None:
@@ -165,11 +173,14 @@ def _norm_action(action: Any) -> str | None:
 
 
 def normalize() -> int:
-    """One row per event id (last-write-wins). item_ref preserved verbatim.
+    """One row per event id (last-write-wins). item_ref/card_type preserved
+    verbatim.
 
     item_ref is the starred repo URL for radar events and NULL for whole-card
     events; it is kept as-is to enable a FUTURE join with github_repo's radar —
-    NOT performed here.
+    NOT performed here. card_type (spec 005 D2) is the emitting card's type
+    (e.g. "insight"), NULL for events from app builds that predate the field —
+    forward-compat, same posture as item_ref.
     """
     rows: dict[str, dict[str, Any]] = {}
     for rec in read_raw(SOURCE):
@@ -183,6 +194,7 @@ def normalize() -> int:
             "card_id": rec.get("cardId"),
             "action": _norm_action(rec.get("action")),
             "item_ref": rec.get("itemRef"),  # None stays None (whole-card event)
+            "card_type": rec.get("cardType"),  # None on events without the key
         }
     return write_clean(SOURCE, "user_event", _CLEAN_DDL, list(rows.values()),
                        _CLEAN_COLS)

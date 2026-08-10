@@ -142,27 +142,86 @@ public struct TodoListCardView: View {
 // MARK: - TodoItemRow
 
 private struct TodoItemRow: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.onToggleDone) private var onToggleDone
+    @Environment(\.doneItemRefs) private var doneItemRefs
+    @Environment(\.currentCardId) private var currentCardId
     let item: TodoListPayload.Item
     let showDue: Bool
 
+    /// Optimistic toggle: the persisted done/undone event only flows back
+    /// through `doneItemRefs` on the next SwiftData refresh, so the tap flips
+    /// the glyph immediately (spec 005 US4: checked within 100ms).
+    @State private var optimisticDone: Bool?
+
+    private var itemRef: String { UserEvent.stableItemRef(for: item) }
+
+    private var isDone: Bool {
+        optimisticDone ?? doneItemRefs.contains(itemRef)
+    }
+
     var body: some View {
+        // The done toggle sits outside the combined accessibility element so
+        // VoiceOver keeps it as its own actionable control (mirrors
+        // `TrendingItemRow`'s star button in TrendingCardView.swift).
         HStack(spacing: 10) {
-            Image(systemName: "circle")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-            Text(item.title)
-                .font(TodoListCardView.recipe.primary)
-                .lineLimit(2)
-            priorityPill
-            Spacer(minLength: 8)
-            if showDue, let due = item.due {
-                Text(due, style: .date)
-                    .font(TodoListCardView.recipe.secondary)
-                    .foregroundStyle(.tertiary)
+            doneToggle
+            HStack(spacing: 10) {
+                Text(item.title)
+                    .font(TodoListCardView.recipe.primary)
+                    .lineLimit(2)
+                    .strikethrough(isDone)
+                    .foregroundStyle(isDone ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                priorityPill
+                Spacer(minLength: 8)
+                if showDue, let due = item.due {
+                    Text(due, style: .date)
+                        .font(TodoListCardView.recipe.secondary)
+                        .foregroundStyle(.tertiary)
+                }
             }
+            .accessibilityElement(children: .combine)
         }
-        .accessibilityElement(children: .combine)
+    }
+
+    // The completion circle: a real Button (not a static decoration) so a
+    // tap toggles done state via the injected `onToggleDone` closure. Spec
+    // 005 D3/D4 fixes what spec 003 shipped without wiring — the writer
+    // method and latest-wins semantics already existed, but no view called
+    // it. Degrades to a visual no-op when `onToggleDone` isn't injected
+    // (previews, snapshots, tests), per constitution §D graceful degrade.
+    private var doneToggle: some View {
+        Button {
+            let target = !isDone
+            withAnimation(.snappy(duration: 0.2)) { optimisticDone = target }
+            onToggleDone?(currentCardId, itemRef, target)
+        } label: {
+            Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                .font(.subheadline)
+                .foregroundStyle(isDone ? theme.primary.primary : theme.neutrals.text3)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(minWidth: AIDashSpacing.starButtonHitTarget,
+                       minHeight: AIDashSpacing.starButtonHitTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isDone ? Self.doneLabel(item.title) : Self.notDoneLabel(item.title))
+    }
+
+    private static func doneLabel(_ title: String) -> String {
+        String(
+            localized: "todo_list.done_toggle.label.done \(title)",
+            bundle: .module,
+            comment: "VoiceOver label for a TodoList item's completion toggle when the item is marked done. The parameter is the item title."
+        )
+    }
+
+    private static func notDoneLabel(_ title: String) -> String {
+        String(
+            localized: "todo_list.done_toggle.label.not_done \(title)",
+            bundle: .module,
+            comment: "VoiceOver label for a TodoList item's completion toggle when the item is not yet done. The parameter is the item title."
+        )
     }
 
     /// Priority as a content-level status pill (§Content-Level Status Pills):
@@ -257,4 +316,22 @@ private struct TodoItemRow: View {
         style: .warning
     )
     .padding()
+}
+
+// MARK: - Previews: done-toggle states (spec 005 D3/D4)
+
+#Preview("Done toggle — not done (outline)") {
+    let items = [TodoListPayload.Item(title: "Review Atlas PRs", priority: .high)]
+    TodoListCardView(payload: TodoListPayload(items: items), size: .small, style: .neutral)
+        .environment(\.onToggleDone) { _, _, _ in }
+        .environment(\.doneItemRefs, [])
+        .padding()
+}
+
+#Preview("Done toggle — done (checked)") {
+    let items = [TodoListPayload.Item(title: "Review Atlas PRs", priority: .high)]
+    TodoListCardView(payload: TodoListPayload(items: items), size: .small, style: .neutral)
+        .environment(\.onToggleDone) { _, _, _ in }
+        .environment(\.doneItemRefs, [UserEvent.stableItemRef(for: items[0])])
+        .padding()
 }

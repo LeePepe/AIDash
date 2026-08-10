@@ -253,4 +253,76 @@ struct CodableStructRoundTripTests {
         #expect(json.contains("apple"))
     }
 
+    // MARK: - UserEvent.cardType (spec 005 D2 / T001)
+
+    @Test func userEventWithCardTypeRoundTrip() throws {
+        let ts = Date(timeIntervalSince1970: Double(Int(Date().timeIntervalSince1970)))
+        let event = UserEvent(
+            id: "evt-cardtype-1",
+            timestamp: ts,
+            device: "Mac [CAFEBABE]",
+            cardId: "digest-card-42",
+            action: .star,
+            itemRef: nil,
+            cardType: "trending"
+        )
+        let data = try encoder.encode(event)
+        let decoded = try decoder.decode(UserEvent.self, from: data)
+        #expect(decoded.id == "evt-cardtype-1")
+        #expect(decoded.action == .star)
+        #expect(decoded.itemRef == nil)
+        #expect(decoded.cardType == "trending")
+    }
+
+    @Test func userEventWithoutCardTypeRoundTripsAsNil() throws {
+        let event = UserEvent(
+            id: "evt-cardtype-2",
+            timestamp: Date(),
+            device: "iPad [1234]",
+            cardId: "card-002",
+            action: .star
+        )
+        let data = try encoder.encode(event)
+        let decoded = try decoder.decode(UserEvent.self, from: data)
+        #expect(decoded.cardType == nil)
+    }
+
+    @Test func userEventLegacyJSONWithoutCardTypeDecodesAsNil() throws {
+        // Simulates a payload written before cardType existed (pre-spec-005
+        // CloudKit record / older CLI). Forward-compat: missing key -> nil,
+        // never a decode failure.
+        let legacyJSON = Data("""
+        {
+          "id": "evt-legacy-2",
+          "timestamp": "2026-01-01T00:00:00Z",
+          "device": "iPhone [DEADBEEF]",
+          "cardId": "card-legacy",
+          "action": "done",
+          "itemRef": "https://github.com/foo/bar"
+        }
+        """.utf8)
+
+        let decoded = try decoder.decode(UserEvent.self, from: legacyJSON)
+        #expect(decoded.id == "evt-legacy-2")
+        #expect(decoded.action == .done)
+        #expect(decoded.itemRef == "https://github.com/foo/bar")
+        #expect(decoded.cardType == nil)
+    }
+
+    @Test func userEventWithCardTypeEmitsKey() throws {
+        let event = UserEvent(
+            id: "evt-emit-2",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            device: "Mac",
+            cardId: "card-y",
+            action: .star,
+            itemRef: nil,
+            cardType: "trending"
+        )
+        let data = try encoder.encode(event)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(json.contains("\"cardType\""))
+        #expect(json.contains("\"trending\""))
+    }
+
 }
