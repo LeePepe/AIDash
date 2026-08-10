@@ -31,7 +31,7 @@ from L5_apps.digest.sources import (  # noqa: F401 — fetch_ado_pr_trends re-ex
     # batch-2 (L5 数据接入批2): AI 效能 + 时间与产出 + 新闻雷达 + 模型分层.
     fetch_ai_efficiency, fetch_app_focus, fetch_commit_by_repo,
     fetch_cost_by_project, fetch_model_by_project,
-    fetch_leverage, fetch_rework_by_workspace,
+    fetch_leverage, fetch_rework_by_workspace, fetch_tool_cross,
     fetch_news_radar, fetch_model_tier,
     # 你最常收藏的卡型 (spec 005 T007/US5).
     fetch_card_interest,
@@ -104,6 +104,10 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         # 0% across 22 issues). A slow-moving quality signal needs a slow
         # window.
         rework_by_workspace=fetch_rework_by_workspace(None),
+        # Tool cross is all-time for the same reason as rework: a per-call
+        # token average over one day is dominated by whichever session
+        # happened to run long.
+        tool_cross=fetch_tool_cross(None),
     )
 
 

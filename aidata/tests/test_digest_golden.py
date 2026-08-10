@@ -126,6 +126,8 @@ def frozen_trends(monkeypatch):
                         lambda *a, **k: Leverage.empty("skipped:未取"))
     monkeypatch.setattr(app, "fetch_rework_by_workspace",
                         lambda *a, **k: RankBundle([], _skipped("multica_run")))
+    monkeypatch.setattr(app, "fetch_tool_cross",
+                        lambda *a, **k: RankBundle([], _skipped("hermes_messages")))
 
 
 @pytest.mark.unit
