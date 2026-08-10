@@ -314,10 +314,17 @@ public enum AIDashSize {
 public enum AIDashSpacing {
     /// 32pt between containers.
     public static let containerVertical: CGFloat = 32
-    /// 12pt between a container's header and its first card.
+    /// 12pt between a container's header and its first card (framed mode).
     public static let containerHeaderToFirstCard: CGFloat = 12
-    /// 12pt between cards inside a container.
-    public static let cardVertical: CGFloat = 12
+    /// 10pt between a container's header and its content when the container
+    /// renders a single, chrome-less card (§Container Chrome Rule A). Tighter
+    /// than the framed step because there is no card padding left to absorb
+    /// the gap — the title and the content read as one block.
+    public static let containerHeaderToBareContent: CGFloat = 10
+    /// 14pt between cards inside a container. Rule B separates cards by SPACE
+    /// rather than by contrast, so this widened from 12pt when the hairline
+    /// was damped (MY-1306).
+    public static let cardVertical: CGFloat = 14
     /// 16pt grid column gap.
     public static let gridGap: CGFloat = 16
     /// 24pt page horizontal padding on macOS.
@@ -366,10 +373,31 @@ public enum AIDashSpace {
 
 public enum AIDashChrome {
     /// Width of the left-edge accent stripe drawn for non-neutral styles.
+    /// Also the width of the bare-mode title-side bar, so `style` reads the
+    /// same weight whichever mode a container resolves to.
     public static let stripeWidth: CGFloat = 3
     /// Width of the 1px border overlay that defines card edges
     /// (`theme.neutrals.border`, luminance-tier elevation per §Card Chrome).
     public static let hairlineWidth: CGFloat = 1
+
+    /// Opacity applied to the stripe / title-side bar. Just under full so the
+    /// signal stays legible without becoming the loudest thing on the page
+    /// (§Container Chrome Rule B).
+    public static let stripeOpacity: Double = 0.9
+
+    /// Opacity applied to the card hairline in `.framed` mode. Damped to a
+    /// boundary HINT: the multi-card frame must stay distinguishable while the
+    /// page stops reading as a stack of boxes (§Container Chrome Rule B).
+    /// Damped, never deleted — at 0 the cards in a multi-card container would
+    /// lose their mutual boundary.
+    public static let hairlineOpacity: Double = 0.08
+
+    /// How far the bare-mode title-side bar hangs into the page margin: the
+    /// bar's own width plus one ladder step of breathing room. Offsetting by
+    /// this keeps the TITLE TEXT and the (now unpadded) card content on one
+    /// left edge — the whole point of dropping the frame. Fits inside the
+    /// tightest page padding (`pageHorizontalCompact`), so it is never clipped.
+    public static let titleBarGutter: CGFloat = stripeWidth + AIDashSpace.s8
 
     /// Stripe color per `style`, resolved from the theme's semantic/primary
     /// tokens. `neutral` returns `nil` — no stripe drawn. Colors come from
@@ -385,12 +413,19 @@ public enum AIDashChrome {
 }
 
 // MARK: - Shared card chrome modifier
+//
+// Two branches, selected by the container-derived `cardChromeMode` (MY-1306):
+// `.bare` for a lone card (the container title already carries the grouping,
+// so a frame here would be the second one) and `.framed` for two or more.
+// The modifier NEVER consults `CardType` — chrome is count-driven, so the
+// type / size / style dimensions stay orthogonal (§Principle VI).
 
 public struct CardChromeModifier: ViewModifier {
     public let size: CardSize
     public let style: CardStyle
     public let minHeightOverride: CGFloat?
     @Environment(\.theme) private var theme
+    @Environment(\.cardChromeMode) private var chromeMode
 
     public init(size: CardSize, style: CardStyle, minHeightOverride: CGFloat? = nil) {
         self.size = size
@@ -398,10 +433,35 @@ public struct CardChromeModifier: ViewModifier {
         self.minHeightOverride = minHeightOverride
     }
 
+    @ViewBuilder
     public func body(content: Content) -> some View {
+        switch chromeMode {
+        case .bare:
+            bare(content)
+        case .framed:
+            framed(content)
+        }
+    }
+
+    /// Rule A — the lone card of a container draws NO frame: no background, no
+    /// hairline, no corner radius, no card padding, no min height. The content
+    /// sits directly on the page background, flush with the container title,
+    /// and its `style` is carried by the title-side bar instead of a stripe.
+    @ViewBuilder
+    private func bare(_ content: Content) -> some View {
+        content.frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// Rule B — two or more cards keep the frame, because they still need a
+    /// boundary against each other. It is damped though: the hairline drops to
+    /// `hairlineOpacity` and the stripe to `stripeOpacity`, so a container
+    /// separates its cards mostly by space (`AIDashSpacing.cardVertical`)
+    /// rather than by contrast.
+    @ViewBuilder
+    private func framed(_ content: Content) -> some View {
         let radius = AIDashSize.cornerRadius(size)
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return content
+        content
             .padding(AIDashSize.padding(size))
             .frame(
                 minHeight: minHeightOverride ?? AIDashSize.minHeight(size),
@@ -410,14 +470,14 @@ public struct CardChromeModifier: ViewModifier {
             .background(theme.neutrals.card, in: shape)
             .overlay(
                 shape.strokeBorder(
-                    theme.neutrals.border,
+                    theme.neutrals.border.opacity(AIDashChrome.hairlineOpacity),
                     lineWidth: AIDashChrome.hairlineWidth
                 )
             )
             .overlay(alignment: .leading) {
                 if let stripe = AIDashChrome.stripeColor(for: style, theme: theme) {
                     Rectangle()
-                        .fill(stripe)
+                        .fill(stripe.opacity(AIDashChrome.stripeOpacity))
                         .frame(width: AIDashChrome.stripeWidth)
                 }
             }
@@ -448,8 +508,17 @@ extension View {
     /// panel (e.g. an insight lead statement) without a renderer inlining its
     /// own `.background(...)` — the modifier lives in the token layer, so the
     /// renderer chrome guards stay satisfied.
-    public func innerSurface(padding: CGFloat = 12) -> some View {
-        modifier(InnerSurfaceModifier(padding: padding))
+    ///
+    /// `role` says what the panel represents (MY-1306 Rule C). A `.body` panel
+    /// wraps the card's WHOLE body, so in a bare card it would regrow the
+    /// removed frame one level inward — it collapses to plain content there.
+    /// `.emphasis` (the default, and what every existing call site means) is a
+    /// local highlight and survives in both modes.
+    public func innerSurface(
+        padding: CGFloat = 12,
+        role: InnerSurfaceRole = .emphasis
+    ) -> some View {
+        modifier(InnerSurfaceModifier(padding: padding, role: role))
     }
 
     /// Fill an already-padded view with the `neutrals.inner` surface clipped to
@@ -470,18 +539,33 @@ public struct StatChipSurfaceModifier: ViewModifier {
 
 public struct InnerSurfaceModifier: ViewModifier {
     public let padding: CGFloat
+    public let role: InnerSurfaceRole
     @Environment(\.theme) private var theme
+    @Environment(\.cardChromeMode) private var chromeMode
 
-    public init(padding: CGFloat = 12) {
+    public init(padding: CGFloat = 12, role: InnerSurfaceRole = .emphasis) {
         self.padding = padding
+        self.role = role
     }
 
+    public var drawsSurface: Bool {
+        AIDashContainerChrome.drawsInnerSurface(role: role, mode: chromeMode)
+    }
+
+    @ViewBuilder
     public func body(content: Content) -> some View {
-        content
-            .padding(padding)
-            .background(
-                theme.neutrals.inner,
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
+        if drawsSurface {
+            content
+                .padding(padding)
+                .background(
+                    theme.neutrals.inner,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+        } else {
+            // Rule C: the panel would be the removed frame, one level in.
+            // Drop the fill AND its padding so the text lands on the same left
+            // edge as the container title.
+            content
+        }
     }
 }
