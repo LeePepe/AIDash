@@ -34,6 +34,20 @@ Configs/Identity.local.xcconfig
 Thumbs.db
 
 # ---------------------------------------------------------------------------
+# fastlane / TestFlight 分发(spec 004)
+# 构建产物与**签名材料**。.p8 / .mobileprovision 一旦进版本库等于把发布权限
+# 交出去 —— 与宪法 §No Identity in Version Control 同源的红线。
+# ---------------------------------------------------------------------------
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/
+fastlane/README.md
+AuthKey_*.p8
+*.mobileprovision
+*.ipa
+*.dSYM.zip
+
+# ---------------------------------------------------------------------------
 # aidata (Python 数据层)
 # 全部规则显式锚定到 aidata/ —— 不加前缀会误伤全仓库同名文件（如 state.json）。
 # ---------------------------------------------------------------------------

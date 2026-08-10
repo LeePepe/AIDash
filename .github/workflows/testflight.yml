@@ -1,0 +1,158 @@
+name: testflight
+
+# 定时把 main 打包上传 TestFlight(内部测试)。
+#   - schedule: 每天 03:07 CST 检查一次;仅当 main 自上次成功发布后有新 commit 才 build。
+#     「上次发布点」记录在 moving tag `testflight/last-released`(累积式:build 失败
+#     或机器关机期间不丢 commit,下次开机的 cron 会把攒的一起发)。
+#     分钟取 7 而非 0 —— 整点是 GitHub cron 的高峰,排队延迟明显。
+#   - workflow_dispatch: 手动兜底,force=true 可忽略「无新提交」检查强制发一次。
+#     首次验证真实上传就走这条(见 docs/testflight-handoff.md)。
+#
+# 跑在 self-hosted `aidash-mac`(复用 claude-review / codex-review 那台):
+# Apple Distribution 证书已在登录钥匙串,所以不需要把 .p12 塞进 Secret。
+# 需要的 Secrets: ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8_BASE64 / ASC_TEAM_ID /
+# KEYCHAIN_PASSWORD。前置条件与配置步骤见 docs/testflight-handoff.md。
+#
+# 安全:本 workflow 只在 schedule / workflow_dispatch 上触发,永远 checkout main
+# ——不存在 fork PR 的代码在维护者本机执行的路径(与 claude-review.yml 的可信
+# 边界同理,只是这里更简单:根本不碰 PR 内容)。
+#
+# push tag 不触发 build.yml(其 push 过滤是 branches: [main]),无副作用。
+
+on:
+  schedule:
+    - cron: "7 19 * * *" # 19:07 UTC = 03:07 CST
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '忽略「无新提交」检查,强制发一次'
+        type: boolean
+        default: false
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false # 不打断进行中的上传
+
+permissions:
+  contents: write # 移动 testflight/last-released tag
+
+jobs:
+  release:
+    name: Build & upload to TestFlight
+    runs-on: [self-hosted, aidash-mac]
+    timeout-minutes: 40
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Decide whether to release
+        id: gate
+        run: |
+          set -euo pipefail
+          LATEST="$(git rev-parse HEAD)"
+          RELEASED="$(git rev-parse -q --verify refs/tags/testflight/last-released || echo none)"
+          FORCE="${{ github.event.inputs.force }}"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "HEAD=$LATEST  last-released=$RELEASED  force=$FORCE"
+          if [ "$FORCE" = "true" ] || [ "$LATEST" != "$RELEASED" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "→ 有新提交(或 force):将 build + 上传"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "→ skipped: no new commits since last TestFlight release"
+          fi
+
+      - name: Verify Xcode
+        if: steps.gate.outputs.release == 'true'
+        # self-hosted runner 上 Xcode 由用户选定(无 passwordless sudo,不能像
+        # GitHub 托管 runner 那样 sudo xcode-select)。这里只校验版本可用。
+        run: |
+          echo "Using: $(xcode-select -p)"
+          xcodebuild -version
+
+      - name: Ensure xcodegen + fastlane
+        if: steps.gate.outputs.release == 'true'
+        # AIDash.xcodeproj 是 gitignore 的生成物,lane 里会 xcodegen generate,
+        # 所以两个工具都得在。已装则跳过(brew list 比 brew install 快得多)。
+        run: |
+          set -euo pipefail
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          brew list fastlane >/dev/null 2>&1 || brew install fastlane
+
+      - name: Verify API key secret
+        if: steps.gate.outputs.release == 'true'
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_TEAM_ID: ${{ secrets.ASC_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          # fastlane 直接吃 base64 的 key_content(is_key_content_base64: true),
+          # 所以这里只校验 Secret 存在,不把明文 .p8 落到磁盘上。
+          # 提前失败比让 fastlane 在 archive 之后才报「认证失败」省 10 分钟。
+          missing=0
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64 ASC_TEAM_ID; do
+            if [ -z "$(eval "echo \${$name:-}")" ]; then
+              echo "::error::$name secret 未设置(gh secret set $name)"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: Unlock login keychain for codesign
+        if: steps.gate.outputs.release == 'true'
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # runner 跑在独立 launchd 会话(PPID=1),login keychain 在该会话里默认
+          # 锁定 → codesign 拿不到 Apple Distribution 私钥 → errSecInternalComponent
+          # (报错完全不提「钥匙串锁着」,极难排查)。每次 build 前显式解锁 +
+          # 放行 codesign 无提示访问私钥。
+          if [ -z "${KEYCHAIN_PASSWORD:-}" ]; then
+            echo "::error::KEYCHAIN_PASSWORD secret 未设置(gh secret set KEYCHAIN_PASSWORD)"; exit 1
+          fi
+          KC="$HOME/Library/Keychains/login.keychain-db"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          # 关掉自动锁定(interval / lock-on-sleep),避免长 archive 期间被重新锁上。
+          security set-keychain-settings "$KC"
+          # 确保 login keychain 在 search list 里(codesign 才找得到私钥)。
+          # 保留现有 search list,只补上 login —— `-s` 会替换整份,所以先读回再合并去重。
+          EXISTING=$(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//')
+          security list-keychains -d user -s $(printf '%s\n' "$KC" $EXISTING | awk '!seen[$0]++')
+          # 放行 codesign / apple 工具无提示访问私钥(幂等,重复跑无害)。
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KC" >/dev/null 2>&1 || true
+
+      - name: fastlane ios beta
+        if: steps.gate.outputs.release == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          # 宪法 §No Identity in Version Control:Team ID 不进版本库,由 secret
+          # 注入(fastlane/identity.rb 优先读它,本机则回退 Identity.local.xcconfig)。
+          AIDASH_DEVELOPMENT_TEAM: ${{ secrets.ASC_TEAM_ID }}
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+          # self-hosted runner 首次 SPM resolve + showBuildSettings 慢,会撞上
+          # fastlane 默认 3s 超时(重试到 24s 仍不够)导致 build_app 直接放弃。
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
+          FASTLANE_XCODEBUILD_SETTINGS_RETRIES: "6"
+        run: fastlane ios beta
+
+      - name: Move last-released tag
+        if: steps.gate.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.gate.outputs.latest }}"
+          git tag -f testflight/last-released "$SHA"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "refs/tags/testflight/last-released"
+          echo "✅ testflight/last-released → $SHA"

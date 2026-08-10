@@ -1,0 +1,175 @@
+# AIDash TestFlight 自动发布 lane。
+#
+# 由 .github/workflows/testflight.yml 在 self-hosted runner(aidash-mac)上调用。
+# 全程走 App Store Connect API Key(.p8),无需 Apple ID / 2FA —— 这是能无人值守
+# 定时发布的前提。
+#
+# 需要的环境变量(workflow 从 GitHub Secrets 注入):
+#   ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8_BASE64 / AIDASH_DEVELOPMENT_TEAM
+#
+# 签名:manual + App Store distribution profile(由 get_provisioning_profile 拉取)。
+# **不用 automatic** —— 教训来自 VitalStride:runner 的登录钥匙串里躺着多个 Apple
+# 账号的证书,automatic 在 archive 阶段会为 target 解析 Development 证书,而付费
+# team 往往只有 Distribution、没有 Development → automatic 回退去挑了别的账号的
+# Development 证书 → errSecInternalComponent,报错信息还完全不指向真正原因。
+# 改 manual 后由我们显式指定 profile,不依赖 automatic 的启发式挑选。
+#
+# AIDash 与 VitalStride 的差异(有意删掉的部分):本 app 无 widget / app extension
+# (单 bundle ID,不存在 app 与 extension build number 必须一致的坑),
+# 无 HealthKit,无 GlitchTip / Aptabase 遥测 —— 因此没有 dSYM 上传、没有
+# 注入遥测密钥的 xcargs、没有第二个 profile。
+
+require "base64"
+require_relative "identity"
+
+default_platform(:ios)
+
+APP_IDENTIFIER = AIDash::Identity.app_identifier.freeze
+TEAM_ID = AIDash::Identity.team_id.freeze
+SCHEME = "AIDashApp".freeze
+XCODEPROJ = "AIDash.xcodeproj".freeze
+
+platform :ios do
+  desc "Build and upload a build to TestFlight (internal testing)"
+  lane :beta do
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_P8_BASE64"),
+      is_key_content_base64: true,
+      in_house: false
+    )
+
+    # AIDash.xcodeproj 是 gitignore 的生成物(project.yml 才是源),所以 lane 必须
+    # 先生成它 —— runner 上 checkout 出来的工作区里没有 .xcodeproj。
+    sh("cd .. && xcodegen generate")
+
+    # Build number 必须**全局单调递增**(跨 marketing version 不重置)。
+    # 刻意不传 `version:` —— 传了会把查询限定在「当前 marketing version 内」,
+    # 于是 bump 到 1.1 后 build 从 1 重新开始,而 1.0 可能已经到 build 4,
+    # 新的 1.1(1) 的 CFBundleVersion 反而更小。TestFlight/ASC 按全局 build number
+    # 判新旧,会把它当成比 1.0(4) 更旧的构建。不传 version 就查该 app 所有版本的
+    # 最大 build,永不倒退。(这是 VitalStride 踩过的坑,原样保留结论。)
+    latest = latest_testflight_build_number(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      initial_build_number: 0
+    )
+    next_build = latest.to_i + 1
+    UI.message("TestFlight latest build (all versions) = #{latest}; this build = #{next_build}")
+
+    # 拉 App Store distribution profile(付费 team)。需要时自动在 Developer Portal
+    # 创建。不传 adhoc/developer_id —— 二者互斥且默认 false 即 App Store distribution。
+    #
+    # force: true —— 每次都重新生成 profile。App ID 新增 capability(AIDash 用
+    # iCloud/CloudKit)后,旧 profile 是加能力之前的快照、不含新 entitlements;
+    # fastlane 默认(force: false)会复用这份过时 profile → archive 报
+    # "provisioning profile doesn't include the iCloud capability"。
+    # force: true 保证 profile 始终反映 App ID 的最新能力。
+    app_profile = get_provisioning_profile(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      team_id: TEAM_ID,
+      force: true,
+      skip_install: false
+    )
+
+    build_app(
+      project: XCODEPROJ,
+      scheme: SCHEME,
+      configuration: "Release",
+      # 单 target、单 bundle ID,destination 显式锁 iOS —— AIDashApp 的
+      # supportedDestinations 同时含 macOS,不锁的话 archive 可能挑成 macOS。
+      destination: "generic/platform=iOS",
+      export_method: "app-store",
+      export_team_id: TEAM_ID,
+      # 只注入 build number + team。build number 经由 project.yml 的
+      # CURRENT_PROJECT_VERSION 流进 Info.plist 的 CFBundleVersion
+      # (Info.plist 里写的是 $(CURRENT_PROJECT_VERSION),不是字面量,
+      #  否则这个 xcargs 覆盖不到、每次都传 build 1 被 ASC 拒收)。
+      xcargs: "CURRENT_PROJECT_VERSION=#{next_build} " \
+              "DEVELOPMENT_TEAM=#{TEAM_ID}",
+      export_options: {
+        # fastlane 已经算好 build number 了,不让 Xcode 再自作主张改一遍。
+        manageAppVersionAndBuildNumber: false,
+        signingStyle: "manual",
+        teamID: TEAM_ID,
+        provisioningProfiles: {
+          APP_IDENTIFIER => ENV.fetch("sigh_#{APP_IDENTIFIER}_appstore_profile-name",
+                                      app_profile)
+        }
+      },
+      output_directory: ENV.fetch("RUNNER_TEMP", "/tmp"),
+      clean: true
+    )
+
+    # 上传 build 并等 ASC 处理完(分发到群组的前提:没处理完就加不进群组)。
+    #
+    # ⚠️ 为什么不用 upload_to_testflight 的 `groups:` 参数:fastlane 文档明确
+    # `groups` 只在 `distribute_external: true` 时生效。我们要发到 **internal**
+    # 群组(distribute_external: false),所以 `groups:` 会被完全忽略 —— build
+    # 传上去、处理完,却不分发给 internal 测试员(VitalStride 2026-07 踩过 build
+    # 4/5:日志无任何分发动作、也不报错,测试员看不到,只能手动加)。而 ASC 对
+    # 「Xcode/API 上传的 build」的 internal 群组强制「手动分发」,不提供自动开关。
+    #
+    # 正确做法:上传后用 spaceship(fastlane 内置 ASC API)显式把 build 加到
+    # internal betaGroup。见下方 distribute-to-internal 块。
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      skip_waiting_for_build_processing: false,
+      skip_submission: true,
+      distribute_external: false
+    )
+
+    distribute_to_internal_groups(next_build: next_build)
+  end
+
+  # 显式把刚上传的 build 分发到 internal 群组(默认 "Internal",可用
+  # TESTFLIGHT_GROUPS 覆盖,逗号分隔可多组)。用 spaceship 直接调 ASC API,
+  # 绕开 upload_to_testflight `groups:` 对 internal 无效的坑(见上方注释)。
+  #
+  # 容错:分发失败不让整个 lane 挂(binary 已经上传成功了,重跑一次分发即可),
+  # 除非 TESTFLIGHT_STRICT_UPLOAD=1。
+  private_lane :distribute_to_internal_groups do |options|
+    next_build = options[:next_build]
+    group_names = ENV.fetch("TESTFLIGHT_GROUPS", "Internal")
+                     .split(",").map(&:strip).reject(&:empty?)
+
+    begin
+      require "spaceship"
+      Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
+        key_id: ENV.fetch("ASC_KEY_ID"),
+        issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+        key: Base64.decode64(ENV.fetch("ASC_KEY_P8_BASE64"))
+      )
+
+      asc_app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+      UI.user_error!("App #{APP_IDENTIFIER} not found in App Store Connect") if asc_app.nil?
+
+      # 只按 build_number 查,不传 version —— build number 全局唯一(见上面
+      # latest_testflight_build_number 的注释),用它定位比用 marketing version
+      # 稳:后者改了这里就得跟着改,是个必然腐烂的耦合。
+      build = Spaceship::ConnectAPI::Build.all(
+        app_id: asc_app.id,
+        build_number: next_build.to_s
+      ).first
+      UI.user_error!("Uploaded build (#{next_build}) not found in ASC for distribution") if build.nil?
+
+      all_groups = asc_app.get_beta_groups
+      group_names.each do |name|
+        group = all_groups.find { |g| g.name == name }
+        if group.nil?
+          UI.important("Beta group '#{name}' not found in ASC — skipping (名字大小写敏感,去 ASC 核对)。")
+          next
+        end
+        build.add_beta_groups(beta_groups: [group])
+        UI.success("Distributed build #{next_build} to group '#{name}'.")
+      end
+    rescue StandardError => e
+      UI.error("Internal-group distribution failed: #{e.message}")
+      UI.important("Binary 已上传成功,build 在 TestFlight 里但未分发到群组 —— 手动加或重跑一次。")
+      raise e if ENV["TESTFLIGHT_STRICT_UPLOAD"] == "1"
+    end
+  end
+end
