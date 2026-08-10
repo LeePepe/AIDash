@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from config import UNPRICED_MODELS
+
 ROOT = Path(__file__).resolve().parent.parent
 WAREHOUSE = ROOT / "L3_merge" / "warehouse.db"
 
@@ -44,9 +46,60 @@ def test_model_canon_collapses_names():
 def test_no_tokens_without_cost():
     # The v2 headline fix: every row that has BOTH tokens must have a cost.
     # (NULL-token rows legitimately stay NULL — excluded here.)
+    #
+    # UNPRICED_MODELS is the one sanctioned escape hatch. Some models have no
+    # published price at all (internal/codename builds), and inventing a number
+    # would be worse than a NULL: a made-up rate turns an honest gap into a
+    # precise-looking wrong number that flows into the cost-attribution cards
+    # and never trips a gate again. So those rows stay NULL on purpose and are
+    # measured in TOKENS, not dollars.
+    #
+    # The exemption is deliberately narrow — an explicit name list, not a
+    # predicate — so a NEW unpriced model still fails this test loudly instead
+    # of silently joining the exempt set. Adding a name here is a decision.
+    #
+    # The empty-list short-circuit matters: the finding doc tells the next
+    # reader to REMOVE a name once a real price is known, and emptying the tuple
+    # would otherwise render `NOT IN ()`, which SQLite rejects as a syntax
+    # error — the gate would explode instead of passing, right at the moment it
+    # should simply become unconditional again.
+    # `model_canon IS NULL` must stay INSIDE the gate. SQLite evaluates
+    # `NULL NOT IN (...)` to NULL, not true, so a bare NOT IN silently drops
+    # every NULL-model row from the count — verified: 2 rows, `NOT IN` counts 1.
+    # model_canon() returns None for empty/None input and _cost() returns None
+    # in the same case, so "tokens present, cost NULL, model_canon NULL" is a
+    # REAL shape this gate is supposed to catch. Excluding it would widen the
+    # exemption far beyond the explicit name list this comment promises.
+    clause = ""
+    if UNPRICED_MODELS:
+        exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)
+        clause = f" AND (model_canon IS NULL OR model_canon NOT IN ({exempt}))"
     n = int(_q(
         "SELECT count(*) FROM fact_request "
         "WHERE cost_usd IS NULL AND input_tokens IS NOT NULL "
-        "AND output_tokens IS NOT NULL;"
+        f"AND output_tokens IS NOT NULL{clause};"
     ))
-    assert n == 0, f"{n} rows have tokens but no cost"
+    assert n == 0, f"{n} rows have tokens but no cost (and are not in UNPRICED_MODELS)"
+
+
+@pytest.mark.integration
+def test_unpriced_models_still_carry_tokens():
+    # The flip side of the exemption: an unpriced model must still be fully
+    # measurable in tokens. If these rows lost their token counts too they
+    # would be invisible everywhere, not just in the dollar columns — the
+    # exemption is about MISSING PRICE, never about missing usage.
+    #
+    # Note on the 2 `gpt-5.6-luna` / `codex-tui` rows the finding doc lists as
+    # having NULL input/output tokens: they are NOT a violation here. This gate
+    # checks `total_tokens`, which raven populates for those rows (verified:
+    # 0 of 72 unpriced-model rows have a NULL total_tokens, including those 2).
+    # Per-field NULLs are a legitimate upstream shape — the invariant that
+    # matters is that overall USAGE stays measurable.
+    if not UNPRICED_MODELS:
+        pytest.skip("no unpriced models — nothing to assert")
+    exempt = ", ".join(f"'{m}'" for m in UNPRICED_MODELS)
+    n = int(_q(
+        "SELECT count(*) FROM fact_request "
+        f"WHERE model_canon IN ({exempt}) AND total_tokens IS NULL;"
+    ))
+    assert n == 0, f"{n} unpriced-model rows also lack tokens — usage must stay measurable"
