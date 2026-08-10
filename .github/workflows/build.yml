@@ -194,6 +194,21 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Build AIDashApp (iOS)
+        # 宪法 §Testing gate 1(四端构建门)的 iOS 边。AIDashApp 是
+        # supportedDestinations: [macOS, iOS] 的单 target,generic/platform=iOS
+        # 编一次即覆盖 iPhone/iPad(同 target、同代码),不必再加 iPad destination。
+        #
+        # 这个门防的是 T201 那类回归:macOS 专属 API(SecCode 等)悄悄漏进
+        # 共用代码路径,macOS 绿、iOS 却编不过——只跑 macOS 的话看不见。
+        # CI 不签名,所以 CODE_SIGNING_ALLOWED=NO(entitlements 按 SDK 拆分见 T202)。
+        run: |
+          xcodebuild \
+            -scheme AIDashApp \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
       - name: Build aidash CLI (macOS)
         run: |
           xcodebuild \
