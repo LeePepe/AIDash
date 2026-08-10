@@ -21,7 +21,8 @@ advance the cursor. The cursor is `{"ts": <newest>, "ids": [...]}` — a bare
 timestamp is NOT enough because `--since` is inclusive AND stamps are only
 second-granular, so the ids collected at that second are tracked to tell a
 re-pull from a genuine same-second sibling. A legacy bare-string watermark is
-still read (its id set is unknown → the whole second is excluded, once).
+still read (its id set is unknown → that second is re-collected once, since a
+duplicate raw line is deduped at L2 while a skipped event would be lost).
 A living source (like news / github_repo): 0 events today is a perfectly valid
 empty result, and once the user starts interacting the next run eats the backlog.
 

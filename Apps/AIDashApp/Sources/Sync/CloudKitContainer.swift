@@ -325,6 +325,25 @@ public final class CloudKitContainer {
         adoptLegacyStore(from: legacyStoreURLs(), to: pinned)
     }
 
+    /// Newest activity across a store's WHOLE file set, not just the `.store`.
+    ///
+    /// SQLite in WAL mode appends commits to `-wal` and only folds them into
+    /// the main file at a checkpoint, so the `.store` mtime can lag its own
+    /// live data by hours. Ranking candidates by the main file alone would
+    /// therefore pick the STALER database whenever the busier one simply had
+    /// not checkpointed yet — and the newest append-only events would stay
+    /// orphaned, which is the precise failure this migration exists to end.
+    /// (Measured on a real machine: the `-wal` was 14 hours newer than its
+    /// own `.store`.)
+    internal static func lastActivity(of store: URL) -> Date {
+        let fm = FileManager.default
+        return ["", "-wal", "-shm"].compactMap { suffix -> Date? in
+            let path = store.path + suffix
+            guard let attrs = try? fm.attributesOfItem(atPath: path) else { return nil }
+            return attrs[.modificationDate] as? Date
+        }.max() ?? .distantPast
+    }
+
     /// Testable core of the migration: `candidates` is injected so the behavior
     /// can be exercised against a temp directory instead of the real home.
     ///
@@ -343,10 +362,8 @@ public final class CloudKitContainer {
         guard !fm.fileExists(atPath: pinned.path) else { return }
 
         let existing = candidates.filter { fm.fileExists(atPath: $0.path) }
-        guard let legacy = existing.max(by: { lhs, rhs in
-            let l = (try? fm.attributesOfItem(atPath: lhs.path)[.modificationDate] as? Date) ?? nil
-            let r = (try? fm.attributesOfItem(atPath: rhs.path)[.modificationDate] as? Date) ?? nil
-            return (l ?? .distantPast) < (r ?? .distantPast)
+        guard let legacy = existing.max(by: {
+            lastActivity(of: $0) < lastActivity(of: $1)
         }) else { return }
 
         // More than one legacy store means the split-brain left data on BOTH
@@ -357,7 +374,7 @@ public final class CloudKitContainer {
         // with them.
         if existing.count > 1 {
             let others = existing.filter { $0 != legacy }.map(\.path).joined(separator: ", ")
-            logger.warning("Multiple legacy stores found; adopting the most recent. NOT migrated: \(others, privacy: .public)")
+            logger.warning("Multiple legacy stores found; adopting the one with the newest activity across store/-wal/-shm. NOT migrated: \(others, privacy: .public)")
         }
 
         let staging = pinned.deletingLastPathComponent()

@@ -285,3 +285,48 @@ import AIDashCore
     #expect(fm.fileExists(atPath: legacy.path + "-wal"))
     #endif
 }
+
+@MainActor
+@Test func adoptRanksCandidatesByWalActivityNotJustTheStoreFile() throws {
+    #if os(macOS)
+    // SQLite in WAL mode appends commits to -wal and only folds them into the
+    // main file at a checkpoint, so a busy store's .store mtime can lag its own
+    // live data by hours. Ranking by the main file alone picks the STALER
+    // database and leaves the newest append-only events orphaned — exactly the
+    // failure this migration exists to end. (Measured on a real machine: the
+    // -wal was 14 hours newer than its own .store.)
+    let fm = FileManager.default
+    let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tmp) }
+
+    let old = Date(timeIntervalSince1970: 1_000_000)
+    let new = Date(timeIntervalSince1970: 2_000_000)
+
+    // Candidate A: NEWER .store, but no recent WAL activity.
+    let quiet = tmp.appendingPathComponent("quiet.store")
+    try Data("quiet".utf8).write(to: quiet)
+    try fm.setAttributes([.modificationDate: new], ofItemAtPath: quiet.path)
+
+    // Candidate B: OLDER .store, but its -wal carries the newest commits.
+    let busy = tmp.appendingPathComponent("busy.store")
+    try Data("busy".utf8).write(to: busy)
+    try Data("wal".utf8).write(to: URL(fileURLWithPath: busy.path + "-wal"))
+    try fm.setAttributes([.modificationDate: old], ofItemAtPath: busy.path)
+    try fm.setAttributes([.modificationDate: new.addingTimeInterval(60)],
+                         ofItemAtPath: busy.path + "-wal")
+
+    #expect(CloudKitContainer.lastActivity(of: busy)
+            > CloudKitContainer.lastActivity(of: quiet))
+
+    let pinned = tmp.appendingPathComponent("dest/AIDash.store")
+    try fm.createDirectory(at: pinned.deletingLastPathComponent(),
+                           withIntermediateDirectories: true)
+    CloudKitContainer.adoptLegacyStore(from: [quiet, busy], to: pinned)
+
+    // The busy store (newest WAL) must win, not the one with the newer .store.
+    #expect(try String(contentsOf: pinned, encoding: .utf8) == "busy")
+    #expect(fm.fileExists(atPath: pinned.path + "-wal"))
+    #expect(fm.fileExists(atPath: quiet.path))  // the loser is left untouched
+    #endif
+}
