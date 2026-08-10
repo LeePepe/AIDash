@@ -12,11 +12,11 @@ red_lines:
   - 无 App 侧 LLM 调用:内容是 agent 撰写的,不在视图层生成
   - 无 fatalError / try! / as!,渲染失败走优雅 UI 回退
 roles:                              # 层内轴:类角色 → 目录(角色顺序见顶层 canonical_roles)
-  Types:   [DesignTokens]          # 几何/排版/chrome 令牌:纯值,不依赖任何视图(颜色来自 DesignKit)
+  Types:   [DesignTokens, ContainerChrome]  # 几何/排版/chrome 令牌:纯值,不依赖任何视图(颜色来自 DesignKit)
   Runtime: [Layout]                # 容器布局引擎:Grid/List/Hero/Auto,消费 Tokens
   UI:      [CardView]              # 类型渲染器 + 视图:依赖 Layout + Tokens,最上层
 test: swift test --package-path Packages/AIDashUI
-owns: [BriefingView, ContainerView, CardRouter, DesignTokens, AutoLayout, GridLayout, ListLayout, HeroLayout, MetricCardView, TrendingCardView, SectionHeaderCardView]
+owns: [BriefingView, ContainerView, CardRouter, DesignTokens, ContainerChrome, AutoLayout, GridLayout, ListLayout, HeroLayout, MetricCardView, TrendingCardView, SectionHeaderCardView]
 ---
 
 # AIDashUI Tech Context
@@ -44,6 +44,11 @@ owns: [BriefingView, ContainerView, CardRouter, DesignTokens, AutoLayout, GridLa
   `AIDashSize` `AIDashChrome` `CardTypeBadge` `CardChromeModifier`)。**颜色不在此**——
   颜色来自 DesignKit,视图经 `@Environment(\.theme)` 读 `Theme` 解析
   (`classificationTint`/`success`/`warning`/`danger`/`primary`)。
+- **ContainerChrome.swift**:容器 chrome 模式(MY-1306)。容器**只按卡片数**决定卡片画不画
+  边框:1 张 → `.bare`(无背景/发丝线/圆角/内边距,内容直接坐在页面底色上,`style` 移到
+  标题旁的竖条),≥2 张 → `.framed`(保留边框但压低对比)。决策函数
+  `AIDashContainerChrome.chromeMode(effectiveCardCount:)` 是纯函数;结果经
+  `\.cardChromeMode` 环境值下发给卡片。**不得**按 `CardType` 判定——否则三维度又混了。
 - **Prototype/**:设计原型(`KPICardPrototype` `HeatmapPrototype`
   `ModernBriefingPrototype` 等)+ `ProtoTheme`/`ProtoDesign`/`PrimaryPalette`。
   原型用于探索,不是生产渲染路径。
