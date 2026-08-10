@@ -91,6 +91,10 @@ public struct InsightCardView: View {
     /// The body as a lead statement inside an inner-elevation panel (§5): a
     /// larger medium-weight rounded line on the `neutrals.inner` surface, so
     /// insight reads as a single emphasised takeaway rather than body prose.
+    ///
+    /// Declared `role: .body` because this panel IS the card's whole body — in
+    /// a bare (single-card) container it collapses to plain text, otherwise it
+    /// would just regrow the removed card frame one level inward (MY-1306 Rule C).
     @ViewBuilder
     private func leadStatement(_ text: String) -> some View {
         Text(text)
@@ -99,7 +103,7 @@ public struct InsightCardView: View {
             .lineSpacing(5)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .innerSurface(padding: 14)
+            .innerSurface(padding: 14, role: .body)
     }
 
     var truncatedBody: String {
