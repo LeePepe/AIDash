@@ -124,6 +124,40 @@ aidata/ (Python, L1→L5)  ──JSON payload──>  aidash CLI  ──XPC─�
 `aidata (pytest + ruff)` 把关:pytest + `ruff check` + 无 `config_local.py` 的
 降级探针。本地跑:`/usr/bin/python3 -m pytest aidata/tests/ -q`。
 
+## Running tests: don't. The hooks do it.
+
+**Do NOT proactively run test suites.** `scripts/hooks/pre-commit` and
+`pre-push` already run the right set (SPM package tests, then the build
+gate) before anything leaves the machine. Running them by hand adds no
+signal and repeats the cost — including, on this repo, real damage.
+
+**NEVER run a host-based test target locally:**
+
+```bash
+xcodebuild -scheme AIDashApp ... test     # ❌ FORBIDDEN locally
+```
+
+`AIDashAppTests` pins `TEST_HOST` to the real `AIDash.app`, so the bundle
+executes **as the production app** — same bundle id, same real home, freshly
+re-signed each build. Two things follow, both of which actually happened:
+
+1. macOS re-prompts for TCC access (Contacts / iCloud, which the app
+   container symlinks to) on **every** run.
+2. Code resolving the real home operates on the user's **live data** — a
+   test once moved the developer's SwiftData store into a temp dir and
+   deleted it on teardown.
+
+If you genuinely must verify an app-layer change beyond the build gate, use
+the hostless target — it runs as `xctest`, launches no app, and cannot reach
+the real home:
+
+```bash
+xcodebuild -scheme AIDashAppLogicTests -destination 'platform=macOS' test
+```
+
+Host-based targets belong to CI (no one to prompt, no live user data) or to
+a run the user explicitly asks for.
+
 ## Build commands
 
 ```bash

@@ -2,7 +2,11 @@
 import Testing
 import Foundation
 import SwiftData
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
 @testable import AIDashApp
+#endif
 import AIDashCore
 
 /// Tests for the App layer's star write path (spec 002, US1/D2): each star

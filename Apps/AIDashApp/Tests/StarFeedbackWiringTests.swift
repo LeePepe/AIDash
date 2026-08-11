@@ -3,7 +3,11 @@ import Testing
 import Foundation
 import SwiftUI
 import SwiftData
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
 @testable import AIDashApp
+#endif
 import AIDashCore
 import AIDashUI
 

@@ -1,7 +1,11 @@
 #if os(macOS)
 import Testing
 import Foundation
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
 @testable import AIDashApp
+#endif
 
 /// Tests for `RunMode.decide(env:)` — the pure agent-vs-GUI decision made once at
 /// launch. Agent mode (launchd-spawned headless process, flagged by
