@@ -2,7 +2,11 @@
 import Testing
 import Foundation
 import SwiftData
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
 @testable import AIDashApp
+#endif
 import AIDashCore
 
 /// Regression tests for the events.pull handler (spec 002, star feedback

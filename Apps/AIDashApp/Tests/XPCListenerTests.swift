@@ -1,7 +1,11 @@
 #if os(macOS)
 import Testing
 import Foundation
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
 @testable import AIDashApp
+#endif
 import AIDashCore
 
 // Behavior tests for the public XPCListener surface (MY-1003 follow-up to T080).

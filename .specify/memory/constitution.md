@@ -272,6 +272,34 @@ Three gates, in priority order:
    reviewer inspection. The user will provide product feedback naturally while
    using the app; that feedback becomes follow-up issues, not a pre-ship gate.
 
+#### Who runs tests (NON-NEGOTIABLE)
+
+**The git hooks run the tests. A human or agent working locally does not.**
+
+`scripts/hooks/pre-commit` and `pre-push` already run exactly the right set
+(SPM package tests, then the build gate). Running suites by hand on top of
+that adds no signal — the hook will run them anyway before anything leaves
+the machine — and it is how the two worst incidents in this repo happened.
+
+- **Never run a host-based test target locally.** `AIDashAppTests` pins
+  `TEST_HOST` to the real `AIDash.app`, so the bundle executes AS the
+  production app: same bundle id, same real home, freshly re-signed each
+  build. Two consequences, both observed for real:
+  1. macOS re-prompts for TCC access (Contacts / iCloud — the app container
+     symlinks to them) on EVERY run.
+  2. Code that resolves the real home operates on the user's live data. A
+     test once moved the developer's SwiftData store into a temp directory
+     and deleted it on teardown.
+- **Local verification uses the hostless target**, which runs as `xctest`
+  with no app launch and no access to the real home:
+  `xcodebuild -scheme AIDashAppLogicTests -destination 'platform=macOS' test`
+- **Host-based targets belong to CI** (and to an explicit, human-authorized
+  local run). CI machines have nobody to prompt and no live user data.
+
+The rule is deliberately about WHO, not about WHICH: "only run the safe
+suites" degrades the moment someone wants to check one more thing. "Let the
+hooks do it" has no such failure mode.
+
 ### Design System & Tokens
 
 This section is the single source of truth for AIDash visual design. Card

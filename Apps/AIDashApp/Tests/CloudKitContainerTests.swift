@@ -1,7 +1,11 @@
 import Testing
 import Foundation
 import SwiftData
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
 @testable import AIDashApp
+#endif
 import AIDashCore
 
 // MARK: - Deterministic contract tests
@@ -184,7 +188,9 @@ import AIDashCore
     try Data("store".utf8).write(to: legacy)
     try Data("wal".utf8).write(to: URL(fileURLWithPath: legacy.path + "-wal"))
 
-    CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+    CloudKitContainer.withStoreSandbox(tmp) {
+        CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+    }
 
     #expect(fm.fileExists(atPath: pinned.path))
     #expect(fm.fileExists(atPath: pinned.path + "-wal"))
@@ -209,7 +215,9 @@ import AIDashCore
     try Data("old".utf8).write(to: legacy)
     try Data("current".utf8).write(to: pinned)
 
-    CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+    CloudKitContainer.withStoreSandbox(tmp) {
+        CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+    }
 
     #expect(try String(contentsOf: pinned, encoding: .utf8) == "current")
     #expect(fm.fileExists(atPath: legacy.path))  // untouched
@@ -238,7 +246,9 @@ import AIDashCore
     let blocker = tmp.appendingPathComponent("blocker")
     try Data("not a directory".utf8).write(to: blocker)
     let pinned = blocker.appendingPathComponent("AIDash.store")
-    CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+    CloudKitContainer.withStoreSandbox(tmp) {
+        CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+    }
 
     // Legacy survives in full…
     #expect(fm.fileExists(atPath: legacy.path))
@@ -278,7 +288,9 @@ import AIDashCore
     let pinned = dest.appendingPathComponent("AIDash.store")
     try fm.createDirectory(at: pinned, withIntermediateDirectories: true)
 
-    CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+    CloudKitContainer.withStoreSandbox(tmp) {
+        CloudKitContainer.adoptLegacyStore(from: [legacy], to: pinned)
+    }
 
     #expect(!fm.fileExists(atPath: pinned.path + "-wal"))
     #expect(fm.fileExists(atPath: legacy.path))
@@ -322,7 +334,9 @@ import AIDashCore
     let pinned = tmp.appendingPathComponent("dest/AIDash.store")
     try fm.createDirectory(at: pinned.deletingLastPathComponent(),
                            withIntermediateDirectories: true)
-    CloudKitContainer.adoptLegacyStore(from: [quiet, busy], to: pinned)
+    CloudKitContainer.withStoreSandbox(tmp) {
+        CloudKitContainer.adoptLegacyStore(from: [quiet, busy], to: pinned)
+    }
 
     // The busy store (newest WAL) must win, not the one with the newer .store.
     #expect(try String(contentsOf: pinned, encoding: .utf8) == "busy")
@@ -334,42 +348,86 @@ import AIDashCore
 // MARK: - Tests must never touch the real home
 
 @MainActor
-@Test func prepareStoreURLRefusesToTouchTheRealHomeUnderTest() throws {
+@Test func prepareStoreURLNeverReachesTheRealHomeUnderTest() throws {
     #if os(macOS)
-    // REGRESSION. `prepareStoreURL()` creates a directory and MIGRATES a legacy
-    // store. Any test reaching container construction — including one that only
-    // reads `CloudKitContainer.shared.state` — used to run that migration
-    // against the developer's real home. Repeated `xcodebuild test` runs
-    // actually relocated a real store and made macOS prompt for file access on
-    // every run.
+    // REGRESSION, twice over.
     //
-    // Under XCTest with no explicit override, it must decline entirely (nil →
-    // SwiftData's own default) rather than fall through to the real home.
-    #expect(CloudKitContainer.storeURLOverride == nil)
-    // The real-home path must be untouched. Compare the directory's mtime
-    // across the call: creating a file inside it (or creating the directory
-    // itself) would move that timestamp. A "does .probe-file exist?" check
-    // would be near-tautological — nothing ever creates that name — so it
-    // could not have caught the original bug.
+    // Tests are NOT isolated here: project.yml pins TEST_HOST to the real
+    // AIDash.app, so the bundle runs inside the production app and every path
+    // (bundle id, real home) resolves exactly as in production. Isolation has
+    // to be explicit in code.
+    //
+    // v1 of this fix guarded only the no-override path, so a test that DID set
+    // an override re-opened the full migration — which then discovered the
+    // developer's real legacy store, moved it into the test's temp dir, and
+    // deleted it on teardown. Data destroyed, not merely relocated.
+    //
+    // Now the test guard runs FIRST and the sandbox root confines BOTH halves:
+    // the pinned destination and the legacy-source search.
+    let fm = FileManager.default
+
+    // No sandbox → decline entirely, and leave the real home alone.
+    #expect(CloudKitContainer.sandboxRoot == nil)
     let real = try #require(CloudKitContainer.storeURL())
     let realDir = real.deletingLastPathComponent().path
-    let fm = FileManager.default
-    let before = (try? fm.attributesOfItem(atPath: realDir)[.modificationDate]) as? Date
+    let realDirExistedBefore = fm.fileExists(atPath: realDir)
+    let before = (try? fm.attributesOfItem(atPath: realDir))?[.modificationDate] as? Date
+
     #expect(CloudKitContainer.prepareStoreURL() == nil)
-    let after = (try? fm.attributesOfItem(atPath: realDir)[.modificationDate]) as? Date
+
+    let after = (try? fm.attributesOfItem(atPath: realDir))?[.modificationDate] as? Date
+    // Assert non-creation explicitly: on a clean CI machine both timestamps are
+    // nil, and a bare `before == after` would pass vacuously in exactly the
+    // case that matters most.
+    #expect(fm.fileExists(atPath: realDir) == realDirExistedBefore)
     #expect(before == after)
 
-    // With an explicit override, the whole prepare path runs — inside temp only.
-    let tmp = FileManager.default.temporaryDirectory
-        .appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: tmp) }
-    let pinned = tmp.appendingPathComponent("AIDash.store")
-    let resolved = CloudKitContainer.withStoreLocation(pinned) {
+    // With a sandbox, the whole path runs — confined to the temp root, and the
+    // legacy SOURCES resolve under it too, never under the real home.
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try fm.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: root) }
+
+    let sources = CloudKitContainer.legacyStoreURLs(under: root)
+    #expect(!sources.isEmpty)
+    for src in sources {
+        #expect(src.path.hasPrefix(root.path))
+        #expect(!src.path.hasPrefix(CloudKitContainer.realHomeDirectory().path))
+    }
+
+    let resolved = CloudKitContainer.withStoreSandbox(root) {
         CloudKitContainer.prepareStoreURL()
     }
-    #expect(resolved == pinned)
-    #expect(FileManager.default.fileExists(atPath: tmp.path))  // dir created there
-    // Override is restored, so no later test inherits it.
-    #expect(CloudKitContainer.storeURLOverride == nil)
+    #expect(resolved == root.appendingPathComponent("AIDash.store"))
+    // Sandbox is restored, so no later test inherits it.
+    #expect(CloudKitContainer.sandboxRoot == nil)
+    #endif
+}
+
+@MainActor
+@Test func adoptRefusesRealHomePathsEvenWhenAskedDirectly() throws {
+    #if os(macOS)
+    // The exact scenario that destroyed data: a caller hands adoptLegacyStore a
+    // REAL-home legacy source with a temp destination. It used to comply —
+    // moving the developer's store into a directory the test then deleted.
+    // Now the function itself refuses, independent of any caller-side guard.
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try fm.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: root) }
+
+    // A decoy standing in for the developer's real store, OUTSIDE the sandbox.
+    let outside = fm.temporaryDirectory
+        .appendingPathComponent("outside-\(UUID().uuidString).store")
+    try Data("precious".utf8).write(to: outside)
+    defer { try? fm.removeItem(at: outside) }
+
+    let pinned = root.appendingPathComponent("AIDash.store")
+    CloudKitContainer.withStoreSandbox(root) {
+        CloudKitContainer.adoptLegacyStore(from: [outside], to: pinned)
+    }
+
+    #expect(fm.fileExists(atPath: outside.path))          // untouched
+    #expect(!fm.fileExists(atPath: pinned.path))          // nothing adopted
     #endif
 }

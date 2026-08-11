@@ -69,11 +69,74 @@ targets:
       - package: AIDashUI
       - package: DesignKit
 
+  # Hostless logic tests. NO TEST_HOST on purpose.
+  #
+  # `AIDashAppTests` below is injected into the real AIDash.app, which means the
+  # test bundle runs AS the production app: same bundle id, same real home, and
+  # a freshly re-signed binary every build. macOS therefore re-asks for TCC
+  # access (Contacts / iCloud — the app container symlinks to them) on every
+  # single `xcodebuild test`, and any code that touches the real home operates
+  # on the developer's live data.
+  #
+  # Everything that does not genuinely need a running app belongs HERE, so the
+  # day-to-day test run is silent and cannot reach real user data.
+  AIDashAppLogicTests:
+    type: bundle.unit-test
+    supportedDestinations: [macOS, iOS]
+    sources:
+      - path: Apps/AIDashApp/Tests
+        excludes:
+          # Need a real app host: CloudKitContainer.shared brings up a live
+          # SwiftData/CloudKit container, XPCListener needs launchd to broker
+          # its mach service, and StarFeedbackWiring links AIDashUI environment
+          # symbols through the app binary.
+          - "CloudKitContainerTests.swift"
+          - "XPCListenerTests.swift"
+          - "StarFeedbackWiringTests.swift"
+      # Compile the units under test directly into the bundle. A hostless
+      # bundle has no app binary to link against, so `@testable import` alone
+      # cannot resolve app-internal symbols. Listing the specific files keeps
+      # the dependency explicit — and keeps the whole app (menu bar, scenes,
+      # CloudKit) out of a run that is meant to be pure logic.
+      - path: Apps/AIDashApp/Sources/XPCService
+      - path: Apps/AIDashApp/Sources/Sync
+      - path: Apps/AIDashApp/Sources/LaunchdInstaller
+      - path: Apps/AIDashApp/Sources/RunMode.swift
+      - path: Apps/AIDashApp/Sources/Menubar
+      - path: Apps/AIDashApp/Sources/Scenes
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(AIDASH_BUNDLE_ID).logictests
+        GENERATE_INFOPLIST_FILE: YES
+        # NOT PRODUCT_MODULE_NAME: AIDashApp — the app target already emits a
+        # module by that name, and two producers of one .swiftmodule collide
+        # ("Multiple commands produce …") when the full scheme builds both.
+        # The sources compile into THIS module instead, and the shared test
+        # files import it via the AIDASHAPP_LOGIC_TESTS flag below.
+        PRODUCT_MODULE_NAME: AIDashAppLogic
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) AIDASHAPP_LOGIC_TESTS
+        # Explicitly EMPTY. XcodeGen infers a TEST_HOST from the AIDashApp
+        # dependency (needed for `@testable import`), but a host is exactly what
+        # this target must not have — see the comment above. Clearing both makes
+        # the bundle run standalone.
+        TEST_HOST: ""
+        BUNDLE_LOADER: ""
+    dependencies:
+      - package: AIDashCore
+      - package: AIDashUI
+      - package: DesignKit
+
   AIDashAppTests:
     type: bundle.unit-test
     supportedDestinations: [macOS, iOS]
     sources:
       - path: Apps/AIDashApp/Tests
+        includes:
+          - "CloudKitContainerTests.swift"
+          - "XPCListenerTests.swift"
+          - "StarFeedbackWiringTests.swift"
+          # Shared helper — compiled into BOTH test targets.
+          - "XPCHandlersTestSupport.swift"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(AIDASH_BUNDLE_ID).tests
@@ -135,9 +198,23 @@ schemes:
     test:
       config: Debug
       targets:
+        - AIDashAppLogicTests
         - AIDashAppTests
     archive:
       config: Release
+  # Day-to-day scheme: hostless tests only, so a local `xcodebuild test` never
+  # launches the real app and never triggers a TCC permission prompt.
+  #   xcodebuild -scheme AIDashAppLogicTests -destination 'platform=macOS' test
+  # Use the full `AIDashApp` scheme when the host-dependent tests matter (CI
+  # always does — CI machines have no one to prompt).
+  AIDashAppLogicTests:
+    build:
+      targets:
+        AIDashAppLogicTests: [test]
+    test:
+      config: Debug
+      targets:
+        - AIDashAppLogicTests
   aidash:
     build:
       targets:

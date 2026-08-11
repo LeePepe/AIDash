@@ -2,7 +2,11 @@
 import Testing
 import Foundation
 import AppKit
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
 @testable import AIDashApp
+#endif
 
 // MARK: - Localization contract tests
 //

@@ -1,7 +1,11 @@
 #if os(macOS)
 import Testing
 import Foundation
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
 @testable import AIDashApp
+#endif
 
 /// Tests for `LaunchdAgentInstaller` — the plain-`launchctl` LaunchAgent installer
 /// that replaced `SMAppService` (root cause: SMAppService attaches a Launch
