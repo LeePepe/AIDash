@@ -221,6 +221,29 @@ public final class CloudKitContainer {
     /// first run, adopt any legacy store. Returns nil to fall back to
     /// SwiftData's default when the directory cannot be created.
     ///
+    /// Overrides the pinned store location. Set by tests; `nil` in production.
+    ///
+    /// Exists because `prepareStoreURL()` is genuinely side-effecting: it
+    /// creates a directory and migrates a legacy store. Any test that reaches
+    /// container construction — including one that only asserts on
+    /// `CloudKitContainer.shared.state` — would otherwise run that migration
+    /// against the developer's REAL home. That is not hypothetical: repeated
+    /// `xcodebuild test` runs moved a real store into the pinned location and
+    /// made macOS prompt for file-access permission on every run.
+    ///
+    /// A test sets this to a temp directory (see `withStoreLocation`) so the
+    /// whole prepare/adopt path stays inside that sandbox.
+    nonisolated(unsafe) internal static var storeURLOverride: URL?
+
+    /// Run `body` with the store pinned inside `url`, restoring the previous
+    /// value afterwards. Tests use this instead of touching the real home.
+    internal static func withStoreLocation<T>(_ url: URL, _ body: () throws -> T) rethrows -> T {
+        let previous = storeURLOverride
+        storeURLOverride = url
+        defer { storeURLOverride = previous }
+        return try body()
+    }
+
     /// Split from `storeURL()` on purpose. Folding these side effects into a
     /// getter meant merely *asking* for the path created a directory and moved
     /// real files — a unit test that called it relocated the developer's actual
@@ -229,7 +252,36 @@ public final class CloudKitContainer {
     /// exists). Path math and data movement must not share a function.
     internal static func prepareStoreURL() -> URL? {
         #if os(macOS)
+        if let override = storeURLOverride {
+            return prepare(pinned: override)
+        }
+        // Belt and braces: an override that a test FORGOT to set would silently
+        // fall through to the real home and migrate the developer's data — the
+        // exact accident this change exists to prevent, and one that only shows
+        // up as an OS permission prompt hours later. Under XCTest, refuse to
+        // touch the real home at all and let SwiftData use its own default.
+        if isRunningTests {
+            logger.notice("Test process: skipping pinned store + migration; using SwiftData default.")
+            return nil
+        }
         guard let pinned = storeURL() else { return nil }
+        return prepare(pinned: pinned)
+        #else
+        return nil
+        #endif
+    }
+
+    #if os(macOS)
+    /// True when the process is hosting XCTest/swift-testing.
+    private static var isRunningTests: Bool {
+        let env = ProcessInfo.processInfo.environment
+        return env["XCTestConfigurationFilePath"] != nil
+            || env["XCTestBundlePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
+    }
+
+    /// Create the directory and adopt any legacy store for a given location.
+    private static func prepare(pinned: URL) -> URL? {
         let dir = pinned.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -246,10 +298,8 @@ public final class CloudKitContainer {
         }
         adoptLegacyStoreIfNeeded(pinned: pinned)
         return pinned
-        #else
-        return nil
-        #endif
     }
+    #endif
 
     #if os(macOS)
     /// The user's REAL home directory, even inside the App Sandbox.

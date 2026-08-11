@@ -330,3 +330,41 @@ import AIDashCore
     #expect(fm.fileExists(atPath: quiet.path))  // the loser is left untouched
     #endif
 }
+
+// MARK: - Tests must never touch the real home
+
+@MainActor
+@Test func prepareStoreURLRefusesToTouchTheRealHomeUnderTest() throws {
+    #if os(macOS)
+    // REGRESSION. `prepareStoreURL()` creates a directory and MIGRATES a legacy
+    // store. Any test reaching container construction — including one that only
+    // reads `CloudKitContainer.shared.state` — used to run that migration
+    // against the developer's real home. Repeated `xcodebuild test` runs
+    // actually relocated a real store and made macOS prompt for file access on
+    // every run.
+    //
+    // Under XCTest with no explicit override, it must decline entirely (nil →
+    // SwiftData's own default) rather than fall through to the real home.
+    #expect(CloudKitContainer.storeURLOverride == nil)
+    #expect(CloudKitContainer.prepareStoreURL() == nil)
+
+    // The pinned real-home path must NOT have been created as a side effect.
+    let real = try #require(CloudKitContainer.storeURL())
+    let createdByThisCall = FileManager.default.fileExists(
+        atPath: real.deletingLastPathComponent().path + "/.probe-should-not-exist")
+    #expect(!createdByThisCall)
+
+    // With an explicit override, the whole prepare path runs — inside temp only.
+    let tmp = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let pinned = tmp.appendingPathComponent("AIDash.store")
+    let resolved = CloudKitContainer.withStoreLocation(pinned) {
+        CloudKitContainer.prepareStoreURL()
+    }
+    #expect(resolved == pinned)
+    #expect(FileManager.default.fileExists(atPath: tmp.path))  // dir created there
+    // Override is restored, so no later test inherits it.
+    #expect(CloudKitContainer.storeURLOverride == nil)
+    #endif
+}
