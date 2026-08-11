@@ -346,13 +346,18 @@ import AIDashCore
     // Under XCTest with no explicit override, it must decline entirely (nil →
     // SwiftData's own default) rather than fall through to the real home.
     #expect(CloudKitContainer.storeURLOverride == nil)
-    #expect(CloudKitContainer.prepareStoreURL() == nil)
-
-    // The pinned real-home path must NOT have been created as a side effect.
+    // The real-home path must be untouched. Compare the directory's mtime
+    // across the call: creating a file inside it (or creating the directory
+    // itself) would move that timestamp. A "does .probe-file exist?" check
+    // would be near-tautological — nothing ever creates that name — so it
+    // could not have caught the original bug.
     let real = try #require(CloudKitContainer.storeURL())
-    let createdByThisCall = FileManager.default.fileExists(
-        atPath: real.deletingLastPathComponent().path + "/.probe-should-not-exist")
-    #expect(!createdByThisCall)
+    let realDir = real.deletingLastPathComponent().path
+    let fm = FileManager.default
+    let before = (try? fm.attributesOfItem(atPath: realDir)[.modificationDate]) as? Date
+    #expect(CloudKitContainer.prepareStoreURL() == nil)
+    let after = (try? fm.attributesOfItem(atPath: realDir)[.modificationDate]) as? Date
+    #expect(before == after)
 
     // With an explicit override, the whole prepare path runs — inside temp only.
     let tmp = FileManager.default.temporaryDirectory

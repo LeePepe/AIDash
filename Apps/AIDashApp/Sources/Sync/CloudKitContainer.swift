@@ -233,7 +233,16 @@ public final class CloudKitContainer {
     ///
     /// A test sets this to a temp directory (see `withStoreLocation`) so the
     /// whole prepare/adopt path stays inside that sandbox.
-    nonisolated(unsafe) internal static var storeURLOverride: URL?
+    ///
+    /// Plain `@MainActor` state — NOT `nonisolated(unsafe)`. The enclosing type
+    /// is already `@MainActor`, so the actor supplies the mutual exclusion that
+    /// a `nonisolated(unsafe) static var` would have thrown away: swift-testing
+    /// runs suites in parallel, and an unsynchronized read-modify-restore would
+    /// let two tests clobber each other's override (or leak one test's temp
+    /// path into another's container). Staying on the actor also keeps this
+    /// inside the constitution's concurrency rule rather than needing the ADR
+    /// that `nonisolated(unsafe)` demands.
+    internal static var storeURLOverride: URL?
 
     /// Run `body` with the store pinned inside `url`, restoring the previous
     /// value afterwards. Tests use this instead of touching the real home.
