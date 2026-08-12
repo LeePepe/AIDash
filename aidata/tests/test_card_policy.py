@@ -46,8 +46,6 @@ def _candidate(card_id: str, order: int, **kw) -> CardCandidate:
         source_coverage=kw.get("source_coverage", 1),
         reading_cost=kw.get("reading_cost", 1),
         is_detail=kw.get("is_detail", False),
-        provides=kw.get("provides", ()),
-        redundant_with=kw.get("redundant_with", ()),
         weight=kw.get("weight", 1),
     )
 
@@ -321,113 +319,6 @@ def test_a_detail_card_that_carries_a_signal_survives():
 @pytest.mark.unit
 def test_empty_candidate_set_is_not_an_error():
     assert list(select_with_budget([])) == []
-
-
-# --------------------------------------------------------------------------- #
-# Redundancy suppression — a weaker restatement of a stronger signal
-# --------------------------------------------------------------------------- #
-@pytest.mark.unit
-def test_raw_token_card_is_suppressed_when_a_stronger_cross_signal_exists():
-    raw = _candidate("raw-tokens", 1, redundant_with=("outcome_x_tokens",))
-    cross = _candidate("cross", 5, cross_signal_strength=3,
-                       provides=("outcome_x_tokens",))
-    ids = [c.card.id for c in select_with_budget([raw, cross])]
-    assert ids == ["cross"]
-
-
-@pytest.mark.unit
-def test_raw_card_survives_when_the_stronger_signal_is_absent():
-    """Suppression must be conditional — with no cross card, the raw one is
-    the only thing saying anything, and dropping it loses the signal."""
-    raw = _candidate("raw-tokens", 1, redundant_with=("outcome_x_tokens",))
-    unrelated = _candidate("other", 5, cross_signal_strength=3,
-                           provides=("something_else",))
-    ids = [c.card.id for c in select_with_budget([raw, unrelated])]
-    assert set(ids) == {"raw-tokens", "other"}
-
-
-@pytest.mark.unit
-def test_a_suppressed_card_that_demands_action_is_still_kept():
-    """An actionable card is never silently dropped as a duplicate."""
-    raw = _candidate("raw-tokens", 1, requires_action=True,
-                     redundant_with=("outcome_x_tokens",))
-    cross = _candidate("cross", 5, cross_signal_strength=3,
-                       provides=("outcome_x_tokens",))
-    ids = [c.card.id for c in select_with_budget([raw, cross])]
-    assert set(ids) == {"raw-tokens", "cross"}
-
-
-@pytest.mark.unit
-def test_suppression_does_not_apply_to_a_card_against_itself():
-    solo = _candidate("solo", 1, provides=("outcome_x_tokens",),
-                      redundant_with=("outcome_x_tokens",))
-    assert [c.card.id for c in select_with_budget([solo])] == ["solo"]
-
-
-@pytest.mark.unit
-def test_a_provider_filtered_out_as_detail_cannot_suppress_anything():
-    """Suppression must depend on a provider that is actually PUBLISHED.
-
-    A detail-only provider is dropped by the omission rule, so if it could still
-    suppress, both cards would vanish — the signal disappears entirely, which is
-    strictly worse than the duplication suppression exists to prevent.
-    """
-    provider = _candidate("provider", 1, is_detail=True, provides=("sig",))
-    dependent = _candidate("dependent", 2, redundant_with=("sig",))
-    ids = [c.card.id for c in select_with_budget([provider, dependent])]
-    assert ids == ["dependent"], "the weaker card was suppressed by a ghost"
-
-
-@pytest.mark.unit
-def test_a_provider_too_heavy_to_be_admitted_cannot_suppress_anything():
-    """The same silent-loss trap via the budget rather than the filter: a
-    provider that never fits must not take its dependent down with it."""
-    provider = _candidate("provider", 1, weight=MAX_CARDS + 5,
-                          cross_signal_strength=9, provides=("sig",))
-    dependent = _candidate("dependent", 2, redundant_with=("sig",))
-    ids = [c.card.id for c in select_with_budget([provider, dependent])]
-    assert ids == ["dependent"]
-
-
-@pytest.mark.unit
-def test_a_provider_crowded_out_by_capacity_releases_its_dependent():
-    """Ranked in, then squeezed out by cards spent ahead of it — the dependent
-    must come back rather than both being lost."""
-    filler = _candidate("filler", 0, weight=MAX_CARDS, cross_signal_strength=9)
-    provider = _candidate("provider", 1, weight=3, cross_signal_strength=5,
-                          provides=("sig",))
-    dependent = _candidate("dependent", 2, redundant_with=("sig",))
-    ids = [c.card.id for c in select_with_budget([filler, provider, dependent],
-                                                 max_cards=MAX_CARDS)]
-    assert "provider" not in ids, "fixture no longer crowds the provider out"
-    assert "dependent" in ids or ids == ["filler"], (
-        "with the provider unpublished the dependent must not stay suppressed"
-    )
-
-
-@pytest.mark.unit
-def test_an_admitted_provider_still_suppresses_its_dependent():
-    """The suppression itself must survive the fix — a published stronger card
-    still silences the weaker restatement."""
-    provider = _candidate("provider", 1, cross_signal_strength=4,
-                          provides=("sig",))
-    dependent = _candidate("dependent", 2, redundant_with=("sig",))
-    ids = [c.card.id for c in select_with_budget([provider, dependent])]
-    assert ids == ["provider"]
-
-
-@pytest.mark.unit
-def test_suppression_never_loses_both_cards():
-    """The invariant behind all of the above, stated once over many shapes."""
-    shapes = [
-        {"is_detail": True}, {"weight": MAX_CARDS + 1}, {"weight": 2},
-        {"is_detail": True, "weight": 4}, {"cross_signal_strength": 3},
-    ]
-    for shape in shapes:
-        provider = _candidate("provider", 1, provides=("sig",), **shape)
-        dependent = _candidate("dependent", 2, redundant_with=("sig",))
-        kept = select_with_budget([provider, dependent])
-        assert kept, f"both cards vanished for provider shape {shape}"
 
 
 @pytest.mark.unit

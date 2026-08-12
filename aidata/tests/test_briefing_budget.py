@@ -415,18 +415,61 @@ def test_the_cross_signal_survives_a_crowded_day():
 
 
 @pytest.mark.unit
+def test_no_container_deletes_another_containers_unrelated_cards():
+    """Cross-container signal suppression is gone, and must stay gone.
+
+    It was tried twice and failed both times for the same structural reason:
+    admission is per CONTAINER but redundancy is per CARD. `趋势指标` carries
+    requests, sessions, completed-issues and the automation ratio alongside the
+    spend total, so suppressing the whole container to remove one duplicated
+    number silently deleted four unrelated signals.
+
+    Asserted on a day with room for both: whatever the budget admits must be
+    decided by RANK and capacity alone. A container dropping out while the
+    budget still had space for it means something deleted it.
+    """
+    b = _build(_rich_sources_without_attribution())
+    titles = [c.title for c in b.containers]
+    assert "交叉信号" in titles, "fixture no longer publishes the heatmap"
+    assert "趋势指标" in titles, (
+        "the trend container vanished with budget to spare — only suppression "
+        "can do that, and it should no longer exist"
+    )
+
+
+@pytest.mark.unit
+def test_the_trend_container_keeps_its_non_spend_signals():
+    """The concrete loss the old suppression caused: requests and sessions exist
+    nowhere else in the briefing, so deleting the container deleted them."""
+    b = _build(_rich_sources_without_attribution())
+    trend = [c for c in b.containers if c.title == "趋势指标"]
+    assert trend, "the trend container was dropped"
+    labels = {item["label"] for item in trend[0].cards[0].payload["items"]}
+    assert {"请求数", "会话数"} <= labels, (
+        f"non-spend trend signals missing from the published card: {labels}"
+    )
+
+
+@pytest.mark.unit
+def test_a_trimmed_container_was_outranked_not_suppressed():
+    """When the trend IS dropped on a fully-loaded day, it must be because the
+    budget was spent — not because another container claimed to supersede it."""
+    b = _build(_rich_sources())
+    if any(c.title == "趋势指标" for c in b.containers):
+        return
+    assert len(_cards(b)) == MAX_CARDS, (
+        "the trend was dropped while the card budget still had room"
+    )
+
+
+@pytest.mark.unit
 def test_the_rework_heatmap_does_not_suppress_the_trend_metrics():
     """The rework matrix and the day's numbers are DIFFERENT signals.
 
-    `交叉信号` used to claim it provided `outcome_x_tokens`, which `趋势指标`
+    `交叉信号` once claimed to provide `outcome_x_tokens`, which `趋势指标`
     declared itself redundant with — so publishing a workspace × root-cause
     heatmap silently deleted the entire trend container. Rework concentration
     says nothing about cost, tokens, requests, or sessions; the claim was false.
-
-    Asserted with the heatmap present and the spend breakdown ABSENT, so the
-    only candidate suppressor left is the heatmap. On a full day `趋势指标` is
-    legitimately suppressed by `成本归因` — which splits the very spend the trend
-    reports — and that honest pair is covered separately below.
     """
     b = _build(_rich_sources_without_attribution())
     titles = [c.title for c in b.containers]
@@ -434,25 +477,6 @@ def test_the_rework_heatmap_does_not_suppress_the_trend_metrics():
     assert "趋势指标" in titles, (
         "the rework heatmap suppressed the trend metrics — different signals"
     )
-
-
-@pytest.mark.unit
-def test_the_spend_breakdown_does_suppress_the_bare_trend_total():
-    """The one honest pair: with the per-project split on the page, the single
-    spend arrow it decomposes is a weaker restatement of it."""
-    titles = [c.title for c in _build(_rich_sources()).containers]
-    assert "成本归因" in titles
-    assert "趋势指标" not in titles
-
-
-@pytest.mark.unit
-def test_the_trend_returns_when_the_breakdown_is_not_published():
-    """Suppression is conditional on the stronger card actually being there —
-    otherwise the signal disappears entirely, which is the worse outcome."""
-    titles = [c.title for c in
-              _build(_rich_sources_without_attribution()).containers]
-    assert "成本归因" not in titles
-    assert "趋势指标" in titles
 
 
 @pytest.mark.unit

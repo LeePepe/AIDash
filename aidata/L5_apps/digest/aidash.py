@@ -994,47 +994,40 @@ def _relationship_container(mmdd: str, rework) -> "Container | None":
 # degrade-safety — but they are then offered to the budget as CANDIDATES rather
 # than appended unconditionally. The budget is what turns "we have data for this"
 # into "this earns the reader's attention today".
+#
+# ## Why there is no cross-container redundancy suppression here
+#
+# An earlier version let one container declare it superseded another's signal
+# (成本归因's per-project split vs 趋势指标's single spend arrow). The
+# granularity is wrong and cannot be made right at this level: admission is
+# per CONTAINER, but redundancy is per CARD. 趋势指标 carries requests,
+# sessions, completed-issues and the automation ratio alongside the spend
+# total — none of which the cost split restates — so suppressing the container
+# to remove one duplicated number silently deleted four unrelated signals.
+#
+# Two-pass admission (suppress against provisionally-admitted providers) does
+# not rescue it either: `_admit` skips an over-budget candidate and lets a
+# lighter one take its place, so removing a card can change WHICH cards fit,
+# and both the provider and its dependent can end up unpublished — the signal
+# gone entirely, which is worse than the duplication.
+#
+# Genuine card-level redundancy belongs in the producer that owns both cards
+# (it already decides which cards a container gets), not in a budget that only
+# sees containers. Recorded as a follow-up rather than approximated here.
 # ---------------------------------------------------------------------------
-# Signals a card can carry or restate. Naming the SIGNAL (not the card) is what
-# lets a weak restatement be suppressed when a stronger card is present, and
-# survive when it is not.
-#
-# A `provides` claim is an ASSERTION ABOUT THE DATA, and a false one deletes a
-# real card: 交叉信号 used to claim `outcome_x_tokens`, which 趋势指标 restates,
-# so publishing a workspace × root-cause rework heatmap silently removed the
-# entire trend container. Rework concentration says nothing about cost, tokens,
-# requests, or sessions — the claim was simply untrue. Only declare a signal a
-# container genuinely carries.
-#
-# `spend_breakdown` is the one honest pair today: 成本归因 splits the very spend
-# 趋势指标 reports as a single arrow, so with the breakdown on the page the bare
-# total is a weaker restatement of it.
-#
-# There is deliberately NO rework signal here. 交叉信号 carries the workspace ×
-# root-cause matrix, and 成本归因 does hold a rework-by-workspace bar — but that
-# is one of its four cards, and suppression is per CONTAINER, so declaring the
-# pair would delete three unrelated cards to remove one overlap. A constant that
-# nothing consumes reads as "some card is being suppressed by this" and is worse
-# than its absence.
-_SIGNAL_SPEND_BREAKDOWN = "spend_breakdown"
-
 # Per-container budget metadata, keyed by container title. Everything absent
 # from this table takes the default (a plain, non-detail card of average cost).
 #
 #   is_detail        — stable description; omitted when it carries no signal.
 #   cross_signal     — how much cross-source value it adds (0 = single dimension).
 #   reading_cost     — roughly how long a reader spends on it.
-#   provides         — signals this container carries.
-#   redundant_with   — signals it merely restates, more weakly.
 _BUDGET_META: dict[str, dict] = {
     "总览": {"reading_cost": 2, "requires_action": False},
     "今日规划": {"requires_action": True, "reading_cost": 1},
     "交叉信号": {"cross_signal": 3, "reading_cost": 2},
     "AI 效能": {"cross_signal": 2, "reading_cost": 3},
-    "成本归因": {"cross_signal": 2, "reading_cost": 3,
-                 "provides": (_SIGNAL_SPEND_BREAKDOWN,)},
-    "趋势指标": {"cross_signal": 0, "reading_cost": 2,
-                 "redundant_with": (_SIGNAL_SPEND_BREAKDOWN,)},
+    "成本归因": {"cross_signal": 2, "reading_cost": 3},
+    "趋势指标": {"cross_signal": 0, "reading_cost": 2},
     "今日工作": {"reading_cost": 2},
     "昨日汇总": {"reading_cost": 2},
     "可改良": {"cross_signal": 1, "reading_cost": 3},
@@ -1073,8 +1066,6 @@ def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
             source_coverage=len(container.cards),
             reading_cost=int(meta.get("reading_cost", 2)),
             is_detail=bool(meta.get("is_detail", False)),
-            provides=tuple(meta.get("provides", ())),
-            redundant_with=tuple(meta.get("redundant_with", ())),
             weight=len(container.cards),
         ))
     return candidates

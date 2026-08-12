@@ -91,12 +91,6 @@ class CardCandidate:
     rather than demoted, because a card pushed to the bottom still costs the
     reader the scroll (§design 5: 低价值卡被省略而非只是排到底部).
 
-    `provides` / `redundant_with` name SIGNALS, not cards. A raw token card
-    declares `redundant_with=("outcome_x_tokens",)` — "I restate whatever says
-    that, more weakly" — and the cross card declares it `provides` it. Naming
-    the signal rather than the card id means the suppression survives a card
-    being renamed, resized, or built by a different producer.
-
     `weight` is how many PUBLISHED CARDS this candidate stands for. It is 1 for
     a single card and N for a section carrying N of them. The budget is spent
     in cards because that is what the reader's five minutes are spent on — a
@@ -113,8 +107,6 @@ class CardCandidate:
     source_coverage: int = 0
     reading_cost: int = 0
     is_detail: bool = False
-    provides: tuple[str, ...] = ()
-    redundant_with: tuple[str, ...] = ()
     weight: int = 1
 
     @property
@@ -271,24 +263,6 @@ class BudgetResult:
         return self.selected[index]
 
 
-def _is_superseded(candidate: CardCandidate, admitted_signals: set) -> bool:
-    """True when a card ACTUALLY PUBLISHED carries every signal this one restates.
-
-    `admitted_signals` holds only the signals of candidates that survived
-    admission — not everything the original set merely offered. That distinction
-    is the whole point: suppressing against a provider which is itself filtered
-    out (detail-only) or never fits the budget loses BOTH cards, and a signal
-    silently disappearing is strictly worse than the duplication suppression
-    exists to prevent.
-
-    An actionable card is never suppressed — "you already know this" is a fair
-    thing to say about a description, not about something asking to be done.
-    """
-    if candidate.requires_action or not candidate.redundant_with:
-        return False
-    return any(signal in admitted_signals for signal in candidate.redundant_with)
-
-
 def _admit(candidates: Sequence[CardCandidate], max_cards: int,
            first_screen: int) -> tuple[list[CardCandidate], int]:
     """Rank, then admit while the card budget lasts. Returns (selected, lead).
@@ -327,50 +301,40 @@ def select_with_budget(candidates: Sequence[CardCandidate],
                        ) -> BudgetResult:
     """Apply the daily information budget to already-built cards.
 
-    Four things happen, in order:
+    Three things happen, in order:
 
       1. **Omission.** A stable detail card with no action, anomaly, or cross
          value is dropped outright — a card pushed to the bottom still costs
          the reader the scroll.
-      2. **Provisional admission.** The rest are ranked by `_priority` and
+      2. **Ranking + admission.** The rest are ranked by `_priority` and
          admitted while the budget lasts, spent in `weight` (published cards),
          so a candidate standing for five cards costs five rather than one.
-      3. **Redundancy suppression, then re-admission.** A card restating a
-         signal that a PROVISIONALLY ADMITTED card already carries is dropped,
-         and admission runs again over what is left — both because the freed
-         budget should go to something and because dropping a card can only
-         ever admit more, never fewer. Suppressing against the raw candidate set
-         instead would let a provider that is itself filtered out or over budget
-         take its dependent down with it, losing the signal entirely.
-      4. **Lead/tail split.** `lead_count` marks where the first screen ends.
-         The whole selection stays in PRIORITY order — including the tail.
-         Re-sorting the tail into authored order here was a real defect: the
-         consumer renumbers from this sequence, so a light low-priority
-         candidate with an early authored number jumped ahead of a
-         higher-priority one and landed on the reader's first screen. A caller
-         that genuinely wants authored order for the tail can sort
-         `result.tail` itself, having been told where it starts.
+      3. **Lead/tail split.** `lead_count` marks where the first screen ends.
+         The whole selection stays in PRIORITY order — including the tail —
+         because the consumer renumbers from this sequence, so the order here
+         IS the order the reader gets. A caller wanting authored order for the
+         tail can sort `result.tail`, having been told where it starts.
 
     Returns a `BudgetResult` carrying the explicit `lead_count`. The boundary is
     part of the decision, not something a caller can recover afterwards: once
-    weights differ, re-counting cards off the front of the result cannot
-    reconstruct where admission actually closed the screen.
+    weights differ, re-counting cards off the front cannot reconstruct where
+    admission actually closed the screen.
+
+    ## No cross-candidate redundancy suppression
+
+    Deliberately absent. A candidate here stands for a whole container, but
+    redundancy between cards is per card, so suppressing a candidate to remove
+    one duplicated number deletes every unrelated card beside it. Attempting it
+    in two passes (suppress against provisionally-admitted providers) is worse
+    still, because admission is not monotone: `_admit` skips an over-budget
+    candidate and lets a lighter one take its place, so removing a candidate can
+    change WHICH others fit and evict the very provider that justified the
+    suppression — losing both cards and the signal entirely. Card-level
+    redundancy belongs to whoever builds both cards.
 
     Pure and total: an empty input yields an empty result, and it is identical
     regardless of the input's order.
     """
     eligible = [c for c in candidates if c.carries_signal or not c.is_detail]
-
-    # Pass 1 — who would be published if nothing were suppressed?
-    provisional, _ = _admit(eligible, max_cards, first_screen)
-    admitted_signals = {s for c in provisional for s in c.provides}
-
-    # Pass 2 — drop the restatements those admitted cards make redundant, then
-    # re-admit so the freed budget is not simply wasted. A candidate cannot
-    # suppress itself, so its own signals do not count against it.
-    survivors = [
-        c for c in eligible
-        if not _is_superseded(c, admitted_signals - set(c.provides))
-    ]
-    selected, lead_count = _admit(survivors, max_cards, first_screen)
+    selected, lead_count = _admit(eligible, max_cards, first_screen)
     return BudgetResult(selected, lead_count)
