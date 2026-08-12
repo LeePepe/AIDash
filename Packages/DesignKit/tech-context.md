@@ -14,7 +14,7 @@ roles:                              # 层内轴:类角色 → 目录(角色顺�
   Types: [Color]                    # ColorSystem + Theme:seed→token,纯值,不依赖组件
   UI:    [Components]               # Card/Metric/Sparkline/RingGauge/StatusPill:消费 Color
 test: swift test --package-path Packages/DesignKit
-owns: [Seed, Neutral, PrimaryPalette, Neutrals, Semantic, Classification, Theme, makePrimaryPalette, chartPalette, Card, CardInner, Metric, Sparkline, RingGauge, StatusPill, SectionHeader, PillTone]
+owns: [Seed, Neutral, PrimaryPalette, Neutrals, Semantic, Classification, TextRole, Theme, makePrimaryPalette, chartPalette, Card, CardInner, Metric, Sparkline, RingGauge, StatusPill, SectionHeader, PillTone]
 ---
 
 # DesignKit Tech Context
@@ -25,11 +25,40 @@ owns: [Seed, Neutral, PrimaryPalette, Neutrals, Semantic, Classification, Theme,
 
 ## 职责
 
-- **seed 色彩系统**:`makePrimaryPalette(seed:isDark:)` 从单个 seed 派生完整 primary token 集;
-  `chartPalette` 派生 8 档图表色;`Semantic` 固定 success/warning/danger;`Neutral` 提供
-  slate / neutral 两套中性色。**同一套色彩数学与 web 模板 (`color-system.ts`) 逐字一致。**
+- **seed 色彩系统**:`makePrimaryPalette(seed:isDark:darkAnchor:)` 从单个 seed 派生完整
+  primary token 集;`chartPalette` 派生 8 档图表色;`Semantic` 固定 success/warning/danger;
+  `Neutral` 提供 slate / neutral 两套中性色。**同一套色彩数学与 web 模板
+  (`color-system.ts`) 逐字一致。**
 - **组件词汇**:`Card` / `CardInner` / `Metric` / `Sparkline` / `RingGauge` / `StatusPill` /
   `SectionHeader`——消费上面的 token,不含业务逻辑。
+
+## Dark anchor(单 seed 的深色锚点,非第二套调色板)
+
+通用深色规则 `b + 0.06` 假设「亮色 seed 已在色相/饱和度上接近深色目标,只需从近黑提亮」。
+五个 Radix/Apple seed 成立;`lime` **不成立**——亮值 `#5A8A00` 为在白底存活被刻意压深
+(h 80.9°, s 1.00, b 0.54),而宪法 1.7.0 / `design/north-star.md` §10 规定的签名色是
+`#C6F04A`(h 75.2°, s 0.69, b 0.94):**色相要降约 6°、饱和度要降约 0.31,任何提亮都到不了**。
+旧式派生得 `#679908`(卡片底对比 4.99:1,签名色为 12.97:1)——即 MY-1399 的 P0。
+
+因此 `Seed.darkAnchorHex` 只为**这一个 seed** 固定深色 primary;整条深色 ramp 仍由该锚点
+用同一套 HSB 关系派生,`Semantic` / `Classification` 不动。**这是「一个 seed 系统」的锚点
+校准,不是第二套调色板**;其余 seed 返回 `nil`,走与 web 逐字一致的派生,并由
+`ColorSystemTests` 的黄金值锁死。
+
+## 可访问性角色 token(text role + on-subtle)
+
+同一个语义色**作填充**和**作小字**所需的明度不同。旧 `StatusPill` 让文字与填充同色,
+文字落在自身 16% 淡化上,实测浅色 success 1.95:1 / warning 1.93:1——远低于 4.5:1。
+
+- `TextRole`(`heading` / `body` / `meta`)+ `Neutrals.text(_:)`:让消费方表达**意图**而非
+  凭眼挑明度档。`body` 恒解析到 `text2`(各底 ≥4.5:1),**永不落到 `text3`**——把
+  north-star §4「正文别用 text3」从建议变成可执行约束。`meta` 保证 ≥3:1。
+- `Semantic.{success,warning,danger}OnSubtle`:同三个色相的小字变体,校准到在**自身淡化底**
+  上跨两套中性色 × card/inner/bg 均 ≥4.5:1。色相保持不变(绿仍读作绿)。
+- `PrimaryPalette.onPrimarySubtle` 从 `primaryText` 解耦并加深/提亮,使**每个 seed** 的
+  primary pill 都达标。
+- 验收由 `ContrastTests` **实测** WCAG 比值(含 source-over 合成),不是查表断言。
+
 
 ## 依赖方向
 
