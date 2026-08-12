@@ -1,6 +1,45 @@
 import Testing
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
 @testable import DesignKit
+
+/// Resolved sRGB hex of a `Color`.
+///
+/// `Color` equality is by CONSTRUCTION, not by value: a color built with
+/// `Color(hue:saturation:brightness:)` is never `==` to the `Color(hex:)`
+/// naming the same pixel. Golden assertions on derived tokens therefore have
+/// to compare resolved components, not the `Color` values themselves.
+func resolvedHex(_ color: Color) -> String {
+    #if canImport(AppKit)
+    let ns = NSColor(color).usingColorSpace(.sRGB) ?? .black
+    let r = Int((ns.redComponent * 255).rounded())
+    let g = Int((ns.greenComponent * 255).rounded())
+    let b = Int((ns.blueComponent * 255).rounded())
+    return String(format: "#%02X%02X%02X", r, g, b)
+    #else
+    return "#000000"
+    #endif
+}
+
+/// Whether `color` resolves to `hex` within `tolerance` per 8-bit channel.
+///
+/// Tokens that pass through an HSB round-trip (`Color(hue:saturation:
+/// brightness:)`) can land a step off the arithmetic value depending on how
+/// the component read resolves. A ±2/255 window is far tighter than any real
+/// palette drift — the olive regression this suite guards against differs by
+/// ~95/255 in the red channel — while staying immune to that rounding.
+func resolves(_ color: Color, to hex: String, tolerance: Int = 2) -> Bool {
+    func channels(_ s: String) -> [Int] {
+        let t = s.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        return stride(from: 0, to: 6, by: 2).map {
+            let i = t.index(t.startIndex, offsetBy: $0)
+            return Int(t[i ..< t.index(i, offsetBy: 2)], radix: 16) ?? -1
+        }
+    }
+    return zip(channels(resolvedHex(color)), channels(hex)).allSatisfy { abs($0 - $1) <= tolerance }
+}
 
 @Suite("Seed color system")
 struct ColorSystemTests {
@@ -18,6 +57,55 @@ struct ColorSystemTests {
         // onPrimary is black or white — a real WCAG choice was made
         #expect(light.onPrimary == .white || light.onPrimary == .black)
         #expect(dark.onPrimary == .white || dark.onPrimary == .black)
+    }
+
+    @Test("dark lime resolves to the mandated signature color")
+    func darkLimeIsTheSignature() {
+        // constitution 1.7.0 / design/north-star.md §10: the cockpit
+        // signature is `#C6F04A` on near-black. This is the acceptance
+        // criterion for MY-1399 — before the anchor, the generic `b + 0.06`
+        // lift produced `#679908`, an unusably dark olive.
+        let theme = Theme(seed: .lime, neutral: .slate, isDark: true)
+        #expect(resolvedHex(theme.primary.primary) == "#C6F04A")
+        #expect(Seed.lime.darkAnchorHex == "#C6F04A")
+    }
+
+    @Test("light lime is unchanged — the anchor is dark-only")
+    func lightLimeIsUnchanged() {
+        #expect(Seed.lime.hex == "#5A8A00")
+        let theme = Theme(seed: .lime, neutral: .slate, isDark: false)
+        #expect(resolvedHex(theme.primary.primary) == "#5A8A00")
+    }
+
+    @Test("only lime pins a dark anchor — the other seeds keep the shared math")
+    func onlyLimeIsAnchored() {
+        for seed in Seed.allCases where seed != .lime {
+            #expect(seed.darkAnchor == nil, "\(seed.rawValue) must not pin a dark anchor")
+        }
+        // The unanchored dark derivation is the verbatim web math
+        // (`c(h, s - 0.05, b + 0.06)`). Pinned as golden values so a future
+        // anchor change cannot silently alter the other five seeds.
+        #expect(resolves(Theme(seed: .blue, isDark: true).primary.primary, to: "#0D96FF"))
+        #expect(resolves(Theme(seed: .purple, isDark: true).primary.primary, to: "#9E5FD5"))
+        #expect(resolves(Theme(seed: .teal, isDark: true).primary.primary, to: "#1DB4A3"))
+        #expect(resolves(Theme(seed: .orange, isDark: true).primary.primary, to: "#FF7622"))
+        #expect(resolves(Theme(seed: .appleBlue, isDark: true).primary.primary, to: "#0D81FF"))
+    }
+
+    @Test("the anchored dark ramp stays monotonic and derived from one anchor")
+    func anchoredRampIsWellFormed() {
+        let p = Theme(seed: .lime, neutral: .slate, isDark: true).primary
+        // hover/active brighten away from the anchor without clipping into
+        // one indistinguishable near-white.
+        let steps = [p.primary, p.primaryHover, p.primaryActive].map(resolvedHex)
+        #expect(Set(steps).count == 3, "ramp collapsed: \(steps)")
+        // The whole ramp shares the anchor's hue: still ONE seed system.
+        let anchorHue = hsbHue(Color(hex: "#C6F04A"))
+        for color in [p.primary, p.primaryHover, p.primaryActive, p.primaryText, p.primaryBorder] {
+            #expect(abs(hsbHue(color) - anchorHue) < 0.01, "ramp left the anchor hue")
+        }
+        // Lime is bright enough that black is the correct foreground on it.
+        #expect(p.onPrimary == .black)
     }
 
     @Test("chart palette has 8 stops")

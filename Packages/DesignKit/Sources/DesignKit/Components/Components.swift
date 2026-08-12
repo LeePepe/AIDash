@@ -250,7 +250,15 @@ public struct StatusPill: View {
         self.tone = tone
     }
 
-    private var color: Color {
+    /// Opacity of the tinted fill. Lowered from 0.16: at 0.16 the light-mode
+    /// fill absorbs enough of the ground that even the calibrated on-subtle
+    /// text tops out near 4.3:1. At 0.12 every tone clears 4.5:1 on both
+    /// neutral palettes and all three grounds, and the pill still reads as a
+    /// tinted capsule rather than a hairline outline.
+    private static let fillOpacity: Double = 0.12
+
+    /// The FILL color — full-saturation semantic, correct as a background.
+    private var fill: Color {
         switch tone {
         case .primary: return theme.primary.primary
         case .success: return theme.success
@@ -260,12 +268,29 @@ public struct StatusPill: View {
         }
     }
 
+    /// The TEXT color — the on-subtle variant of the same hue.
+    ///
+    /// This is the fix for the pill's contrast failure: previously text and
+    /// fill were the SAME color, so the text sat on a 16% wash of itself and
+    /// measured 1.93–2.86:1 in light mode. Each tone now pairs its fill with
+    /// a variant calibrated to clear 4.5:1 against that fill. The `neutral`
+    /// tone pairs a `text3` fill with `text2` text for the same reason.
+    private var textColor: Color {
+        switch tone {
+        case .primary: return theme.primary.onPrimarySubtle
+        case .success: return theme.successOnSubtle
+        case .warning: return theme.warningOnSubtle
+        case .danger: return theme.dangerOnSubtle
+        case .neutral: return theme.text(.body)
+        }
+    }
+
     public var body: some View {
         Text(text)
             .font(TypeScale.meta).fontWeight(.medium)
             .padding(.horizontal, 8).padding(.vertical, 2)
-            .background(color.opacity(0.16))
-            .foregroundStyle(color)
+            .background(fill.opacity(Self.fillOpacity))
+            .foregroundStyle(textColor)
             .clipShape(Capsule())
     }
 }

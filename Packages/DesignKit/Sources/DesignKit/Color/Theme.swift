@@ -22,6 +22,17 @@ public struct Theme: Sendable {
     public var warning: Color { Semantic.warning(isDark: isDark) }
     public var danger: Color { Semantic.danger(isDark: isDark) }
 
+    /// The three semantics as READABLE TEXT on a tint of themselves (status
+    /// pills). The plain `success`/`warning`/`danger` above are FILL colors
+    /// and do not meet small-text contrast in that role — see `Semantic`.
+    public var successOnSubtle: Color { Semantic.successOnSubtle(isDark: isDark) }
+    public var warningOnSubtle: Color { Semantic.warningOnSubtle(isDark: isDark) }
+    public var dangerOnSubtle: Color { Semantic.dangerOnSubtle(isDark: isDark) }
+
+    /// Text color for a semantic role — `body` is accessible by construction.
+    /// Prefer this over reaching for `neutrals.text1/2/3` directly.
+    public func text(_ role: TextRole) -> Color { neutrals.text(role) }
+
     /// Per-category icon-badge tint, resolved for the current color scheme.
     public func classificationTint(_ kind: Classification) -> Color {
         kind.tint(isDark: isDark)
@@ -31,7 +42,7 @@ public struct Theme: Sendable {
         self.seed = seed
         self.neutral = neutral
         self.isDark = isDark
-        self.primary = makePrimaryPalette(seed: seed.color, isDark: isDark)
+        self.primary = makePrimaryPalette(seed: seed.color, isDark: isDark, darkAnchor: seed.darkAnchor)
         self.neutrals = neutral.palette(isDark: isDark)
         self.charts = chartPalette(seed: seed.color, isDark: isDark)
     }
