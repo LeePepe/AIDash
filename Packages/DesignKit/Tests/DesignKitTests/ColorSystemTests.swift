@@ -28,7 +28,7 @@ struct ColorSystemTests {
 
     @Test("classification tints are golden fixed values")
     func classificationGolden() {
-        #expect(Classification.allCases.count == 8)
+        #expect(Classification.allCases.count == 9)
         // Light golden values (mirror Apple system palette). Locks the token so a
         // repo's copy can't silently drift.
         #expect(Classification.metric.tint(isDark: false) == Color(hex: "#007AFF"))
@@ -38,9 +38,22 @@ struct ColorSystemTests {
         // red/pink; stackedBar is a warm yellow, distinct from trending orange.
         #expect(Classification.barList.tint(isDark: false) == Color(hex: "#A2845E"))
         #expect(Classification.stackedBar.tint(isDark: false) == Color(hex: "#FFCC00"))
+        // relationship is a cyan that must not collapse into metric blue or
+        // digest teal — the three ride the same cool arc of the wheel.
+        #expect(Classification.relationship.tint(isDark: false) == Color(hex: "#0891B2"))
+        #expect(Classification.relationship.tint(isDark: true) == Color(hex: "#22D3EE"))
         // Dark variant differs from light (dark mode is honored, not identical).
         #expect(Classification.metric.tint(isDark: true) != Classification.metric.tint(isDark: false))
         #expect(Classification.barList.tint(isDark: true) != Classification.barList.tint(isDark: false))
+    }
+
+    @Test("relationship cyan stays distinct from metric blue and digest teal")
+    func relationshipDistinctFromCoolNeighbors() {
+        for isDark in [false, true] {
+            let relationship = Classification.relationship.tint(isDark: isDark)
+            #expect(relationship != Classification.metric.tint(isDark: isDark))
+            #expect(relationship != Classification.digest.tint(isDark: isDark))
+        }
     }
 
     @Test("classification tints are pairwise distinguishable")
