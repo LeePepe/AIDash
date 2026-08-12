@@ -45,7 +45,20 @@ struct EnumRoundtripTests {
     }
 
     @Test func cardTypeCount() {
-        #expect(CardType.allCases.count == 9)
+        // Deliberate tripwire: adding a CardType obliges the downstream layers
+        // (DesignKit classification, AIDashUI badge + router, XPC schema ad) to
+        // follow. Bump this only alongside those.
+        #expect(CardType.allCases.count == 10)
+    }
+
+    @Test func relationshipVisualizationRoundtrip() throws {
+        for value in RelationshipVisualization.allCases {
+            let data = try JSONEncoder().encode(value)
+            let decoded = try JSONDecoder().decode(RelationshipVisualization.self, from: data)
+            #expect(decoded == value)
+            #expect(decoded.rawValue == value.rawValue)
+        }
+        #expect(RelationshipVisualization.allCases.count == 3)
     }
 
     @Test func userEventActionExcludesHide() {

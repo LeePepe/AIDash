@@ -86,6 +86,8 @@ public struct CardRouter: View {
             BarListCardView(payload: p, size: effectiveSize, style: card.style)
         case let p as StackedBarPayload:
             StackedBarCardView(payload: p, size: effectiveSize, style: card.style)
+        case let p as RelationshipPayload:
+            RelationshipCardView(payload: p, size: effectiveSize, style: card.style)
         default:
             fallbackView
         }

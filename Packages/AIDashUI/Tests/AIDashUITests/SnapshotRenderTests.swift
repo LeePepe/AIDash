@@ -173,6 +173,49 @@ struct SnapshotRenderTests {
             width: 1000,
             to: "render-new-cards"
         )
+
+        // Variant: relationship — the three visualizations side by side, so the
+        // chart + evidence rail can be inspected at both the medium (stacked)
+        // and wide (side-by-side) ViewThatFits outcomes.
+        // swiftlint:disable line_length
+        let relationships = container("关联 · 成本 × 产出", .grid, [
+            card(.relationship, .wide, .neutral, #"{"title":"Cost × outcome","visualization":"scatter","xAxis":{"label":"Cost per completed task","unit":"USD"},"yAxis":{"label":"First-pass completion proxy","unit":"%"},"points":[{"label":"AIDash","x":2.1,"y":88,"magnitude":34,"category":"project"},{"label":"Financial","x":3.4,"y":81,"magnitude":21,"category":"project"},{"label":"Skills","x":4.8,"y":74,"magnitude":12,"category":"workspace"},{"label":"Multica","x":5.6,"y":69,"magnitude":28,"category":"workspace"},{"label":"aidata","x":6.9,"y":62,"magnitude":9,"category":"project"}],"sampleSize":34,"timeWindow":"7d","metricDefinition":"completed is a pipeline proxy, not objective correctness","summary":"AIDash has the lowest observed cost at the highest completion proxy."}"#),
+            card(.relationship, .medium, .neutral, #"{"title":"Rework concentration","visualization":"heatmap","xAxis":{"label":"Day"},"yAxis":{"label":"Workspace"},"cells":[{"column":"08-09","row":"AIDash","value":12000},{"column":"08-10","row":"AIDash","value":48000},{"column":"08-11","row":"AIDash","value":6000},{"column":"08-09","row":"Financial","value":3000},{"column":"08-10","row":"Financial","value":9000},{"column":"08-11","row":"Financial","value":27000}],"sampleSize":4,"timeWindow":"7d","metricDefinition":"tokens on issues completed after cancellation","summary":"Observed rework is concentrated on one day; no causal claim."}"#),
+            card(.relationship, .medium, .neutral, #"{"title":"Before × after","visualization":"slope","xAxis":{"label":"Period"},"yAxis":{"label":"Tokens per completed task"},"slopes":[{"label":"AIDash","before":21000,"after":18000},{"label":"Financial","before":17500,"after":19200},{"label":"Skills","before":12400,"after":9800}],"sampleSize":12,"timeWindow":"previous 7d vs current 7d","metricDefinition":"total tokens divided by completed pipeline tasks","summary":"Observed unit token use decreased."}"#),
+        ])
+        // swiftlint:enable line_length
+        render(
+            VStack(alignment: .leading, spacing: 16) {
+                Text("2026-08-12").font(.largeTitle.bold())
+                ContainerView(container: relationships)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading),
+            width: 1200,
+            to: "render-relationship"
+        )
+
+        // Variant: the two review-found edge cases, so both are inspectable by
+        // eye — a MIXED-magnitude scatter (points 2 and 4 carry no magnitude
+        // and must render as small hollow rings, not mid-size solid discs),
+        // and a TRUNCATED scatter on a small card (12 points against a cap of
+        // 8, so the "Showing 8 of 12." disclosure must appear).
+        // swiftlint:disable line_length
+        let edgeCases = container("关联 · 边界情况", .grid, [
+            card(.relationship, .wide, .neutral, #"{"title":"Mixed magnitudes","visualization":"scatter","xAxis":{"label":"Cost","unit":"USD"},"yAxis":{"label":"Completion","unit":"%"},"points":[{"label":"has-a","x":1.2,"y":90,"magnitude":80},{"label":"missing-b","x":2.4,"y":78},{"label":"has-c","x":3.6,"y":66,"magnitude":30},{"label":"missing-d","x":4.8,"y":54},{"label":"has-e","x":6.0,"y":42,"magnitude":55}],"sampleSize":5,"timeWindow":"7d","metricDefinition":"magnitude is optional per point","summary":"Two points carry no magnitude and must read as absent, not as mid-range."}"#),
+            card(.relationship, .small, .neutral, #"{"title":"Truncated","visualization":"scatter","xAxis":{"label":"X"},"yAxis":{"label":"Y"},"points":[{"label":"p1","x":1,"y":10,"magnitude":5},{"label":"p2","x":2,"y":20,"magnitude":9},{"label":"p3","x":3,"y":30,"magnitude":14},{"label":"p4","x":4,"y":25,"magnitude":7},{"label":"p5","x":5,"y":40,"magnitude":18},{"label":"p6","x":6,"y":35,"magnitude":11},{"label":"p7","x":7,"y":50,"magnitude":22},{"label":"p8","x":8,"y":45,"magnitude":16},{"label":"p9","x":9,"y":60,"magnitude":26},{"label":"p10","x":10,"y":55,"magnitude":20},{"label":"p11","x":11,"y":70,"magnitude":30},{"label":"p12","x":12,"y":65,"magnitude":24}],"sampleSize":12,"timeWindow":"7d","metricDefinition":"12 points against a small-card cap of 8","summary":"Only part of this dataset is plotted."}"#),
+        ])
+        // swiftlint:enable line_length
+        render(
+            VStack(alignment: .leading, spacing: 16) {
+                Text("2026-08-13").font(.largeTitle.bold())
+                ContainerView(container: edgeCases)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading),
+            width: 1200,
+            to: "render-relationship-edges"
+        )
     }
 
     // MARK: - In-memory model builders

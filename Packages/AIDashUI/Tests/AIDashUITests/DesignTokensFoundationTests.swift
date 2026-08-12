@@ -132,6 +132,7 @@ struct DesignTokensFoundationTests {
         #expect(CardType.trending.iconSymbol == "chart.line.uptrend.xyaxis")
         #expect(CardType.barList.iconSymbol == "chart.bar.xaxis")
         #expect(CardType.stackedBar.iconSymbol == "chart.bar.doc.horizontal")
+        #expect(CardType.relationship.iconSymbol == "point.3.connected.trianglepath.dotted")
         #expect(CardType.sectionHeader.iconSymbol == nil)
     }
 
@@ -145,6 +146,7 @@ struct DesignTokensFoundationTests {
         #expect(CardType.trending.classification == .trending)
         #expect(CardType.barList.classification == .barList)
         #expect(CardType.stackedBar.classification == .stackedBar)
+        #expect(CardType.relationship.classification == .relationship)
         #expect(CardType.sectionHeader.classification == nil)
     }
 

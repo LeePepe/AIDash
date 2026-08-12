@@ -131,8 +131,39 @@ struct CardRouterTests {
         _ = CardRouter(card: card).body
     }
 
-    // MARK: - Fallback on decode failure
+    @Test("routes relationship card from the contract's own scatter JSON")
+    func routesRelationship() throws {
+        // The literal example from
+        // `specs/001-core-briefing-cli/contracts/cardtype-payloads.md` — an
+        // author writes only `points`, omitting `cells` / `slopes`, so this
+        // also pins that the router's decode path tolerates the absent keys.
+        // swiftlint:disable:next line_length
+        let json = #"{"title":"Cost × outcome","visualization":"scatter","xAxis":{"label":"Cost per completed task","unit":"USD"},"yAxis":{"label":"First-pass completion proxy","unit":"%"},"points":[{"label":"AIDash","x":2.1,"y":88,"magnitude":34,"category":"project"}],"sampleSize":34,"timeWindow":"7d","metricDefinition":"completed is a pipeline proxy, not objective correctness","summary":"AIDash has the lowest observed cost at the highest completion proxy."}"#
+        let card = makeCard(type: .relationship, size: .wide, payloadJSON: Data(json.utf8))
 
+        let decoded = try card.type.decode(card.payloadJSON) as? RelationshipPayload
+        #expect(decoded?.visualization == .scatter)
+        #expect(decoded?.points.count == 1)
+        #expect(decoded?.cells.isEmpty == true)
+        #expect(decoded?.slopes.isEmpty == true)
+        #expect(decoded?.sampleSize == 34)
+        _ = CardRouter(card: card).body
+    }
+
+    @Test(
+        "routes every relationship visualization to a rendered view, not the fallback",
+        arguments: RelationshipVisualization.allCases
+    )
+    func routesEveryRelationshipVisualization(visualization: RelationshipVisualization) throws {
+        let payload = RelationshipCardViewTests.payload(for: visualization)
+        let card = makeCard(type: .relationship, size: .wide, payloadJSON: encode(payload))
+
+        let decoded = try card.type.decode(card.payloadJSON) as? RelationshipPayload
+        #expect(decoded?.visualization == visualization)
+        _ = CardRouter(card: card).body
+    }
+
+    // MARK: - Fallback on decode failure
     @Test("renders fallback for invalid JSON")
     func fallbackOnInvalidJSON() {
         let card = makeCard(type: .metric, payloadJSON: Data("not json".utf8))
@@ -222,6 +253,8 @@ struct CardRouterTests {
                 data = encode(BarListPayload(items: [.init(label: "L", value: 1)]))
             case .stackedBar:
                 data = encode(StackedBarPayload(segments: [.init(label: "S", value: 1)]))
+            case .relationship:
+                data = encode(RelationshipCardViewTests.scatter(points: 1))
             }
 
             let card = makeCard(type: cardType, payloadJSON: data)
@@ -280,6 +313,8 @@ struct CardRouterTests {
             return encode(BarListPayload(items: [.init(label: "L", value: 1)]))
         case .stackedBar:
             return encode(StackedBarPayload(segments: [.init(label: "S", value: 1)]))
+        case .relationship:
+            return encode(RelationshipCardViewTests.scatter(points: 1))
         }
     }
 
