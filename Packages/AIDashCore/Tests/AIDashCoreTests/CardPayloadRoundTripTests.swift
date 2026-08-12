@@ -294,11 +294,35 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.items[0].semantic == "warning")
         #expect(decoded.items[1].semantic == nil)
         #expect(decoded.items[2].valueText == nil)
+        // No title supplied → no header band, and the key is not emitted.
+        #expect(decoded.title == nil)
+        #expect(decoded.headerTitle == nil)
 
         // CardType.decode dispatch
         let data = try encoder.encode(payload)
         let dispatched = try CardType.barList.decode(data)
         #expect(dispatched is BarListPayload)
+    }
+
+    @Test func barListPayloadTitledRoundTrip() throws {
+        // A titled ranking round-trips and exposes the header anchor the card
+        // renderer needs for its header band (and the star affordance on it).
+        let payload = BarListPayload(
+            items: [
+                BarListPayload.Item(label: "runtime-offline", value: 41, valueText: "41%", semantic: "warning"),
+                BarListPayload.Item(label: "queue-timeout", value: 18, valueText: "18%"),
+            ],
+            title: "失败根因"
+        )
+        let decoded = try roundTrip(payload)
+        #expect(decoded.title == "失败根因")
+        #expect(decoded.headerTitle == "失败根因")
+        #expect(decoded.items.count == 2)
+        try decoded.validateInvariants()
+
+        let dispatched = try CardType.barList.decode(encoder.encode(payload))
+        let barList = try #require(dispatched as? BarListPayload)
+        #expect(barList.headerTitle == "失败根因")
     }
 
     @Test func barListPayloadDecodesLegacyMinimalItem() throws {
@@ -309,6 +333,35 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.items[0].valueText == nil)
         #expect(decoded.items[0].semantic == nil)
         #expect(decoded.items[0].value == 48)
+    }
+
+    @Test func barListPayloadWithoutTitleKeyStaysValid() throws {
+        // Backward compatibility: every payload published before `title`
+        // existed omits the key entirely. It must still decode and validate.
+        let untitled = Data(#"{"items":[{"label":"cmux","value":4.4,"valueText":"4.4min"}]}"#.utf8)
+        let decoded = try decoder.decode(BarListPayload.self, from: untitled)
+        #expect(decoded.title == nil)
+        #expect(decoded.headerTitle == nil)
+        try decoded.validateInvariants()
+    }
+
+    @Test func barListPayloadDecodesExplicitNullTitle() throws {
+        // An author emitting `"title": null` (a JSON serializer that writes
+        // nulls rather than dropping absent keys) gets the headerless card,
+        // not a decode failure.
+        let nullTitle = Data(#"{"items":[{"label":"AIDash","value":48}],"title":null}"#.utf8)
+        let decoded = try decoder.decode(BarListPayload.self, from: nullTitle)
+        #expect(decoded.headerTitle == nil)
+        try decoded.validateInvariants()
+    }
+
+    @Test func barListPayloadRejectsBlankTitle() throws {
+        // Present-but-blank is a publisher bug, not a headerless card: it
+        // would reserve an empty header band. Rejected at the invariant gate.
+        let blank = Data(#"{"items":[{"label":"AIDash","value":48}],"title":"   "}"#.utf8)
+        let decoded = try decoder.decode(BarListPayload.self, from: blank)
+        #expect(decoded.headerTitle == nil)
+        #expect(throws: XPCError.self) { try decoded.validateInvariants() }
     }
 
     // MARK: StackedBarPayload
