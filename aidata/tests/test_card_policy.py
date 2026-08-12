@@ -48,6 +48,7 @@ def _candidate(card_id: str, order: int, **kw) -> CardCandidate:
         is_detail=kw.get("is_detail", False),
         provides=kw.get("provides", ()),
         redundant_with=kw.get("redundant_with", ()),
+        weight=kw.get("weight", 1),
     )
 
 
@@ -310,3 +311,74 @@ def test_action_budget_constant_matches_the_design():
     assert MAX_ACTIONS == 3
     assert FIRST_SCREEN_CARDS == 6
     assert MAX_CARDS == 10
+
+
+# --------------------------------------------------------------------------- #
+# The budget is spent in CARDS, not candidates
+# --------------------------------------------------------------------------- #
+def _weighted(card_id: str, order: int, weight: int, **kw) -> CardCandidate:
+    return _candidate(card_id, order, weight=weight, **kw)
+
+
+@pytest.mark.unit
+def test_budget_charges_a_candidate_for_every_card_it_publishes():
+    """Three five-card sections must not report "3 of 10" while publishing 15."""
+    heavy = [_weighted(f"h{i}", i, 5, cross_signal_strength=1) for i in range(3)]
+    selected = select_with_budget(heavy)
+    assert sum(c.weight for c in selected) <= MAX_CARDS
+    assert len(selected) == 2, "only two five-card sections fit inside ten"
+
+
+@pytest.mark.unit
+def test_a_candidate_too_heavy_for_the_remaining_budget_is_skipped():
+    """Admission is all-or-nothing: half a section is an uninterpretable stump,
+    so an over-budget candidate yields to a lighter one behind it."""
+    big = _weighted("big", 0, 9, cross_signal_strength=5)
+    huge = _weighted("huge", 1, 8, cross_signal_strength=4)
+    small = _weighted("small", 2, 1, cross_signal_strength=1)
+    ids = [c.card.id for c in select_with_budget([big, huge, small])]
+    assert ids == ["big", "small"], "the 8-card section could not fit in 1"
+
+
+@pytest.mark.unit
+def test_weight_defaults_to_one_card():
+    assert _candidate("c", 0).weight == 1
+
+
+@pytest.mark.unit
+def test_zero_or_negative_weight_still_costs_one():
+    """A malformed weight must not buy free admission."""
+    cheats = [_weighted(f"z{i:02d}", i, 0, cross_signal_strength=1)
+              for i in range(30)]
+    assert len(select_with_budget(cheats)) <= MAX_CARDS
+
+
+@pytest.mark.unit
+def test_first_screen_is_charged_in_cards_too():
+    lead_heavy = _weighted("lead", 0, 6, cross_signal_strength=5)
+    follower = _weighted("follow", 1, 1, cross_signal_strength=4)
+    selected = select_with_budget([lead_heavy, follower])
+    # The 6-card section fills the first screen exactly; the follower is tail.
+    assert [c.card.id for c in selected] == ["lead", "follow"]
+
+
+@pytest.mark.unit
+def test_first_screen_is_a_contiguous_prefix_not_a_cherry_pick():
+    """Once a candidate overruns the first screen, the screen is closed — a
+    lighter candidate further down does not get promoted past it, because a
+    reader cannot skip a section."""
+    heavy = _weighted("heavy", 0, 5, cross_signal_strength=9)
+    also_heavy = _weighted("also", 1, 4, cross_signal_strength=8)
+    light = _weighted("light", 2, 1, cross_signal_strength=1)
+    selected = select_with_budget([heavy, also_heavy, light])
+    assert [c.card.id for c in selected][0] == "heavy"
+    assert sum(c.weight for c in selected) <= MAX_CARDS
+
+
+@pytest.mark.unit
+def test_weighted_selection_is_deterministic():
+    pool = [_weighted(f"c{i:02d}", i, (i % 4) + 1, cross_signal_strength=i % 3)
+            for i in range(12)]
+    first = [c.card.id for c in select_with_budget(pool)]
+    second = [c.card.id for c in select_with_budget(list(reversed(pool)))]
+    assert first == second

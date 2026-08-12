@@ -1029,12 +1029,14 @@ _BUDGET_META: dict[str, dict] = {
 
 
 def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
-    """One CardCandidate per container, carrying its budget signals.
+    """One CardCandidate per container, weighted by the cards it publishes.
 
-    The budget ranks CONTAINERS rather than individual cards on purpose: a
-    container is the unit a reader scans and the unit that means something on
-    its own ("成本归因" split across two screens explains nothing). `card` is
-    the container itself — `select_with_budget` only reads `.id`.
+    Containers are the ADMISSION unit — a container is what a reader scans, and
+    half of "成本归因" explains nothing, so a section is published whole or not
+    at all. But the BUDGET is spent in cards (`weight`), because the reader's
+    five minutes go on cards rather than section headers. Charging one per
+    container was the bug: three five-card sections cost 3 against a cap of 10
+    while putting 15 cards on the page.
 
     `freshness` is derived from position: the digest orders containers by their
     own `order`, and an earlier container is the more immediate signal.
@@ -1056,17 +1058,19 @@ def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
             is_detail=bool(meta.get("is_detail", False)),
             provides=tuple(meta.get("provides", ())),
             redundant_with=tuple(meta.get("redundant_with", ())),
+            weight=len(container.cards),
         ))
     return candidates
 
 
 def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
-    """Trim the day's containers to the information budget.
+    """Trim the day's containers so the PUBLISHED CARDS fit the budget.
 
     The overview is EXEMPT and always leads: it is the briefing's only
     guaranteed card (ADR-23 — a fully degraded day still publishes a valid
     briefing), so putting it up for selection would risk a day with no cards at
-    all. Everything else competes.
+    all. Its cards are still CHARGED against the budget, since the reader pays
+    for them either way; only its admission is unconditional.
 
     The surviving containers are returned in `order`, not in priority order:
     priority decides WHAT is published, the authored order decides how it reads.
@@ -1074,8 +1078,11 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     if not containers:
         return ()
     head, rest = containers[0], containers[1:]
-    budget = max(0, MAX_CARDS - 1)
-    first_screen = max(0, FIRST_SCREEN_CARDS - 1)
+    # The overview's own cards come out of the same budget — exempt from being
+    # dropped is not the same as free.
+    head_cards = len(head.cards)
+    budget = max(0, MAX_CARDS - head_cards)
+    first_screen = max(0, FIRST_SCREEN_CARDS - head_cards)
     kept = select_with_budget(_container_candidates(rest),
                               max_cards=budget, first_screen=first_screen)
     survivors = [c.card for c in kept if c.card.cards]

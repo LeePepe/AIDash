@@ -96,6 +96,12 @@ class CardCandidate:
     that, more weakly" — and the cross card declares it `provides` it. Naming
     the signal rather than the card id means the suppression survives a card
     being renamed, resized, or built by a different producer.
+
+    `weight` is how many PUBLISHED CARDS this candidate stands for. It is 1 for
+    a single card and N for a section carrying N of them. The budget is spent
+    in cards because that is what the reader's five minutes are spent on — a
+    candidate that costs 1 while publishing 5 would let three sections report
+    "3 of 10" while putting 15 cards on the page.
     """
 
     card: Any
@@ -109,6 +115,7 @@ class CardCandidate:
     is_detail: bool = False
     provides: tuple[str, ...] = ()
     redundant_with: tuple[str, ...] = ()
+    weight: int = 1
 
     @property
     def carries_signal(self) -> bool:
@@ -241,12 +248,21 @@ def select_with_budget(candidates: Sequence[CardCandidate],
          first-screen budget without adding anything.
       2. **Omission.** A stable detail card with no action, anomaly, or cross
          value is dropped outright.
-      3. **Ranking + cap.** The rest are ranked by `_priority` and truncated to
-         `max_cards`.
-      4. **Lead/tail split.** The top `first_screen` keep their priority order —
-         they are what a two-minute read gets. Everything after returns to the
-         authored order, so the detail tail still reads as the author arranged
-         it rather than as a second priority list.
+      3. **Ranking + cap.** The rest are ranked by `_priority` and admitted
+         while the budget lasts. The budget is spent in `weight` — one per card
+         by default — so a candidate standing for five published cards costs
+         five, not one. Counting candidates instead would let three five-card
+         sections report "3" against a cap of 10 while publishing 15.
+      4. **Lead/tail split.** Candidates whose cards fit inside `first_screen`
+         keep their priority order — they are what a two-minute read gets.
+         Everything after returns to the authored order, so the detail tail
+         still reads as the author arranged it rather than as a second priority
+         list.
+
+    Admission is ALL-OR-NOTHING per candidate: a candidate too heavy for the
+    remaining budget is skipped and a lighter, lower-priority one may take its
+    place. That keeps a multi-card section whole — half of it is not a smaller
+    version of it, just an uninterpretable stump.
 
     Pure and total: an empty input yields an empty list, and the result is
     identical regardless of the input's order.
@@ -261,8 +277,28 @@ def select_with_budget(candidates: Sequence[CardCandidate],
         if (c.carries_signal or not c.is_detail) and not _is_superseded(c, supplied)
     ]
     ranked = sorted(eligible, key=_priority)
-    selected = ranked[:max(0, max_cards)]
-    lead = selected[:max(0, first_screen)]
-    tail = sorted(selected[max(0, first_screen):],
-                  key=lambda c: (c.order, c.card.id))
+
+    selected: list[CardCandidate] = []
+    spent = 0
+    lead_count = 0
+    lead_spent = 0
+    lead_open = True
+    for candidate in ranked:
+        cost = max(1, candidate.weight)
+        if spent + cost > max(0, max_cards):
+            continue
+        selected.append(candidate)
+        spent += cost
+        # The first screen is measured in the same currency and is a CONTIGUOUS
+        # prefix: it closes at the first candidate that would overrun it, rather
+        # than skipping ahead to a smaller one further down. A reader does not
+        # get to jump a section.
+        if lead_open and lead_spent + cost <= max(0, first_screen):
+            lead_count += 1
+            lead_spent += cost
+        else:
+            lead_open = False
+
+    lead = selected[:lead_count]
+    tail = sorted(selected[lead_count:], key=lambda c: (c.order, c.card.id))
     return lead + tail

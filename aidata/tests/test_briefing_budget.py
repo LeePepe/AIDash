@@ -18,8 +18,10 @@ import pytest
 from L5_apps.digest.aidash import Briefing, build_briefing
 from L5_apps.digest.card_policy import FIRST_SCREEN_CARDS, MAX_ACTIONS, MAX_CARDS
 from L5_apps.digest.sources import (
-    AdoPrTrends, AutomationTrends, DigestSources, MulticaTrends, RavenTrends,
-    RelationshipCell, ReworkRelationship, SourceHealth,
+    AdoPrTrends, AiEfficiency, AutomationTrends, CardInterest, CardTypeStar,
+    DigestSources, Leverage, ModelTier, MulticaTrends, NewsItem, NewsRadar,
+    RankBundle, RankItem, RavenTrends, RelationshipCell, ReworkRelationship,
+    Segment, SegmentBundle, SourceHealth,
 )
 
 from tests.test_digest_golden import (
@@ -92,8 +94,85 @@ def _build(sources: DigestSources, md: str = FULL_MD) -> Briefing:
     return build_briefing(REPORT_DATE, sources, md, MUST_SEE)
 
 
+def _rich_sources() -> DigestSources:
+    """A day where every source is healthy and several containers hold 4–5 cards.
+
+    The budget cannot be tested against a thin day: the default fixture
+    publishes 6 cards, under every cap, so a briefing with no budget at all
+    would pass. This one publishes 16 cards before trimming — enough that
+    `AI 效能` (5 cards), `成本归因` (4) and `可改良` (2) alone overrun the
+    10-card total, which is exactly the container-vs-card confusion the caps
+    must catch.
+    """
+    ok = lambda name: SourceHealth(name, "ok")  # noqa: E731
+    ranks = [RankItem("alpha", 3.0, "3"), RankItem("beta", 2.0, "2")]
+    segments = [Segment("end_turn", 5.0, "good"), Segment("tool_use", 3.0, None)]
+    return _sources(
+        rework_relationship=_matrix(3, 3),
+        ai_efficiency=AiEfficiency(
+            cache=[("2026-07-08", 40.0), ("2026-07-09", 50.0)],
+            cache_savings=[("2026-07-09", 12.0)], cache_health=ok("state_db"),
+            rework=[("2026-W27", 9.0), ("2026-W28", 11.0)],
+            rework_health=ok("multica_run"),
+            failure=RankBundle(ranks, ok("multica_run")),
+            quality=SegmentBundle(segments, ok("claude_jsonl")),
+            planner_gap_count=3, planner_gap_health=ok("multica_comment")),
+        tool_cross=RankBundle(ranks, ok("hermes_messages")),
+        cost_by_project=RankBundle(ranks, ok("attribution")),
+        model_by_project=RankBundle(ranks, ok("attribution")),
+        leverage=Leverage(10, 4.0, 3.0, 120, ok("leverage")),
+        rework_by_workspace=RankBundle(ranks, ok("multica_run")),
+        app_focus=RankBundle(ranks, ok("gecko")),
+        commit_by_repo=RankBundle(ranks, ok("local_git")),
+        model_tier=ModelTier(segments, ok("state_db")),
+        news_radar=NewsRadar(
+            [NewsItem("hn", "t1", "u1", "s"), NewsItem("finance", "t2", "u2", "s")],
+            ok("news")),
+        card_interest=CardInterest([CardTypeStar("insight", 4)],
+                                   ok("aidash_events")),
+    )
+
+
+def _untrimmed_containers(sources=None) -> list:
+    """Every container the producers build, BEFORE the budget trims anything.
+
+    Reads the same seam `build_briefing` uses, so the "does the fixture still
+    overflow?" guard measures the real authored set rather than a hand-copied
+    number that would rot.
+    """
+    from L5_apps.digest import aidash
+
+    captured: list = []
+    original = aidash._apply_budget
+
+    def _spy(containers):
+        captured.extend(containers)
+        return original(containers)
+
+    aidash._apply_budget = _spy
+    try:
+        _build(sources if sources is not None else _rich_sources())
+    finally:
+        aidash._apply_budget = original
+    return captured
+
+
 def _cards(b: Briefing) -> list:
     return [card for c in b.containers for card in c.cards]
+
+
+def _first_screen_cards(b: Briefing) -> list:
+    """The cards a reader sees before scrolling.
+
+    Containers are the scanning unit, so the first screen is the cards of the
+    leading containers that fit whole — never a container cut in half.
+    """
+    lead: list = []
+    for container in b.containers:
+        if len(lead) + len(container.cards) > FIRST_SCREEN_CARDS:
+            break
+        lead.extend(container.cards)
+    return lead
 
 
 def _of_type(b: Briefing, card_type: str) -> list:
@@ -185,24 +264,110 @@ def test_relationship_absent_from_default_sources():
 
 # --------------------------------------------------------------------------- #
 # information budget (§design 3)
+#
+# These run against `_rich_sources()` — a day where EVERY source is healthy and
+# several containers carry 4–5 cards each. That matters: the thin default
+# fixture publishes 6 cards, which is under every cap, so it cannot tell a
+# working budget from an absent one. The rich fixture publishes 16 cards before
+# any trimming, which is what makes the assertions below load-bearing.
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
-def test_briefing_respects_the_total_card_budget():
-    b = _build(_sources(rework_relationship=_matrix(3, 3)))
-    assert len(_cards(b)) <= MAX_CARDS
+def test_the_rich_fixture_actually_overflows_before_trimming():
+    """Guard the guard: if the fixture stops overflowing, every budget test
+    below silently becomes vacuous — passing because there was nothing to trim
+    rather than because trimming works."""
+    untrimmed = sum(len(c.cards) for c in _untrimmed_containers())
+    assert untrimmed > MAX_CARDS, (
+        f"fixture publishes only {untrimmed} cards before the budget; it can no "
+        f"longer prove the {MAX_CARDS}-card cap"
+    )
 
 
 @pytest.mark.unit
-def test_first_screen_is_bounded():
-    b = _build(_sources(rework_relationship=_matrix(3, 3)))
-    lead = _cards(b)[:FIRST_SCREEN_CARDS]
+def test_briefing_respects_the_total_card_budget():
+    """The cap is on PUBLISHED CARDS, not containers. Counting containers lets
+    three 5-card containers publish 15 cards while reporting 3 against a cap of
+    10 — the reader's five minutes are spent on cards, not section headers."""
+    assert len(_cards(_build(_rich_sources()))) <= MAX_CARDS
+
+
+@pytest.mark.unit
+def test_first_screen_card_count_is_bounded():
+    """The first screen is a two-minute read, measured in cards.
+
+    Deliberately NOT `len(cards[:N]) <= N` — that slices to the bound and then
+    asserts it, so it holds for any briefing and proves nothing. The real
+    question is how many cards the leading containers carry.
+    """
+    b = _build(_rich_sources())
+    lead = _first_screen_cards(b)
     assert len(lead) <= FIRST_SCREEN_CARDS
+
+
+@pytest.mark.unit
+def test_first_screen_is_not_the_whole_briefing_on_a_rich_day():
+    """On a day with plenty of data the first screen must be a genuine SUBSET —
+    if it swallowed everything, the two-minute promise would be the five-minute
+    one wearing a different name."""
+    b = _build(_rich_sources())
+    assert len(_first_screen_cards(b)) < len(_cards(b))
+
+
+@pytest.mark.unit
+def test_a_container_is_never_split_across_the_first_screen_boundary():
+    """A container is the unit a reader scans; half of 成本归因 above the fold
+    and half below explains nothing. So the first screen ends on a container
+    boundary, which is why it can hold FEWER than 6 cards but never more."""
+    b = _build(_rich_sources())
+    lead = _first_screen_cards(b)
+    consumed = 0
+    for container in b.containers:
+        if consumed >= len(lead):
+            break
+        consumed += len(container.cards)
+    assert consumed == len(lead), "first screen cut a container in half"
+
+
+@pytest.mark.unit
+def test_overflow_drops_whole_containers_not_individual_cards():
+    """Trimming keeps containers intact: a 5-card container is published whole
+    or not at all, never as a 2-card stump the reader cannot interpret."""
+    published = {c.id: len(c.cards) for c in _build(_rich_sources()).containers}
+    authored = {c.id: len(c.cards) for c in _untrimmed_containers()}
+    for container_id, count in published.items():
+        assert count == authored[container_id], (
+            "a published container lost cards; containers are all-or-nothing"
+        )
+
+
+@pytest.mark.unit
+def test_the_overview_survives_the_budget_on_a_rich_day():
+    """ADR-23: the overview is the one guaranteed card. A crowded day must not
+    be able to crowd it out."""
+    titles = [c.title for c in _build(_rich_sources()).containers]
+    assert titles[0] == "总览"
+
+
+@pytest.mark.unit
+def test_the_cross_signal_survives_a_crowded_day():
+    """§design 3: the first screen must carry at least one outcome × resource
+    cross signal. It is the highest-value card on the board, so a busy day is
+    exactly when it must not be the one that gets trimmed."""
+    b = _build(_rich_sources())
+    assert _of_type(b, "relationship"), "the cross signal was trimmed away"
 
 
 @pytest.mark.unit
 def test_actions_are_capped():
     todo = _of_type(_build(_sources()), "todoList")
     assert todo, "the markdown TODO section must still produce a card"
+    assert len(todo[0].payload["items"]) <= MAX_ACTIONS
+
+
+@pytest.mark.unit
+def test_actions_are_capped_on_a_rich_day_too():
+    todo = _of_type(_build(_rich_sources()), "todoList")
+    assert todo, "actions must survive the budget — they are the point"
     assert len(todo[0].payload["items"]) <= MAX_ACTIONS
 
 
