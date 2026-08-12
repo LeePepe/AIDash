@@ -415,6 +415,18 @@
         }
       }
     },
+    "relationship.scatter.category": {
+      "comment": "Legend title for the color dimension of a relationship scatter chart; each entry is one of the payload's point categories.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Category"
+          }
+        }
+      }
+    },
     "relationship.slope.after": {
       "comment": "X-axis category for the later reading of a relationship slope chart.",
       "extractionState": "manual",
