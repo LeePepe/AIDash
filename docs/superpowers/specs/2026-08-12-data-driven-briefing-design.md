@@ -121,6 +121,12 @@ size 是作者上限，不是必须填满的目标。
 - 不内联颜色/字号/间距，不按 size 改字体。
 - 当数据不支持 relationship 或丰富度不足时优雅回退，不画误导图。
 
+### DesignKit
+
+- 为 `relationship` 增加独立 `Classification` token，使其 32×32 badge 与现有 CardType 在深/浅色中均可区分。
+- 通用图形原语仅消费 `theme.chart(index)`、semantic 与 neutral token；不为 relationship 另建调色板。
+- 继续保持零本地依赖和 Apple-framework-only。
+
 ### AGENTS.md
 
 - 将“Running tests: don't”改为“不手工重复跑测试；正常 commit/push 必须让 hooks 执行相应测试和构建”。
@@ -149,7 +155,8 @@ size 是作者上限，不是必须填满的目标。
 1. `docs:` 研究、设计、AGENTS.md 测试表述修正。
 2. `feat(aidata):` 交叉查询、选卡决策与信息预算。
 3. `feat(AIDashCore):` `relationship` schema 与合同。
-4. `feat(AIDashUI):` relationship 图表和 wide 自适应结构。
+4. `feat(DesignKit):` relationship 分类 token 与通用图形原语。
+5. `feat(AIDashUI):` relationship 图表和 wide 自适应结构。
 
 若实施时发现需要修改 App/CLI 层的非 schema 逻辑，记录为新任务，不扩大当前层 commit。
 
