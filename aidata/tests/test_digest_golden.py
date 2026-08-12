@@ -8,6 +8,7 @@ from L5_apps.digest.sources import (
     RavenTrends, MulticaTrends, AdoPrTrends, AutomationTrends, SourceHealth,
     RepoRadar, CostImprovement, ValueEfficiency, WorkByProject, AiEfficiency,
     RankBundle, SegmentBundle, NewsRadar, ModelTier, CardInterest, Leverage,
+    ReworkRelationship,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -128,6 +129,11 @@ def frozen_trends(monkeypatch):
                         lambda *a, **k: RankBundle([], _skipped("multica_run")))
     monkeypatch.setattr(app, "fetch_tool_cross",
                         lambda *a, **k: RankBundle([], _skipped("hermes_messages")))
+    # The rework MATRIX reads the live warehouse too. Frozen degraded-empty:
+    # a relationship card needs a 2×2+ matrix, and the committed golden predates
+    # it — its own rendering is covered by test_briefing_budget.
+    monkeypatch.setattr(app, "fetch_rework_relationship",
+                        lambda *a, **k: ReworkRelationship.empty("skipped:未取"))
 
 
 @pytest.mark.unit

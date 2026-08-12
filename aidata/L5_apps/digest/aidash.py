@@ -27,11 +27,15 @@ import re
 import subprocess  # nosec B404 - used only via injected runner/glob helpers
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from config import AIDASH_BIN_FIXED, AIDASH_BIN_GLOB
+from L5_apps.digest.card_policy import (
+    FIRST_SCREEN_CARDS, MAX_ACTIONS, MAX_CARDS,
+    CardCandidate, DataProfile, choose_card, select_with_budget,
+)
 from L5_apps.digest.cst import yesterday
 from L5_apps.digest.trends import compute_trend
 
@@ -179,6 +183,23 @@ def _todo_items(todo_lines: list[str]) -> list[dict]:
     return items
 
 
+# Action rank for the cap below: a P0 must survive where a P2 does not.
+_PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def _capped_actions(items: list[dict]) -> list[dict]:
+    """The day's actions, trimmed to the budget (§design 3: 行动最多 3 项).
+
+    A list of ten things to do today is a list of zero things that will get
+    done, so the cap is a feature rather than a truncation to apologise for.
+    The trim is by PRIORITY (stably — equal priorities keep authored order), so
+    what survives is the top of the list rather than whatever happened to be
+    written first.
+    """
+    ranked = sorted(items, key=lambda it: _PRIORITY_RANK.get(it["priority"], 1))
+    return ranked[:MAX_ACTIONS]
+
+
 # ---- plain-text bodies (BUG 2: card `body` is a String, never markdown) ----
 _MD_PREFIX = re.compile(r"^\s*(?:#{1,6}\s+|[-*+]\s+|>\s+)")
 
@@ -297,6 +318,125 @@ def _metric_items(sources: "DigestSources", report_date: str) -> list[dict]:
         if item:
             items.append(item)
     return items
+
+
+# ---- Item-level de-duplication (§design 3, acceptance criterion 5) ----------
+#
+# The redundancy in this briefing is real, but it is not container-shaped, not
+# card-shaped, and SMALLER than it looks — it is one row.
+#
+# `趋势指标` publishes one row per metric. When the per-project spend breakdown
+# is on the page, its 成本 row reports the same total that breakdown decomposes,
+# so the bare row carries nothing the split does not.
+#
+# EXACTLY ONE ROW, AND HERE IS THE EVIDENCE. `attribution/cost-by-project.sql`
+# selects `ktokens` and `requests` alongside `cost_usd`, but
+# `fetch_cost_by_project` reads only `project` / `cost_usd` / `cost_pct`, and
+# `_bar_items` publishes label/value/valueText. So no token, request or session
+# figure ever reaches a card. Treating `Token` as redundant deleted a signal
+# nothing on the page replaced — a de-duplication that was a deletion.
+#
+# Two earlier attempts suppressed the whole CONTAINER and took four unrelated
+# rows with it. Doing it here — inside the producer that owns the rows — is the
+# granularity the redundancy actually has.
+#
+# Labels a published breakdown genuinely restates. Deliberately minimal: every
+# addition must be justified by a field the provider card actually renders.
+_SPEND_TOTAL_LABELS = ("成本",)
+
+# Card id slots holding the per-project cost BREAKDOWN — the only card whose
+# presence makes the bare cost row redundant.
+#
+# SLOT 32 ONLY (`attribution/cost-by-project`). Slot 33
+# (`attribution/model-by-project`) is deliberately NOT here: it is a project ×
+# model grain filtered to `cost_usd > 0` and folded to a top-5 whose trailing
+# "Other" sums costs across pairs, so it does not reproduce the day's total
+# cost and cannot stand in for it. Binding to it would drop the 成本 row on days
+# when nothing on the page reports that total.
+#
+# NOT keyed on the `成本归因` container: that container is built from any of
+# four inputs and can consist of the 人机杠杆 metric alone, which decomposes
+# nothing.
+_SPEND_BREAKDOWN_SLOTS = frozenset({32})
+
+
+def _slot_of(card_id: str) -> int | None:
+    """The `_kuid` slot number encoded in a card id, or None if unparseable.
+
+    Ids are `22222222-<mmdd>-<slot:04d>-0000-<slot:012d>`; the third group is
+    read rather than the last so the parse stays cheap and obvious. Never
+    raises — an id from elsewhere simply matches nothing.
+    """
+    parts = card_id.split("-")
+    if len(parts) < 3 or not parts[2].isdigit():
+        return None
+    return int(parts[2])
+
+
+def _dedupe_metric_items(items: list[dict],
+                         spend_breakdown_published: bool) -> list[dict]:
+    """Drop metric rows a stronger PUBLISHED card already covers.
+
+    Conditional on the stronger card actually reaching the reader, and that
+    condition must be evaluated against the FINAL published set, not against
+    "the producer built one". The budget can still trim the breakdown after it
+    is built, and a row dropped in anticipation of a card that never ships
+    leaves the page with neither — the signal deleted rather than
+    de-duplicated. So this runs after `_apply_budget`, on what survived.
+
+    Never returns an empty list when it was given a non-empty one. A metric
+    payload requires `items.count >= 1`, so emptying the card would make the app
+    reject it and the card would vanish silently — turning a de-duplication into
+    a deletion. If every row is redundant there is nothing left to thin, so the
+    card is left intact.
+    """
+    if not spend_breakdown_published:
+        return items
+    kept = [it for it in items if it.get("label") not in _SPEND_TOTAL_LABELS]
+    return kept or items
+
+
+def _dedupe_published(containers: tuple[Container, ...]) -> tuple[Container, ...]:
+    """Thin duplicated rows out of the trend card, after the budget has run.
+
+    Two conditions, and both are about what the reader ACTUALLY sees:
+
+    1. **Ordering.** De-duplication asks "is this row already covered by
+       something on the page?", and only the post-budget set can answer that.
+       Running it earlier answers "did a producer build one?" instead, and gets
+       it wrong whenever the budget later trims the provider.
+    2. **Identity.** The provider is the per-project cost BREAKDOWN card, not
+       the container that happens to hold it. `成本归因` is built from any of
+       four inputs — it can consist of the 人机杠杆 metric alone, with no spend
+       split in it — so keying on the container title dropped the cost row
+       whenever any attribution data existed. Only the cost-by-project card
+       (slot 32) qualifies; see `_SPEND_BREAKDOWN_SLOTS` for why the project ×
+       model card does not.
+
+    Pure: containers are rebuilt rather than mutated, and a briefing without
+    both sides of the pair passes through untouched.
+    """
+    published_ids = {card.id for c in containers for card in c.cards}
+    breakdown_published = any(
+        _slot_of(card_id) in _SPEND_BREAKDOWN_SLOTS for card_id in published_ids
+    )
+    if not breakdown_published:
+        return containers
+    out: list[Container] = []
+    for container in containers:
+        if container.title != "趋势指标":
+            out.append(container)
+            continue
+        cards = []
+        for card in container.cards:
+            items = card.payload.get("items")
+            if not items:
+                cards.append(card)
+                continue
+            kept = _dedupe_metric_items(items, True)
+            cards.append(replace(card, payload={**card.payload, "items": kept}))
+        out.append(replace(container, cards=tuple(cards)))
+    return tuple(out)
 
 
 def _overview_sections(sections: dict[str, list[str]]) -> list[dict]:
@@ -438,7 +578,7 @@ def _prose_containers(mmdd: str,
     # else fall back to the markdown 今日 TODO section. The inbox merges stalls
     # / decisions / planned work / findings into one prioritized list.
     inbox = [{"title": it.title, "priority": it.priority} for it in (inbox_items or [])]
-    todos = inbox or _todo_items(_section(sections, "今日 TODO"))
+    todos = _capped_actions(inbox or _todo_items(_section(sections, "今日 TODO")))
     if todos:
         out.append(Container(_cuid(mmdd, 4), "今日规划", 40,
             (Card(_kuid(mmdd, 5), "todoList", "hero", {"items": todos},
@@ -874,7 +1014,252 @@ def _card_interest_container(mmdd: str, card_interest) -> "Container | None":
         return None
     card = Card(_kuid(mmdd, 24), "insight", "wide",
                 {"title": "你最常收藏的卡型 Top-N", "body": body})
-    return Container(_cuid(mmdd, 11), "卡型兴趣", 55, (card,), layout="list")
+    # NOTE: slot 13, not 11. 成本归因 already owns 11 — the two collided, so the
+    # `container put` for whichever came second silently OVERWROTE the first in
+    # the app (container id is the upsert key). Harmless-looking while cards were
+    # appended unconditionally; load-bearing now that the information budget
+    # selects containers by identity. Slot 12 is 交叉信号.
+    return Container(_cuid(mmdd, 13), "卡型兴趣", 55, (card,), layout="list")
+
+
+# ---------------------------------------------------------------------------
+# 交叉信号 · relationship (§design 4.2, constitution §Relationship visualization)
+#
+# The first card here built from a genuinely TWO-dimensional bundle. Everything
+# above is a series or a ranking, and neither can honestly become a
+# relationship — so this is produced from the structured matrix bundle only,
+# never by parsing structure back out of prose.
+# ---------------------------------------------------------------------------
+# What the plotted number actually measures. Stated on the card because
+# "rework tokens" is a proxy (tokens on issues that were cancelled and later
+# completed), not an objective measure of wasted effort.
+_REWORK_METRIC_DEFINITION = (
+    "返工 token = 被取消后又完成的 issue 上消耗的 token；"
+    "每个 issue 只计入其主导根因一次，不跨根因重复计数"
+)
+
+
+def _relationship_summary(cells: list, sample_size: int) -> str:
+    """A summary that states what was OBSERVED, never why.
+
+    The constitution forbids wording an observational association as causation,
+    and this matrix is exactly the kind that invites it ("runtime-offline
+    causes rework"). What is actually known is where the mass sits, so that is
+    what the sentence says.
+    """
+    top = max(cells, key=lambda c: c.value)
+    total = sum(c.value for c in cells)
+    share = (100.0 * top.value / total) if total > 0 else 0.0
+    return (f"观察到返工 token 最集中于 {top.row} · {top.column}"
+            f"（占 {share:.0f}%，样本 {sample_size} 个返工 issue）；"
+            "这是相关性观察，不构成因果结论")
+
+
+def _relationship_container(mmdd: str, rework) -> "Container | None":
+    """🔗 交叉信号: the workspace × root-cause rework heatmap.
+
+    Returns None — not an empty frame — whenever the data cannot honestly carry
+    a relationship (ADR-23):
+      - the source degraded or was never collected;
+      - the matrix is thinner than 2×2, i.e. one axis has a single value and the
+        "relationship" would be a ranking wearing a matrix's clothes;
+      - the sample size is 0, which the schema rejects anyway (sampleSize >= 1),
+        so publishing it would make the card silently vanish app-side.
+
+    The size/visualization decision is delegated to `card_policy.choose_card`,
+    so "why is this wide?" is answered by a unit-tested rule rather than a
+    literal typed here.
+    """
+    if rework is None or getattr(rework, "health", None) is None:
+        return None
+    if rework.health.state != "ok" or not rework.cells or rework.sample_size < 1:
+        return None
+    rows = sorted({c.row for c in rework.cells})
+    columns = sorted({c.column for c in rework.cells})
+    profile = DataProfile(
+        semantic="relationship",
+        item_count=len(rework.cells),
+        dimensions=2,
+        row_count=len(rows),
+        column_count=len(columns),
+        relationship_kind="heatmap",
+    )
+    decision = choose_card(profile)
+    if decision.size != "wide":
+        # A medium heatmap is a 1×N strip: the second axis carries no
+        # information, so the chart would assert a structure the data lacks.
+        return None
+    payload = {
+        "title": "返工集中在哪里",
+        "visualization": decision.visualization,
+        "xAxis": {"label": "失败根因"},
+        "yAxis": {"label": "Workspace"},
+        "cells": [{"row": c.row, "column": c.column, "value": float(c.value)}
+                  for c in rework.cells],
+        "sampleSize": int(rework.sample_size),
+        "timeWindow": rework.time_window or "全部",
+        "metricDefinition": _REWORK_METRIC_DEFINITION,
+        "summary": _relationship_summary(rework.cells, rework.sample_size),
+    }
+    card = Card(_kuid(mmdd, 37), "relationship", decision.size, payload)
+    return Container(_cuid(mmdd, 12), "交叉信号", 24, (card,), layout="auto",
+                     subtitle="返工 × 根因 × workspace · 观察性关联")
+
+
+# ---------------------------------------------------------------------------
+# Information budget (§design 3): a two-minute first screen, a five-minute page.
+#
+# Containers are built as before — each producer still owns its own
+# degrade-safety — but they are then offered to the budget as CANDIDATES rather
+# than appended unconditionally. The budget is what turns "we have data for this"
+# into "this earns the reader's attention today".
+#
+# ## Why redundancy is handled per ITEM, not here
+#
+# An earlier version let one container declare it superseded another's signal
+# (成本归因's per-project split vs 趋势指标's spend total). The granularity was
+# wrong: admission is per CONTAINER, but the redundancy is a single ROW. 趋势指标
+# carries tokens, requests, sessions, completed-issues and the automation ratio
+# beside the cost row — none of which the cost split restates — so suppressing
+# the container to remove one duplicated row deleted five unrelated signals.
+#
+# Two-pass admission (suppress against provisionally-admitted providers) did not
+# rescue it either: `_admit` skips an over-budget candidate and lets a lighter
+# one take its place, so admission is NOT monotone — removing a card can change
+# WHICH cards fit and evict the very provider that justified the suppression,
+# losing both sides and the signal entirely.
+#
+# So de-duplication lives in `_dedupe_metric_items`, inside the producer that
+# owns the rows, and runs before the card is built. The budget below ranks and
+# caps; it never deletes one container on another's behalf.
+# ---------------------------------------------------------------------------
+# Per-container budget metadata, keyed by container title. Everything absent
+# from this table takes the default (a plain, non-detail card of average cost).
+#
+#   is_detail        — stable description; omitted when it carries no signal.
+#   cross_signal     — how much cross-source value it adds (0 = single dimension).
+#   reading_cost     — roughly how long a reader spends on it.
+#
+# 趋势指标 scores 1 rather than 0 because its rows are de-duplicated before the
+# card is built: whatever survives is a signal no other card restates (requests,
+# sessions, completed work, automation ratio). Ranking it at 0 — as a bare
+# single-dimension total — described the card before de-duplication, and dropped
+# the day's only source of those numbers on a busy day.
+_BUDGET_META: dict[str, dict] = {
+    "总览": {"reading_cost": 2, "requires_action": False},
+    "今日规划": {"requires_action": True, "reading_cost": 1},
+    "交叉信号": {"cross_signal": 3, "reading_cost": 2},
+    "AI 效能": {"cross_signal": 2, "reading_cost": 3},
+    "成本归因": {"cross_signal": 2, "reading_cost": 3},
+    "趋势指标": {"cross_signal": 1, "reading_cost": 2},
+    "今日工作": {"reading_cost": 2},
+    "昨日汇总": {"reading_cost": 2},
+    "可改良": {"cross_signal": 1, "reading_cost": 3},
+    "时间与产出": {"is_detail": True, "reading_cost": 2},
+    "卡型兴趣": {"is_detail": True, "reading_cost": 1},
+    "GitHub 工具雷达": {"is_detail": True, "reading_cost": 3},
+    "新闻雷达": {"is_detail": True, "reading_cost": 3},
+}
+
+
+def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
+    """One CardCandidate per container, weighted by the cards it publishes.
+
+    Containers are the ADMISSION unit — a container is what a reader scans, and
+    half of "成本归因" explains nothing, so a section is published whole or not
+    at all. But the BUDGET is spent in cards (`weight`), because the reader's
+    five minutes go on cards rather than section headers. Charging one per
+    container was the bug: three five-card sections cost 3 against a cap of 10
+    while putting 15 cards on the page.
+
+    `freshness` is derived from position: the digest orders containers by their
+    own `order`, and an earlier container is the more immediate signal.
+    """
+    candidates: list[CardCandidate] = []
+    for index, container in enumerate(containers):
+        meta = _BUDGET_META.get(container.title, {})
+        candidates.append(CardCandidate(
+            card=container,
+            order=container.order,
+            requires_action=bool(meta.get("requires_action", False)),
+            is_anomaly=bool(meta.get("is_anomaly", False)),
+            cross_signal_strength=int(meta.get("cross_signal", 0)),
+            # Later containers are progressively less immediate; the overview
+            # and the day's numbers lead.
+            freshness=max(0, len(containers) - index),
+            source_coverage=len(container.cards),
+            reading_cost=int(meta.get("reading_cost", 2)),
+            is_detail=bool(meta.get("is_detail", False)),
+            weight=len(container.cards),
+        ))
+    return candidates
+
+
+def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
+    """Trim the day's containers so the PUBLISHED CARDS fit the budget, and
+    make the first-screen decision one the APP will actually honour.
+
+    The overview is EXEMPT and always leads: it is the briefing's only
+    guaranteed card (ADR-23 — a fully degraded day still publishes a valid
+    briefing), so putting it up for selection would risk a day with no cards at
+    all. Its cards are still CHARGED against the budget, since the reader pays
+    for them either way; only its admission is unconditional.
+
+    ## Why this rewrites `order` rather than just returning a tuple
+
+    The app does NOT render containers in the order we send them — both
+    `BriefingView.swift` and `XPCHandlers.swift` sort by `container.order`. So a
+    first-screen decision expressed only as tuple position is invisible to the
+    reader: whatever `order` says wins, and the budget's ranking is silently
+    discarded on the way through XPC. (Sorting survivors straight back to
+    authored order here had exactly that effect — `FIRST_SCREEN_CARDS` decided
+    nothing a reader could see.)
+
+    So the lead containers are renumbered into a reserved band BELOW every
+    authored order, preserving their priority sequence, while the tail keeps its
+    authored numbering. `order` remains ascending — it is still the single
+    ordering key — but its leading stretch now encodes "this is the two-minute
+    read" instead of "this is where the producer happened to append it".
+    """
+    if not containers:
+        return ()
+    head, rest = containers[0], containers[1:]
+    # The overview's own cards come out of the same budget — exempt from being
+    # dropped is not the same as free.
+    head_cards = len(head.cards)
+    budget = max(0, MAX_CARDS - head_cards)
+    first_screen = max(0, FIRST_SCREEN_CARDS - head_cards)
+    kept = select_with_budget(_container_candidates(rest),
+                              max_cards=budget, first_screen=first_screen)
+    if not [c for c in kept.selected if c.card.cards]:
+        return (head,)
+
+    # Take the first-screen boundary FROM the budget rather than re-deriving it.
+    # Counting cards off the front of the result would be wrong: the tail is
+    # sorted back into authored order, so a light low-priority container sitting
+    # early in authored order gets swept into the lead and — because the lead is
+    # what gets renumbered — genuinely promoted onto the reader's first screen
+    # ahead of a higher-priority one.
+    lead = [c.card for c in kept.lead if c.card.cards]
+    tail = [c.card for c in kept.tail if c.card.cards]
+
+    # Renumber EVERY survivor into one ascending run below the overview.
+    #
+    # Renumbering only the lead is not enough. The app sorts by `order` alone,
+    # so a tail container that happens to carry a low authored number (say the
+    # producer gave it 15 while a lead container authored 30 got renumbered)
+    # would still render above the first screen — the budget's decision loses to
+    # an accident of how the producers numbered their sections.
+    #
+    # So: lead first, in priority order; then tail, in authored order. The
+    # overview keeps the hard top. Within each group the relative order is the
+    # one that group is supposed to express, and across groups the first screen
+    # always wins.
+    published = [
+        replace(container, order=head.order + 1 + index)
+        for index, container in enumerate(lead + tail)
+    ]
+    return tuple([head] + published)
 
 
 def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
@@ -885,6 +1270,11 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     automation ratio) built from the structured `sources` series — not by parsing
     numbers back out of markdown. `full_md` still supplies the prose sections
     (昨日汇总/TODO/可改良) and the source-health line.
+
+    Containers are built first and then passed through the INFORMATION BUDGET
+    (§design 3): what a reader can finish in two minutes leads, the whole page
+    stays inside five, and a low-value card is omitted rather than pushed to the
+    bottom. The overview is exempt so a fully degraded day still publishes.
 
     The briefing date/title/UUIDs key on the REPORTED day (yesterday of the run
     date) so they match the local archive filename and the digest title (BUG 3).
@@ -902,6 +1292,13 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     if work_container:
         containers.append(work_container)
 
+    # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
+    attribution_container = _attribution_container(
+        mmdd, getattr(sources, "cost_by_project", None),
+        getattr(sources, "model_by_project", None),
+        getattr(sources, "leverage", None),
+        getattr(sources, "rework_by_workspace", None))
+
     metrics = _metric_items(sources, report_date)
     if metrics:
         containers.append(Container(
@@ -909,14 +1306,15 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
             (Card(_kuid(mmdd, 3), "metric", "wide", {"items": metrics}),),
             layout="auto"))
 
-    # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
-    attribution_container = _attribution_container(
-        mmdd, getattr(sources, "cost_by_project", None),
-        getattr(sources, "model_by_project", None),
-        getattr(sources, "leverage", None),
-        getattr(sources, "rework_by_workspace", None))
     if attribution_container:
         containers.append(attribution_container)
+
+    # 🔗 交叉信号 (order 24): the rework heatmap. Sits between 成本归因 (22) and
+    # AI 效能 (25) — it explains where the effectiveness numbers below come from.
+    relationship_container = _relationship_container(
+        mmdd, getattr(sources, "rework_relationship", None))
+    if relationship_container:
+        containers.append(relationship_container)
 
     # 🧠 AI 效能 (order 25) + ⏱ 时间与产出 (order 28): batch-2 差异化 sections,
     # placed right after the trend metrics and before the prose 昨日汇总 (order 30).
@@ -952,7 +1350,11 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     news_container = _news_container(mmdd, getattr(sources, "news_radar", None))
     if news_container:
         containers.append(news_container)
-    return Briefing(reported_day, GENERATED_BY, tuple(containers))
+    # De-duplicate AFTER the budget, never before: a row is only redundant if
+    # the card that covers it actually reaches the reader, and until the budget
+    # has run that is not known (§design 3, criterion 5).
+    return Briefing(reported_day, GENERATED_BY,
+                    _dedupe_published(_apply_budget(containers)))
 
 
 # ---------------------------------------------------------------------------
