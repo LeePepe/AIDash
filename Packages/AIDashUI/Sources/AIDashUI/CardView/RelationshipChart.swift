@@ -438,7 +438,14 @@ struct RelationshipChart: View {
             ForEach(Self.periods(for: slope), id: \.period) { reading in
                 LineMark(
                     x: .value(payload.xAxis.label, reading.period),
-                    y: .value(payload.yAxis.label, reading.value)
+                    y: .value(payload.yAxis.label, reading.value),
+                    // Swift Charts groups marks into series by THIS argument —
+                    // not by the enclosing ForEach and not by foregroundStyle.
+                    // Without it every entity's points land in one series and
+                    // the renderer connects entity A's "after" to entity B's
+                    // "before", drawing a zigzag that reads as a real trend but
+                    // is pure artifact.
+                    series: .value(Self.seriesFieldLabel, Self.seriesKey(index: index, slope: slope))
                 )
                 .foregroundStyle(RelationshipCategoryPalette.color(slot: index, theme: theme))
                 PointMark(
@@ -454,6 +461,24 @@ struct RelationshipChart: View {
         .chartYAxisLabel(payload.yAxis.label, position: .top, alignment: .leading)
         .chartLegend(.hidden)
     }
+
+    /// The series identity of one slope entity — what Swift Charts groups its
+    /// `LineMark`s by, so each entity gets its own 2-point line.
+    ///
+    /// The entity's own index is part of the key on purpose. Two entities can
+    /// legitimately carry the SAME label (the same repo under two orgs, the
+    /// same workspace name in two accounts), and keying on the label alone
+    /// would silently merge them back into one line — the same defect this
+    /// helper exists to prevent, just harder to spot. The label stays in the
+    /// key so a rendered chart is still debuggable by eye.
+    static func seriesKey(index: Int, slope: RelationshipPayload.Slope) -> String {
+        "\(index)·\(slope.label)"
+    }
+
+    /// Field name for the series dimension. Not user-visible — the legend is
+    /// hidden and each entity is announced through its own accessibility
+    /// element — so it is a stable identifier, not a localized string.
+    static let seriesFieldLabel = "Entity"
 
     /// A slope's two readings, keyed by their localized period names — the
     /// x-axis of a slope chart is always exactly "before" then "after".

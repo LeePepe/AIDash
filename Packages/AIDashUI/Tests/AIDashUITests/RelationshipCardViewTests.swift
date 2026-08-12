@@ -238,6 +238,94 @@ struct RelationshipCardViewTests {
         }
     }
 
+    // MARK: - Slope series isolation (regression: cross-entity connections)
+    //
+    // A slope chart draws one 2-point line PER ENTITY. Swift Charts groups
+    // marks into series by the `series:` argument, NOT by the enclosing
+    // ForEach or by foregroundStyle — so without an explicit discriminator
+    // every entity's points collapse into a single series and the renderer
+    // connects entity A's "after" to entity B's "before". That produces a
+    // zigzag that reads as a real trend but is pure rendering artifact, which
+    // is exactly the kind of misleading ink the constitution forbids.
+    //
+    // These tests pin the series KEY, because the key is what Swift Charts
+    // actually groups on. They deliberately include a duplicate-label payload:
+    // keying on `slope.label` alone would silently re-merge two same-named
+    // entities back into one line.
+
+    @Test("every slope reading carries the series key of its own entity — no two entities share one")
+    func slopeSeriesKeysAreUniquePerEntity() {
+        let payload = Self.slope(items: 4)
+        let keys = payload.slopes.indices.map { RelationshipChart.seriesKey(index: $0, slope: payload.slopes[$0]) }
+        #expect(Set(keys).count == payload.slopes.count,
+                "each entity must get a distinct series key, else Swift Charts joins them into one line")
+    }
+
+    @Test("two entities sharing a display label still get distinct series keys (duplicate-label regression)")
+    func slopeSeriesKeysSurviveDuplicateLabels() {
+        // Two entities legitimately named the same (e.g. same repo in two
+        // orgs). Keying purely on the label would connect them into one line.
+        let duplicated = RelationshipPayload(
+            title: "Before × after",
+            visualization: .slope,
+            xAxis: .init(label: "Period"),
+            yAxis: .init(label: "Tokens"),
+            slopes: [
+                .init(label: "AIDash", before: 21_000, after: 18_000),
+                .init(label: "AIDash", before: 12_000, after: 15_500),
+            ],
+            sampleSize: 12,
+            timeWindow: "previous 7d vs current 7d",
+            metricDefinition: "total tokens divided by completed pipeline tasks",
+            summary: "Observed unit token use decreased."
+        )
+        let keys = duplicated.slopes.indices.map {
+            RelationshipChart.seriesKey(index: $0, slope: duplicated.slopes[$0])
+        }
+        #expect(keys[0] != keys[1],
+                "two entities with the same label must NOT collapse into a single series")
+        #expect(keys.allSatisfy { $0.contains("AIDash") },
+                "the series key must still carry the entity label so the chart stays debuggable")
+    }
+
+    @Test("a slope's two readings share ONE series key — the before→after line must connect")
+    func slopeReadingsShareTheirOwnSeries() {
+        let payload = Self.slope(items: 3)
+        var keysSeen: [String] = []
+        for (index, slope) in payload.slopes.enumerated() {
+            let readings = RelationshipChart.periods(for: slope)
+            #expect(readings.count == 2, "a slope is exactly before + after")
+            #expect(readings[0].period == RelationshipChart.beforeLabel)
+            #expect(readings[1].period == RelationshipChart.afterLabel)
+            #expect(readings[0].value == slope.before)
+            #expect(readings[1].value == slope.after)
+            // The whole entity — both readings — sits under ONE key. Within an
+            // entity the line MUST connect; only ACROSS entities must it not.
+            keysSeen.append(RelationshipChart.seriesKey(index: index, slope: slope))
+        }
+        #expect(keysSeen.count == 3)
+        #expect(Set(keysSeen).count == 3, "one key per entity, and no key shared between entities")
+    }
+
+    @Test("the renderer passes an explicit per-entity series to every slope LineMark")
+    func slopeRendererDeclaresSeries() throws {
+        let source = try DesignTokensComplianceTests.cardViewSource(named: "RelationshipChart")
+        #expect(source.contains("series: .value("),
+                "slope LineMarks must declare an explicit series, or Swift Charts joins all entities into one line")
+        #expect(source.contains("seriesKey(index:"),
+                "the series value must come from the per-entity seriesKey helper")
+    }
+
+    @Test("a multi-entity slope payload materialises with every entity isolated")
+    func multiEntitySlopeRenders() {
+        let payload = Self.slope(items: 5)
+        let keys = payload.slopes.indices.map { RelationshipChart.seriesKey(index: $0, slope: payload.slopes[$0]) }
+        #expect(Set(keys).count == 5)
+        for size in CardSize.allCases {
+            _ = RelationshipCardView(payload: payload, size: size, style: .neutral).body
+        }
+    }
+
     // MARK: - Accessibility
 
     @Test("each scatter point becomes one accessible element carrying its label and both axis values")
