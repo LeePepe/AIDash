@@ -466,6 +466,14 @@ class DigestSources:
             [], SourceHealth("aidash_events", "skipped:未取")
         )
     )
+    # 交叉信号 (§design 4.2): rework tokens crossed by workspace × root cause.
+    # The first genuinely two-dimensional bundle here — everything above is a
+    # series or a ranking, which is why none of them can carry a relationship
+    # card. Defaults to a skipped/empty bundle so older constructors keep
+    # working; _fetch_sources() populates it in the real pipeline.
+    rework_relationship: "ReworkRelationship" = field(
+        default_factory=lambda: ReworkRelationship.empty()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1026,6 +1034,81 @@ def fetch_model_tier(top_n: int = 5) -> "ModelTier":
         return ModelTier(segs, SourceHealth("state_db", "ok"))
     except Exception as exc:
         return ModelTier([], SourceHealth("state_db", "error", str(exc)[:200]))
+
+
+# ---- 交叉信号 · 返工关系矩阵 (§design 4.2) --------------------------------
+@dataclass(frozen=True)
+class RelationshipCell:
+    """One cell of a two-dimensional relationship: row × column → magnitude."""
+    row: str
+    column: str
+    value: float
+
+
+@dataclass(frozen=True)
+class ReworkRelationship:
+    """Rework tokens crossed by workspace × root cause (attribution/rework-
+    relationship), plus the evidence a relationship card must carry.
+
+    `sample_size` is the number of rework issues behind the WHOLE matrix (not
+    per cell) and `time_window` the observed CST span — both are required by the
+    constitution's relationship recipe, because an association without its
+    sample and window is a claim without evidence.
+
+    Degrades to an empty bundle + non-ok health on a missing source or a failed
+    query (ADR-23), so the producer omits the card rather than drawing a chart
+    from nothing.
+    """
+    cells: list[RelationshipCell]
+    sample_size: int
+    time_window: str
+    health: SourceHealth
+
+    @staticmethod
+    def empty(state: str = "skipped:未取") -> "ReworkRelationship":
+        return ReworkRelationship([], 0, "", SourceHealth("multica_run", state))
+
+
+def fetch_rework_relationship(since: str | None) -> "ReworkRelationship":
+    """Fetch the workspace × root-cause rework matrix; degrade-safe (ADR-23).
+
+    Workspace UUIDs are mapped to friendly names HERE rather than in SQL, for
+    the same reason as `fetch_rework_by_workspace`: the name table lives in the
+    gitignored `config_local.py`, so a public query cannot do the lookup. An
+    unmapped workspace falls back to its first UUID segment, which is still a
+    stable, distinguishable row label.
+
+    Rows already arrive tokens-desc from L4; that order is preserved so the
+    heaviest cell leads.
+    """
+    if not clean_path("multica_run").exists():
+        return ReworkRelationship.empty("skipped:未采集")
+    try:
+        rows, idx = _rows("attribution/rework-relationship", {"since": since})
+        if not rows:
+            return ReworkRelationship.empty("skipped:无返工数据")
+        cells = [
+            RelationshipCell(
+                row=_WS_NAMES.get(str(r[idx["workspace_id"]]),
+                                  str(r[idx["workspace_id"]])[:8]),
+                column=str(r[idx["root_cause"]]),
+                value=float(r[idx["rework_tokens"]] or 0),
+            )
+            for r in rows
+        ]
+        start = str(rows[0][idx["window_start"]] or "")
+        end = str(rows[0][idx["window_end"]] or "")
+        window = f"{start} → {end}" if start and end else ""
+        return ReworkRelationship(
+            cells=cells,
+            sample_size=int(rows[0][idx["sample_size"]] or 0),
+            time_window=window,
+            health=SourceHealth("multica_run", "ok"),
+        )
+    except Exception as exc:  # noqa: BLE001 - degrade, never crash the digest
+        return ReworkRelationship([], 0, "",
+                                  SourceHealth("multica_run", "error",
+                                               str(exc)[:200]))
 
 
 # ---- 你最常收藏的卡型 (spec 005 T007/US5) ---------------------------------

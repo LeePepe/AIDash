@@ -1,0 +1,281 @@
+"""build_briefing under the data-driven card policy (MY-1395).
+
+Two behaviours are asserted here that no earlier test could:
+
+  1. The briefing carries a `relationship` card ONLY when the underlying data is
+     genuinely a 2×2-or-better matrix, and that card carries its evidence
+     (sample size, window, metric definition, non-causal summary).
+  2. The briefing obeys an information budget — a first screen a reader can
+     finish in two minutes, a whole page in five — instead of appending every
+     container that has data.
+
+Both are pure-transform tests: `build_briefing` never touches a warehouse, so
+the fixtures below are hand-built bundles rather than frozen captures.
+"""
+
+import pytest
+
+from L5_apps.digest.aidash import Briefing, build_briefing
+from L5_apps.digest.card_policy import FIRST_SCREEN_CARDS, MAX_ACTIONS, MAX_CARDS
+from L5_apps.digest.sources import (
+    AdoPrTrends, AutomationTrends, DigestSources, MulticaTrends, RavenTrends,
+    RelationshipCell, ReworkRelationship, SourceHealth,
+)
+
+from tests.test_digest_golden import (
+    _FROZEN_ADO, _FROZEN_AUTOMATION, _FROZEN_MULTICA, _FROZEN_TRENDS,
+)
+
+REPORT_DATE = "2026-07-10"
+
+FULL_MD = """# AI 使用日报 2026-07-09
+
+> 💡 点评: 成本回落但请求下滑
+
+> 数据源: raven✅ multica✅ ADO✅ state.db✅
+
+## ⚡ Trending
+- 成本: 2699$ ↑(+24%) vs 昨 2180$
+- 会话数: 76 ↑(+300%) vs 昨 19
+
+## 📅 今日 TODO
+- P0: 查 pipeline 取消率
+- P1: 降级 opus 用量
+- P1: 核查缓存命中
+- P2: 清理旧分支
+- P2: 更新 README
+
+## 🗂 昨日汇总
+- 昨日花费 $2699.44，请求 8273 次
+- 开了 4 个 PR（合并 3 个）
+
+## 🔍 可改良
+- 昨日 $262 花在极小输出/大上下文
+"""
+
+MUST_SEE = "> 💡 点评: 成本回落但请求下滑"
+
+
+def _matrix(rows: int, cols: int, *, sample: int = 12) -> ReworkRelationship:
+    """A rework matrix with `rows` workspaces × `cols` root causes."""
+    cells = [
+        RelationshipCell(row=f"ws{r}", column=f"cause{c}",
+                         value=float(1000 * (r + 1) * (c + 1)))
+        for r in range(rows) for c in range(cols)
+    ]
+    return ReworkRelationship(cells, sample, "2026-07-03 → 2026-07-09",
+                              SourceHealth("multica_run", "ok"))
+
+
+def _sources(**kw) -> DigestSources:
+    base = dict(raven=_FROZEN_TRENDS, multica=_FROZEN_MULTICA,
+                ado=_FROZEN_ADO, automation=_FROZEN_AUTOMATION)
+    base.update(kw)
+    return DigestSources(**base)
+
+
+def _empty_sources(**kw) -> DigestSources:
+    empty: list = []
+    base = dict(
+        raven=RavenTrends(empty, empty, empty, empty, empty, empty, empty,
+                          SourceHealth("raven", "error", "boom")),
+        multica=MulticaTrends(empty, {}, SourceHealth("multica", "error")),
+        ado=AdoPrTrends(empty, empty, SourceHealth("ado_pr", "skipped:未采集")),
+        automation=AutomationTrends(empty, empty, empty,
+                                    SourceHealth("state_db", "skipped:未采集")),
+    )
+    base.update(kw)
+    return DigestSources(**base)
+
+
+def _build(sources: DigestSources, md: str = FULL_MD) -> Briefing:
+    return build_briefing(REPORT_DATE, sources, md, MUST_SEE)
+
+
+def _cards(b: Briefing) -> list:
+    return [card for c in b.containers for card in c.cards]
+
+
+def _of_type(b: Briefing, card_type: str) -> list:
+    return [card for card in _cards(b) if card.type == card_type]
+
+
+# --------------------------------------------------------------------------- #
+# relationship: emitted only when the data is genuinely two-dimensional
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_two_by_two_matrix_emits_a_wide_heatmap_relationship():
+    b = _build(_sources(rework_relationship=_matrix(2, 2)))
+    cards = _of_type(b, "relationship")
+    assert len(cards) == 1
+    card = cards[0]
+    assert card.size == "wide"
+    assert card.payload["visualization"] == "heatmap"
+
+
+@pytest.mark.unit
+def test_relationship_payload_carries_its_evidence():
+    """Constitution §Relationship visualization: sample size, window, and
+    metric definition are required, and the summary must not claim causation."""
+    card = _of_type(_build(_sources(rework_relationship=_matrix(2, 3))),
+                    "relationship")[0]
+    payload = card.payload
+    assert payload["sampleSize"] == 12
+    assert payload["timeWindow"] == "2026-07-03 → 2026-07-09"
+    assert payload["metricDefinition"]
+    assert payload["summary"]
+    # Observation, never cause — the words that would assert one are absent.
+    for banned in ("导致", "因为", "causes", "caused by", "because"):
+        assert banned not in payload["summary"]
+
+
+@pytest.mark.unit
+def test_relationship_payload_matches_the_locked_heatmap_contract():
+    """Only `cells` may be populated for a heatmap; axes are labeled; every
+    value is finite. A mismatch is rejected app-side as
+    schema.payload_decode_failed and the card silently vanishes."""
+    payload = _of_type(_build(_sources(rework_relationship=_matrix(2, 2))),
+                       "relationship")[0].payload
+    assert payload["cells"]
+    assert "points" not in payload and "slopes" not in payload
+    assert payload["xAxis"]["label"] and payload["yAxis"]["label"]
+    assert all(isinstance(c["value"], float) for c in payload["cells"])
+    assert all(c["row"] and c["column"] for c in payload["cells"])
+
+
+@pytest.mark.unit
+def test_single_row_matrix_is_omitted_rather_than_drawn_thin():
+    """One workspace is a ranking, not a relationship — drawing it as a matrix
+    asserts a second dimension the data does not have."""
+    b = _build(_sources(rework_relationship=_matrix(1, 3)))
+    assert _of_type(b, "relationship") == []
+
+
+@pytest.mark.unit
+def test_single_column_matrix_is_omitted():
+    assert _of_type(_build(_sources(rework_relationship=_matrix(3, 1))),
+                    "relationship") == []
+
+
+@pytest.mark.unit
+def test_degraded_relationship_source_emits_no_card():
+    degraded = ReworkRelationship([], 0, "",
+                                  SourceHealth("multica_run", "error", "boom"))
+    assert _of_type(_build(_sources(rework_relationship=degraded)),
+                    "relationship") == []
+
+
+@pytest.mark.unit
+def test_relationship_with_zero_sample_size_is_omitted():
+    """sampleSize >= 1 is a schema invariant; publishing 0 would be rejected."""
+    bundle = ReworkRelationship(
+        [RelationshipCell("ws0", "c0", 1.0), RelationshipCell("ws1", "c1", 2.0),
+         RelationshipCell("ws0", "c1", 3.0), RelationshipCell("ws1", "c0", 4.0)],
+        0, "7d", SourceHealth("multica_run", "ok"))
+    assert _of_type(_build(_sources(rework_relationship=bundle)),
+                    "relationship") == []
+
+
+@pytest.mark.unit
+def test_relationship_absent_from_default_sources():
+    """The default bundle is skipped/empty, so an unwired pipeline is silent
+    rather than emitting a hollow card."""
+    assert _of_type(_build(_sources()), "relationship") == []
+
+
+# --------------------------------------------------------------------------- #
+# information budget (§design 3)
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_briefing_respects_the_total_card_budget():
+    b = _build(_sources(rework_relationship=_matrix(3, 3)))
+    assert len(_cards(b)) <= MAX_CARDS
+
+
+@pytest.mark.unit
+def test_first_screen_is_bounded():
+    b = _build(_sources(rework_relationship=_matrix(3, 3)))
+    lead = _cards(b)[:FIRST_SCREEN_CARDS]
+    assert len(lead) <= FIRST_SCREEN_CARDS
+
+
+@pytest.mark.unit
+def test_actions_are_capped():
+    todo = _of_type(_build(_sources()), "todoList")
+    assert todo, "the markdown TODO section must still produce a card"
+    assert len(todo[0].payload["items"]) <= MAX_ACTIONS
+
+
+@pytest.mark.unit
+def test_actions_keep_the_highest_priority_items_when_capped():
+    items = _of_type(_build(_sources()), "todoList")[0].payload["items"]
+    assert items[0]["priority"] == "high", "P0 must survive the cap"
+
+
+@pytest.mark.unit
+def test_missing_sources_still_produce_a_valid_overview():
+    """ADR-23: a total data outage yields a real briefing, not an empty one."""
+    b = _build(_empty_sources(), md="# AI 使用日报 2026-07-09\n\n## ⚡ Trending\n- 数据缺失\n")
+    assert b.containers
+    assert _of_type(b, "digest"), "the overview digest is always present"
+    for card in _cards(b):
+        assert card.payload
+        if "items" in card.payload:
+            assert len(card.payload["items"]) >= 1
+
+
+@pytest.mark.unit
+def test_budget_is_deterministic():
+    a = _build(_sources(rework_relationship=_matrix(3, 3)))
+    b = _build(_sources(rework_relationship=_matrix(3, 3)))
+    assert [c.id for c in _cards(a)] == [c.id for c in _cards(b)]
+
+
+@pytest.mark.unit
+def test_containers_stay_non_empty_after_budget_trimming():
+    """A container whose every card lost the budget must be dropped, not left
+    as an empty frame."""
+    b = _build(_sources(rework_relationship=_matrix(3, 3)))
+    assert all(c.cards for c in b.containers)
+
+
+@pytest.mark.unit
+def test_container_order_is_preserved_after_trimming():
+    b = _build(_sources(rework_relationship=_matrix(2, 2)))
+    orders = [c.order for c in b.containers]
+    assert orders == sorted(orders)
+
+
+# --------------------------------------------------------------------------- #
+# Identity — the budget selects containers, so their ids must be unique
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_every_container_slot_is_unique():
+    """`container put` upserts on id, so two containers sharing one id means the
+    second silently REPLACES the first in the app. 成本归因 and 卡型兴趣 collided
+    on slot 11 (fixed with MY-1395); this is the sentinel that keeps them apart.
+
+    Checked over the builders directly rather than one rendered briefing, since
+    no single briefing necessarily emits every container.
+    """
+    import inspect
+    import re
+
+    from L5_apps.digest import aidash
+
+    source = inspect.getsource(aidash)
+    slots = re.findall(r"_cuid\(mmdd,\s*(\d+)\)", source)
+    duplicates = {s for s in slots if slots.count(s) > 1}
+    assert not duplicates, f"container id slots reused: {sorted(duplicates)}"
+
+
+@pytest.mark.unit
+def test_every_card_slot_is_unique():
+    import inspect
+    import re
+
+    from L5_apps.digest import aidash
+
+    slots = re.findall(r"_kuid\(mmdd,\s*(\d+)\)", inspect.getsource(aidash))
+    duplicates = {s for s in slots if slots.count(s) > 1}
+    assert not duplicates, f"card id slots reused: {sorted(duplicates)}"

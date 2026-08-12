@@ -80,7 +80,7 @@ header marker (same style as `-- aidata-attach:`):
 ```
 
 - **production** (no marker) — consumed by the L5 digest. Their columns are a
-  **contract**: changing the shape breaks a briefing card. 24 of them today.
+  **contract**: changing the shape breaks a briefing card. 32 of them today.
 - **explore** (marked) — no L5 consumer; they exist for ad-hoc investigation via
   `cli.py query <name>`. Nothing downstream depends on their columns, so they can
   be freely reshaped or deleted. 15 of them today.

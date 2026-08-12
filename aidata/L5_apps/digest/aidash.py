@@ -32,6 +32,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from config import AIDASH_BIN_FIXED, AIDASH_BIN_GLOB
+from L5_apps.digest.card_policy import (
+    FIRST_SCREEN_CARDS, MAX_ACTIONS, MAX_CARDS,
+    CardCandidate, DataProfile, choose_card, select_with_budget,
+)
 from L5_apps.digest.cst import yesterday
 from L5_apps.digest.trends import compute_trend
 
@@ -177,6 +181,23 @@ def _todo_items(todo_lines: list[str]) -> list[dict]:
                 break
         items.append({"title": text, "priority": prio})
     return items
+
+
+# Action rank for the cap below: a P0 must survive where a P2 does not.
+_PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def _capped_actions(items: list[dict]) -> list[dict]:
+    """The day's actions, trimmed to the budget (§design 3: 行动最多 3 项).
+
+    A list of ten things to do today is a list of zero things that will get
+    done, so the cap is a feature rather than a truncation to apologise for.
+    The trim is by PRIORITY (stably — equal priorities keep authored order), so
+    what survives is the top of the list rather than whatever happened to be
+    written first.
+    """
+    ranked = sorted(items, key=lambda it: _PRIORITY_RANK.get(it["priority"], 1))
+    return ranked[:MAX_ACTIONS]
 
 
 # ---- plain-text bodies (BUG 2: card `body` is a String, never markdown) ----
@@ -438,7 +459,7 @@ def _prose_containers(mmdd: str,
     # else fall back to the markdown 今日 TODO section. The inbox merges stalls
     # / decisions / planned work / findings into one prioritized list.
     inbox = [{"title": it.title, "priority": it.priority} for it in (inbox_items or [])]
-    todos = inbox or _todo_items(_section(sections, "今日 TODO"))
+    todos = _capped_actions(inbox or _todo_items(_section(sections, "今日 TODO")))
     if todos:
         out.append(Container(_cuid(mmdd, 4), "今日规划", 40,
             (Card(_kuid(mmdd, 5), "todoList", "hero", {"items": todos},
@@ -874,7 +895,192 @@ def _card_interest_container(mmdd: str, card_interest) -> "Container | None":
         return None
     card = Card(_kuid(mmdd, 24), "insight", "wide",
                 {"title": "你最常收藏的卡型 Top-N", "body": body})
-    return Container(_cuid(mmdd, 11), "卡型兴趣", 55, (card,), layout="list")
+    # NOTE: slot 13, not 11. 成本归因 already owns 11 — the two collided, so the
+    # `container put` for whichever came second silently OVERWROTE the first in
+    # the app (container id is the upsert key). Harmless-looking while cards were
+    # appended unconditionally; load-bearing now that the information budget
+    # selects containers by identity. Slot 12 is 交叉信号.
+    return Container(_cuid(mmdd, 13), "卡型兴趣", 55, (card,), layout="list")
+
+
+# ---------------------------------------------------------------------------
+# 交叉信号 · relationship (§design 4.2, constitution §Relationship visualization)
+#
+# The first card here built from a genuinely TWO-dimensional bundle. Everything
+# above is a series or a ranking, and neither can honestly become a
+# relationship — so this is produced from the structured matrix bundle only,
+# never by parsing structure back out of prose.
+# ---------------------------------------------------------------------------
+# What the plotted number actually measures. Stated on the card because
+# "rework tokens" is a proxy (tokens on issues that were cancelled and later
+# completed), not an objective measure of wasted effort.
+_REWORK_METRIC_DEFINITION = (
+    "返工 token = 被取消后又完成的 issue 上消耗的 token；"
+    "每个 issue 只计入其主导根因一次，不跨根因重复计数"
+)
+
+
+def _relationship_summary(cells: list, sample_size: int) -> str:
+    """A summary that states what was OBSERVED, never why.
+
+    The constitution forbids wording an observational association as causation,
+    and this matrix is exactly the kind that invites it ("runtime-offline
+    causes rework"). What is actually known is where the mass sits, so that is
+    what the sentence says.
+    """
+    top = max(cells, key=lambda c: c.value)
+    total = sum(c.value for c in cells)
+    share = (100.0 * top.value / total) if total > 0 else 0.0
+    return (f"观察到返工 token 最集中于 {top.row} · {top.column}"
+            f"（占 {share:.0f}%，样本 {sample_size} 个返工 issue）；"
+            "这是相关性观察，不构成因果结论")
+
+
+def _relationship_container(mmdd: str, rework) -> "Container | None":
+    """🔗 交叉信号: the workspace × root-cause rework heatmap.
+
+    Returns None — not an empty frame — whenever the data cannot honestly carry
+    a relationship (ADR-23):
+      - the source degraded or was never collected;
+      - the matrix is thinner than 2×2, i.e. one axis has a single value and the
+        "relationship" would be a ranking wearing a matrix's clothes;
+      - the sample size is 0, which the schema rejects anyway (sampleSize >= 1),
+        so publishing it would make the card silently vanish app-side.
+
+    The size/visualization decision is delegated to `card_policy.choose_card`,
+    so "why is this wide?" is answered by a unit-tested rule rather than a
+    literal typed here.
+    """
+    if rework is None or getattr(rework, "health", None) is None:
+        return None
+    if rework.health.state != "ok" or not rework.cells or rework.sample_size < 1:
+        return None
+    rows = sorted({c.row for c in rework.cells})
+    columns = sorted({c.column for c in rework.cells})
+    profile = DataProfile(
+        semantic="relationship",
+        item_count=len(rework.cells),
+        dimensions=2,
+        row_count=len(rows),
+        column_count=len(columns),
+        relationship_kind="heatmap",
+    )
+    decision = choose_card(profile)
+    if decision.size != "wide":
+        # A medium heatmap is a 1×N strip: the second axis carries no
+        # information, so the chart would assert a structure the data lacks.
+        return None
+    payload = {
+        "title": "返工集中在哪里",
+        "visualization": decision.visualization,
+        "xAxis": {"label": "失败根因"},
+        "yAxis": {"label": "Workspace"},
+        "cells": [{"row": c.row, "column": c.column, "value": float(c.value)}
+                  for c in rework.cells],
+        "sampleSize": int(rework.sample_size),
+        "timeWindow": rework.time_window or "全部",
+        "metricDefinition": _REWORK_METRIC_DEFINITION,
+        "summary": _relationship_summary(rework.cells, rework.sample_size),
+    }
+    card = Card(_kuid(mmdd, 37), "relationship", decision.size, payload)
+    return Container(_cuid(mmdd, 12), "交叉信号", 24, (card,), layout="auto",
+                     subtitle="返工 × 根因 × workspace · 观察性关联")
+
+
+# ---------------------------------------------------------------------------
+# Information budget (§design 3): a two-minute first screen, a five-minute page.
+#
+# Containers are built as before — each producer still owns its own
+# degrade-safety — but they are then offered to the budget as CANDIDATES rather
+# than appended unconditionally. The budget is what turns "we have data for this"
+# into "this earns the reader's attention today".
+# ---------------------------------------------------------------------------
+# Signals a card can carry or restate. Naming the SIGNAL (not the card) is what
+# lets a weak restatement be suppressed when a stronger card is present, and
+# survive when it is not.
+_SIGNAL_REWORK_CROSS = "rework_x_rootcause"
+_SIGNAL_OUTCOME_TOKENS = "outcome_x_tokens"
+
+# Per-container budget metadata, keyed by container title. Everything absent
+# from this table takes the default (a plain, non-detail card of average cost).
+#
+#   is_detail        — stable description; omitted when it carries no signal.
+#   cross_signal     — how much cross-source value it adds (0 = single dimension).
+#   reading_cost     — roughly how long a reader spends on it.
+#   provides         — signals this container carries.
+#   redundant_with   — signals it merely restates, more weakly.
+_BUDGET_META: dict[str, dict] = {
+    "总览": {"reading_cost": 2, "requires_action": False},
+    "今日规划": {"requires_action": True, "reading_cost": 1},
+    "交叉信号": {"cross_signal": 3, "reading_cost": 2,
+                 "provides": (_SIGNAL_REWORK_CROSS, _SIGNAL_OUTCOME_TOKENS)},
+    "AI 效能": {"cross_signal": 2, "reading_cost": 3},
+    "成本归因": {"cross_signal": 2, "reading_cost": 3},
+    "趋势指标": {"cross_signal": 0, "reading_cost": 2,
+                 "redundant_with": (_SIGNAL_OUTCOME_TOKENS,)},
+    "今日工作": {"reading_cost": 2},
+    "昨日汇总": {"reading_cost": 2},
+    "可改良": {"cross_signal": 1, "reading_cost": 3},
+    "时间与产出": {"is_detail": True, "reading_cost": 2},
+    "卡型兴趣": {"is_detail": True, "reading_cost": 1},
+    "GitHub 工具雷达": {"is_detail": True, "reading_cost": 3},
+    "新闻雷达": {"is_detail": True, "reading_cost": 3},
+}
+
+
+def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
+    """One CardCandidate per container, carrying its budget signals.
+
+    The budget ranks CONTAINERS rather than individual cards on purpose: a
+    container is the unit a reader scans and the unit that means something on
+    its own ("成本归因" split across two screens explains nothing). `card` is
+    the container itself — `select_with_budget` only reads `.id`.
+
+    `freshness` is derived from position: the digest orders containers by their
+    own `order`, and an earlier container is the more immediate signal.
+    """
+    candidates: list[CardCandidate] = []
+    for index, container in enumerate(containers):
+        meta = _BUDGET_META.get(container.title, {})
+        candidates.append(CardCandidate(
+            card=container,
+            order=container.order,
+            requires_action=bool(meta.get("requires_action", False)),
+            is_anomaly=bool(meta.get("is_anomaly", False)),
+            cross_signal_strength=int(meta.get("cross_signal", 0)),
+            # Later containers are progressively less immediate; the overview
+            # and the day's numbers lead.
+            freshness=max(0, len(containers) - index),
+            source_coverage=len(container.cards),
+            reading_cost=int(meta.get("reading_cost", 2)),
+            is_detail=bool(meta.get("is_detail", False)),
+            provides=tuple(meta.get("provides", ())),
+            redundant_with=tuple(meta.get("redundant_with", ())),
+        ))
+    return candidates
+
+
+def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
+    """Trim the day's containers to the information budget.
+
+    The overview is EXEMPT and always leads: it is the briefing's only
+    guaranteed card (ADR-23 — a fully degraded day still publishes a valid
+    briefing), so putting it up for selection would risk a day with no cards at
+    all. Everything else competes.
+
+    The surviving containers are returned in `order`, not in priority order:
+    priority decides WHAT is published, the authored order decides how it reads.
+    """
+    if not containers:
+        return ()
+    head, rest = containers[0], containers[1:]
+    budget = max(0, MAX_CARDS - 1)
+    first_screen = max(0, FIRST_SCREEN_CARDS - 1)
+    kept = select_with_budget(_container_candidates(rest),
+                              max_cards=budget, first_screen=first_screen)
+    survivors = [c.card for c in kept if c.card.cards]
+    survivors.sort(key=lambda c: (c.order, c.id))
+    return tuple([head] + survivors)
 
 
 def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
@@ -885,6 +1091,11 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     automation ratio) built from the structured `sources` series — not by parsing
     numbers back out of markdown. `full_md` still supplies the prose sections
     (昨日汇总/TODO/可改良) and the source-health line.
+
+    Containers are built first and then passed through the INFORMATION BUDGET
+    (§design 3): what a reader can finish in two minutes leads, the whole page
+    stays inside five, and a low-value card is omitted rather than pushed to the
+    bottom. The overview is exempt so a fully degraded day still publishes.
 
     The briefing date/title/UUIDs key on the REPORTED day (yesterday of the run
     date) so they match the local archive filename and the digest title (BUG 3).
@@ -917,6 +1128,13 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         getattr(sources, "rework_by_workspace", None))
     if attribution_container:
         containers.append(attribution_container)
+
+    # 🔗 交叉信号 (order 24): the rework heatmap. Sits between 成本归因 (22) and
+    # AI 效能 (25) — it explains where the effectiveness numbers below come from.
+    relationship_container = _relationship_container(
+        mmdd, getattr(sources, "rework_relationship", None))
+    if relationship_container:
+        containers.append(relationship_container)
 
     # 🧠 AI 效能 (order 25) + ⏱ 时间与产出 (order 28): batch-2 差异化 sections,
     # placed right after the trend metrics and before the prose 昨日汇总 (order 30).
@@ -952,7 +1170,7 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     news_container = _news_container(mmdd, getattr(sources, "news_radar", None))
     if news_container:
         containers.append(news_container)
-    return Briefing(reported_day, GENERATED_BY, tuple(containers))
+    return Briefing(reported_day, GENERATED_BY, _apply_budget(containers))
 
 
 # ---------------------------------------------------------------------------
