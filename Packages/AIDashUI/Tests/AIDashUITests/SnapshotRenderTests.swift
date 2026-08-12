@@ -194,6 +194,28 @@ struct SnapshotRenderTests {
             width: 1200,
             to: "render-relationship"
         )
+
+        // Variant: the two review-found edge cases, so both are inspectable by
+        // eye — a MIXED-magnitude scatter (points 2 and 4 carry no magnitude
+        // and must render as small hollow rings, not mid-size solid discs),
+        // and a TRUNCATED scatter on a small card (12 points against a cap of
+        // 8, so the "Showing 8 of 12." disclosure must appear).
+        // swiftlint:disable line_length
+        let edgeCases = container("关联 · 边界情况", .grid, [
+            card(.relationship, .wide, .neutral, #"{"title":"Mixed magnitudes","visualization":"scatter","xAxis":{"label":"Cost","unit":"USD"},"yAxis":{"label":"Completion","unit":"%"},"points":[{"label":"has-a","x":1.2,"y":90,"magnitude":80},{"label":"missing-b","x":2.4,"y":78},{"label":"has-c","x":3.6,"y":66,"magnitude":30},{"label":"missing-d","x":4.8,"y":54},{"label":"has-e","x":6.0,"y":42,"magnitude":55}],"sampleSize":5,"timeWindow":"7d","metricDefinition":"magnitude is optional per point","summary":"Two points carry no magnitude and must read as absent, not as mid-range."}"#),
+            card(.relationship, .small, .neutral, #"{"title":"Truncated","visualization":"scatter","xAxis":{"label":"X"},"yAxis":{"label":"Y"},"points":[{"label":"p1","x":1,"y":10,"magnitude":5},{"label":"p2","x":2,"y":20,"magnitude":9},{"label":"p3","x":3,"y":30,"magnitude":14},{"label":"p4","x":4,"y":25,"magnitude":7},{"label":"p5","x":5,"y":40,"magnitude":18},{"label":"p6","x":6,"y":35,"magnitude":11},{"label":"p7","x":7,"y":50,"magnitude":22},{"label":"p8","x":8,"y":45,"magnitude":16},{"label":"p9","x":9,"y":60,"magnitude":26},{"label":"p10","x":10,"y":55,"magnitude":20},{"label":"p11","x":11,"y":70,"magnitude":30},{"label":"p12","x":12,"y":65,"magnitude":24}],"sampleSize":12,"timeWindow":"7d","metricDefinition":"12 points against a small-card cap of 8","summary":"Only part of this dataset is plotted."}"#),
+        ])
+        // swiftlint:enable line_length
+        render(
+            VStack(alignment: .leading, spacing: 16) {
+                Text("2026-08-13").font(.largeTitle.bold())
+                ContainerView(container: edgeCases)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading),
+            width: 1200,
+            to: "render-relationship-edges"
+        )
     }
 
     // MARK: - In-memory model builders

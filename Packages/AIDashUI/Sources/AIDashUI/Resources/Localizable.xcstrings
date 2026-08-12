@@ -438,6 +438,30 @@
           }
         }
       }
+    },
+    "relationship.a11y.truncated": {
+      "comment": "Disclosure shown when a relationship chart plots fewer marks than the payload carries. First placeholder is the number drawn, second is the true total.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Showing %1$lld of %2$lld."
+          }
+        }
+      }
+    },
+    "relationship.a11y.point.magnitude_missing": {
+      "comment": "Appended to a scatter point's VoiceOver value when that point has no magnitude but other points in the same chart do.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "no magnitude available"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

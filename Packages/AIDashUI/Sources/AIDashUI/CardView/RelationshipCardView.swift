@@ -93,7 +93,29 @@ public struct RelationshipCardView: View {
     }
 
     private var chart: some View {
-        RelationshipChart(payload: payload, size: size)
+        VStack(alignment: .leading, spacing: AIDashSpace.s4) {
+            RelationshipChart(payload: payload, size: size)
+            truncationNotice
+        }
+    }
+
+    /// Sighted-user parity for the density cap. When the card plots fewer
+    /// marks than the payload carries, the VoiceOver label already says
+    /// "Showing N of M" — without this line a sighted reader would have no
+    /// way to know anything was dropped at all, and would read a truncated
+    /// plot as the whole dataset.
+    @ViewBuilder
+    private var truncationNotice: some View {
+        let total = RelationshipAccessibility.totalMarks(payload)
+        let visible = min(total, RelationshipDensity.visibleMarkCap(size))
+        if RelationshipAccessibility.isTruncated(visible: visible, total: total) {
+            Text(RelationshipAccessibility.truncationNotice(visible: visible, total: total))
+                .font(Self.recipe.secondary)
+                .foregroundStyle(theme.neutrals.text2)
+                // The chart's own accessibility label already carries this
+                // sentence; announcing it twice would be noise for VoiceOver.
+                .accessibilityHidden(true)
+        }
     }
 
     /// The four mandatory evidence rows. `summary` leads (it is the card's

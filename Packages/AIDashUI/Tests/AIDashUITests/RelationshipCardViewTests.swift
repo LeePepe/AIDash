@@ -364,9 +364,236 @@ struct RelationshipCardViewTests {
           arguments: RelationshipVisualization.allCases)
     func chartAccessibilityLabel(visualization: RelationshipVisualization) {
         let payload = Self.payload(for: visualization)
-        let label = RelationshipAccessibility.chartLabel(payload)
+        let label = RelationshipAccessibility.chartLabel(payload, visibleCount: Self.markCount(payload))
         #expect(!label.isEmpty)
         #expect(label.contains(payload.title))
+    }
+
+    static func markCount(_ payload: RelationshipPayload) -> Int {
+        switch payload.visualization {
+        case .scatter: return payload.points.count
+        case .heatmap: return payload.cells.count
+        case .slope:   return payload.slopes.count
+        }
+    }
+
+    // MARK: - Truncation honesty (regression: capped plot vs announced count)
+    //
+    // `visibleMarkCap(size)` plots only `prefix(cap)` marks, but the chart's
+    // VoiceOver label used to announce the FULL payload count. A sighted user
+    // saw 8 points on a small card while VoiceOver said "40 points" — the
+    // screen-reader description asserted data that was not on screen. Worse,
+    // neither channel disclosed that anything had been dropped at all.
+
+    @Test("when marks are capped, the label announces visible-of-total, not the full payload count")
+    func cappedChartLabelReportsBothCounts() {
+        let total = 40
+        let payload = Self.scatter(points: total)
+        let cap = RelationshipDensity.visibleMarkCap(.small)
+        #expect(cap < total, "fixture must actually exceed the small-card cap for this to test anything")
+
+        let label = RelationshipAccessibility.chartLabel(payload, visibleCount: cap)
+        #expect(label.contains("\(cap)"), "the label must state how many marks are actually plotted")
+        #expect(label.contains("\(total)"), "the label must still disclose the true total")
+        #expect(RelationshipAccessibility.isTruncated(visible: cap, total: total))
+    }
+
+    @Test("when nothing is capped, the label does not claim a truncation")
+    func uncappedChartLabelOmitsTruncation() {
+        let payload = Self.scatter(points: 5)
+        let cap = RelationshipDensity.visibleMarkCap(.wide)
+        #expect(cap >= payload.points.count)
+
+        let label = RelationshipAccessibility.chartLabel(payload, visibleCount: payload.points.count)
+        #expect(label.contains("\(payload.points.count)"))
+        #expect(!RelationshipAccessibility.isTruncated(visible: payload.points.count, total: payload.points.count))
+    }
+
+    @Test(
+        "every visualization reports a consistent visible-vs-total count when capped",
+        arguments: RelationshipVisualization.allCases
+    )
+    func cappedLabelIsConsistentAcrossVisualizations(visualization: RelationshipVisualization) {
+        // Build a payload that exceeds the smallest cap for each shape.
+        let cap = RelationshipDensity.visibleMarkCap(.small)
+        let payload: RelationshipPayload
+        switch visualization {
+        case .scatter: payload = Self.scatter(points: cap + 5)
+        case .heatmap: payload = Self.heatmap(values: (0..<(cap + 5)).map { Double($0) })
+        case .slope:   payload = Self.slope(items: cap + 5)
+        }
+        let total = Self.markCount(payload)
+        #expect(total > cap)
+
+        let label = RelationshipAccessibility.chartLabel(payload, visibleCount: cap)
+        #expect(label.contains("\(cap)") && label.contains("\(total)"),
+                "\(visualization) must announce both the plotted count and the true total")
+    }
+
+    @Test("the renderer passes the CAPPED count to the accessibility label, not the raw payload count")
+    func rendererPassesVisibleCount() throws {
+        let source = try DesignTokensComplianceTests.cardViewSource(named: "RelationshipChart")
+        #expect(source.contains("chartLabel(payload, visibleCount:"),
+                "the chart label must be built from the visible (capped) count, or VoiceOver will announce marks that aren't drawn")
+    }
+
+    @Test("a truncated card discloses the overflow visually, not only to VoiceOver")
+    func truncationIsVisiblyDisclosed() throws {
+        let source = try DesignTokensComplianceTests.cardViewSource(named: "RelationshipCardView")
+        #expect(source.contains("truncationNotice") || source.contains("RelationshipTruncation"),
+                "a sighted user must also be told marks were dropped — VoiceOver-only disclosure is not parity")
+        // The notice text itself must carry both numbers.
+        let notice = RelationshipAccessibility.truncationNotice(visible: 8, total: 40)
+        #expect(notice.contains("8") && notice.contains("40"))
+    }
+
+    // MARK: - Missing magnitude must be visually distinct (regression)
+    //
+    // `magnitude` is optional per point, so a payload can mix points that have
+    // it with points that don't. Rendering a missing magnitude as a solid
+    // mid-size symbol makes ABSENT data indistinguishable from a genuine
+    // mid-low reading — the chart states a third dimension it does not have.
+    // Missing values therefore get a distinct treatment (a small hollow
+    // symbol), not a medium solid one.
+
+    @Test("in a mixed payload, a missing magnitude does not collide with any real magnitude's symbol size")
+    func missingMagnitudeIsNotAMidSizedSymbol() {
+        // Domain spans 10...100. Under the plain scale a missing magnitude fell
+        // back to `baseSize` (60) — which is exactly what a real reading at
+        // ~17% of this domain renders, so absence was indistinguishable from
+        // data. The mixed-aware overload is what the renderer actually calls.
+        let domain = RelationshipSymbolScale.domain([10, 55, 100])
+        let missing = RelationshipSymbolScale.size(for: nil, in: domain, inMixedPayload: true)
+        for real in [10.0, 25.0, 55.0, 80.0, 100.0] {
+            let realSize = RelationshipSymbolScale.size(for: real, in: domain, inMixedPayload: true)
+            #expect(missing != realSize,
+                    "a missing magnitude renders the same symbol area as a real reading of \(real)")
+        }
+        #expect(missing < RelationshipSymbolScale.size(for: 10, in: domain, inMixedPayload: true),
+                "missing data must read as smaller than the smallest real reading, never as mid-sized")
+        // Pin the old bug explicitly: the mixed path must NOT return baseSize.
+        #expect(missing != RelationshipSymbolScale.baseSize,
+                "regression: a magnitude-less point must not fall back to the mid-range base size")
+    }
+
+    @Test("a missing magnitude renders hollow while every real magnitude renders solid")
+    func missingMagnitudeIsHollow() {
+        let domain = RelationshipSymbolScale.domain([10, 55, 100])
+        #expect(RelationshipSymbolScale.isMissing(magnitude: nil))
+        #expect(!RelationshipSymbolScale.isMissing(magnitude: 55))
+        // A non-finite magnitude is missing data too, not a zero-size point.
+        #expect(RelationshipSymbolScale.isMissing(magnitude: Double.nan))
+        _ = domain
+    }
+
+    @Test("a payload where NO point carries a magnitude stays uniformly solid (no third dimension claimed)")
+    func absentMagnitudeDimensionStaysUniform() {
+        // Distinct from the MIXED case: if nobody has a magnitude there is no
+        // third dimension at all, so every point is an ordinary solid symbol
+        // at the base size — flagging them all as "missing" would be noise.
+        let payload = RelationshipPayload(
+            title: "No magnitudes",
+            visualization: .scatter,
+            xAxis: .init(label: "X"), yAxis: .init(label: "Y"),
+            points: [
+                .init(label: "a", x: 1, y: 2),
+                .init(label: "b", x: 2, y: 3),
+            ],
+            sampleSize: 2, timeWindow: "7d",
+            metricDefinition: "definition", summary: "summary"
+        )
+        #expect(!RelationshipSymbolScale.hasMixedMagnitudes(payload.points))
+        for point in payload.points {
+            #expect(!RelationshipSymbolScale.isMissing(magnitude: point.magnitude, inMixedPayload: false))
+        }
+        _ = RelationshipCardView(payload: payload, size: .medium, style: .neutral).body
+    }
+
+    @Test("a mixed payload IS detected as mixed, and only the magnitude-less points are flagged")
+    func mixedMagnitudeDetection() {
+        let mixed: [RelationshipPayload.Point] = [
+            .init(label: "has", x: 1, y: 2, magnitude: 30),
+            .init(label: "missing", x: 2, y: 3),
+        ]
+        #expect(RelationshipSymbolScale.hasMixedMagnitudes(mixed))
+        #expect(!RelationshipSymbolScale.isMissing(magnitude: mixed[0].magnitude, inMixedPayload: true))
+        #expect(RelationshipSymbolScale.isMissing(magnitude: mixed[1].magnitude, inMixedPayload: true))
+    }
+
+    @Test("VoiceOver names a missing magnitude rather than silently omitting the dimension")
+    func missingMagnitudeIsAnnounced() {
+        let withMagnitude = RelationshipPayload.Point(label: "has", x: 1, y: 2, magnitude: 30)
+        let without = RelationshipPayload.Point(label: "missing", x: 2, y: 3)
+        let axis = RelationshipPayload.Axis(label: "Cost", unit: "USD")
+
+        let announced = RelationshipAccessibility.pointValue(
+            without, xAxis: axis, yAxis: axis, inMixedPayload: true
+        )
+        #expect(announced.lowercased().contains("no ") || announced.lowercased().contains("unavailable"),
+                "a mixed payload must tell a VoiceOver user this point has no magnitude")
+        let normal = RelationshipAccessibility.pointValue(
+            withMagnitude, xAxis: axis, yAxis: axis, inMixedPayload: true
+        )
+        #expect(!normal.lowercased().contains("unavailable"))
+    }
+
+    @Test("the point symbol converts area to diameter honestly (2√(area/π)), so doubled magnitude is not 4× bigger")
+    func pointSymbolGeometry() {
+        let small = RelationshipPointSymbol(area: 60, isMissing: false, color: .clear)
+        let doubled = RelationshipPointSymbol(area: 120, isMissing: false, color: .clear)
+        // Area doubles → diameter grows by √2, not by 2.
+        let ratio = doubled.diameter / small.diameter
+        #expect(abs(ratio - 2.0.squareRoot()) < 0.001,
+                "symbol area must map to diameter as 2√(area/π); got ratio \(ratio)")
+        #expect(small.diameter > 0)
+        // A missing symbol is visibly smaller than any real one.
+        let missing = RelationshipPointSymbol(
+            area: RelationshipSymbolScale.missingSize, isMissing: true, color: .clear
+        )
+        let smallestReal = RelationshipPointSymbol(
+            area: RelationshipSymbolScale.minSize, isMissing: false, color: .clear
+        )
+        #expect(missing.diameter < smallestReal.diameter)
+        _ = missing.body
+        _ = smallestReal.body
+    }
+
+    @Test("the hollow 'no magnitude' ring has a perceptible open centre, not a 1pt pinhole")
+    func missingSymbolRingIsActuallyHollow() {
+        // Regression on the first attempt at this fix: missingSize was 14pt²,
+        // giving a 4.2pt disc that a 1.5pt stroke nearly filled — a ~1.2pt
+        // hole, which rendered as a tiny SOLID dot. The hollow channel existed
+        // in code and was invisible on screen. Caught in the rendered snapshot.
+        let missing = RelationshipPointSymbol(
+            area: RelationshipSymbolScale.missingSize, isMissing: true, color: .clear
+        )
+        let hole = missing.diameter - 2 * RelationshipPointSymbol.ringWidth
+        #expect(hole >= 4.0,
+                "the ring's open centre is \(hole)pt — too small to read as hollow rather than solid")
+        // And it must still be smaller than the smallest real symbol.
+        let smallestReal = RelationshipPointSymbol(
+            area: RelationshipSymbolScale.minSize, isMissing: false, color: .clear
+        )
+        #expect(missing.diameter < smallestReal.diameter)
+    }
+
+    @Test("a mixed-magnitude scatter materialises at every size")
+    func mixedMagnitudeRenders() {
+        let payload = RelationshipPayload(
+            title: "Mixed",
+            visualization: .scatter,
+            xAxis: .init(label: "X"), yAxis: .init(label: "Y"),
+            points: [
+                .init(label: "a", x: 1, y: 2, magnitude: 30),
+                .init(label: "b", x: 2, y: 3),
+                .init(label: "c", x: 3, y: 4, magnitude: 90),
+            ],
+            sampleSize: 3, timeWindow: "7d",
+            metricDefinition: "definition", summary: "summary"
+        )
+        for size in CardSize.allCases {
+            _ = RelationshipCardView(payload: payload, size: size, style: .neutral).body
+        }
     }
 
     // MARK: - Size = geometry + density only (never typography)
@@ -420,9 +647,15 @@ struct RelationshipCardViewTests {
         #expect(badgeCount == 1, "relationship renderer must render exactly one CardTypeBadge")
     }
 
-    @Test("neither relationship source file inlines a color literal or a font literal")
+    @Test("no relationship source file inlines a color literal or a font literal")
     func noInlineColorOrFontLiterals() throws {
-        for name in ["RelationshipCardView", "RelationshipChart"] {
+        // All FOUR files, not just the two the renderer started as: the token
+        // guards must follow the code when it splits, or a literal can hide in
+        // whichever file the list forgot.
+        for name in [
+            "RelationshipCardView", "RelationshipChart",
+            "RelationshipScales", "RelationshipEvidence",
+        ] {
             let source = try DesignTokensComplianceTests.cardViewSource(named: name)
             #expect(!source.contains("Color(hex:"),
                     "\(name) must not inline hex colors — resolve them from the Theme")
