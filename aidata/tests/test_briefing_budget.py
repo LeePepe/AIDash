@@ -499,6 +499,36 @@ def test_de_duplication_never_empties_the_trend_card():
 
 
 @pytest.mark.unit
+def test_totals_return_when_the_budget_trims_the_breakdown():
+    """De-duplication must key on what is PUBLISHED, not on what was built.
+
+    The breakdown can be built and then trimmed by the budget. Dropping the
+    totals in anticipation of it leaves the page with neither the per-project
+    split nor the spend totals — the signal deleted rather than de-duplicated.
+    Forced here by ranking 成本归因 below everything so the budget drops it.
+    """
+    from L5_apps.digest.aidash import _BUDGET_META
+
+    backup = dict(_BUDGET_META)
+    _BUDGET_META["成本归因"] = {"cross_signal": 0, "reading_cost": 9,
+                                "is_detail": True}
+    try:
+        b = _build(_rich_sources())
+    finally:
+        _BUDGET_META.clear()
+        _BUDGET_META.update(backup)
+
+    titles = [c.title for c in b.containers]
+    labels = _trend_labels(b)
+    assert "成本归因" not in titles, "fixture no longer trims the breakdown"
+    assert labels, "fixture no longer publishes the trend card"
+    assert {"成本", "Token"} <= labels, (
+        "the breakdown was trimmed but the totals had already been dropped — "
+        "the spend signal reached the reader in neither form"
+    )
+
+
+@pytest.mark.unit
 def test_every_published_pair_keeps_at_least_one_side():
     """The invariant that survived the removed two-pass algorithm: for each
     (provider, dependent) pair, at least one side reaches the reader.

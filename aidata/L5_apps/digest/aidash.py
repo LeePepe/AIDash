@@ -341,22 +341,57 @@ _SPEND_TOTAL_LABELS = ("成本", "Token")
 
 def _dedupe_metric_items(items: list[dict],
                          spend_breakdown_published: bool) -> list[dict]:
-    """Drop metric rows a stronger published card already covers.
+    """Drop metric rows a stronger PUBLISHED card already covers.
 
-    Conditional on the stronger card ACTUALLY being published: with no spend
-    breakdown on the page, dropping the totals would remove the signal rather
-    than de-duplicate it, which is the worse outcome.
+    Conditional on the stronger card actually reaching the reader, and that
+    condition must be evaluated against the FINAL published set, not against
+    "the producer built one". The budget can still trim the breakdown after it
+    is built, and a row dropped in anticipation of a card that never ships
+    leaves the page with neither — the signal deleted rather than
+    de-duplicated. So this runs after `_apply_budget`, on what survived.
 
     Never returns an empty list when it was given a non-empty one. A metric
     payload requires `items.count >= 1`, so emptying the card would make the app
     reject it and the card would vanish silently — turning a de-duplication into
     a deletion. If every row is redundant there is nothing left to thin, so the
-    card is left intact and the budget decides its fate on rank.
+    card is left intact.
     """
     if not spend_breakdown_published:
         return items
     kept = [it for it in items if it.get("label") not in _SPEND_TOTAL_LABELS]
     return kept or items
+
+
+def _dedupe_published(containers: tuple[Container, ...]) -> tuple[Container, ...]:
+    """Thin duplicated rows out of the trend card, after the budget has run.
+
+    Ordering matters and is the whole point: de-duplication asks "is this row
+    already covered by something the reader will see?", and only the post-budget
+    set can answer that. Running it earlier answers a different question — "did
+    a producer build one?" — and gets it wrong whenever the budget later trims
+    the provider, leaving the page with neither the breakdown nor the totals.
+
+    Pure: containers are rebuilt rather than mutated, and a briefing without
+    both sides of the pair passes through untouched.
+    """
+    titles = {c.title for c in containers}
+    if "成本归因" not in titles or "趋势指标" not in titles:
+        return containers
+    out: list[Container] = []
+    for container in containers:
+        if container.title != "趋势指标":
+            out.append(container)
+            continue
+        cards = []
+        for card in container.cards:
+            items = card.payload.get("items")
+            if not items:
+                cards.append(card)
+                continue
+            kept = _dedupe_metric_items(items, True)
+            cards.append(replace(card, payload={**card.payload, "items": kept}))
+        out.append(replace(container, cards=tuple(cards)))
+    return tuple(out)
 
 
 def _overview_sections(sections: dict[str, list[str]]) -> list[dict]:
@@ -1213,18 +1248,13 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         containers.append(work_container)
 
     # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
-    # Built BEFORE the trend card even though it renders after it, because
-    # whether it exists decides which trend rows are duplicates: its per-project
-    # split reports the same spend the 成本 / Token totals do, so with it on the
-    # page those two rows carry nothing it does not (§design 3, criterion 5).
     attribution_container = _attribution_container(
         mmdd, getattr(sources, "cost_by_project", None),
         getattr(sources, "model_by_project", None),
         getattr(sources, "leverage", None),
         getattr(sources, "rework_by_workspace", None))
 
-    metrics = _dedupe_metric_items(_metric_items(sources, report_date),
-                                   attribution_container is not None)
+    metrics = _metric_items(sources, report_date)
     if metrics:
         containers.append(Container(
             _cuid(mmdd, 2), "趋势指标", 20,
@@ -1275,7 +1305,11 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     news_container = _news_container(mmdd, getattr(sources, "news_radar", None))
     if news_container:
         containers.append(news_container)
-    return Briefing(reported_day, GENERATED_BY, _apply_budget(containers))
+    # De-duplicate AFTER the budget, never before: a row is only redundant if
+    # the card that covers it actually reaches the reader, and until the budget
+    # has run that is not known (§design 3, criterion 5).
+    return Briefing(reported_day, GENERATED_BY,
+                    _dedupe_published(_apply_budget(containers)))
 
 
 # ---------------------------------------------------------------------------
