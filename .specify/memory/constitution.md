@@ -349,7 +349,16 @@ many items / how much of the payload the renderer chooses to show.
 | `agentSummary` | `bubble.left.and.bubble.right.fill` | `.agentSummary` (indigo hue) | `.headline` for agent name | `.callout` for completed; `.caption.monospaced()` for refs | Refs render as capsule chips |
 | `todoList` | `checklist` | `.todoList` (green hue) | `.body` per row | `.caption2` for priority dot label | Each row leads with a priority color dot |
 | `trending` | `chart.line.uptrend.xyaxis` | `.trending` (orange hue) | `.callout.monospaced()` for score | `.body` for title | Scores right-aligned mono |
+| `relationship` | `point.3.connected.trianglepath.dotted` | `.relationship` (cyan) | `.headline` for conclusion | `.caption.monospaced()` for axes/sample/window | Scatter/heatmap/slope; wide uses chart + evidence rail |
 | `sectionHeader` | (no badge, no chrome) | — | `.title3.weight(.semibold)` | `.subheadline` `.secondary` | Renders with NO card chrome (raw header inside container) |
+
+#### Relationship visualization
+
+- `relationship` represents a typed relationship, not a chart-shaped CardType.
+- `visualization` is `scatter | heatmap | slope` and must match the payload fields.
+- Every relationship card carries `sampleSize`, `timeWindow`, and `metricDefinition`.
+- A relationship card must never claim causation from observational association.
+- Wide/hero may use chart + evidence rail; small/medium reduce visible marks/legend, never font size.
 
 #### Icon badge specification
 
@@ -911,7 +920,25 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.10.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-10
+**Version**: 1.11.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-12
+
+<!--
+1.11.0 — MINOR (new `relationship` CardType recipe and visualization
+contract; no principle removed or inverted).
+
+Changes:
+- §Per-Type Visual Recipes adds the `relationship` CardType and its icon,
+  classification token, typography, and responsive chart/evidence-rail recipe.
+- New §Relationship visualization locks the `scatter | heatmap | slope`
+  vocabulary, required evidence fields, observational-language constraint, and
+  size behavior.
+
+Migration note: In-flight Core, aidata, DesignKit, and AIDashUI work that
+introduces `relationship` MUST migrate in coordinated layer commits: lock the
+payload and validation, produce only supported visualizations with evidence,
+provide the classification token, and render the responsive recipe. Stored
+briefings without the new CardType are unaffected.
+-->
 
 <!--
 1.10.0 — MINOR (new section + material expansion of §Card Chrome /
@@ -1028,5 +1055,4 @@ spacing literals and MUST be updated in lockstep with the AIDashUI
 implementation PR. Stored briefings are unaffected (new metric fields are
 optional and decode to nil on old records).
 -->
-
 
