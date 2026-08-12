@@ -415,7 +415,16 @@ struct DesignTokensComplianceTests {
         case .sectionHeader: name = "SectionHeaderCardView"
         case .barList:       name = "BarListCardView"
         case .stackedBar:    name = "StackedBarCardView"
+        case .relationship:  name = "RelationshipCardView"
         }
+        return try cardViewSource(named: name)
+    }
+
+    /// Load any `CardView/<name>.swift` source. `rendererSource(for:)` maps a
+    /// CardType to its renderer; this is for the supporting files a renderer
+    /// splits into (e.g. `RelationshipChart`), which the same token guards
+    /// must cover — a color literal is no more acceptable one file over.
+    static func cardViewSource(named name: String) throws -> String {
         let url = try sourceFile(named: "\(name).swift",
                                  under: ["Sources", "AIDashUI", "CardView"])
         return try String(contentsOf: url, encoding: .utf8)

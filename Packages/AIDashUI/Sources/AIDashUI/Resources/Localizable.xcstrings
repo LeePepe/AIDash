@@ -294,6 +294,150 @@
           }
         }
       }
+    },
+    "relationship.a11y.cell.label": {
+      "comment": "VoiceOver label for one heatmap cell: its row then its column.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "relationship.a11y.chart.heatmap": {
+      "comment": "VoiceOver label for a relationship card's heatmap. First placeholder is the card title, second is the number of cells.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@. Heatmap of %2$lld cells."
+          }
+        }
+      }
+    },
+    "relationship.a11y.chart.scatter": {
+      "comment": "VoiceOver label for a relationship card's scatter plot. First placeholder is the card title, second is the number of plotted points.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@. Scatter plot of %2$lld points."
+          }
+        }
+      }
+    },
+    "relationship.a11y.chart.slope": {
+      "comment": "VoiceOver label for a relationship card's slope chart. First placeholder is the card title, second is the number of before/after series.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@. Slope chart of %2$lld series."
+          }
+        }
+      }
+    },
+    "relationship.a11y.point.value": {
+      "comment": "VoiceOver value for one scatter point: the x-axis reading followed by the y-axis reading.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "relationship.a11y.slope.value": {
+      "comment": "VoiceOver value for one slope series: its before reading then its after reading.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "before %1$@, after %2$@"
+          }
+        }
+      }
+    },
+    "relationship.empty": {
+      "comment": "Shown inside a relationship card when its payload decoded successfully but carries no marks to plot.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No data"
+          }
+        }
+      }
+    },
+    "relationship.evidence.definition": {
+      "comment": "Metric-definition row of a relationship card's evidence rail. The placeholder states what the plotted metric actually measures.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Measures: %@"
+          }
+        }
+      }
+    },
+    "relationship.evidence.sample": {
+      "comment": "Sample-size row of a relationship card's evidence rail. The integer is the number of underlying observations.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "n=%lld"
+          }
+        }
+      }
+    },
+    "relationship.evidence.window": {
+      "comment": "Observation-window row of a relationship card's evidence rail. The placeholder is an author-written window such as `7d`.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Window: %@"
+          }
+        }
+      }
+    },
+    "relationship.slope.after": {
+      "comment": "X-axis category for the later reading of a relationship slope chart.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "After"
+          }
+        }
+      }
+    },
+    "relationship.slope.before": {
+      "comment": "X-axis category for the earlier reading of a relationship slope chart.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Before"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

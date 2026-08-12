@@ -134,6 +134,17 @@ public enum AIDashTypography {
                 secondary: .caption2,
                 secondaryColor: .secondary
             )
+        case .relationship:
+            // §Per-Type Visual Recipes: `.headline` carries the conclusion (the
+            // observed association, which is the card's actual claim), and the
+            // axes / sample / window read as instrument metadata in
+            // `.caption.monospaced()` — tabular so `n=34` and a numeric axis
+            // label stay aligned against the chart edge.
+            return DetailRecipe(
+                primary: .headline,
+                secondary: .caption.monospaced(),
+                secondaryColor: .secondary
+            )
         }
     }
 }
@@ -158,6 +169,7 @@ extension CardType {
         case .sectionHeader: return nil
         case .barList:       return "chart.bar.xaxis"
         case .stackedBar:    return "chart.bar.doc.horizontal"
+        case .relationship:  return "point.3.connected.trianglepath.dotted"
         }
     }
 
@@ -176,6 +188,7 @@ extension CardType {
         case .sectionHeader: return nil
         case .barList:       return .barList
         case .stackedBar:    return .stackedBar
+        case .relationship:  return .relationship
         }
     }
 
