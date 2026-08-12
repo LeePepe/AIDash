@@ -186,6 +186,7 @@ public enum Semantic {
 
 public enum Classification: String, CaseIterable, Sendable {
     case metric, insight, digest, agentSummary, todoList, trending, barList, stackedBar
+    case relationship
 
     /// Resolved tint for the current color scheme. Light/dark hex pairs mirror
     /// Apple's systemBlue/Purple/Teal/Indigo/Green/Orange.
@@ -204,6 +205,13 @@ public enum Classification: String, CaseIterable, Sendable {
         // stackedBar is a composition-of-a-whole (session quality / model
         // tiers): a warm yellow badge, distinct from the orange trending hue.
         case .stackedBar:   return Color(hex: isDark ? "#FFD426" : "#FFCC00") // yellow
+        // relationship is a cross-data correlation (cost×outcome, rework
+        // concentration): a cyan that reads as "two things measured against
+        // each other". It sits between metric blue and digest teal on the
+        // wheel, so the pair is pushed apart deliberately — the light value
+        // is deeper and the dark value brighter than either neighbor, keeping
+        // all three separable at 32×32 badge size in both schemes.
+        case .relationship: return Color(hex: isDark ? "#22D3EE" : "#0891B2") // cyan
         }
     }
 }
