@@ -133,6 +133,26 @@ def _collection_size(item_count: int, medium_ceiling: int) -> str:
     return "medium" if item_count <= medium_ceiling else "wide"
 
 
+def _relationship_is_rich(profile: DataProfile) -> bool:
+    """Does this relationship have enough structure to earn a full chart?
+
+    The answer differs by KIND, and conflating them was a real bug. A heatmap's
+    richness is its EXTENT — both axes must carry at least two values, because a
+    1×N strip has one row and therefore no second dimension at all. Cell count
+    cannot substitute: a single workspace with five distinct failure root causes
+    has five cells and one row, and publishing that as a wide heatmap asserts a
+    dimension the data does not have — exactly what this module exists to stop.
+    That shape is the normal one for a single-workspace user, not a corner case.
+
+    Scatter and slope never populate row/column counts (their axes are
+    continuous), so for them the number of marks IS the richness.
+    """
+    if profile.relationship_kind == "heatmap":
+        return (profile.row_count >= RELATIONSHIP_RICH_ROWS
+                and profile.column_count >= RELATIONSHIP_RICH_COLUMNS)
+    return profile.item_count >= RELATIONSHIP_RICH_POINTS
+
+
 def _relationship_decision(profile: DataProfile) -> CardDecision:
     """A relationship must prove it is two-dimensional before it is drawn."""
     if profile.dimensions != 2 or profile.relationship_kind is None:
@@ -146,9 +166,7 @@ def _relationship_decision(profile: DataProfile) -> CardDecision:
             f"unknown relationship kind {profile.relationship_kind!r}; "
             f"expected one of {_RELATIONSHIP_KINDS}"
         )
-    rich = (profile.item_count >= RELATIONSHIP_RICH_POINTS
-            or (profile.row_count >= RELATIONSHIP_RICH_ROWS
-                and profile.column_count >= RELATIONSHIP_RICH_COLUMNS))
+    rich = _relationship_is_rich(profile)
     return CardDecision(
         card_type="relationship",
         size="wide" if rich else "medium",
@@ -218,21 +236,54 @@ def _priority(candidate: CardCandidate) -> tuple:
     )
 
 
-def _is_superseded(candidate: CardCandidate,
-                   supplied: dict[str, set[Any]]) -> bool:
-    """True when a STRONGER card already carries every signal this one restates.
+def _is_superseded(candidate: CardCandidate, admitted_signals: set) -> bool:
+    """True when a card ACTUALLY PUBLISHED carries every signal this one restates.
+
+    `admitted_signals` holds only the signals of candidates that survived
+    admission — not everything the original set merely offered. That distinction
+    is the whole point: suppressing against a provider which is itself filtered
+    out (detail-only) or never fits the budget loses BOTH cards, and a signal
+    silently disappearing is strictly worse than the duplication suppression
+    exists to prevent.
 
     An actionable card is never suppressed — "you already know this" is a fair
     thing to say about a description, not about something asking to be done.
-    `supplied` maps each signal to the ids of the cards providing it, so a card
-    naming a signal it also provides cannot suppress itself.
     """
     if candidate.requires_action or not candidate.redundant_with:
         return False
-    return any(
-        supplied.get(signal, set()) - {candidate.card.id}
-        for signal in candidate.redundant_with
-    )
+    return any(signal in admitted_signals for signal in candidate.redundant_with)
+
+
+def _admit(candidates: Sequence[CardCandidate], max_cards: int,
+           first_screen: int) -> tuple[list[CardCandidate], int]:
+    """Rank, then admit while the card budget lasts. Returns (selected, lead).
+
+    Admission is ALL-OR-NOTHING per candidate: one too heavy for the remaining
+    budget is skipped and a lighter, lower-priority one may take its place. That
+    keeps a multi-card section whole — half of it is not a smaller version of
+    it, just an uninterpretable stump.
+
+    The first screen is a CONTIGUOUS prefix in the same currency: it closes at
+    the first candidate that would overrun it rather than skipping ahead to a
+    smaller one further down, because a reader cannot jump a section.
+    """
+    selected: list[CardCandidate] = []
+    spent = 0
+    lead_count = 0
+    lead_spent = 0
+    lead_open = True
+    for candidate in sorted(candidates, key=_priority):
+        cost = max(1, candidate.weight)
+        if spent + cost > max(0, max_cards):
+            continue
+        selected.append(candidate)
+        spent += cost
+        if lead_open and lead_spent + cost <= max(0, first_screen):
+            lead_count += 1
+            lead_spent += cost
+        else:
+            lead_open = False
+    return selected, lead_count
 
 
 def select_with_budget(candidates: Sequence[CardCandidate],
@@ -243,61 +294,41 @@ def select_with_budget(candidates: Sequence[CardCandidate],
 
     Four things happen, in order:
 
-      1. **Redundancy suppression.** A card that restates a signal another card
-         already carries more strongly is dropped — a weaker duplicate spends
-         first-screen budget without adding anything.
-      2. **Omission.** A stable detail card with no action, anomaly, or cross
-         value is dropped outright.
-      3. **Ranking + cap.** The rest are ranked by `_priority` and admitted
-         while the budget lasts. The budget is spent in `weight` — one per card
-         by default — so a candidate standing for five published cards costs
-         five, not one. Counting candidates instead would let three five-card
-         sections report "3" against a cap of 10 while publishing 15.
-      4. **Lead/tail split.** Candidates whose cards fit inside `first_screen`
-         keep their priority order — they are what a two-minute read gets.
-         Everything after returns to the authored order, so the detail tail
-         still reads as the author arranged it rather than as a second priority
-         list.
-
-    Admission is ALL-OR-NOTHING per candidate: a candidate too heavy for the
-    remaining budget is skipped and a lighter, lower-priority one may take its
-    place. That keeps a multi-card section whole — half of it is not a smaller
-    version of it, just an uninterpretable stump.
+      1. **Omission.** A stable detail card with no action, anomaly, or cross
+         value is dropped outright — a card pushed to the bottom still costs
+         the reader the scroll.
+      2. **Provisional admission.** The rest are ranked by `_priority` and
+         admitted while the budget lasts, spent in `weight` (published cards),
+         so a candidate standing for five cards costs five rather than one.
+      3. **Redundancy suppression, then re-admission.** A card restating a
+         signal that a PROVISIONALLY ADMITTED card already carries is dropped,
+         and admission runs again over what is left — both because the freed
+         budget should go to something and because dropping a card can only
+         ever admit more, never fewer. Suppressing against the raw candidate set
+         instead would let a provider that is itself filtered out or over budget
+         take its dependent down with it, losing the signal entirely.
+      4. **Lead/tail split.** Candidates inside `first_screen` keep their
+         priority order — that is what a two-minute read gets. Everything after
+         returns to the authored order, so the detail tail reads as the author
+         arranged it rather than as a second priority list.
 
     Pure and total: an empty input yields an empty list, and the result is
     identical regardless of the input's order.
     """
-    supplied: dict[str, set[Any]] = {}
-    for candidate in candidates:
-        for signal in candidate.provides:
-            supplied.setdefault(signal, set()).add(candidate.card.id)
+    eligible = [c for c in candidates if c.carries_signal or not c.is_detail]
 
-    eligible = [
-        c for c in candidates
-        if (c.carries_signal or not c.is_detail) and not _is_superseded(c, supplied)
+    # Pass 1 — who would be published if nothing were suppressed?
+    provisional, _ = _admit(eligible, max_cards, first_screen)
+    admitted_signals = {s for c in provisional for s in c.provides}
+
+    # Pass 2 — drop the restatements those admitted cards make redundant, then
+    # re-admit so the freed budget is not simply wasted. A candidate cannot
+    # suppress itself, so its own signals do not count against it.
+    survivors = [
+        c for c in eligible
+        if not _is_superseded(c, admitted_signals - set(c.provides))
     ]
-    ranked = sorted(eligible, key=_priority)
-
-    selected: list[CardCandidate] = []
-    spent = 0
-    lead_count = 0
-    lead_spent = 0
-    lead_open = True
-    for candidate in ranked:
-        cost = max(1, candidate.weight)
-        if spent + cost > max(0, max_cards):
-            continue
-        selected.append(candidate)
-        spent += cost
-        # The first screen is measured in the same currency and is a CONTIGUOUS
-        # prefix: it closes at the first candidate that would overrun it, rather
-        # than skipping ahead to a smaller one further down. A reader does not
-        # get to jump a section.
-        if lead_open and lead_spent + cost <= max(0, first_screen):
-            lead_count += 1
-            lead_spent += cost
-        else:
-            lead_open = False
+    selected, lead_count = _admit(survivors, max_cards, first_screen)
 
     lead = selected[:lead_count]
     tail = sorted(selected[lead_count:], key=lambda c: (c.order, c.card.id))

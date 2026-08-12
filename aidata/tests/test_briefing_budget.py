@@ -13,6 +13,8 @@ Both are pure-transform tests: `build_briefing` never touches a warehouse, so
 the fixtures below are hand-built bundles rather than frozen captures.
 """
 
+import dataclasses
+
 import pytest
 
 from L5_apps.digest.aidash import Briefing, build_briefing
@@ -133,6 +135,23 @@ def _rich_sources() -> DigestSources:
     )
 
 
+def _rich_sources_without_attribution() -> DigestSources:
+    """The rich day minus every 成本归因 input.
+
+    Isolates the rework heatmap as the only possible suppressor of `趋势指标`:
+    on a full day the spend breakdown legitimately suppresses the bare spend
+    arrow, which would mask whether the heatmap is doing it too.
+    """
+    skipped = SourceHealth("attribution", "skipped:未取")
+    return dataclasses.replace(
+        _rich_sources(),
+        cost_by_project=RankBundle([], skipped),
+        model_by_project=RankBundle([], skipped),
+        rework_by_workspace=RankBundle([], skipped),
+        leverage=Leverage.empty(),
+    )
+
+
 def _untrimmed_containers(sources=None) -> list:
     """Every container the producers build, BEFORE the budget trims anything.
 
@@ -173,6 +192,29 @@ def _first_screen_cards(b: Briefing) -> list:
             break
         lead.extend(container.cards)
     return lead
+
+
+def _budget_rank(b: Briefing) -> dict:
+    """{container id: admission rank} as `select_with_budget` actually ordered
+    them, captured from the real seam rather than recomputed by the test."""
+    from L5_apps.digest import aidash
+
+    captured: dict = {}
+    original = aidash.select_with_budget
+
+    def _spy(candidates, **kw):
+        kept = original(candidates, **kw)
+        captured.clear()
+        captured.update({c.card.id: i for i, c in enumerate(kept)})
+        return kept
+
+    aidash.select_with_budget = _spy
+    try:
+        _build(_rich_sources())
+    finally:
+        aidash.select_with_budget = original
+    published = {c.id for c in b.containers}
+    return {cid: rank for cid, rank in captured.items() if cid in published}
 
 
 def _of_type(b: Briefing, card_type: str) -> list:
@@ -233,6 +275,21 @@ def test_single_row_matrix_is_omitted_rather_than_drawn_thin():
 @pytest.mark.unit
 def test_single_column_matrix_is_omitted():
     assert _of_type(_build(_sources(rework_relationship=_matrix(3, 1))),
+                    "relationship") == []
+
+
+@pytest.mark.unit
+def test_single_row_matrix_with_five_cells_is_still_omitted():
+    """The production shape that slipped through: one workspace, five distinct
+    failure root causes. Five cells used to buy richness, so a wide heatmap was
+    published over a single row."""
+    assert _of_type(_build(_sources(rework_relationship=_matrix(1, 5))),
+                    "relationship") == []
+
+
+@pytest.mark.unit
+def test_single_column_matrix_with_five_cells_is_still_omitted():
+    assert _of_type(_build(_sources(rework_relationship=_matrix(5, 1))),
                     "relationship") == []
 
 
@@ -358,6 +415,54 @@ def test_the_cross_signal_survives_a_crowded_day():
 
 
 @pytest.mark.unit
+def test_the_rework_heatmap_does_not_suppress_the_trend_metrics():
+    """The rework matrix and the day's numbers are DIFFERENT signals.
+
+    `交叉信号` used to claim it provided `outcome_x_tokens`, which `趋势指标`
+    declared itself redundant with — so publishing a workspace × root-cause
+    heatmap silently deleted the entire trend container. Rework concentration
+    says nothing about cost, tokens, requests, or sessions; the claim was false.
+
+    Asserted with the heatmap present and the spend breakdown ABSENT, so the
+    only candidate suppressor left is the heatmap. On a full day `趋势指标` is
+    legitimately suppressed by `成本归因` — which splits the very spend the trend
+    reports — and that honest pair is covered separately below.
+    """
+    b = _build(_rich_sources_without_attribution())
+    titles = [c.title for c in b.containers]
+    assert "交叉信号" in titles, "fixture no longer publishes the heatmap"
+    assert "趋势指标" in titles, (
+        "the rework heatmap suppressed the trend metrics — different signals"
+    )
+
+
+@pytest.mark.unit
+def test_the_spend_breakdown_does_suppress_the_bare_trend_total():
+    """The one honest pair: with the per-project split on the page, the single
+    spend arrow it decomposes is a weaker restatement of it."""
+    titles = [c.title for c in _build(_rich_sources()).containers]
+    assert "成本归因" in titles
+    assert "趋势指标" not in titles
+
+
+@pytest.mark.unit
+def test_the_trend_returns_when_the_breakdown_is_not_published():
+    """Suppression is conditional on the stronger card actually being there —
+    otherwise the signal disappears entirely, which is the worse outcome."""
+    titles = [c.title for c in
+              _build(_rich_sources_without_attribution()).containers]
+    assert "成本归因" not in titles
+    assert "趋势指标" in titles
+
+
+@pytest.mark.unit
+def test_trend_metrics_survive_alongside_the_relationship_on_a_thin_day():
+    b = _build(_sources(rework_relationship=_matrix(2, 2)))
+    titles = [c.title for c in b.containers]
+    assert "交叉信号" in titles and "趋势指标" in titles
+
+
+@pytest.mark.unit
 def test_actions_are_capped():
     todo = _of_type(_build(_sources()), "todoList")
     assert todo, "the markdown TODO section must still produce a card"
@@ -409,6 +514,91 @@ def test_container_order_is_preserved_after_trimming():
     b = _build(_sources(rework_relationship=_matrix(2, 2)))
     orders = [c.order for c in b.containers]
     assert orders == sorted(orders)
+
+
+# --------------------------------------------------------------------------- #
+# The first-screen DECISION must reach the app
+#
+# The app does not render containers in array order — both
+# `BriefingView.swift:144` and `XPCHandlers.swift:208` sort by `container.order`.
+# So a first-screen decision expressed only as tuple position is invisible to
+# the reader: whatever `order` says wins. These assert on `order`, because that
+# is the field the app actually obeys.
+# --------------------------------------------------------------------------- #
+def _by_render_order(b: Briefing) -> list:
+    """Containers as the APP will show them — sorted by `order`, like Swift."""
+    return sorted(b.containers, key=lambda c: c.order)
+
+
+def _rendered_first_screen(b: Briefing) -> list:
+    """Cards above the fold once the app has applied its own `order` sort."""
+    lead: list = []
+    for container in _by_render_order(b):
+        if len(lead) + len(container.cards) > FIRST_SCREEN_CARDS:
+            break
+        lead.extend(container.cards)
+    return lead
+
+
+@pytest.mark.unit
+def test_render_order_matches_the_published_tuple_order():
+    """If these diverge, every tuple-position assertion in this file is testing
+    something the reader never sees."""
+    b = _build(_rich_sources())
+    assert [c.id for c in b.containers] == [c.id for c in _by_render_order(b)]
+
+
+@pytest.mark.unit
+def test_the_highest_priority_container_reaches_the_rendered_first_screen():
+    """The budget's top-ranked admitted container must land above the fold
+    AFTER the app's `order` sort — not merely first in the tuple we send."""
+    b = _build(_rich_sources())
+    lead_ids = {c.id for c in _rendered_first_screen(b)}
+    cross = [c for c in b.containers if c.title == "交叉信号"]
+    assert cross, "fixture no longer publishes the cross signal"
+    assert cross[0].cards[0].id in lead_ids, (
+        "the highest-value cross signal was pushed off the rendered first screen"
+    )
+
+
+@pytest.mark.unit
+def test_the_action_container_reaches_the_rendered_first_screen():
+    """Actions are the one container the reader is asked to DO something with;
+    burying them below the fold defeats the point of ranking them first."""
+    b = _build(_rich_sources())
+    lead_ids = {c.id for c in _rendered_first_screen(b)}
+    todo = [c for c in b.containers if c.title == "今日规划"]
+    assert todo, "fixture no longer publishes actions"
+    assert todo[0].cards[0].id in lead_ids
+
+
+@pytest.mark.unit
+def test_the_rendered_first_screen_is_bounded_and_contiguous():
+    b = _build(_rich_sources())
+    lead = _rendered_first_screen(b)
+    assert 0 < len(lead) <= FIRST_SCREEN_CARDS
+    consumed = 0
+    for container in _by_render_order(b):
+        if consumed >= len(lead):
+            break
+        consumed += len(container.cards)
+    assert consumed == len(lead), "rendered first screen cut a container in half"
+
+
+@pytest.mark.unit
+def test_first_screen_containers_all_outrank_the_tail_ones():
+    """The ordering the budget decided must be the ordering the app renders:
+    every container above the fold ranks at least as high as every one below.
+    """
+    b = _build(_rich_sources())
+    lead_ids = {c.id for c in _rendered_first_screen(b)}
+    ranked = _budget_rank(b)
+    lead_ranks = [r for cid, r in ranked.items() if cid in lead_ids]
+    tail_ranks = [r for cid, r in ranked.items() if cid not in lead_ids]
+    if lead_ranks and tail_ranks:
+        assert max(lead_ranks) < min(tail_ranks), (
+            "a lower-priority container rendered above a higher-priority one"
+        )
 
 
 # --------------------------------------------------------------------------- #

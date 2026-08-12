@@ -27,7 +27,7 @@ import re
 import subprocess  # nosec B404 - used only via injected runner/glob helpers
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
@@ -998,8 +998,25 @@ def _relationship_container(mmdd: str, rework) -> "Container | None":
 # Signals a card can carry or restate. Naming the SIGNAL (not the card) is what
 # lets a weak restatement be suppressed when a stronger card is present, and
 # survive when it is not.
-_SIGNAL_REWORK_CROSS = "rework_x_rootcause"
-_SIGNAL_OUTCOME_TOKENS = "outcome_x_tokens"
+#
+# A `provides` claim is an ASSERTION ABOUT THE DATA, and a false one deletes a
+# real card: 交叉信号 used to claim `outcome_x_tokens`, which 趋势指标 restates,
+# so publishing a workspace × root-cause rework heatmap silently removed the
+# entire trend container. Rework concentration says nothing about cost, tokens,
+# requests, or sessions — the claim was simply untrue. Only declare a signal a
+# container genuinely carries.
+#
+# `spend_breakdown` is the one honest pair today: 成本归因 splits the very spend
+# 趋势指标 reports as a single arrow, so with the breakdown on the page the bare
+# total is a weaker restatement of it.
+#
+# There is deliberately NO rework signal here. 交叉信号 carries the workspace ×
+# root-cause matrix, and 成本归因 does hold a rework-by-workspace bar — but that
+# is one of its four cards, and suppression is per CONTAINER, so declaring the
+# pair would delete three unrelated cards to remove one overlap. A constant that
+# nothing consumes reads as "some card is being suppressed by this" and is worse
+# than its absence.
+_SIGNAL_SPEND_BREAKDOWN = "spend_breakdown"
 
 # Per-container budget metadata, keyed by container title. Everything absent
 # from this table takes the default (a plain, non-detail card of average cost).
@@ -1012,12 +1029,12 @@ _SIGNAL_OUTCOME_TOKENS = "outcome_x_tokens"
 _BUDGET_META: dict[str, dict] = {
     "总览": {"reading_cost": 2, "requires_action": False},
     "今日规划": {"requires_action": True, "reading_cost": 1},
-    "交叉信号": {"cross_signal": 3, "reading_cost": 2,
-                 "provides": (_SIGNAL_REWORK_CROSS, _SIGNAL_OUTCOME_TOKENS)},
+    "交叉信号": {"cross_signal": 3, "reading_cost": 2},
     "AI 效能": {"cross_signal": 2, "reading_cost": 3},
-    "成本归因": {"cross_signal": 2, "reading_cost": 3},
+    "成本归因": {"cross_signal": 2, "reading_cost": 3,
+                 "provides": (_SIGNAL_SPEND_BREAKDOWN,)},
     "趋势指标": {"cross_signal": 0, "reading_cost": 2,
-                 "redundant_with": (_SIGNAL_OUTCOME_TOKENS,)},
+                 "redundant_with": (_SIGNAL_SPEND_BREAKDOWN,)},
     "今日工作": {"reading_cost": 2},
     "昨日汇总": {"reading_cost": 2},
     "可改良": {"cross_signal": 1, "reading_cost": 3},
@@ -1064,7 +1081,8 @@ def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
 
 
 def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
-    """Trim the day's containers so the PUBLISHED CARDS fit the budget.
+    """Trim the day's containers so the PUBLISHED CARDS fit the budget, and
+    make the first-screen decision one the APP will actually honour.
 
     The overview is EXEMPT and always leads: it is the briefing's only
     guaranteed card (ADR-23 — a fully degraded day still publishes a valid
@@ -1072,8 +1090,21 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     all. Its cards are still CHARGED against the budget, since the reader pays
     for them either way; only its admission is unconditional.
 
-    The surviving containers are returned in `order`, not in priority order:
-    priority decides WHAT is published, the authored order decides how it reads.
+    ## Why this rewrites `order` rather than just returning a tuple
+
+    The app does NOT render containers in the order we send them — both
+    `BriefingView.swift` and `XPCHandlers.swift` sort by `container.order`. So a
+    first-screen decision expressed only as tuple position is invisible to the
+    reader: whatever `order` says wins, and the budget's ranking is silently
+    discarded on the way through XPC. (Sorting survivors straight back to
+    authored order here had exactly that effect — `FIRST_SCREEN_CARDS` decided
+    nothing a reader could see.)
+
+    So the lead containers are renumbered into a reserved band BELOW every
+    authored order, preserving their priority sequence, while the tail keeps its
+    authored numbering. `order` remains ascending — it is still the single
+    ordering key — but its leading stretch now encodes "this is the two-minute
+    read" instead of "this is where the producer happened to append it".
     """
     if not containers:
         return ()
@@ -1086,8 +1117,37 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     kept = select_with_budget(_container_candidates(rest),
                               max_cards=budget, first_screen=first_screen)
     survivors = [c.card for c in kept if c.card.cards]
-    survivors.sort(key=lambda c: (c.order, c.id))
-    return tuple([head] + survivors)
+    if not survivors:
+        return (head,)
+
+    # How many of `survivors` are the first screen: select_with_budget returns
+    # lead-then-tail, and the tail is sorted by authored order, so the lead is
+    # the leading run whose cards fit the first-screen budget.
+    lead: list[Container] = []
+    lead_cards = 0
+    for container in survivors:
+        if lead_cards + len(container.cards) > first_screen:
+            break
+        lead.append(container)
+        lead_cards += len(container.cards)
+    tail = survivors[len(lead):]
+
+    # Reserve a band strictly between the overview and every authored order, so
+    # a lead container always renders above a tail one no matter how the
+    # producers numbered them — while the overview keeps the very top.
+    #
+    # The band is carved out of the gap below the lowest surviving tail order
+    # rather than by shifting anyone up, so the numbers stay ascending and no
+    # authored order has to move. `head.order` is the hard floor: the overview
+    # is the one card guaranteed to exist, and it leads.
+    ceiling = min([c.order for c in tail] + [head.order + len(lead) + 1])
+    base = max(head.order + 1, ceiling - len(lead))
+    lead = [
+        replace(container, order=base + index)
+        for index, container in enumerate(lead)
+    ]
+    tail = sorted(tail, key=lambda c: (c.order, c.id))
+    return tuple([head] + lead + tail)
 
 
 def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
