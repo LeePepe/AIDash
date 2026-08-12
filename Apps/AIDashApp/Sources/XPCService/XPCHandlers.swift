@@ -536,28 +536,29 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         schemas[CardType.metric.rawValue] = """
         {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"unit":{"type":"string"},"trend":{"type":"string","enum":["up","down","flat"]},"series":{"type":"array","items":{"type":"number"}},"ratio":{"type":"number","minimum":0,"maximum":1},"higherIsBetter":{"type":"boolean"},"context":{"type":"string"}}}}}}
         """
-        schemas[CardType.insight.rawValue] = """
-        {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"citations":{"type":"array","items":{"type":"object","required":["label","url"],"properties":{"label":{"type":"string"},"url":{"type":"string"}}}}}}
-        """
-        schemas[CardType.agentSummary.rawValue] = """
-        {"type":"object","required":["agentName","completed"],"properties":{"agentName":{"type":"string","minLength":1},"completed":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"ref":{"type":"string"}}}},"stats":{"type":"array","items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"}}}}}}
-        """
-        schemas[CardType.todoList.rawValue] = """
-        {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"priority":{"type":"string","enum":["low","medium","high"]},"due":{"type":"string","format":"date-time"},"ref":{"type":"string"}}}}}}
-        """
-        schemas[CardType.trending.rawValue] = """
-        {"type":"object","required":["topic","items"],"properties":{"topic":{"type":"string","minLength":1},"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title","url"],"properties":{"title":{"type":"string"},"url":{"type":"string"},"score":{"type":"number"},"delta":{"type":"number"},"category":{"type":"string"},"reason":{"type":"string"}}}}}}
-        """
-        schemas[CardType.digest.rawValue] = """
-        {"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"sections":{"type":"array","items":{"type":"object","required":["heading","paragraphs"],"properties":{"heading":{"type":"string"},"paragraphs":{"type":"array","items":{"type":"string"}}}}}}}
-        """
-        schemas[CardType.sectionHeader.rawValue] = """
-        {"type":"object","required":["title"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"}}}
-        """
+        schemas[CardType.insight.rawValue] = #"{"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"citations":{"type":"array","items":{"type":"object","required":["label","url"],"properties":{"label":{"type":"string"},"url":{"type":"string"}}}}}}"#
+        schemas[CardType.agentSummary.rawValue] = #"{"type":"object","required":["agentName","completed"],"properties":{"agentName":{"type":"string","minLength":1},"completed":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"ref":{"type":"string"}}}},"stats":{"type":"array","items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"}}}}}}"#
+        schemas[CardType.todoList.rawValue] = #"{"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"priority":{"type":"string","enum":["low","medium","high"]},"due":{"type":"string","format":"date-time"},"ref":{"type":"string"}}}}}}"#
+        schemas[CardType.trending.rawValue] = #"{"type":"object","required":["topic","items"],"properties":{"topic":{"type":"string","minLength":1},"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title","url"],"properties":{"title":{"type":"string"},"url":{"type":"string"},"score":{"type":"number"},"delta":{"type":"number"},"category":{"type":"string"},"reason":{"type":"string"}}}}}}"#
+        schemas[CardType.digest.rawValue] = #"{"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"sections":{"type":"array","items":{"type":"object","required":["heading","paragraphs"],"properties":{"heading":{"type":"string"},"paragraphs":{"type":"array","items":{"type":"string"}}}}}}}"#
+        schemas[CardType.sectionHeader.rawValue] = #"{"type":"object","required":["title"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"}}}"#
         schemas[CardType.barList.rawValue] = #"{"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"valueText":{"type":"string"},"semantic":{"type":"string"}}}}}}"#
         schemas[CardType.stackedBar.rawValue] = #"{"type":"object","required":["segments"],"properties":{"title":{"type":"string"},"segments":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"semantic":{"type":"string"}}}}}}"#
+        schemas[CardType.relationship.rawValue] = relationshipSchema
         return schemas
     }()
+
+    /// `visualization` locks which mark collection may be populated, so the
+    /// `allOf`/`if`-`then` clauses mirror `RelationshipPayload.validateMarkSet`:
+    /// a publisher reading `aidash schema list` sees the exclusivity `card.put`
+    /// enforces. Split across literals to stay under the 500-char lint ceiling.
+    private static let relationshipSchema =
+        #"{"type":"object","required":["title","visualization","xAxis","yAxis","sampleSize","timeWindow","metricDefinition","summary"],"properties":{"title":{"type":"string","minLength":1},"visualization":{"type":"string","enum":["scatter","heatmap","slope"]},"# +
+        #""xAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","minLength":1},"unit":{"type":"string"}}},"yAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","minLength":1},"unit":{"type":"string"}}},"# +
+        #""points":{"type":"array","items":{"type":"object","required":["label","x","y"],"properties":{"label":{"type":"string","minLength":1},"x":{"type":"number"},"y":{"type":"number"},"magnitude":{"type":"number","exclusiveMinimum":0},"category":{"type":"string"}}}},"# +
+        #""cells":{"type":"array","items":{"type":"object","required":["column","row","value"],"properties":{"column":{"type":"string","minLength":1},"row":{"type":"string","minLength":1},"value":{"type":"number"}}}},"slopes":{"type":"array","items":{"type":"object","required":["label","before","after"],"properties":{"label":{"type":"string","minLength":1},"before":{"type":"number"},"after":{"type":"number"}}}},"# +
+        #""sampleSize":{"type":"integer","minimum":1},"timeWindow":{"type":"string","minLength":1},"metricDefinition":{"type":"string","minLength":1},"summary":{"type":"string","minLength":1}},"allOf":[{"if":{"properties":{"visualization":{"const":"scatter"}}},"then":{"required":["points"],"properties":{"points":{"minItems":1},"cells":{"maxItems":0},"slopes":{"maxItems":0}}}},"# +
+        #"{"if":{"properties":{"visualization":{"const":"heatmap"}}},"then":{"required":["cells"],"properties":{"cells":{"minItems":1},"points":{"maxItems":0},"slopes":{"maxItems":0}}}},{"if":{"properties":{"visualization":{"const":"slope"}}},"then":{"required":["slopes"],"properties":{"slopes":{"minItems":1},"points":{"maxItems":0},"cells":{"maxItems":0}}}}]}"#
 
     // MARK: - Helpers
 

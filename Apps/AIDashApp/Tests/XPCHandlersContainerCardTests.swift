@@ -226,9 +226,25 @@ struct XPCHandlersContainerCardTests {
         #expect(result.cardSizes.count == CardSize.allCases.count)
         #expect(result.cardStyles.count == CardStyle.allCases.count)
         #expect(result.containerLayouts.count == ContainerLayout.allCases.count)
-        // Every card type has a documented payload schema.
-        for type in CardType.allCases where type != .sectionHeader {
+        // Every card type has a documented payload schema — including any type
+        // added after this test was written. `relationship` shipped without an
+        // XPC schema entry once (MY-1397); the count assertion is what turns a
+        // silent omission into a failure, since a per-type loop alone still
+        // passes when a new case is quietly skipped.
+        for type in CardType.allCases {
             #expect(result.payloads[type.rawValue] != nil, "Missing payload schema for \(type.rawValue)")
+        }
+        #expect(
+            result.payloads.count == CardType.allCases.count,
+            "schema.list must advertise exactly one payload schema per CardType; got \(result.payloads.count) for \(CardType.allCases.count) types"
+        )
+        // Each advertised body is a real JSON Schema document, not a placeholder.
+        for (type, body) in result.payloads {
+            let object = try #require(
+                JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any],
+                "payload schema for \(type) is not a JSON object"
+            )
+            #expect(object["type"] as? String == "object", "\(type) schema must declare an object type")
         }
     }
 
@@ -261,6 +277,23 @@ struct XPCHandlersContainerCardTests {
                 title: "t", subtitle: "s", body: "b",
                 sections: [.init(heading: "h", paragraphs: ["p"])]
             ),
+            // Populates all three mark collections at once. That combination is
+            // invalid as a *card* (the discriminator owns exactly one), but this
+            // test walks emitted JSON keys, and only a payload carrying points,
+            // cells and slopes together proves the schema declares all three.
+            .relationship: RelationshipPayload(
+                title: "t",
+                visualization: .scatter,
+                xAxis: .init(label: "x", unit: "USD"),
+                yAxis: .init(label: "y", unit: "%"),
+                points: [.init(label: "p", x: 1, y: 2, magnitude: 3, category: "c")],
+                cells: [.init(column: "col", row: "row", value: 4)],
+                slopes: [.init(label: "s", before: 5, after: 6)],
+                sampleSize: 7,
+                timeWindow: "7d",
+                metricDefinition: "proxy, not ground truth",
+                summary: "observed association"
+            ),
         ]
 
         for (type, payload) in fixtures {
@@ -271,6 +304,55 @@ struct XPCHandlersContainerCardTests {
             let missing = emitted.subtracting(declared)
             #expect(missing.isEmpty,
                     "\(type.rawValue) schema is missing fields the model emits: \(missing.sorted())")
+        }
+    }
+
+    /// The relationship schema is the one payload whose validity is not
+    /// field-by-field: `visualization` locks which mark collection may be
+    /// populated (`RelationshipPayload.validateMarkSet`). A schema that listed
+    /// the fields but dropped that lock would tell a publisher a heatmap may
+    /// carry `points`, which the app then rejects at `card.put`.
+    @Test("schema.list advertises the relationship discriminator and its mark-set lock")
+    func schemaListDescribesRelationshipContract() async throws {
+        let handlers = try XPCTestSupport.makeHandlers()
+        struct Empty: Codable {}
+        let response = try await XPCTestSupport.send(handlers, command: "schema.list", params: Empty())
+        let result = try XPCTestSupport.decodeResult(SchemaListResult.self, from: response)
+
+        let body = try #require(result.payloads[CardType.relationship.rawValue],
+                                "no schema for relationship")
+        let root = try #require(
+            JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
+        )
+        let properties = try #require(root["properties"] as? [String: Any])
+
+        // Discriminator enum matches the Core enum exactly.
+        let visualization = try #require(properties["visualization"] as? [String: Any])
+        let cases = try #require(visualization["enum"] as? [String])
+        #expect(cases.sorted() == RelationshipVisualization.allCases.map(\.rawValue).sorted())
+
+        // Evidence context is required, not optional — an association without
+        // its sample size and window is a claim without evidence.
+        let required = Set(try #require(root["required"] as? [String]))
+        #expect(required.isSuperset(of: ["visualization", "sampleSize", "timeWindow", "metricDefinition", "summary"]),
+                "relationship schema must require its evidence fields; got \(required.sorted())")
+
+        // All three mark collections are declared, and each visualization has a
+        // conditional clause requiring its own collection.
+        #expect(Set(properties.keys).isSuperset(of: ["points", "cells", "slopes"]))
+        let conditionals = try #require(root["allOf"] as? [[String: Any]])
+        for (visualization, markField) in [("scatter", "points"), ("heatmap", "cells"), ("slope", "slopes")] {
+            let clause = conditionals.first { clause in
+                guard let ifBlock = clause["if"] as? [String: Any],
+                      let ifProps = ifBlock["properties"] as? [String: Any],
+                      let discriminator = ifProps["visualization"] as? [String: Any] else { return false }
+                return discriminator["const"] as? String == visualization
+            }
+            let then = try #require((clause?["then"] as? [String: Any]),
+                                    "no conditional clause for visualization '\(visualization)'")
+            let thenRequired = try #require(then["required"] as? [String])
+            #expect(thenRequired.contains(markField),
+                    "'\(visualization)' must require '\(markField)'")
         }
     }
 
