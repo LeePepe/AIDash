@@ -1,3 +1,5 @@
+import Foundation
+
 /// A horizontal bar ranking (card type `barList`) — a descending list of
 /// labeled magnitudes drawn as horizontal bars. Covers "failure root cause",
 /// "app focus time", "commits by repo", and similar rank-by-value views.
@@ -7,6 +9,10 @@
 /// An optional `semantic` flags a row that warrants a status color + icon
 /// (e.g. an infrastructure `runtime-offline` root cause) so a single hot row
 /// pops out of an otherwise neutral ranking.
+///
+/// An optional `title` gives the card a header band. It is optional and
+/// additive: payloads written before the field existed keep decoding, and a
+/// payload that omits it renders exactly as it did.
 public struct BarListPayload: CardPayloadProtocol {
     public struct Item: Codable, Sendable {
         /// Row label (e.g. `runtime-offline`, `cmux`, `AIDash`).
@@ -36,9 +42,30 @@ public struct BarListPayload: CardPayloadProtocol {
     }
 
     public let items: [Item]
+    /// Optional header title for the ranking (e.g. "失败根因"). Absent → the
+    /// card draws no header band and the rows start at the top edge, exactly
+    /// as every payload published before this field existed.
+    ///
+    /// Present → the renderer owes the ranking a header band. That band is the
+    /// anchor for card-level affordances (the star / pin control), which
+    /// otherwise have nowhere to sit but on top of the first row's trailing
+    /// value read-out. Mirrors `StackedBarPayload.title`; the two bar forms
+    /// carry the same header contract so a publisher writes one shape.
+    public let title: String?
 
-    public init(items: [Item]) {
+    public init(items: [Item], title: String? = nil) {
         self.items = items
+        self.title = title
+    }
+
+    /// The header title once normalized: `nil` when absent **or** blank, the
+    /// trimmed string otherwise. Consumers branch on this rather than on
+    /// `title` directly, so "is there a header band?" is decided in one place
+    /// instead of each renderer re-deriving it (and drifting on whitespace).
+    public var headerTitle: String? {
+        guard let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 
     public func validateInvariants() throws {
@@ -47,6 +74,16 @@ public struct BarListPayload: CardPayloadProtocol {
                 code: "schema.payload_decode_failed",
                 message: "BarListPayload requires at least one item",
                 field: "items"
+            )
+        }
+        // A present-but-blank title is rejected rather than silently ignored:
+        // it would reserve a header band with nothing in it, which reads as a
+        // rendering bug. Omit the key instead to get the headerless card.
+        if let title, title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw XPCError(
+                code: "schema.payload_decode_failed",
+                message: "BarListPayload title must be non-empty when present",
+                field: "title"
             )
         }
     }

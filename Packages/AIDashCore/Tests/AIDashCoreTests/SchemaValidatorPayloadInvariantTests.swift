@@ -256,6 +256,47 @@ struct SchemaValidatorPayloadInvariantTests {
         }
     }
 
+    @Test func cardPut_barList_blankTitle_throws() {
+        // A present-but-blank header title is rejected at `card.put` with the
+        // title field named, so the publisher fixes the payload rather than
+        // shipping a card that reserves an empty header band.
+        let payload = Data(#"{"items":[{"label":"AIDash","value":48}],"title":" "}"#.utf8)
+        do {
+            try SchemaValidator.validateCardPut(
+                containerId: "550E8400-E29B-41D4-A716-446655440000",
+                id: "660E8400-E29B-41D4-A716-446655440000",
+                type: "barList",
+                size: "medium",
+                style: "neutral",
+                payload: payload
+            )
+            Issue.record("Should have thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "schema.payload_decode_failed")
+            #expect(error.field == "title")
+        } catch {
+            Issue.record("Unexpected error type")
+        }
+    }
+
+    @Test func cardPut_barList_titledAndUntitled_bothAccepted() throws {
+        // Both shapes pass `card.put`: the pre-existing untitled payload and
+        // the new titled one. Backward compatibility is asserted on the same
+        // path a publisher uses, not only on the Codable round-trip.
+        let untitled = Data(#"{"items":[{"label":"AIDash","value":48}]}"#.utf8)
+        let titled = Data(#"{"items":[{"label":"AIDash","value":48}],"title":"提交排行"}"#.utf8)
+        for payload in [untitled, titled] {
+            try SchemaValidator.validateCardPut(
+                containerId: "550E8400-E29B-41D4-A716-446655440000",
+                id: "660E8400-E29B-41D4-A716-446655440000",
+                type: "barList",
+                size: "medium",
+                style: "neutral",
+                payload: payload
+            )
+        }
+    }
+
     @Test func cardPut_stackedBar_emptySegments_throws() {
         let payload = Data("{\"segments\":[]}".utf8)
         do {

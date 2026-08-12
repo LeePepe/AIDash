@@ -49,4 +49,20 @@ struct PublicInitTests {
         )
         #expect(event.id == "x")
     }
+
+    /// The bar-list header anchor must be reachable from outside the module:
+    /// AIDashUI builds the card's header band from `headerTitle`, and the
+    /// `title:` argument must stay defaulted so existing call sites that pass
+    /// only `items:` keep compiling.
+    @Test func barListPayloadPublicHeaderAnchor() {
+        let untitled = BarListPayload(items: [.init(label: "AIDash", value: 48)])
+        #expect(untitled.title == nil)
+        #expect(untitled.headerTitle == nil)
+
+        let titled = BarListPayload(
+            items: [.init(label: "AIDash", value: 48)],
+            title: "提交排行"
+        )
+        #expect(titled.headerTitle == "提交排行")
+    }
 }
