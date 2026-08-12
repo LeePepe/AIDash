@@ -529,6 +529,42 @@ def test_totals_return_when_the_budget_trims_the_breakdown():
 
 
 @pytest.mark.unit
+def test_totals_survive_when_attribution_holds_no_spend_breakdown():
+    """`成本归因` existing is not the same as the breakdown being published.
+
+    That container is built from any of four inputs, so it can consist of the
+    人机杠杆 metric alone — which decomposes nothing. Keying de-duplication on
+    the container title therefore deleted the totals whenever ANY attribution
+    data existed, leaving the spend signal in neither place.
+    """
+    leverage_only = dataclasses.replace(
+        _sources(),
+        cost_by_project=RankBundle([], SourceHealth("attribution", "skipped:未取")),
+        model_by_project=RankBundle([], SourceHealth("attribution", "skipped:未取")),
+        rework_by_workspace=RankBundle([], SourceHealth("attribution", "skipped:未取")),
+        leverage=Leverage(10, 4.0, 3.0, 120, SourceHealth("leverage", "ok")),
+    )
+    b = _build(leverage_only)
+    titles = [c.title for c in b.containers]
+    assert "成本归因" in titles, "fixture no longer builds the attribution container"
+    attribution = next(c for c in b.containers if c.title == "成本归因")
+    assert len(attribution.cards) == 1, "fixture is no longer breakdown-free"
+    assert {"成本", "Token"} <= _trend_labels(b), (
+        "the totals were dropped for an attribution container that carries no "
+        "spend breakdown at all"
+    )
+
+
+@pytest.mark.unit
+def test_totals_are_dropped_only_for_a_real_breakdown_card():
+    """The positive half of the same rule: a genuine per-project split does
+    make the bare totals redundant."""
+    labels = _trend_labels(_build(_rich_sources()))
+    assert labels, "the trend card was trimmed; this test needs it published"
+    assert not ({"成本", "Token"} & labels)
+
+
+@pytest.mark.unit
 def test_every_published_pair_keeps_at_least_one_side():
     """The invariant that survived the removed two-pass algorithm: for each
     (provider, dependent) pair, at least one side reaches the reader.
@@ -726,16 +762,27 @@ def test_the_rendered_first_screen_is_bounded_and_contiguous():
 def test_first_screen_containers_all_outrank_the_tail_ones():
     """The ordering the budget decided must be the ordering the app renders:
     every container above the fold ranks at least as high as every one below.
+
+    Compares CONTAINER ids on both sides. An earlier version compared the card
+    ids in the first screen against container-keyed ranks, so the two sets never
+    intersected, `lead_ranks` came back empty, and the guarded assertion was
+    skipped — the test passed without checking anything.
     """
     b = _build(_rich_sources())
-    lead_ids = {c.id for c in _rendered_first_screen(b)}
+    lead_card_ids = {c.id for c in _rendered_first_screen(b)}
+    lead_container_ids = {
+        container.id for container in b.containers
+        if any(card.id in lead_card_ids for card in container.cards)
+    }
     ranked = _budget_rank(b)
-    lead_ranks = [r for cid, r in ranked.items() if cid in lead_ids]
-    tail_ranks = [r for cid, r in ranked.items() if cid not in lead_ids]
-    if lead_ranks and tail_ranks:
-        assert max(lead_ranks) < min(tail_ranks), (
-            "a lower-priority container rendered above a higher-priority one"
-        )
+    assert ranked, "no container ranks captured — the spy seam is broken"
+    lead_ranks = [r for cid, r in ranked.items() if cid in lead_container_ids]
+    tail_ranks = [r for cid, r in ranked.items() if cid not in lead_container_ids]
+    assert lead_ranks, "no first-screen container matched a captured rank"
+    assert tail_ranks, "fixture no longer produces a tail to compare against"
+    assert max(lead_ranks) < min(tail_ranks), (
+        "a lower-priority container rendered above a higher-priority one"
+    )
 
 
 @pytest.mark.unit

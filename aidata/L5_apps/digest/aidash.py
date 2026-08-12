@@ -338,6 +338,26 @@ def _metric_items(sources: "DigestSources", report_date: str) -> list[dict]:
 # reason survives a card being renamed or re-sized.
 _SPEND_TOTAL_LABELS = ("成本", "Token")
 
+# Card id slots holding the per-project spend BREAKDOWN — the only cards whose
+# presence makes the bare totals redundant. Slot 32 is cost-by-project, 33 is
+# project × model. Deliberately NOT "the 成本归因 container exists": that
+# container is built from any of four inputs and can consist of the 人机杠杆
+# metric alone, which decomposes nothing.
+_SPEND_BREAKDOWN_SLOTS = frozenset({32, 33})
+
+
+def _slot_of(card_id: str) -> int | None:
+    """The `_kuid` slot number encoded in a card id, or None if unparseable.
+
+    Ids are `22222222-<mmdd>-<slot:04d>-0000-<slot:012d>`; the third group is
+    read rather than the last so the parse stays cheap and obvious. Never
+    raises — an id from elsewhere simply matches nothing.
+    """
+    parts = card_id.split("-")
+    if len(parts) < 3 or not parts[2].isdigit():
+        return None
+    return int(parts[2])
+
 
 def _dedupe_metric_items(items: list[dict],
                          spend_breakdown_published: bool) -> list[dict]:
@@ -365,17 +385,27 @@ def _dedupe_metric_items(items: list[dict],
 def _dedupe_published(containers: tuple[Container, ...]) -> tuple[Container, ...]:
     """Thin duplicated rows out of the trend card, after the budget has run.
 
-    Ordering matters and is the whole point: de-duplication asks "is this row
-    already covered by something the reader will see?", and only the post-budget
-    set can answer that. Running it earlier answers a different question — "did
-    a producer build one?" — and gets it wrong whenever the budget later trims
-    the provider, leaving the page with neither the breakdown nor the totals.
+    Two conditions, and both are about what the reader ACTUALLY sees:
+
+    1. **Ordering.** De-duplication asks "is this row already covered by
+       something on the page?", and only the post-budget set can answer that.
+       Running it earlier answers "did a producer build one?" instead, and gets
+       it wrong whenever the budget later trims the provider.
+    2. **Identity.** The provider is the per-project spend BREAKDOWN, not the
+       container that happens to hold it. `成本归因` is built from any of four
+       inputs — it can consist of the 人机杠杆 metric alone, with no spend split
+       in it — so keying on the container title deletes the totals whenever any
+       attribution data exists. The breakdown cards carry fixed id slots (32:
+       cost-by-project, 33: project × model), which is what is actually checked.
 
     Pure: containers are rebuilt rather than mutated, and a briefing without
     both sides of the pair passes through untouched.
     """
-    titles = {c.title for c in containers}
-    if "成本归因" not in titles or "趋势指标" not in titles:
+    published_ids = {card.id for c in containers for card in c.cards}
+    breakdown_published = any(
+        _slot_of(card_id) in _SPEND_BREAKDOWN_SLOTS for card_id in published_ids
+    )
+    if not breakdown_published:
         return containers
     out: list[Container] = []
     for container in containers:
