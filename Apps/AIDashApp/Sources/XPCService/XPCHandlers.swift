@@ -548,17 +548,18 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         return schemas
     }()
 
-    /// `visualization` locks which mark collection may be populated, so the
-    /// `allOf`/`if`-`then` clauses mirror `RelationshipPayload.validateMarkSet`:
-    /// a publisher reading `aidash schema list` sees the exclusivity `card.put`
-    /// enforces. Split across literals to stay under the 500-char lint ceiling.
+    /// The `allOf`/`if`-`then` clauses mirror `validateMarkSet`, so a publisher
+    /// reading `aidash schema list` sees the exclusivity `card.put` enforces.
+    /// Fields that `validateInvariants()` runs through `requireText` advertise
+    /// `"pattern":"\\S"`, not `minLength:1` — `requireText` trims first, so
+    /// `"   "` is one character long and still rejected, and `minLength:1`
+    /// would advertise as valid a payload the app refuses. Split for line len.
     private static let relationshipSchema =
-        #"{"type":"object","required":["title","visualization","xAxis","yAxis","sampleSize","timeWindow","metricDefinition","summary"],"properties":{"title":{"type":"string","minLength":1},"visualization":{"type":"string","enum":["scatter","heatmap","slope"]},"# +
-        #""xAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","minLength":1},"unit":{"type":"string"}}},"yAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","minLength":1},"unit":{"type":"string"}}},"# +
-        #""points":{"type":"array","items":{"type":"object","required":["label","x","y"],"properties":{"label":{"type":"string","minLength":1},"x":{"type":"number"},"y":{"type":"number"},"magnitude":{"type":"number","exclusiveMinimum":0},"category":{"type":"string"}}}},"# +
-        #""cells":{"type":"array","items":{"type":"object","required":["column","row","value"],"properties":{"column":{"type":"string","minLength":1},"row":{"type":"string","minLength":1},"value":{"type":"number"}}}},"slopes":{"type":"array","items":{"type":"object","required":["label","before","after"],"properties":{"label":{"type":"string","minLength":1},"before":{"type":"number"},"after":{"type":"number"}}}},"# +
-        #""sampleSize":{"type":"integer","minimum":1},"timeWindow":{"type":"string","minLength":1},"metricDefinition":{"type":"string","minLength":1},"summary":{"type":"string","minLength":1}},"allOf":[{"if":{"properties":{"visualization":{"const":"scatter"}}},"then":{"required":["points"],"properties":{"points":{"minItems":1},"cells":{"maxItems":0},"slopes":{"maxItems":0}}}},"# +
-        #"{"if":{"properties":{"visualization":{"const":"heatmap"}}},"then":{"required":["cells"],"properties":{"cells":{"minItems":1},"points":{"maxItems":0},"slopes":{"maxItems":0}}}},{"if":{"properties":{"visualization":{"const":"slope"}}},"then":{"required":["slopes"],"properties":{"slopes":{"minItems":1},"points":{"maxItems":0},"cells":{"maxItems":0}}}}]}"#
+        #"{"type":"object","required":["title","visualization","xAxis","yAxis","sampleSize","timeWindow","metricDefinition","summary"],"properties":{"title":{"type":"string","pattern":"\\S"},"visualization":{"type":"string","enum":["scatter","heatmap","slope"]},"xAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","pattern":"\\S"},"unit":{"type":"string"}}},"# +
+        #""yAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","pattern":"\\S"},"unit":{"type":"string"}}},"points":{"type":"array","items":{"type":"object","required":["label","x","y"],"properties":{"label":{"type":"string","pattern":"\\S"},"x":{"type":"number"},"y":{"type":"number"},"magnitude":{"type":"number","exclusiveMinimum":0},"category":{"type":"string"}}}},"# +
+        #""cells":{"type":"array","items":{"type":"object","required":["column","row","value"],"properties":{"column":{"type":"string","pattern":"\\S"},"row":{"type":"string","pattern":"\\S"},"value":{"type":"number"}}}},"slopes":{"type":"array","items":{"type":"object","required":["label","before","after"],"properties":{"label":{"type":"string","pattern":"\\S"},"before":{"type":"number"},"after":{"type":"number"}}}},"# +
+        #""sampleSize":{"type":"integer","minimum":1},"timeWindow":{"type":"string","pattern":"\\S"},"metricDefinition":{"type":"string","pattern":"\\S"},"summary":{"type":"string","pattern":"\\S"}},"allOf":[{"if":{"properties":{"visualization":{"const":"scatter"}}},"then":{"required":["points"],"properties":{"points":{"minItems":1},"cells":{"maxItems":0},"slopes":{"maxItems":0}}}},{"if":{"properties":{"visualization":{"const":"heatmap"}}},"# +
+        #""then":{"required":["cells"],"properties":{"cells":{"minItems":1},"points":{"maxItems":0},"slopes":{"maxItems":0}}}},{"if":{"properties":{"visualization":{"const":"slope"}}},"then":{"required":["slopes"],"properties":{"slopes":{"minItems":1},"points":{"maxItems":0},"cells":{"maxItems":0}}}}]}"#
 
     // MARK: - Helpers
 

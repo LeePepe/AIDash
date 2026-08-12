@@ -356,6 +356,170 @@ struct XPCHandlersContainerCardTests {
         }
     }
 
+    /// Regression for the MY-1397 review P0: the schema advertised text fields
+    /// as `minLength: 1`, which accepts `"   "`. `RelationshipPayload` trims
+    /// before testing for empty, so the app rejects that same value at
+    /// `card.put` — the CLI would have told a publisher a payload was valid
+    /// that the app refuses. Every field Core runs through `requireText` must
+    /// therefore advertise a non-whitespace constraint, not a length one.
+    ///
+    /// Both halves are asserted together deliberately: checking the schema text
+    /// alone would pass on a constraint that no longer matches Core, and
+    /// checking `card.put` alone would pass on the schema that caused the P0.
+    @Test("relationship schema rejects whitespace-only text exactly where Core does")
+    func schemaListAdvertisesNonWhitespaceTextConstraints() async throws {
+        let handlers = try XPCTestSupport.makeHandlers()
+        struct Empty: Codable {}
+        let response = try await XPCTestSupport.send(handlers, command: "schema.list", params: Empty())
+        let result = try XPCTestSupport.decodeResult(SchemaListResult.self, from: response)
+        let body = try #require(result.payloads[CardType.relationship.rawValue])
+        let root = try #require(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+
+        // Every field `RelationshipPayload.validateInvariants()` guards with
+        // `requireText`, addressed as a path into the schema document.
+        let trimmedFields = [
+            ["title"], ["xAxis", "label"], ["yAxis", "label"],
+            ["timeWindow"], ["metricDefinition"], ["summary"],
+            ["points", "label"], ["cells", "column"], ["cells", "row"], ["slopes", "label"],
+        ]
+        for path in trimmedFields {
+            let node = try #require(Self.schemaNode(root, at: path),
+                                    "schema declares no node at \(path.joined(separator: "."))")
+            let field = path.joined(separator: ".")
+            // A pattern requiring a non-whitespace character. `minLength` is
+            // precisely the constraint that let `"   "` through.
+            #expect(node["pattern"] as? String == #"\S"#,
+                    "\(field) must advertise a non-whitespace pattern; got \(node)")
+            #expect(node["minLength"] == nil,
+                    "\(field) must not fall back to minLength — it accepts whitespace-only text")
+        }
+    }
+
+    /// The other half of the parity claim: the app really does reject each of
+    /// those fields when it holds only whitespace. Driven through `card.put`,
+    /// so this exercises the same validation path the CLI hits — a schema-only
+    /// assertion could drift from the behaviour it describes.
+    @Test("card.put rejects whitespace-only relationship text fields")
+    func cardPutRejectsWhitespaceOnlyRelationshipText() async throws {
+        let handlers = try XPCTestSupport.makeHandlers()
+        let date = "2026-06-29"
+        let containerId = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        _ = try await XPCTestSupport.send(
+            handlers,
+            command: "briefing.put",
+            params: BriefingPutParams(date: date, generatedBy: "test", published: false)
+        )
+        _ = try await XPCTestSupport.send(
+            handlers,
+            command: "container.put",
+            params: ContainerPutParams(
+                briefingDate: date, id: containerId, title: "C",
+                subtitle: nil, order: 10, layout: .auto, style: .neutral
+            )
+        )
+
+        // A whitespace-only value per field, including tab and newline — the
+        // characters `trimmingCharacters(in: .whitespacesAndNewlines)` strips.
+        let blank = " \t\n "
+        var mutations: [(field: String, payload: RelationshipPayload)] = [
+            ("title", Self.relationshipFixture(title: blank)),
+            ("xAxis.label", Self.relationshipFixture(xAxisLabel: blank)),
+            ("yAxis.label", Self.relationshipFixture(yAxisLabel: blank)),
+            ("timeWindow", Self.relationshipFixture(timeWindow: blank)),
+            ("metricDefinition", Self.relationshipFixture(metricDefinition: blank)),
+            ("summary", Self.relationshipFixture(summary: blank)),
+            ("points.label", Self.relationshipFixture(pointLabel: blank)),
+        ]
+        mutations.append(("cells.column", Self.relationshipFixture(
+            visualization: .heatmap, cells: [.init(column: blank, row: "r", value: 1)]
+        )))
+        mutations.append(("cells.row", Self.relationshipFixture(
+            visualization: .heatmap, cells: [.init(column: "c", row: blank, value: 1)]
+        )))
+        mutations.append(("slopes.label", Self.relationshipFixture(
+            visualization: .slope, slopes: [.init(label: blank, before: 1, after: 2)]
+        )))
+
+        for (index, mutation) in mutations.enumerated() {
+            let response = try await XPCTestSupport.send(
+                handlers,
+                command: "card.put",
+                params: CardPutParams(
+                    containerId: containerId,
+                    id: "dddddddd-dddd-dddd-dddd-\(String(format: "%012d", index))",
+                    type: .relationship,
+                    size: .wide,
+                    style: .neutral,
+                    payload: try XPCTestSupport.jsonEncoder.encode(mutation.payload)
+                )
+            )
+            #expect(response.ok == false,
+                    "whitespace-only \(mutation.field) must be rejected, not stored")
+            #expect(response.error?.code.hasPrefix("schema.") == true,
+                    "whitespace-only \(mutation.field) must fail schema validation; got \(String(describing: response.error))")
+        }
+
+        // Positive control: the same fixture with real text is accepted, so the
+        // rejections above are attributable to the whitespace and not to an
+        // unrelated defect in the fixture or the relationship write path.
+        let accepted = try await XPCTestSupport.send(
+            handlers,
+            command: "card.put",
+            params: CardPutParams(
+                containerId: containerId,
+                id: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+                type: .relationship,
+                size: .wide,
+                style: .neutral,
+                payload: try XPCTestSupport.jsonEncoder.encode(Self.relationshipFixture())
+            )
+        )
+        #expect(accepted.ok == true,
+                "valid relationship payload must still be accepted; got \(String(describing: accepted.error))")
+    }
+
+    /// A valid scatter payload, with one field overridable per call so each
+    /// case differs from the accepted baseline in exactly one way.
+    private static func relationshipFixture(
+        title: String = "Cost × outcome",
+        visualization: RelationshipVisualization = .scatter,
+        xAxisLabel: String = "Cost per task",
+        yAxisLabel: String = "Completion proxy",
+        pointLabel: String = "AIDash",
+        cells: [RelationshipPayload.Cell] = [],
+        slopes: [RelationshipPayload.Slope] = [],
+        timeWindow: String = "7d",
+        metricDefinition: String = "completed is a pipeline proxy",
+        summary: String = "Observed association, no causal claim."
+    ) -> RelationshipPayload {
+        RelationshipPayload(
+            title: title,
+            visualization: visualization,
+            xAxis: .init(label: xAxisLabel, unit: "USD"),
+            yAxis: .init(label: yAxisLabel, unit: "%"),
+            points: visualization == .scatter ? [.init(label: pointLabel, x: 2.1, y: 88)] : [],
+            cells: cells,
+            slopes: slopes,
+            sampleSize: 34,
+            timeWindow: timeWindow,
+            metricDefinition: metricDefinition,
+            summary: summary
+        )
+    }
+
+    /// Resolve a dotted field path into the schema document, stepping through
+    /// `properties` and unwrapping array `items` as it goes.
+    private static func schemaNode(_ root: [String: Any], at path: [String]) -> [String: Any]? {
+        var node = root
+        for segment in path {
+            guard let properties = node["properties"] as? [String: Any],
+                  var next = properties[segment] as? [String: Any] else { return nil }
+            if let items = next["items"] as? [String: Any] { next = items }
+            node = next
+        }
+        return node
+    }
+
     /// Every `properties` key anywhere in a JSON Schema document (recursively,
     /// so nested `items`/object schemas are covered).
     private static func schemaPropertyKeys(_ schema: String) -> Set<String> {
