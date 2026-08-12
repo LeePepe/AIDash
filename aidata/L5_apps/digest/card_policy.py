@@ -322,15 +322,19 @@ def select_with_budget(candidates: Sequence[CardCandidate],
 
     ## No cross-candidate redundancy suppression
 
-    Deliberately absent. A candidate here stands for a whole container, but
-    redundancy between cards is per card, so suppressing a candidate to remove
-    one duplicated number deletes every unrelated card beside it. Attempting it
-    in two passes (suppress against provisionally-admitted providers) is worse
-    still, because admission is not monotone: `_admit` skips an over-budget
-    candidate and lets a lighter one take its place, so removing a candidate can
-    change WHICH others fit and evict the very provider that justified the
-    suppression — losing both cards and the signal entirely. Card-level
-    redundancy belongs to whoever builds both cards.
+    Deliberately absent, and not a gap: de-duplication happens upstream, per
+    ITEM, in the producer that owns the rows. A candidate here stands for a
+    whole container, so suppressing one to remove a duplicated row would delete
+    every unrelated card beside it.
+
+    Doing it in two passes (suppress against provisionally-admitted providers)
+    was tried and is worse. It rests on an assumption that is FALSE here:
+    admission is not monotone. `_admit` skips an over-budget candidate and lets
+    a lighter one take its place, so removing a candidate can change WHICH
+    others fit and evict the very provider that justified the suppression —
+    losing both sides and the signal entirely. That is why this function only
+    ranks and caps: both operations are decided per candidate, so neither can
+    make a second candidate disappear on another's behalf.
 
     Pure and total: an empty input yields an empty result, and it is identical
     regardless of the input's order.

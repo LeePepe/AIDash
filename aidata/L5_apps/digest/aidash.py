@@ -320,6 +320,45 @@ def _metric_items(sources: "DigestSources", report_date: str) -> list[dict]:
     return items
 
 
+# ---- Item-level de-duplication (§design 3, acceptance criterion 5) ----------
+#
+# The redundancy in this briefing is real, but it is not container-shaped and it
+# is not even card-shaped — it is per ITEM. `趋势指标` publishes one row per
+# metric, and when `成本归因` is on the page its per-project split reports the
+# SAME spend the 成本 / Token rows report, only decomposed. Those two rows are
+# duplicates; 请求数 / 会话数 / 完成任务 / 自动化占比 in the same card are not
+# restated by anything, anywhere.
+#
+# Two earlier attempts suppressed the whole CONTAINER on that basis and deleted
+# the non-duplicate rows as collateral. Doing it here — inside the producer that
+# owns the items, before the card is built — is the granularity the redundancy
+# actually has, and it needs no cross-container bookkeeping in the budget.
+#
+# Labels a stronger cross-signal makes redundant. Keyed by the signal so the
+# reason survives a card being renamed or re-sized.
+_SPEND_TOTAL_LABELS = ("成本", "Token")
+
+
+def _dedupe_metric_items(items: list[dict],
+                         spend_breakdown_published: bool) -> list[dict]:
+    """Drop metric rows a stronger published card already covers.
+
+    Conditional on the stronger card ACTUALLY being published: with no spend
+    breakdown on the page, dropping the totals would remove the signal rather
+    than de-duplicate it, which is the worse outcome.
+
+    Never returns an empty list when it was given a non-empty one. A metric
+    payload requires `items.count >= 1`, so emptying the card would make the app
+    reject it and the card would vanish silently — turning a de-duplication into
+    a deletion. If every row is redundant there is nothing left to thin, so the
+    card is left intact and the budget decides its fate on rank.
+    """
+    if not spend_breakdown_published:
+        return items
+    kept = [it for it in items if it.get("label") not in _SPEND_TOTAL_LABELS]
+    return kept or items
+
+
 def _overview_sections(sections: dict[str, list[str]]) -> list[dict]:
     """Real-data sections for the digest hero card.
 
@@ -995,25 +1034,24 @@ def _relationship_container(mmdd: str, rework) -> "Container | None":
 # than appended unconditionally. The budget is what turns "we have data for this"
 # into "this earns the reader's attention today".
 #
-# ## Why there is no cross-container redundancy suppression here
+# ## Why redundancy is handled per ITEM, not here
 #
 # An earlier version let one container declare it superseded another's signal
-# (成本归因's per-project split vs 趋势指标's single spend arrow). The
-# granularity is wrong and cannot be made right at this level: admission is
-# per CONTAINER, but redundancy is per CARD. 趋势指标 carries requests,
-# sessions, completed-issues and the automation ratio alongside the spend
-# total — none of which the cost split restates — so suppressing the container
-# to remove one duplicated number silently deleted four unrelated signals.
+# (成本归因's per-project split vs 趋势指标's spend totals). The granularity was
+# wrong: admission is per CONTAINER, but the redundancy is per ITEM. 趋势指标
+# carries requests, sessions, completed-issues and the automation ratio beside
+# the spend totals — none of which the cost split restates — so suppressing the
+# container to remove two duplicated rows deleted four unrelated signals.
 #
-# Two-pass admission (suppress against provisionally-admitted providers) does
-# not rescue it either: `_admit` skips an over-budget candidate and lets a
-# lighter one take its place, so removing a card can change WHICH cards fit,
-# and both the provider and its dependent can end up unpublished — the signal
-# gone entirely, which is worse than the duplication.
+# Two-pass admission (suppress against provisionally-admitted providers) did not
+# rescue it either: `_admit` skips an over-budget candidate and lets a lighter
+# one take its place, so admission is NOT monotone — removing a card can change
+# WHICH cards fit and evict the very provider that justified the suppression,
+# losing both sides and the signal entirely.
 #
-# Genuine card-level redundancy belongs in the producer that owns both cards
-# (it already decides which cards a container gets), not in a budget that only
-# sees containers. Recorded as a follow-up rather than approximated here.
+# So de-duplication lives in `_dedupe_metric_items`, inside the producer that
+# owns the rows, and runs before the card is built. The budget below ranks and
+# caps; it never deletes one container on another's behalf.
 # ---------------------------------------------------------------------------
 # Per-container budget metadata, keyed by container title. Everything absent
 # from this table takes the default (a plain, non-detail card of average cost).
@@ -1021,13 +1059,19 @@ def _relationship_container(mmdd: str, rework) -> "Container | None":
 #   is_detail        — stable description; omitted when it carries no signal.
 #   cross_signal     — how much cross-source value it adds (0 = single dimension).
 #   reading_cost     — roughly how long a reader spends on it.
+#
+# 趋势指标 scores 1 rather than 0 because its rows are de-duplicated before the
+# card is built: whatever survives is a signal no other card restates (requests,
+# sessions, completed work, automation ratio). Ranking it at 0 — as a bare
+# single-dimension total — described the card before de-duplication, and dropped
+# the day's only source of those numbers on a busy day.
 _BUDGET_META: dict[str, dict] = {
     "总览": {"reading_cost": 2, "requires_action": False},
     "今日规划": {"requires_action": True, "reading_cost": 1},
     "交叉信号": {"cross_signal": 3, "reading_cost": 2},
     "AI 效能": {"cross_signal": 2, "reading_cost": 3},
     "成本归因": {"cross_signal": 2, "reading_cost": 3},
-    "趋势指标": {"cross_signal": 0, "reading_cost": 2},
+    "趋势指标": {"cross_signal": 1, "reading_cost": 2},
     "今日工作": {"reading_cost": 2},
     "昨日汇总": {"reading_cost": 2},
     "可改良": {"cross_signal": 1, "reading_cost": 3},
@@ -1168,19 +1212,25 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     if work_container:
         containers.append(work_container)
 
-    metrics = _metric_items(sources, report_date)
+    # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
+    # Built BEFORE the trend card even though it renders after it, because
+    # whether it exists decides which trend rows are duplicates: its per-project
+    # split reports the same spend the 成本 / Token totals do, so with it on the
+    # page those two rows carry nothing it does not (§design 3, criterion 5).
+    attribution_container = _attribution_container(
+        mmdd, getattr(sources, "cost_by_project", None),
+        getattr(sources, "model_by_project", None),
+        getattr(sources, "leverage", None),
+        getattr(sources, "rework_by_workspace", None))
+
+    metrics = _dedupe_metric_items(_metric_items(sources, report_date),
+                                   attribution_container is not None)
     if metrics:
         containers.append(Container(
             _cuid(mmdd, 2), "趋势指标", 20,
             (Card(_kuid(mmdd, 3), "metric", "wide", {"items": metrics}),),
             layout="auto"))
 
-    # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
-    attribution_container = _attribution_container(
-        mmdd, getattr(sources, "cost_by_project", None),
-        getattr(sources, "model_by_project", None),
-        getattr(sources, "leverage", None),
-        getattr(sources, "rework_by_workspace", None))
     if attribution_container:
         containers.append(attribution_container)
 

@@ -356,6 +356,39 @@ def test_a_candidate_too_heavy_for_the_remaining_budget_is_skipped():
 
 
 @pytest.mark.unit
+def test_admission_is_not_monotone_which_is_why_suppression_was_removed():
+    """Evidence for the retired assumption, kept as an executable record.
+
+    The removed two-pass algorithm rested on "dropping a candidate can only ever
+    admit more, never fewer". That is FALSE here: `_admit` skips an over-budget
+    candidate and lets a lighter one take its place, so removing a candidate can
+    change WHICH others fit and evict one that was previously admitted.
+
+    Below, dropping `dependent` (weight 2) frees room for `heavy` (weight 9),
+    which then crowds out `provider` (weight 3) — the very card whose presence
+    would have justified suppressing `dependent`. Both sides gone, signal lost.
+    That is the failure mode the suppression could not avoid, and the reason
+    de-duplication now happens per item in the producer instead.
+    """
+    dependent = _weighted("dependent", 0, 2, cross_signal_strength=9)
+    heavy = _weighted("heavy", 1, 9, cross_signal_strength=8)
+    provider = _weighted("provider", 2, 3, cross_signal_strength=7)
+
+    with_dependent = [c.card.id for c in
+                      select_with_budget([dependent, heavy, provider])]
+    without_dependent = [c.card.id for c in
+                         select_with_budget([heavy, provider])]
+
+    assert "provider" in with_dependent, "fixture no longer admits the provider"
+    assert "provider" not in without_dependent, (
+        "removing a candidate must be able to EVICT another for this to be "
+        "the counterexample it documents"
+    )
+    # Hence the two-pass scheme would publish neither side of the pair.
+    assert "dependent" not in without_dependent
+
+
+@pytest.mark.unit
 def test_weight_defaults_to_one_card():
     assert _candidate("c", 0).weight == 1
 

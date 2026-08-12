@@ -419,7 +419,7 @@ def test_no_container_deletes_another_containers_unrelated_cards():
     """Cross-container signal suppression is gone, and must stay gone.
 
     It was tried twice and failed both times for the same structural reason:
-    admission is per CONTAINER but redundancy is per CARD. `趋势指标` carries
+    admission is per CONTAINER but redundancy is per ITEM. `趋势指标` carries
     requests, sessions, completed-issues and the automation ratio alongside the
     spend total, so suppressing the whole container to remove one duplicated
     number silently deleted four unrelated signals.
@@ -435,6 +435,89 @@ def test_no_container_deletes_another_containers_unrelated_cards():
         "the trend container vanished with budget to spare — only suppression "
         "can do that, and it should no longer exist"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Item-level de-duplication (acceptance criterion 5)
+#
+# The redundancy is real but it is NOT container-shaped. When 成本归因 publishes
+# the per-project spend split, the bare 成本 / Token totals in 趋势指标 are the
+# same numbers with less information — but 请求数 / 会话数 / 完成任务 in the same
+# card are not restated by anything. So the duplicate ITEMS are dropped and the
+# rest of the card stays.
+# --------------------------------------------------------------------------- #
+def _trend_labels(b: Briefing) -> set:
+    """Labels published by the 趋势指标 card, or an empty set if it was trimmed."""
+    trend = [c for c in b.containers if c.title == "趋势指标"]
+    if not trend:
+        return set()
+    return {item["label"] for item in trend[0].cards[0].payload["items"]}
+
+
+@pytest.mark.unit
+def test_duplicate_spend_items_are_dropped_when_the_breakdown_is_published():
+    """The stronger cross signal wins: with the per-project split on the page,
+    the bare totals it decomposes carry nothing the split does not."""
+    labels = _trend_labels(_build(_rich_sources()))
+    assert labels, "the trend container was trimmed; this test needs it published"
+    assert "成本" not in labels, "the raw cost total duplicates 成本归因"
+    assert "Token" not in labels, "the raw token total duplicates 成本归因"
+
+
+@pytest.mark.unit
+def test_non_duplicate_trend_items_survive_the_de_duplication():
+    """The whole point of doing this per item: requests and sessions appear
+    nowhere else in the briefing, so they must outlive the spend totals."""
+    labels = _trend_labels(_build(_rich_sources()))
+    assert {"请求数", "会话数"} <= labels, (
+        f"non-duplicate trend signals were collateral damage: {labels}"
+    )
+
+
+@pytest.mark.unit
+def test_the_trend_card_keeps_its_spend_items_when_no_breakdown_exists():
+    """Suppression is conditional on the stronger card ACTUALLY being published.
+    Without it, dropping the totals would lose the signal entirely — worse than
+    the duplication."""
+    labels = _trend_labels(_build(_rich_sources_without_attribution()))
+    assert {"成本", "Token"} <= labels, (
+        "spend totals were dropped with no breakdown to replace them"
+    )
+
+
+@pytest.mark.unit
+def test_de_duplication_never_empties_the_trend_card():
+    """A metric payload needs items.count >= 1; an emptied card is rejected app
+    side and vanishes silently, which is the failure this must not cause."""
+    for source in (_rich_sources(), _rich_sources_without_attribution(),
+                   _sources(), _sources(rework_relationship=_matrix(2, 2))):
+        b = _build(source)
+        for container in b.containers:
+            for card in container.cards:
+                if "items" in card.payload:
+                    assert len(card.payload["items"]) >= 1
+
+
+@pytest.mark.unit
+def test_every_published_pair_keeps_at_least_one_side():
+    """The invariant that survived the removed two-pass algorithm: for each
+    (provider, dependent) pair, at least one side reaches the reader.
+
+    Stated over the real briefing rather than synthetic candidates — the earlier
+    mechanism satisfied a synthetic version of this while still losing both
+    sides in production.
+    """
+    for source in (_rich_sources(), _rich_sources_without_attribution()):
+        b = _build(source)
+        titles = [c.title for c in b.containers]
+        labels = _trend_labels(b)
+        breakdown_published = "成本归因" in titles
+        totals_published = bool({"成本", "Token"} & labels)
+        trend_published = "趋势指标" in titles
+        assert breakdown_published or totals_published or not trend_published, (
+            "neither the spend breakdown nor the totals it replaces reached "
+            "the reader — the signal disappeared"
+        )
 
 
 @pytest.mark.unit
