@@ -171,6 +171,63 @@ enum RelationshipCategoryPalette {
     static func color(slot: Int, theme: Theme) -> Color {
         theme.chartCategorical(slot)
     }
+
+    /// The scatter's color KEY: the resolved legend domain plus the mapping
+    /// from a point to its entry.
+    ///
+    /// This exists because a legend and a color assignment must not be derived
+    /// independently. Swift Charts only emits a legend for a mark styled `by:`
+    /// a data value against a declared scale, so the chart needs BOTH a domain
+    /// (the legend rows, in order) and a per-point key — and if those two ever
+    /// disagreed, the legend would confidently mislabel the plot. Resolving
+    /// both from one value makes that class of drift unrepresentable.
+    struct Legend: Equatable {
+        /// Distinct categories in first-appearance order — the legend rows.
+        /// Empty when no point carries a category.
+        let domain: [String]
+
+        /// Whether the color channel actually discriminates anything. One key
+        /// (or none) means every point is the same color, so a legend would be
+        /// a row that explains nothing.
+        var isKeyed: Bool { domain.count > 1 }
+
+        /// The legend entry a point belongs to. An uncategorized point in a
+        /// mixed payload falls to the first entry, matching `slot(for:in:)` —
+        /// the key and the color stay consistent for it.
+        func key(for point: RelationshipPayload.Point) -> String {
+            guard let category = point.category, !category.isEmpty,
+                  domain.contains(category) else {
+                return domain.first ?? Self.unkeyed
+            }
+            return category
+        }
+
+        /// Slot index of a point's entry — the same index the categorical
+        /// palette is addressed by, so symbol and legend swatch agree.
+        func slot(for point: RelationshipPayload.Point) -> Int {
+            domain.firstIndex(of: key(for: point)) ?? 0
+        }
+
+        func color(for point: RelationshipPayload.Point, theme: Theme) -> Color {
+            RelationshipCategoryPalette.color(slot: slot(for: point), theme: theme)
+        }
+
+        /// The scale's range: one color per domain entry, in domain order.
+        func colors(theme: Theme) -> [Color] {
+            let slots = max(domain.count, 1)
+            return (0..<slots).map { RelationshipCategoryPalette.color(slot: $0, theme: theme) }
+        }
+
+        /// Single key used when the payload carries no categories at all. The
+        /// scale still needs a non-empty domain to bind against; the legend is
+        /// hidden in that case, so this string never reaches the screen.
+        static let unkeyed = "—"
+    }
+
+    static func legend(for points: [RelationshipPayload.Point]) -> Legend {
+        let categories = ordered(points.map(\.category))
+        return Legend(domain: categories.isEmpty ? [Legend.unkeyed] : categories)
+    }
 }
 
 // MARK: - RelationshipDensity

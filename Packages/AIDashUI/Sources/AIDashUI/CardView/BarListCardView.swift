@@ -52,31 +52,59 @@ public struct BarListCardView: View {
     @ViewBuilder
     private var populatedContent: some View {
         let visible = Array(payload.items.prefix(rowCap))
-        ForEach(Array(visible.enumerated()), id: \.offset) { _, item in
+        // The Core header contract (MY-1398): a titled payload owes the ranking
+        // a header band, and that band is what the router's whole-card star
+        // anchors to. It carries the affordance gutter so the star floats over
+        // empty space at the band's trailing edge instead of over the title.
+        if let header = payload.headerTitle {
+            Text(header)
+                .font(Self.recipe.primary)
+                .foregroundStyle(theme.neutrals.text1)
+                .lineLimit(1)
+                .padding(.trailing, AIDashSpacing.cardAffordanceGutter)
+        }
+        let normalized = Self.fractions(for: visible)
+        ForEach(Array(visible.enumerated()), id: \.offset) { index, item in
             BarListRow(
                 item: item,
-                fraction: fraction(for: item.value),
-                anySemantic: anySemantic
+                fraction: normalized[index],
+                anySemantic: anySemantic,
+                // Without a header band the FIRST row is the card's top band,
+                // and its trailing value read-out sits exactly where the star
+                // floats. That row reserves the gutter so the two can never
+                // collide — the same reservation the header makes, applied to
+                // whatever content actually occupies the top band.
+                trailingInset: (payload.headerTitle == nil && index == 0)
+                    ? AIDashSpacing.cardAffordanceGutter
+                    : 0
             )
         }
         if payload.items.count > rowCap {
             Text(Self.moreItemsLabel(overflow: payload.items.count - rowCap))
                 .font(Self.recipe.secondary)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(theme.neutrals.text(.meta))
         }
     }
 
     // MARK: - Derived
 
-    /// The largest magnitude drives the full-width bar; guard a non-positive
-    /// max so a payload of zeros renders empty bars rather than dividing by 0.
-    private var maxValue: Double {
-        max(payload.items.map(\.value).max() ?? 0, 0)
-    }
-
-    private func fraction(for value: Double) -> Double {
-        guard maxValue > 0 else { return 0 }
-        return max(0, min(1, value / maxValue))
+    /// Bar fractions for the rows actually DRAWN, normalized against the
+    /// largest of those rows — so the top-ranked visible row always reaches the
+    /// full track width and the rest read as a share of it.
+    ///
+    /// Normalizing over the drawn rows rather than the whole payload matters
+    /// once `rowCap` truncates: if the largest item were folded into "+N more",
+    /// every visible bar would be scaled against a magnitude that is not on
+    /// screen, so no bar would reach full width and the ranking would read as
+    /// uniformly short. Pure and static so the scale is unit-testable without
+    /// rendering.
+    ///
+    /// Guards a non-positive max (a payload of zeros or negatives) by returning
+    /// all-zero fractions rather than dividing by zero.
+    static func fractions(for items: [BarListPayload.Item]) -> [Double] {
+        let maxValue = max(items.map(\.value).max() ?? 0, 0)
+        guard maxValue > 0 else { return Array(repeating: 0, count: items.count) }
+        return items.map { max(0, min(1, $0.value / maxValue)) }
     }
 
     /// Whether any row is flagged — switches the card into "one hot row"
@@ -132,6 +160,10 @@ private struct BarListRow: View {
     let item: BarListPayload.Item
     let fraction: Double
     let anySemantic: Bool
+    /// Trailing space this row keeps clear for the card-level star affordance.
+    /// Non-zero only for the row that occupies the card's TOP band; every other
+    /// row uses the full width.
+    let trailingInset: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: AIDashSpace.s4) {
@@ -163,6 +195,10 @@ private struct BarListRow: View {
                 .font(BarListCardView.recipe.secondary)
                 .foregroundStyle(theme.neutrals.text1)
         }
+        // Only the LABEL LINE is inset: the value read-out is what the star
+        // would collide with. The bar below keeps the full track width, so the
+        // comparative scale is never distorted by a control's position.
+        .padding(.trailing, trailingInset)
     }
 
     private var bar: some View {
@@ -252,14 +288,17 @@ enum BarListFormat {
     }
 }
 
-#Preview("barList — failure root cause (semantic)") {
+#Preview("barList — failure root cause (semantic, titled)") {
     BarListCardView(
-        payload: BarListPayload(items: [
-            .init(label: "runtime-offline", value: 39, valueText: "39%", semantic: "warning"),
-            .init(label: "codex-init-fail", value: 21, valueText: "21%"),
-            .init(label: "queue-timeout", value: 14, valueText: "14%"),
-            .init(label: "rate-limited", value: 9, valueText: "9%"),
-        ]),
+        payload: BarListPayload(
+            items: [
+                .init(label: "runtime-offline", value: 39, valueText: "39%", semantic: "warning"),
+                .init(label: "codex-init-fail", value: 21, valueText: "21%"),
+                .init(label: "queue-timeout", value: 14, valueText: "14%"),
+                .init(label: "rate-limited", value: 9, valueText: "9%"),
+            ],
+            title: "失败根因"
+        ),
         size: .medium,
         style: .neutral
     )

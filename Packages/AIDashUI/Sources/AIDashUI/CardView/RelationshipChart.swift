@@ -43,6 +43,25 @@ struct RelationshipPointSymbol: View {
     static let ringWidth: CGFloat = 1.2
 }
 
+// MARK: - RelationshipChartAxis
+//
+// north-star §7: "图表克制:无网格、无标签喧宾夺主". Swift Charts' default axis
+// content is `AxisGridLine` + `AxisTick` + `AxisValueLabel`, and the grid line
+// is the part §7 rules out. This helper emits the other two so every
+// relationship plot drops its grid the SAME way — three copies of an inline
+// `.chartXAxis { … }` block is exactly how one of them ends up keeping its grid.
+
+enum RelationshipChartAxis {
+
+    /// Axis marks with ticks and value labels but NO grid line.
+    static func gridless() -> some AxisContent {
+        AxisMarks { _ in
+            AxisTick()
+            AxisValueLabel()
+        }
+    }
+}
+
 // MARK: - RelationshipChart
 //
 // The plot itself. One `Chart` per visualization, each drawing ONLY the mark
@@ -84,12 +103,13 @@ struct RelationshipChart: View {
 
     private var scatterChart: some View {
         let points = Array(payload.points.prefix(cap))
-        let categories = points.map(\.category)
         let magnitudes = points.compactMap(\.magnitude)
         let symbolDomain = RelationshipSymbolScale.domain(magnitudes)
         // Mixed = some points carry a magnitude and some do not. Only then does
         // absence need its own visual treatment; see RelationshipSymbolScale.
         let isMixed = RelationshipSymbolScale.hasMixedMagnitudes(points)
+        // The legend keys the COLOR channel, which `category` drives.
+        let legend = RelationshipCategoryPalette.legend(for: points)
         return Chart(Array(points.enumerated()), id: \.offset) { index, point in
             let isMissing = RelationshipSymbolScale.isMissing(
                 magnitude: point.magnitude, inMixedPayload: isMixed
@@ -97,10 +117,7 @@ struct RelationshipChart: View {
             let area = RelationshipSymbolScale.size(
                 for: point.magnitude, in: symbolDomain, inMixedPayload: isMixed
             )
-            let tint = RelationshipCategoryPalette.color(
-                slot: RelationshipCategoryPalette.slot(for: point.category, in: categories),
-                theme: theme
-            )
+            let tint = legend.color(for: point, theme: theme)
             PointMark(
                 x: .value(payload.xAxis.label, point.x),
                 y: .value(payload.yAxis.label, point.y)
@@ -115,7 +132,13 @@ struct RelationshipChart: View {
             .symbol {
                 RelationshipPointSymbol(area: area, isMissing: isMissing, color: tint)
             }
-            .foregroundStyle(tint)
+            // Keying the style BY the category is what makes Swift Charts emit
+            // a legend at all: a plain `.foregroundStyle(color)` is an opaque
+            // value with no scale behind it, which is why the color channel
+            // rendered unkeyed. The explicit scale below pins each key to the
+            // same slot color the symbol draws, so this keys the existing
+            // colors rather than recoloring anything.
+            .foregroundStyle(by: .value(Self.categoryFieldLabel, legend.key(for: point)))
             .accessibilityIdentifier("relationship.point.\(index)")
             .accessibilityLabel(RelationshipAccessibility.pointLabel(point))
             .accessibilityValue(
@@ -124,10 +147,32 @@ struct RelationshipChart: View {
                 )
             )
         }
+        .chartForegroundStyleScale(
+            domain: legend.domain,
+            range: legend.colors(theme: theme)
+        )
         .chartXAxisLabel(payload.xAxis.label, position: .bottom)
         .chartYAxisLabel(payload.yAxis.label, position: .top, alignment: .leading)
-        .chartLegend(.hidden)
+        // north-star §7 "图表克制:无网格" — Swift Charts draws a grid line per
+        // tick by default, and on a handful of points that grid is the loudest
+        // thing in the plot. Ticks and their VALUE LABELS stay (a scatter with
+        // unreadable axes is not restraint, it is data loss); only the
+        // `AxisGridLine` is dropped, on both axes.
+        .chartXAxis { RelationshipChartAxis.gridless() }
+        .chartYAxis { RelationshipChartAxis.gridless() }
+        // Shown only when `category` actually discriminates something. One key
+        // means color carries no information, and a one-row legend would be
+        // chrome that explains nothing.
+        .chartLegend(legend.isKeyed ? .visible : .hidden)
     }
+
+    /// Field name for the scatter's color dimension — the legend's own title.
+    static let categoryFieldLabel = String(
+        localized: "relationship.scatter.category",
+        defaultValue: "Category",
+        bundle: .module,
+        comment: "Legend title for the color dimension of a relationship scatter chart; each entry is one of the payload's point categories."
+    )
 
     // MARK: Heatmap
 
