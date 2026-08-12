@@ -20,7 +20,8 @@ import Foundation
 ///
 /// `metric`, `trending`, `sectionHeader`, `barList`, and `stackedBar` are
 /// pass-through (their sizing is deliberate): they always return the authored
-/// size unchanged.
+/// size unchanged. `relationship` is NOT pass-through — its geometry follows
+/// the mark count, because a sparse chart at full width misleads.
 public enum EffectiveCardSize {
 
     // MARK: - Thresholds (heuristic, downgrade-only, CJK-conservative)
@@ -40,6 +41,13 @@ public enum EffectiveCardSize {
     private static let insightBodyWide = 220
     /// insight: body long enough for a `medium`.
     private static let insightBodyMedium = 90
+    /// relationship/scatter: points needed before the plot reads as a shape
+    /// rather than a handful of labeled dots.
+    private static let relationshipScatterPointsWide = 5
+    /// relationship/heatmap: rows AND columns needed to be a real matrix.
+    private static let relationshipHeatmapMinAxis = 2
+    /// relationship/slope: series needed before before/after beats a metric card.
+    private static let relationshipSlopeItemsWide = 2
 
     // MARK: - Resolve
 
@@ -111,6 +119,10 @@ public enum EffectiveCardSize {
         case .agentSummary:
             guard let p = payload as? AgentSummaryPayload else { return nil }
             return agentSize(completed: p.completed.count, stats: p.stats?.count ?? 0)
+
+        case .relationship:
+            guard let p = payload as? RelationshipPayload else { return nil }
+            return relationshipSize(p)
         }
     }
 
@@ -149,6 +161,32 @@ public enum EffectiveCardSize {
         if completed <= 2 && stats <= 2 { return .medium }
         if completed <= 5 { return .wide }
         return .hero
+    }
+
+    /// A relationship chart earns width from the number of marks it actually
+    /// plots, not from the author's ambition. A one-point "scatter" is a dot; a
+    /// single-row "heatmap" is a bar chart in a matrix costume. Both mislead
+    /// more at full width than at half, so they downgrade to `medium`.
+    ///
+    /// `wide` is the ceiling even for a dense plot: the card tops out at chart
+    /// + evidence rail, and `hero`'s ≥280pt floor would stretch that into empty
+    /// space. Authored `small`/`medium` still never grows — `resolve` takes the
+    /// min of (authored, justified).
+    private static func relationshipSize(_ p: RelationshipPayload) -> CardSize {
+        switch p.visualization {
+        case .scatter:
+            // Below 5 points the eye reads individual labels, not a shape.
+            return p.points.count >= relationshipScatterPointsWide ? .wide : .medium
+        case .heatmap:
+            // A matrix needs both axes to vary; one row or one column is a ranking.
+            let rows = Set(p.cells.map(\.row)).count
+            let columns = Set(p.cells.map(\.column)).count
+            let isMatrix = rows >= relationshipHeatmapMinAxis && columns >= relationshipHeatmapMinAxis
+            return isMatrix ? .wide : .medium
+        case .slope:
+            // One before/after pair is two numbers — a metric card's job.
+            return p.slopes.count >= relationshipSlopeItemsWide ? .wide : .medium
+        }
     }
 
     // MARK: - Ordering

@@ -136,6 +136,97 @@ struct EffectiveCardSizeTests {
         #expect(resolve(.agentSummary, .hero, rich) == .wide)
     }
 
+    // MARK: - relationship
+
+    /// Relationship payload with the mark set the visualization requires.
+    private func relationship(
+        _ visualization: RelationshipVisualization,
+        points: Int = 0,
+        rows: Int = 0,
+        columns: Int = 0,
+        slopes: Int = 0
+    ) -> RelationshipPayload {
+        RelationshipPayload(
+            title: "Cost × outcome",
+            visualization: visualization,
+            xAxis: .init(label: "x"),
+            yAxis: .init(label: "y"),
+            points: (0..<points).map { .init(label: "p\($0)", x: Double($0), y: Double($0)) },
+            cells: (0..<rows).flatMap { r in
+                (0..<columns).map { c in
+                    .init(column: "c\(c)", row: "r\(r)", value: Double(r * 10 + c))
+                }
+            },
+            slopes: (0..<slopes).map { .init(label: "s\($0)", before: 1, after: 2) },
+            sampleSize: max(1, points + rows * columns + slopes),
+            timeWindow: "7d",
+            metricDefinition: "d",
+            summary: "s"
+        )
+    }
+
+    @Test("relationship scatter downgrades until the plot has enough points")
+    func relationshipScatter() {
+        // A 1-point "scatter" is a dot, not a relationship: no width earned.
+        #expect(resolve(.relationship, .hero, relationship(.scatter, points: 1)) == .medium)
+        #expect(resolve(.relationship, .wide, relationship(.scatter, points: 1)) == .medium)
+        // 2–4 points still read fine in a medium plot.
+        #expect(resolve(.relationship, .hero, relationship(.scatter, points: 2)) == .medium)
+        #expect(resolve(.relationship, .wide, relationship(.scatter, points: 4)) == .medium)
+        // 5+ points earn the full row — but never more than wide: relationship
+        // tops out at a chart + evidence rail, which hero would over-inflate.
+        #expect(resolve(.relationship, .wide, relationship(.scatter, points: 5)) == .wide)
+        #expect(resolve(.relationship, .hero, relationship(.scatter, points: 5)) == .wide)
+        #expect(resolve(.relationship, .hero, relationship(.scatter, points: 40)) == .wide)
+    }
+
+    @Test("relationship heatmap needs a 2×2 matrix to earn wide")
+    func relationshipHeatmap() {
+        // A single row or single column is a bar chart wearing a matrix
+        // costume — downgrade rather than render a one-line grid at full row.
+        #expect(resolve(.relationship, .hero, relationship(.heatmap, rows: 1, columns: 1)) == .medium)
+        #expect(resolve(.relationship, .wide, relationship(.heatmap, rows: 1, columns: 5)) == .medium)
+        #expect(resolve(.relationship, .wide, relationship(.heatmap, rows: 5, columns: 1)) == .medium)
+        // 2×2 and denser is a genuine matrix.
+        #expect(resolve(.relationship, .wide, relationship(.heatmap, rows: 2, columns: 2)) == .wide)
+        #expect(resolve(.relationship, .hero, relationship(.heatmap, rows: 4, columns: 7)) == .wide)
+    }
+
+    @Test("relationship slope needs two or more series to earn wide")
+    func relationshipSlope() {
+        #expect(resolve(.relationship, .hero, relationship(.slope, slopes: 1)) == .medium)
+        #expect(resolve(.relationship, .wide, relationship(.slope, slopes: 1)) == .medium)
+        #expect(resolve(.relationship, .wide, relationship(.slope, slopes: 2)) == .wide)
+        #expect(resolve(.relationship, .hero, relationship(.slope, slopes: 6)) == .wide)
+    }
+
+    @Test("relationship never grows an authored small/medium card")
+    func relationshipNeverGrows() {
+        let rich = relationship(.scatter, points: 40)
+        #expect(resolve(.relationship, .small, rich) == .small)
+        #expect(resolve(.relationship, .medium, rich) == .medium)
+        let matrix = relationship(.heatmap, rows: 6, columns: 6)
+        #expect(resolve(.relationship, .small, matrix) == .small)
+        #expect(resolve(.relationship, .medium, matrix) == .medium)
+        // And a sparse payload authored small stays small, not medium.
+        #expect(resolve(.relationship, .small, relationship(.slope, slopes: 1)) == .small)
+    }
+
+    @Test("relationship with an empty mark set degrades to medium")
+    func relationshipEmptyMarks() {
+        // An empty payload cannot pass validation, but the resolver runs on
+        // stored cards too and must not hand a blank chart the full row.
+        #expect(resolve(.relationship, .hero, relationship(.scatter)) == .medium)
+        #expect(resolve(.relationship, .wide, relationship(.heatmap)) == .medium)
+        #expect(resolve(.relationship, .wide, relationship(.slope)) == .medium)
+    }
+
+    @Test("relationship keeps the authored size under collapseToList")
+    func relationshipCollapseToList() {
+        #expect(resolve(
+            .relationship, .hero, relationship(.scatter, points: 1), collapseToList: true) == .hero)
+    }
+
     // MARK: - invariants
 
     @Test("resolver only ever downgrades, never grows past authored")
