@@ -320,7 +320,7 @@ def test_a_detail_card_that_carries_a_signal_survives():
 
 @pytest.mark.unit
 def test_empty_candidate_set_is_not_an_error():
-    assert select_with_budget([]) == []
+    assert list(select_with_budget([])) == []
 
 
 # --------------------------------------------------------------------------- #
@@ -506,3 +506,61 @@ def test_weighted_selection_is_deterministic():
     first = [c.card.id for c in select_with_budget(pool)]
     second = [c.card.id for c in select_with_budget(list(reversed(pool)))]
     assert first == second
+
+
+# --------------------------------------------------------------------------- #
+# The first-screen boundary is returned, not left to be re-derived
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_the_result_reports_its_own_lead_boundary():
+    high = _weighted("high", 20, 3, cross_signal_strength=5)
+    mid = _weighted("mid", 30, 4, cross_signal_strength=4)
+    low = _weighted("low", 15, 1, cross_signal_strength=0)
+    result = select_with_budget([high, mid, low], max_cards=8, first_screen=4)
+    assert [c.card.id for c in result.lead] == ["high"]
+    assert "low" not in [c.card.id for c in result.lead]
+
+
+@pytest.mark.unit
+def test_the_selection_stays_in_priority_order_throughout():
+    """Including the tail. Re-sorting the tail into authored order let a light,
+    low-priority candidate with an early authored number render above a
+    higher-priority one — the consumer renumbers from this sequence, so the
+    order here IS the order the reader gets."""
+    high = _weighted("high", 20, 3, cross_signal_strength=5)
+    mid = _weighted("mid", 30, 4, cross_signal_strength=4)
+    low = _weighted("low", 15, 1, cross_signal_strength=0)
+    ids = [c.card.id for c in select_with_budget([high, mid, low],
+                                                 max_cards=8, first_screen=4)]
+    assert ids == ["high", "mid", "low"], (
+        "authored order overrode the budget's ranking"
+    )
+
+
+@pytest.mark.unit
+def test_the_lead_boundary_is_not_a_card_count_off_the_front():
+    """The boundary must be reported, not re-derived: with mixed weights, the
+    screen closes on a candidate too heavy to fit, and the count alone cannot
+    say where that happened."""
+    high = _weighted("high", 20, 3, cross_signal_strength=5)
+    mid = _weighted("mid", 30, 4, cross_signal_strength=4)
+    low = _weighted("low", 15, 1, cross_signal_strength=0)
+    result = select_with_budget([high, mid, low], max_cards=8, first_screen=4)
+    assert [c.card.id for c in result.lead] == ["high"]
+    assert [c.card.id for c in result.tail] == ["mid", "low"]
+
+
+@pytest.mark.unit
+def test_lead_and_tail_partition_the_selection():
+    pool = [_weighted(f"c{i:02d}", i, (i % 3) + 1, cross_signal_strength=i % 4)
+            for i in range(10)]
+    result = select_with_budget(pool)
+    assert result.lead + result.tail == result.selected
+    assert len(result) == len(result.selected)
+
+
+@pytest.mark.unit
+def test_an_empty_budget_result_is_still_iterable():
+    result = select_with_budget([])
+    assert list(result) == []
+    assert result.lead == [] and result.tail == []

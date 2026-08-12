@@ -1116,38 +1116,35 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     first_screen = max(0, FIRST_SCREEN_CARDS - head_cards)
     kept = select_with_budget(_container_candidates(rest),
                               max_cards=budget, first_screen=first_screen)
-    survivors = [c.card for c in kept if c.card.cards]
-    if not survivors:
+    if not [c for c in kept.selected if c.card.cards]:
         return (head,)
 
-    # How many of `survivors` are the first screen: select_with_budget returns
-    # lead-then-tail, and the tail is sorted by authored order, so the lead is
-    # the leading run whose cards fit the first-screen budget.
-    lead: list[Container] = []
-    lead_cards = 0
-    for container in survivors:
-        if lead_cards + len(container.cards) > first_screen:
-            break
-        lead.append(container)
-        lead_cards += len(container.cards)
-    tail = survivors[len(lead):]
+    # Take the first-screen boundary FROM the budget rather than re-deriving it.
+    # Counting cards off the front of the result would be wrong: the tail is
+    # sorted back into authored order, so a light low-priority container sitting
+    # early in authored order gets swept into the lead and — because the lead is
+    # what gets renumbered — genuinely promoted onto the reader's first screen
+    # ahead of a higher-priority one.
+    lead = [c.card for c in kept.lead if c.card.cards]
+    tail = [c.card for c in kept.tail if c.card.cards]
 
-    # Reserve a band strictly between the overview and every authored order, so
-    # a lead container always renders above a tail one no matter how the
-    # producers numbered them — while the overview keeps the very top.
+    # Renumber EVERY survivor into one ascending run below the overview.
     #
-    # The band is carved out of the gap below the lowest surviving tail order
-    # rather than by shifting anyone up, so the numbers stay ascending and no
-    # authored order has to move. `head.order` is the hard floor: the overview
-    # is the one card guaranteed to exist, and it leads.
-    ceiling = min([c.order for c in tail] + [head.order + len(lead) + 1])
-    base = max(head.order + 1, ceiling - len(lead))
-    lead = [
-        replace(container, order=base + index)
-        for index, container in enumerate(lead)
+    # Renumbering only the lead is not enough. The app sorts by `order` alone,
+    # so a tail container that happens to carry a low authored number (say the
+    # producer gave it 15 while a lead container authored 30 got renumbered)
+    # would still render above the first screen — the budget's decision loses to
+    # an accident of how the producers numbered their sections.
+    #
+    # So: lead first, in priority order; then tail, in authored order. The
+    # overview keeps the hard top. Within each group the relative order is the
+    # one that group is supposed to express, and across groups the first screen
+    # always wins.
+    published = [
+        replace(container, order=head.order + 1 + index)
+        for index, container in enumerate(lead + tail)
     ]
-    tail = sorted(tail, key=lambda c: (c.order, c.id))
-    return tuple([head] + lead + tail)
+    return tuple([head] + published)
 
 
 def build_briefing(report_date: str, sources: "DigestSources", full_md: str,

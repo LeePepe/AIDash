@@ -236,6 +236,41 @@ def _priority(candidate: CardCandidate) -> tuple:
     )
 
 
+@dataclass(frozen=True)
+class BudgetResult:
+    """What the budget admitted, and where the first screen ends.
+
+    `lead_count` is returned rather than left to be re-derived, because it
+    CANNOT be recovered from `selected` alone: the tail is re-sorted into
+    authored order, so counting cards off the front of the result can sweep a
+    low-priority tail container into the lead. That is not a cosmetic slip —
+    the caller rewrites `order` from this boundary, so a miscount genuinely
+    promotes the wrong container onto the reader's first screen.
+    """
+
+    selected: list[CardCandidate]
+    lead_count: int
+
+    @property
+    def lead(self) -> list[CardCandidate]:
+        return self.selected[:self.lead_count]
+
+    @property
+    def tail(self) -> list[CardCandidate]:
+        return self.selected[self.lead_count:]
+
+    def __iter__(self):
+        """Iterating a result yields its candidates, so callers that only care
+        about what was admitted can treat it as the list it replaced."""
+        return iter(self.selected)
+
+    def __len__(self) -> int:
+        return len(self.selected)
+
+    def __getitem__(self, index):
+        return self.selected[index]
+
+
 def _is_superseded(candidate: CardCandidate, admitted_signals: set) -> bool:
     """True when a card ACTUALLY PUBLISHED carries every signal this one restates.
 
@@ -289,7 +324,7 @@ def _admit(candidates: Sequence[CardCandidate], max_cards: int,
 def select_with_budget(candidates: Sequence[CardCandidate],
                        max_cards: int = MAX_CARDS,
                        first_screen: int = FIRST_SCREEN_CARDS,
-                       ) -> list[CardCandidate]:
+                       ) -> BudgetResult:
     """Apply the daily information budget to already-built cards.
 
     Four things happen, in order:
@@ -307,13 +342,22 @@ def select_with_budget(candidates: Sequence[CardCandidate],
          ever admit more, never fewer. Suppressing against the raw candidate set
          instead would let a provider that is itself filtered out or over budget
          take its dependent down with it, losing the signal entirely.
-      4. **Lead/tail split.** Candidates inside `first_screen` keep their
-         priority order — that is what a two-minute read gets. Everything after
-         returns to the authored order, so the detail tail reads as the author
-         arranged it rather than as a second priority list.
+      4. **Lead/tail split.** `lead_count` marks where the first screen ends.
+         The whole selection stays in PRIORITY order — including the tail.
+         Re-sorting the tail into authored order here was a real defect: the
+         consumer renumbers from this sequence, so a light low-priority
+         candidate with an early authored number jumped ahead of a
+         higher-priority one and landed on the reader's first screen. A caller
+         that genuinely wants authored order for the tail can sort
+         `result.tail` itself, having been told where it starts.
 
-    Pure and total: an empty input yields an empty list, and the result is
-    identical regardless of the input's order.
+    Returns a `BudgetResult` carrying the explicit `lead_count`. The boundary is
+    part of the decision, not something a caller can recover afterwards: once
+    weights differ, re-counting cards off the front of the result cannot
+    reconstruct where admission actually closed the screen.
+
+    Pure and total: an empty input yields an empty result, and it is identical
+    regardless of the input's order.
     """
     eligible = [c for c in candidates if c.carries_signal or not c.is_detail]
 
@@ -329,7 +373,4 @@ def select_with_budget(candidates: Sequence[CardCandidate],
         if not _is_superseded(c, admitted_signals - set(c.provides))
     ]
     selected, lead_count = _admit(survivors, max_cards, first_screen)
-
-    lead = selected[:lead_count]
-    tail = sorted(selected[lead_count:], key=lambda c: (c.order, c.card.id))
-    return lead + tail
+    return BudgetResult(selected, lead_count)

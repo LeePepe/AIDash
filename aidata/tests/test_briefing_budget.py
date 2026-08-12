@@ -17,7 +17,7 @@ import dataclasses
 
 import pytest
 
-from L5_apps.digest.aidash import Briefing, build_briefing
+from L5_apps.digest.aidash import Briefing, Card, Container, build_briefing
 from L5_apps.digest.card_policy import FIRST_SCREEN_CARDS, MAX_ACTIONS, MAX_CARDS
 from L5_apps.digest.sources import (
     AdoPrTrends, AiEfficiency, AutomationTrends, CardInterest, CardTypeStar,
@@ -599,6 +599,52 @@ def test_first_screen_containers_all_outrank_the_tail_ones():
         assert max(lead_ranks) < min(tail_ranks), (
             "a lower-priority container rendered above a higher-priority one"
         )
+
+
+@pytest.mark.unit
+def test_a_low_priority_tail_container_is_never_promoted_above_a_higher_one():
+    """Published `order` must follow the budget's ranking, not authored order.
+
+    Shape that exposes it: the first screen admits a 3-card high-priority
+    container, then closes because the next admitted container needs 4 cards. A
+    third, single-card container of the LOWEST priority sits early in authored
+    order (15, ahead of MID's 30). Since the app sorts by `order` alone, any
+    scheme that preserves authored numbering for the tail renders that
+    least-important container above a higher-priority one — and, being light,
+    it slips inside the reader's first six cards.
+    """
+    from L5_apps.digest.aidash import _apply_budget, _BUDGET_META
+
+    def _container(title, order, count, base):
+        return Container(
+            f"id-{title}", title, order,
+            tuple(Card(f"card-{base + i}", "insight", "wide",
+                       {"title": "t", "body": "b"}) for i in range(count)))
+
+    meta_backup = dict(_BUDGET_META)
+    _BUDGET_META.update({
+        "HIGH": {"cross_signal": 5}, "MID": {"cross_signal": 4},
+        "LOW": {"cross_signal": 0},
+    })
+    try:
+        published = _apply_budget([
+            _container("总览", 10, 2, 0),
+            _container("HIGH", 20, 3, 10),
+            _container("MID", 30, 4, 20),
+            _container("LOW", 15, 1, 30),   # early authored order, lowest value
+        ])
+    finally:
+        _BUDGET_META.clear()
+        _BUDGET_META.update(meta_backup)
+
+    rendered = [c.title for c in sorted(published, key=lambda c: c.order)]
+    assert rendered.index("HIGH") < rendered.index("LOW"), (
+        "the lowest-priority container rendered above the highest-priority one"
+    )
+    assert rendered.index("MID") < rendered.index("LOW"), (
+        "authored order overrode the budget's ranking"
+    )
+    assert rendered[0] == "总览"
 
 
 # --------------------------------------------------------------------------- #
