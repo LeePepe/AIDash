@@ -311,6 +311,33 @@ hint affects vertical spacing only (small = compact, hero = generous).
 
 ---
 
+## `relationship`
+
+A typed two-dimensional relationship. The visualization discriminator locks
+which mark collection is populated; every shape carries its evidence context.
+
+**Scatter example**:
+```json
+{"title":"Cost × outcome","visualization":"scatter","xAxis":{"label":"Cost per completed task","unit":"USD"},"yAxis":{"label":"First-pass completion proxy","unit":"%"},"points":[{"label":"AIDash","x":2.1,"y":88,"magnitude":34,"category":"project"}],"sampleSize":34,"timeWindow":"7d","metricDefinition":"completed is a pipeline proxy, not objective correctness","summary":"AIDash has the lowest observed cost at the highest completion proxy."}
+```
+
+**Heatmap example**:
+```json
+{"title":"Rework concentration","visualization":"heatmap","xAxis":{"label":"Day"},"yAxis":{"label":"Workspace"},"cells":[{"column":"2026-08-11","row":"AIDash","value":48000}],"sampleSize":4,"timeWindow":"7d","metricDefinition":"tokens on issues completed after cancellation","summary":"Observed rework is concentrated on one day; no causal claim."}
+```
+
+**Slope example**:
+```json
+{"title":"Before × after","visualization":"slope","xAxis":{"label":"Period"},"yAxis":{"label":"Tokens per completed task"},"slopes":[{"label":"AIDash","before":21000,"after":18000}],"sampleSize":12,"timeWindow":"previous 7d vs current 7d","metricDefinition":"total tokens divided by completed pipeline tasks","summary":"Observed unit token use decreased."}
+```
+
+`visualization` is exactly `scatter`, `heatmap`, or `slope` and must match
+`points`, `cells`, or `slopes`, respectively. `sampleSize` is positive; axis
+labels, `timeWindow`, `metricDefinition`, and `summary` are non-empty. Numeric
+values are finite, and observational associations must not claim causation.
+
+---
+
 ## Validation summary
 
 For every CardType, `SchemaValidator.validate(type:, payload:)` performs:
@@ -352,6 +379,7 @@ depth.
 | todoList | ⚠ thin | ✓ | ✓ main | ✓ |
 | trending | ⚠ degrade | ⚠ degrade | ✓ main | ✓ main |
 | digest | ⚠ degrade | ⚠ degrade | ✓ | ✓ main |
+| relationship | ⚠ degrade | ✓ | ✓ main | ✓ main |
 | sectionHeader | ✓ | ✓ | ✓ | ✓ |
 
 ✓ = renders well, ⚠ = renders but doesn't shine. This is a hint to

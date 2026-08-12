@@ -124,12 +124,14 @@ aidata/ (Python, L1→L5)  ──JSON payload──>  aidash CLI  ──XPC─�
 `aidata (pytest + ruff)` 把关:pytest + `ruff check` + 无 `config_local.py` 的
 降级探针。本地跑:`/usr/bin/python3 -m pytest aidata/tests/ -q`。
 
-## Running tests: don't. The hooks do it.
+## Test through hooks; do not manually repeat suites
 
-**Do NOT proactively run test suites.** `scripts/hooks/pre-commit` and
-`pre-push` already run the right set (SPM package tests, then the build
-gate) before anything leaves the machine. Running them by hand adds no
-signal and repeats the cost — including, on this repo, real damage.
+**Verification is mandatory and hook-driven.** Do not manually run the same
+test suites that `scripts/hooks/pre-commit` and `pre-push` run. Instead, make
+normal verified commits and pushes: `pre-commit` runs the affected package
+build/tests and lint; `pre-push` runs the repository-wide gates. A hook failure
+is the test signal: map its path to the owning layer, fix that layer, and commit
+again. Do not bypass hooks for code changes.
 
 **NEVER run a host-based test target locally:**
 
