@@ -322,28 +322,42 @@ def _metric_items(sources: "DigestSources", report_date: str) -> list[dict]:
 
 # ---- Item-level de-duplication (§design 3, acceptance criterion 5) ----------
 #
-# The redundancy in this briefing is real, but it is not container-shaped and it
-# is not even card-shaped — it is per ITEM. `趋势指标` publishes one row per
-# metric, and when `成本归因` is on the page its per-project split reports the
-# SAME spend the 成本 / Token rows report, only decomposed. Those two rows are
-# duplicates; 请求数 / 会话数 / 完成任务 / 自动化占比 in the same card are not
-# restated by anything, anywhere.
+# The redundancy in this briefing is real, but it is not container-shaped, not
+# card-shaped, and SMALLER than it looks — it is one row.
 #
-# Two earlier attempts suppressed the whole CONTAINER on that basis and deleted
-# the non-duplicate rows as collateral. Doing it here — inside the producer that
-# owns the items, before the card is built — is the granularity the redundancy
-# actually has, and it needs no cross-container bookkeeping in the budget.
+# `趋势指标` publishes one row per metric. When the per-project spend breakdown
+# is on the page, its 成本 row reports the same total that breakdown decomposes,
+# so the bare row carries nothing the split does not.
 #
-# Labels a stronger cross-signal makes redundant. Keyed by the signal so the
-# reason survives a card being renamed or re-sized.
-_SPEND_TOTAL_LABELS = ("成本", "Token")
+# EXACTLY ONE ROW, AND HERE IS THE EVIDENCE. `attribution/cost-by-project.sql`
+# selects `ktokens` and `requests` alongside `cost_usd`, but
+# `fetch_cost_by_project` reads only `project` / `cost_usd` / `cost_pct`, and
+# `_bar_items` publishes label/value/valueText. So no token, request or session
+# figure ever reaches a card. Treating `Token` as redundant deleted a signal
+# nothing on the page replaced — a de-duplication that was a deletion.
+#
+# Two earlier attempts suppressed the whole CONTAINER and took four unrelated
+# rows with it. Doing it here — inside the producer that owns the rows — is the
+# granularity the redundancy actually has.
+#
+# Labels a published breakdown genuinely restates. Deliberately minimal: every
+# addition must be justified by a field the provider card actually renders.
+_SPEND_TOTAL_LABELS = ("成本",)
 
-# Card id slots holding the per-project spend BREAKDOWN — the only cards whose
-# presence makes the bare totals redundant. Slot 32 is cost-by-project, 33 is
-# project × model. Deliberately NOT "the 成本归因 container exists": that
-# container is built from any of four inputs and can consist of the 人机杠杆
-# metric alone, which decomposes nothing.
-_SPEND_BREAKDOWN_SLOTS = frozenset({32, 33})
+# Card id slots holding the per-project cost BREAKDOWN — the only card whose
+# presence makes the bare cost row redundant.
+#
+# SLOT 32 ONLY (`attribution/cost-by-project`). Slot 33
+# (`attribution/model-by-project`) is deliberately NOT here: it is a project ×
+# model grain filtered to `cost_usd > 0` and folded to a top-5 whose trailing
+# "Other" sums costs across pairs, so it does not reproduce the day's total
+# cost and cannot stand in for it. Binding to it would drop the 成本 row on days
+# when nothing on the page reports that total.
+#
+# NOT keyed on the `成本归因` container: that container is built from any of
+# four inputs and can consist of the 人机杠杆 metric alone, which decomposes
+# nothing.
+_SPEND_BREAKDOWN_SLOTS = frozenset({32})
 
 
 def _slot_of(card_id: str) -> int | None:
@@ -391,12 +405,13 @@ def _dedupe_published(containers: tuple[Container, ...]) -> tuple[Container, ...
        something on the page?", and only the post-budget set can answer that.
        Running it earlier answers "did a producer build one?" instead, and gets
        it wrong whenever the budget later trims the provider.
-    2. **Identity.** The provider is the per-project spend BREAKDOWN, not the
-       container that happens to hold it. `成本归因` is built from any of four
-       inputs — it can consist of the 人机杠杆 metric alone, with no spend split
-       in it — so keying on the container title deletes the totals whenever any
-       attribution data exists. The breakdown cards carry fixed id slots (32:
-       cost-by-project, 33: project × model), which is what is actually checked.
+    2. **Identity.** The provider is the per-project cost BREAKDOWN card, not
+       the container that happens to hold it. `成本归因` is built from any of
+       four inputs — it can consist of the 人机杠杆 metric alone, with no spend
+       split in it — so keying on the container title dropped the cost row
+       whenever any attribution data existed. Only the cost-by-project card
+       (slot 32) qualifies; see `_SPEND_BREAKDOWN_SLOTS` for why the project ×
+       model card does not.
 
     Pure: containers are rebuilt rather than mutated, and a briefing without
     both sides of the pair passes through untouched.
@@ -1102,11 +1117,11 @@ def _relationship_container(mmdd: str, rework) -> "Container | None":
 # ## Why redundancy is handled per ITEM, not here
 #
 # An earlier version let one container declare it superseded another's signal
-# (成本归因's per-project split vs 趋势指标's spend totals). The granularity was
-# wrong: admission is per CONTAINER, but the redundancy is per ITEM. 趋势指标
-# carries requests, sessions, completed-issues and the automation ratio beside
-# the spend totals — none of which the cost split restates — so suppressing the
-# container to remove two duplicated rows deleted four unrelated signals.
+# (成本归因's per-project split vs 趋势指标's spend total). The granularity was
+# wrong: admission is per CONTAINER, but the redundancy is a single ROW. 趋势指标
+# carries tokens, requests, sessions, completed-issues and the automation ratio
+# beside the cost row — none of which the cost split restates — so suppressing
+# the container to remove one duplicated row deleted five unrelated signals.
 #
 # Two-pass admission (suppress against provisionally-admitted providers) did not
 # rescue it either: `_admit` skips an over-budget candidate and lets a lighter

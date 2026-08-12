@@ -455,33 +455,46 @@ def _trend_labels(b: Briefing) -> set:
 
 
 @pytest.mark.unit
-def test_duplicate_spend_items_are_dropped_when_the_breakdown_is_published():
-    """The stronger cross signal wins: with the per-project split on the page,
-    the bare totals it decomposes carry nothing the split does not."""
+def test_only_the_cost_row_is_dropped_when_the_breakdown_is_published():
+    """The stronger cross signal wins — for the ONE row it actually covers.
+
+    The published breakdown card renders `cost_usd` only, so 成本 is the only
+    row it restates. Everything else in the trend card stays.
+    """
     labels = _trend_labels(_build(_rich_sources()))
     assert labels, "the trend container was trimmed; this test needs it published"
-    assert "成本" not in labels, "the raw cost total duplicates 成本归因"
-    assert "Token" not in labels, "the raw token total duplicates 成本归因"
+    assert "成本" not in labels, "the raw cost total duplicates the breakdown"
+
+
+@pytest.mark.unit
+def test_the_token_row_survives_the_de_duplication():
+    """`ktokens` exists in attribution/cost-by-project.sql but
+    fetch_cost_by_project never selects it, so no published card reports a token
+    figure. Dropping this row deleted a signal nothing replaced."""
+    labels = _trend_labels(_build(_rich_sources()))
+    assert "Token" in labels, (
+        "the token row was dropped, but the breakdown card publishes cost only"
+    )
 
 
 @pytest.mark.unit
 def test_non_duplicate_trend_items_survive_the_de_duplication():
-    """The whole point of doing this per item: requests and sessions appear
-    nowhere else in the briefing, so they must outlive the spend totals."""
+    """The whole point of doing this per row: tokens, requests and sessions
+    appear nowhere else in the briefing, so they must outlive the cost row."""
     labels = _trend_labels(_build(_rich_sources()))
-    assert {"请求数", "会话数"} <= labels, (
+    assert {"Token", "请求数", "会话数"} <= labels, (
         f"non-duplicate trend signals were collateral damage: {labels}"
     )
 
 
 @pytest.mark.unit
-def test_the_trend_card_keeps_its_spend_items_when_no_breakdown_exists():
+def test_the_trend_card_keeps_its_cost_row_when_no_breakdown_exists():
     """Suppression is conditional on the stronger card ACTUALLY being published.
-    Without it, dropping the totals would lose the signal entirely — worse than
-    the duplication."""
+    Without it, dropping the cost row would lose the signal entirely — worse
+    than the duplication."""
     labels = _trend_labels(_build(_rich_sources_without_attribution()))
     assert {"成本", "Token"} <= labels, (
-        "spend totals were dropped with no breakdown to replace them"
+        "the cost row was dropped with no breakdown to replace it"
     )
 
 
@@ -523,18 +536,18 @@ def test_totals_return_when_the_budget_trims_the_breakdown():
     assert "成本归因" not in titles, "fixture no longer trims the breakdown"
     assert labels, "fixture no longer publishes the trend card"
     assert {"成本", "Token"} <= labels, (
-        "the breakdown was trimmed but the totals had already been dropped — "
+        "the breakdown was trimmed but the cost row had already been dropped — "
         "the spend signal reached the reader in neither form"
     )
 
 
 @pytest.mark.unit
-def test_totals_survive_when_attribution_holds_no_spend_breakdown():
+def test_cost_row_survives_when_attribution_holds_no_breakdown_card():
     """`成本归因` existing is not the same as the breakdown being published.
 
     That container is built from any of four inputs, so it can consist of the
     人机杠杆 metric alone — which decomposes nothing. Keying de-duplication on
-    the container title therefore deleted the totals whenever ANY attribution
+    the container title therefore deleted the cost row whenever ANY attribution
     data existed, leaving the spend signal in neither place.
     """
     leverage_only = dataclasses.replace(
@@ -550,18 +563,46 @@ def test_totals_survive_when_attribution_holds_no_spend_breakdown():
     attribution = next(c for c in b.containers if c.title == "成本归因")
     assert len(attribution.cards) == 1, "fixture is no longer breakdown-free"
     assert {"成本", "Token"} <= _trend_labels(b), (
-        "the totals were dropped for an attribution container that carries no "
+        "the cost row was dropped for an attribution container that carries no "
         "spend breakdown at all"
     )
 
 
 @pytest.mark.unit
-def test_totals_are_dropped_only_for_a_real_breakdown_card():
-    """The positive half of the same rule: a genuine per-project split does
-    make the bare totals redundant."""
+def test_the_project_x_model_card_alone_does_not_drop_the_cost_row():
+    """Slot 33 is a project × model grain filtered to `cost_usd > 0` and folded
+    to a top-5 whose trailing "Other" sums costs across pairs — it does not
+    reproduce the day's total cost, so it cannot stand in for the bare row.
+    Only the cost-by-project card (slot 32) qualifies as the provider.
+    """
+    model_only = dataclasses.replace(
+        _sources(),
+        cost_by_project=RankBundle([], SourceHealth("attribution", "skipped:未取")),
+        model_by_project=RankBundle(
+            [RankItem("AIDash · opus-5", 120.0, "$120"),
+             RankItem("VitalStride · sonnet-5", 40.0, "$40")],
+            SourceHealth("attribution", "ok")),
+        rework_by_workspace=RankBundle([], SourceHealth("attribution", "skipped:未取")),
+        leverage=Leverage.empty(),
+    )
+    b = _build(model_only)
+    assert "成本归因" in [c.title for c in b.containers], (
+        "fixture no longer publishes the project × model card"
+    )
+    assert {"成本", "Token"} <= _trend_labels(b), (
+        "the cost row was dropped for a project × model card, which reports no "
+        "total cost the reader could substitute for it"
+    )
+
+
+@pytest.mark.unit
+def test_the_cost_row_is_dropped_only_for_a_real_breakdown_card():
+    """The positive half of the same rule: a genuine per-project cost split does
+    make the bare cost row redundant — and only that row."""
     labels = _trend_labels(_build(_rich_sources()))
     assert labels, "the trend card was trimmed; this test needs it published"
-    assert not ({"成本", "Token"} & labels)
+    assert "成本" not in labels
+    assert {"Token", "请求数", "会话数"} <= labels
 
 
 @pytest.mark.unit
@@ -578,10 +619,10 @@ def test_every_published_pair_keeps_at_least_one_side():
         titles = [c.title for c in b.containers]
         labels = _trend_labels(b)
         breakdown_published = "成本归因" in titles
-        totals_published = bool({"成本", "Token"} & labels)
+        cost_row_published = "成本" in labels
         trend_published = "趋势指标" in titles
-        assert breakdown_published or totals_published or not trend_published, (
-            "neither the spend breakdown nor the totals it replaces reached "
+        assert breakdown_published or cost_row_published or not trend_published, (
+            "neither the spend breakdown nor the cost row it replaces reached "
             "the reader — the signal disappeared"
         )
 
