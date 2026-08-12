@@ -143,13 +143,23 @@ public func makePrimaryPalette(seed: Color, isDark: Bool, darkAnchor: Color? = n
         // An anchored primary is the anchor ITSELF, not an HSB round-trip of
         // it — the signature color must land on its exact sRGB value.
         let primary = darkAnchor ?? c(ah, asat, ab)
+        // Saturation base for the subtle/muted/border chips.
+        //
+        // These three MUST stay on the seed's own `s` when unanchored: the
+        // shared-with-web derivation multiplies `s`, not the primary's
+        // `s - 0.05`. Routing them through `asat` (which folds in that -0.05
+        // primary-only adjustment) shifts all five unanchored seeds by 1–3
+        // per channel — a silent drift away from the verbatim web math.
+        // An anchored seed has no separate seed saturation to fall back to;
+        // its whole ramp is by definition derived from the anchor.
+        let chipSat = isAnchored ? asat : s
         return PrimaryPalette(
             primary: primary,
             primaryHover: isAnchored ? c(ah, asat * 0.88, ab + headroom * 0.35) : c(h, s, b + 0.08),
             primaryActive: isAnchored ? c(ah, asat * 0.72, ab + headroom * 0.70) : c(h, s, b + 0.14),
-            primarySubtle: c(ah, asat * 0.45, 0.18),
-            primaryMuted: c(ah, asat * 0.50, 0.26),
-            primaryBorder: c(ah, asat * 0.55, 0.36),
+            primarySubtle: c(ah, chipSat * 0.45, 0.18),
+            primaryMuted: c(ah, chipSat * 0.50, 0.26),
+            primaryBorder: c(ah, chipSat * 0.55, 0.36),
             primaryText: isAnchored ? c(ah, asat * 0.70, ab + headroom * 0.55) : c(h, s * 0.70, b + 0.28),
             onPrimary: contrastChoose(primary),
             onPrimarySubtle: isAnchored ? c(ah, asat * 0.70, ab + headroom * 0.55) : c(h, s * 0.70, b + 0.28),
