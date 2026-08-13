@@ -285,6 +285,181 @@ def test_enum_case_shorthand_in_an_argument_list_is_not_a_modifier():
     assert not is_modifier_line("    .init(a: 1),")
 
 
+# --- Blocker 1: standalone enum / member expressions --------------------------
+#
+# A leading-dot line with no trailing comma was accepted as a modifier, so a
+# bare `.leading` or `.red` sitting on its own line as an ARGUMENT VALUE came
+# back `resolved=True` with an invented receiver. `resolved` is what the prompt
+# treats as citable, so that is false evidence, not merely noise.
+
+def test_standalone_enum_argument_value_is_not_attachment_evidence():
+    source = '''\
+struct Row: View {
+    var body: some View {
+        VStack(
+            alignment:
+                .leading
+        ) {
+            Text("hi")
+        }
+    }
+}
+'''
+    # Omitted entirely — `unresolved` would claim "a modifier we could not
+    # place", and this is not a modifier at all.
+    assert attachments_for_lines(source, [5]) == ()
+
+
+def test_bare_member_expression_as_argument_is_not_attachment_evidence():
+    source = '''\
+struct Row: View {
+    var body: some View {
+        Text("hi")
+            .foregroundStyle(
+                .red
+            )
+    }
+}
+'''
+    assert attachments_for_lines(source, [5]) == ()
+
+
+def test_uninvoked_leading_dot_lines_are_rejected_textually():
+    """A modifier is applied: the member is followed by a call or a closure."""
+    assert not is_modifier_line(".leading")
+    assert not is_modifier_line(".red")
+    assert not is_modifier_line("        .infinity")
+    assert is_modifier_line(".padding(8)")
+    assert is_modifier_line(".frame(")
+    assert is_modifier_line(".chartXAxis { RelationshipChartAxis.gridless() }")
+
+
+def test_invoked_argument_value_is_still_rejected_structurally():
+    """`.value(...)` after `PointMark(` is an argument, not a modifier.
+
+    It is invoked and comma-free, so the textual test alone would accept it.
+    What rules it out is the line above: an argument hangs off a line that
+    OPENS a list, a chain hangs off one that ENDS an expression.
+    """
+    source = '''\
+struct Chart2: View {
+    var body: some View {
+        Chart(points) { point in
+            PointMark(
+                x: .value("x", point.x)
+            )
+        }
+    }
+}
+'''
+    assert attachments_for_lines(source, [5]) == ()
+
+
+# --- Blocker 2: multiline declaration heads -----------------------------------
+#
+# A declaration was recognized only when its keyword shared a line with `{`.
+# For a multiline parameter list the walk continued outward and reported the
+# enclosing type — while still returning `resolved=True`, so a reviewer would
+# read a confidently-wrong scope.
+
+def test_multiline_function_head_is_attributed_to_the_function():
+    source = '''\
+struct Card: View {
+    private func kpiCell(
+        _ item: KPIItem,
+        width: CGFloat
+    ) -> some View {
+        HStack {
+            Text(item.label)
+        }
+        .padding(.trailing, 8)
+    }
+}
+'''
+    item = _only(source, 9)
+    assert item.resolved
+    assert item.receiver == "HStack"
+    assert item.declaration == "private func kpiCell"
+    assert item.declaration_line == 2
+    # The pre-fix behaviour: attributed to the enclosing struct, resolved=True.
+    assert item.declaration != "struct Card"
+
+
+def test_multiline_initializer_head_is_attributed_to_the_initializer():
+    source = '''\
+struct Card: View {
+    init(
+        payload: Payload,
+        size: CardSize
+    ) {
+        VStack {
+            Text("x")
+        }
+        .padding(4)
+    }
+}
+'''
+    item = _only(source, 9)
+    assert item.resolved
+    assert item.declaration == "init"
+    assert item.declaration_line == 2
+
+
+def test_multiline_head_scan_does_not_adopt_a_preceding_statement():
+    """An ordinary closure `{` must not adopt the statement above it.
+
+    The head scan follows PAREN CONTINUATION only — an unmatched `)` before the
+    `{`, matched back to its opener. A looser "look at the line above" rule
+    would read `let items = compute()` as the declaration owning
+    `return ForEach(items) {`, which is how the first attempt at this fix
+    regressed MetricCardView to `let viz`.
+    """
+    source = '''\
+struct Card: View {
+    var body: some View {
+        let items = compute()
+        return ForEach(items) { item in
+            Text(item.label)
+        }
+        .padding(4)
+    }
+}
+'''
+    item = _only(source, 7)
+    assert item.resolved
+    assert item.receiver == "ForEach"
+    # `var body` — reached by the outward walk, not by adopting line 3.
+    assert item.declaration == "var body"
+    assert item.declaration_line == 2
+
+
+def test_declaration_with_body_locals_still_reports_the_declaration():
+    """Locals between the head and the modifier must not become the scope.
+
+    This is the MetricCardView shape from the real PR #171 diff: `kpiCell`
+    declares two `let`s, then returns a view. The evidence must say
+    `private func kpiCell`, not `let viz`.
+    """
+    source = '''\
+struct MetricCard: View {
+    private func kpiCell(_ item: MetricPayload.Item) -> some View {
+        let recipe = AIDashTypography.detail(for: .metric)
+        let viz = vizKind(item)
+        return VStack(alignment: .leading, spacing: AIDashSpace.s12) {
+            Text(item.label)
+                .font(recipe.secondary)
+        }
+        .padding(4)
+    }
+}
+'''
+    item = _only(source, 9)
+    assert item.resolved
+    assert item.receiver == "VStack"
+    assert item.declaration == "private func kpiCell"
+    assert item.declaration_line == 2
+
+
 def test_receiver_skips_leading_keywords():
     """`return Chart { … }` reports `Chart`, not `return`."""
     source = '''\

@@ -48,32 +48,78 @@ _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*")
 # reporting `Chart` is the point.
 _LEADING_KEYWORDS = frozenset({"return", "try", "await", "let", "var", "case"})
 
-# `.padding(...)`, `.font(x)`, `.accessibilityHidden(true)` — a leading-dot
-# member access is how every SwiftUI modifier is written.
+# `.padding(...)`, `.font(x)`, `.chartXAxis { … }` — a leading-dot member
+# access is how every SwiftUI modifier is written.
 _MODIFIER_RE = re.compile(r"^\.([A-Za-z_][A-Za-z0-9_]*)")
 
-# A leading dot also introduces an element of a collection literal
-# (`.init(label: "a", value: 1),`) and enum-case shorthand in an argument list.
-# Those are not modifiers and resolving a "receiver" for them is meaningless
-# noise, so they are filtered out before anything else runs.
+# A leading dot introduces plenty of things that are NOT modifiers:
+#   · collection-literal elements — `.init(label: "a", value: 1),`
+#   · enum-case shorthand as an argument value — `alignment:` / `.leading`
+#   · standalone member expressions — `.red`
+# Resolving a "receiver" for any of those is meaningless, and — worse — it comes
+# back `resolved=True`, which the prompt treats as citable evidence. So the bar
+# for calling a line a modifier is deliberately high, and everything that does
+# not clear it is dropped rather than reported with a guess.
 _COLLECTION_ELEMENT_RE = re.compile(r",\s*$")
 _NON_MODIFIER_MEMBERS = frozenset({"init"})
 
+# A modifier is APPLIED: the member name is followed by a call or a trailing
+# closure. `.padding(8)`, `.frame(` (multiline call), `.chartXAxis { … }` all
+# qualify; bare `.leading` and `.red` do not. Bare-property modifiers are
+# vanishingly rare in SwiftUI (it is `.bold()`, not `.bold`), and the cost of
+# missing one is no evidence — never wrong evidence.
+_INVOCATION_RE = re.compile(r"^\.[A-Za-z_][A-Za-z0-9_]*\s*[({]")
+
+# The last character of the line a modifier chains off. A chain continues an
+# expression, so its predecessor ends in something that can END one. A line
+# ending in `,` `:` `(` `[` `{` `=` opens an argument or element instead, which
+# makes the leading-dot line below it a VALUE, not a modifier.
+_EXPRESSION_END_RE = re.compile(r"[)\]}\"A-Za-z0-9_?!>]$")
+
 
 def is_modifier_line(text: str) -> bool:
-    """Whether `text` reads as a view-modifier line worth resolving."""
+    """Whether `text` reads, on its own, as an applied view modifier.
+
+    Purely textual — the structural half of the test lives in
+    `_is_chain_continuation`, which needs the whole file. Callers that have the
+    file should use both; `review_context` uses this as a cheap prefilter.
+    """
     stripped = text.strip()
     match = _MODIFIER_RE.match(stripped)
     if not match:
         return False
     if match.group(1) in _NON_MODIFIER_MEMBERS:
         return False
+    if not _INVOCATION_RE.match(stripped):
+        return False
     # A trailing comma means this is one element among several, not a modifier
     # applied to the line above it.
     return not _COLLECTION_ELEMENT_RE.search(stripped)
 
+
+def _is_chain_continuation(blanked: Sequence[str], index: int) -> bool:
+    """Whether the leading-dot line at `index` continues an expression.
+
+    `someCall(` / `.value("x", y)` is an ARGUMENT — invoked, comma-free, and
+    still not a modifier. What separates it from a real chain is the line above:
+    a chain hangs off something that ends an expression (`)`, `}`, `]`, an
+    identifier), an argument hangs off something that opens a list.
+    """
+    previous = _previous_code_line(blanked, index)
+    if previous is None:
+        return False
+    text = blanked[previous].rstrip()
+    if not text:
+        return False
+    return bool(_EXPRESSION_END_RE.search(text))
+
 # Walking a receiver chain is bounded: a pathological file must not hang CI.
 _MAX_WALK_STEPS = 500
+
+# A declaration head may span several lines (a multiline parameter list), but
+# not many. Bounding the backwards scan keeps a malformed file from turning one
+# lookup into a whole-file walk.
+_MAX_DECL_HEAD_LINES = 40
 
 
 class Attachment(NamedTuple):
@@ -251,9 +297,9 @@ def enclosing_declaration(
 ) -> Optional[Tuple[int, str]]:
     """The declaration whose body encloses line `index` (0-based).
 
-    Returns (0-based line, display text) or None at file scope. Walks outward
-    through anonymous scopes (closures, `if` blocks) until it reaches a line
-    that reads as a declaration head.
+    Returns (0-based line of the declaration's FIRST line, display text), or
+    None at file scope. Walks outward through anonymous scopes (closures, `if`
+    blocks) until it reaches a scope opened by a declaration.
     """
     row, col = index, -1
     for _ in range(_MAX_WALK_STEPS):
@@ -261,8 +307,64 @@ def enclosing_declaration(
         if opener is None:
             return None
         row, col = opener
-        if _DECL_RE.match(raw[row]):
-            return (row, _display_declaration(raw[row]))
+        head = _declaration_head(blanked, raw, row)
+        if head is not None:
+            return head
+    return None
+
+
+def _declaration_head(
+    blanked: Sequence[str], raw: Sequence[str], brace_row: int
+) -> Optional[Tuple[int, str]]:
+    """The declaration that opens the scope whose `{` sits on `brace_row`.
+
+    A declaration's keyword is NOT always on the same line as its `{`:
+
+        private func kpiCell(
+            _ item: KPIItem,
+            width: CGFloat
+        ) -> some View {
+
+    Matching only `brace_row` misses that, and the walk then continues outward
+    and reports the enclosing `struct` — with `resolved=True`, so a reviewer
+    would read a confidently-wrong scope.
+
+    What ties `) -> some View {` back to its keyword is PAREN CONTINUATION: the
+    line closes a parameter list opened above. So the scan follows that paren,
+    and nothing else. A looser "just look at the line above" rule would adopt
+    whatever statement happened to precede an ordinary closure — e.g. read
+    `let viz = vizKind(item)` as the declaration owning `return VStack {`.
+    """
+    if _DECL_RE.match(raw[brace_row]):
+        return (brace_row, _display_declaration(raw[brace_row]))
+
+    # Text before the `{`: does it close more parens than it opens?
+    text = blanked[brace_row]
+    brace_col = text.find("{")
+    if brace_col < 0:
+        return None
+    prefix = text[:brace_col]
+
+    depth = 0
+    close_col = -1
+    for col, char in enumerate(prefix):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0 and close_col < 0:
+                close_col = col
+    if close_col < 0:
+        return None                      # no unmatched `)` — not a multiline head
+
+    opener = _match_backwards(blanked, brace_row, close_col, "(", ")")
+    if opener is None:
+        return None
+    head_row = opener[0]
+    if brace_row - head_row > _MAX_DECL_HEAD_LINES:
+        return None
+    if _DECL_RE.match(raw[head_row]):
+        return (head_row, _display_declaration(raw[head_row]))
     return None
 
 
@@ -293,9 +395,13 @@ def _enclosing_open_brace(
 
 
 def _display_declaration(raw_line: str) -> str:
-    """`    private var labelLine: some View {` → `private var labelLine`."""
+    """`    private var labelLine: some View {` → `private var labelLine`.
+
+    Also trims the dangling `(` a multiline function head leaves behind, so the
+    evidence row reads `private func kpiCell`, not `private func kpiCell(`.
+    """
     text = raw_line.strip()
-    for cut in ("{", ":", "="):
+    for cut in ("{", "(", ":", "="):
         head = text.split(cut, 1)[0]
         if head != text:
             text = head
@@ -312,6 +418,11 @@ def modifier_attachment(
         declaration="", declaration_line=0, resolved=False,
     )
     if not is_modifier_line(text):
+        return unresolved
+    # Textually a modifier, but structurally an argument value — e.g. the
+    # `.value("x", p.x)` on the line after `PointMark(`. Dropping it keeps a
+    # non-modifier from being reported as `resolved` attachment evidence.
+    if not _is_chain_continuation(blanked, index):
         return unresolved
 
     receiver = _receiver_line(blanked, index)
@@ -385,6 +496,12 @@ def attachments_for_lines(
         if index < 0 or index >= len(raw):
             continue
         if not is_modifier_line(raw[index]):
+            continue
+        # Not a modifier at all (an argument value that merely starts with a
+        # dot) — omit it entirely rather than emitting an `unresolved` row.
+        # `unresolved` means "this IS a modifier we could not place"; using it
+        # for non-modifiers would bury the real ones in noise.
+        if trustworthy and not _is_chain_continuation(blanked, index):
             continue
         if not trustworthy:
             results.append(

@@ -77,6 +77,17 @@ PR #171 上两道门(claude / codex)因此同时误判:`private var labelLine` �
   **不可信数据**围栏内 —— 结构(谁挂在谁身上)是脚本算的,文字内容仍是 PR 作者写的。
 - **算不出就是没有证据**。词法扫描不敢下结论(括号不平衡、超出字节上限)时标为
   `unresolved`,prompt 明确要求此时最多写 note,**不得**升级为 blocker。
+- **"看起来像 modifier" 的门槛故意抬高**。一个 leading-dot 行必须是**被调用的**
+  (`.padding(8)` / `.frame(` / `.chartXAxis { … }`),且其上一行以**表达式结尾**
+  (`)` `}` `]` 或标识符)才算 modifier。裸成员表达式(`.leading`、`.red`)与实参值
+  (`PointMark(` 下面的 `.value(…)`)一律**整行剔除**,不进表 —— 这类行既不是
+  modifier,给它编一个 receiver 会以 `resolved=True` 的形式变成**假证据**,比噪音更糟。
+  代价是极少数写法(SwiftUI 里几乎不存在的裸属性 modifier)拿不到证据 —— 那是安全的
+  方向:宁可没有证据,不要错的证据。
+- **多行声明头能被正确归属**。`private func kpiCell(\n … \n) -> some View {` 的关键字
+  不在 `{` 那一行;归属靠**括号续行**(`{` 前那个未配对的 `)` 回溯到它的开括号)确定,
+  而不是"看上一行"——后者会把 `let viz = vizKind(item)` 当成 `return VStack {` 的声明。
+
 - **只放宽"归属靠猜"这一类**。分层越界、崩溃、数据破坏、安全问题等有直接 diff 证据的
   blocker,判定标准不变。
 - **仍然 fail-closed**。分析器自身异常(python3 缺失、崩溃)= 工具异常,与 `git fetch`
