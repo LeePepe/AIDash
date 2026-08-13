@@ -80,6 +80,75 @@ diff --git a/{PATH} b/{PATH}
     assert added_line_numbers(diff, PATH) == (2, 42)
 
 
+def test_added_content_starting_with_plus_plus_does_not_shift_line_numbers():
+    """`+++foo` inside a hunk is an added line, not a file header.
+
+    Treating it as a header drops it from `added` AND leaves head_line
+    un-incremented, so every later line number in the file is off by one —
+    a silent shift that turns correct evidence into confidently-wrong evidence.
+    """
+    diff = f"""\
+diff --git a/{PATH} b/{PATH}
+--- a/{PATH}
++++ b/{PATH}
+@@ -1,3 +1,6 @@
+ context
++++ this line's content starts with plus-plus
++.padding(4)
+ context
+"""
+    # Both additions counted, and the second keeps its true HEAD line number.
+    assert added_line_numbers(diff, PATH) == (2, 3)
+
+
+def test_leading_dashes_in_added_content_do_not_shift_line_numbers():
+    diff = f"""\
+diff --git a/{PATH} b/{PATH}
+--- a/{PATH}
++++ b/{PATH}
+@@ -1,2 +1,4 @@
+ context
++--- a divider written in a comment
++.padding(4)
+ context
+"""
+    assert added_line_numbers(diff, PATH) == (2, 3)
+
+
+def test_run_git_decodes_utf8_regardless_of_locale():
+    """Swift here carries Chinese comments; locale-dependent decoding would
+    raise UnicodeDecodeError, which is not an OSError and would escape to the
+    top-level handler — blocking every PR on an encoding accident."""
+    import review_context
+
+    source = review_context.run_git(["--version"])
+    assert source is not None
+    # The call must pin encoding rather than inherit the runner's locale.
+    import inspect
+
+    body = inspect.getsource(review_context.run_git)
+    assert 'encoding="utf-8"' in body
+    assert 'errors="replace"' in body
+
+
+def test_unboundable_excerpt_is_announced_not_silently_dropped(monkeypatch):
+    """"No excerpt" must never read to the model as "nothing to excerpt"."""
+    import review_context
+
+    _stub_git(monkeypatch, PR171_SOURCE)
+    monkeypatch.setattr(
+        review_context, "declaration_slice", lambda source, line: None, raising=True
+    )
+    item = evidence_for_file(
+        path=PATH, head_sha="deadbee", diff_text=_diff_marking(PR171_PADDING_LINE),
+        max_file_bytes=400_000, max_excerpt_bytes=20_000,
+    )
+    assert item is not None
+    assert item.table_rows            # the receiver table still resolves
+    assert item.excerpts == ()
+    assert "could not be bounded" in item.skipped
+
+
 def test_pr171_evidence_names_the_inner_hstack_and_quotes_its_declaration(monkeypatch):
     _stub_git(monkeypatch, PR171_SOURCE)
 

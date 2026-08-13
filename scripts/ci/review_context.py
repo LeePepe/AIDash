@@ -72,10 +72,23 @@ class FileEvidence(NamedTuple):
 
 
 def run_git(args: Sequence[str]) -> Optional[str]:
-    """Run a read-only git command; None when it fails (missing blob, etc.)."""
+    """Run a read-only git command; None when it fails (missing blob, etc.).
+
+    Decoding is pinned to UTF-8 with replacement rather than left to the
+    runner's locale. This repo's Swift carries a lot of Chinese comment text, so
+    a non-UTF-8 locale would raise `UnicodeDecodeError` — which is not an
+    `OSError`, so it would escape to the top-level handler and exit 1. That is
+    fail-closed in the technically-correct but useless sense: every PR blocked
+    on an encoding accident.
+    """
     try:
         done = subprocess.run(
-            ["git", *args], capture_output=True, text=True, check=False
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
     except OSError:
         return None
@@ -93,19 +106,28 @@ def added_line_numbers(diff_text: str, path: str) -> Tuple[int, ...]:
     lines = diff_text.splitlines()
     added: list[int] = []
     in_file = False
+    in_hunk = False
     head_line = 0
 
     for line in lines:
         if line.startswith("diff --git "):
             in_file = line.endswith(f" b/{path}")
+            in_hunk = False
             continue
         if not in_file:
             continue
         hunk = _HUNK_RE.match(line)
         if hunk:
             head_line = int(hunk.group(1))
+            in_hunk = True
             continue
-        if line.startswith("+++") or line.startswith("---"):
+        # File headers only appear BEFORE the first hunk. Inside a hunk, a line
+        # starting with `+++` is an ADDED line whose content happens to begin
+        # with `++` — skipping it would drop it from `added` AND leave
+        # `head_line` un-incremented, shifting every later line number in the
+        # file. That silent shift is exactly the class of wrong-but-confident
+        # evidence this module exists to prevent.
+        if not in_hunk and (line.startswith("+++") or line.startswith("---")):
             continue
         if line.startswith("+"):
             added.append(head_line)
@@ -160,6 +182,7 @@ def evidence_for_file(
     excerpts: list[Tuple[str, int, int, str]] = []
     seen_spans: set[Tuple[int, int]] = set()
     dropped = 0
+    unbounded = 0
 
     for item in attachments:
         if not item.resolved:
@@ -177,7 +200,13 @@ def evidence_for_file(
         )
 
         span = declaration_slice(source, item.line)
-        if span is None or span in seen_spans:
+        if span is None:
+            # Could not bound the declaration (unbalanced braces, walk cap).
+            # Counted, not silently dropped: "no excerpt" must never read to the
+            # model as "nothing worth excerpting".
+            unbounded += 1
+            continue
+        if span in seen_spans:
             continue
         seen_spans.add(span)
         start, end = span
@@ -187,14 +216,22 @@ def evidence_for_file(
             continue
         excerpts.append((declaration, start, end, text))
 
-    skipped = ""
+    notices: list[str] = []
     if dropped:
-        skipped = (
+        notices.append(
             f"{dropped} declaration excerpt(s) exceeded the "
             f"{max_excerpt_bytes}-byte cap and were omitted"
         )
+    if unbounded:
+        notices.append(
+            f"{unbounded} declaration excerpt(s) could not be bounded "
+            "(unbalanced braces or walk cap) and were omitted"
+        )
     return FileEvidence(
-        path=path, table_rows=tuple(rows), excerpts=tuple(excerpts), skipped=skipped
+        path=path,
+        table_rows=tuple(rows),
+        excerpts=tuple(excerpts),
+        skipped="; ".join(notices),
     )
 
 
