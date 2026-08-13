@@ -107,6 +107,33 @@ jobs:
       - name: Require tests (blocking)
         run: scripts/quality/require-tests.sh "${{ steps.range.outputs.base }}" "${{ steps.range.outputs.head }}"
 
+  review-gate:
+    name: review-gate (pytest)
+    # The automated review gates (claude / codex) resolve Swift modifier scope
+    # from exact-HEAD source before they may raise an attachment blocker. That
+    # resolver is the thing standing between an ambiguous hunk and a false
+    # high-severity finding (MY-1402 / PR #171), so it carries its own tests
+    # and its own CI job — it is not covered by any Swift or aidata job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test tooling
+        # Stdlib-only in production; same pinned ruff as the aidata job so a
+        # new linter release cannot turn this gate red with no code change.
+        run: python -m pip install --upgrade pip pytest 'ruff==0.15.13'
+      - name: pytest
+        working-directory: scripts/ci
+        run: python -m pytest tests/ -q
+      - name: ruff
+        working-directory: scripts/ci
+        run: ruff check .
+
   build:
     name: build + test (macOS 26)
     # macos-26 runner ships Xcode 26.x (Swift 6.2), which AIDashUI requires
