@@ -96,6 +96,44 @@ PR #171 上两道门(claude / codex)因此同时误判:`private var labelLine` �
   免得模型把"被截断"读成"就这么多"。
 
 
+## 门为什么会「静默卡 20 分钟」——以及现在不会了(MY-1404)
+
+PR #171 上两道门连续四次(claude 两次、codex 两次)跑满 20 分钟被 GitHub cancel,
+**日志一行输出都没有**。分析器没错,脚本压根没跑到它。
+
+根因在 shell,不在 Python:
+
+- runner(`aidash-mac`)的 PATH 解析到 **Homebrew bash 5.3.15**;
+- 该版本下,**body 超过一个 pipe buffer(实测 512 字节)的 heredoc / here-string 会死锁**
+  —— bash 先把 body 写进重定向管道,再 fork 读端;body 填满管道后写操作永久阻塞。
+  栈是 `do_redirection_internal → heredoc_write → write`;
+- macOS 自带 bash 3.2 改用临时文件,**同样的脚本在 `/bin/bash` 下永远复现不出来**。
+  MY-1402 因此带着一段 1118 字节的 heredoc(`review_evidence_rules`)合进了 main,
+  而它在 CI 里**一次都没被执行过**(MY-1402 自己的 PR 跑的是合并前的 base 脚本)。
+
+这段 heredoc 是两道门**共用**的,且在调用任何 CLI **之前**求值 —— 所以两道门同时、
+同样地卡住,而不是各自出了各自的问题。
+
+现在的约束:
+
+| 措施 | 位置 |
+|---|---|
+| 门脚本里**禁止** `<<` / `<<-` / `<<<`,多行文本一律 `printf` 生成 | `scripts/ci/*.sh` |
+| 结构化校验(读源码,不只是跑一遍) | `scripts/ci/tests/test_review_shell.py` |
+| CLI 调用套 wall-clock 看门狗,默认 900s(<workflow 的 20 分钟) | `run_with_timeout`,`review-common.sh` |
+| 超时按**进程组** TERM→KILL,不留孤儿进程 | 同上 |
+
+看门狗的两个要点:
+
+- **超时依旧 fail-closed**。CLI 卡死 → `rc=124` → 贴 sticky 说明 + `exit 1`,门照旧红。
+  变的只是「红得有原因」:15 分钟内给出明确诊断,而不是 20 分钟后一份空日志。
+- **`|| rc=$?`,不能裸调用**。workflow 以 `bash -e {0}` 跑脚本,被信号杀掉的子进程
+  会让裸 `wait` 直接以 143 终止整个脚本 —— check 仍然红,但连那句诊断都来不及贴,
+  又回到了本条要消灭的症状。
+
+> 判定阈值、可信边界、不可信数据围栏、fail-closed 语义都没有放松;只有「文本怎么送进
+> 变量」和「卡死怎么收场」变了。
+
 ## ruleset 即代码
 `scripts/rulesets/main-protection.json` 是唯一真相,改后重跑 `scripts/rulesets/apply`
 (幂等 create-or-update)同步到服务端。**先让 `claude-review` check 至少成功上报过一次,

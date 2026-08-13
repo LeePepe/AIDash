@@ -104,23 +104,26 @@ printf %s "$FULL_DIFF" > "$DIFF_FILE"
 cleanup() { rm -f "$SCHEMA_FILE" "$OUT_FILE" "$ERR_FILE" "$DIFF_FILE"; }
 trap cleanup EXIT
 
-cat > "$SCHEMA_FILE" <<'SCHEMA_EOF'
-{
-  "type":"object","additionalProperties":false,
-  "required":["verdict","summary","blockers","notes"],
-  "properties":{
-    "verdict":{"type":"string","enum":["pass","changes"]},
-    "summary":{"type":"string"},
-    "blockers":{"type":"array","items":{"type":"object","additionalProperties":false,
-      "required":["file","line","severity","why"],
-      "properties":{"file":{"type":"string"},"line":{"type":["integer","null"]},
-        "severity":{"type":"string","enum":["critical","high"]},"why":{"type":"string"}}}},
-    "notes":{"type":"array","items":{"type":"object","additionalProperties":false,
-      "required":["file","line","note"],
-      "properties":{"file":{"type":"string"},"line":{"type":["integer","null"]},"note":{"type":"string"}}}}
-  }
-}
-SCHEMA_EOF
+# 用 printf 写,不用 heredoc:brew bash 5.3 下 body 超过一个 pipe buffer(实测
+# 512 字节)的 heredoc 会死锁在 `heredoc_write`,无输出无退出码,直到 job 的
+# 20 分钟上限把 step cancel 掉(MY-1404;详见 review-common.sh 顶部说明)。
+# 本 schema 是 762 字节,正好落在死锁区间内。内容与原 heredoc 完全一致。
+printf '%s\n' \
+'{' \
+'  "type":"object","additionalProperties":false,' \
+'  "required":["verdict","summary","blockers","notes"],' \
+'  "properties":{' \
+'    "verdict":{"type":"string","enum":["pass","changes"]},' \
+'    "summary":{"type":"string"},' \
+'    "blockers":{"type":"array","items":{"type":"object","additionalProperties":false,' \
+'      "required":["file","line","severity","why"],' \
+'      "properties":{"file":{"type":"string"},"line":{"type":["integer","null"]},' \
+'        "severity":{"type":"string","enum":["critical","high"]},"why":{"type":"string"}}}},' \
+'    "notes":{"type":"array","items":{"type":"object","additionalProperties":false,' \
+'      "required":["file","line","note"],' \
+'      "properties":{"file":{"type":"string"},"line":{"type":["integer","null"]},"note":{"type":"string"}}}}' \
+'  }' \
+'}' > "$SCHEMA_FILE"
 
 # ---- exact-HEAD scope evidence(MY-1402)---------------------------------
 # 与 claude-review 完全一致的机制(共享 scripts/ci/review-common.sh):hunk 边界不是
@@ -179,16 +182,31 @@ echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED"
 # --skip-git-repo-check：checkout 目录是 detached HEAD，跳过 git 仓库信任检查。
 # hooks / MCP / 沙箱 / effort 均由独立 CODEX_HOME 的 config.toml 固定；这里只
 # 再显式钉一遍关键项，防 config 缺失时回退到危险默认。
-"$CODEX_BIN" exec \
+# 套 wall-clock 看门狗(MY-1404):与 claude-review 同一份实现,卡住的 CLI 由我们
+# 在 15 分钟内收掉并留诊断,而不是等 job 20 分钟上限 cancel 出一份空日志。
+# `|| CLI_RC=$?`:workflow 以 `bash -e {0}` 跑本脚本,裸调用一旦非零会直接中止,
+# 跳过下面的 fail-closed 提示——check 仍红,但日志是空的,正是 MY-1404 要消除的
+# 那种"红得说不清原因"。
+CLI_RC=0
+run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
+    "$CODEX_BIN" exec \
     --output-schema "$SCHEMA_FILE" \
     -o "$OUT_FILE" \
     --skip-git-repo-check \
     -c sandbox_mode=read-only \
     -c approval_policy=never \
-    "$PROMPT" >/dev/null 2>"$ERR_FILE"
-CLI_RC=$?
+    "$PROMPT" >/dev/null 2>"$ERR_FILE" || CLI_RC=$?
 
 RAW="$(cat "$OUT_FILE" 2>/dev/null)"
+
+if [ "$CLI_RC" -eq "$REVIEW_TIMEOUT_RC" ]; then
+    echo "[codex-review] ❌ codex CLI 超时(>${REVIEW_CLI_TIMEOUT_SECONDS}s),已终止"
+    tail -c 2000 "$ERR_FILE" >&2 || true
+    post_sticky "$STICKY
+⚠️ 自动 review 未能完成:codex CLI 超过 ${REVIEW_CLI_TIMEOUT_SECONDS} 秒仍未返回,已被终止。
+为安全起见 **暂不放行**,请人工检查或重跑。"
+    exit 1
+fi
 
 if [ "$CLI_RC" -ne 0 ] || [ -z "$RAW" ]; then
     echo "[codex-review] ❌ codex CLI 失败 (rc=$CLI_RC)"; tail -c 2000 "$ERR_FILE" >&2 || true
