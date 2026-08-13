@@ -386,18 +386,113 @@ struct RankingKPIPresentationTests {
         }
     }
 
-    @Test("an uncategorized point in a mixed payload still keys to the color it is drawn in")
-    func mixedCategoryPointsStayConsistent() {
+    @Test("an uncategorized point in a mixed payload gets its own legend row, never a real category")
+    func mixedCategoryPointsAreNeverFoldedIntoARealCategory() throws {
+        // Two REAL categories plus one uncategorized point — the payload shape
+        // where folding absence into `domain.first` colored and described the
+        // ungrouped mark as "project".
+        let points: [RelationshipPayload.Point] = [
+            .init(label: "AIDash", x: 2.1, y: 88, category: "project"),
+            .init(label: "Skills", x: 4.8, y: 74, category: "workspace"),
+            .init(label: "unknown", x: 3.0, y: 70),
+            .init(label: "blank", x: 3.6, y: 66, category: ""),
+        ]
+        let legend = RelationshipCategoryPalette.legend(for: points)
+
+        #expect(legend.domain.count == 3,
+                "two real categories plus one uncategorized row")
+        #expect(Array(legend.domain.prefix(2)) == ["project", "workspace"],
+                "real categories keep first-appearance order and lead the legend")
+        let uncategorizedKey = try #require(legend.uncategorizedKey)
+        #expect(legend.domain.last == uncategorizedKey,
+                "the uncategorized row sits last, after every real category")
+
+        for point in [points[2], points[3]] {
+            // The blocker, stated directly: a nil / empty category may never be
+            // represented as any real category — not in the key, not in color.
+            #expect(legend.entry(for: point) == .uncategorized)
+            #expect(!legend.categories.contains(legend.key(for: point)),
+                    "\(point.label): its legend key must not be a real category")
+            for scheme in Self.schemes {
+                let theme = Self.theme(isDark: scheme.isDark)
+                let tint = legend.color(for: point, theme: theme)
+                #expect(tint == RelationshipCategoryPalette.uncategorizedColor(theme),
+                        "\(scheme.name)/\(point.label): absence is drawn in the neutral token")
+                for index in legend.categories.indices {
+                    #expect(tint != RelationshipCategoryPalette.color(slot: index, theme: theme),
+                            "\(scheme.name)/\(point.label): must not wear any category's swatch")
+                }
+            }
+        }
+    }
+
+    @Test("a legend row and its swatch agree for every point, uncategorized included")
+    func mixedCategoryLegendSwatchesMatchThePlottedColors() {
+        let points: [RelationshipPayload.Point] = [
+            .init(label: "AIDash", x: 2.1, y: 88, category: "project"),
+            .init(label: "Skills", x: 4.8, y: 74, category: "workspace"),
+            .init(label: "unknown", x: 3.0, y: 70),
+        ]
+        let legend = RelationshipCategoryPalette.legend(for: points)
+        #expect(legend.isKeyed, "three rows means color discriminates — the legend must render")
+        for scheme in Self.schemes {
+            let theme = Self.theme(isDark: scheme.isDark)
+            let range = legend.colors(theme: theme)
+            #expect(range.count == legend.domain.count,
+                    "\(scheme.name): the scale's range must have one color per legend row")
+            for point in points {
+                #expect(legend.color(for: point, theme: theme) == range[legend.slot(for: point)],
+                        "\(scheme.name): a point's symbol color must equal its own legend swatch")
+            }
+        }
+    }
+
+    @Test("one real category plus uncategorized points still shows the legend — two colors are on screen")
+    func singleCategoryPlusUncategorizedStaysKeyed() {
         let points: [RelationshipPayload.Point] = [
             .init(label: "AIDash", x: 2.1, y: 88, category: "project"),
             .init(label: "unknown", x: 3.0, y: 70),
         ]
         let legend = RelationshipCategoryPalette.legend(for: points)
-        let theme = Self.theme(isDark: true)
-        #expect(legend.key(for: points[1]) == legend.domain.first)
-        #expect(legend.color(for: points[1], theme: theme)
-                == RelationshipCategoryPalette.color(slot: 0, theme: theme),
-                "an uncategorized point falls to slot 0 in both key and color")
+        #expect(legend.isKeyed,
+                "one category and one uncategorized row are two distinct colors; hiding the legend would leave the second unexplained")
+        #expect(legend.entry(for: points[1]) == .uncategorized)
+        #expect(legend.key(for: points[1]) != "project")
+    }
+
+    @Test("a real category literally named Uncategorized does not collapse into the absence row")
+    func uncategorizedRowSurvivesANameCollision() {
+        let points: [RelationshipPayload.Point] = [
+            .init(label: "AIDash", x: 2.1, y: 88,
+                  category: RelationshipCategoryPalette.Legend.uncategorizedLabel),
+            .init(label: "Skills", x: 4.8, y: 74, category: "workspace"),
+            .init(label: "unknown", x: 3.0, y: 70),
+        ]
+        let legend = RelationshipCategoryPalette.legend(for: points)
+        #expect(Set(legend.domain).count == legend.domain.count,
+                "two identical domain values would merge into one Swift Charts row")
+        #expect(legend.key(for: points[0])
+                == RelationshipCategoryPalette.Legend.uncategorizedLabel,
+                "the REAL category keeps the name the payload gave it")
+        #expect(legend.key(for: points[2]) != legend.key(for: points[0]),
+                "the absence row must stay distinct from the same-named real category")
+        #expect(legend.entry(for: points[2]) == .uncategorized)
+    }
+
+    @Test("with no categories at all there is no uncategorized row — nothing to distinguish")
+    func fullyUncategorizedPayloadHasNoAbsenceRow() {
+        let points: [RelationshipPayload.Point] = [
+            .init(label: "AIDash", x: 2.1, y: 88),
+            .init(label: "aidata", x: 6.9, y: 62, category: ""),
+        ]
+        let legend = RelationshipCategoryPalette.legend(for: points)
+        #expect(legend.categories.isEmpty)
+        #expect(legend.uncategorizedKey == nil,
+                "flagging every point as missing would be noise, not information")
+        #expect(!legend.isKeyed)
+        #expect(legend.domain == [RelationshipCategoryPalette.Legend.unkeyed],
+                "the style scale still needs a non-empty domain to bind against")
+        for point in points { #expect(legend.entry(for: point) == .unkeyed) }
     }
 
     @Test("the scatter materialises at every size with the legend wired to the scale")

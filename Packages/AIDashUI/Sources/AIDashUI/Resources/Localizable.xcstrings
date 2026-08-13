@@ -474,6 +474,18 @@
           }
         }
       }
+    },
+    "relationship.scatter.category.uncategorized": {
+      "comment": "Legend row for relationship scatter points that carry no category while other points in the same chart do. It labels absence of a grouping key, not a group named this.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uncategorized"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

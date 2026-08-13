@@ -145,31 +145,64 @@ enum RelationshipSymbolScale {
 // Resolves a scatter point's optional `category` to a categorical color slot.
 // Slots are assigned in FIRST-APPEARANCE order over the payload's own category
 // sequence, so the legend reads top-to-bottom in the order the author wrote
-// the points. A nil or unknown category is a single-series scatter → slot 0.
+// the points.
 //
-// The color itself always comes from `Theme.chartCategorical`, whose remap
-// keeps the first categories ≥40° apart in hue and clear of the semantic
-// hues — the same rule stackedBar's pure-category segments follow.
+// `category` is optional PER POINT, so one payload can mix categorized points
+// with uncategorized ones. That mixed case is the dangerous one, and it is the
+// direct analogue of the mixed-`magnitude` case above: folding an uncategorized
+// point into the first real category makes ABSENT grouping indistinguishable
+// from membership, so the chart asserts the point belongs to a group it was
+// never placed in — in its color AND in the legend key that describes it. An
+// uncategorized point therefore gets its OWN legend entry, drawn in a neutral
+// (non-categorical) token, so absence reads as absence.
+//
+// The color for a real category always comes from `Theme.chartCategorical`,
+// whose remap keeps the first categories ≥40° apart in hue and clear of the
+// semantic hues — the same rule stackedBar's pure-category segments follow.
 
 enum RelationshipCategoryPalette {
+
+    /// True when a point carries no usable grouping key. An empty string is
+    /// absence too — a blank legend row explains nothing.
+    static func isUncategorized(_ category: String?) -> Bool {
+        guard let category, !category.isEmpty else { return true }
+        return false
+    }
 
     /// Distinct categories in first-appearance order.
     static func ordered(_ categories: [String?]) -> [String] {
         var seen: Set<String> = []
         var order: [String] = []
-        for case let category? in categories where !category.isEmpty {
+        for category in categories where !isUncategorized(category) {
+            guard let category else { continue }
             if seen.insert(category).inserted { order.append(category) }
         }
         return order
     }
 
+    /// Ordinal of a REAL category within its payload's category sequence.
+    ///
+    /// This addresses the categorical palette only. It deliberately does NOT
+    /// model absence: a nil / empty / unknown category has no ordinal, and the
+    /// `0` returned here is a palette fallback, not a claim of membership.
+    /// Legend keying and per-point coloring must go through `Legend` instead,
+    /// which gives an uncategorized point its own entry.
     static func slot(for category: String?, in categories: [String?]) -> Int {
-        guard let category, !category.isEmpty else { return 0 }
+        guard !isUncategorized(category), let category else { return 0 }
         return ordered(categories).firstIndex(of: category) ?? 0
     }
 
     static func color(slot: Int, theme: Theme) -> Color {
         theme.chartCategorical(slot)
+    }
+
+    /// Color for the uncategorized legend row. Deliberately NOT a categorical
+    /// slot: every `chartCategorical` color reads as "a group", and absence of
+    /// a group is not one. The neutral `meta` tier is the token that already
+    /// means "present but non-essential", and it clears the 3:1 non-text
+    /// contrast floor on every ground, so the mark stays visible.
+    static func uncategorizedColor(_ theme: Theme) -> Color {
+        theme.neutrals.text(.meta)
     }
 
     /// The scatter's color KEY: the resolved legend domain plus the mapping
@@ -182,51 +215,134 @@ enum RelationshipCategoryPalette {
     /// disagreed, the legend would confidently mislabel the plot. Resolving
     /// both from one value makes that class of drift unrepresentable.
     struct Legend: Equatable {
-        /// Distinct categories in first-appearance order — the legend rows.
-        /// Empty when no point carries a category.
-        let domain: [String]
+
+        /// Where one point sits in the color encoding. Three cases, because
+        /// "no category" and "the first category" are genuinely different
+        /// things and collapsing them is what made the plot lie.
+        enum Entry: Equatable {
+            /// The payload declares no categories at all — one uniform series,
+            /// nothing for color to discriminate, legend hidden.
+            case unkeyed
+            /// A real category, at this ordinal in `categories`.
+            case category(Int)
+            /// No grouping key while siblings have one — its own legend row and
+            /// its own non-categorical color.
+            case uncategorized
+        }
+
+        /// Real categories in first-appearance order — the leading legend rows.
+        /// Empty when no point carries a category at all.
+        let categories: [String]
+
+        /// The row uncategorized points belong to, present only when the payload
+        /// MIXES them with real categories. nil when every point is categorized
+        /// (nothing to explain), and nil when NO point is (there is no category
+        /// encoding at all, so absence is not a distinction worth drawing).
+        let uncategorizedKey: String?
+
+        /// Legend rows in render order: real categories first, the uncategorized
+        /// row last. Falls back to a single unkeyed row so the style scale always
+        /// has a non-empty domain to bind against.
+        var domain: [String] {
+            guard !categories.isEmpty else { return [Self.unkeyed] }
+            guard let uncategorizedKey else { return categories }
+            return categories + [uncategorizedKey]
+        }
 
         /// Whether the color channel actually discriminates anything. One key
         /// (or none) means every point is the same color, so a legend would be
-        /// a row that explains nothing.
+        /// a row that explains nothing. One real category PLUS uncategorized
+        /// points is two rows — two colors are genuinely on screen, and the
+        /// reader needs to be told which is which.
         var isKeyed: Bool { domain.count > 1 }
 
-        /// The legend entry a point belongs to. An uncategorized point in a
-        /// mixed payload falls to the first entry, matching `slot(for:in:)` —
-        /// the key and the color stay consistent for it.
-        func key(for point: RelationshipPayload.Point) -> String {
-            guard let category = point.category, !category.isEmpty,
-                  domain.contains(category) else {
-                return domain.first ?? Self.unkeyed
+        /// The encoding entry a point belongs to. An uncategorized point can
+        /// never resolve to `.category`, so it can never be colored as, or
+        /// described as, a group it was not placed in.
+        func entry(for point: RelationshipPayload.Point) -> Entry {
+            guard !categories.isEmpty else { return .unkeyed }
+            if let category = point.category,
+               !RelationshipCategoryPalette.isUncategorized(category),
+               let index = categories.firstIndex(of: category) {
+                return .category(index)
             }
-            return category
+            return .uncategorized
         }
 
-        /// Slot index of a point's entry — the same index the categorical
-        /// palette is addressed by, so symbol and legend swatch agree.
+        /// The legend entry a point belongs to, as the scale's domain value.
+        func key(for point: RelationshipPayload.Point) -> String {
+            switch entry(for: point) {
+            case .unkeyed:              return Self.unkeyed
+            case .category(let index):  return categories[index]
+            case .uncategorized:        return uncategorizedKey ?? Self.unkeyed
+            }
+        }
+
+        /// Row index of a point's entry within `domain` — the index its swatch
+        /// occupies in `colors(theme:)`, so symbol and legend swatch agree.
         func slot(for point: RelationshipPayload.Point) -> Int {
             domain.firstIndex(of: key(for: point)) ?? 0
         }
 
         func color(for point: RelationshipPayload.Point, theme: Theme) -> Color {
-            RelationshipCategoryPalette.color(slot: slot(for: point), theme: theme)
+            switch entry(for: point) {
+            case .unkeyed:
+                return RelationshipCategoryPalette.color(slot: 0, theme: theme)
+            case .category(let index):
+                return RelationshipCategoryPalette.color(slot: index, theme: theme)
+            case .uncategorized:
+                return RelationshipCategoryPalette.uncategorizedColor(theme)
+            }
         }
 
         /// The scale's range: one color per domain entry, in domain order.
         func colors(theme: Theme) -> [Color] {
-            let slots = max(domain.count, 1)
-            return (0..<slots).map { RelationshipCategoryPalette.color(slot: $0, theme: theme) }
+            guard !categories.isEmpty else {
+                return [RelationshipCategoryPalette.color(slot: 0, theme: theme)]
+            }
+            let categoryColors = categories.indices.map {
+                RelationshipCategoryPalette.color(slot: $0, theme: theme)
+            }
+            guard uncategorizedKey != nil else { return categoryColors }
+            return categoryColors + [RelationshipCategoryPalette.uncategorizedColor(theme)]
         }
 
         /// Single key used when the payload carries no categories at all. The
         /// scale still needs a non-empty domain to bind against; the legend is
         /// hidden in that case, so this string never reaches the screen.
         static let unkeyed = "—"
+
+        /// Legend row label for points that carry no grouping key while their
+        /// siblings do. This one IS user-visible — it is the row a reader looks
+        /// at to learn that those marks were never assigned a group.
+        static let uncategorizedLabel = String(
+            localized: "relationship.scatter.category.uncategorized",
+            defaultValue: "Uncategorized",
+            bundle: .module,
+            comment: "Legend row for relationship scatter points that carry no category while other points in the same chart do. It labels absence of a grouping key, not a group named this."
+        )
+
+        /// The uncategorized row's key, guaranteed distinct from every real
+        /// category. A payload may legitimately name a real category
+        /// "Uncategorized"; two identical domain values would collapse into one
+        /// row inside Swift Charts and reintroduce the exact conflation this
+        /// entry exists to prevent, so the collision is broken visibly.
+        static func uncategorizedKey(avoiding categories: [String]) -> String {
+            var key = uncategorizedLabel
+            while categories.contains(key) { key = "\(key) ·" }
+            return key
+        }
     }
 
     static func legend(for points: [RelationshipPayload.Point]) -> Legend {
         let categories = ordered(points.map(\.category))
-        return Legend(domain: categories.isEmpty ? [Legend.unkeyed] : categories)
+        let hasUncategorized = points.contains { isUncategorized($0.category) }
+        return Legend(
+            categories: categories,
+            uncategorizedKey: hasUncategorized && !categories.isEmpty
+                ? Legend.uncategorizedKey(avoiding: categories)
+                : nil
+        )
     }
 }
 

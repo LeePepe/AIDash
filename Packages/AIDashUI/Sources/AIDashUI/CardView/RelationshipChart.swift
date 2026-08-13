@@ -138,6 +138,11 @@ struct RelationshipChart: View {
             // rendered unkeyed. The explicit scale below pins each key to the
             // same slot color the symbol draws, so this keys the existing
             // colors rather than recoloring anything.
+            //
+            // The key comes from `Legend`, never from `point.category` directly:
+            // a point with no category in a payload that HAS categories keys to
+            // its own "Uncategorized" row, so the legend can never describe an
+            // ungrouped mark as a member of the first real group.
             .foregroundStyle(by: .value(Self.categoryFieldLabel, legend.key(for: point)))
             .accessibilityIdentifier("relationship.point.\(index)")
             .accessibilityLabel(RelationshipAccessibility.pointLabel(point))
