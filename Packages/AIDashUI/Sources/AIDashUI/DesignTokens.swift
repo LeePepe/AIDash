@@ -46,6 +46,11 @@ public enum AIDashTypography {
     /// (constitution §Quality Bar P1.1).
     public static let metricUnit: Font = .system(size: 20, weight: .medium, design: .monospaced)
 
+    /// The KPI context sub-label (e.g. "全部工作区 · 今日") — one step below the
+    /// metric label so the two read as a hierarchy inside the label band. Named
+    /// so the renderer stays free of freshly-typed typography (§Quality Bar P1.1).
+    public static let metricContext: Font = .caption2
+
     /// Detail-tier typography recipe for a single `CardType`.
     /// `sectionHeader` is NOT a content card; its row exists only to keep callers
     /// from special-casing the enum.
@@ -470,14 +475,25 @@ public struct CardChromeModifier: ViewModifier {
     /// `hairlineOpacity` and the stripe to `stripeOpacity`, so a container
     /// separates its cards mostly by space (`AIDashSpacing.cardVertical`)
     /// rather than by contrast.
+    ///
+    /// A populated framed card also STRETCHES to the height its row proposes.
+    /// `TokenGridLayout` already proposes each card its row's height, but a card
+    /// whose content hugged left its background short, so two ranking cards
+    /// ended at different bottom edges. The empty state is excluded; collapsing
+    /// is its purpose.
     @ViewBuilder
     private func framed(_ content: Content) -> some View {
         let radius = AIDashSize.cornerRadius(size)
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let stretches = minHeightOverride == nil
         content
             .padding(AIDashSize.padding(size))
             .frame(
                 minHeight: minHeightOverride ?? AIDashSize.minHeight(size),
+                alignment: .topLeading
+            )
+            .frame(
+                maxHeight: stretches ? .infinity : nil,
                 alignment: .topLeading
             )
             .background(theme.neutrals.card, in: shape)

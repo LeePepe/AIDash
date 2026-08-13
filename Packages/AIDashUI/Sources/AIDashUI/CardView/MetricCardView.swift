@@ -100,15 +100,25 @@ public struct MetricCardView: View {
         let viz = vizKind(item)
         return VStack(alignment: .leading, spacing: AIDashSpace.s12) {
             VStack(alignment: .leading, spacing: 1) {
+                // Label and context are COPY — a reader reads them to know what
+                // the number is. Both resolve through DesignKit's `TextRole`
+                // rather than SwiftUI's `.secondary`/`.tertiary` hierarchy: the
+                // system roles are computed against the platform's own
+                // background, not the theme's card ground, which is how the
+                // context line ended up at 1.69:1 light / 2.12:1 dark. `.body`
+                // is `text2` by construction and never `text3`, so the
+                // north-star §4 "don't set body copy in text3" rule is enforced
+                // by the token layer instead of by eye. Typography still comes
+                // from the per-type recipe — only the color role changes.
                 Text(item.label)
                     .font(recipe.secondary)
-                    .foregroundStyle(recipe.secondaryColor)
+                    .foregroundStyle(theme.neutrals.text(.body))
                     .textCase(.uppercase)
                     .lineLimit(1)
                 if let context = item.context, !context.isEmpty {
                     Text(context)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(AIDashTypography.metricContext)
+                        .foregroundStyle(theme.neutrals.text(.body))
                         .lineLimit(1)
                 }
             }
@@ -119,7 +129,7 @@ public struct MetricCardView: View {
             // for baseline alignment: a cell that draws a viz band reserves it
             // so its band lines up with a pilled sibling's band; a chart-less
             // flat cell with no pill reserves nothing and stays compact.
-            valueRow(item, recipe: recipe, reservesPillRow: showsAnyPill && viz != .none)
+            valueRow(item, recipe: recipe, reservesPillRow: viz.reservesPillRow)
 
             // Only draw the viz band when it carries signal. A flat or near-
             // constant series (e.g. real [100,100,…]) renders as a meaningless
@@ -137,20 +147,55 @@ public struct MetricCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// What data-viz a KPI cell should draw, if any.
-    private enum VizKind {
+    /// What data-viz a KPI cell should draw, if any. Internal rather than
+    /// private so the band-height and reservation contracts below can be
+    /// asserted as behavior instead of by grepping the renderer's source.
+    enum VizKind {
         case gauge     // a ratio → SegmentedGauge
         case sparkbars // a series that actually varies
         case none      // flat / too-short series, or no viz data → draw nothing
 
-        /// Height the band reserves. A gauge reads fine shorter than a spark.
+        /// Height the band reserves.
+        ///
+        /// A gauge reserves the SAME band as a bar-spark. It used to reserve
+        /// 44pt against the spark's 52pt, which broke the four-card KPI
+        /// baseline: the ratio card's band ended 8pt short of its siblings',
+        /// and — because the cell's trailing `Spacer` absorbs the difference at
+        /// the card BOTTOM — that shortfall pooled into a visible cavity rather
+        /// than tightening the card. One band height for both instruments is
+        /// what north-star §6's "a ratio card and a series card end up the same
+        /// height" actually requires.
         var height: CGFloat {
             switch self {
-            case .gauge:    return 44
+            case .gauge:     return MetricCardView.vizBandHeight
             case .sparkbars: return MetricCardView.vizBandHeight
-            case .none:     return 0
+            case .none:      return 0
             }
         }
+
+        /// Whether a PILL-LESS cell drawing this viz still reserves the trend
+        /// pill row.
+        ///
+        /// This replaces a payload-scoped "does any item here have a pill"
+        /// check, which could only see the items in ITS OWN payload — the
+        /// within-card case. The cross-CARD case (four `small` metric cards
+        /// side by side, each its own single-item payload) was invisible to it,
+        /// so a lone ratio item saw "no pills anywhere", reserved nothing, and
+        /// rode ~20pt higher than the pilled cards beside it. That was the
+        /// fourth KPI card's broken baseline.
+        ///
+        /// Any cell that DRAWS an instrument now reserves the row: the
+        /// reservation is what puts every instrument on one baseline, and a
+        /// cell with a band has the height to spend. A chart-less cell still
+        /// reserves nothing and stays compact, so the sparse-data whitespace
+        /// reclaim is unchanged.
+        var reservesPillRow: Bool { self != .none }
+    }
+
+    /// The viz a KPI item resolves to — exposed for the same reason `VizKind`
+    /// is: so the ratio/series band contract is testable without rendering.
+    func resolvedVizKind(for item: MetricPayload.Item) -> VizKind {
+        vizKind(item)
     }
 
     /// Decide the viz for a KPI: a ratio always gauges; a series only draws
@@ -175,21 +220,20 @@ public struct MetricCardView: View {
         return (hi - lo) / denom < 0.02
     }
 
-    /// True when ANY item in the payload draws a trend pill, so the whole grid
-    /// reserves the pill row and cells stay baseline-aligned. When no item has
-    /// a trend (e.g. an all-flat throughput card), the row isn't reserved at
-    /// all — reclaiming ~20pt/cell of dead space.
-    private var showsAnyPill: Bool {
-        payload.items.contains { pillLabel(for: $0) != nil }
-    }
-
-    /// The bottom viz band for the resolved `kind`.
+    /// The bottom viz band for the resolved `kind`. Both instruments fill the
+    /// same band and sit on the same bottom edge, so a ratio cell and a series
+    /// cell in one KPI row read as one instrument row rather than two tiers.
     @ViewBuilder
     private func vizBand(_ item: MetricPayload.Item, kind: VizKind) -> some View {
         switch kind {
         case .gauge:
+            // Bottom-aligned, not centered: `Sparkbars` draws its bars UP from
+            // the band's bottom edge, so a centered gauge floated half a band
+            // above the sparks' baseline and the instrument row read as two
+            // tiers. Sharing the bottom edge puts both instruments on one
+            // baseline within the now-equal band.
             ringGauge(item)
-                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         case .sparkbars:
             sparkline(item)
                 .frame(maxWidth: .infinity)
