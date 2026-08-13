@@ -21,6 +21,7 @@
 |---|---|---|---|
 | pre-commit / pre-push | `scripts/hooks/*` | 本地 git | `--no-verify` 可绕 |
 | CI 构建测试 | `.github/workflows/build.yml` | PR / push main | 否(服务端) |
+| review-gate 测试 | `.github/workflows/build.yml` 的 `review-gate` job + `scripts/ci/tests/` | PR / push main | 否 |
 | 自动 review | `.github/workflows/claude-review.yml` + `scripts/ci/claude-review.sh` | PR | 否 |
 | 自动合并 | `.github/workflows/auto-merge.yml` | PR | — |
 | ruleset(硬门) | `scripts/rulesets/main-protection.json` | main | admin 可 bypass |
@@ -49,6 +50,51 @@ self-hosted runner + `pull_request` + checkout PR head = 公认高危:step 执�
 - 仓库设置已把 **outside collaborators 的 workflow 设为需人工批准**
   (`actions/permissions/fork-pr-contributor-approval = all_external_contributors`)。
 - review prompt 显式声明 diff 为**不可信数据**,防止 PR 内对抗性文本诱导 `verdict=pass`。
+
+## 作用域证据(scope evidence)—— 为什么 review 不只看 diff
+
+**diff 的 hunk 边界不是作用域边界。** hunk 里的一个 `}` 可能是内层闭包的收尾,也可能
+是外层 body 的收尾,光看 hunk 分不出来 —— 于是紧跟其后新增的 `.modifier(...)` 到底挂
+在谁身上,就成了猜。
+
+PR #171 上两道门(claude / codex)因此同时误判:`private var labelLine` 里的
+`.padding(.trailing, trailingInset)` 被说成挂在 `BarListRow.body` 的外层 `VStack` 上,
+各自开出一条高危 blocker,卡住了一个本该通过的 PR(MY-1402)。
+
+现在归属由**可信脚本**先算好再交给模型:
+
+| 组件 | 职责 |
+|---|---|
+| `scripts/ci/swift_scope.py` | 纯词法括号匹配(先抹掉注释与字符串字面量),算出每个 leading-dot modifier 的 receiver 与所在声明 |
+| `scripts/ci/review_context.py` | 从 exact-HEAD 读源码,产出 RECEIVER TABLE + 按声明完整摘录的 SCOPE EXCERPTS |
+| `scripts/ci/review-common.sh` | 两道门共用的调用入口 + 证据纪律 prompt(避免两边漂移) |
+| `scripts/ci/tests/` | pytest;CI 的 `review-gate (pytest)` job 与 pre-push(改到 `scripts/ci/**` 时)都跑 |
+
+要点:
+
+- **安全边界不变**。脚本仍只在 base checkout 里跑;PR 内容只经 `git show <HEAD>:<file>`
+  以 blob 读入,不 checkout、不执行。产出的 evidence 连同 diff 一起放在 prompt 的
+  **不可信数据**围栏内 —— 结构(谁挂在谁身上)是脚本算的,文字内容仍是 PR 作者写的。
+- **算不出就是没有证据**。词法扫描不敢下结论(括号不平衡、超出字节上限)时标为
+  `unresolved`,prompt 明确要求此时最多写 note,**不得**升级为 blocker。
+- **"看起来像 modifier" 的门槛故意抬高**。一个 leading-dot 行必须是**被调用的**
+  (`.padding(8)` / `.frame(` / `.chartXAxis { … }`),且其上一行以**表达式结尾**
+  (`)` `}` `]` 或标识符)才算 modifier。裸成员表达式(`.leading`、`.red`)与实参值
+  (`PointMark(` 下面的 `.value(…)`)一律**整行剔除**,不进表 —— 这类行既不是
+  modifier,给它编一个 receiver 会以 `resolved=True` 的形式变成**假证据**,比噪音更糟。
+  代价是极少数写法(SwiftUI 里几乎不存在的裸属性 modifier)拿不到证据 —— 那是安全的
+  方向:宁可没有证据,不要错的证据。
+- **多行声明头能被正确归属**。`private func kpiCell(\n … \n) -> some View {` 的关键字
+  不在 `{` 那一行;归属靠**括号续行**(`{` 前那个未配对的 `)` 回溯到它的开括号)确定,
+  而不是"看上一行"——后者会把 `let viz = vizKind(item)` 当成 `return VStack {` 的声明。
+
+- **只放宽"归属靠猜"这一类**。分层越界、崩溃、数据破坏、安全问题等有直接 diff 证据的
+  blocker,判定标准不变。
+- **仍然 fail-closed**。分析器自身异常(python3 缺失、崩溃)= 工具异常,与 `git fetch`
+  失败同级,一律 `exit 1` 不放行。
+- 字节上限显式:单文件 400 KB、单摘录 20 KB、整块 120 KB;任何截断都会在文本里写明,
+  免得模型把"被截断"读成"就这么多"。
+
 
 ## ruleset 即代码
 `scripts/rulesets/main-protection.json` 是唯一真相,改后重跑 `scripts/rulesets/apply`
