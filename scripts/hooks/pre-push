@@ -93,20 +93,31 @@ fi
 
 # Review-gate tests — the Swift scope resolver that keeps the automated
 # review gates from raising modifier-attachment blockers off an ambiguous
-# hunk (MY-1402). Only runs when this push touches scripts/ci/**, and only
-# when pytest is available locally (CI enforces it unconditionally).
+# hunk (MY-1402). Only runs when this push touches scripts/ci/**.
+#
+# Picks the first interpreter that actually has pytest: on macOS the system
+# python3 carries it while a Homebrew python3 (PEP 668) usually does not, so
+# probing `python3` alone would silently skip this gate on most dev machines.
 if [ -n "$gate_base" ] && [ -n "$gate_head" ]; then
     if git diff --name-only "$gate_base..$gate_head" | grep -q '^scripts/ci/'; then
-        if python3 -c "import pytest" >/dev/null 2>&1; then
-            echo "[pre-push] pytest (scripts/ci review gate)..."
-            if ! (cd "$REPO_ROOT/scripts/ci" && python3 -m pytest tests/ -q) \
+        review_py=""
+        for candidate in python3 /usr/bin/python3; do
+            if command -v "$candidate" >/dev/null 2>&1 \
+                    && "$candidate" -c "import pytest" >/dev/null 2>&1; then
+                review_py="$candidate"
+                break
+            fi
+        done
+        if [ -n "$review_py" ]; then
+            echo "[pre-push] pytest (scripts/ci review gate, $review_py)..."
+            if ! (cd "$REPO_ROOT/scripts/ci" && "$review_py" -m pytest tests/ -q) \
                     > /tmp/aidash-pre-push-review-gate.log 2>&1; then
                 echo "[pre-push] FAILED: review-gate pytest"
                 tail -40 /tmp/aidash-pre-push-review-gate.log
                 exit 1
             fi
         else
-            echo "[pre-push] WARNING: pytest not installed; skipping review-gate tests (CI enforces them)."
+            echo "[pre-push] WARNING: no python3 with pytest; skipping review-gate tests (CI enforces them)."
         fi
     fi
 fi

@@ -43,9 +43,34 @@ _DECL_RE = re.compile(
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*")
 
+# Keywords that can precede the construct a modifier applies to. Reporting
+# `return` as the receiver of `.chartXAxis { … }` is useless to a reviewer;
+# reporting `Chart` is the point.
+_LEADING_KEYWORDS = frozenset({"return", "try", "await", "let", "var", "case"})
+
 # `.padding(...)`, `.font(x)`, `.accessibilityHidden(true)` — a leading-dot
 # member access is how every SwiftUI modifier is written.
 _MODIFIER_RE = re.compile(r"^\.([A-Za-z_][A-Za-z0-9_]*)")
+
+# A leading dot also introduces an element of a collection literal
+# (`.init(label: "a", value: 1),`) and enum-case shorthand in an argument list.
+# Those are not modifiers and resolving a "receiver" for them is meaningless
+# noise, so they are filtered out before anything else runs.
+_COLLECTION_ELEMENT_RE = re.compile(r",\s*$")
+_NON_MODIFIER_MEMBERS = frozenset({"init"})
+
+
+def is_modifier_line(text: str) -> bool:
+    """Whether `text` reads as a view-modifier line worth resolving."""
+    stripped = text.strip()
+    match = _MODIFIER_RE.match(stripped)
+    if not match:
+        return False
+    if match.group(1) in _NON_MODIFIER_MEMBERS:
+        return False
+    # A trailing comma means this is one element among several, not a modifier
+    # applied to the line above it.
+    return not _COLLECTION_ELEMENT_RE.search(stripped)
 
 # Walking a receiver chain is bounded: a pathological file must not hang CI.
 _MAX_WALK_STEPS = 500
@@ -68,12 +93,13 @@ class Attachment(NamedTuple):
 
 
 def blank_source(lines: Sequence[str]) -> Tuple[str, ...]:
-    """Return `lines` with comments and string literals replaced by spaces.
+    '''Return `lines` with comments and string literals replaced by spaces.
 
     Column positions are preserved (same length per line) so brace matching can
-    report exact coordinates back into the original text. Handles `//`, nested
-    `/* */`, `"…"` with escapes, and `"""…"""`.
-    """
+    report exact coordinates back into the original text. Handles line comments,
+    nested block comments, double-quoted strings with escapes, and Swift's
+    triple-quoted multiline string literals.
+    '''
     out: list[str] = []
     block_depth = 0
     in_multiline_string = False
@@ -202,8 +228,18 @@ def _previous_code_line(blanked: Sequence[str], index: int) -> Optional[int]:
 
 
 def _leading_expression(text: str) -> str:
-    """The construct a line introduces: `HStack(spacing: s8) {` → `HStack`."""
+    """The construct a line introduces: `HStack(spacing: s8) {` → `HStack`.
+
+    Leading keywords are stripped so `return Chart { … }` reports `Chart` — the
+    thing the modifier actually applies to — rather than `return`.
+    """
     stripped = text.strip()
+    for _ in range(4):
+        match = _IDENT_RE.match(stripped)
+        if match and match.group(0) in _LEADING_KEYWORDS:
+            stripped = stripped[match.end():].lstrip()
+            continue
+        break
     match = _IDENT_RE.match(stripped)
     if match:
         return match.group(0)
@@ -275,7 +311,7 @@ def modifier_attachment(
         line=index + 1, modifier=text, receiver="", receiver_line=0,
         declaration="", declaration_line=0, resolved=False,
     )
-    if not _MODIFIER_RE.match(text):
+    if not is_modifier_line(text):
         return unresolved
 
     receiver = _receiver_line(blanked, index)
@@ -348,7 +384,7 @@ def attachments_for_lines(
         index = number - 1
         if index < 0 or index >= len(raw):
             continue
-        if not _MODIFIER_RE.match(raw[index].strip()):
+        if not is_modifier_line(raw[index]):
             continue
         if not trustworthy:
             results.append(

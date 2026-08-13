@@ -24,6 +24,7 @@ from swift_scope import (  # noqa: E402
     blank_source,
     declaration_slice,
     is_balanced,
+    is_modifier_line,
 )
 
 # The PR #171 shape, reduced to its essentials: an outer `body` VStack, an
@@ -255,6 +256,51 @@ struct Row: View {
 def test_non_modifier_lines_are_not_reported():
     found = attachments_for_lines(PR171_SOURCE, [7, 8, 9])
     assert found == ()
+
+
+def test_collection_literal_elements_are_not_treated_as_modifiers():
+    """`.init(...),` inside an array literal is an element, not a modifier.
+
+    Resolving a "receiver" for these produced pure noise in the evidence table
+    — and noise is what makes a reviewer stop reading the evidence.
+    """
+    source = '''\
+#Preview("bar list") {
+    BarListCardView(
+        payload: BarListPayload(items: [
+            .init(label: "runtime-offline", value: 39, semantic: "warning"),
+            .init(label: "codex-init-fail", value: 21),
+        ])
+    )
+}
+'''
+    assert attachments_for_lines(source, [4, 5]) == ()
+    assert not is_modifier_line('        .init(label: "a", value: 1),')
+    # A genuine modifier with no trailing comma still resolves.
+    assert is_modifier_line("        .padding(.trailing, trailingInset)")
+
+
+def test_enum_case_shorthand_in_an_argument_list_is_not_a_modifier():
+    assert not is_modifier_line("            .leading,")
+    assert not is_modifier_line("    .init(a: 1),")
+
+
+def test_receiver_skips_leading_keywords():
+    """`return Chart { … }` reports `Chart`, not `return`."""
+    source = '''\
+struct ScatterChart: View {
+    private var scatterChart: some View {
+        return Chart(points) { point in
+            PointMark(x: .value("x", point.x), y: .value("y", point.y))
+        }
+        .chartLegend(.visible)
+    }
+}
+'''
+    item = _only(source, 6)
+    assert item.resolved
+    assert item.receiver == "Chart"
+    assert item.declaration == "private var scatterChart"
 
 
 def test_out_of_range_lines_are_ignored():

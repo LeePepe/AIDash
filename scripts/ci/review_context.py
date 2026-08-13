@@ -51,14 +51,17 @@ from typing import NamedTuple, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from swift_scope import attachments_for_lines, declaration_slice  # noqa: E402
+from swift_scope import (  # noqa: E402
+    attachments_for_lines,
+    declaration_slice,
+    is_modifier_line,
+)
 
 DEFAULT_MAX_FILE_BYTES = 400_000
 DEFAULT_MAX_EXCERPT_BYTES = 20_000
 DEFAULT_MAX_TOTAL_BYTES = 120_000
 
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-_MODIFIER_RE = re.compile(r"^\.[A-Za-z_]")
 
 
 class FileEvidence(NamedTuple):
@@ -200,7 +203,7 @@ def _is_modifier_line(source: str, number: int) -> bool:
     index = number - 1
     if index < 0 or index >= len(raw):
         return False
-    return bool(_MODIFIER_RE.match(raw[index].strip()))
+    return is_modifier_line(raw[index])
 
 
 def render(evidence: Sequence[FileEvidence], max_total_bytes: int) -> str:
