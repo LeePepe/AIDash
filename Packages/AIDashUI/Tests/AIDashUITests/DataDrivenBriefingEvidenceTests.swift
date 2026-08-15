@@ -3,6 +3,9 @@ import SwiftUI
 import Foundation
 import AIDashCore
 import DesignKit
+#if canImport(AppKit)
+import AppKit
+#endif
 @testable import AIDashUI
 
 // Stage-3 integration evidence (MY-1396).
