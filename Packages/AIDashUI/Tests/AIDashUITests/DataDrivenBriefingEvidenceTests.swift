@@ -8,7 +8,8 @@ import AppKit
 #endif
 @testable import AIDashUI
 
-// Stage-3 integration evidence (MY-1396).
+// Stage-3 integration evidence (MY-1396), regenerated after the final
+// DesignKit and AIDashUI visual repairs (MY-1413 and MY-1414).
 //
 // Renders ONE shaped-data briefing — small metrics + a medium ranking + a wide
 // relationship — through the production render path (ContainerView → CardRouter
