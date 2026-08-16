@@ -23,4 +23,12 @@ struct CockpitVizComponentTests {
         _ = SegmentedGauge(value: 0.87)
         _ = SegmentedGauge(value: 1.4, segments: 20)
     }
+
+    @Test("SegmentedGauge preserves its default height and scales segments")
+    func segmentedGaugeHeight() {
+        #expect(SegmentedGauge.defaultHeight == 30)
+        #expect(SegmentedGauge.litHeight(for: 52) == 52)
+        #expect(SegmentedGauge.unlitHeight(for: 52) == CGFloat(52) * 14 / 22)
+        _ = SegmentedGauge(value: 0.5, height: 52)
+    }
 }

@@ -177,16 +177,29 @@ public struct Sparkbars: View {
 /// capacity gauge, denser and more legible at small sizes than a ring.
 /// Mirrors the cockpit prototype's segmented coverage bar.
 public struct SegmentedGauge: View {
+    static let defaultHeight: CGFloat = 30
+
     @Environment(\.theme) private var theme
     private let value: Double
     private let segments: Int
     private let color: Color?
+    private let height: CGFloat
 
-    public init(value: Double, segments: Int = 20, color: Color? = nil) {
+    public init(
+        value: Double,
+        segments: Int = 20,
+        color: Color? = nil,
+        height: CGFloat = 30
+    ) {
         self.value = value
         self.segments = segments
         self.color = color
+        self.height = height
     }
+
+    static func litHeight(for height: CGFloat) -> CGFloat { height }
+
+    static func unlitHeight(for height: CGFloat) -> CGFloat { height * 14 / 22 }
 
     public var body: some View {
         let clamped = min(1, max(0, value))
@@ -196,10 +209,10 @@ public struct SegmentedGauge: View {
             ForEach(0..<segments, id: \.self) { i in
                 RoundedRectangle(cornerRadius: 1, style: .continuous)
                     .fill(i < filled ? lit : theme.neutrals.border)
-                    .frame(height: i < filled ? 22 : 14)
+                    .frame(height: i < filled ? Self.litHeight(for: height) : Self.unlitHeight(for: height))
             }
         }
-        .frame(height: 30, alignment: .center)
+        .frame(height: height, alignment: .center)
     }
 }
 
