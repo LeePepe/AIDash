@@ -64,19 +64,19 @@ public struct BarListCardView: View {
                 .padding(.trailing, AIDashSpacing.cardAffordanceGutter)
         }
         let normalized = Self.fractions(for: visible)
+        let valueColumnTrailingInsets = Self.valueColumnTrailingInsets(
+            itemCount: visible.count,
+            hasHeader: payload.headerTitle != nil
+        )
         ForEach(Array(visible.enumerated()), id: \.offset) { index, item in
             BarListRow(
                 item: item,
                 fraction: normalized[index],
                 anySemantic: anySemantic,
-                // Without a header band the FIRST row is the card's top band,
-                // and its trailing value read-out sits exactly where the star
-                // floats. That row reserves the gutter so the two can never
-                // collide — the same reservation the header makes, applied to
-                // whatever content actually occupies the top band.
-                trailingInset: (payload.headerTitle == nil && index == 0)
-                    ? AIDashSpacing.cardAffordanceGutter
-                    : 0
+                // Untitled rankings keep one shared trailing value column.
+                // Reserving the star gutter on every row prevents the first
+                // value from drifting left of the values below it.
+                trailingInset: valueColumnTrailingInsets[index]
             )
         }
         if payload.items.count > rowCap {
@@ -105,6 +105,11 @@ public struct BarListCardView: View {
         let maxValue = max(items.map(\.value).max() ?? 0, 0)
         guard maxValue > 0 else { return Array(repeating: 0, count: items.count) }
         return items.map { max(0, min(1, $0.value / maxValue)) }
+    }
+
+    static func valueColumnTrailingInsets(itemCount: Int, hasHeader: Bool) -> [CGFloat] {
+        let inset: CGFloat = hasHeader ? 0 : AIDashSpacing.cardAffordanceGutter
+        return Array(repeating: inset, count: max(0, itemCount))
     }
 
     /// Whether any row is flagged — switches the card into "one hot row"
@@ -161,8 +166,8 @@ private struct BarListRow: View {
     let fraction: Double
     let anySemantic: Bool
     /// Trailing space this row keeps clear for the card-level star affordance.
-    /// Non-zero only for the row that occupies the card's TOP band; every other
-    /// row uses the full width.
+    /// Untitled rankings apply the same non-zero inset to every row so values
+    /// share one column; titled rankings reserve the gutter in their header.
     let trailingInset: CGFloat
 
     var body: some View {

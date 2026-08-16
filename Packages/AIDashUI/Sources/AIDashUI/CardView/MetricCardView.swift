@@ -303,8 +303,16 @@ public struct MetricCardView: View {
     @ViewBuilder
     private func ringGauge(_ item: MetricPayload.Item) -> some View {
         if let ratio = item.ratio {
-            SegmentedGauge(value: ratio, color: ratioColor(item))
+            SegmentedGauge(
+                value: ratio,
+                color: ratioColor(item),
+                height: segmentedGaugeHeight(for: item)
+            )
         }
+    }
+
+    func segmentedGaugeHeight(for item: MetricPayload.Item) -> CGFloat {
+        resolvedVizKind(for: item).height
     }
 
     /// Ring color: use good/bad semantics when declared; a plain ratio with no
