@@ -197,9 +197,9 @@ public struct SegmentedGauge: View {
         self.height = height
     }
 
-    static func litHeight(for height: CGFloat) -> CGFloat { height }
+    static func litHeight(for height: CGFloat) -> CGFloat { height * 22 / 30 }
 
-    static func unlitHeight(for height: CGFloat) -> CGFloat { height * 14 / 22 }
+    static func unlitHeight(for height: CGFloat) -> CGFloat { height * 14 / 30 }
 
     public var body: some View {
         let clamped = min(1, max(0, value))
