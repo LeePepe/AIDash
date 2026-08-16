@@ -74,13 +74,21 @@ struct RankingKPIPresentationTests {
         _ = Self.barList(titled: false).body
     }
 
-    @Test("an untitled bar-list reserves the gutter on the first row instead — the star's band is never unreserved")
-    func untitledBarListReservesGutterOnFirstRow() throws {
-        let source = try DesignTokensComplianceTests.rendererSource(for: .barList)
-        #expect(source.contains("trailingInset"),
-                "the row must accept a trailing inset so the TOP row can clear the star")
-        #expect(source.contains("payload.headerTitle == nil && index == 0"),
-                "exactly the first row of an untitled ranking reserves the gutter — the case that collided")
+    @Test("an untitled bar-list reserves one shared value-column gutter on every row")
+    func untitledBarListKeepsEveryValueInOneColumn() {
+        let untitled = BarListCardView.valueColumnTrailingInsets(
+            itemCount: 3,
+            hasHeader: false
+        )
+        #expect(untitled == Array(repeating: AIDashSpacing.cardAffordanceGutter, count: 3),
+                "all three rows must share the same star-safe value column")
+
+        let titled = BarListCardView.valueColumnTrailingInsets(
+            itemCount: 3,
+            hasHeader: true
+        )
+        #expect(titled == Array(repeating: 0, count: 3),
+                "the header owns the star gutter, so every row remains flush")
     }
 
     @Test("the gutter is reserved on the label line only — the bar keeps its full comparative width")
@@ -193,6 +201,16 @@ struct RankingKPIPresentationTests {
         let flat = MetricPayload.Item(label: "开 PR", value: 1, trend: .flat, series: [2, 2, 2])
         #expect(card.resolvedVizKind(for: flat) == .none)
         #expect(card.resolvedVizKind(for: flat).height == 0)
+    }
+
+    @Test("the ratio gauge consumes the complete visualization band height")
+    func ratioGaugeConsumesVisualizationBandHeight() {
+        let card = Self.kpiCard(items: [.init(label: "Coverage", value: 87, ratio: 0.87)])
+        let ratio = MetricPayload.Item(label: "缓存命中率", value: 63, unit: "%", ratio: 0.63)
+        #expect(card.segmentedGaugeHeight(for: ratio) == card.resolvedVizKind(for: ratio).height)
+        #expect(card.segmentedGaugeHeight(for: ratio) == 52,
+                "the SegmentedGauge configuration must consume the full KPI visualization band")
+        _ = card.body
     }
 
     @Test("both instruments sit on the band's bottom edge so the KPI row reads as one baseline")
