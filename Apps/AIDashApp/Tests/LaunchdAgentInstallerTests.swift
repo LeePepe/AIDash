@@ -1,6 +1,7 @@
 #if os(macOS)
 import Testing
 import Foundation
+import Synchronization
 #if AIDASHAPP_LOGIC_TESTS
 @testable import AIDashAppLogic
 #else
@@ -484,47 +485,82 @@ struct LaunchdAgentInstallerTests {
 
     // MARK: - Pipe capacity regression (deadlock prevention)
 
-    @Test("large stdout+stderr beyond pipe capacity completes without deadlock")
-    func largePipeOutputCompletesWithoutDeadlock() {
-        // Simulate launchctl producing >64 KB on both stdout and stderr.
-        // The injected seam returns the large strings directly — this proves
-        // that the LaunchctlResult can carry large payloads and that the
-        // registerIfNeeded flow handles them without hanging.
-        let largeOutput = String(repeating: "x", count: 80_000) // >64 KB
-        let largeStderr = String(repeating: "e", count: 80_000)
-        let sut = LaunchdAgentInstaller(
-            execPath: { "/a/AIDash" },
-            plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
-            installedExec: { _ in nil },
-            writePlist: { _, _ in },
-            launchctl: { args in
-                if args.first == "print" {
-                    // Known absence — proceeds to install.
-                    return Self.failResult(args: args, status: 113, stderr: "Could not find service")
-                }
-                if args.first == "bootstrap" {
-                    // Simulate a failure with large output on both streams.
-                    return LaunchdAgentInstaller.LaunchctlResult(
-                        arguments: args,
-                        terminationStatus: 5,
-                        stdout: largeOutput,
-                        stderr: largeStderr,
-                        launchError: nil
-                    )
-                }
-                return Self.successResult(args: args)
-            }
-        )
-        let outcome = sut.registerIfNeeded()
-        // The test completing at all proves no deadlock.
-        #expect(outcome.isHealthy == false)
-        if case .failed(let reason) = outcome {
-            // diagnosticSummary trims, so it won't contain 80K chars,
-            // but it should contain the exit code.
-            #expect(reason.contains("exit 5"))
-        } else {
-            Issue.record("expected .failed, got \(outcome)")
+    @Test("real Process/Pipe drain: >64 KB on both streams completes and caps output")
+    func realProcessPipeDrainCompletesWithCapping() throws {
+        // Launch a real /bin/sh process that writes >64 KB to BOTH stdout and
+        // stderr simultaneously, exercising the production Process/Pipe/readCapped
+        // path without touching launchctl or ~/Library/LaunchAgents.
+        //
+        // The test proves:
+        // 1. No deadlock — the test completes (if drain-before-wait were broken,
+        //    the 80 KB output would fill the pipe buffer and block the child).
+        // 2. Capping works — output beyond maxPipeCapture is drained but discarded.
+        // 3. Truncation indicator is appended.
+        let byteCount = 80_000 // > 64 KB pipe buffer capacity
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // Write byteCount bytes of 'A' to stdout and 'B' to stderr.
+        proc.arguments = ["-c", """
+            /usr/bin/head -c \(byteCount) /dev/zero | /usr/bin/tr '\\0' 'A'
+            /usr/bin/head -c \(byteCount) /dev/zero | /usr/bin/tr '\\0' 'B' >&2
+            """]
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        proc.standardOutput = stdoutPipe
+        proc.standardError = stderrPipe
+
+        try proc.run()
+
+        let cap = LaunchdAgentInstaller.maxPipeCapture
+        // Drain concurrently with capping — mirrors the production runLaunchctl path.
+        let stdoutBox = Mutex(LaunchdAgentInstaller.CappedRead(text: "", truncated: false))
+        let stderrBox = Mutex(LaunchdAgentInstaller.CappedRead(text: "", truncated: false))
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            let (text, trunc) = LaunchdAgentInstaller.readCapped(
+                from: stdoutPipe.fileHandleForReading, limit: cap)
+            stdoutBox.withLock { $0 = .init(text: text, truncated: trunc) }
+            group.leave()
         }
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            let (text, trunc) = LaunchdAgentInstaller.readCapped(
+                from: stderrPipe.fileHandleForReading, limit: cap)
+            stderrBox.withLock { $0 = .init(text: text, truncated: trunc) }
+            group.leave()
+        }
+        group.wait()
+        proc.waitUntilExit()
+
+        let stdoutResult = stdoutBox.withLock { $0 }
+        let stderrResult = stderrBox.withLock { $0 }
+        // Process exited cleanly — no deadlock.
+        #expect(proc.terminationStatus == 0)
+        // stdout was capped.
+        #expect(stdoutResult.text.count == cap)
+        #expect(stdoutResult.truncated == true)
+        #expect(stdoutResult.text.allSatisfy { $0 == "A" })
+        // stderr was capped.
+        #expect(stderrResult.text.count == cap)
+        #expect(stderrResult.truncated == true)
+        #expect(stderrResult.text.allSatisfy { $0 == "B" })
+    }
+
+    @Test("readCapped: small output is not truncated")
+    func readCappedSmallOutput() throws {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.arguments = ["-c", "echo hello"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        try proc.run()
+        let (text, truncated) = LaunchdAgentInstaller.readCapped(
+            from: pipe.fileHandleForReading, limit: 65_536)
+        proc.waitUntilExit()
+        #expect(text.trimmingCharacters(in: .whitespacesAndNewlines) == "hello")
+        #expect(truncated == false)
     }
 
     // MARK: - plist authoring

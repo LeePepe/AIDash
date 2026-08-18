@@ -2,6 +2,7 @@
 import Foundation
 import AIDashCore
 import os
+import Synchronization
 
 /// Installs the app's XPC LaunchAgent that vends the `<bundle id>.xpc.v1`
 /// mach service — using a **plain `launchctl bootstrap` of a hand-written plist**
@@ -276,6 +277,10 @@ public final class LaunchdAgentInstaller {
         return plist["Program"] as? String
     }
 
+    /// Maximum bytes to capture per pipe stream. launchctl diagnostics are
+    /// short; 64 KB is generous. Beyond this we truncate and append an indicator.
+    static let maxPipeCapture = 65_536
+
     static func runLaunchctl(_ args: [String]) -> LaunchctlResult {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -290,28 +295,33 @@ public final class LaunchdAgentInstaller {
             try proc.run()
             // Drain both pipes concurrently BEFORE waitUntilExit to avoid
             // deadlock when either pipe's buffer fills (pipe capacity ~64 KB).
-            // The child blocks in write() if the buffer is full; waiting for
-            // exit first would hang indefinitely.
-            var stdoutData = Data()
-            var stderrData = Data()
+            // Each reader is capped to `maxPipeCapture` bytes; excess is
+            // drained (to let the child exit) but discarded with a truncation
+            // indicator appended to the captured portion.
+            let stdoutBox = Mutex(CappedRead(text: "", truncated: false))
+            let stderrBox = Mutex(CappedRead(text: "", truncated: false))
             let group = DispatchGroup()
             group.enter()
             DispatchQueue.global(qos: .utility).async {
-                stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let (text, trunc) = readCapped(from: stdoutPipe.fileHandleForReading, limit: maxPipeCapture)
+                stdoutBox.withLock { $0 = CappedRead(text: text, truncated: trunc) }
                 group.leave()
             }
             group.enter()
             DispatchQueue.global(qos: .utility).async {
-                stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let (text, trunc) = readCapped(from: stderrPipe.fileHandleForReading, limit: maxPipeCapture)
+                stderrBox.withLock { $0 = CappedRead(text: text, truncated: trunc) }
                 group.leave()
             }
             group.wait()
             proc.waitUntilExit()
+            let stdoutCap = stdoutBox.withLock { $0 }
+            let stderrCap = stderrBox.withLock { $0 }
             return LaunchctlResult(
                 arguments: args,
                 terminationStatus: proc.terminationStatus,
-                stdout: String(data: stdoutData, encoding: .utf8) ?? "",
-                stderr: String(data: stderrData, encoding: .utf8) ?? "",
+                stdout: stdoutCap.truncated ? stdoutCap.text + "\n[truncated at \(maxPipeCapture) bytes]" : stdoutCap.text,
+                stderr: stderrCap.truncated ? stderrCap.text + "\n[truncated at \(maxPipeCapture) bytes]" : stderrCap.text,
                 launchError: nil
             )
         } catch {
@@ -323,6 +333,33 @@ public final class LaunchdAgentInstaller {
                 launchError: error.localizedDescription
             )
         }
+    }
+
+    /// Value type for thread-safe capture of capped pipe output via `Mutex`.
+    struct CappedRead: Sendable {
+        let text: String
+        let truncated: Bool
+    }
+
+    /// Reads up to `limit` bytes from `handle`, then drains any remainder so
+    /// the writing process can exit. Returns the captured string and whether
+    /// the output was truncated.
+    static func readCapped(from handle: FileHandle, limit: Int) -> (String, Bool) {
+        var captured = Data()
+        var truncated = false
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty { break } // EOF
+            let remaining = limit - captured.count
+            if remaining > 0 {
+                captured.append(chunk.prefix(remaining))
+            }
+            if captured.count >= limit {
+                truncated = true
+            }
+        }
+        let str = String(data: captured, encoding: .utf8) ?? ""
+        return (str, truncated)
     }
 }
 #endif
