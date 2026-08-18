@@ -368,9 +368,14 @@ public final class LaunchdAgentInstaller {
             if chunk.isEmpty { break } // EOF
             let remaining = limit - captured.count
             if remaining > 0 {
-                captured.append(chunk.prefix(remaining))
-            }
-            if captured.count >= limit {
+                let toAppend = chunk.prefix(remaining)
+                captured.append(toAppend)
+                // Truncated only when we actually discarded bytes from this chunk.
+                if toAppend.count < chunk.count {
+                    truncated = true
+                }
+            } else {
+                // We're past the limit — every byte in this chunk is discarded.
                 truncated = true
             }
         }

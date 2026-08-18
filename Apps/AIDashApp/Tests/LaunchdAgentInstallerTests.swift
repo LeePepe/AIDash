@@ -533,6 +533,23 @@ struct LaunchdAgentInstallerTests {
         #expect(!result.stdout.contains("[truncated"))
     }
 
+    @Test("production runProcess: exact-limit output is NOT marked truncated")
+    func productionRunProcessExactLimit() throws {
+        // Write exactly `cap` bytes — no byte is discarded, so truncated must be false
+        // and no "[truncated ...]" marker should appear.
+        let cap = 100
+        let result = LaunchdAgentInstaller.runProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "/usr/bin/head -c \(cap) /dev/zero | /usr/bin/tr '\\0' 'X'"],
+            capLimit: cap
+        )
+        #expect(result.terminationStatus == 0)
+        #expect(!result.stdout.contains("[truncated"))
+        let body = result.stdout
+        #expect(body.count == cap)
+        #expect(body.allSatisfy { $0 == "X" })
+    }
+
     // MARK: - UTF-8 boundary regression (lossy truncation)
 
     @Test("readCapped preserves valid prefix when cap splits a multibyte scalar")
