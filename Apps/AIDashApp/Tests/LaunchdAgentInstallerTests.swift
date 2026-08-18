@@ -1,7 +1,6 @@
 #if os(macOS)
 import Testing
 import Foundation
-import Synchronization
 #if AIDASHAPP_LOGIC_TESTS
 @testable import AIDashAppLogic
 #else
@@ -485,81 +484,94 @@ struct LaunchdAgentInstallerTests {
 
     // MARK: - Pipe capacity regression (deadlock prevention)
 
-    @Test("real Process/Pipe drain: >64 KB on both streams completes and caps output")
-    func realProcessPipeDrainCompletesWithCapping() throws {
-        // Launch a real /bin/sh process that writes >64 KB to BOTH stdout and
-        // stderr simultaneously, exercising the production Process/Pipe/readCapped
-        // path without touching launchctl or ~/Library/LaunchAgents.
-        //
-        // The test proves:
-        // 1. No deadlock — the test completes (if drain-before-wait were broken,
-        //    the 80 KB output would fill the pipe buffer and block the child).
-        // 2. Capping works — output beyond maxPipeCapture is drained but discarded.
+    @Test("production runProcess: >64 KB on both streams completes and caps output")
+    func productionRunProcessCompletesWithCapping() throws {
+        // Exercises the PRODUCTION `runProcess` orchestration (the same code path
+        // that `runLaunchctl` uses) with a harmless /bin/sh helper that writes
+        // more than pipe capacity to both stdout and stderr. Proves:
+        // 1. No deadlock — the production drain-before-wait ordering works.
+        // 2. Capping works — output beyond the limit is drained but discarded.
         // 3. Truncation indicator is appended.
+        //
+        // If `runProcess` were regressed to `waitUntilExit()` before drain,
+        // this test would hang (deadlock), proving it is a true regression guard.
         let byteCount = 80_000 // > 64 KB pipe buffer capacity
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // Write byteCount bytes of 'A' to stdout and 'B' to stderr.
-        proc.arguments = ["-c", """
-            /usr/bin/head -c \(byteCount) /dev/zero | /usr/bin/tr '\\0' 'A'
-            /usr/bin/head -c \(byteCount) /dev/zero | /usr/bin/tr '\\0' 'B' >&2
-            """]
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        proc.standardOutput = stdoutPipe
-        proc.standardError = stderrPipe
-
-        try proc.run()
-
         let cap = LaunchdAgentInstaller.maxPipeCapture
-        // Drain concurrently with capping — mirrors the production runLaunchctl path.
-        let stdoutBox = Mutex(LaunchdAgentInstaller.CappedRead(text: "", truncated: false))
-        let stderrBox = Mutex(LaunchdAgentInstaller.CappedRead(text: "", truncated: false))
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            let (text, trunc) = LaunchdAgentInstaller.readCapped(
-                from: stdoutPipe.fileHandleForReading, limit: cap)
-            stdoutBox.withLock { $0 = .init(text: text, truncated: trunc) }
-            group.leave()
-        }
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            let (text, trunc) = LaunchdAgentInstaller.readCapped(
-                from: stderrPipe.fileHandleForReading, limit: cap)
-            stderrBox.withLock { $0 = .init(text: text, truncated: trunc) }
-            group.leave()
-        }
-        group.wait()
-        proc.waitUntilExit()
+        let result = LaunchdAgentInstaller.runProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", """
+                /usr/bin/head -c \(byteCount) /dev/zero | /usr/bin/tr '\\0' 'A'
+                /usr/bin/head -c \(byteCount) /dev/zero | /usr/bin/tr '\\0' 'B' >&2
+                """],
+            capLimit: cap
+        )
 
-        let stdoutResult = stdoutBox.withLock { $0 }
-        let stderrResult = stderrBox.withLock { $0 }
         // Process exited cleanly — no deadlock.
-        #expect(proc.terminationStatus == 0)
-        // stdout was capped.
-        #expect(stdoutResult.text.count == cap)
-        #expect(stdoutResult.truncated == true)
-        #expect(stdoutResult.text.allSatisfy { $0 == "A" })
-        // stderr was capped.
-        #expect(stderrResult.text.count == cap)
-        #expect(stderrResult.truncated == true)
-        #expect(stderrResult.text.allSatisfy { $0 == "B" })
+        #expect(result.terminationStatus == 0)
+        #expect(result.launchError == nil)
+        // stdout was capped and contains truncation indicator.
+        #expect(result.stdout.contains("[truncated at \(cap) bytes]"))
+        let stdoutBody = result.stdout.components(separatedBy: "\n[truncated").first ?? ""
+        #expect(stdoutBody.count == cap)
+        #expect(stdoutBody.allSatisfy { $0 == "A" })
+        // stderr was capped and contains truncation indicator.
+        #expect(result.stderr.contains("[truncated at \(cap) bytes]"))
+        let stderrBody = result.stderr.components(separatedBy: "\n[truncated").first ?? ""
+        #expect(stderrBody.count == cap)
+        #expect(stderrBody.allSatisfy { $0 == "B" })
     }
 
-    @Test("readCapped: small output is not truncated")
-    func readCappedSmallOutput() throws {
+    @Test("production runProcess: small output is not truncated")
+    func productionRunProcessSmallOutput() throws {
+        let result = LaunchdAgentInstaller.runProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "echo hello"],
+            capLimit: 65_536
+        )
+        #expect(result.terminationStatus == 0)
+        #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "hello")
+        #expect(!result.stdout.contains("[truncated"))
+    }
+
+    // MARK: - UTF-8 boundary regression (lossy truncation)
+
+    @Test("readCapped preserves valid prefix when cap splits a multibyte scalar")
+    func readCappedPreservesUTF8Prefix() throws {
+        // Write ASCII prefix + a 3-byte UTF-8 character (e.g. "é" U+00E9 is 2 bytes,
+        // but let's use "€" U+20AC which is 3 bytes: E2 82 AC). Set the cap so it
+        // lands in the middle of the 3-byte sequence.
+        // "AAAA€" = 4 bytes of 'A' + 3 bytes of '€' = 7 bytes total.
+        // Cap at 6 bytes → captures 4 A's + first 2 bytes of € (E2 82).
+        // The incomplete trailing scalar should be trimmed, preserving "AAAA".
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-        proc.arguments = ["-c", "echo hello"]
+        proc.arguments = ["-c", "printf 'AAAA\\xe2\\x82\\xac'"]  // "AAAA€"
         let pipe = Pipe()
         proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
         try proc.run()
         let (text, truncated) = LaunchdAgentInstaller.readCapped(
-            from: pipe.fileHandleForReading, limit: 65_536)
+            from: pipe.fileHandleForReading, limit: 6)
         proc.waitUntilExit()
-        #expect(text.trimmingCharacters(in: .whitespacesAndNewlines) == "hello")
+        // The valid prefix "AAAA" is preserved (4 chars); the split € is trimmed.
+        #expect(text == "AAAA")
+        #expect(truncated == true)
+    }
+
+    @Test("readCapped: full multibyte characters within cap are preserved")
+    func readCappedFullMultibytePreserved() throws {
+        // "AAAA€" = 7 bytes. Cap at 7 → full content, no truncation.
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.arguments = ["-c", "printf 'AAAA\\xe2\\x82\\xac'"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        try proc.run()
+        let (text, truncated) = LaunchdAgentInstaller.readCapped(
+            from: pipe.fileHandleForReading, limit: 7)
+        proc.waitUntilExit()
+        #expect(text == "AAAA€")
         #expect(truncated == false)
     }
 

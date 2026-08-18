@@ -282,9 +282,24 @@ public final class LaunchdAgentInstaller {
     static let maxPipeCapture = 65_536
 
     static func runLaunchctl(_ args: [String]) -> LaunchctlResult {
+        runProcess(
+            executable: URL(fileURLWithPath: "/bin/launchctl"),
+            arguments: args,
+            capLimit: maxPipeCapture
+        )
+    }
+
+    /// Production Process/Pipe orchestration: launches `executable` with `arguments`,
+    /// drains both stdout and stderr concurrently (capped at `capLimit` bytes each)
+    /// before calling `waitUntilExit()`, and returns a `LaunchctlResult`.
+    ///
+    /// This is the single implementation of the drain-before-wait pattern. Tests
+    /// exercise this exact path with a harmless helper executable instead of
+    /// independently recreating the orchestration.
+    static func runProcess(executable: URL, arguments: [String], capLimit: Int) -> LaunchctlResult {
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        proc.arguments = args
+        proc.executableURL = executable
+        proc.arguments = arguments
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -295,21 +310,20 @@ public final class LaunchdAgentInstaller {
             try proc.run()
             // Drain both pipes concurrently BEFORE waitUntilExit to avoid
             // deadlock when either pipe's buffer fills (pipe capacity ~64 KB).
-            // Each reader is capped to `maxPipeCapture` bytes; excess is
-            // drained (to let the child exit) but discarded with a truncation
-            // indicator appended to the captured portion.
+            // Each reader is capped to `capLimit` bytes; excess is drained
+            // (to let the child exit) but discarded.
             let stdoutBox = Mutex(CappedRead(text: "", truncated: false))
             let stderrBox = Mutex(CappedRead(text: "", truncated: false))
             let group = DispatchGroup()
             group.enter()
             DispatchQueue.global(qos: .utility).async {
-                let (text, trunc) = readCapped(from: stdoutPipe.fileHandleForReading, limit: maxPipeCapture)
+                let (text, trunc) = readCapped(from: stdoutPipe.fileHandleForReading, limit: capLimit)
                 stdoutBox.withLock { $0 = CappedRead(text: text, truncated: trunc) }
                 group.leave()
             }
             group.enter()
             DispatchQueue.global(qos: .utility).async {
-                let (text, trunc) = readCapped(from: stderrPipe.fileHandleForReading, limit: maxPipeCapture)
+                let (text, trunc) = readCapped(from: stderrPipe.fileHandleForReading, limit: capLimit)
                 stderrBox.withLock { $0 = CappedRead(text: text, truncated: trunc) }
                 group.leave()
             }
@@ -318,15 +332,15 @@ public final class LaunchdAgentInstaller {
             let stdoutCap = stdoutBox.withLock { $0 }
             let stderrCap = stderrBox.withLock { $0 }
             return LaunchctlResult(
-                arguments: args,
+                arguments: arguments,
                 terminationStatus: proc.terminationStatus,
-                stdout: stdoutCap.truncated ? stdoutCap.text + "\n[truncated at \(maxPipeCapture) bytes]" : stdoutCap.text,
-                stderr: stderrCap.truncated ? stderrCap.text + "\n[truncated at \(maxPipeCapture) bytes]" : stderrCap.text,
+                stdout: stdoutCap.truncated ? stdoutCap.text + "\n[truncated at \(capLimit) bytes]" : stdoutCap.text,
+                stderr: stderrCap.truncated ? stderrCap.text + "\n[truncated at \(capLimit) bytes]" : stderrCap.text,
                 launchError: nil
             )
         } catch {
             return LaunchctlResult(
-                arguments: args,
+                arguments: arguments,
                 terminationStatus: -1,
                 stdout: "",
                 stderr: "",
@@ -343,7 +357,9 @@ public final class LaunchdAgentInstaller {
 
     /// Reads up to `limit` bytes from `handle`, then drains any remainder so
     /// the writing process can exit. Returns the captured string and whether
-    /// the output was truncated.
+    /// the output was truncated. Uses lossy UTF-8 decoding: if the byte cap
+    /// splits a multibyte scalar, the incomplete trailing bytes are trimmed
+    /// (not the entire buffer discarded) so the valid prefix is always preserved.
     static func readCapped(from handle: FileHandle, limit: Int) -> (String, Bool) {
         var captured = Data()
         var truncated = false
@@ -358,8 +374,42 @@ public final class LaunchdAgentInstaller {
                 truncated = true
             }
         }
-        let str = String(data: captured, encoding: .utf8) ?? ""
+        let trimmed = Self.trimIncompleteUTF8(captured)
+        // swiftlint:disable:next optional_data_string_conversion
+        let str = String(decoding: trimmed, as: UTF8.self)
         return (str, truncated)
+    }
+
+    /// Trims any incomplete UTF-8 continuation bytes from the end of `data`.
+    /// If the last byte sequence is a valid but incomplete multibyte scalar
+    /// (e.g. the first 2 bytes of a 3-byte sequence), those trailing bytes
+    /// are removed so `String(decoding:as:)` produces valid text without
+    /// replacing the entire buffer with replacement characters.
+    private static func trimIncompleteUTF8(_ data: Data) -> Data {
+        guard !data.isEmpty else { return data }
+        // Walk backwards to find the start of the last scalar.
+        // UTF-8 continuation bytes are 10xxxxxx (0x80-0xBF).
+        // Leading bytes tell us expected sequence length.
+        var i = data.count - 1
+        // Skip continuation bytes (10xxxxxx)
+        while i > 0 && (data[i] & 0xC0) == 0x80 {
+            i -= 1
+        }
+        // `i` is now at a leading byte (or byte 0).
+        let leadByte = data[i]
+        let expectedLength: Int
+        if leadByte & 0x80 == 0 { expectedLength = 1 }        // 0xxxxxxx — ASCII
+        else if leadByte & 0xE0 == 0xC0 { expectedLength = 2 } // 110xxxxx
+        else if leadByte & 0xF0 == 0xE0 { expectedLength = 3 } // 1110xxxx
+        else if leadByte & 0xF8 == 0xF0 { expectedLength = 4 } // 11110xxx
+        else { return data.prefix(i) }                          // invalid lead — trim it
+
+        let actualLength = data.count - i
+        if actualLength < expectedLength {
+            // Incomplete scalar at the end — trim it.
+            return data.prefix(i)
+        }
+        return data
     }
 }
 #endif
