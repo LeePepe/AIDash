@@ -41,6 +41,38 @@ public final class LaunchdAgentInstaller {
         public var isHealthy: Bool { self == .registered }
     }
 
+    // MARK: - LaunchctlResult
+
+    /// Captures the full outcome of a `launchctl` invocation: termination status,
+    /// captured stdout/stderr, and any launch-level error (e.g. executable not found).
+    public struct LaunchctlResult: Equatable, Sendable {
+        /// The arguments passed to launchctl.
+        public let arguments: [String]
+        /// Process termination status (0 = success).
+        public let terminationStatus: Int32
+        /// Captured standard output (empty when launchctl produces none).
+        public let stdout: String
+        /// Captured standard error (contains launchctl diagnostics on failure).
+        public let stderr: String
+        /// Non-nil when the process could not be launched at all.
+        public let launchError: String?
+
+        public var succeeded: Bool { launchError == nil && terminationStatus == 0 }
+
+        /// A one-line summary suitable for logging or embedding in failure messages.
+        public var diagnosticSummary: String {
+            if let err = launchError {
+                return "launchctl \(arguments.joined(separator: " ")): launch error: \(err)"
+            }
+            if terminationStatus != 0 {
+                let stderrTrimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let detail = stderrTrimmed.isEmpty ? "(no stderr)" : stderrTrimmed
+                return "launchctl \(arguments.joined(separator: " ")): exit \(terminationStatus) — \(detail)"
+            }
+            return "launchctl \(arguments.joined(separator: " ")): ok"
+        }
+    }
+
     /// launchd job label. 从 app 的 bundle id 推导,所以改
     /// `Configs/Identity.xcconfig` 的 `AIDASH_BUNDLE_ID` 后自动跟随。
     /// ⚠️ 改了之后必须卸载旧 agent(`launchctl bootout`),否则旧 label 的
@@ -62,8 +94,9 @@ public final class LaunchdAgentInstaller {
     public typealias InstalledExecReader = @MainActor (URL) -> String?
     /// Writes the plist contents to the URL (throws on failure).
     public typealias PlistWriter = @MainActor (URL, Data) throws -> Void
-    /// Runs `launchctl bootout`/`bootstrap`; returns whether it succeeded.
-    public typealias Launchctl = @MainActor (_ args: [String]) -> Bool
+    /// Runs `launchctl` with the given arguments and returns a full result
+    /// including termination status, stdout, stderr, and any launch error.
+    public typealias Launchctl = @MainActor (_ args: [String]) -> LaunchctlResult
 
     private let log = Logger(subsystem: LaunchdAgentInstaller.label, category: "launchd")
     private let execPath: ExecPathProvider
@@ -104,7 +137,8 @@ public final class LaunchdAgentInstaller {
         let exec = execPath()
         let url = plistURL()
         let recordedExec = installedExec(url)
-        let loaded = isJobLoaded()
+        let printResult = launchctl(["print", "gui/\(getuid())/\(Self.label)"])
+        let loaded = printResult.succeeded
         let plan = Self.decide(currentExec: exec, installedExec: recordedExec,
                                jobLoaded: loaded)
         log.info("LaunchAgent install plan: \(String(describing: plan), privacy: .public) for exec \(exec, privacy: .public) (plistExec=\(recordedExec ?? "nil", privacy: .public), jobLoaded=\(loaded, privacy: .public))")
@@ -113,24 +147,11 @@ public final class LaunchdAgentInstaller {
         case .upToDate:
             return .registered
         case .install:
-            // Make the reason explicit: a rebuild (path mismatch) vs. a job that
-            // fell out of launchd while the plist stayed (the self-heal case).
             if recordedExec == exec && !loaded {
                 log.info("LaunchAgent plist matches but launchd job is not loaded — self-healing via reinstall.")
             }
             return performInstall(exec: exec, url: url)
         }
-    }
-
-    /// Whether launchd currently has our agent job loaded in the GUI domain.
-    ///
-    /// Reuses the injected `launchctl` seam: `launchctl print gui/<uid>/<label>`
-    /// exits 0 when the job is loaded, non-zero when it isn't. Fail-safe: ANY
-    /// non-zero (a genuinely-absent job, or a transient launchctl/permission
-    /// hiccup) is treated as "not loaded", so `decide` errs toward an idempotent
-    /// reinstall rather than risk short-circuiting past a wedged mach service.
-    private func isJobLoaded() -> Bool {
-        launchctl(["print", "gui/\(getuid())/\(Self.label)"])
     }
 
     /// What to do given the running executable, the plist's recorded one, and
@@ -167,10 +188,17 @@ public final class LaunchdAgentInstaller {
         // Reload: bootout any stale job (ignore failure — may not exist), then
         // bootstrap the freshly-written plist into the GUI domain.
         let domain = "gui/\(getuid())"
-        _ = launchctl(["bootout", "\(domain)/\(Self.label)"])
-        guard launchctl(["bootstrap", domain, url.path]) else {
-            log.error("launchctl bootstrap failed for \(url.path, privacy: .public)")
-            return .failed(reason: "launchctl bootstrap failed")
+        let bootoutResult = launchctl(["bootout", "\(domain)/\(Self.label)"])
+        if !bootoutResult.succeeded {
+            // Bootout failure is expected when no prior job exists; log but continue.
+            log.debug("bootout returned non-zero (expected if no prior job): \(bootoutResult.diagnosticSummary, privacy: .public)")
+        }
+
+        let bootstrapResult = launchctl(["bootstrap", domain, url.path])
+        guard bootstrapResult.succeeded else {
+            let summary = bootstrapResult.diagnosticSummary
+            log.error("launchctl bootstrap failed: \(summary, privacy: .public)")
+            return .failed(reason: summary)
         }
         log.info("LaunchAgent bootstrapped; XPC mach service should broker to this build.")
         return .registered
@@ -208,18 +236,36 @@ public final class LaunchdAgentInstaller {
         return plist["Program"] as? String
     }
 
-    static func runLaunchctl(_ args: [String]) -> Bool {
+    static func runLaunchctl(_ args: [String]) -> LaunchctlResult {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         proc.arguments = args
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        proc.standardOutput = stdoutPipe
+        proc.standardError = stderrPipe
+
         do {
             try proc.run()
             proc.waitUntilExit()
-            return proc.terminationStatus == 0
+            let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            return LaunchctlResult(
+                arguments: args,
+                terminationStatus: proc.terminationStatus,
+                stdout: String(data: stdoutData, encoding: .utf8) ?? "",
+                stderr: String(data: stderrData, encoding: .utf8) ?? "",
+                launchError: nil
+            )
         } catch {
-            return false
+            return LaunchctlResult(
+                arguments: args,
+                terminationStatus: -1,
+                stdout: "",
+                stderr: "",
+                launchError: error.localizedDescription
+            )
         }
     }
 }
