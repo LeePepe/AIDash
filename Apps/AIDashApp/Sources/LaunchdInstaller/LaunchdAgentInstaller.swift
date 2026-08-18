@@ -2,6 +2,7 @@
 import Foundation
 import AIDashCore
 import os
+import Synchronization
 
 /// Installs the app's XPC LaunchAgent that vends the `<bundle id>.xpc.v1`
 /// mach service — using a **plain `launchctl bootstrap` of a hand-written plist**
@@ -41,6 +42,38 @@ public final class LaunchdAgentInstaller {
         public var isHealthy: Bool { self == .registered }
     }
 
+    // MARK: - LaunchctlResult
+
+    /// Captures the full outcome of a `launchctl` invocation: termination status,
+    /// captured stdout/stderr, and any launch-level error (e.g. executable not found).
+    public struct LaunchctlResult: Equatable, Sendable {
+        /// The arguments passed to launchctl.
+        public let arguments: [String]
+        /// Process termination status (0 = success).
+        public let terminationStatus: Int32
+        /// Captured standard output (empty when launchctl produces none).
+        public let stdout: String
+        /// Captured standard error (contains launchctl diagnostics on failure).
+        public let stderr: String
+        /// Non-nil when the process could not be launched at all.
+        public let launchError: String?
+
+        public var succeeded: Bool { launchError == nil && terminationStatus == 0 }
+
+        /// A one-line summary suitable for logging or embedding in failure messages.
+        public var diagnosticSummary: String {
+            if let err = launchError {
+                return "launchctl \(arguments.joined(separator: " ")): launch error: \(err)"
+            }
+            if terminationStatus != 0 {
+                let stderrTrimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let detail = stderrTrimmed.isEmpty ? "(no stderr)" : stderrTrimmed
+                return "launchctl \(arguments.joined(separator: " ")): exit \(terminationStatus) — \(detail)"
+            }
+            return "launchctl \(arguments.joined(separator: " ")): ok"
+        }
+    }
+
     /// launchd job label. 从 app 的 bundle id 推导,所以改
     /// `Configs/Identity.xcconfig` 的 `AIDASH_BUNDLE_ID` 后自动跟随。
     /// ⚠️ 改了之后必须卸载旧 agent(`launchctl bootout`),否则旧 label 的
@@ -62,8 +95,9 @@ public final class LaunchdAgentInstaller {
     public typealias InstalledExecReader = @MainActor (URL) -> String?
     /// Writes the plist contents to the URL (throws on failure).
     public typealias PlistWriter = @MainActor (URL, Data) throws -> Void
-    /// Runs `launchctl bootout`/`bootstrap`; returns whether it succeeded.
-    public typealias Launchctl = @MainActor (_ args: [String]) -> Bool
+    /// Runs `launchctl` with the given arguments and returns a full result
+    /// including termination status, stdout, stderr, and any launch error.
+    public typealias Launchctl = @MainActor (_ args: [String]) -> LaunchctlResult
 
     private let log = Logger(subsystem: LaunchdAgentInstaller.label, category: "launchd")
     private let execPath: ExecPathProvider
@@ -95,6 +129,37 @@ public final class LaunchdAgentInstaller {
 
     // MARK: - Install
 
+    /// Classification of a `launchctl print` result into actionable categories.
+    enum PrintStatus: Equatable {
+        /// The job is loaded and running in launchd.
+        case loaded
+        /// The job is known absent (exit 113 "Could not find service" or similar
+        /// documented absence codes). Safe to self-heal via reinstall.
+        case knownAbsent
+        /// An unexpected command or launch failure (permission error, launchctl
+        /// binary missing, unknown exit code). NOT safe to assume absence — the
+        /// job may exist but we failed to query it. Return `.failed` to the caller.
+        case commandFailure
+    }
+
+    /// Classifies the result of `launchctl print gui/<uid>/<label>` into one of
+    /// three states. Known absence exit codes (documented by launchd):
+    /// - 113: "Could not find service" — the job genuinely does not exist.
+    /// - 3: "No such process" — the domain/service path is invalid (absent).
+    /// Any other non-zero or a process launch error is treated as a command
+    /// failure where we cannot determine job state.
+    static func classifyPrint(_ result: LaunchctlResult) -> PrintStatus {
+        if result.succeeded { return .loaded }
+        if result.launchError != nil { return .commandFailure }
+        // Known launchd "absent" exit codes.
+        switch result.terminationStatus {
+        case 3, 113:
+            return .knownAbsent
+        default:
+            return .commandFailure
+        }
+    }
+
     /// Ensure the LaunchAgent is installed and pointing at the current build.
     /// Idempotent — safe on every launch. Only rewrites + rebootstraps when the
     /// plist is absent or its `Program` differs from the running executable
@@ -104,7 +169,17 @@ public final class LaunchdAgentInstaller {
         let exec = execPath()
         let url = plistURL()
         let recordedExec = installedExec(url)
-        let loaded = isJobLoaded()
+        let printResult = launchctl(["print", "gui/\(getuid())/\(Self.label)"])
+        let printStatus = Self.classifyPrint(printResult)
+
+        // Command failure: we cannot determine job state. Do NOT blindly
+        // reinstall — the job might exist and we'd clobber it.
+        if printStatus == .commandFailure {
+            log.error("launchctl print failed unexpectedly: \(printResult.diagnosticSummary, privacy: .public)")
+            return .failed(reason: printResult.diagnosticSummary)
+        }
+
+        let loaded = (printStatus == .loaded)
         let plan = Self.decide(currentExec: exec, installedExec: recordedExec,
                                jobLoaded: loaded)
         log.info("LaunchAgent install plan: \(String(describing: plan), privacy: .public) for exec \(exec, privacy: .public) (plistExec=\(recordedExec ?? "nil", privacy: .public), jobLoaded=\(loaded, privacy: .public))")
@@ -113,24 +188,11 @@ public final class LaunchdAgentInstaller {
         case .upToDate:
             return .registered
         case .install:
-            // Make the reason explicit: a rebuild (path mismatch) vs. a job that
-            // fell out of launchd while the plist stayed (the self-heal case).
             if recordedExec == exec && !loaded {
                 log.info("LaunchAgent plist matches but launchd job is not loaded — self-healing via reinstall.")
             }
             return performInstall(exec: exec, url: url)
         }
-    }
-
-    /// Whether launchd currently has our agent job loaded in the GUI domain.
-    ///
-    /// Reuses the injected `launchctl` seam: `launchctl print gui/<uid>/<label>`
-    /// exits 0 when the job is loaded, non-zero when it isn't. Fail-safe: ANY
-    /// non-zero (a genuinely-absent job, or a transient launchctl/permission
-    /// hiccup) is treated as "not loaded", so `decide` errs toward an idempotent
-    /// reinstall rather than risk short-circuiting past a wedged mach service.
-    private func isJobLoaded() -> Bool {
-        launchctl(["print", "gui/\(getuid())/\(Self.label)"])
     }
 
     /// What to do given the running executable, the plist's recorded one, and
@@ -167,10 +229,17 @@ public final class LaunchdAgentInstaller {
         // Reload: bootout any stale job (ignore failure — may not exist), then
         // bootstrap the freshly-written plist into the GUI domain.
         let domain = "gui/\(getuid())"
-        _ = launchctl(["bootout", "\(domain)/\(Self.label)"])
-        guard launchctl(["bootstrap", domain, url.path]) else {
-            log.error("launchctl bootstrap failed for \(url.path, privacy: .public)")
-            return .failed(reason: "launchctl bootstrap failed")
+        let bootoutResult = launchctl(["bootout", "\(domain)/\(Self.label)"])
+        if !bootoutResult.succeeded {
+            // Bootout failure is expected when no prior job exists; log but continue.
+            log.debug("bootout returned non-zero (expected if no prior job): \(bootoutResult.diagnosticSummary, privacy: .public)")
+        }
+
+        let bootstrapResult = launchctl(["bootstrap", domain, url.path])
+        guard bootstrapResult.succeeded else {
+            let summary = bootstrapResult.diagnosticSummary
+            log.error("launchctl bootstrap failed: \(summary, privacy: .public)")
+            return .failed(reason: summary)
         }
         log.info("LaunchAgent bootstrapped; XPC mach service should broker to this build.")
         return .registered
@@ -208,19 +277,144 @@ public final class LaunchdAgentInstaller {
         return plist["Program"] as? String
     }
 
-    static func runLaunchctl(_ args: [String]) -> Bool {
+    /// Maximum bytes to capture per pipe stream. launchctl diagnostics are
+    /// short; 64 KB is generous. Beyond this we truncate and append an indicator.
+    static let maxPipeCapture = 65_536
+
+    static func runLaunchctl(_ args: [String]) -> LaunchctlResult {
+        runProcess(
+            executable: URL(fileURLWithPath: "/bin/launchctl"),
+            arguments: args,
+            capLimit: maxPipeCapture
+        )
+    }
+
+    /// Production Process/Pipe orchestration: launches `executable` with `arguments`,
+    /// drains both stdout and stderr concurrently (capped at `capLimit` bytes each)
+    /// before calling `waitUntilExit()`, and returns a `LaunchctlResult`.
+    ///
+    /// This is the single implementation of the drain-before-wait pattern. Tests
+    /// exercise this exact path with a harmless helper executable instead of
+    /// independently recreating the orchestration.
+    static func runProcess(executable: URL, arguments: [String], capLimit: Int) -> LaunchctlResult {
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        proc.arguments = args
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
+        proc.executableURL = executable
+        proc.arguments = arguments
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        proc.standardOutput = stdoutPipe
+        proc.standardError = stderrPipe
+
         do {
             try proc.run()
+            // Drain both pipes concurrently BEFORE waitUntilExit to avoid
+            // deadlock when either pipe's buffer fills (pipe capacity ~64 KB).
+            // Each reader is capped to `capLimit` bytes; excess is drained
+            // (to let the child exit) but discarded.
+            let stdoutBox = Mutex(CappedRead(text: "", truncated: false))
+            let stderrBox = Mutex(CappedRead(text: "", truncated: false))
+            let group = DispatchGroup()
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let (text, trunc) = readCapped(from: stdoutPipe.fileHandleForReading, limit: capLimit)
+                stdoutBox.withLock { $0 = CappedRead(text: text, truncated: trunc) }
+                group.leave()
+            }
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let (text, trunc) = readCapped(from: stderrPipe.fileHandleForReading, limit: capLimit)
+                stderrBox.withLock { $0 = CappedRead(text: text, truncated: trunc) }
+                group.leave()
+            }
+            group.wait()
             proc.waitUntilExit()
-            return proc.terminationStatus == 0
+            let stdoutCap = stdoutBox.withLock { $0 }
+            let stderrCap = stderrBox.withLock { $0 }
+            return LaunchctlResult(
+                arguments: arguments,
+                terminationStatus: proc.terminationStatus,
+                stdout: stdoutCap.truncated ? stdoutCap.text + "\n[truncated at \(capLimit) bytes]" : stdoutCap.text,
+                stderr: stderrCap.truncated ? stderrCap.text + "\n[truncated at \(capLimit) bytes]" : stderrCap.text,
+                launchError: nil
+            )
         } catch {
-            return false
+            return LaunchctlResult(
+                arguments: arguments,
+                terminationStatus: -1,
+                stdout: "",
+                stderr: "",
+                launchError: error.localizedDescription
+            )
         }
+    }
+
+    /// Value type for thread-safe capture of capped pipe output via `Mutex`.
+    struct CappedRead: Sendable {
+        let text: String
+        let truncated: Bool
+    }
+
+    /// Reads up to `limit` bytes from `handle`, then drains any remainder so
+    /// the writing process can exit. Returns the captured string and whether
+    /// the output was truncated. Uses lossy UTF-8 decoding: if the byte cap
+    /// splits a multibyte scalar, the incomplete trailing bytes are trimmed
+    /// (not the entire buffer discarded) so the valid prefix is always preserved.
+    static func readCapped(from handle: FileHandle, limit: Int) -> (String, Bool) {
+        var captured = Data()
+        var truncated = false
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty { break } // EOF
+            let remaining = limit - captured.count
+            if remaining > 0 {
+                let toAppend = chunk.prefix(remaining)
+                captured.append(toAppend)
+                // Truncated only when we actually discarded bytes from this chunk.
+                if toAppend.count < chunk.count {
+                    truncated = true
+                }
+            } else {
+                // We're past the limit — every byte in this chunk is discarded.
+                truncated = true
+            }
+        }
+        let trimmed = Self.trimIncompleteUTF8(captured)
+        // swiftlint:disable:next optional_data_string_conversion
+        let str = String(decoding: trimmed, as: UTF8.self)
+        return (str, truncated)
+    }
+
+    /// Trims any incomplete UTF-8 continuation bytes from the end of `data`.
+    /// If the last byte sequence is a valid but incomplete multibyte scalar
+    /// (e.g. the first 2 bytes of a 3-byte sequence), those trailing bytes
+    /// are removed so `String(decoding:as:)` produces valid text without
+    /// replacing the entire buffer with replacement characters.
+    private static func trimIncompleteUTF8(_ data: Data) -> Data {
+        guard !data.isEmpty else { return data }
+        // Walk backwards to find the start of the last scalar.
+        // UTF-8 continuation bytes are 10xxxxxx (0x80-0xBF).
+        // Leading bytes tell us expected sequence length.
+        var i = data.count - 1
+        // Skip continuation bytes (10xxxxxx)
+        while i > 0 && (data[i] & 0xC0) == 0x80 {
+            i -= 1
+        }
+        // `i` is now at a leading byte (or byte 0).
+        let leadByte = data[i]
+        let expectedLength: Int
+        if leadByte & 0x80 == 0 { expectedLength = 1 }        // 0xxxxxxx — ASCII
+        else if leadByte & 0xE0 == 0xC0 { expectedLength = 2 } // 110xxxxx
+        else if leadByte & 0xF0 == 0xE0 { expectedLength = 3 } // 1110xxxx
+        else if leadByte & 0xF8 == 0xF0 { expectedLength = 4 } // 11110xxx
+        else { return data.prefix(i) }                          // invalid lead — trim it
+
+        let actualLength = data.count - i
+        if actualLength < expectedLength {
+            // Incomplete scalar at the end — trim it.
+            return data.prefix(i)
+        }
+        return data
     }
 }
 #endif
