@@ -36,6 +36,7 @@ from L5_apps.digest.card_policy import (
     FIRST_SCREEN_CARDS, MAX_ACTIONS, MAX_CARDS,
     CardCandidate, DataProfile, choose_card, select_with_budget,
 )
+from L5_apps.digest.polish import MAX_TODO, truncate
 from L5_apps.digest.cst import yesterday
 from L5_apps.digest.trends import compute_trend
 
@@ -179,7 +180,7 @@ def _todo_items(todo_lines: list[str]) -> list[dict]:
                 prio = mapped
                 text = text[len(tag):].lstrip(": ").strip()
                 break
-        items.append({"title": text, "priority": prio})
+        items.append({"title": truncate(text, MAX_TODO), "priority": prio})
     return items
 
 

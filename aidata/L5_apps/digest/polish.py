@@ -79,10 +79,38 @@ def parse_slots(raw: str) -> PolishSlots:
 
 
 def truncate(text: str, n: int) -> str:
-    """Hard char cap; append an ellipsis when the text was cut."""
+    """Hard char cap with word-boundary awareness; append … when cut.
+
+    Never cuts inside a word or identifier (e.g. "LaunchAgent" won't become
+    "LaunchAgen…" or "Launc…"). Finds the last word boundary (space or
+    punctuation followed by a non-space) at or before the budget, so the
+    output always ends on a complete token. Falls back to a hard cut only
+    when the first token alone exceeds the budget (a single very long word).
+    """
     if len(text) <= n:
         return text
-    return text[: n - 1] + "…"
+    # Budget for the text portion (reserve 1 char for the … suffix).
+    limit = n - 1
+    if limit <= 0:
+        return "…"
+    # Find the last word boundary at or before `limit`.
+    # A boundary is a position where we can cut without splitting a word:
+    # right after a space, or right after common punctuation (:/;,)）】」) when
+    # followed by more text.
+    candidate = -1
+    for i in range(min(limit, len(text))):
+        if text[i] in " \t\n":
+            # Cut right before the space (keep text[:i] which ends on a word).
+            candidate = i
+        elif i > 0 and text[i - 1] in ":/;,，；：、)）】」—":
+            # After punctuation is also a valid break point.
+            candidate = i
+    if candidate > 0 and candidate >= limit * 0.5:
+        # Use the boundary only if it keeps at least half the budget —
+        # otherwise the cut loses too much information.
+        return text[:candidate].rstrip() + " …"
+    # Fallback: hard cut (the whole budget is one long token).
+    return text[:limit] + "…"
 
 
 def apply_slots(template_md: str, slots: PolishSlots) -> str:
