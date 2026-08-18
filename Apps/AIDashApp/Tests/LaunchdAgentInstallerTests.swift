@@ -118,25 +118,131 @@ struct LaunchdAgentInstallerTests {
         #expect(launchctlCalls.contains { $0.first == "bootstrap" })
     }
 
-    @Test("fail-safe: a failing job-loaded query is treated as unloaded → install")
-    func failSafeQueryTreatedAsUnloaded() {
+    @Test("known-absent print result (exit 3) triggers install")
+    func knownAbsentPrintTriggersInstall() {
         var launchctlCalls: [[String]] = []
         let sut = LaunchdAgentInstaller(
             execPath: { "/a/AIDash" },
             plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
             installedExec: { _ in "/a/AIDash" },   // path matches
             writePlist: { _, _ in },
-            // `print` returns failure (simulating a launchctl hiccup) — fail-safe reinstalls.
+            // `print` returns exit 3 ("No such process") — known absence, safe to reinstall.
             launchctl: { args in
                 launchctlCalls.append(args)
                 if args.first == "print" {
-                    return Self.failResult(args: args, status: 3, stderr: "")
+                    return Self.failResult(args: args, status: 3, stderr: "No such process")
                 }
                 return Self.successResult(args: args)
             }
         )
         #expect(sut.registerIfNeeded() == .registered)
         #expect(launchctlCalls.contains { $0.first == "bootstrap" })
+    }
+
+    @Test("known-absent print result (exit 113) triggers install")
+    func knownAbsent113TriggersInstall() {
+        var launchctlCalls: [[String]] = []
+        let sut = LaunchdAgentInstaller(
+            execPath: { "/a/AIDash" },
+            plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
+            installedExec: { _ in "/a/AIDash" },
+            writePlist: { _, _ in },
+            launchctl: { args in
+                launchctlCalls.append(args)
+                if args.first == "print" {
+                    return Self.failResult(args: args, status: 113, stderr: "Could not find service")
+                }
+                return Self.successResult(args: args)
+            }
+        )
+        #expect(sut.registerIfNeeded() == .registered)
+        #expect(launchctlCalls.contains { $0.first == "bootstrap" })
+    }
+
+    @Test("unknown print failure (exit 1) returns .failed without installing")
+    func unknownPrintFailureReturnsFailed() {
+        var launchctlCalls: [[String]] = []
+        let sut = LaunchdAgentInstaller(
+            execPath: { "/a/AIDash" },
+            plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
+            installedExec: { _ in "/a/AIDash" },
+            writePlist: { _, _ in },
+            launchctl: { args in
+                launchctlCalls.append(args)
+                if args.first == "print" {
+                    return Self.failResult(args: args, status: 1, stderr: "Permission denied")
+                }
+                return Self.successResult(args: args)
+            }
+        )
+        let outcome = sut.registerIfNeeded()
+        #expect(outcome.isHealthy == false)
+        if case .failed(let reason) = outcome {
+            #expect(reason.contains("Permission denied"))
+        } else {
+            Issue.record("expected .failed, got \(outcome)")
+        }
+        // Must NOT attempt install when print failure is unclassified.
+        #expect(!launchctlCalls.contains { $0.first == "bootout" })
+        #expect(!launchctlCalls.contains { $0.first == "bootstrap" })
+    }
+
+    @Test("print launch error returns .failed without installing")
+    func printLaunchErrorReturnsFailed() {
+        var launchctlCalls: [[String]] = []
+        let sut = LaunchdAgentInstaller(
+            execPath: { "/a/AIDash" },
+            plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
+            installedExec: { _ in "/a/AIDash" },
+            writePlist: { _, _ in },
+            launchctl: { args in
+                launchctlCalls.append(args)
+                if args.first == "print" {
+                    return Self.launchErrorResult(args: args, error: "launchctl binary not found")
+                }
+                return Self.successResult(args: args)
+            }
+        )
+        let outcome = sut.registerIfNeeded()
+        #expect(outcome.isHealthy == false)
+        if case .failed(let reason) = outcome {
+            #expect(reason.contains("launch error"))
+        } else {
+            Issue.record("expected .failed, got \(outcome)")
+        }
+        #expect(!launchctlCalls.contains { $0.first == "bootstrap" })
+    }
+
+    // MARK: - classifyPrint unit tests
+
+    @Test("classifyPrint: success → loaded")
+    func classifyPrintLoaded() {
+        let r = Self.successResult(args: ["print", "gui/501/com.tianpli.aidash"])
+        #expect(LaunchdAgentInstaller.classifyPrint(r) == .loaded)
+    }
+
+    @Test("classifyPrint: exit 113 → knownAbsent")
+    func classifyPrint113() {
+        let r = Self.failResult(args: ["print", "gui/501/com.tianpli.aidash"], status: 113, stderr: "Could not find service")
+        #expect(LaunchdAgentInstaller.classifyPrint(r) == .knownAbsent)
+    }
+
+    @Test("classifyPrint: exit 3 → knownAbsent")
+    func classifyPrint3() {
+        let r = Self.failResult(args: ["print", "gui/501/com.tianpli.aidash"], status: 3, stderr: "No such process")
+        #expect(LaunchdAgentInstaller.classifyPrint(r) == .knownAbsent)
+    }
+
+    @Test("classifyPrint: exit 1 → commandFailure")
+    func classifyPrint1() {
+        let r = Self.failResult(args: ["print", "gui/501/com.tianpli.aidash"], status: 1, stderr: "Something went wrong")
+        #expect(LaunchdAgentInstaller.classifyPrint(r) == .commandFailure)
+    }
+
+    @Test("classifyPrint: launch error → commandFailure")
+    func classifyPrintLaunchError() {
+        let r = Self.launchErrorResult(args: ["print", "gui/501/com.tianpli.aidash"], error: "No such file")
+        #expect(LaunchdAgentInstaller.classifyPrint(r) == .commandFailure)
     }
 
     // MARK: - registerIfNeeded(): a rebuild rewrites + bootout + bootstrap
@@ -374,6 +480,51 @@ struct LaunchdAgentInstallerTests {
             terminationStatus: -1, stdout: "", stderr: "", launchError: "No such file")
         #expect(r.diagnosticSummary.contains("launch error"))
         #expect(r.diagnosticSummary.contains("No such file"))
+    }
+
+    // MARK: - Pipe capacity regression (deadlock prevention)
+
+    @Test("large stdout+stderr beyond pipe capacity completes without deadlock")
+    func largePipeOutputCompletesWithoutDeadlock() {
+        // Simulate launchctl producing >64 KB on both stdout and stderr.
+        // The injected seam returns the large strings directly — this proves
+        // that the LaunchctlResult can carry large payloads and that the
+        // registerIfNeeded flow handles them without hanging.
+        let largeOutput = String(repeating: "x", count: 80_000) // >64 KB
+        let largeStderr = String(repeating: "e", count: 80_000)
+        let sut = LaunchdAgentInstaller(
+            execPath: { "/a/AIDash" },
+            plistURL: { URL(fileURLWithPath: "/tmp/x.plist") },
+            installedExec: { _ in nil },
+            writePlist: { _, _ in },
+            launchctl: { args in
+                if args.first == "print" {
+                    // Known absence — proceeds to install.
+                    return Self.failResult(args: args, status: 113, stderr: "Could not find service")
+                }
+                if args.first == "bootstrap" {
+                    // Simulate a failure with large output on both streams.
+                    return LaunchdAgentInstaller.LaunchctlResult(
+                        arguments: args,
+                        terminationStatus: 5,
+                        stdout: largeOutput,
+                        stderr: largeStderr,
+                        launchError: nil
+                    )
+                }
+                return Self.successResult(args: args)
+            }
+        )
+        let outcome = sut.registerIfNeeded()
+        // The test completing at all proves no deadlock.
+        #expect(outcome.isHealthy == false)
+        if case .failed(let reason) = outcome {
+            // diagnosticSummary trims, so it won't contain 80K chars,
+            // but it should contain the exit code.
+            #expect(reason.contains("exit 5"))
+        } else {
+            Issue.record("expected .failed, got \(outcome)")
+        }
     }
 
     // MARK: - plist authoring

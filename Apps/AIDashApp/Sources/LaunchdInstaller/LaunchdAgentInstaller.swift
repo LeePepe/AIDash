@@ -128,6 +128,37 @@ public final class LaunchdAgentInstaller {
 
     // MARK: - Install
 
+    /// Classification of a `launchctl print` result into actionable categories.
+    enum PrintStatus: Equatable {
+        /// The job is loaded and running in launchd.
+        case loaded
+        /// The job is known absent (exit 113 "Could not find service" or similar
+        /// documented absence codes). Safe to self-heal via reinstall.
+        case knownAbsent
+        /// An unexpected command or launch failure (permission error, launchctl
+        /// binary missing, unknown exit code). NOT safe to assume absence — the
+        /// job may exist but we failed to query it. Return `.failed` to the caller.
+        case commandFailure
+    }
+
+    /// Classifies the result of `launchctl print gui/<uid>/<label>` into one of
+    /// three states. Known absence exit codes (documented by launchd):
+    /// - 113: "Could not find service" — the job genuinely does not exist.
+    /// - 3: "No such process" — the domain/service path is invalid (absent).
+    /// Any other non-zero or a process launch error is treated as a command
+    /// failure where we cannot determine job state.
+    static func classifyPrint(_ result: LaunchctlResult) -> PrintStatus {
+        if result.succeeded { return .loaded }
+        if result.launchError != nil { return .commandFailure }
+        // Known launchd "absent" exit codes.
+        switch result.terminationStatus {
+        case 3, 113:
+            return .knownAbsent
+        default:
+            return .commandFailure
+        }
+    }
+
     /// Ensure the LaunchAgent is installed and pointing at the current build.
     /// Idempotent — safe on every launch. Only rewrites + rebootstraps when the
     /// plist is absent or its `Program` differs from the running executable
@@ -138,7 +169,16 @@ public final class LaunchdAgentInstaller {
         let url = plistURL()
         let recordedExec = installedExec(url)
         let printResult = launchctl(["print", "gui/\(getuid())/\(Self.label)"])
-        let loaded = printResult.succeeded
+        let printStatus = Self.classifyPrint(printResult)
+
+        // Command failure: we cannot determine job state. Do NOT blindly
+        // reinstall — the job might exist and we'd clobber it.
+        if printStatus == .commandFailure {
+            log.error("launchctl print failed unexpectedly: \(printResult.diagnosticSummary, privacy: .public)")
+            return .failed(reason: printResult.diagnosticSummary)
+        }
+
+        let loaded = (printStatus == .loaded)
         let plan = Self.decide(currentExec: exec, installedExec: recordedExec,
                                jobLoaded: loaded)
         log.info("LaunchAgent install plan: \(String(describing: plan), privacy: .public) for exec \(exec, privacy: .public) (plistExec=\(recordedExec ?? "nil", privacy: .public), jobLoaded=\(loaded, privacy: .public))")
@@ -248,9 +288,25 @@ public final class LaunchdAgentInstaller {
 
         do {
             try proc.run()
+            // Drain both pipes concurrently BEFORE waitUntilExit to avoid
+            // deadlock when either pipe's buffer fills (pipe capacity ~64 KB).
+            // The child blocks in write() if the buffer is full; waiting for
+            // exit first would hang indefinitely.
+            var stdoutData = Data()
+            var stderrData = Data()
+            let group = DispatchGroup()
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+            group.wait()
             proc.waitUntilExit()
-            let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
             return LaunchctlResult(
                 arguments: args,
                 terminationStatus: proc.terminationStatus,
