@@ -8,9 +8,14 @@ import AIDashCore
 @MainActor
 final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
-    private let container: ModelContainer
+    /// The persistent store container. Starts `nil` during bootstrap (store
+    /// loads asynchronously so it does not block MainActor / the XPC listener).
+    /// Store-independent commands (`ping`, `schema.list`) respond immediately
+    /// regardless; store-dependent mutations return a typed retryable
+    /// `internal.store_not_ready` error until this is set.
+    private(set) var container: ModelContainer?
 
-    init(container: ModelContainer) {
+    init(container: ModelContainer?) {
         self.container = container
         super.init()
     }
@@ -19,9 +24,35 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
     nonisolated func execute(requestData: Data, reply: @escaping (Data) -> Void) {
         nonisolated(unsafe) let reply = reply
+
+        // Fast path: store-independent commands respond WITHOUT hopping to
+        // MainActor. This guarantees `schema.list` and `ping` reply even while
+        // MainActor is occupied by the async store load or any other work.
+        if let request = try? makeXPCDecoder().decode(XPCRequest.self, from: requestData) {
+            switch request.command {
+            case "ping":
+                let response = XPCResponse(
+                    requestId: request.requestId,
+                    appVersion: Self.appVersion,
+                    ok: true,
+                    data: nil,
+                    error: nil
+                )
+                reply((try? makeXPCEncoder().encode(response)) ?? Data())
+                return
+            case "schema.list":
+                let response = Self.buildSchemaListResponse(requestId: request.requestId)
+                reply((try? makeXPCEncoder().encode(response)) ?? Data())
+                return
+            default:
+                break
+            }
+        }
+
+        // Store-dependent commands: hop to MainActor where the container lives.
         Task { @MainActor in
             let response = await self.handleRequest(requestData)
-            let encoded = (try? JSONEncoder.xpc.encode(response)) ?? Data()
+            let encoded = (try? makeXPCEncoder().encode(response)) ?? Data()
             reply(encoded)
         }
     }
@@ -31,9 +62,25 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     private func handleRequest(_ data: Data) async -> XPCResponse {
         let requestId: String
         do {
-            let request = try JSONDecoder.xpc.decode(XPCRequest.self, from: data)
+            let request = try makeXPCDecoder().decode(XPCRequest.self, from: data)
             requestId = request.requestId
-            let resultData = try await dispatch(request)
+
+            // Gate: store-dependent commands require a ready container.
+            guard let container else {
+                return XPCResponse(
+                    requestId: requestId,
+                    appVersion: Self.appVersion,
+                    ok: false,
+                    data: nil,
+                    error: XPCError(
+                        code: "internal.store_not_ready",
+                        message: "Persistent store is still loading. Retry shortly.",
+                        cause: "retryable"
+                    )
+                )
+            }
+
+            let resultData = try await dispatch(request, container: container)
             return XPCResponse(
                 requestId: requestId,
                 appVersion: Self.appVersion,
@@ -43,7 +90,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
             )
         } catch let error as XPCError {
             return XPCResponse(
-                requestId: (try? JSONDecoder.xpc.decode(XPCRequest.self, from: data).requestId) ?? "",
+                requestId: (try? makeXPCDecoder().decode(XPCRequest.self, from: data).requestId) ?? "",
                 appVersion: Self.appVersion,
                 ok: false,
                 data: nil,
@@ -51,7 +98,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
             )
         } catch is DecodingError {
             return XPCResponse(
-                requestId: (try? JSONDecoder.xpc.decode(XPCRequest.self, from: data).requestId) ?? "",
+                requestId: (try? makeXPCDecoder().decode(XPCRequest.self, from: data).requestId) ?? "",
                 appVersion: Self.appVersion,
                 ok: false,
                 data: nil,
@@ -70,7 +117,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
                 code = "internal.unexpected"
             }
             return XPCResponse(
-                requestId: (try? JSONDecoder.xpc.decode(XPCRequest.self, from: data).requestId) ?? "",
+                requestId: (try? makeXPCDecoder().decode(XPCRequest.self, from: data).requestId) ?? "",
                 appVersion: Self.appVersion,
                 ok: false,
                 data: nil,
@@ -82,28 +129,29 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         }
     }
 
-    private func dispatch(_ request: XPCRequest) async throws -> Data? {
+    private func dispatch(_ request: XPCRequest, container: ModelContainer) async throws -> Data? {
         switch request.command {
-        case "ping":
-            return nil
-        case "briefing.put":
-            return try await handleBriefingPut(request)
-        case "briefing.publish":
-            return try await handleBriefingPublish(request)
-        case "briefing.get":
-            return try await handleBriefingGet(request)
-        case "container.put":
-            return try await handleContainerPut(request)
-        case "container.delete":
-            return try await handleContainerDelete(request)
-        case "card.put":
-            return try await handleCardPut(request)
-        case "card.delete":
-            return try await handleCardDelete(request)
-        case "events.pull":
-            return try await handleEventsPull(request)
-        case "schema.list":
+        case "ping", "schema.list":
+            // Handled in the nonisolated fast path of execute(); reaching here
+            // means a future code path routed them through MainActor — still safe.
+            if request.command == "ping" { return nil }
             return try handleSchemaList(request)
+        case "briefing.put":
+            return try await handleBriefingPut(request, container: container)
+        case "briefing.publish":
+            return try await handleBriefingPublish(request, container: container)
+        case "briefing.get":
+            return try await handleBriefingGet(request, container: container)
+        case "container.put":
+            return try await handleContainerPut(request, container: container)
+        case "container.delete":
+            return try await handleContainerDelete(request, container: container)
+        case "card.put":
+            return try await handleCardPut(request, container: container)
+        case "card.delete":
+            return try await handleCardDelete(request, container: container)
+        case "events.pull":
+            return try await handleEventsPull(request, container: container)
         default:
             throw XPCError(
                 code: "schema.unknown_command",
@@ -116,7 +164,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
     // MARK: - Briefing Handlers
 
-    private func handleBriefingPut(_ request: XPCRequest) async throws -> Data {
+    private func handleBriefingPut(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(BriefingPutParams.self, from: request)
         try SchemaValidator.validateBriefingPut(date: params.date, generatedBy: params.generatedBy)
 
@@ -151,10 +199,10 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         try context.save()
 
         let result = BriefingPutResult(date: params.date, generatedAt: now, publishedAt: publishedAt)
-        return try JSONEncoder.xpc.encode(result)
+        return try makeXPCEncoder().encode(result)
     }
 
-    private func handleBriefingPublish(_ request: XPCRequest) async throws -> Data {
+    private func handleBriefingPublish(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(BriefingPublishParams.self, from: request)
         try SchemaValidator.validateBriefingPublish(date: params.date)
         let dateValue = params.date
@@ -180,10 +228,10 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
             date: params.date,
             publishedAt: briefing.publishedAt ?? now
         )
-        return try JSONEncoder.xpc.encode(result)
+        return try makeXPCEncoder().encode(result)
     }
 
-    private func handleBriefingGet(_ request: XPCRequest) async throws -> Data {
+    private func handleBriefingGet(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(BriefingGetParams.self, from: request)
         try SchemaValidator.validateBriefingGet(date: params.date)
         let dateValue = params.date
@@ -228,12 +276,12 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         )
 
         let result = BriefingGetResult(briefing: briefing)
-        return try JSONEncoder.xpc.encode(result)
+        return try makeXPCEncoder().encode(result)
     }
 
     // MARK: - Container Handlers
 
-    private func handleContainerPut(_ request: XPCRequest) async throws -> Data {
+    private func handleContainerPut(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(ContainerPutParams.self, from: request)
         try SchemaValidator.validateContainerPut(
             id: params.id,
@@ -302,10 +350,10 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         try context.save()
 
         let result = ContainerPutResult(id: params.id, updatedAt: now, wasCreated: wasCreated)
-        return try JSONEncoder.xpc.encode(result)
+        return try makeXPCEncoder().encode(result)
     }
 
-    private func handleContainerDelete(_ request: XPCRequest) async throws -> Data {
+    private func handleContainerDelete(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(ContainerDeleteParams.self, from: request)
         try SchemaValidator.validateContainerDelete(id: params.id)
 
@@ -324,12 +372,12 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         context.delete(containerModel)
         try context.save()
 
-        return try JSONEncoder.xpc.encode(ContainerDeleteResult())
+        return try makeXPCEncoder().encode(ContainerDeleteResult())
     }
 
     // MARK: - Card Handlers
 
-    private func handleCardPut(_ request: XPCRequest) async throws -> Data {
+    private func handleCardPut(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(CardPutParams.self, from: request)
         try SchemaValidator.validateCardPut(
             containerId: params.containerId,
@@ -396,10 +444,10 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         try context.save()
 
         let result = CardPutResult(id: params.id, updatedAt: now, wasCreated: wasCreated)
-        return try JSONEncoder.xpc.encode(result)
+        return try makeXPCEncoder().encode(result)
     }
 
-    private func handleCardDelete(_ request: XPCRequest) async throws -> Data {
+    private func handleCardDelete(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(CardDeleteParams.self, from: request)
         try SchemaValidator.validateCardDelete(id: params.id)
 
@@ -418,12 +466,12 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         context.delete(cardModel)
         try context.save()
 
-        return try JSONEncoder.xpc.encode(CardDeleteResult())
+        return try makeXPCEncoder().encode(CardDeleteResult())
     }
 
     // MARK: - Events Handler
 
-    private func handleEventsPull(_ request: XPCRequest) async throws -> Data {
+    private func handleEventsPull(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(EventsPullParams.self, from: request)
         try SchemaValidator.validateEventsPull(cardId: params.cardId)
 
@@ -510,62 +558,14 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
             }
 
         let result = EventsPullResult(events: events, count: events.count)
-        return try JSONEncoder.xpc.encode(result)
+        return try makeXPCEncoder().encode(result)
     }
-
-    // MARK: - Schema Handler
-
-    private func handleSchemaList(_ request: XPCRequest) throws -> Data {
-        let result = SchemaListResult(
-            cliVersion: Self.appVersion,
-            schemaVersion: "1.0.0",
-            cardTypes: CardType.allCases.map(\.rawValue),
-            cardSizes: CardSize.allCases.map(\.rawValue),
-            cardStyles: CardStyle.allCases.map(\.rawValue),
-            containerLayouts: ContainerLayout.allCases.map(\.rawValue),
-            userEventActions: UserEventAction.allCases.map(\.rawValue),
-            payloads: Self.payloadSchemas
-        )
-        return try JSONEncoder.xpc.encode(result)
-    }
-
-    // MARK: - Payload Schema Descriptions
-
-    private static let payloadSchemas: [String: String] = {
-        var schemas: [String: String] = [:]
-        schemas[CardType.metric.rawValue] = """
-        {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"unit":{"type":"string"},"trend":{"type":"string","enum":["up","down","flat"]},"series":{"type":"array","items":{"type":"number"}},"ratio":{"type":"number","minimum":0,"maximum":1},"higherIsBetter":{"type":"boolean"},"context":{"type":"string"}}}}}}
-        """
-        schemas[CardType.insight.rawValue] = #"{"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"citations":{"type":"array","items":{"type":"object","required":["label","url"],"properties":{"label":{"type":"string"},"url":{"type":"string"}}}}}}"#
-        schemas[CardType.agentSummary.rawValue] = #"{"type":"object","required":["agentName","completed"],"properties":{"agentName":{"type":"string","minLength":1},"completed":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"ref":{"type":"string"}}}},"stats":{"type":"array","items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"}}}}}}"#
-        schemas[CardType.todoList.rawValue] = #"{"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title"],"properties":{"title":{"type":"string"},"priority":{"type":"string","enum":["low","medium","high"]},"due":{"type":"string","format":"date-time"},"ref":{"type":"string"}}}}}}"#
-        schemas[CardType.trending.rawValue] = #"{"type":"object","required":["topic","items"],"properties":{"topic":{"type":"string","minLength":1},"items":{"type":"array","minItems":1,"items":{"type":"object","required":["title","url"],"properties":{"title":{"type":"string"},"url":{"type":"string"},"score":{"type":"number"},"delta":{"type":"number"},"category":{"type":"string"},"reason":{"type":"string"}}}}}}"#
-        schemas[CardType.digest.rawValue] = #"{"type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"},"body":{"type":"string","minLength":1},"sections":{"type":"array","items":{"type":"object","required":["heading","paragraphs"],"properties":{"heading":{"type":"string"},"paragraphs":{"type":"array","items":{"type":"string"}}}}}}}"#
-        schemas[CardType.sectionHeader.rawValue] = #"{"type":"object","required":["title"],"properties":{"title":{"type":"string","minLength":1},"subtitle":{"type":"string"}}}"#
-        schemas[CardType.barList.rawValue] = #"{"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"valueText":{"type":"string"},"semantic":{"type":"string"}}}}}}"#
-        schemas[CardType.stackedBar.rawValue] = #"{"type":"object","required":["segments"],"properties":{"title":{"type":"string"},"segments":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"semantic":{"type":"string"}}}}}}"#
-        schemas[CardType.relationship.rawValue] = relationshipSchema
-        return schemas
-    }()
-
-    /// The `allOf`/`if`-`then` clauses mirror `validateMarkSet`, so a publisher
-    /// reading `aidash schema list` sees the exclusivity `card.put` enforces.
-    /// Fields that `validateInvariants()` runs through `requireText` advertise
-    /// `"pattern":"\\S"`, not `minLength:1` — `requireText` trims first, so
-    /// `"   "` is one character long and still rejected, and `minLength:1`
-    /// would advertise as valid a payload the app refuses. Split for line len.
-    private static let relationshipSchema =
-        #"{"type":"object","required":["title","visualization","xAxis","yAxis","sampleSize","timeWindow","metricDefinition","summary"],"properties":{"title":{"type":"string","pattern":"\\S"},"visualization":{"type":"string","enum":["scatter","heatmap","slope"]},"xAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","pattern":"\\S"},"unit":{"type":"string"}}},"# +
-        #""yAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","pattern":"\\S"},"unit":{"type":"string"}}},"points":{"type":"array","items":{"type":"object","required":["label","x","y"],"properties":{"label":{"type":"string","pattern":"\\S"},"x":{"type":"number"},"y":{"type":"number"},"magnitude":{"type":"number","exclusiveMinimum":0},"category":{"type":"string"}}}},"# +
-        #""cells":{"type":"array","items":{"type":"object","required":["column","row","value"],"properties":{"column":{"type":"string","pattern":"\\S"},"row":{"type":"string","pattern":"\\S"},"value":{"type":"number"}}}},"slopes":{"type":"array","items":{"type":"object","required":["label","before","after"],"properties":{"label":{"type":"string","pattern":"\\S"},"before":{"type":"number"},"after":{"type":"number"}}}},"# +
-        #""sampleSize":{"type":"integer","minimum":1},"timeWindow":{"type":"string","pattern":"\\S"},"metricDefinition":{"type":"string","pattern":"\\S"},"summary":{"type":"string","pattern":"\\S"}},"allOf":[{"if":{"properties":{"visualization":{"const":"scatter"}}},"then":{"required":["points"],"properties":{"points":{"minItems":1},"cells":{"maxItems":0},"slopes":{"maxItems":0}}}},{"if":{"properties":{"visualization":{"const":"heatmap"}}},"# +
-        #""then":{"required":["cells"],"properties":{"cells":{"minItems":1},"points":{"maxItems":0},"slopes":{"maxItems":0}}}},{"if":{"properties":{"visualization":{"const":"slope"}}},"then":{"required":["slopes"],"properties":{"slopes":{"minItems":1},"points":{"maxItems":0},"cells":{"maxItems":0}}}}]}"#
 
     // MARK: - Helpers
 
     private func decodeParams<T: Decodable>(_ type: T.Type, from request: XPCRequest) throws -> T {
         do {
-            return try JSONDecoder.xpc.decode(type, from: request.params)
+            return try makeXPCDecoder().decode(type, from: request.params)
         } catch {
             throw XPCError(
                 code: "schema.payload_decode_failed",
@@ -582,19 +582,18 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
 // MARK: - JSON Coder Configuration
 
-private extension JSONEncoder {
-    static let xpc: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }()
+/// Factory functions that return a fresh encoder/decoder per call.
+/// JSONEncoder and JSONDecoder are mutable reference types and must not be
+/// shared across concurrent XPC callbacks.
+private func makeXPCEncoder() -> JSONEncoder {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    return encoder
 }
 
-private extension JSONDecoder {
-    static let xpc: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
+private func makeXPCDecoder() -> JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return decoder
 }
 #endif

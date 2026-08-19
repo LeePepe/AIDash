@@ -343,6 +343,21 @@ public final class CloudKitContainer {
         mode: StorageMode
     ) -> ModelConfiguration {
         let url = prepareStoreURL()
+        return Self.makeConfiguration(schema: schema, mode: mode, url: url)
+    }
+
+    /// Nonisolated configuration builder for off-MainActor container creation.
+    ///
+    /// Unlike the private `makeConfiguration(schema:mode:)` which calls
+    /// `prepareStoreURL()` (filesystem mutation + legacy adoption), this overload
+    /// takes a pre-resolved URL and performs NO filesystem side effects beyond
+    /// what `ModelContainer` itself does on open. Used by `AgentContainerLoader`
+    /// and `GUIContainerLoader` in `AppBootstrap`.
+    nonisolated internal static func makeConfiguration(
+        schema: Schema,
+        mode: StorageMode,
+        url: URL?
+    ) -> ModelConfiguration {
         switch mode {
         case .cloudKit:
             if let url {
@@ -361,7 +376,6 @@ public final class CloudKitContainer {
                 cloudKitDatabase: .private(cloudKitContainerIdentifier)
             )
         case .localOnly:
-            logger.notice("iCloud unavailable; using local-only store without CloudKit sync.")
             if let url {
                 return ModelConfiguration(
                     schema: schema,
