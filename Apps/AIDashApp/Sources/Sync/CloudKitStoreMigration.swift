@@ -19,7 +19,7 @@ extension CloudKitContainer {
     /// reads the passwd database directly and is the documented
     /// sandbox-independent answer, so the absolute container path it builds
     /// names the same bytes to a sandboxed and an unsandboxed process alike.
-    internal static func realHomeDirectory() -> URL {
+    nonisolated internal static func realHomeDirectory() -> URL {
         // `pw.pw_dir` points INTO `buffer`, so the string must be copied out
         // while the buffer pointer is still guaranteed valid. Swift only
         // guarantees an `&array` pointer for the duration of the call it is

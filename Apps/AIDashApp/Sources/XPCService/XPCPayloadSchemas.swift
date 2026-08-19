@@ -6,7 +6,7 @@ import AIDashCore
 
 extension XPCHandlers {
 
-    static let payloadSchemas: [String: String] = {
+    nonisolated static let payloadSchemas: [String: String] = {
         var schemas: [String: String] = [:]
         schemas[CardType.metric.rawValue] = """
         {"type":"object","required":["items"],"properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","required":["label","value"],"properties":{"label":{"type":"string"},"value":{"type":"number"},"unit":{"type":"string"},"trend":{"type":"string","enum":["up","down","flat"]},"series":{"type":"array","items":{"type":"number"}},"ratio":{"type":"number","minimum":0,"maximum":1},"higherIsBetter":{"type":"boolean"},"context":{"type":"string"}}}}}}
@@ -29,7 +29,7 @@ extension XPCHandlers {
     /// `"pattern":"\\S"`, not `minLength:1` — `requireText` trims first, so
     /// `"   "` is one character long and still rejected, and `minLength:1`
     /// would advertise as valid a payload the app refuses. Split for line len.
-    private static let relationshipSchema =
+    private nonisolated static let relationshipSchema =
         #"{"type":"object","required":["title","visualization","xAxis","yAxis","sampleSize","timeWindow","metricDefinition","summary"],"properties":{"title":{"type":"string","pattern":"\\S"},"visualization":{"type":"string","enum":["scatter","heatmap","slope"]},"xAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","pattern":"\\S"},"unit":{"type":"string"}}},"# +
         #""yAxis":{"type":"object","required":["label"],"properties":{"label":{"type":"string","pattern":"\\S"},"unit":{"type":"string"}}},"points":{"type":"array","items":{"type":"object","required":["label","x","y"],"properties":{"label":{"type":"string","pattern":"\\S"},"x":{"type":"number"},"y":{"type":"number"},"magnitude":{"type":"number","exclusiveMinimum":0},"category":{"type":"string"}}}},"# +
         #""cells":{"type":"array","items":{"type":"object","required":["column","row","value"],"properties":{"column":{"type":"string","pattern":"\\S"},"row":{"type":"string","pattern":"\\S"},"value":{"type":"number"}}}},"slopes":{"type":"array","items":{"type":"object","required":["label","before","after"],"properties":{"label":{"type":"string","pattern":"\\S"},"before":{"type":"number"},"after":{"type":"number"}}}},"# +

@@ -13,7 +13,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     /// Store-independent commands (`ping`, `schema.list`) respond immediately
     /// regardless; store-dependent mutations return a typed retryable
     /// `internal.store_not_ready` error until this is set.
-    private(set) var container: ModelContainer?
+    internal(set) var container: ModelContainer?
 
     init(container: ModelContainer?) {
         self.container = container
@@ -575,7 +575,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         }
     }
 
-    private static let appVersion: String = {
+    nonisolated static let appVersion: String = {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
     }()
 }
@@ -585,7 +585,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 /// Factory functions that return a fresh encoder/decoder per call.
 /// JSONEncoder and JSONDecoder are mutable reference types and must not be
 /// shared across concurrent XPC callbacks.
-private func makeXPCEncoder() -> JSONEncoder {
+func makeXPCEncoder() -> JSONEncoder {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     return encoder
