@@ -19,10 +19,28 @@ public final class CloudKitContainer {
 
     // `internal` (not `private`): the store-migration half lives in
     // CloudKitStoreMigration.swift and logs through the same category.
-    internal static let logger = Logger(
+    nonisolated internal static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.tianpli.aidash",
         category: "CloudKitContainer"
     )
+
+    // MARK: - Nonisolated shared helpers
+    //
+    // These are explicitly `nonisolated` so both `GUIContainerLoader` and
+    // `AgentContainerLoader` can call them from `Task.detached` without
+    // hopping to MainActor. They access no actor-isolated state — only
+    // pure computations, synchronous system APIs, and thread-safe frameworks
+    // (Security, FileManager).
+
+    /// The canonical SwiftData schema used by all container paths.
+    nonisolated internal static func makeSchema() -> Schema {
+        Schema([
+            BriefingModel.self,
+            ContainerModel.self,
+            CardModel.self,
+            UserEventModel.self,
+        ])
+    }
 
     /// Internal initializer for testing — allows injecting a specific state.
     internal init(state: InitState) {
@@ -98,7 +116,7 @@ public final class CloudKitContainer {
     /// Pure decision function: which backing store to use given whether an
     /// iCloud account is currently available. Extracted so the gate that
     /// prevents the CloudKit-mirror crash is deterministically testable.
-    internal static func storageMode(cloudAvailable: Bool) -> StorageMode {
+    nonisolated internal static func storageMode(cloudAvailable: Bool) -> StorageMode {
         cloudAvailable ? .cloudKit : .localOnly
     }
 
@@ -110,7 +128,7 @@ public final class CloudKitContainer {
     ///   2. an active iCloud account on the device (`ubiquityIdentityToken`).
     /// Both checks are synchronous, so they complete before `ModelContainer`
     /// spins up the async mirroring delegate that would otherwise crash.
-    internal static func isCloudKitAvailable() -> Bool {
+    nonisolated internal static func isCloudKitAvailable() -> Bool {
         hasCloudKitEntitlement() && FileManager.default.ubiquityIdentityToken != nil
     }
 
@@ -126,7 +144,7 @@ public final class CloudKitContainer {
     /// downstream `ubiquityIdentityToken` check in `isCloudKitAvailable()`
     /// still gracefully falls back to local-only when the user has no iCloud
     /// account signed in.
-    private static func hasCloudKitEntitlement() -> Bool {
+    private nonisolated static func hasCloudKitEntitlement() -> Bool {
         #if os(macOS)
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return false }
@@ -159,7 +177,7 @@ public final class CloudKitContainer {
     /// entitlement 用的 `$(AIDASH_CLOUDKIT_CONTAINER)` 默认也是同一个约定值。
     /// 若你的容器名不遵循该约定,在 xcconfig 里单独设 `AIDASH_CLOUDKIT_CONTAINER`,
     /// 并把下面的 fallback 常量改成同一个字符串。
-    internal static let cloudKitContainerIdentifier: String = {
+    nonisolated internal static let cloudKitContainerIdentifier: String = {
         if let bundleID = Bundle.main.bundleIdentifier, !bundleID.isEmpty {
             return "iCloud.\(bundleID)"
         }
@@ -207,7 +225,7 @@ public final class CloudKitContainer {
     /// process resolves it as its own container (it is literally what
     /// `NSHomeDirectory()` returns there), and an unsandboxed process can open
     /// it as a plain absolute path. One path, one store, either way.
-    internal static func storeURL() -> URL? {
+    nonisolated internal static func storeURL() -> URL? {
         #if os(macOS)
         let bundleID = Bundle.main.bundleIdentifier ?? "com.tianpli.aidash"
         return realHomeDirectory()
@@ -365,7 +383,7 @@ public final class CloudKitContainer {
     /// User-facing message used when CloudKit init fails. Resolved through the
     /// app's String Catalog (`Localizable.xcstrings`, key `cloudkit.unavailable.message`)
     /// so translations can be added without code changes (Constitution §F.1).
-    internal static var iCloudUnavailableMessage: String {
+    nonisolated internal static var iCloudUnavailableMessage: String {
         String(
             localized: "cloudkit.unavailable.message",
             defaultValue: "iCloud data sync is unavailable. Please check your iCloud account in Settings.",
