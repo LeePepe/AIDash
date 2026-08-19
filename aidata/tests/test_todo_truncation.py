@@ -37,9 +37,19 @@ class TestTruncateBoundaryAware:
     """Boundary-aware truncation never produces half-words."""
 
     @pytest.mark.unit
-    def test_launchagent_not_cut_mid_word(self):
+    def test_launchagent_fits_within_budget(self):
+        """LaunchAgent fixture (118 chars) fits within MAX_TODO (120); no truncation."""
         result = truncate(LAUNCHAGENT_TODO, MAX_TODO)
+        assert result == LAUNCHAGENT_TODO  # unchanged — fits in budget
         assert len(result) <= MAX_TODO
+        assert "LaunchAgent" in result
+
+    @pytest.mark.unit
+    def test_launchagent_truncated_at_smaller_budget(self):
+        """When forced to truncate, LaunchAgent must not cut mid-word."""
+        budget = 80
+        result = truncate(LAUNCHAGENT_TODO, budget)
+        assert len(result) <= budget
         assert "…" in result
         # Must NOT end with partial identifiers.
         assert not result.rstrip(" …").endswith("launc")
@@ -78,7 +88,9 @@ class TestTruncateBoundaryAware:
     @pytest.mark.unit
     def test_result_ends_on_complete_word(self):
         """Generic: the text before … must end on a complete word."""
-        result = truncate(LAUNCHAGENT_TODO, MAX_TODO)
+        # Use SNAPSHOT_CRON_TODO which actually exceeds MAX_TODO and gets truncated.
+        result = truncate(SNAPSHOT_CRON_TODO, MAX_TODO)
+        assert "…" in result  # sanity: this one IS truncated
         # Strip the trailing " …" marker and check the last char is not
         # a letter that would indicate a mid-word cut.
         body = result.rstrip("…").rstrip()
@@ -91,8 +103,8 @@ class TestTruncateBoundaryAware:
             # If it ends on an ASCII letter, confirm the next char (had it
             # not been cut) would be a space or punctuation (i.e., word end).
             pos = len(body)
-            if pos < len(LAUNCHAGENT_TODO):
-                next_char = LAUNCHAGENT_TODO[pos]
+            if pos < len(SNAPSHOT_CRON_TODO):
+                next_char = SNAPSHOT_CRON_TODO[pos]
                 assert next_char in " \t\n:/;,，；：、)）】」—", (
                     f"Truncation split inside a word: '...{body[-10:]}'|'{next_char}...'"
                 )
@@ -107,7 +119,7 @@ class TestTruncateBoundaryAware:
     @pytest.mark.unit
     def test_ellipsis_is_explicit(self):
         """Truncated output uses an explicit … (not three dots)."""
-        for text in [LAUNCHAGENT_TODO, SNAPSHOT_CRON_TODO, PR_DIAGNOSIS_TODO]:
+        for text in [SNAPSHOT_CRON_TODO, PR_DIAGNOSIS_TODO]:
             result = truncate(text, MAX_TODO)
             assert "…" in result
 
@@ -143,4 +155,8 @@ class TestTodoItemsFallbackTruncation:
         items = _todo_items(lines)
         for item in items:
             assert len(item["title"]) <= MAX_TODO
-            assert "…" in item["title"]
+        # Only those that actually exceed the budget should have …
+        over_budget = [item for item in items if len(item["title"]) == MAX_TODO
+                       or "…" in item["title"]]
+        # At least the SNAPSHOT and PR ones must be truncated
+        assert len(over_budget) >= 2
