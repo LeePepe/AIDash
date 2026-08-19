@@ -8,6 +8,8 @@ import pytest
 from L5_apps.digest.llm import LLMError
 from L5_apps.digest.polish import (
     PolishSlots, MAX_TLDR, build_prompt, parse_slots, truncate, apply_slots, polish_digest,
+    EfficiencyEvidence, extract_efficiency_evidence, validate_efficiency_claim,
+    neutral_fallback_tldr,
 )
 
 TEMPLATE = """# AI 使用日报 2026-07-09
@@ -116,3 +118,182 @@ def test_polish_digest_end_to_end_with_fake_client():
     assert "💡 点评: 整体上升" in out
     assert "- P0: 尽快排查 pipeline" in out
     assert len(client.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Efficiency-evidence gating tests (MY-1437/MY-1449)
+# ---------------------------------------------------------------------------
+
+# Template where cost rose +71% and waste rose +141%
+TEMPLATE_COST_UP = """# AI 使用日报 2026-08-18
+
+> 数据源: raven✅
+
+## ⚡ Trending
+- 成本: 4100$ ↑(+71%) vs 昨 2400$
+- Token: 120000 ↑(+46%) vs 昨 82000
+- 请求数: 950 ↑(+19%) vs 昨 800
+- 浪费额: 580$ ↑(+141%) vs 昨 240$
+- 完成任务: 128 ↑(+256%) vs 昨 36
+
+## 📅 今日 TODO
+- P0: 查浪费来源
+
+## 🗂 昨日汇总
+- 昨日花费 $4100.00，请求 950 次
+
+## 🔍 可改良
+- 昨日 $580 花在极小输出/大上下文，可考虑降级模型或裁剪上下文"""
+
+# Template where cost went down
+TEMPLATE_COST_DOWN = """# AI 使用日报 2026-08-18
+
+> 数据源: raven✅
+
+## ⚡ Trending
+- 成本: 1800$ ↓(-25%) vs 昨 2400$
+- 浪费额: 100$ ↓(-58%) vs 昨 240$
+
+## 📅 今日 TODO
+- P0: 继续优化
+
+## 🗂 昨日汇总
+- 昨日花费 $1800.00，请求 600 次
+
+## 🔍 可改良
+- 昨日无显著浪费信号"""
+
+
+@pytest.mark.unit
+def test_extract_evidence_cost_up():
+    ev = extract_efficiency_evidence(TEMPLATE_COST_UP)
+    assert ev.cost_pct == 71
+    assert ev.waste_pct == 141
+
+
+@pytest.mark.unit
+def test_extract_evidence_cost_down():
+    ev = extract_efficiency_evidence(TEMPLATE_COST_DOWN)
+    assert ev.cost_pct == -25
+    assert ev.waste_pct == -58
+
+
+@pytest.mark.unit
+def test_extract_evidence_no_trend_lines():
+    ev = extract_efficiency_evidence("# 空日报\n无数据")
+    assert ev.cost_pct is None
+    assert ev.waste_pct is None
+
+
+@pytest.mark.unit
+def test_allows_positive_claim_when_cost_down_waste_down():
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58)
+    assert ev.allows_positive_claim() is True
+
+
+@pytest.mark.unit
+def test_disallows_positive_claim_when_cost_up():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=-10)
+    assert ev.allows_positive_claim() is False
+
+
+@pytest.mark.unit
+def test_disallows_positive_claim_when_waste_up():
+    ev = EfficiencyEvidence(cost_pct=-10, waste_pct=141)
+    assert ev.allows_positive_claim() is False
+
+
+@pytest.mark.unit
+def test_disallows_positive_claim_when_both_up():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141)
+    assert ev.allows_positive_claim() is False
+
+
+@pytest.mark.unit
+def test_disallows_positive_claim_when_no_data():
+    ev = EfficiencyEvidence(cost_pct=None, waste_pct=None)
+    assert ev.allows_positive_claim() is False
+
+
+@pytest.mark.unit
+def test_allows_positive_claim_cost_down_no_waste():
+    ev = EfficiencyEvidence(cost_pct=-10, waste_pct=None)
+    assert ev.allows_positive_claim() is True
+
+
+@pytest.mark.unit
+def test_validate_rejects_positive_claim_when_cost_up():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141)
+    assert validate_efficiency_claim("效率明显提升", ev) is False
+    assert validate_efficiency_claim("整体向好", ev) is False
+    assert validate_efficiency_claim("用得更高效", ev) is False
+
+
+@pytest.mark.unit
+def test_validate_allows_neutral_wording_when_cost_up():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141)
+    assert validate_efficiency_claim("整体上升，关注浪费", ev) is True
+    assert validate_efficiency_claim("成本和浪费均有波动", ev) is True
+
+
+@pytest.mark.unit
+def test_validate_allows_positive_claim_when_evidence_supports():
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58)
+    assert validate_efficiency_claim("效率明显提升", ev) is True
+
+
+@pytest.mark.unit
+def test_neutral_fallback_mentions_counter_signal():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141)
+    fb = neutral_fallback_tldr(ev)
+    assert "浪费上升" in fb  # highest counter-signal
+
+
+@pytest.mark.unit
+def test_neutral_fallback_cost_only():
+    ev = EfficiencyEvidence(cost_pct=30, waste_pct=None)
+    fb = neutral_fallback_tldr(ev)
+    assert "成本上升" in fb
+
+
+@pytest.mark.unit
+def test_build_prompt_injects_constraint_when_cost_up():
+    system, _ = build_prompt(TEMPLATE_COST_UP)
+    assert "效率" in system  # the efficiency constraint was injected
+
+
+@pytest.mark.unit
+def test_build_prompt_no_constraint_when_cost_down():
+    system, _ = build_prompt(TEMPLATE_COST_DOWN)
+    # The base system always mentions 数字; when evidence is positive,
+    # the extra efficiency constraint should NOT be appended.
+    assert "成本或浪费上升" not in system
+
+
+@pytest.mark.unit
+def test_polish_digest_rejects_false_efficiency_claim():
+    """LLM claims efficiency improved despite cost +71% / waste +141%."""
+    client = FakeClient('{"tldr": "效率明显提升，继续保持", '
+                        '"todos": ["优先排查浪费来源"]}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    # The false claim must be replaced with a neutral fallback.
+    assert "效率" not in out or "提升" not in out
+    assert "浪费上升" in out or "成本上升" in out
+    assert "- P0: 优先排查浪费来源" in out  # TODOs are kept
+
+
+@pytest.mark.unit
+def test_polish_digest_keeps_valid_neutral_commentary():
+    """LLM provides neutral commentary when cost is up — should be kept."""
+    client = FakeClient('{"tldr": "成本和浪费均有波动，需关注", '
+                        '"todos": ["排查浪费来源"]}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    assert "成本和浪费均有波动" in out
+
+
+@pytest.mark.unit
+def test_polish_digest_allows_positive_when_cost_down():
+    """LLM claims efficiency improved when cost is genuinely down."""
+    client = FakeClient('{"tldr": "效率明显提升", "todos": ["继续优化"]}')
+    out = polish_digest(TEMPLATE_COST_DOWN, client)
+    assert "效率明显提升" in out
