@@ -13,10 +13,15 @@ import AIDashCore
 /// state, providing compile-level proof that the heavy I/O (SQLite open,
 /// schema construction) never executes on MainActor.
 ///
+/// Implementations MUST:
+/// - Call `CloudKitContainer.prepareStoreURL(sandboxRoot:)` BEFORE constructing
+///   `ModelContainer` so legacy-store adoption runs on upgrade (prevents data
+///   orphaning when the app transitions to the pinned store path).
+///
 /// Implementations MUST NOT:
-/// - Call `CloudKitContainer.prepareStoreURL()` (mutates filesystem via adoption)
-/// - Enumerate, copy, move, or delete real user store files
 /// - Use `nonisolated(unsafe)` or `@unchecked Sendable` escape hatches
+/// - Enumerate, copy, move, or delete user store files outside the
+///   `prepareStoreURL` contract
 protocol ContainerLoading: Sendable {
     /// Create a `ModelContainer` off MainActor. May block the calling thread
     /// (SQLite open) but must never hop to MainActor.
@@ -27,9 +32,8 @@ protocol ContainerLoading: Sendable {
 
 #if os(macOS)
 /// Production loader for the headless XPC agent. Creates a local-only
-/// ModelContainer at the pinned store path. Non-mutating: the only filesystem
-/// write is the SQLite open/create itself — no legacy-store adoption, no
-/// enumeration of existing stores, no deletion.
+/// ModelContainer at the pinned store path. Calls `prepareStoreURL` to
+/// ensure legacy-store adoption runs on upgrade before opening the container.
 ///
 /// Agent mode ALWAYS uses `.localOnly` regardless of iCloud availability:
 /// `NSPersistentCloudKitContainer` SIGTRAPs in a headless launchd-agent
@@ -39,6 +43,14 @@ protocol ContainerLoading: Sendable {
 /// conformance to `ContainerLoading` requires the explicit `nonisolated`
 /// `load()` — any accidental @MainActor access is a compile error.
 struct AgentContainerLoader: ContainerLoading {
+    /// nil in production; set by tests to confine legacy-store adoption
+    /// inside a temp directory (prevents touching the real user store).
+    let sandboxRoot: URL?
+
+    init(sandboxRoot: URL? = nil) {
+        self.sandboxRoot = sandboxRoot
+    }
+
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.tianpli.aidash",
         category: "AgentContainerLoader"
@@ -46,13 +58,7 @@ struct AgentContainerLoader: ContainerLoading {
 
     nonisolated func load() -> CloudKitContainer.InitState {
         let schema = CloudKitContainer.makeSchema()
-        let url = CloudKitContainer.storeURL()
-        if let url {
-            let dir = url.deletingLastPathComponent()
-            try? FileManager.default.createDirectory(
-                at: dir, withIntermediateDirectories: true
-            )
-        }
+        let url = CloudKitContainer.prepareStoreURL(sandboxRoot: sandboxRoot)
 
         // Agent: ALWAYS local-only — no CloudKit mirror.
         let config = CloudKitContainer.makeConfiguration(
@@ -87,9 +93,18 @@ struct AgentContainerLoader: ContainerLoading {
 /// GUI mode decides `.cloudKit` vs `.localOnly` based on entitlement + account,
 /// using the same gate that prevents the CloudKit-mirror crash.
 ///
-/// Does NOT invoke legacy-store adoption (`prepareStoreURL`). Directory
-/// creation for the pinned path is the only filesystem side effect.
+/// Calls `prepareStoreURL(sandboxRoot:)` so legacy-store adoption runs
+/// on upgrade before the container is opened — ensuring upgrade users'
+/// data is carried forward to the pinned store path.
 struct GUIContainerLoader: ContainerLoading {
+    /// nil in production; set by tests to confine legacy-store adoption
+    /// inside a temp directory (prevents touching the real user store).
+    let sandboxRoot: URL?
+
+    init(sandboxRoot: URL? = nil) {
+        self.sandboxRoot = sandboxRoot
+    }
+
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.tianpli.aidash",
         category: "GUIContainerLoader"
@@ -100,13 +115,7 @@ struct GUIContainerLoader: ContainerLoading {
         let cloudAvailable = CloudKitContainer.isCloudKitAvailable()
         let mode = CloudKitContainer.storageMode(cloudAvailable: cloudAvailable)
 
-        let url = CloudKitContainer.storeURL()
-        if let url {
-            let dir = url.deletingLastPathComponent()
-            try? FileManager.default.createDirectory(
-                at: dir, withIntermediateDirectories: true
-            )
-        }
+        let url = CloudKitContainer.prepareStoreURL(sandboxRoot: sandboxRoot)
 
         let config = CloudKitContainer.makeConfiguration(
             schema: schema, mode: mode, url: url

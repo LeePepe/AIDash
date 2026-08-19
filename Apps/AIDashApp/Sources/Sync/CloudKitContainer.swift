@@ -287,22 +287,32 @@ public final class CloudKitContainer {
     /// suppresses the real migration (adoption is skipped once the destination
     /// exists). Path math and data movement must not share a function.
     internal static func prepareStoreURL() -> URL? {
+        prepareStoreURL(sandboxRoot: Self.sandboxRoot)
+    }
+
+    /// Nonisolated store preparation for off-MainActor container creation.
+    ///
+    /// Resolves the pinned URL, creates the parent directory, and adopts any
+    /// legacy store — the same contract as the MainActor `prepareStoreURL()`,
+    /// callable from `ContainerLoading.load()` inside `Task.detached`.
+    ///
+    /// `sandboxRoot`: nil in production; non-nil in tests to confine ALL
+    /// filesystem mutation (pinned destination AND legacy-source search)
+    /// inside a temp directory.
+    nonisolated internal static func prepareStoreURL(sandboxRoot: URL?) -> URL? {
         #if os(macOS)
-        // ORDER MATTERS. The test guard comes FIRST, before any override is
-        // consulted. A previous revision checked the override first, so a test
-        // that set one re-opened the full real-home migration path and skipped
-        // this guard entirely. Under test, the only reachable locations are
-        // inside an explicit sandbox — never the real home, under any override.
         if isRunningTests {
             guard let root = sandboxRoot else {
                 logger.notice("Test process without a store sandbox: skipping pinned store + migration.")
                 return nil
             }
             return prepare(pinned: root.appendingPathComponent("AIDash.store"),
-                           legacyCandidates: legacyStoreURLs(under: root))
+                           legacyCandidates: legacyStoreURLs(under: root),
+                           confinedTo: sandboxRoot)
         }
         guard let pinned = storeURL() else { return nil }
-        return prepare(pinned: pinned, legacyCandidates: legacyStoreURLs())
+        return prepare(pinned: pinned, legacyCandidates: legacyStoreURLs(),
+                       confinedTo: sandboxRoot)
         #else
         return nil
         #endif
@@ -310,7 +320,7 @@ public final class CloudKitContainer {
 
     #if os(macOS)
     /// True when the process is hosting XCTest/swift-testing.
-    internal static var isRunningTests: Bool {
+    nonisolated internal static var isRunningTests: Bool {
         let env = ProcessInfo.processInfo.environment
         return env["XCTestConfigurationFilePath"] != nil
             || env["XCTestBundlePath"] != nil
@@ -319,21 +329,24 @@ public final class CloudKitContainer {
 
     /// Create the directory and adopt any legacy store for a given location.
     private static func prepare(pinned: URL, legacyCandidates: [URL]) -> URL? {
+        prepare(pinned: pinned, legacyCandidates: legacyCandidates,
+                confinedTo: Self.sandboxRoot)
+    }
+
+    /// Nonisolated prepare: creates the pinned store directory and adopts any
+    /// legacy store. `confinedTo` is the explicit sandbox root (nil in
+    /// production), forwarded to `adoptLegacyStore(from:to:confinedTo:)`.
+    nonisolated private static func prepare(
+        pinned: URL, legacyCandidates: [URL], confinedTo sandboxRoot: URL?
+    ) -> URL? {
         let dir = pinned.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {
-            // Both postures can normally create this directory — a sandboxed
-            // process owns its container, and an unsandboxed one has full home
-            // access — so reaching here means something genuinely unusual (disk
-            // full, a file occupying the path, revoked permissions). Degrade to
-            // SwiftData's default rather than failing container creation (§D):
-            // the app still launches. It does mean THIS launch reads a
-            // different store, so the failure is logged rather than swallowed.
             logger.warning("Pinned store dir unavailable (\(error.localizedDescription, privacy: .public)); using SwiftData default.")
             return nil
         }
-        adoptLegacyStore(from: legacyCandidates, to: pinned)
+        adoptLegacyStore(from: legacyCandidates, to: pinned, confinedTo: sandboxRoot)
         return pinned
     }
     #endif

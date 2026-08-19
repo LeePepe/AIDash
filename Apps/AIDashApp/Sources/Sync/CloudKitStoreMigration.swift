@@ -46,14 +46,14 @@ extension CloudKitContainer {
     /// `default.store` is what SwiftData creates when no `url:` is given. It
     /// resolves differently depending on the running process's sandbox state,
     /// which is exactly how the app ended up with two divergent stores.
-    internal static func legacyStoreURLs() -> [URL] {
+    nonisolated internal static func legacyStoreURLs() -> [URL] {
         legacyStoreURLs(under: realHomeDirectory())
     }
 
     /// Same layout, rooted at an arbitrary directory. Tests pass a temp root so
     /// legacy discovery — the half that MOVES and DELETES files — can never
     /// reach the real home. Production passes the real home.
-    internal static func legacyStoreURLs(under root: URL) -> [URL] {
+    nonisolated internal static func legacyStoreURLs(under root: URL) -> [URL] {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.tianpli.aidash"
         return [
             // Unsandboxed (ad-hoc fixed install) — the most recently active one.
@@ -95,7 +95,7 @@ extension CloudKitContainer {
     /// orphaned, which is the precise failure this migration exists to end.
     /// (Measured on a real machine: the `-wal` was 14 hours newer than its
     /// own `.store`.)
-    internal static func lastActivity(of store: URL) -> Date {
+    nonisolated internal static func lastActivity(of store: URL) -> Date {
         let fm = FileManager.default
         return ["", "-wal", "-shm"].compactMap { suffix -> Date? in
             let path = store.path + suffix
@@ -104,8 +104,16 @@ extension CloudKitContainer {
         }.max() ?? .distantPast
     }
 
+    /// MainActor entry point: delegates to the nonisolated overload, passing
+    /// the current test sandbox root. Tests call this via `withStoreSandbox`.
+    internal static func adoptLegacyStore(from candidates: [URL], to pinned: URL) {
+        adoptLegacyStore(from: candidates, to: pinned, confinedTo: Self.sandboxRoot)
+    }
+
     /// Testable core of the migration: `candidates` is injected so the behavior
     /// can be exercised against a temp directory instead of the real home.
+    /// `confinedTo` replaces the MainActor `sandboxRoot` read — callers pass
+    /// the sandbox root explicitly so this function needs no actor-isolated state.
     ///
     /// COPY-then-publish, never move-in-place. The destination is only put in
     /// its final position once the WHOLE file set (store + `-wal` + `-shm`) has
@@ -117,7 +125,9 @@ extension CloudKitContainer {
     /// visible outcome all-or-nothing. On any failure everything published so
     /// far is rolled back and the legacy set is left exactly as it was, so the
     /// next launch simply retries.
-    internal static func adoptLegacyStore(from candidates: [URL], to pinned: URL) {
+    nonisolated internal static func adoptLegacyStore(
+        from candidates: [URL], to pinned: URL, confinedTo sandboxRoot: URL?
+    ) {
         let fm = FileManager.default
 
         // LAST LINE OF DEFENSE. This function MOVES and DELETES files, and a

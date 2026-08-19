@@ -199,3 +199,73 @@ private struct ImmediateLoader: ContainerLoading {
     }
 }
 #endif
+
+// MARK: - Nonisolated legacy-store adoption (off-MainActor path)
+
+#if os(macOS)
+/// Verifies that the nonisolated `prepareStoreURL(sandboxRoot:)` — the path
+/// used by `GUIContainerLoader` and `AgentContainerLoader` — performs
+/// legacy-store adoption before the container is opened. Without this, an
+/// upgrade user's data would be orphaned at the legacy location while the
+/// loader creates a fresh empty store at the pinned path.
+@Test func nonisolatedPrepareStoreURLAdoptsLegacyStore() throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try fm.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: root) }
+
+    // Plant a legacy store at the unsandboxed default location under the
+    // sandbox root — this is where an upgrade user's data lives.
+    let legacyDir = root.appendingPathComponent("Library/Application Support")
+    try fm.createDirectory(at: legacyDir, withIntermediateDirectories: true)
+    let legacy = legacyDir.appendingPathComponent("default.store")
+    try Data("upgrade-data".utf8).write(to: legacy)
+    try Data("wal-data".utf8).write(to: URL(fileURLWithPath: legacy.path + "-wal"))
+
+    // Call the nonisolated prepare with sandbox root — this is exactly what
+    // the loaders call inside Task.detached.
+    let result = CloudKitContainer.prepareStoreURL(sandboxRoot: root)
+
+    // The pinned store should be at root/AIDash.store
+    let expected = root.appendingPathComponent("AIDash.store")
+    #expect(result == expected)
+
+    // Adoption should have moved the legacy store to the pinned location
+    #expect(fm.fileExists(atPath: expected.path))
+    #expect(fm.fileExists(atPath: expected.path + "-wal"))
+    #expect(try String(contentsOf: expected, encoding: .utf8) == "upgrade-data")
+    #expect(try String(contentsOf: URL(fileURLWithPath: expected.path + "-wal"), encoding: .utf8) == "wal-data")
+
+    // Legacy was MOVED, not copied — prevents future builds from resurrecting
+    // stale data at the old path.
+    #expect(!fm.fileExists(atPath: legacy.path))
+    #expect(!fm.fileExists(atPath: legacy.path + "-wal"))
+}
+
+/// Verifies that the nonisolated path does NOT adopt when the pinned store
+/// already exists — prevents overwriting newer data with an older legacy file.
+@Test func nonisolatedPrepareStoreURLSkipsAdoptionWhenPinnedExists() throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try fm.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: root) }
+
+    // Pinned store already exists (previous launch)
+    let pinned = root.appendingPathComponent("AIDash.store")
+    try Data("current-data".utf8).write(to: pinned)
+
+    // A legacy store also exists
+    let legacyDir = root.appendingPathComponent("Library/Application Support")
+    try fm.createDirectory(at: legacyDir, withIntermediateDirectories: true)
+    let legacy = legacyDir.appendingPathComponent("default.store")
+    try Data("old-data".utf8).write(to: legacy)
+
+    let result = CloudKitContainer.prepareStoreURL(sandboxRoot: root)
+
+    #expect(result == pinned)
+    // Pinned store content is unchanged
+    #expect(try String(contentsOf: pinned, encoding: .utf8) == "current-data")
+    // Legacy is untouched
+    #expect(fm.fileExists(atPath: legacy.path))
+}
+#endif
