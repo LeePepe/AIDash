@@ -54,6 +54,19 @@ def _today_cst() -> str:
     return datetime.now(tz=_CST).strftime("%Y-%m-%d")
 
 
+def _headline_cost(raven, day: str | None) -> float | None:
+    """Extract the total daily cost from the raven trends for the given day.
+
+    Returns None when the day is absent from the series (degraded/empty raven),
+    so callers fall back to attributed-total as denominator (legacy behavior).
+    """
+    if day is None or raven is None or raven.health.state != "ok":
+        return None
+    cost_map = dict(raven.cost)
+    val = cost_map.get(day)
+    return float(val) if val is not None else None
+
+
 def _fetch_sources(report_date: str | None = None) -> DigestSources:
     """Fetch every trend source ONCE into an immutable bundle (ADR-23).
 
@@ -75,8 +88,9 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         day_since = (base - timedelta(days=1)).strftime("%Y-%m-%d")
         day_until = base.strftime("%Y-%m-%d")
     cost_improvement = fetch_cost_improvement()
+    raven = fetch_raven_trends()
     return DigestSources(
-        raven=fetch_raven_trends(),
+        raven=raven,
         multica=fetch_multica_completed(),
         ado=fetch_combined_pr_trends(),
         automation=fetch_automation_trends(),
@@ -95,7 +109,11 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         # Attribution uses the REPORTED day (day_since), matching the day the
         # trend arrows describe — attributing yesterday's spike to projects is
         # only meaningful against yesterday's spend.
-        cost_by_project=fetch_cost_by_project(day_since),
+        # headline_cost is the TOTAL day spend from raven so percentages use an
+        # honest denominator and the unattributed portion is explicit (MY-1435).
+        cost_by_project=fetch_cost_by_project(
+            day_since,
+            headline_cost=_headline_cost(raven, day_since)),
         model_by_project=fetch_model_by_project(day_since),
         card_interest=fetch_card_interest(since),
         leverage=fetch_leverage(day_since),

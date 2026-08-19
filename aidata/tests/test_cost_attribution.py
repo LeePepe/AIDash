@@ -76,6 +76,100 @@ def test_cost_by_project_handles_empty(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# MY-1435 regression: coverage must be explicit when attribution is partial
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_cost_by_project_partial_coverage_shows_unattributed(monkeypatch):
+    """Headline 2858.35, attributed 2107.23 → explicit unattributed row.
+
+    Before MY-1435 the card presented percentages summing to 100% of the
+    attributed subtotal, silently implying full-cost coverage. After the fix,
+    percentages use the headline as denominator and the unattributed portion
+    appears as a named row so the reader can reconcile:
+      Σ(project %) + 未归因 % == 100% of headline.
+    """
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [("AIDash", 1200.00, 56.9, 300000, 800, 10),
+         ("VitalStride", 600.00, 28.5, 150000, 400, 8),
+         ("Multica", 307.23, 14.6, 80000, 200, 5)],
+        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
+    headline = 2858.35
+    attributed = 1200.00 + 600.00 + 307.23  # 2107.23
+    bundle = s.fetch_cost_by_project("2026-08-02", headline_cost=headline)
+
+    assert bundle.health.state == "ok"
+    labels = [i.label for i in bundle.items]
+    # The unattributed portion must be explicit
+    assert "未归因" in labels, (
+        "partial coverage must produce an explicit unattributed row"
+    )
+    unattributed_item = next(i for i in bundle.items if i.label == "未归因")
+    # The gap must be the arithmetic difference
+    expected_gap = headline - attributed
+    assert abs(unattributed_item.value - expected_gap) < 0.01
+    # Percentages must use headline as denominator (not attributed subtotal)
+    first = bundle.items[0]
+    expected_pct = round(100.0 * 1200.00 / headline, 1)
+    assert first.value_text == f"{expected_pct:.0f}%"
+    # ALL percentages must reconcile to 100% of headline
+    all_pcts = []
+    for item in bundle.items:
+        pct_str = item.value_text.rstrip("%")
+        all_pcts.append(float(pct_str))
+    # Allow rounding tolerance (±2%)
+    assert abs(sum(all_pcts) - 100.0) < 2.0, (
+        f"percentages must reconcile to ~100% of headline; got {sum(all_pcts)}"
+    )
+    # Unattributed has semantic="warning" to draw attention
+    assert unattributed_item.semantic == "warning"
+
+
+@pytest.mark.unit
+def test_cost_by_project_full_coverage_no_warning(monkeypatch):
+    """When attributed == headline, no unnecessary warning row appears."""
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [("AIDash", 1800.00, 60.0, 400000, 1000, 15),
+         ("VitalStride", 1200.00, 40.0, 300000, 800, 12)],
+        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
+    headline = 3000.00  # exactly equals attributed total
+    bundle = s.fetch_cost_by_project("2026-08-02", headline_cost=headline)
+    labels = [i.label for i in bundle.items]
+    assert "未归因" not in labels, (
+        "full coverage must NOT produce a warning row"
+    )
+
+
+@pytest.mark.unit
+def test_cost_by_project_no_headline_falls_back_to_attributed_pct(monkeypatch):
+    """Without headline_cost, percentages use SQL's own cost_pct (legacy)."""
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [("AIDash", 1552.93, 41.4, 331680.5, 1492.0, 19),
+         ("VitalStride", 900.04, 24.0, 191641.8, 1807.0, 26)],
+        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
+    bundle = s.fetch_cost_by_project("2026-08-02")  # no headline_cost
+    # Uses SQL-computed cost_pct (41.4) directly
+    assert bundle.items[0].value_text == "41%"
+    assert "未归因" not in [i.label for i in bundle.items]
+
+
+@pytest.mark.unit
+def test_headline_cost_extracts_day_from_raven_series():
+    """_headline_cost returns the raven cost for the given day."""
+    from L5_apps.digest.app import _headline_cost
+
+    raven = s.RavenTrends(
+        cost=[("2026-08-01", 2858.35), ("2026-08-02", 3100.0)],
+        tokens=[], requests=[], waste=[],
+        pipeline_completed=[], pipeline_cancelled=[], sessions=[],
+        health=s.SourceHealth("raven", "ok"),
+    )
+    assert _headline_cost(raven, "2026-08-01") == 2858.35
+    assert _headline_cost(raven, "2026-08-03") is None  # day not in series
+    assert _headline_cost(raven, None) is None
+    assert _headline_cost(None, "2026-08-01") is None
+
+
+# --------------------------------------------------------------------------- #
 # fetch_model_by_project
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit

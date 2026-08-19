@@ -779,7 +779,8 @@ def fetch_ai_efficiency() -> "AiEfficiency":
 
 
 # ---- ⏱ 时间与产出 -------------------------------------------------------
-def fetch_cost_by_project(day: str | None, top_n: int = 6) -> "RankBundle":
+def fetch_cost_by_project(day: str | None, top_n: int = 6, *,
+                          headline_cost: float | None = None) -> "RankBundle":
     """Where the day's spend actually went, as a descending barList.
 
     This is the attribution layer: every other trend card reports one
@@ -790,17 +791,49 @@ def fetch_cost_by_project(day: str | None, top_n: int = 6) -> "RankBundle":
     session touches 1.68 projects on average, so summing per project would
     double-count (see the query header). Degrades to empty + non-ok health
     when the warehouse or query fails (ADR-23).
+
+    When `headline_cost` is provided (the day's total spend from raven), all
+    percentages are computed against THAT denominator — never the attributed
+    subtotal — so displayed values never imply full-cost coverage. If the
+    attributed total < headline_cost, an explicit '未归因' row shows the gap
+    (MY-1435). Full coverage produces no extra row. This guarantees arithmetic
+    reconciliation: headline = Σ(project costs) + unattributed.
     """
     try:
         rows, idx = _rows("attribution/cost-by-project", {"day": day})
         pi, ci, pci = idx["project"], idx["cost_usd"], idx["cost_pct"]
-        ranked = [(str(r[pi]), float(r[ci] or 0), float(r[pci] or 0))
-                  for r in rows]
+
+        attributed_total = sum(float(r[ci] or 0) for r in rows)
+
+        # When headline_cost is available, recompute percentages against it so
+        # every % answers "of total spend" (honest denominator). Otherwise use
+        # the SQL's own cost_pct which is relative to the full attributed base
+        # (includes projects beyond top_n).
+        if headline_cost and headline_cost > 0:
+            ranked = [
+                (str(r[pi]), float(r[ci] or 0),
+                 round(100.0 * float(r[ci] or 0) / headline_cost, 1))
+                for r in rows
+            ]
+        else:
+            ranked = [(str(r[pi]), float(r[ci] or 0), float(r[pci] or 0))
+                      for r in rows]
+
         items = _fold_top_n(
             ranked, top_n,
             value_text=lambda pct: f"{pct:.0f}%",
             semantic=lambda _label: None,
         )
+
+        # Explicit unattributed row when headline > attributed (MY-1435).
+        # Threshold: >1% gap avoids noise from floating-point rounding.
+        if (headline_cost and headline_cost > 0
+                and attributed_total < headline_cost * 0.99):
+            gap = headline_cost - attributed_total
+            gap_pct = round(100.0 * gap / headline_cost, 1)
+            items.append(RankItem("未归因", gap, f"{gap_pct:.0f}%",
+                                  semantic="warning"))
+
         return RankBundle(items, SourceHealth("attribution", "ok"))
     except Exception as exc:
         return RankBundle([], SourceHealth("attribution", "error", str(exc)[:200]))
