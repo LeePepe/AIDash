@@ -126,6 +126,20 @@ class PushResult:
     published: bool = False
 
 
+@dataclass(frozen=True)
+class DeliveryState:
+    """Last-known delivery/XPC health, persisted across briefings.
+
+    Read at digest-build time to expose delivery health SEPARATELY from
+    content-source health (MY-1438/MY-1450). Written after every push attempt.
+    Freshness: `timestamp` is UTC ISO-8601; consumers compare against the
+    current briefing date to detect staleness.
+    """
+    ok: bool
+    reason: str = ""
+    timestamp: str = ""  # UTC ISO-8601, e.g. "2026-08-19T04:01:23Z"
+
+
 # ---------------------------------------------------------------------------
 # Pure transform.
 # ---------------------------------------------------------------------------
@@ -481,7 +495,9 @@ def _overview_sections(sections: dict[str, list[str]]) -> list[dict]:
 
 
 def _overview_container(mmdd: str, reported_day: str, must_see: str,
-                        sections: dict[str, list[str]]) -> Container:
+                        sections: dict[str, list[str]],
+                        delivery: "DeliveryState | None" = None,
+                        report_date: str = "") -> Container:
     """总览: the always-present digest card + optional data-health insight."""
     digest_payload = {
         "title": f"AI 使用日报 {reported_day}",
@@ -497,6 +513,13 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
         cards.append(Card(_kuid(mmdd, 2), "insight", "wide",
                           {"title": "数据源健康", "body": _strip_md(health)},
                           style="warning"))
+    # Delivery/XPC health — separate from content-source health (MY-1450).
+    if delivery is not None and not delivery.ok:
+        d_line = delivery_health_line(report_date, delivery)
+        if d_line:
+            cards.append(Card(_kuid(mmdd, 99), "insight", "wide",
+                              {"title": "投递健康", "body": _strip_md(d_line)},
+                              style="warning"))
     return Container(_cuid(mmdd, 1), "总览", 10, tuple(cards),
                      layout="auto", style="accent")
 
@@ -1263,7 +1286,8 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
 
 
 def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
-                   must_see: str) -> Briefing:
+                   must_see: str,
+                   delivery: "DeliveryState | None" = None) -> Briefing:
     """Map the digest into a Briefing (pure). `report_date` is the RUN date.
 
     Numeric trends render as a `metric` card (sparklines + a ring gauge for the
@@ -1284,7 +1308,9 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     reported_day = yesterday(report_date)
     sections = parse_sections(full_md)
     mmdd = _mmdd(reported_day)
-    containers = [_overview_container(mmdd, reported_day, must_see, sections)]
+    containers = [_overview_container(mmdd, reported_day, must_see, sections,
+                                      delivery=delivery,
+                                      report_date=report_date)]
 
     # 今日工作 (goal ① 做了什么, M2): per-project effort, right after overview.
     work_container = _work_container(
@@ -1580,6 +1606,73 @@ def _record_push_failure(reason: str,
 def _utc_now() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ---------------------------------------------------------------------------
+# Delivery state persistence (MY-1438/MY-1450).
+#
+# The push path writes `DeliveryState` after every attempt; the next
+# digest-build reads it to expose delivery health separately from
+# content-source health. Uses the existing state.json watermark store
+# under key "delivery".
+# ---------------------------------------------------------------------------
+_DELIVERY_KEY = "delivery"
+
+
+def save_delivery_state(result: PushResult,
+                        now: Callable[[], str] | None = None) -> DeliveryState:
+    """Persist delivery state from a PushResult. Returns the saved state."""
+    from state import set_watermark
+    stamp = (now or _utc_now)()
+    state = DeliveryState(ok=result.ok, reason=result.reason, timestamp=stamp)
+    set_watermark(_DELIVERY_KEY, {
+        "ok": state.ok, "reason": state.reason, "timestamp": state.timestamp,
+    })
+    return state
+
+
+def load_delivery_state() -> DeliveryState | None:
+    """Read the last-persisted delivery state, or None if never pushed."""
+    from state import get_watermark
+    raw = get_watermark(_DELIVERY_KEY)
+    if raw is None or not isinstance(raw, dict):
+        return None
+    return DeliveryState(
+        ok=raw.get("ok", False),
+        reason=raw.get("reason", ""),
+        timestamp=raw.get("timestamp", ""),
+    )
+
+
+def delivery_health_line(report_date: str,
+                         delivery: "DeliveryState | None" = None) -> str:
+    """Human-readable delivery/XPC health line with freshness semantics.
+
+    Returns "" when no delivery state exists (first run, never pushed).
+    Marks the state as stale when its timestamp is >36h before the report date.
+    """
+    if delivery is None:
+        return ""
+    if delivery.ok:
+        label = "XPC✅"
+    else:
+        short_reason = delivery.reason.split("(")[0].strip() if delivery.reason else "unknown"
+        label = f"XPC⚠️{short_reason}"
+    # Freshness: compare delivery timestamp to report_date.
+    stale_tag = ""
+    if delivery.timestamp and report_date:
+        try:
+            from datetime import datetime, timezone, timedelta
+            ts = datetime.fromisoformat(delivery.timestamp.replace("Z", "+00:00"))
+            from L5_apps.digest.cst import _parse as _parse_cst_day, _CST
+            report_dt = _parse_cst_day(report_date).replace(tzinfo=_CST)
+            age = report_dt - ts
+            if age > timedelta(hours=36):
+                stale_tag = f"(stale: {age.days}d ago)"
+        except (ValueError, TypeError):
+            pass
+    parts = label + (f" {stale_tag}" if stale_tag else "")
+    return f"> 投递: {parts}"
 
 
 def _card_argv(bin_path: str, container_id: str, card: Card,
