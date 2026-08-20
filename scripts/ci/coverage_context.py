@@ -98,16 +98,24 @@ def _find_all_test_functions(source: str) -> list[tuple[str, re.Match]]:
     - Swift Testing: `@Test func arbitraryName()` / `@Test("label") func …`
     - Python: `def test_foo()` / `async def test_foo()`
 
-    Returns (func_name, match) pairs. Deduplicates by name (a function that
-    matches both regexes is returned once).
+    Returns (func_name, match) pairs. Preserves every declaration with a
+    distinct captured-group position so that same-named tests in different
+    suites/classes are all enumerated. Deduplicates only when multiple regexes
+    match the same function declaration (same captured group(1) position).
     """
-    seen: dict[str, re.Match] = {}
+    seen_group_starts: set[int] = set()
+    results: list[tuple[str, re.Match]] = []
     for rx in (_XCTEST_FUNC_RE, _SWIFT_TESTING_FUNC_RE, _PYTHON_TEST_FUNC_RE):
         for m in rx.finditer(source):
-            name = m.group(1)
-            if name not in seen:
-                seen[name] = m
-    return list(seen.items())
+            # Use the start of the captured function name to identify unique
+            # declarations: @Test func testFoo and func testFoo both capture
+            # "testFoo" at the same position, so they are the same declaration.
+            group_start = m.start(1)
+            if group_start in seen_group_starts:
+                continue
+            seen_group_starts.add(group_start)
+            results.append((m.group(1), m))
+    return results
 
 
 # Regex to find containing type declarations (class, struct, enum, extension)
@@ -840,7 +848,7 @@ def build_coverage_evidence(
 ) -> str:
     """Main entry: build coverage context block for the review prompt.
 
-    Returns empty string when no removed tests are detected (normal case).
+    Returns empty string when the analyzer detects no removed tests (normal case).
     Returns non-empty evidence block when tests are removed and related
     coverage exists in HEAD.
 

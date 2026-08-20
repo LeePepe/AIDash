@@ -262,7 +262,7 @@ review_coverage_rules() {
 '- COVERAGE CONTEXT 中标注 "declaration absent from HEAD" 的 removed tests 已由可信脚本' \
 '  验证确实从 HEAD 中消失(不是仅修改)。若一个 test function 仅被修改而非删除,' \
 '  它不会出现在 REMOVED TESTS 列表中。' \
-'- 若 COVERAGE CONTEXT 块为空或完全不存在,这是**正常结果**:表示 diff 未移除任何测试函数。' \
+'- 若 COVERAGE CONTEXT 块为空或完全不存在,这是**正常结果**:表示分析器未检测到被移除的测试函数。' \
 '  空块不提供 SEARCH SCOPE 证据,不改变基于其他具体 full-HEAD 证据的 missing-test / rule-4 blocker 判定。' \
 '  空块不是分析器异常;真正的分析器异常(git/tool 故障)会导致脚本 exit nonzero,gate fail-closed,不会走到这里。' \
 '- 不确定一律降级为 note。'
