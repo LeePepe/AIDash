@@ -250,6 +250,56 @@ else
   fail_count=$((fail_count + 1))
 fi
 
+# --- 9. Probe 2 envelope regression (exact real briefing.not_found) ----------
+# The canonical CLI error envelope for briefing.not_found contains ONLY
+# ok=false, error.code, and error.message — no requestId at any level.
+# The installer must accept this shape. This fixture uses the exact envelope
+# observed on real-machine acceptance (MY-1453).
+P2_FIX_PASS=$(mktemp "${TMPDIR:-/tmp}/p2-pass.XXXXXX")
+P2_FIX_WRONG=$(mktemp "${TMPDIR:-/tmp}/p2-wrong.XXXXXX")
+P2_FIX_MISSING=$(mktemp "${TMPDIR:-/tmp}/p2-missing.XXXXXX")
+trap 'rm -rf "$TMP_PLIST_DIR" "$FAKE_LAUNCHCTL_LOG" "$FAKE_LAUNCHCTL_BIN" "$VJK_FIXTURE" "$P2_FIX_PASS" "$P2_FIX_WRONG" "$P2_FIX_MISSING"' EXIT
+
+# Exact real envelope (no requestId)
+cat > "$P2_FIX_PASS" <<'EOF'
+{"error":{"code":"briefing.not_found","message":"No briefing found for date '2026-08-20'"},"ok":false}
+EOF
+
+# Wrong error code (must fail)
+cat > "$P2_FIX_WRONG" <<'EOF'
+{"error":{"code":"internal.store_failed","message":"Store failed"},"ok":false}
+EOF
+
+# Missing error.code entirely (must fail)
+cat > "$P2_FIX_MISSING" <<'EOF'
+{"error":{"message":"Something went wrong"},"ok":false}
+EOF
+
+# PASS: real no-requestId envelope must be accepted
+if validate_json_key "$P2_FIX_PASS" "ok" "false" \
+   && validate_json_key "$P2_FIX_PASS" "error.code" "briefing.not_found"; then
+  echo "  PASS: probe 2 envelope: real briefing.not_found (no requestId) accepted"
+else
+  echo "  FAIL: probe 2 envelope: real briefing.not_found (no requestId) rejected" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# FAIL: wrong error code must be rejected
+if validate_json_key "$P2_FIX_WRONG" "error.code" "briefing.not_found"; then
+  echo "  FAIL: probe 2 envelope: wrong error code should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: wrong error code correctly rejected"
+fi
+
+# FAIL: missing error.code must be rejected
+if validate_json_key "$P2_FIX_MISSING" "error.code" "briefing.not_found"; then
+  echo "  FAIL: probe 2 envelope: missing error.code should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: missing error.code correctly rejected"
+fi
+
 # --- Result ------------------------------------------------------------------
 echo
 if [ "$fail_count" -eq 0 ]; then
