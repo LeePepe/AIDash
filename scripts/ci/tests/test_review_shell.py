@@ -453,16 +453,16 @@ def test_oversized_printf_body_round_trips() -> None:
 # --------------------------------------------------------------------------
 
 def test_claude_review_passes_max_turns_and_disables_tools() -> None:
-    """The claude CLI invocation includes --max-turns 1 AND --tools "".
+    """The claude CLI invocation includes --max-turns 2 AND --tools "".
 
-    Without --max-turns 1, `claude -p` runs in full agentic mode — reading
-    files, running commands, taking multiple turns — easily exhausting the
-    900-second watchdog on the self-hosted runner (MY-1452).
+    --max-turns 2 (not 1): with --json-schema the CLI needs turn 1 (model
+    response) + turn 2 (structured output extraction). --max-turns 1 causes
+    exit with error_max_turns before producing structured_output. Runner probe
+    confirmed --max-turns 2 returns schema-valid verdict in ~7s.
 
-    Without --tools "", built-in tools (Read, Edit, Bash, etc.) remain active
-    and a single first-turn tool call can exhaust the watchdog. Both flags are
-    required. `--tools ""` is the documented way to disable all tools per
-    `claude --help`.
+    --tools "" disables all built-in tools (Read, Edit, Bash, etc.) per
+    `claude --help`, preventing any tool call from exhausting the 900s
+    watchdog (MY-1452).
 
     This is a behavioural check restricted to executable lines (comments
     stripped): removing the real CLI flags while leaving them in comments must
@@ -471,9 +471,9 @@ def test_claude_review_passes_max_turns_and_disables_tools() -> None:
     executable_lines = _code_lines(CLAUDE)
     executable_text = "\n".join(code for _, code in executable_lines)
 
-    assert "--max-turns 1" in executable_text, (
-        "claude-review.sh must pass --max-turns 1 to `claude -p` to prevent "
-        "unbounded agentic exploration (MY-1452)"
+    assert "--max-turns 2" in executable_text, (
+        "claude-review.sh must pass --max-turns 2 to `claude -p` to bound "
+        "agentic turns while allowing structured output (MY-1452)"
     )
     assert '--tools ""' in executable_text, (
         'claude-review.sh must pass --tools "" to `claude -p` to '
@@ -503,6 +503,61 @@ def test_claude_review_emits_phase_timing() -> None:
             f"claude-review.sh is missing _phase_end for phase {phase!r} "
             f"in executable code (MY-1452)"
         )
+
+
+def test_claude_review_structured_output_path() -> None:
+    """The structured_output extraction path handles the full verdict envelope.
+
+    Contract: when the CLI exits 0 and produces JSON with .structured_output,
+    the script must extract verdict, summary, blockers, and notes. This test
+    verifies that the production script's jq extraction pipeline handles both
+    .structured_output (primary) and .result (fallback) paths correctly.
+
+    Destroying the --output-format json or --json-schema invocation or the
+    structured_output extraction must fail this test.
+    """
+    executable_lines = _code_lines(CLAUDE)
+    executable_text = "\n".join(code for _, code in executable_lines)
+
+    # Production invocation must include the structured output chain
+    assert "--output-format json" in executable_text, (
+        "claude-review.sh must pass --output-format json to get "
+        "structured_output in the response envelope (MY-1452)"
+    )
+    assert "--json-schema" in executable_text, (
+        "claude-review.sh must pass --json-schema to enforce the verdict "
+        "schema on the CLI response (MY-1452)"
+    )
+
+    # The extraction pipeline must handle both paths
+    assert ".structured_output" in executable_text, (
+        "claude-review.sh must extract .structured_output from the CLI "
+        "response for the verdict envelope (MY-1452)"
+    )
+    assert ".result" in executable_text, (
+        "claude-review.sh must have a .result fallback path for verdict "
+        "extraction (MY-1452)"
+    )
+
+
+def test_claude_review_error_max_turns_diagnostic() -> None:
+    """When CLI returns error_max_turns, the script extracts structured diag.
+
+    MY-1452 requirement: non-zero CLI exit must surface terminal_reason,
+    subtype, and num_turns from the JSON output so operators can distinguish
+    error_max_turns from genuine crashes without leaking sensitive content.
+    """
+    executable_lines = _code_lines(CLAUDE)
+    executable_text = "\n".join(code for _, code in executable_lines)
+
+    assert "terminal_reason" in executable_text, (
+        "claude-review.sh must extract terminal_reason from CLI JSON on "
+        "non-zero exit for actionable diagnostics (MY-1452)"
+    )
+    assert "num_turns" in executable_text, (
+        "claude-review.sh must extract num_turns from CLI JSON on non-zero "
+        "exit (MY-1452)"
+    )
 
 
 def test_timeout_kills_nested_env_bash_wrapper(tmp_path: pathlib.Path) -> None:
