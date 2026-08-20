@@ -254,39 +254,83 @@ run sequentially.
 
 #### 30-second timeout runner (stock macOS, no `timeout(1)`)
 
-Stock macOS does not ship GNU `timeout`. Use a background-process runner
-that preserves child stdout/stderr, propagates exit status, and returns a
-distinct timeout failure:
+Stock macOS does not ship GNU `timeout`. The runner uses temp files for
+stdout/stderr capture so the watcher subprocess cannot inherit or retain
+command-substitution file descriptors. A race-safe sentinel file proves
+whether the watcher actually fired; the child's real exit/signal status
+is preserved unless the sentinel confirms a timeout.
 
 ```bash
-# run_with_timeout SECONDS CMD [ARGS...]
-# Returns: child exit status, or 124 on timeout (matching GNU convention).
+# run_with_timeout SECONDS STDOUT_FILE STDERR_FILE CMD [ARGS...]
+# Writes child stdout/stderr to the named files.
+# Returns: child exit status, or 124 only when the watcher sentinel
+#          proves the timeout fired.
 run_with_timeout() {
-    local limit=$1; shift
-    "$@" &
+    local limit=$1 out_file=$2 err_file=$3; shift 3
+    local sentinel
+    sentinel=$(mktemp /tmp/aidash_timeout.XXXXXX)
+    rm -f "$sentinel"  # sentinel absent = watcher has not fired
+
+    "$@" >"$out_file" 2>"$err_file" &
     local pid=$!
-    ( sleep "$limit"; kill "$pid" 2>/dev/null ) &
+
+    # Watcher: redirect own I/O to /dev/null so it cannot hold
+    # any inherited fd open after the child exits.
+    ( exec >/dev/null 2>/dev/null
+      sleep "$limit"
+      touch "$sentinel"
+      kill "$pid" 2>/dev/null
+    ) &
     local watcher=$!
+
     wait "$pid" 2>/dev/null
     local rc=$?
-    kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
-    # If child was killed by our watcher, report timeout
-    if [ $rc -ge 128 ]; then rc=124; fi
+
+    # Cancel watcher immediately — success returns immediately.
+    kill "$watcher" 2>/dev/null
+    wait "$watcher" 2>/dev/null
+
+    # Return 124 only if the sentinel proves the watcher fired.
+    if [ -f "$sentinel" ]; then
+        rm -f "$sentinel"
+        return 124
+    fi
+    rm -f "$sentinel" 2>/dev/null
     return $rc
+}
+```
+
+#### Probe helpers
+
+Every probe failure must print the literal command, numeric exit status,
+and captured stderr — the three-tuple promised by this ADR:
+
+```bash
+# probe_fail PROBE_NAME COMMAND_STRING EXIT_CODE STDERR_FILE
+probe_fail() {
+    local name=$1 cmd=$2 rc=$3 err_file=$4
+    echo "FATAL: $name failed"
+    echo "  command: $cmd"
+    echo "  exit:    $rc"
+    echo "  stderr:  $(cat "$err_file" 2>/dev/null)"
+    exit 1
 }
 ```
 
 #### Probe 1 — store-independent (schema availability)
 
 ```bash
-probe1_out=$(run_with_timeout 30 aidash schema list --quiet 2>&1)
-probe1_rc=$?
-if [ "$probe1_rc" -eq 124 ]; then
-    echo "FATAL: probe 1 timed out after 30 s"; exit 1
+p1_cmd="aidash schema list --quiet"
+p1_out=$(mktemp) p1_err=$(mktemp)
+run_with_timeout 30 "$p1_out" "$p1_err" aidash schema list --quiet
+p1_rc=$?
+if [ "$p1_rc" -eq 124 ]; then
+    probe_fail "probe 1 (timeout)" "$p1_cmd" "$p1_rc" "$p1_err"
 fi
-if [ "$probe1_rc" -ne 0 ]; then
-    echo "FATAL: probe 1 failed (exit $probe1_rc): $probe1_out"; exit 1
+if [ "$p1_rc" -ne 0 ]; then
+    probe_fail "probe 1" "$p1_cmd" "$p1_rc" "$p1_err"
 fi
+rm -f "$p1_out" "$p1_err"
 ```
 
 This confirms the XPC agent started and the Mach service is reachable.
@@ -296,10 +340,12 @@ container-access failures.
 #### Probe 2 — store-dependent (container read under sandbox)
 
 ```bash
-probe2_out=$(run_with_timeout 30 aidash briefing get --date today --json 2>&1)
-probe2_rc=$?
-if [ "$probe2_rc" -eq 124 ]; then
-    echo "FATAL: probe 2 timed out after 30 s"; exit 1
+p2_cmd="aidash briefing get --date today --json"
+p2_out=$(mktemp) p2_err=$(mktemp)
+run_with_timeout 30 "$p2_out" "$p2_err" aidash briefing get --date today --json
+p2_rc=$?
+if [ "$p2_rc" -eq 124 ]; then
+    probe_fail "probe 2 (timeout)" "$p2_cmd" "$p2_rc" "$p2_err"
 fi
 ```
 
@@ -312,47 +358,68 @@ documented in the Context section) and hit the 30 s timeout.
 #### Probe 2 exit-code validation (aligned with CLI contract)
 
 The `aidash` CLI uses structured JSON envelopes. The installer must
-validate both the exit code and the envelope shape:
+validate both the exit code and the envelope shape. Validation uses
+`/usr/bin/plutil` (guaranteed on stock macOS) to convert JSON to XML
+plist, then pattern-matches required keys — no dependency on `python3`
+or any package manager binary that could prompt, hang, or be absent.
 
 | Exit code | Meaning | Installer action |
 |-----------|---------|------------------|
-| 0 | Success — response is `{"ok":true,"data":...,"requestId":"..."}` | **PASS** if envelope is valid JSON with `ok`=`true` and `requestId` present. |
-| 3 | Domain error — response is `{"ok":false,"error":{"code":"briefing.not_found",...},"requestId":"..."}` | **PASS** — proves the store was opened and queried; no briefing exists for today. |
+| 0 | Success — `{"ok":true,"data":...,"requestId":"..."}` | **PASS** if envelope has `ok`=`true`, `data` present, `requestId` present. |
+| 3 | Domain error — `{"ok":false,"error":{"code":"briefing.not_found",...,"requestId":"..."}}`; root `requestId` absent | **PASS** — proves store was opened and queried; no briefing exists for today. |
 | Any other | Infrastructure/XPC/timeout failure | **FAIL** |
 
 ```bash
-case "$probe2_rc" in
+# validate_json_key FILE KEY EXPECTED_VALUE
+# Uses /usr/bin/plutil to check a top-level key in a JSON file.
+# Returns 0 if key exists and value matches (or EXPECTED_VALUE is empty
+# for existence-only check), 1 otherwise.
+validate_json_key() {
+    local file=$1 key=$2 expected=$3
+    local val
+    val=$(/usr/bin/plutil -extract "$key" raw -o - "$file" 2>/dev/null) \
+      || return 1
+    if [ -n "$expected" ] && [ "$val" != "$expected" ]; then
+        return 1
+    fi
+    return 0
+}
+
+case "$p2_rc" in
     0)
-        # Must be a valid success envelope
-        if ! printf '%s' "$probe2_out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-assert d.get('ok') is True
-assert 'data' in d
-assert 'requestId' in d
-"; then
-            echo "FATAL: probe 2 exit 0 but malformed envelope: $probe2_out"
-            exit 1
+        # Must be a valid success envelope: ok=true, data present, requestId present
+        if ! validate_json_key "$p2_out" "ok" "1"; then
+            probe_fail "probe 2 (ok!=true)" "$p2_cmd" "$p2_rc" "$p2_err"
+        fi
+        if ! validate_json_key "$p2_out" "data" ""; then
+            probe_fail "probe 2 (missing data)" "$p2_cmd" "$p2_rc" "$p2_err"
+        fi
+        if ! validate_json_key "$p2_out" "requestId" ""; then
+            probe_fail "probe 2 (missing requestId)" "$p2_cmd" "$p2_rc" "$p2_err"
         fi
         ;;
     3)
-        # Must be a valid briefing.not_found error envelope
-        if ! printf '%s' "$probe2_out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-assert d.get('ok') is False
-assert d.get('error', {}).get('code') == 'briefing.not_found'
-assert 'requestId' in d
-"; then
-            echo "FATAL: probe 2 exit 3 but malformed error envelope: $probe2_out"
-            exit 1
+        # Must be a valid briefing.not_found error envelope:
+        # ok=false, error.code=briefing.not_found, error.requestId present,
+        # root requestId ABSENT (error envelopes carry requestId inside error)
+        if ! validate_json_key "$p2_out" "ok" "0"; then
+            probe_fail "probe 2 exit 3 (ok!=false)" "$p2_cmd" "$p2_rc" "$p2_err"
+        fi
+        if ! validate_json_key "$p2_out" "error.code" "briefing.not_found"; then
+            probe_fail "probe 2 exit 3 (error.code mismatch)" "$p2_cmd" "$p2_rc" "$p2_err"
+        fi
+        if ! validate_json_key "$p2_out" "error.requestId" ""; then
+            probe_fail "probe 2 exit 3 (missing error.requestId)" "$p2_cmd" "$p2_rc" "$p2_err"
+        fi
+        if validate_json_key "$p2_out" "requestId" ""; then
+            probe_fail "probe 2 exit 3 (unexpected root requestId)" "$p2_cmd" "$p2_rc" "$p2_err"
         fi
         ;;
     *)
-        echo "FATAL: probe 2 failed (exit $probe2_rc): $probe2_out"
-        exit 1
+        probe_fail "probe 2" "$p2_cmd" "$p2_rc" "$p2_err"
         ;;
 esac
+rm -f "$p2_out" "$p2_err"
 ```
 
 #### Cold-start timeout budget
@@ -362,10 +429,10 @@ The cold-start budget accounts for:
 - launchd agent bootstrap (~2 s),
 - SwiftData `ModelContainer` initialization (~3–5 s first launch).
 
-If either probe fails, the installer must print the probe command, its
-exit code, and any stderr, then exit non-zero. The user should check that
-the installed binary has the correct entitlements (`codesign -d --entitlements :-
-/Applications/AIDash.app/Contents/MacOS/AIDash`).
+If either probe fails, the installer prints the literal command, numeric
+exit code, and captured stderr, then exits non-zero. The user should check
+that the installed binary has the correct entitlements
+(`codesign -d --entitlements :- /Applications/AIDash.app/Contents/MacOS/AIDash`).
 
 ## Analysis
 
