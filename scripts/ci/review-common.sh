@@ -132,7 +132,10 @@ build_scope_evidence() {
         return 1
     }
 
-    while IFS= read -r file; do
+    # NUL-delimited path parsing: $changed arrives from `git diff -z --name-only`
+    # with NUL separators (not newlines), ensuring paths containing newlines,
+    # quotes, backslashes, and non-ASCII are transmitted losslessly.
+    while IFS= read -r -d '' file; do
         [ -z "$file" ] && continue
         case "$file" in
             *.swift)
@@ -142,12 +145,9 @@ build_scope_evidence() {
                 count=$((count + 1))
                 ;;
         esac
-    # Process substitution, NOT `<<<"$changed"`: a here-string carries the same
-    # deadlock as a heredoc under bash 5.3, and this one is fed the PR's changed
-    # -file list — attacker-influenced in LENGTH, which is all that is needed to
-    # cross the 512-byte pipe buffer. A PR touching ~10 nested Swift paths gets
-    # there, so the old form was a hang waiting for a big enough PR.
-    done < <(printf '%s\n' "$changed")
+    # Process substitution with printf '%s' (no trailing newline) feeds the
+    # NUL-delimited blob. The -d '' in read splits on NUL.
+    done < <(printf '%s' "$changed")
 
     # No Swift files changed → nothing to resolve; empty output, success.
     # Checked with a plain counter (not ${#args[@]}) and returned BEFORE any
@@ -179,13 +179,16 @@ build_coverage_context() {
         return 1
     }
 
-    while IFS= read -r file; do
+    # NUL-delimited path parsing: $changed arrives from `git diff -z --name-only`
+    # with NUL separators, ensuring lossless path transport for non-ASCII,
+    # quoted, backslash-bearing, and newline-containing paths.
+    while IFS= read -r -d '' file; do
         [ -z "$file" ] && continue
         args[count]="--changed-file"
         count=$((count + 1))
         args[count]="$file"
         count=$((count + 1))
-    done < <(printf '%s\n' "$changed")
+    done < <(printf '%s' "$changed")
 
     [ "$count" -eq 0 ] && return 0
 

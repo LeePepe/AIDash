@@ -18,6 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from coverage_context import (  # noqa: E402
     AnalysisError,
+    COVERAGE_GLOBAL_WORK_BUDGET,
     COVERAGE_MAX_FILE_BYTES,
     COVERAGE_MAX_TOTAL_BYTES,
     RemovedTest,
@@ -213,9 +214,9 @@ def _stub_git(monkeypatch, file_map, base_file_map=None):
                 return str(len(content.encode("utf-8")))
             return None
         if args[0] == "ls-tree":
-            # ls-tree -r --name-only <sha> → list all files
+            # ls-tree -r --name-only -z <sha> → NUL-delimited list of all files
             if "-r" in args:
-                return "\n".join(file_map.keys())
+                return "\0".join(file_map.keys()) + "\0"
             # ls-tree <sha> -- <path> → check if path exists
             if "--" in args:
                 path_idx = args.index("--") + 1
@@ -224,7 +225,7 @@ def _stub_git(monkeypatch, file_map, base_file_map=None):
                     if path in file_map:
                         return f"100644 blob abc123\t{path}"
                     return ""  # empty = file not in tree
-            return "\n".join(file_map.keys())
+            return "\0".join(file_map.keys()) + "\0"
         return None
 
     monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
@@ -946,7 +947,7 @@ def test_find_related_tests_head_blob_fail_raises(monkeypatch):
             return None
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
+                return "CLI/aidash/Tests/BriefingPublishCommandTests.swift\0"
             return "100644 blob abc\tCLI/aidash/Tests/BriefingPublishCommandTests.swift"
         return None
 
@@ -1127,7 +1128,7 @@ def test_delimiter_injection_in_claude_prompt_path(monkeypatch):
             return injected_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "CLI/aidash/Tests/EvilTests.swift"
+                return "CLI/aidash/Tests/EvilTests.swift\0"
             return "100644 blob abc\tCLI/aidash/Tests/EvilTests.swift"
         return None
 
@@ -1169,14 +1170,14 @@ def test_deleted_test_file_excluded_from_candidates(monkeypatch):
             if "-r" in args:
                 # Only the production file and a symbol-matching test remain in HEAD
                 return (
-                    "CLI/aidash/Sources/BriefingPublishCommand.swift\n"
-                    "CLI/aidash/Tests/BriefingPublishCommandNewTests.swift"
+                    "CLI/aidash/Sources/BriefingPublishCommand.swift\0"
+                    "CLI/aidash/Tests/BriefingPublishCommandNewTests.swift\0"
                 )
         return None
 
     monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
 
-    test_files, searched = find_test_files_in_changed_and_related(
+    test_files, searched, _ = find_test_files_in_changed_and_related(
         head_sha="head123",
         changed_files=[
             "CLI/aidash/Tests/BriefingPublishCommandTests.swift",  # DELETED
@@ -1300,7 +1301,7 @@ index abc1234..0000000
         if args[0] == "ls-tree":
             if "-r" in args:
                 # HEAD tree: deleted file is absent
-                return "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
+                return "CLI/aidash/Tests/BriefingPublishCommandTests.swift\0"
             if "--" in args:
                 path_idx = args.index("--") + 1
                 path = args[path_idx]
@@ -1494,7 +1495,7 @@ index abc1234..def5678 100644
                 return None
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "scripts/ci/tests/test_coverage_context.py"
+                return "scripts/ci/tests/test_coverage_context.py\0"
             if "--" in args:
                 path_idx = args.index("--") + 1
                 path = args[path_idx]
@@ -1553,7 +1554,7 @@ def test_build_with_config():
             return head_py_test
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "scripts/ci/tests/test_coverage_context.py"
+                return "scripts/ci/tests/test_coverage_context.py\0"
             return "100644 blob abc\tscripts/ci/tests/test_coverage_context.py"
         return None
 
@@ -1938,7 +1939,7 @@ struct EvilTests {
             return malicious_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/EvilTests.swift"
+                return "Tests/EvilTests.swift\0"
             return "100644 blob abc\tTests/EvilTests.swift"
         return None
 
@@ -1989,7 +1990,7 @@ struct EvilTests {
             return malicious_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/EvilTests.swift"
+                return "Tests/EvilTests.swift\0"
             return "100644 blob abc\tTests/EvilTests.swift"
         return None
 
@@ -2037,7 +2038,7 @@ struct EvilTests {
             return malicious_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/EvilTests.swift"
+                return "Tests/EvilTests.swift\0"
             return "100644 blob abc\tTests/EvilTests.swift"
         return None
 
@@ -2085,7 +2086,7 @@ struct EvilTests {
             return malicious_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/EvilTests.swift"
+                return "Tests/EvilTests.swift\0"
             return "100644 blob abc\tTests/EvilTests.swift"
         return None
 
@@ -2140,7 +2141,7 @@ struct CJKTests {{
             return test_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/CJKTests.swift"
+                return "Tests/CJKTests.swift\0"
             return "100644 blob abc\tTests/CJKTests.swift"
         return None
 
@@ -2276,7 +2277,7 @@ diff --git a/Tests/TrivialTests.swift b/Tests/TrivialTests.swift
                 return head_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/TrivialTests.swift"
+                return "Tests/TrivialTests.swift\0"
             if "--" in args:
                 return "100644 blob abc\tTests/TrivialTests.swift"
         return None
@@ -2329,7 +2330,7 @@ struct RuntimeTests {
             return test_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/RuntimeTests.swift"
+                return "Tests/RuntimeTests.swift\0"
             return "100644 blob abc\tTests/RuntimeTests.swift"
         return None
 
@@ -2374,7 +2375,7 @@ struct CommandTests {
             return test_source
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/CommandTests.swift"
+                return "Tests/CommandTests.swift\0"
             return "100644 blob abc\tTests/CommandTests.swift"
         return None
 
@@ -2495,7 +2496,7 @@ struct BriefingPublishCommandTests {
             return None
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "\n".join(file_map.keys())
+                return "\0".join(file_map.keys()) + "\0"
             return ""
         return None
 
@@ -2607,7 +2608,7 @@ struct BriefingPutCommandTests {
             return str(len(test_source.encode("utf-8")))
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/BriefingPutCommandTests.swift"
+                return "Tests/BriefingPutCommandTests.swift\0"
             return "100644 blob abc\tTests/BriefingPutCommandTests.swift"
         return None
 
@@ -2665,13 +2666,13 @@ struct IntegrationTests {
             return str(len(generic_test.encode("utf-8")))
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "Tests/IntegrationTests.swift"
+                return "Tests/IntegrationTests.swift\0"
             return ""
         return None
 
     monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
 
-    test_files, searched = find_test_files_in_changed_and_related(
+    test_files, searched, _ = find_test_files_in_changed_and_related(
         head_sha="head123",
         changed_files=["Sources/BriefingPublishCommand.swift"],
         production_symbols={"BriefingPublishCommand"},
@@ -3664,14 +3665,15 @@ diff --git a/{test_path} b/{test_path}
 
 
 def test_content_discovery_cap_counts_oversize_and_unreadable(monkeypatch):
-    """Content-discovery attempt cap must count every candidate attempted,
+    """Global work budget must count every candidate attempted,
     including oversized and unreadable files, so bounded-work claim is literal."""
 
     import coverage_context
 
-    # Create 25 candidate test files; first 15 are oversized, next 10 normal.
-    # With cap of 20, only 5 normal files should be reached (15 oversized + 5 normal = 20).
-    all_files = [f"Tests/Test{i}.swift" for i in range(25)]
+    # Create 60 candidate test files; first 40 are oversized, next 20 normal.
+    # With global budget of 50, only 10 normal files should be reached
+    # (40 oversized + 10 normal = 50 budget).
+    all_files = [f"Tests/Test{i}.swift" for i in range(60)]
     normal_content = """\
 import Testing
 struct NormalTests {
@@ -3688,8 +3690,8 @@ struct NormalTests {
             _, _, path = ref_path.partition(":")
             if path in all_files:
                 idx = all_files.index(path)
-                if idx < 15:
-                    # First 15: oversized
+                if idx < 40:
+                    # First 40: oversized
                     return "500000"
                 else:
                     # Remaining: normal size
@@ -3700,12 +3702,12 @@ struct NormalTests {
             _, _, path = ref_path.partition(":")
             if path in all_files:
                 idx = all_files.index(path)
-                if idx >= 15:
+                if idx >= 40:
                     return normal_content
             return None
         if args[0] == "ls-tree":
             if "-r" in args:
-                return "\n".join(all_files)
+                return "\0".join(all_files) + "\0"
             if "--" in args:
                 path_idx = args.index("--") + 1
                 path = args[path_idx]
@@ -3720,14 +3722,329 @@ struct NormalTests {
     from coverage_context import find_test_files_in_changed_and_related
 
     # Pass production symbols to trigger content-based discovery
-    test_files, searched = find_test_files_in_changed_and_related(
+    test_files, searched, _ = find_test_files_in_changed_and_related(
         "head", ["src/Domain.swift"], {"DomainService"}
     )
 
-    # With cap of 20 candidates total, 15 oversized + 5 normal = 20.
-    # So only 5 normal files should be content-matched.
+    # With global budget of 50 candidates total, 40 oversized + 10 normal = 50.
+    # So only 10 normal files should be content-matched.
     content_matched = [s for s in searched if "content-match" in s]
-    assert len(content_matched) == 5, (
-        f"Expected 5 content-matched files (cap 20, 15 oversized counted), "
+    assert len(content_matched) == 10, (
+        f"Expected 10 content-matched files (budget 50, 40 oversized counted), "
         f"got {len(content_matched)}"
     )
+
+
+# === P1-1: Swift lexical scanner — block comments, multiline/raw strings ===
+
+
+def test_swift_block_comment_braces_not_counted():
+    """Braces inside block comments must not affect func-end detection."""
+    source = """\
+    @Test func testBlockComment() {
+        /* this { does not } open anything */
+        let x = 1
+    }
+"""
+    lines = source.splitlines()
+    end = _find_func_end(lines, 0, "Tests/Foo.swift")
+    assert end == 4  # closing } on line 4 (1-based)
+
+
+def test_swift_nested_block_comment_braces_not_counted():
+    """Braces inside nested block comments must not affect func-end detection."""
+    source = """\
+    @Test func testNestedComment() {
+        /* outer { /* inner } */ still comment { */
+        let x = 1
+    }
+"""
+    lines = source.splitlines()
+    end = _find_func_end(lines, 0, "Tests/Foo.swift")
+    assert end == 4
+
+
+def test_swift_multiline_string_braces_not_counted():
+    '''Braces inside multiline strings (triple-quote) must not terminate the func.'''
+    source = '    @Test func testMultiline() {\n        let s = """\n        { not a real brace }\n        """\n        let x = 1\n    }\n'
+    lines = source.splitlines()
+    end = _find_func_end(lines, 0, "Tests/Foo.swift")
+    assert end == 6  # closing } on line 6
+
+
+def test_swift_raw_string_braces_not_counted():
+    """Braces inside raw strings (#\"...\"#) must not terminate the func."""
+    source = '    @Test func testRawStr() {\n        let s = #"this { is } not code"#\n        let x = 1\n    }\n'
+    lines = source.splitlines()
+    end = _find_func_end(lines, 0, "Tests/Foo.swift")
+    assert end == 4
+
+
+def test_swift_unbalanced_braces_explicit_truncation():
+    """When braces don't balance, the scanner returns scan limit, not 50-line fallback."""
+    # Function with opening brace but no closing brace within 500 lines
+    lines = ["    func testOpen() {"]
+    lines.extend(["        let x = 1"] * 100)
+    # No closing brace — should return start_idx + 500 capped at len(lines)
+    end = _find_func_end(lines, 0, "Tests/Foo.swift")
+    assert end == len(lines)  # capped at actual line count (< 500)
+
+
+def test_swift_real_brace_bearing_test_label_with_block_comment():
+    """Real BriefingPut shape with block comment braces — symbols after the comment
+    must still be extractable (body not truncated by comment braces)."""
+    source = """\
+    @Test("returned ok={false} is handled")
+    func publishReturnedFalse() async throws {
+        /* setup { mock } */
+        let client = MockAPIClient(response: .init(ok: false, error: "rate limited"))
+        let cmd = BriefingPublishCommand(client: client)
+        let result = try await cmd.run()
+        #expect(result == .failure("rate limited"))
+    }
+"""
+    lines = source.splitlines()
+    end = _find_func_end(lines, 1, "Tests/Foo.swift")  # func starts at line index 1
+    assert end == 8  # closing } on line 8 (1-based)
+    # Verify the full body includes the BriefingPublishCommand symbol
+    body = "\n".join(lines[1:end])
+    assert "BriefingPublishCommand" in body
+
+
+# === P1-2: Swift lexical enclosure tracking ===
+
+
+def test_swift_containing_type_lexical_enclosure_basic():
+    """Function inside a struct is correctly identified."""
+    source = """\
+struct FooTests {
+    func testFoo() {
+    }
+}
+"""
+    # testFoo starts at character offset of "func testFoo"
+    offset = source.index("func testFoo")
+    result = _find_containing_type(source, offset, "Tests/FooTests.swift")
+    assert result == "FooTests"
+
+
+def test_swift_top_level_after_closed_type():
+    """A top-level function AFTER a closed struct must NOT be attributed to it."""
+    source = """\
+struct FooTests {
+    func testInside() {
+    }
+}
+
+func testTopLevel() {
+}
+"""
+    offset = source.index("func testTopLevel")
+    result = _find_containing_type(source, offset, "Tests/FooTests.swift")
+    assert result == "", "Top-level func after closed type should have empty containing_type"
+
+
+def test_swift_nested_type_innermost_wins():
+    """When types are nested, the innermost enclosing type wins."""
+    source = """\
+struct Outer {
+    struct Inner {
+        func testInner() {
+        }
+    }
+}
+"""
+    offset = source.index("func testInner")
+    result = _find_containing_type(source, offset, "Tests/Foo.swift")
+    assert result == "Inner"
+
+
+def test_swift_func_between_two_types():
+    """A top-level func between two types gets no containing type."""
+    source = """\
+struct Alpha {
+    func testAlpha() {}
+}
+
+func testMiddle() {}
+
+struct Beta {
+    func testBeta() {}
+}
+"""
+    offset = source.index("func testMiddle")
+    result = _find_containing_type(source, offset, "Tests/Foo.swift")
+    assert result == ""
+
+
+# === P1-3: NUL-delimited path transport (tested via find_test_files_in_changed_and_related) ===
+
+
+def test_nul_delimited_tree_parsing(monkeypatch):
+    """ls-tree output with NUL delimiters is parsed correctly, including
+    paths with spaces and non-ASCII."""
+    import coverage_context
+
+    # Simulate paths with spaces and unicode
+    paths = [
+        "Tests/日本語Tests.swift",
+        "Tests/Path With Spaces/FooTests.swift",
+        "Sources/Model.swift",
+    ]
+
+    def fake_run_git(args):
+        if args[0] == "ls-tree" and "-r" in args:
+            return "\0".join(paths) + "\0"
+        if args[0] == "cat-file" and "-s" in args:
+            return "100"
+        if args[0] == "show":
+            return "import Testing\nstruct T { @Test func testX() {} }"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    test_files, searched, _ = find_test_files_in_changed_and_related(
+        head_sha="head",
+        changed_files=["Tests/日本語Tests.swift"],
+    )
+    assert "Tests/日本語Tests.swift" in test_files
+
+
+# === P1-4: Global work budget ===
+
+
+def test_global_work_budget_limits_total_file_operations(monkeypatch):
+    """Global work budget must cap total file operations across all routes."""
+    import coverage_context
+
+    # Create more files than the budget allows
+    from coverage_context import COVERAGE_GLOBAL_WORK_BUDGET
+
+    num_files = COVERAGE_GLOBAL_WORK_BUDGET + 20
+    all_files = [f"Tests/Test{i}Tests.swift" for i in range(num_files)]
+    test_content = "import Testing\nstruct T {\n    @Test func testX() { DomainSvc() }\n}\n"
+
+    def fake_run_git(args):
+        if args[0] == "ls-tree" and "-r" in args:
+            return "\0".join(all_files) + "\0"
+        if args[0] == "cat-file" and "-s" in args:
+            return str(len(test_content.encode("utf-8")))
+        if args[0] == "show":
+            return test_content
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    test_files, searched, work_remaining = find_test_files_in_changed_and_related(
+        head_sha="head",
+        changed_files=["Sources/Domain.swift"],
+        production_symbols={"DomainSvc"},
+    )
+    # Budget should be exhausted
+    assert work_remaining == 0
+    # Total test files found should be <= COVERAGE_GLOBAL_WORK_BUDGET
+    assert len(test_files) <= COVERAGE_GLOBAL_WORK_BUDGET
+    # Should have a budget-cap message in searched
+    budget_msgs = [s for s in searched if "budget-cap" in s]
+    assert len(budget_msgs) > 0
+
+
+def test_global_work_budget_shared_with_candidate_reads(monkeypatch):
+    """find_related_tests_in_head respects remaining work budget from discovery."""
+    import coverage_context
+
+    test_content = "import Testing\nstruct T {\n    @Test func testX() { MySvc() }\n}\n"
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            return str(len(test_content.encode("utf-8")))
+        if args[0] == "show":
+            return test_content
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    # Give it 3 files but only 2 remaining budget
+    excerpts, outcomes = find_related_tests_in_head(
+        head_sha="head",
+        test_files=["Tests/A.swift", "Tests/B.swift", "Tests/C.swift"],
+        production_symbols={"MySvc"},
+        max_excerpt_bytes=30000,
+        work_budget_remaining=2,
+    )
+    # Third file should be budget-omitted
+    read_count = sum(1 for o in outcomes if o.startswith("read:"))
+    omitted_count = sum(1 for o in outcomes if "budget-omitted" in o)
+    assert read_count == 2
+    assert omitted_count == 1
+
+
+# === P1-5: Content-discovery fail-closed ===
+
+
+def test_content_discovery_read_failure_raises_analysis_error(monkeypatch):
+    """When content-discovery bounded read fails (not oversize), must raise
+    AnalysisError instead of silently continuing."""
+    import coverage_context
+
+    test_files = ["Tests/FooTests.swift", "Tests/BarTests.swift"]
+
+    call_count = {"cat_file": 0}
+
+    def fake_run_git(args):
+        if args[0] == "ls-tree" and "-r" in args:
+            return "\0".join(test_files) + "\0"
+        if args[0] == "cat-file" and "-s" in args:
+            call_count["cat_file"] += 1
+            # Second file: size preflight fails (returns None)
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            if "BarTests" in ref_path:
+                return None  # preflight failure
+            return "100"
+        if args[0] == "show":
+            return "import Testing\nstruct T { @Test func testX() {} }"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    with pytest.raises(AnalysisError, match="Content-discovery read failed"):
+        find_test_files_in_changed_and_related(
+            head_sha="head",
+            changed_files=["Sources/Foo.swift"],
+            production_symbols={"SomeType"},
+        )
+
+
+def test_content_discovery_oversize_is_bounded_outcome_not_error(monkeypatch):
+    """Oversized files in content discovery are a bounded outcome (skip),
+    not an error — distinct from read failure."""
+    import coverage_context
+
+    test_files = ["Tests/BigTests.swift", "Tests/SmallTests.swift"]
+    small_content = "import Testing\nstruct T {\n    @Test func testX() { SomeType() }\n}\n"
+
+    def fake_run_git(args):
+        if args[0] == "ls-tree" and "-r" in args:
+            return "\0".join(test_files) + "\0"
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            if "BigTests" in ref_path:
+                return "999999999"  # way over limit
+            return str(len(small_content.encode("utf-8")))
+        if args[0] == "show":
+            return small_content
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    # Should NOT raise — oversize is a skip, not an error
+    test_files_result, searched, _ = find_test_files_in_changed_and_related(
+        head_sha="head",
+        changed_files=["Sources/Foo.swift"],
+        production_symbols={"SomeType"},
+    )
+    # SmallTests should be found via content match
+    assert "Tests/SmallTests.swift" in test_files_result
+    # BigTests should have an oversize note
+    oversize_entries = [s for s in searched if "oversize" in s]
+    assert len(oversize_entries) == 1
