@@ -96,6 +96,29 @@ canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
 - 改跨 2+ 层 → 任务太大,按层拆成独立可 build/test 的 commit
 - 收尾遗留 → 记为新任务,不扩展原任务
 
+## Fixed Install Packaging (ADR-003)
+
+`scripts/dev/install-fixed-build.sh` builds a Release binary for
+`/Applications/AIDash.app` + `~/.local/bin/aidash`, ad-hoc signed (`-`).
+
+| Posture | Entitlements | Sandbox | CloudKit |
+|---------|-------------|---------|----------|
+| Xcode dev / Release | `AIDashApp.macOS.entitlements` | Yes | Yes (provisioned) |
+| Fixed install | `AIDashApp.macOS.fixed.entitlements` | Yes | No (no profile) |
+
+Key constraints:
+- **Minimal entitlements**: `app-sandbox` + `network.client` only. No CloudKit
+  entitlements (would crash without provisioning profile).
+- **Local-only**: `hasCloudKitEntitlement()` returns `false` → `.localOnly`
+  fallback. Same runtime behavior as before; change is purely packaging.
+- **Store identity unchanged**: canonical path
+  `~/Library/Containers/<bundleID>/Data/Library/Application Support/AIDash/AIDash.store`
+  — no migration, no fork. See `docs/adr/003-sandboxed-fixed-install.md`.
+- **LaunchAgent compatible**: Mach services via `launchctl bootstrap` work
+  inside sandbox. No SMAppService (avoids LWCR issues).
+- **Data contract**: no new store path, no split-brain, no in-memory fallback,
+  no real-store enumeration/move/delete.
+
 ## 构建 / 测试
 
 见 `AGENTS.md → Build commands`。快速门:`swift test --package-path Packages/AIDashCore`。
