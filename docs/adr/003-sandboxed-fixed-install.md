@@ -82,8 +82,6 @@ codesign step that embeds the fixed entitlements into the app bundle.
 
 #### Current bundle layout
 
-Today the repo ships a single-executable app bundle:
-
 ```
 AIDash.app/
   Contents/
@@ -93,16 +91,18 @@ AIDash.app/
     _CodeSignature/
 ```
 
-There is **no** nested XPC service bundle, no nested helper executable, and
-no embedded LaunchAgent helper inside the app bundle. The LaunchAgent plist
-sets `Program` to the outer app's main executable
-(`/Applications/AIDash.app/Contents/MacOS/AIDash`), which handles both
-GUI and headless XPC-agent modes. The separately installed CLI
-(`~/.local/bin/aidash`) is a standalone binary outside the app bundle; it
-does not access the SwiftData store and is not subject to this signing
-contract.
-
 #### Signing order (inside-out, three-phase, deterministic)
+
+> **Codebase fact (as of this ADR):** The repo ships a single-executable
+> app bundle with no nested XPC service, helper, or embedded framework.
+> The LaunchAgent plist sets `Program` to the outer app's main executable
+> (`/Applications/AIDash.app/Contents/MacOS/AIDash`), which handles both
+> GUI and headless XPC-agent modes. The separately installed CLI
+> (`~/.local/bin/aidash`) is outside the app bundle and does not access
+> the SwiftData store. Phases 1 and 2 below are therefore **no-ops today**
+> and exist as **fail-closed future-proofing**: if a future change adds
+> nested code, the signing contract is already correct and the
+> verification gate will catch any signing omission.
 
 The signing contract has three phases executed strictly in order. Each
 phase uses a **separate enumeration pass** — never a single combined
@@ -114,37 +114,38 @@ phase.
 ENTITLEMENTS="Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements"
 ```
 
-**Phase 1 — Leaf Mach-O executables and libraries.** Sign every regular
-executable file and dynamic library inside `Contents/` that is not the
-main app binary (`Contents/MacOS/*`). This phase matches only regular
-files (`-type f`), never bundle directories.
+**Phase 1 — Leaf executables and libraries.** Enumerate regular files
+inside `Contents/` (excluding the main app binary at `Contents/MacOS/*`)
+that are either executable or are dynamic libraries. Before signing each
+file, verify it is a Mach-O binary (`file -b` output starts with
+`Mach-O`); skip non-Mach-O executables (e.g. shell scripts, Python
+scripts with `+x`) to avoid signing artifacts that `codesign` cannot
+process or that do not carry entitlements.
 
 ```bash
-# Phase 1: sign leaf executables/dylibs (regular files only, not main binary)
+# Phase 1: sign leaf Mach-O executables/dylibs (regular files only)
 find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
   ! -path "$APP_SRC/Contents/MacOS/*" \
   -print0 | while IFS= read -r -d '' leaf; do
+    # Guard: only sign actual Mach-O binaries
+    file -b "$leaf" | grep -q '^Mach-O' || continue
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$leaf"
 done
 ```
 
-With today's single-executable bundle this phase is a no-op. It exists
-so that the contract remains correct if future work adds nested helpers.
-
 **Phase 2 — Nested code bundles (deepest-first).** In a **separate**
-enumeration pass, sign `.xpc`, `.appex`, and `.app` bundle directories
-nested inside `Contents/`, processing the deepest nesting level first so
-that an enclosing bundle is never sealed before its inner contents.
+enumeration pass, sign `.xpc` and `.appex` bundle directories nested
+inside `Contents/`. The traversal uses `find -depth` to guarantee
+depth-first (post-order) processing: inner bundles are always visited
+before enclosing bundles, regardless of directory name sort order.
 
 ```bash
-# Phase 2: sign nested code bundles deepest-first (separate pass)
-find "$APP_SRC/Contents" \( -name "*.xpc" -o -name "*.appex" \) -type d \
-  -print0 | sort -rz | while IFS= read -r -d '' bundle; do
+# Phase 2: sign nested code bundles depth-first (post-order traversal)
+find "$APP_SRC/Contents" -depth \( -name "*.xpc" -o -name "*.appex" \) \
+  -type d -print0 | while IFS= read -r -d '' bundle; do
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$bundle"
 done
 ```
-
-With today's bundle this phase is also a no-op.
 
 **Phase 3 — Outer app bundle.** Sign the top-level `.app` last, sealing
 all nested signatures from Phases 1 and 2.
