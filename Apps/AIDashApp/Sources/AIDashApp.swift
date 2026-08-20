@@ -65,17 +65,15 @@ struct AIDashApp: App {
         // Even if the SQLite/CloudKit open hangs indefinitely, MainActor is
         // never blocked: SwiftUI renders, XPC dispatches ping/schema.list.
         //
-        // Agent mode: local-only container (no CloudKit mirror — headless
-        // launchd context SIGTRAPs on CloudKit bring-up).
-        // GUI mode: CloudKit-vs-local decided by entitlement + account check
-        // via CloudKitContainer's nonisolated static methods.
-        // Test-host mode: skip production store loader entirely — running
-        // prepareStoreURL/ModelContainer here would open the real default
-        // store under the app host's bundle container.
-        if mode.isAgent {
+        // The loader strategy is a testable seam on RunMode — see
+        // RunMode.loaderStrategy and its tests in RunModeTests.
+        switch mode.loaderStrategy {
+        case .agent:
             boot.startDetached(loader: AgentContainerLoader())
-        } else if mode != .testHost {
+        case .gui:
             boot.startDetached(loader: GUIContainerLoader())
+        case .none:
+            break
         }
 
         #else
