@@ -180,7 +180,7 @@ codesign --verify --deep --strict "$APP_SRC" \
   || { echo "FATAL: codesign --verify --deep --strict failed"; exit 1; }
 
 # 2. Verify app-sandbox entitlement on the main executable
-codesign -d --entitlements :- "$APP_SRC/Contents/MacOS/AIDash" \
+codesign -d --entitlements :- "$APP_SRC/Contents/MacOS/AIDash" 2>&1 \
   | /usr/bin/grep -q "com.apple.security.app-sandbox" \
   || { echo "FATAL: app-sandbox entitlement missing on main executable"; exit 1; }
 
@@ -189,14 +189,14 @@ if [ "$signed_count" -gt 0 ]; then
     # Re-enumerate the same targets and check each one
     while IFS= read -r -d '' target; do
         /usr/bin/file -b "$target" | /usr/bin/grep -q "Mach-O" || continue
-        codesign -d --entitlements :- "$target" \
+        codesign -d --entitlements :- "$target" 2>&1 \
           | /usr/bin/grep -q "com.apple.security.app-sandbox" \
           || { echo "FATAL: app-sandbox entitlement missing on $target"; exit 1; }
     done < <(find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
       ! -path "$APP_SRC/Contents/MacOS/AIDash" -print0)
 
     while IFS= read -r -d '' target; do
-        codesign -d --entitlements :- "$target" \
+        codesign -d --entitlements :- "$target" 2>&1 \
           | /usr/bin/grep -q "com.apple.security.app-sandbox" \
           || { echo "FATAL: app-sandbox entitlement missing on $target"; exit 1; }
     done < <(find "$APP_SRC/Contents" -depth -type d \
