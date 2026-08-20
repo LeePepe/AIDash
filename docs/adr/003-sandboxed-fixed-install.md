@@ -83,31 +83,57 @@ inside the app bundle must be individually signed before the outer app is
 signed, so that each executable carries the sandbox entitlement in its own
 code signature.
 
-#### Signing order (inside-out, deterministic)
+#### Signing order (inside-out, three-phase, deterministic)
 
-1. **Sign every nested executable first.** The app bundle contains at least
-   the LaunchAgent/XPC helper (`AIDash.app/Contents/Library/LaunchAgents/`
-   or `Contents/XPCServices/`). Each nested Mach-O must be ad-hoc signed
-   with the same fixed entitlements before the outer bundle signature is
-   applied:
+The signing contract has three phases executed strictly in order. Each
+phase signs only the targets listed; no later phase may modify the
+contents of a bundle signed in an earlier phase.
 
-   ```bash
-   # Sign each nested executable with sandbox entitlements:
-   find "$APP_SRC/Contents" \( -name "*.xpc" -o -type f -perm +111 \) \
-     ! -path "$APP_SRC/Contents/MacOS/*" -print0 | while IFS= read -r -d '' nested; do
-       codesign --force --sign - \
-         --entitlements Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements \
-         "$nested"
-   done
-   ```
+**Phase 1 — Leaf Mach-O executables.** Sign every standalone executable
+file that is NOT the main app binary and is NOT a bundle directory. This
+covers helpers, CLI tools, and the inner executables of XPC services or
+LaunchAgent helpers. Only regular Mach-O files are matched; `.xpc` and
+`.app` bundle directories are excluded.
 
-2. **Sign the outer app bundle last**, sealing all nested signatures:
+```bash
+ENTITLEMENTS="Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements"
 
-   ```bash
-   codesign --force --sign - \
-     --entitlements Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements \
-     "$APP_SRC"
-   ```
+# Phase 1: sign leaf Mach-O executables (not bundle dirs, not main binary)
+find "$APP_SRC/Contents" -type f -perm +111 \
+  ! -path "$APP_SRC/Contents/MacOS/*" \
+  ! -name "*.xpc" \
+  -print0 | while IFS= read -r -d '' exe; do
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$exe"
+done
+```
+
+**Phase 2 — Nested bundles (deepest-first).** Sign `.xpc` service
+bundles and any other nested bundle directories, processing the deepest
+nesting level first so that an outer bundle is never sealed before its
+inner contents. After this phase every nested bundle's seal covers all
+of its already-signed leaf executables from Phase 1.
+
+```bash
+# Phase 2: sign nested bundles deepest-first (sort by depth descending)
+find "$APP_SRC/Contents" -name "*.xpc" -type d -print0 \
+  | sort -rz \
+  | while IFS= read -r -d '' bundle; do
+      codesign --force --sign - --entitlements "$ENTITLEMENTS" "$bundle"
+  done
+```
+
+**Phase 3 — Outer app bundle.** Sign the top-level `.app` last, sealing
+all nested signatures from Phases 1 and 2.
+
+```bash
+# Phase 3: sign the outer app bundle last
+codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_SRC"
+```
+
+**Invariant:** no command in Phase 2 or 3 may write inside a bundle
+that was already sealed in a prior phase. Violating this (e.g. signing
+a `.xpc` directory before its inner executable, then signing that
+executable) invalidates the outer seal and produces a broken signature.
 
 Signing only the outer app is **insufficient**: nested executables spawned
 by launchd (e.g. the XPC agent registered via a LaunchAgent plist) run as
