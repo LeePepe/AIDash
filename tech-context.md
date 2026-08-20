@@ -115,9 +115,12 @@ canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
 Key constraints (apply once implemented):
 - **Minimal entitlements**: `app-sandbox` only. No `network.client`, no CloudKit
   entitlements (would crash without provisioning profile).
-- **Inside-out signing**: every nested executable (LaunchAgent/XPC helper)
-  must be individually ad-hoc signed with the fixed entitlements before the
-  outer app bundle is signed.
+- **Inside-out signing**: the signing contract specifies three phases
+  (leaf Mach-O → nested bundles deepest-first → outer app). **Today the
+  repo ships no nested XPC helper or LaunchAgent executable** — the
+  LaunchAgent `Program` points to the outer app main binary
+  (`Contents/MacOS/AIDash`). Phases 1 and 2 are no-ops today and exist
+  as fail-closed future-proofing only.
 - **Local-only**: `hasCloudKitEntitlement()` returns `false` → `.localOnly`
   fallback. Same runtime behavior as before; change is purely packaging.
 - **Store identity unchanged**: canonical path

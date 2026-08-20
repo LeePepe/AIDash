@@ -115,22 +115,30 @@ ENTITLEMENTS="Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements"
 ```
 
 **Phase 1 — Leaf executables and libraries.** Enumerate regular files
-inside `Contents/` (excluding the main app binary at `Contents/MacOS/*`)
-that are either executable or are dynamic libraries. Before signing each
-file, verify it is a Mach-O binary (`file -b` output starts with
-`Mach-O`); skip non-Mach-O executables (e.g. shell scripts, Python
-scripts with `+x`) to avoid signing artifacts that `codesign` cannot
-process or that do not carry entitlements.
+inside `Contents/` that are either executable or are dynamic libraries,
+excluding only the exact outer main binary
+(`$APP_SRC/Contents/MacOS/AIDash`) — not all of `Contents/MacOS/*`,
+because a future build may place additional helper executables there that
+must be signed in this phase. Before signing each file, verify it is a
+Mach-O binary; skip non-Mach-O executables (e.g. shell scripts with `+x`).
+
+The script **must run under `set -uo pipefail`**. Because `while read`
+in a pipeline runs in a subshell whose exit status is masked by
+`pipefail` only reporting the last non-zero component, use a
+process-substitution form that propagates `codesign` failures to the
+calling shell:
 
 ```bash
 # Phase 1: sign leaf Mach-O executables/dylibs (regular files only)
-find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
-  ! -path "$APP_SRC/Contents/MacOS/*" \
-  -print0 | while IFS= read -r -d '' leaf; do
-    # Guard: only sign actual Mach-O binaries
+signed_count=0
+while IFS= read -r -d '' leaf; do
     /usr/bin/file -b "$leaf" | /usr/bin/grep -q "Mach-O" || continue
-    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$leaf"
-done
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$leaf" \
+      || { echo "FATAL: codesign failed on $leaf"; exit 1; }
+    signed_count=$((signed_count + 1))
+done < <(find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
+  ! -path "$APP_SRC/Contents/MacOS/AIDash" \
+  -print0)
 ```
 
 **Phase 2 — Nested code bundles (deepest-first).** In a **separate**
@@ -143,10 +151,12 @@ visited before enclosing bundles, regardless of directory name sort order.
 
 ```bash
 # Phase 2: sign nested code bundles depth-first (post-order traversal)
-find "$APP_SRC/Contents" -depth -type d \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) \
-  -print0 | while IFS= read -r -d '' bundle; do
-    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$bundle"
-done
+while IFS= read -r -d '' bundle; do
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$bundle" \
+      || { echo "FATAL: codesign failed on $bundle"; exit 1; }
+    signed_count=$((signed_count + 1))
+done < <(find "$APP_SRC/Contents" -depth -type d \
+  \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) -print0)
 ```
 
 **Phase 3 — Outer app bundle.** Sign the top-level `.app` last, sealing
@@ -159,24 +169,44 @@ codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_SRC"
 
 #### Post-sign verification gate (fail-closed)
 
-After all three phases, the installer **must** verify the result. If any
-nested code bundle exists (Phase 1 or Phase 2 was non-empty), the
-verification must confirm that the deep signature is intact and that
-every signed executable carries the expected entitlements:
+After all three phases, the installer **must** verify the result. The
+verification confirms deep signature integrity and that **every** signed
+Mach-O and nested bundle target carries the `app-sandbox` entitlement —
+not just the main executable.
 
 ```bash
-# Verify deep signature integrity
-codesign --verify --deep --strict "$APP_SRC"
+# 1. Deep signature integrity (covers all nested signatures)
+codesign --verify --deep --strict "$APP_SRC" \
+  || { echo "FATAL: codesign --verify --deep --strict failed"; exit 1; }
 
-# Verify the main executable has app-sandbox
+# 2. Verify app-sandbox entitlement on the main executable
 codesign -d --entitlements :- "$APP_SRC/Contents/MacOS/AIDash" \
-  | grep -q "com.apple.security.app-sandbox" \
-  || { echo "FATAL: app-sandbox entitlement missing"; exit 1; }
+  | /usr/bin/grep -q "com.apple.security.app-sandbox" \
+  || { echo "FATAL: app-sandbox entitlement missing on main executable"; exit 1; }
+
+# 3. Verify app-sandbox entitlement on every target signed in Phases 1/2
+if [ "$signed_count" -gt 0 ]; then
+    # Re-enumerate the same targets and check each one
+    while IFS= read -r -d '' target; do
+        /usr/bin/file -b "$target" | /usr/bin/grep -q "Mach-O" || continue
+        codesign -d --entitlements :- "$target" \
+          | /usr/bin/grep -q "com.apple.security.app-sandbox" \
+          || { echo "FATAL: app-sandbox entitlement missing on $target"; exit 1; }
+    done < <(find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
+      ! -path "$APP_SRC/Contents/MacOS/AIDash" -print0)
+
+    while IFS= read -r -d '' target; do
+        codesign -d --entitlements :- "$target" \
+          | /usr/bin/grep -q "com.apple.security.app-sandbox" \
+          || { echo "FATAL: app-sandbox entitlement missing on $target"; exit 1; }
+    done < <(find "$APP_SRC/Contents" -depth -type d \
+      \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) -print0)
+fi
 ```
 
-If `codesign --verify --deep --strict` fails, the installer must exit
-non-zero without proceeding to install. This is fail-closed: a broken
-nested signature is never silently installed.
+If any verification step fails, the installer must exit non-zero without
+proceeding to install. This is fail-closed: a target missing `app-sandbox`
+or a broken nested signature is never silently installed.
 
 #### Design rationale
 
@@ -333,6 +363,12 @@ sandboxed) resolves the same path. One store identity for all builds.
 - **No in-memory fallback**: `ModelContainer` still opens the persistent
   SQLite store or fails with `.failed(reason:)`.
 
+**MY-1453 implementation prohibition:** The follow-up implementation issue
+(MY-1453) **must not** change `CloudKitContainer.storeURL()`,
+`legacyStoreURLs()`, or any store-path resolution logic. It must not
+enumerate, copy, move, delete, or repair the real SwiftData store file or
+its WAL/SHM companions. The scope of MY-1453 is strictly packaging and
+signing — if a store-path change appears necessary, stop and file a new ADR.
 ### Constitution alignment
 
 | Principle | Status |
@@ -381,3 +417,21 @@ sandboxed) resolves the same path. One store identity for all builds.
   (1 key: `app-sandbox` only) and rarely changes.
 - Future changes to the store path or sandbox posture require updating this
   ADR.
+
+### Rollback / supersession condition
+
+If either tight probe (`aidash schema list --quiet` or
+`aidash briefing get --date today --json`) fails **because** the sandboxed
+ad-hoc binary cannot register or check in to its Mach service, or cannot
+open the protected container store, this ADR must be **superseded** — not
+patched around. Specifically:
+
+- Do **not** fall back to a second store path, an unsandboxed posture, or a
+  `~/Library/Application Support/` alternative. Any such fallback creates
+  split-brain and violates Constitution §I.
+- Do **not** add TCC / Full Disk Access workarounds for the container
+  protection — macOS 26 container access is a hard sandbox enforcement, not
+  a consent gate.
+- Instead, **stop** the MY-1453 implementation, file a new ADR that
+  supersedes ADR-003, and re-evaluate the signing/packaging approach from
+  first principles before resuming.
