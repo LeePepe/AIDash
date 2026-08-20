@@ -170,6 +170,86 @@ for forbidden_key in \
   fi
 done
 
+# --- 8. validate_json_key fixtures (exercises the real shared helper) ---------
+# Create JSON test fixtures that exercise both code paths:
+# - existence-only (empty expected): must handle objects, arrays, and scalars
+# - scalar comparison (non-empty expected): must match literal values
+VJK_FIXTURE=$(mktemp "${TMPDIR:-/tmp}/vjk-fixture.XXXXXX")
+trap 'rm -rf "$TMP_PLIST_DIR" "$FAKE_LAUNCHCTL_LOG" "$FAKE_LAUNCHCTL_BIN" "$VJK_FIXTURE"' EXIT
+
+cat > "$VJK_FIXTURE" <<'VJK_EOF'
+{
+  "ok": true,
+  "data": {"briefing": {"id": "test-123", "containers": []}},
+  "requestId": "abc-def",
+  "error": {"code": "briefing.not_found", "requestId": "ghi-jkl"}
+}
+VJK_EOF
+
+# Existence-only: object-valued "data" must succeed (the old raw-only bug)
+if validate_json_key "$VJK_FIXTURE" "data" ""; then
+  echo "  PASS: validate_json_key existence: object-valued 'data'"
+else
+  echo "  FAIL: validate_json_key existence: object-valued 'data' (should succeed)" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# Existence-only: scalar-valued "requestId" must succeed
+if validate_json_key "$VJK_FIXTURE" "requestId" ""; then
+  echo "  PASS: validate_json_key existence: scalar 'requestId'"
+else
+  echo "  FAIL: validate_json_key existence: scalar 'requestId' (should succeed)" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# Existence-only: nested key "error.code" must succeed
+if validate_json_key "$VJK_FIXTURE" "error.code" ""; then
+  echo "  PASS: validate_json_key existence: nested 'error.code'"
+else
+  echo "  FAIL: validate_json_key existence: nested 'error.code' (should succeed)" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# Existence-only: missing key must fail
+if validate_json_key "$VJK_FIXTURE" "nonexistent" ""; then
+  echo "  FAIL: validate_json_key existence: missing key (should fail)" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: validate_json_key existence: missing key correctly fails"
+fi
+
+# Scalar comparison: ok=true must succeed
+if validate_json_key "$VJK_FIXTURE" "ok" "true"; then
+  echo "  PASS: validate_json_key scalar: ok=true"
+else
+  echo "  FAIL: validate_json_key scalar: ok=true (should succeed)" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# Scalar comparison: ok=false must fail (value is true)
+if validate_json_key "$VJK_FIXTURE" "ok" "false"; then
+  echo "  FAIL: validate_json_key scalar: ok=false (should fail, value is true)" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: validate_json_key scalar: ok!=false correctly fails"
+fi
+
+# Scalar comparison: error.code=briefing.not_found must succeed
+if validate_json_key "$VJK_FIXTURE" "error.code" "briefing.not_found"; then
+  echo "  PASS: validate_json_key scalar: error.code=briefing.not_found"
+else
+  echo "  FAIL: validate_json_key scalar: error.code=briefing.not_found (should succeed)" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# Scalar comparison: requestId=abc-def must succeed
+if validate_json_key "$VJK_FIXTURE" "requestId" "abc-def"; then
+  echo "  PASS: validate_json_key scalar: requestId=abc-def"
+else
+  echo "  FAIL: validate_json_key scalar: requestId=abc-def (should succeed)" >&2
+  fail_count=$((fail_count + 1))
+fi
+
 # --- Result ------------------------------------------------------------------
 echo
 if [ "$fail_count" -eq 0 ]; then

@@ -129,3 +129,32 @@ provision_fixed_launchagent() {
 
     bootstrap_fixed_launchagent "$uid_n" "$plist_path"
 }
+
+# validate_json_key FILE KEY EXPECTED_VALUE
+#
+# Checks a key in a JSON file via /usr/bin/plutil.
+#
+# When EXPECTED_VALUE is empty (existence-only check): uses
+# `plutil -extract KEY xml1 -o /dev/null` which succeeds for any JSON value
+# type (objects, arrays, scalars, nested paths). The `raw` format only works
+# for scalars; the `json` format only works for top-level objects/arrays.
+# `xml1` handles everything.
+#
+# When EXPECTED_VALUE is non-empty (scalar comparison): uses
+# `plutil -extract KEY raw -o -` and compares the literal string.
+#
+# Returns 0 if the key exists (and value matches when expected is given),
+# 1 otherwise.
+validate_json_key() {
+    local file=$1 key=$2 expected=$3
+    if [ -z "$expected" ]; then
+        # Existence-only: xml1 format handles any value type and nested paths
+        /usr/bin/plutil -extract "$key" xml1 -o /dev/null "$file" 2>/dev/null
+    else
+        # Scalar comparison: raw format for literal string match
+        local val
+        val=$(/usr/bin/plutil -extract "$key" raw -o - "$file" 2>/dev/null) \
+          || return 1
+        [ "$val" = "$expected" ]
+    fi
+}

@@ -329,20 +329,7 @@ probe_fail() {
     exit 1
 }
 
-# validate_json_key FILE KEY EXPECTED_VALUE
-# Uses /usr/bin/plutil to check a top-level key in a JSON file.
-# Returns 0 if key exists and value matches (or EXPECTED_VALUE is empty
-# for existence-only check), 1 otherwise.
-validate_json_key() {
-    local file=$1 key=$2 expected=$3
-    local val
-    val=$(/usr/bin/plutil -extract "$key" raw -o - "$file" 2>/dev/null) \
-      || return 1
-    if [ -n "$expected" ] && [ "$val" != "$expected" ]; then
-        return 1
-    fi
-    return 0
-}
+# validate_json_key is provided by lib-fixed-install-plist.sh (sourced above)
 
 # Probe 1 — store-independent (schema availability)
 echo "[install-fixed] probe 1: schema list (30 s timeout)…"
