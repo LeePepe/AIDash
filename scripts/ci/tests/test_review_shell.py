@@ -1067,3 +1067,161 @@ class TestRealGateContract:
         assert result.returncode == 1
         sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
         assert "暂不放行" in sticky
+
+    # ------------------------------------------------------------------
+    # Notes item-level schema validation (MY-1452 full schema fail-closed)
+    # ------------------------------------------------------------------
+
+    def test_non_object_note_structured_output_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Non-object note element (e.g. string) → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"ok",'
+            '"blockers":[],"notes":["bad-note"]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1, "non-object note must fail-closed"
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_non_object_note_result_fallback_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Non-object note via .result fallback → fail-closed."""
+        import json as _json
+        inner = {"verdict": "pass", "summary": "ok", "blockers": [], "notes": [42]}
+        output = _json.dumps({"result": _json.dumps(inner)})
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_note_missing_file_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Note missing required 'file' field → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"ok",'
+            '"blockers":[],"notes":[{"note":"nit"}]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_note_missing_note_field_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Note missing required 'note' field → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"ok",'
+            '"blockers":[],"notes":[{"file":"a.swift"}]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_note_invalid_line_type_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Note with non-integer/non-null line → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"ok",'
+            '"blockers":[],"notes":[{"file":"a.swift","note":"x","line":"bad"}]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_blocker_invalid_line_type_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Blocker with non-integer/non-null line → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"changes","summary":"x",'
+            '"blockers":[{"file":"a.swift","severity":"critical","why":"bug","line":"ten"}],'
+            '"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_note_unexpected_properties_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Note with extra properties not in schema → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"ok",'
+            '"blockers":[],"notes":[{"file":"a.swift","note":"x","extra":"bad"}]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_blocker_unexpected_properties_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Blocker with extra properties not in schema → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"changes","summary":"x",'
+            '"blockers":[{"file":"a.swift","severity":"critical","why":"bug","extra":true}],'
+            '"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_note_invalid_line_result_fallback_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Note with invalid line via .result fallback → fail-closed."""
+        import json as _json
+        inner = {
+            "verdict": "pass", "summary": "ok", "blockers": [],
+            "notes": [{"file": "a.swift", "note": "x", "line": "bad"}],
+        }
+        output = _json.dumps({"result": _json.dumps(inner)})
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_valid_notes_with_line_pass(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Well-formed notes with valid integer/null line still pass."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"ok",'
+            '"blockers":[],"notes":['
+            '{"file":"a.swift","note":"nit","line":42},'
+            '{"file":"b.swift","note":"style","line":null}'
+            ']}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 0, f"valid notes should pass: {result.stdout}"
