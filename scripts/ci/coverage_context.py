@@ -120,7 +120,7 @@ def _find_all_test_functions(source: str) -> list[tuple[str, re.Match]]:
 
 # Regex to find containing type declarations (class, struct, enum, extension)
 _CONTAINING_TYPE_RE = re.compile(
-    r"^\s*(?:final\s+)?(?:class|struct|enum|extension|actor)\s+(\w+)",
+    r"^[ \t]*(?:final\s+)?(?:class|struct|enum|extension|actor)\s+(\w+)",
     re.MULTILINE,
 )
 
@@ -309,12 +309,19 @@ COVERAGE_MAX_FILE_BYTES = 400_000
 COVERAGE_MAX_EXCERPT_BYTES = 30_000
 COVERAGE_MAX_TOTAL_BYTES = 80_000
 
-# Global work budget: maximum number of file-level operations (reads, size
-# checks) across ALL discovery and candidate-read routes combined. This
+# Global work budget: maximum number of file-level blob read operations
+# across content-discovery and candidate-read routes combined. This
 # prevents unbounded work even when many files match naming conventions.
-# Every attempted file counts (changed, sibling, filename-stem, content-
-# discovery, and later candidate reads in find_related_tests_in_head).
+# Path-only operations (changed/sibling enumeration, filename-stem matching)
+# do NOT charge this budget since they use the already-fetched tree list.
 COVERAGE_GLOBAL_WORK_BUDGET = 50
+
+# Minimum operations reserved for primary candidate reads (changed/sibling
+# files). Content discovery cannot consume more than
+# COVERAGE_GLOBAL_WORK_BUDGET - COVERAGE_PRIMARY_RESERVE operations.
+# This guarantees that genuine candidates from changed/sibling paths are
+# always readable, even in repos with many test files.
+COVERAGE_PRIMARY_RESERVE = 15
 
 
 class RemovedTest(NamedTuple):
@@ -517,10 +524,25 @@ def _extract_b_path(ab_spec: str) -> str:
     if idx != -1:
         return ab_spec[idx + 4:]  # everything after b/
 
-    # Case 3: both plain — find b/ by splitting in the middle
-    # Standard: a/<path> b/<path>, where both paths are the same.
-    # Find ' b/' — the separator between a-path and b-path.
-    idx = ab_spec.find(' b/')
+    # Case 3: both plain — a/<path> b/<path> where both paths are equal.
+    # Cannot simply find(' b/') because the path itself may contain ' b/'.
+    # Since both sides are equal: total = "a/" + path + " b/" + path
+    # Length = 2 + len(path) + 3 + len(path) = 5 + 2*len(path)
+    # So len(path) = (len(ab_spec) - 5) / 2 and b-path starts at len(ab_spec) - 2 - len(path).
+    # For renamed files (a != b) this doesn't apply, but Git uses C-quoting for those.
+    if ab_spec.startswith("a/") and len(ab_spec) >= 7:
+        # Verify: length must be odd+5 pattern: "a/" + path + " b/" + path
+        remainder = len(ab_spec) - 5  # subtract "a/" + " b/"
+        if remainder > 0 and remainder % 2 == 0:
+            path_len = remainder // 2
+            b_start = 2 + path_len + 3  # skip "a/<path> b/"
+            candidate = ab_spec[b_start:]
+            # Verify a-path == b-path for consistency
+            a_path = ab_spec[2:2 + path_len]
+            if a_path == candidate:
+                return candidate
+    # Fallback: last occurrence of ' b/' (most specific split point)
+    idx = ab_spec.rfind(' b/')
     if idx != -1:
         return ab_spec[idx + 3:]
 
@@ -915,6 +937,7 @@ def find_related_tests_in_head(
     production_symbols: set[str],
     max_excerpt_bytes: int,
     work_budget_remaining: int = COVERAGE_GLOBAL_WORK_BUDGET,
+    blob_cache: Optional[dict[str, str]] = None,
 ) -> tuple[list[str], list[str]]:
     """Find existing test functions in HEAD that reference the same symbols.
 
@@ -925,16 +948,25 @@ def find_related_tests_in_head(
 
     work_budget_remaining: number of file-level operations allowed. Each file
     read counts. When exhausted, remaining files are reported as budget-omitted.
+    Cached reads (from blob_cache) do NOT consume budget operations.
+
+    blob_cache: optional dict of path → content from content-discovery reads.
+    Files found in the cache are used without re-reading the blob, saving
+    both a budget operation and a git call.
 
     Returns (excerpts, file_outcomes) where file_outcomes tracks what
     actually happened to each candidate file:
     - "read: <path>" — successfully read and scanned
+    - "cached: <path>" — used cached content from discovery
     - "skipped-oversize: <path>" — exceeded COVERAGE_MAX_FILE_BYTES
     - "budget-omitted: <path>" — not reached due to global work budget
     - "read-failed: <path>" — preflight/read tool error (fail-closed)
     """
     if not production_symbols:
         return [], []
+
+    if blob_cache is None:
+        blob_cache = {}
 
     excerpts: list[str] = []
     file_outcomes: list[str] = []
@@ -953,27 +985,32 @@ def find_related_tests_in_head(
             file_outcomes.append(f"budget-omitted: {test_file}")
             continue
 
-        # Global work budget: each file read counts
-        if work_used >= work_budget_remaining:
-            file_outcomes.append(f"budget-omitted: {test_file}")
-            continue
-        work_used += 1
+        # Check blob cache first — cached reads don't consume budget
+        if test_file in blob_cache:
+            source = blob_cache[test_file]
+            file_outcomes.append(f"cached: {test_file}")
+        else:
+            # Global work budget: each uncached file read counts
+            if work_used >= work_budget_remaining:
+                file_outcomes.append(f"budget-omitted: {test_file}")
+                continue
+            work_used += 1
 
-        # Bounded read: check blob size BEFORE capturing full content to
-        # prevent oversized PR-controlled blobs from consuming runner memory.
-        source, was_oversize = _bounded_blob_read(
-            f"{head_sha}:{test_file}", COVERAGE_MAX_FILE_BYTES
-        )
-        if was_oversize:
-            file_outcomes.append(f"skipped-oversize: {test_file}")
-            continue
-        if source is None:
-            raise AnalysisError(
-                f"HEAD blob read failed for candidate test file "
-                f"'{test_file}' (claimed in SEARCH SCOPE but unreadable)"
+            # Bounded read: check blob size BEFORE capturing full content to
+            # prevent oversized PR-controlled blobs from consuming runner memory.
+            source, was_oversize = _bounded_blob_read(
+                f"{head_sha}:{test_file}", COVERAGE_MAX_FILE_BYTES
             )
+            if was_oversize:
+                file_outcomes.append(f"skipped-oversize: {test_file}")
+                continue
+            if source is None:
+                raise AnalysisError(
+                    f"HEAD blob read failed for candidate test file "
+                    f"'{test_file}' (claimed in SEARCH SCOPE but unreadable)"
+                )
 
-        file_outcomes.append(f"read: {test_file}")
+            file_outcomes.append(f"read: {test_file}")
         source_lines = source.splitlines()
 
         for func_name, match in _find_all_test_functions(source):
@@ -1038,13 +1075,18 @@ def find_test_files_in_changed_and_related(
     head_sha: str,
     changed_files: list[str],
     production_symbols: Optional[set[str]] = None,
-) -> tuple[list[str], list[str], int]:
+) -> tuple[list[str], list[str], int, dict[str, str]]:
     """Find test files: changed, naming-convention siblings, and repo-wide
-    symbol matches. Returns (test_files, searched_paths_summary, work_remaining).
+    symbol matches. Returns (test_files, searched_paths_summary, work_remaining,
+    blob_cache).
 
     work_remaining is the number of file-level operations left in the global
     work budget after discovery. Downstream readers (find_related_tests_in_head)
     must respect this budget for their candidate reads.
+
+    blob_cache maps path → content for blobs already read during content
+    discovery. Downstream readers should use cached content instead of
+    re-reading the same blob (saves a work-budget operation).
 
     Only includes files proven present in the HEAD tree — deleted test files
     are excluded so downstream readers do not raise AnalysisError on expected
@@ -1052,10 +1094,20 @@ def find_test_files_in_changed_and_related(
 
     The searched_paths_summary lists what was actually searched, so the
     evidence block can report scope and the reviewer can judge completeness.
+
+    Budget allocation:
+    - Changed/sibling files are enumerated without charging the read budget
+      (they are path-only operations against the already-fetched tree).
+    - Filename-stem matching is also read-free (string matching only).
+    - Only actual blob reads (content discovery) charge the work budget.
+    - A minimum of COVERAGE_PRIMARY_RESERVE operations is reserved for
+      downstream candidate reads, so primary changed/sibling files are always
+      readable even in repos with many test files.
     """
     test_files: list[str] = []
     searched: list[str] = []
-    work_used = 0  # global budget counter
+    blob_cache: dict[str, str] = {}  # path → content from content-discovery reads
+    work_used = 0  # counts only actual blob read operations
 
     # Fetch the full HEAD tree once for existence checks and symbol search.
     # Uses -z for NUL-delimited output to handle paths with newlines, quotes,
@@ -1073,16 +1125,9 @@ def find_test_files_in_changed_and_related(
     head_paths: set[str] = set(all_tree_files)
 
     # 1. Changed test files (only if still present in HEAD)
-    # Each file counts toward the global work budget.
+    # No blob read — path-only check against the already-fetched tree.
     for path in changed_files:
-        if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
-            searched.append(
-                f"budget-cap: (global work budget {COVERAGE_GLOBAL_WORK_BUDGET} "
-                f"exhausted during changed-file enumeration)"
-            )
-            break
         if "Test" in path or "test" in path:
-            work_used += 1
             if path in head_paths:
                 test_files.append(path)
                 searched.append(f"changed: {path}")
@@ -1090,13 +1135,8 @@ def find_test_files_in_changed_and_related(
                 searched.append(f"changed-deleted: {path} (excluded — absent from HEAD)")
 
     # 2. Sibling test files by naming convention
+    # Also read-free: string matching against the already-fetched tree list.
     for path in changed_files:
-        if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
-            searched.append(
-                f"budget-cap: (global work budget {COVERAGE_GLOBAL_WORK_BUDGET} "
-                f"exhausted during sibling enumeration)"
-            )
-            break
         if "Test" in path or "test" in path:
             continue
         if not path.endswith(".swift"):
@@ -1107,11 +1147,8 @@ def find_test_files_in_changed_and_related(
             f"{stem}Test.swift",
         ]
         for line in all_tree_files:
-            if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
-                break
             for pattern in candidate_patterns:
                 if line.endswith(pattern) and line not in test_files:
-                    work_used += 1
                     test_files.append(line)
                     searched.append(f"sibling: {line}")
 
@@ -1119,21 +1156,18 @@ def find_test_files_in_changed_and_related(
     # AND by content. First tries filename matching (fast, no blob reads),
     # then does bounded content-based discovery for generically named test
     # files that contain exact domain identifiers.
-    if production_symbols and work_used < COVERAGE_GLOBAL_WORK_BUDGET:
+    #
+    # Content discovery budget: reserve COVERAGE_PRIMARY_RESERVE for
+    # downstream candidate reads so changed/sibling files are always readable.
+    content_budget = max(0, COVERAGE_GLOBAL_WORK_BUDGET - COVERAGE_PRIMARY_RESERVE)
+    if production_symbols:
         # Build search stems from production symbols (CamelCase type names)
         search_stems = sorted({
             sym for sym in production_symbols
             if len(sym) > 3 and sym[0].isupper()
         })
-        # 3a. Filename-stem matching (fast — no blob reads needed)
+        # 3a. Filename-stem matching (fast — no blob reads, no budget charge)
         for line in all_tree_files:
-            if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
-                searched.append(
-                    f"budget-cap: (global work budget "
-                    f"{COVERAGE_GLOBAL_WORK_BUDGET} exhausted during "
-                    f"filename-stem discovery)"
-                )
-                break
             if line in test_files:
                 continue
             if not (line.endswith(".swift") or line.endswith(".py")):
@@ -1143,7 +1177,6 @@ def find_test_files_in_changed_and_related(
             basename = line.rsplit("/", 1)[-1]
             for stem in search_stems:
                 if stem in basename:
-                    work_used += 1
                     test_files.append(line)
                     searched.append(f"symbol-match({stem}): {line}")
                     break
@@ -1151,7 +1184,7 @@ def find_test_files_in_changed_and_related(
         # 3b. Content-based discovery: for test files not yet selected,
         # do a bounded read and check if they contain any production symbol.
         # This catches generically named files (e.g. "IntegrationTests.swift")
-        # that reference exact domain identifiers. Bounded by global work cap.
+        # that reference exact domain identifiers. Bounded by content_budget.
         content_candidates = [
             f for f in all_tree_files
             if f not in test_files
@@ -1159,11 +1192,11 @@ def find_test_files_in_changed_and_related(
             and ("Test" in f or "test" in f)
         ]
         for candidate in content_candidates:
-            if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
+            if work_used >= content_budget:
                 searched.append(
-                    f"budget-cap: (global work budget "
-                    f"{COVERAGE_GLOBAL_WORK_BUDGET} exhausted during "
-                    f"content discovery)"
+                    f"budget-cap: (content-discovery budget "
+                    f"{content_budget} exhausted; "
+                    f"{COVERAGE_PRIMARY_RESERVE} reserved for candidate reads)"
                 )
                 break
             # Count every candidate attempted toward the work cap, including
@@ -1186,6 +1219,8 @@ def find_test_files_in_changed_and_related(
                     f"'{candidate}' (size preflight or blob read error); "
                     f"cannot determine if file contains relevant tests"
                 )
+            # Cache the read content so downstream doesn't re-read
+            blob_cache[candidate] = source
             # Check for word-boundary matches of production symbols
             for sym in search_stems:
                 if re.search(r'\b' + re.escape(sym) + r'\b', source):
@@ -1196,8 +1231,13 @@ def find_test_files_in_changed_and_related(
     if not searched:
         searched.append("(no test files found in scope)")
 
-    work_remaining = max(0, COVERAGE_GLOBAL_WORK_BUDGET - work_used)
-    return test_files, searched, work_remaining
+    # Remaining budget for downstream: global budget minus content-discovery
+    # reads, but at least COVERAGE_PRIMARY_RESERVE for changed/sibling reads.
+    work_remaining = max(
+        COVERAGE_PRIMARY_RESERVE,
+        COVERAGE_GLOBAL_WORK_BUDGET - work_used,
+    )
+    return test_files, searched, work_remaining, blob_cache
 
 
 def _merge_search_outcomes(
@@ -1255,6 +1295,8 @@ def _merge_search_outcomes(
         outcome = outcome_map.get(path, "")
         if outcome == "read":
             merged.append(f"{entry} [read]")
+        elif outcome == "cached":
+            merged.append(f"{entry} [cached]")
         elif outcome == "skipped-oversize":
             merged.append(f"{entry} [skipped — exceeded {COVERAGE_MAX_FILE_BYTES}-byte file limit]")
         elif outcome == "budget-omitted":
@@ -1313,17 +1355,19 @@ def build_coverage_evidence(
     symbols = extract_production_symbols(all_removed)
 
     # Step 3: Find all test files that might have coverage (bounded repo-wide)
-    test_files, searched_summary, work_remaining = (
+    test_files, searched_summary, work_remaining, blob_cache = (
         find_test_files_in_changed_and_related(
             head_sha, changed_files, symbols
         )
     )
 
     # Step 4: Find existing tests covering the same symbols
-    # Pass remaining work budget so candidate reads share the global cap.
+    # Pass remaining work budget and blob cache so candidate reads share the
+    # global cap and avoid re-reading already-fetched blobs.
     related_excerpts, file_outcomes = find_related_tests_in_head(
         head_sha, test_files, symbols, COVERAGE_MAX_EXCERPT_BYTES,
         work_budget_remaining=work_remaining,
+        blob_cache=blob_cache,
     )
 
     # Step 5: Render with accurate search scope — merge discovery context
@@ -1406,11 +1450,28 @@ def render_coverage_evidence(
             parts.append(excerpt)
             parts.append("")
     else:
-        parts.append(
-            "No related existing tests found in HEAD within the searched scope. "
-            "This may indicate genuine coverage loss — reviewer should verify "
-            "within the searched scope above; claims beyond searched scope are notes."
-        )
+        # Determine if any files were actually read — only "[read]" or
+        # "[cached]" annotations in searched_summary represent genuine searches.
+        # If zero files were read and we have scope info, cannot support
+        # negative evidence claims.
+        actually_read = False
+        if searched_summary:
+            for s in searched_summary:
+                if "[read]" in s or "[cached]" in s:
+                    actually_read = True
+                    break
+        if searched_summary is not None and not actually_read:
+            parts.append(
+                "INCONCLUSIVE — no test files were actually read within the work "
+                "budget. Cannot determine whether related coverage exists. "
+                "Reviewer must not claim coverage loss based on this result."
+            )
+        else:
+            parts.append(
+                "No related existing tests found in HEAD within the searched scope. "
+                "This may indicate genuine coverage loss — reviewer should verify "
+                "within the searched scope above; claims beyond searched scope are notes."
+            )
         parts.append("")
 
     # Enforce COVERAGE_MAX_TOTAL_BYTES over the entire rendered output.
