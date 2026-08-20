@@ -22,6 +22,7 @@ the base checkout, never executes PR code.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -66,6 +67,23 @@ def sanitize_untrusted_content(text: str) -> str:
         "[SANITIZED — structural record removed]", result
     )
     return result
+
+
+def _json_encode_untrusted(value: str) -> str:
+    """Encode a PR-controlled value as a JSON string literal.
+
+    All control characters (newlines, tabs, etc.), backslashes, and double
+    quotes are escaped per RFC 8259. The result is always a single line
+    surrounded by double quotes, making it impossible for an attacker to
+    inject newlines that create additional output lines, structural record
+    headers, or reviewer directives.
+
+    Use this for every PR-controlled path/name value embedded in rendered
+    evidence (REMOVED TESTS, SEARCH SCOPE, candidate headers). The
+    analyzer's internal logic uses lossless original values; encoding is
+    applied only at render time.
+    """
+    return json.dumps(value, ensure_ascii=False)
 
 
 class AnalysisError(Exception):
@@ -1032,12 +1050,14 @@ def find_related_tests_in_head(
             # Sanitize PR-controlled content before embedding in the prompt
             # to prevent delimiter injection attacks (MY-1456 security fix).
             safe_body = sanitize_untrusted_content(func_body)
-            # Path and func name are also PR-controlled — sanitize them
-            safe_file = sanitize_untrusted_content(test_file)
-            safe_func = sanitize_untrusted_content(func_name)
+            # Path and func name are PR-controlled — sanitize then JSON-encode
+            # so they are single-line, preventing newline injection of fake
+            # structural records or reviewer directives.
+            enc_file = _json_encode_untrusted(sanitize_untrusted_content(test_file))
+            enc_func = _json_encode_untrusted(sanitize_untrusted_content(func_name))
 
             excerpt = (
-                f"--- {safe_file}: {safe_func} "
+                f"--- {enc_file}: {enc_func} "
                 f"(lines {func_start + 1}-{func_end_idx}, "
                 f"references: {', '.join(sorted(referenced)[:5])})\n"
                 f"{safe_body}"
@@ -1425,10 +1445,14 @@ def render_coverage_evidence(
     ]
 
     for rt in removed_tests:
-        # Sanitize path and func_name — they are PR-controlled values
-        safe_file = sanitize_untrusted_content(rt.file)
-        safe_name = sanitize_untrusted_content(rt.func_name)
-        parts.append(f"  - {safe_file}: {safe_name}")
+        # JSON-encode path and func_name — they are PR-controlled values.
+        # JSON encoding escapes all control characters (newlines, tabs),
+        # backslashes, and quotes into a single-line string, preventing
+        # injection of new lines/records/directives into the evidence block.
+        # Sanitize first (neutralize structural keywords), then encode.
+        enc_file = _json_encode_untrusted(sanitize_untrusted_content(rt.file))
+        enc_name = _json_encode_untrusted(sanitize_untrusted_content(rt.func_name))
+        parts.append(f"  - {enc_file}: {enc_name}")
 
     parts.append("")
 
@@ -1436,8 +1460,10 @@ def render_coverage_evidence(
     if searched_summary:
         parts.append("SEARCH SCOPE (files actually searched for related tests):")
         for s in searched_summary:
-            # Sanitize — path values within are PR-controlled
-            parts.append(f"  - {sanitize_untrusted_content(s)}")
+            # JSON-encode the entire entry — path values within are
+            # PR-controlled and could contain newlines/control chars.
+            # Sanitize first (structural keywords), then encode.
+            parts.append(f"  - {_json_encode_untrusted(sanitize_untrusted_content(s))}")
         parts.append("")
 
     if related_excerpts:
