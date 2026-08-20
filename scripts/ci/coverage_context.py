@@ -234,20 +234,22 @@ def _bounded_blob_read(
     """Read a git blob only if it does not exceed max_bytes.
 
     Returns (content, was_oversize). If oversize, content is None and
-    was_oversize is True. If the read fails for other reasons, content is None
-    and was_oversize is False.
+    was_oversize is True. If the size preflight fails (cat-file -s returns
+    None), content is None and was_oversize is False — the caller must
+    treat this as a read failure and fail closed. No fallback to unbounded
+    git show is performed.
     """
     size = _git_blob_size(ref_path)
-    if size is not None and size > max_bytes:
+    if size is None:
+        # Size preflight failed — cannot determine if blob is safe to read.
+        # Fail closed: do NOT fall through to an unbounded git show.
+        return None, False
+    if size > max_bytes:
         return None, True
-    # Size is within bounds (or unknown — fall through to full read and
-    # check post-hoc for safety)
+    # Size confirmed within bounds — safe to read content.
     content = run_git(["show", ref_path])
     if content is None:
         return None, False
-    # Post-hoc check in case cat-file -s was unavailable
-    if len(content.encode("utf-8", "replace")) > max_bytes:
-        return None, True
     return content, False
 
 
@@ -302,14 +304,20 @@ def find_removed_test_functions(
     if "Test" not in path and "test" not in path:
         return []
 
-    # Get the BASE version of the file to see what was there.
-    # A None return means git failed — could be a real error or file not in
-    # base. Use ls-tree to distinguish: if the path is absent from the base
-    # tree, there are genuinely no removed tests (return []).  If ls-tree
-    # also fails, we can't determine anything → raise AnalysisError.
-    base_source = run_git(["show", f"{base_sha}:{path}"])
+    # Get the BASE version of the file via bounded preflight reader.
+    # BASE is trusted content (from the base checkout), but we still enforce
+    # explicit bounded/fail-closed policy to prevent unbounded memory capture.
+    base_source, base_oversize = _bounded_blob_read(
+        f"{base_sha}:{path}", COVERAGE_MAX_FILE_BYTES
+    )
+    if base_oversize:
+        raise AnalysisError(
+            f"BASE blob for {base_sha}:{path} exceeds "
+            f"{COVERAGE_MAX_FILE_BYTES}-byte limit; cannot analyze"
+        )
     if base_source is None:
-        # Check whether the file simply doesn't exist in base (new file)
+        # Bounded read failed — check whether the file simply doesn't exist
+        # in base (new file) vs a real read/tool error.
         base_tree = run_git(["ls-tree", base_sha, "--", path])
         if base_tree is not None and base_tree.strip() == "":
             # File genuinely absent from base — no tests to have removed
@@ -322,7 +330,7 @@ def find_removed_test_functions(
             )
         # ls-tree itself failed — can't determine anything
         raise AnalysisError(
-            f"Cannot read BASE source for {path}: both git-show and "
+            f"Cannot read BASE source for {path}: both bounded-read and "
             f"ls-tree failed (git tool error)"
         )
 
@@ -330,16 +338,27 @@ def find_removed_test_functions(
     if not removed_lines:
         return []
 
-    # Get HEAD version to verify removal (not just modification).
+    # Get HEAD version via bounded preflight reader to verify removal.
+    # HEAD blobs are PR-controlled — must never be captured without size check.
     # Distinguish three states: verified-present, verified-absent, unknown.
     head_source: Optional[str] = None
     head_read_succeeded = False
     if head_sha:
-        head_source = run_git(["show", f"{head_sha}:{path}"])
+        head_source, head_oversize = _bounded_blob_read(
+            f"{head_sha}:{path}", COVERAGE_MAX_FILE_BYTES
+        )
+        if head_oversize:
+            # Oversized HEAD blob — fail closed, never capture full content.
+            raise AnalysisError(
+                f"HEAD blob for {head_sha}:{path} exceeds "
+                f"{COVERAGE_MAX_FILE_BYTES}-byte limit; "
+                f"cannot verify test removal (fail-closed)"
+            )
         if head_source is not None:
             head_read_succeeded = True
         else:
-            # Verify file is truly deleted vs blob read failure by checking
+            # Bounded read returned None (size preflight failed or blob read
+            # failed). Verify file is truly deleted vs tool error by checking
             # ls-tree (lightweight, path-only — no blob content needed).
             tree_out = run_git(["ls-tree", head_sha, "--", path])
             if tree_out is not None and tree_out.strip() == "":
@@ -768,13 +787,15 @@ def find_test_files_in_changed_and_related(
         for candidate in content_candidates:
             if content_scanned >= _CONTENT_DISCOVERY_MAX_FILES:
                 break
+            # Count every candidate attempted toward the work cap, including
+            # oversized/unreadable files, so the bounded-work claim is literal.
+            content_scanned += 1
             # Bounded read — skip oversized files without full capture
             source, was_oversize = _bounded_blob_read(
                 f"{head_sha}:{candidate}", _CONTENT_DISCOVERY_MAX_BYTES
             )
             if was_oversize or source is None:
                 continue
-            content_scanned += 1
             # Check for word-boundary matches of production symbols
             for sym in search_stems:
                 if re.search(r'\b' + re.escape(sym) + r'\b', source):

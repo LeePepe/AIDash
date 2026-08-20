@@ -204,8 +204,11 @@ def _stub_git(monkeypatch, file_map, base_file_map=None):
         if args[0] == "cat-file" and "-s" in args:
             # git cat-file -s <sha>:<path> — return byte size
             ref_path = args[2] if len(args) > 2 else args[-1]
-            _, _, path = ref_path.partition(":")
-            content = file_map.get(path)
+            sha_part, _, path = ref_path.partition(":")
+            if base_file_map and sha_part == "base123":
+                content = base_file_map.get(path)
+            else:
+                content = file_map.get(path)
             if content is not None:
                 return str(len(content.encode("utf-8")))
             return None
@@ -302,6 +305,11 @@ def test_find_removed_test_functions_detects_obsolete_tests(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             if ref_path.startswith("base123:"):
@@ -356,6 +364,11 @@ def test_find_removed_test_functions_ignores_modified_not_removed(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             if ref_path.startswith("base123:"):
@@ -610,6 +623,11 @@ def test_blob_read_failure_does_not_claim_removal(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             if ref_path.startswith("base123:"):
@@ -651,6 +669,11 @@ def test_verified_file_deletion_reports_removal(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             if ref_path.startswith("base123:"):
@@ -733,6 +756,11 @@ def test_base_read_failure_raises_analysis_error(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             # BASE blob read fails
             return None
@@ -761,6 +789,11 @@ def test_base_read_failure_lstree_also_fails_raises(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         # Everything fails
         return None
 
@@ -769,7 +802,7 @@ def test_base_read_failure_lstree_also_fails_raises(monkeypatch):
     )
 
     path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
-    with pytest.raises(AnalysisError, match="both git-show and ls-tree failed"):
+    with pytest.raises(AnalysisError, match="both bounded-read and ls-tree failed"):
         find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
 
 
@@ -780,6 +813,11 @@ def test_base_new_file_returns_empty(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return None  # blob read fails
         if args[0] == "ls-tree":
@@ -818,6 +856,11 @@ def test_head_blob_fail_with_lstree_showing_file_exists_raises(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             if ref_path.startswith("base123:"):
@@ -850,6 +893,11 @@ def test_build_coverage_evidence_propagates_analysis_error(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             if "base123:" in ref_path:
@@ -888,6 +936,11 @@ def test_find_related_tests_head_blob_fail_raises(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             # HEAD blob read fails for the candidate test file
             return None
@@ -1065,6 +1118,11 @@ def test_delimiter_injection_in_claude_prompt_path(monkeypatch):
     )
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return injected_source
         if args[0] == "ls-tree":
@@ -1102,6 +1160,11 @@ def test_deleted_test_file_excluded_from_candidates(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "ls-tree":
             if "-r" in args:
                 # Only the production file and a symbol-matching test remain in HEAD
@@ -1138,6 +1201,11 @@ def test_find_test_files_lstree_failure_raises(monkeypatch):
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "ls-tree":
             # Total ls-tree failure (git tool error)
             return None
@@ -1212,6 +1280,11 @@ index abc1234..0000000
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             if ref_path.startswith("base123:"):
@@ -1402,6 +1475,11 @@ index abc1234..def5678 100644
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             if ref_path.startswith("base123:"):
@@ -1466,6 +1544,11 @@ def test_build_with_config():
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return head_py_test
         if args[0] == "ls-tree":
@@ -1519,6 +1602,11 @@ struct SmallTests {
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             path = ref_path.split(":", 1)[1]
@@ -1578,6 +1666,11 @@ struct SmallTests {
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             path = ref_path.split(":", 1)[1]
@@ -1656,6 +1749,11 @@ def test_file_outcomes_only_read_supports_negative_evidence(monkeypatch):
     oversize_source = "x" * (COVERAGE_MAX_FILE_BYTES + 1)
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return oversize_source
         return None
@@ -1775,6 +1873,11 @@ struct MultibyteCoverageTests {{
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return test_source
         return None
@@ -1826,6 +1929,11 @@ struct EvilTests {
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return malicious_source
         if args[0] == "ls-tree":
@@ -1872,6 +1980,11 @@ struct EvilTests {
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return malicious_source
         if args[0] == "ls-tree":
@@ -1915,6 +2028,11 @@ struct EvilTests {
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return malicious_source
         if args[0] == "ls-tree":
@@ -1958,6 +2076,11 @@ struct EvilTests {
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return malicious_source
         if args[0] == "ls-tree":
@@ -2008,6 +2131,11 @@ struct CJKTests {{
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return test_source
         if args[0] == "ls-tree":
@@ -2135,6 +2263,11 @@ diff --git a/Tests/TrivialTests.swift b/Tests/TrivialTests.swift
     import coverage_context
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref = args[1]
             if ref.startswith("base:"):
@@ -2187,6 +2320,11 @@ struct RuntimeTests {
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return test_source
         if args[0] == "ls-tree":
@@ -2227,6 +2365,11 @@ struct CommandTests {
 """
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             return test_source
         if args[0] == "ls-tree":
@@ -2339,6 +2482,11 @@ struct BriefingPublishCommandTests {
     }
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref_path = args[1]
             for path, source in file_map.items():
@@ -2589,6 +2737,11 @@ diff --git a/Tests/FooTests.swift b/Tests/FooTests.swift
     test_path = "Tests/FooTests.swift"
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref = args[1]
             if ref.startswith("base:"):
@@ -2644,6 +2797,11 @@ diff --git a/Tests/FooTests.swift b/Tests/FooTests.swift
     test_path = "Tests/FooTests.swift"
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref = args[1]
             if ref.startswith("base:"):
@@ -2988,6 +3146,11 @@ diff --git a/Tests/FooTests.swift b/Tests/FooTests.swift
     test_path = "Tests/FooTests.swift"
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref = args[1]
             if ref.startswith("base:"):
@@ -3167,6 +3330,11 @@ diff --git a/tests/test_foo.py b/tests/test_foo.py
     test_path = "tests/test_foo.py"
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref = args[1]
             if ref.startswith("base:"):
@@ -3217,6 +3385,11 @@ diff --git a/tests/test_foo.py b/tests/test_foo.py
     test_path = "tests/test_foo.py"
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref = args[1]
             if ref.startswith("base:"):
@@ -3268,6 +3441,11 @@ diff --git a/tests/test_foo.py b/tests/test_foo.py
     test_path = "tests/test_foo.py"
 
     def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            # Derive size from what show would return
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
         if args[0] == "show":
             ref = args[1]
             if ref.startswith("base:"):
@@ -3288,3 +3466,268 @@ diff --git a/tests/test_foo.py b/tests/test_foo.py
     # Module-level function has no containing type
     assert removed[0].containing_type == ""
 
+
+# --- Bounded preflight tests (MY-1457 resource-bound repair) ---
+
+
+def test_bounded_blob_read_fails_closed_when_size_preflight_fails(monkeypatch):
+    """When cat-file -s returns None (size preflight failure),
+    _bounded_blob_read must NOT fall through to unbounded git show.
+    It must return (None, False) immediately."""
+
+    import coverage_context
+
+    show_called = []
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            return None  # size preflight fails
+        if args[0] == "show":
+            show_called.append(args[1])
+            return "should never be read"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    content, was_oversize = _bounded_blob_read("head:big.swift", 400000)
+    assert content is None
+    assert was_oversize is False
+    # Critical: git show must NOT have been called
+    assert show_called == [], (
+        "git show was called despite size preflight failure — "
+        "unbounded read fallback was not removed"
+    )
+
+
+def test_head_oversize_blob_raises_analysis_error_in_find_removed(monkeypatch):
+    """When HEAD blob exceeds COVERAGE_MAX_FILE_BYTES,
+    find_removed_test_functions must raise AnalysisError without capturing
+    the full blob content."""
+
+    import coverage_context
+
+    base_source = """\
+import XCTest
+final class FooTests: XCTestCase {
+    func testBar() {
+        let svc = BarService()
+        XCTAssertTrue(svc.check())
+    }
+}
+"""
+    test_path = "Tests/FooTests.swift"
+    diff = f"""\
+diff --git a/{test_path} b/{test_path}
+--- a/{test_path}
++++ b/{test_path}
+@@ -3,5 +3,0 @@ final class FooTests: XCTestCase {{
+-    func testBar() {{
+-        let svc = BarService()
+-        XCTAssertTrue(svc.check())
+-    }}
+"""
+
+    head_show_called = []
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            if ref_path.startswith("base:"):
+                return str(len(base_source.encode("utf-8")))
+            if ref_path.startswith("head:"):
+                # Report HEAD as oversized (500KB > 400KB limit)
+                return "500000"
+            return None
+        if args[0] == "show":
+            ref_path = args[1]
+            if ref_path.startswith("base:"):
+                return base_source
+            if ref_path.startswith("head:"):
+                head_show_called.append(ref_path)
+                return "x" * 500000  # should NOT be reached
+            return None
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return f"100644 blob abc\t{test_path}"
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    with pytest.raises(AnalysisError, match="HEAD blob.*exceeds"):
+        find_removed_test_functions(diff, test_path, "base", "head")
+
+    # git show must NOT have been called for the oversized HEAD blob
+    assert head_show_called == [], (
+        "git show was called for oversized HEAD blob — "
+        "full content was captured before size check"
+    )
+
+
+def test_head_size_preflight_failure_uses_lstree_deletion_fallback(monkeypatch):
+    """When HEAD size preflight fails but ls-tree confirms file is absent,
+    find_removed_test_functions still follows whole-file-deletion logic
+    (reporting all base functions as removed)."""
+
+    import coverage_context
+
+    base_source = """\
+import XCTest
+final class FooTests: XCTestCase {
+    func testAlpha() {
+        Alpha().run()
+    }
+}
+"""
+    test_path = "Tests/FooTests.swift"
+    diff = f"""\
+diff --git a/{test_path} b/{test_path}
+deleted file mode 100644
+--- a/{test_path}
++++ /dev/null
+@@ -1,6 +0,0 @@
+-import XCTest
+-final class FooTests: XCTestCase {{
+-    func testAlpha() {{
+-        Alpha().run()
+-    }}
+-}}
+"""
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            if ref_path.startswith("base:"):
+                return str(len(base_source.encode("utf-8")))
+            # HEAD size preflight fails (file deleted)
+            return None
+        if args[0] == "show":
+            ref_path = args[1]
+            if ref_path.startswith("base:"):
+                return base_source
+            return None  # HEAD show would also fail
+        if args[0] == "ls-tree":
+            if "--" in args:
+                path_idx = args.index("--") + 1
+                path = args[path_idx]
+                if "base" in str(args):
+                    return f"100644 blob abc\t{path}"
+                # HEAD ls-tree: file absent (genuine deletion)
+                return ""
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    removed = find_removed_test_functions(diff, test_path, "base", "head")
+    # File deleted at HEAD → all base functions reported as removed
+    assert len(removed) == 1
+    assert removed[0].func_name == "testAlpha"
+
+
+def test_base_oversize_blob_raises_analysis_error(monkeypatch):
+    """When BASE blob exceeds COVERAGE_MAX_FILE_BYTES,
+    find_removed_test_functions must raise AnalysisError."""
+
+    import coverage_context
+
+    test_path = "Tests/FooTests.swift"
+    diff = f"""\
+diff --git a/{test_path} b/{test_path}
+--- a/{test_path}
++++ b/{test_path}
+@@ -3,3 +3,0 @@
+-    func testBar() {{
+-        check()
+-    }}
+"""
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            if ref_path.startswith("base:"):
+                # Report BASE as oversized
+                return "500000"
+            return "100"
+        if args[0] == "show":
+            return None
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return f"100644 blob abc\t{test_path}"
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    with pytest.raises(AnalysisError, match="BASE blob.*exceeds"):
+        find_removed_test_functions(diff, test_path, "base", "head")
+
+
+def test_content_discovery_cap_counts_oversize_and_unreadable(monkeypatch):
+    """Content-discovery attempt cap must count every candidate attempted,
+    including oversized and unreadable files, so bounded-work claim is literal."""
+
+    import coverage_context
+
+    # Create 25 candidate test files; first 15 are oversized, next 10 normal.
+    # With cap of 20, only 5 normal files should be reached (15 oversized + 5 normal = 20).
+    all_files = [f"Tests/Test{i}.swift" for i in range(25)]
+    normal_content = """\
+import Testing
+struct NormalTests {
+    @Test func testDomain() {
+        let svc = DomainService()
+        svc.run()
+    }
+}
+"""
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            _, _, path = ref_path.partition(":")
+            if path in all_files:
+                idx = all_files.index(path)
+                if idx < 15:
+                    # First 15: oversized
+                    return "500000"
+                else:
+                    # Remaining: normal size
+                    return str(len(normal_content.encode("utf-8")))
+            return None
+        if args[0] == "show":
+            ref_path = args[1]
+            _, _, path = ref_path.partition(":")
+            if path in all_files:
+                idx = all_files.index(path)
+                if idx >= 15:
+                    return normal_content
+            return None
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "\n".join(all_files)
+            if "--" in args:
+                path_idx = args.index("--") + 1
+                path = args[path_idx]
+                if path in all_files:
+                    return f"100644 blob abc\t{path}"
+                return ""
+            return "\n".join(all_files)
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    from coverage_context import find_test_files_in_changed_and_related
+
+    # Pass production symbols to trigger content-based discovery
+    test_files, searched = find_test_files_in_changed_and_related(
+        "head", ["src/Domain.swift"], {"DomainService"}
+    )
+
+    # With cap of 20 candidates total, 15 oversized + 5 normal = 20.
+    # So only 5 normal files should be content-matched.
+    content_matched = [s for s in searched if "content-match" in s]
+    assert len(content_matched) == 5, (
+        f"Expected 5 content-matched files (cap 20, 15 oversized counted), "
+        f"got {len(content_matched)}"
+    )
