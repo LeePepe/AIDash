@@ -26,11 +26,11 @@ import Foundation
 ///   5. On malformed reply (`ok=false` without error): throw `xpc.decode_failure`
 ///      so the central handler maps to exit 2.
 ///
-/// Exit codes (mapped centrally by `AIDash.main` via `ExitCodeMapper`):
+/// Exit codes:
 ///   0 — success
-///   1 — local validation (`schema.*`)
-///   2 — XPC transport (`xpc.*`)
-///   3 — remote error (everything else)
+///   1 — local validation (`schema.*`, mapped centrally via `ExitCodeMapper`)
+///   2 — XPC transport/decode (`xpc.*`, mapped centrally via `ExitCodeMapper`)
+///   3 — remote error (emitted locally with `response.requestId` on stderr)
 struct CardPutCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "put",
@@ -132,23 +132,39 @@ struct CardPutCommand: AsyncParsableCommand {
         } else if let error = response.error {
             // Remote error — emit envelope with response.requestId and exit 3.
             // Per cli-surface §"Exit codes": server-returned errors ALWAYS exit 3.
-            let remoteError = XPCError(
-                code: error.code,
-                message: error.message,
-                field: error.field,
-                got: error.got,
-                allowed: error.allowed,
-                cause: error.cause
-            )
-            let formatter = globals.outputMode.formatter()
-            try formatter.emit(error: remoteError, requestId: response.requestId)
-            Darwin.exit(3)
+            do {
+                try Self.emitRemoteError(error, requestId: response.requestId, globals: globals)
+            } catch let exitCode as ExitCode {
+                Darwin.exit(exitCode.rawValue)
+            }
         } else {
             throw XPCError(
                 code: "xpc.decode_failure",
                 message: "Server returned ok=false but no error payload"
             )
         }
+    }
+
+    // MARK: - Remote-error handler (extracted for testability, MY-1455)
+
+    /// Production remote-error handler for card.put: emits the error envelope
+    /// with response.requestId on stderr and throws ExitCode(3) (MY-1455).
+    static func emitRemoteError(
+        _ error: XPCError,
+        requestId: String,
+        globals: GlobalOptions
+    ) throws {
+        let remoteError = XPCError(
+            code: error.code,
+            message: error.message,
+            field: error.field,
+            got: error.got,
+            allowed: error.allowed,
+            cause: error.cause
+        )
+        let formatter = globals.outputMode.formatter()
+        try formatter.emit(error: remoteError, requestId: requestId)
+        throw ExitCode(3)
     }
 
     // MARK: - Payload resolution

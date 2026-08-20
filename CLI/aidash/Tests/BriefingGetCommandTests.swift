@@ -257,12 +257,12 @@ struct BriefingGetCommandTests {
     // MARK: - MY-1455: Remote error retains requestId from XPCResponse
 
     /// Production-seam test: encodes a synthetic XPCResponse with ok=false,
-    /// decodes it through `XPCClient.decodeReply` (the production decode path),
-    /// then calls `BriefingGetCommand.emitRemoteError` to verify the full
-    /// decoded-reply → command-emit path.
+    /// decodes it through `XPCClient.deliverReply` (the production delivery
+    /// policy), then calls `BriefingGetCommand.emitRemoteError` to verify the
+    /// full decoded-reply → command-emit path.
     ///
     /// Asserts:
-    /// - decodeReply returns the response (does not throw for ok=false)
+    /// - deliverReply returns the response (does not throw for ok=false)
     /// - stderr contains the error envelope
     /// - `error.requestId` equals `XPCResponse.requestId`
     /// - root `requestId` is absent
@@ -283,10 +283,10 @@ struct BriefingGetCommandTests {
         )
         let encodedBytes = try JSONEncoder().encode(response)
 
-        // Decode through the production path (XPCClient.decodeReply).
-        let decoded = try XPCClient.decodeReply(encodedBytes)
+        // Decode through the production delivery policy (XPCClient.deliverReply).
+        let decoded = try XPCClient.deliverReply(encodedBytes)
 
-        // Assert decodeReply returns ok=false (not thrown).
+        // Assert deliverReply returns ok=false (not thrown).
         #expect(decoded.ok == false)
         #expect(decoded.requestId == "xpc-resp-id-456")
 

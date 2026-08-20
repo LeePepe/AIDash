@@ -172,11 +172,18 @@ public actor XPCClient {
         await pending.failAll(code: code, message: message)
     }
 
-    /// Test seam: exposes the decoded-reply delivery logic used by `handleReply`.
-    /// Returns `XPCResponse` on successful decode (including ok=false), throws
-    /// `XPCError` on decode failure. Tests can feed encoded bytes through this to
-    /// verify ok=false responses are returned (not thrown).
-    public static func decodeReply(_ data: Data) throws -> XPCResponse {
+    /// Production delivery policy for decoded XPC replies (MY-1455).
+    ///
+    /// This is the single authoritative seam that determines whether a decoded
+    /// reply is returned or thrown. The policy: any successfully decoded
+    /// `XPCResponse` (including `ok=false`) is RETURNED to the caller. Only
+    /// bytes that fail JSON decoding throw `XPCError(code: "xpc.decode_failure")`.
+    ///
+    /// `handleReply` delegates to this method without applying any additional
+    /// `ok=false` classification. Tests feed encoded bytes through this exact
+    /// seam to verify the policy; reintroducing throw-on-decoded-`ok=false`
+    /// here will fail the MY-1455 regression test.
+    public static func deliverReply(_ data: Data) throws -> XPCResponse {
         do {
             return try JSONDecoder().decode(XPCResponse.self, from: data)
         } catch {
@@ -196,7 +203,7 @@ public actor XPCClient {
     private func handleReply(requestId: String, data: Data) async {
         let decoded: Result<XPCResponse, any Error>
         do {
-            decoded = .success(try Self.decodeReply(data))
+            decoded = .success(try Self.deliverReply(data))
         } catch {
             decoded = .failure(error)
         }

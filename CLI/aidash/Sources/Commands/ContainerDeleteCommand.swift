@@ -24,11 +24,11 @@ import Foundation
 /// idempotent from the caller's perspective only in that a missing container
 /// returns a `container.not_found` remote error (exit 3), never a silent success.
 ///
-/// Exit codes (mapped centrally by `AIDash.main` via `ExitCodeMapper`):
+/// Exit codes:
 ///   0 — success
-///   1 — local validation (`schema.*`)
-///   2 — XPC transport (`xpc.*`)
-///   3 — remote error (everything else, incl. `container.not_found`)
+///   1 — local validation (`schema.*`, mapped centrally via `ExitCodeMapper`)
+///   2 — XPC transport/decode (`xpc.*`, mapped centrally via `ExitCodeMapper`)
+///   3 — remote error (emitted locally with `response.requestId` on stderr)
 struct ContainerDeleteCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "delete",

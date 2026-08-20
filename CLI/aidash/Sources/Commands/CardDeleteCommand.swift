@@ -22,11 +22,11 @@ import Foundation
 /// Unlike `container delete`, this removes only the named card; its parent
 /// container and sibling cards are untouched.
 ///
-/// Exit codes (mapped centrally by `AIDash.main` via `ExitCodeMapper`):
+/// Exit codes:
 ///   0 — success
-///   1 — local validation (`schema.*`)
-///   2 — XPC transport (`xpc.*`)
-///   3 — remote error (everything else, incl. `card.not_found`)
+///   1 — local validation (`schema.*`, mapped centrally via `ExitCodeMapper`)
+///   2 — XPC transport/decode (`xpc.*`, mapped centrally via `ExitCodeMapper`)
+///   3 — remote error (emitted locally with `response.requestId` on stderr)
 struct CardDeleteCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "delete",

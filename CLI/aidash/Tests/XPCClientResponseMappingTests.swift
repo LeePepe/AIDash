@@ -2,19 +2,19 @@ import Foundation
 import Testing
 import AIDashCore
 
-/// Tests for `XPCClient.decodeReply` — the production test seam that exposes
-/// the decode-to-Result logic used by `handleReply`.
+/// Tests for `XPCClient.deliverReply` — the production delivery-policy seam
+/// that determines whether a decoded reply is returned or thrown.
 ///
-/// Since MY-1455, `handleReply` returns decoded responses (including `ok=false`)
-/// directly to the caller. `decodeReply` is the public test seam that lets tests
-/// feed encoded bytes through the same production decode path.
+/// Since MY-1455, `handleReply` delegates to `deliverReply` which returns
+/// decoded responses (including `ok=false`) directly to the caller. Only
+/// bytes that fail JSON decoding are thrown as `XPCError`.
 @Suite("XPCClient response mapping")
 struct XPCClientResponseMappingTests {
 
-    // MARK: - decodeReply: ok=true returns success
+    // MARK: - deliverReply: ok=true returns success
 
-    @Test("decodeReply returns ok=true response without throwing")
-    func decodeReplyOkTrue() throws {
+    @Test("deliverReply returns ok=true response without throwing")
+    func deliverReplyOkTrue() throws {
         let response = XPCResponse(
             requestId: "req-1",
             appVersion: "1.0.0",
@@ -24,15 +24,15 @@ struct XPCClientResponseMappingTests {
         )
         let encoded = try JSONEncoder().encode(response)
 
-        let decoded = try XPCClient.decodeReply(encoded)
+        let decoded = try XPCClient.deliverReply(encoded)
         #expect(decoded.requestId == "req-1")
         #expect(decoded.ok == true)
     }
 
-    // MARK: - decodeReply: ok=false is returned (not thrown)
+    // MARK: - deliverReply: ok=false is returned (not thrown)
 
-    @Test("decodeReply returns ok=false response without throwing (MY-1455)")
-    func decodeReplyOkFalseNotThrown() throws {
+    @Test("deliverReply returns ok=false response without throwing (MY-1455)")
+    func deliverReplyOkFalseNotThrown() throws {
         let response = XPCResponse(
             requestId: "req-2",
             appVersion: "1.0.0",
@@ -42,20 +42,20 @@ struct XPCClientResponseMappingTests {
         )
         let encoded = try JSONEncoder().encode(response)
 
-        let decoded = try XPCClient.decodeReply(encoded)
+        let decoded = try XPCClient.deliverReply(encoded)
         #expect(decoded.ok == false)
         #expect(decoded.requestId == "req-2")
         #expect(decoded.error?.code == "briefing.not_found")
     }
 
-    // MARK: - decodeReply: invalid bytes throw xpc.decode_failure
+    // MARK: - deliverReply: invalid bytes throw xpc.decode_failure
 
-    @Test("decodeReply throws xpc.decode_failure on invalid bytes")
-    func decodeReplyThrowsOnInvalidBytes() {
+    @Test("deliverReply throws xpc.decode_failure on invalid bytes")
+    func deliverReplyThrowsOnInvalidBytes() {
         let garbage = Data("not json at all".utf8)
 
         do {
-            _ = try XPCClient.decodeReply(garbage)
+            _ = try XPCClient.deliverReply(garbage)
             Issue.record("Expected XPCError to be thrown")
         } catch let error as XPCError {
             #expect(error.code == "xpc.decode_failure")
@@ -67,7 +67,7 @@ struct XPCClientResponseMappingTests {
     // MARK: - MY-1455: ok=false with various error codes decoded correctly
 
     @Test(
-        "decodeReply preserves error codes for all remote error categories",
+        "deliverReply preserves error codes for all remote error categories",
         arguments: [
             "schema.unknown_card_type",
             "schema.invalid_date",
@@ -77,7 +77,7 @@ struct XPCClientResponseMappingTests {
             "internal",
         ]
     )
-    func decodeReplyPreservesErrorCodes(code: String) throws {
+    func deliverReplyPreservesErrorCodes(code: String) throws {
         let response = XPCResponse(
             requestId: "req-codes",
             appVersion: "1.0.0",
@@ -87,7 +87,7 @@ struct XPCClientResponseMappingTests {
         )
         let encoded = try JSONEncoder().encode(response)
 
-        let decoded = try XPCClient.decodeReply(encoded)
+        let decoded = try XPCClient.deliverReply(encoded)
         #expect(decoded.ok == false)
         #expect(decoded.error?.code == code)
         #expect(decoded.error?.message == "synthesised")
@@ -95,8 +95,8 @@ struct XPCClientResponseMappingTests {
 
     // MARK: - MY-1455: ok=false with nil error also decoded (not thrown)
 
-    @Test("decodeReply returns ok=false with nil error without throwing")
-    func decodeReplyOkFalseNilError() throws {
+    @Test("deliverReply returns ok=false with nil error without throwing")
+    func deliverReplyOkFalseNilError() throws {
         let response = XPCResponse(
             requestId: "req-3",
             appVersion: "1.0.0",
@@ -106,7 +106,7 @@ struct XPCClientResponseMappingTests {
         )
         let encoded = try JSONEncoder().encode(response)
 
-        let decoded = try XPCClient.decodeReply(encoded)
+        let decoded = try XPCClient.deliverReply(encoded)
         #expect(decoded.ok == false)
         #expect(decoded.error == nil)
     }
