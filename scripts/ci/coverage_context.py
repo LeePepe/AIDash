@@ -66,7 +66,7 @@ _SWIFT_TESTING_FUNC_RE = re.compile(
     r"^\s*@Test(?:\(.*?\))?\s+func\s+(\w+)\s*\(", re.MULTILINE
 )
 _PYTHON_TEST_FUNC_RE = re.compile(
-    r"^(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE
+    r"^[ \t]*(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE
 )
 
 
@@ -103,7 +103,8 @@ COVERAGE_MAX_TOTAL_BYTES = 80_000
 class RemovedTest(NamedTuple):
     file: str
     func_name: str
-    body_snippet: str  # first ~200 chars of the removed test body
+    body_snippet: str  # first ~200 chars of the removed test body (for display)
+    full_body: str = ""  # full extracted body for symbol analysis
 
 
 class CoverageEvidence(NamedTuple):
@@ -270,10 +271,14 @@ def find_removed_test_functions(
         body_start = func_start_line - 1
         body_end = min(func_end_line, body_start + 10)
         snippet = "\n".join(base_lines[body_start:body_end])[:200]
+        # Full body for symbol extraction (bounded by func_end_line)
+        full_body = "\n".join(base_lines[body_start:func_end_line])
         # Sanitize snippet — base content is also PR-controlled in principle
         snippet = sanitize_untrusted_content(snippet)
+        full_body = sanitize_untrusted_content(full_body)
         results.append(RemovedTest(
-            file=path, func_name=func_name, body_snippet=snippet
+            file=path, func_name=func_name, body_snippet=snippet,
+            full_body=full_body,
         ))
 
     return results
@@ -347,26 +352,37 @@ def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
         "XCTest", "XCTestCase", "XCTestExpectation", "XCTAssert",
         "XCTAssertEqual", "XCTAssertTrue", "XCTAssertFalse",
         "XCTAssertNil", "XCTAssertNotNil", "XCTAssertThrowsError",
-        "XCTFail", "XCTUnwrap", "XCTSkip",
+        "XCTAssertNoThrow", "XCTFail", "XCTUnwrap", "XCTSkip",
         # Swift Testing framework
         "Test", "Testing", "Suite", "Tag", "Trait",
         "Expect", "Issue", "Confirmation",
         # Common mock/stub/fake prefixes handled below
         "Mock", "Stub", "Fake", "Spy",
-        # Standard library / system frameworks
+        # Standard library / system frameworks / common stdlib types
         "Foundation", "Combine", "SwiftUI", "UIKit",
         "Task", "Result", "Error", "Optional",
         "String", "Int", "Bool", "Double", "Float", "Array", "Dictionary",
         "Set", "Data", "URL", "Date", "UUID",
+        # Networking / system types frequently seen in test bodies
+        "JSONDecoder", "JSONEncoder", "URLSession", "URLRequest",
+        "HTTPURLResponse", "URLResponse",
+        # Concurrency / system types
+        "DispatchQueue", "OperationQueue",
+        # Observation / notification
+        "NotificationCenter", "UserDefaults", "FileManager",
+        "Bundle", "ProcessInfo",
     }
 
     symbols: set[str] = set()
     for test in removed_tests:
+        # Use full_body when available for complete symbol extraction;
+        # fall back to body_snippet for backward compatibility.
+        source_text = test.full_body if test.full_body else test.body_snippet
         # Look for CamelCase identifiers that look like production types/funcs
-        words = re.findall(r"\b([A-Z]\w{2,})\b", test.body_snippet)
+        words = re.findall(r"\b([A-Z]\w{2,})\b", source_text)
         symbols.update(words)
         # Also look for common patterns like `sut.methodName`, `Command.run`
-        methods = re.findall(r"\.(\w+)\s*\(", test.body_snippet)
+        methods = re.findall(r"\.(\w+)\s*\(", source_text)
         symbols.update(m for m in methods if len(m) > 2)
 
     # Filter non-production symbols
@@ -385,21 +401,39 @@ def find_related_tests_in_head(
     test_files: list[str],
     production_symbols: set[str],
     max_excerpt_bytes: int,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """Find existing test functions in HEAD that reference the same symbols.
 
     Results are ADVISORY CANDIDATES — symbol co-occurrence is necessary but
     not sufficient proof of equivalent branch coverage. The reviewer must
     verify that a candidate actually exercises the same production branch
     before concluding coverage is preserved.
+
+    Returns (excerpts, file_outcomes) where file_outcomes tracks what
+    actually happened to each candidate file:
+    - "read: <path>" — successfully read and scanned
+    - "skipped-oversize: <path>" — exceeded COVERAGE_MAX_FILE_BYTES
+    - "budget-omitted: <path>" — not reached due to COVERAGE_MAX_TOTAL_BYTES
     """
     if not production_symbols:
-        return []
+        return [], []
 
     excerpts: list[str] = []
+    file_outcomes: list[str] = []
     total_bytes = 0
+    budget_exhausted = False
+    # Pre-compute omission marker so its bytes can be reserved in budget
+    _OMISSION_MARKER = (
+        f"[additional matching tests omitted — "
+        f"{COVERAGE_MAX_TOTAL_BYTES}-byte cap reached]"
+    )
+    _OMISSION_MARKER_BYTES = len(_OMISSION_MARKER.encode("utf-8", "replace"))
 
     for test_file in test_files:
+        if budget_exhausted:
+            file_outcomes.append(f"budget-omitted: {test_file}")
+            continue
+
         source = run_git(["show", f"{head_sha}:{test_file}"])
         if source is None:
             raise AnalysisError(
@@ -407,8 +441,10 @@ def find_related_tests_in_head(
                 f"'{test_file}' (claimed in SEARCH SCOPE but unreadable)"
             )
         if len(source.encode("utf-8", "replace")) > COVERAGE_MAX_FILE_BYTES:
+            file_outcomes.append(f"skipped-oversize: {test_file}")
             continue
 
+        file_outcomes.append(f"read: {test_file}")
         source_lines = source.splitlines()
 
         for func_name, match in _find_all_test_functions(source):
@@ -439,17 +475,17 @@ def find_related_tests_in_head(
                 excerpt = excerpt[:max_excerpt_bytes] + "\n[truncated]"
                 excerpt_bytes = max_excerpt_bytes
 
-            if total_bytes + excerpt_bytes > COVERAGE_MAX_TOTAL_BYTES:
-                excerpts.append(
-                    f"[additional matching tests omitted — "
-                    f"{COVERAGE_MAX_TOTAL_BYTES}-byte cap reached]"
-                )
+            if total_bytes + excerpt_bytes + _OMISSION_MARKER_BYTES > COVERAGE_MAX_TOTAL_BYTES:
+                # Include omission marker bytes in budget accounting
+                total_bytes += _OMISSION_MARKER_BYTES
+                excerpts.append(_OMISSION_MARKER)
+                budget_exhausted = True
                 break
 
             excerpts.append(excerpt)
             total_bytes += excerpt_bytes
 
-    return excerpts
+    return excerpts, file_outcomes
 
 
 def find_test_files_in_changed_and_related(
@@ -539,6 +575,67 @@ def find_test_files_in_changed_and_related(
     return test_files, searched
 
 
+def _merge_search_outcomes(
+    discovery: list[str], file_outcomes: list[str]
+) -> list[str]:
+    """Merge discovery labels with actual read outcomes.
+
+    Discovery labels (from find_test_files_in_changed_and_related) say HOW
+    each file was found (changed, sibling, symbol-match). File outcomes (from
+    find_related_tests_in_head) say WHAT happened when we tried to read it.
+
+    Only files with outcome "read:" are reported as successfully searched.
+    Files skipped or budget-omitted get distinct labels so the reviewer knows
+    the scope limitation.
+    """
+    # Parse outcomes into a lookup: path -> status
+    outcome_map: dict[str, str] = {}
+    for entry in file_outcomes:
+        status, _, path = entry.partition(": ")
+        outcome_map[path.strip()] = status.strip()
+
+    merged: list[str] = []
+    for entry in discovery:
+        # Discovery entries look like "changed: path", "sibling: path", etc.
+        # Extract the path portion
+        _, _, path_part = entry.partition(": ")
+        path = path_part.strip()
+
+        # Entries about deleted files pass through unchanged
+        if "deleted" in entry or "absent" in entry or "excluded" in entry:
+            merged.append(entry)
+            continue
+
+        # Check the actual read outcome for this path
+        outcome = outcome_map.get(path, "")
+        if outcome == "read":
+            merged.append(f"{entry} [read]")
+        elif outcome == "skipped-oversize":
+            merged.append(f"{entry} [skipped — exceeded {COVERAGE_MAX_FILE_BYTES}-byte file limit]")
+        elif outcome == "budget-omitted":
+            merged.append(f"{entry} [not reached — {COVERAGE_MAX_TOTAL_BYTES}-byte total budget exhausted]")
+        else:
+            # File was in discovery but not in test_files passed to
+            # find_related_tests_in_head, or no outcome recorded
+            merged.append(entry)
+
+    # Add any budget-omitted files not in the original discovery list
+    discovery_paths = set()
+    for entry in discovery:
+        _, _, p = entry.partition(": ")
+        discovery_paths.add(p.strip())
+    for entry in file_outcomes:
+        status, _, path = entry.partition(": ")
+        path = path.strip()
+        if path not in discovery_paths:
+            if status.strip() == "budget-omitted":
+                merged.append(f"budget-omitted: {path} [not reached — {COVERAGE_MAX_TOTAL_BYTES}-byte total budget exhausted]")
+            elif status.strip() == "skipped-oversize":
+                merged.append(f"skipped-oversize: {path} [skipped — exceeded {COVERAGE_MAX_FILE_BYTES}-byte file limit]")
+
+    return merged if merged else ["(no test files found in scope)"]
+
+
 def build_coverage_evidence(
     head_sha: str,
     base_sha: str,
@@ -576,13 +673,18 @@ def build_coverage_evidence(
     )
 
     # Step 4: Find existing tests covering the same symbols
-    related_excerpts = find_related_tests_in_head(
+    related_excerpts, file_outcomes = find_related_tests_in_head(
         head_sha, test_files, symbols, COVERAGE_MAX_EXCERPT_BYTES
     )
 
-    # Step 5: Render with search scope
+    # Step 5: Render with accurate search scope — merge discovery context
+    # from find_test_files_in_changed_and_related with actual read outcomes
+    # from find_related_tests_in_head so the output only claims "searched"
+    # for files that were actually read.
+    accurate_scope = _merge_search_outcomes(searched_summary, file_outcomes)
+
     return render_coverage_evidence(
-        all_removed, related_excerpts, searched_summary
+        all_removed, related_excerpts, accurate_scope
     )
 
 
@@ -591,7 +693,12 @@ def render_coverage_evidence(
     related_excerpts: list[str],
     searched_summary: Optional[list[str]] = None,
 ) -> str:
-    """Render the coverage evidence block."""
+    """Render the coverage evidence block.
+
+    Path/name values from removed_tests and searched_summary originate from
+    PR-controlled content (file paths can be attacker-chosen). They are
+    sanitized before embedding to prevent injection into the reviewer prompt.
+    """
     if not removed_tests:
         return ""
 
@@ -610,7 +717,10 @@ def render_coverage_evidence(
     ]
 
     for rt in removed_tests:
-        parts.append(f"  - {rt.file}: {rt.func_name}")
+        # Sanitize path and func_name — they are PR-controlled values
+        safe_file = sanitize_untrusted_content(rt.file)
+        safe_name = sanitize_untrusted_content(rt.func_name)
+        parts.append(f"  - {safe_file}: {safe_name}")
 
     parts.append("")
 
@@ -618,7 +728,8 @@ def render_coverage_evidence(
     if searched_summary:
         parts.append("SEARCH SCOPE (files actually searched for related tests):")
         for s in searched_summary:
-            parts.append(f"  - {s}")
+            # Sanitize — path values within are PR-controlled
+            parts.append(f"  - {sanitize_untrusted_content(s)}")
         parts.append("")
 
     if related_excerpts:
