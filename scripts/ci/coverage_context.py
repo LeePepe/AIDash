@@ -446,9 +446,16 @@ def find_test_files_in_changed_and_related(
     test_files: list[str] = []
     searched: list[str] = []
 
-    # Fetch the full HEAD tree once for existence checks and symbol search
+    # Fetch the full HEAD tree once for existence checks and symbol search.
+    # A None return means git/tool failure — must fail-closed, not silently
+    # produce empty results (which would be indistinguishable from "no tests").
     tree = run_git(["ls-tree", "-r", "--name-only", head_sha])
-    all_tree_files = tree.splitlines() if tree else []
+    if tree is None:
+        raise AnalysisError(
+            f"Cannot list HEAD tree ({head_sha}): ls-tree failed "
+            f"(git tool error); cannot determine which test files exist"
+        )
+    all_tree_files = tree.splitlines()
     head_paths: set[str] = set(all_tree_files)
 
     # 1. Changed test files (only if still present in HEAD)
