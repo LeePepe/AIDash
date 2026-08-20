@@ -85,8 +85,11 @@ def truncate(text: str, n: int) -> str:
     "LaunchAgen…" or "Launc…"). Finds the last word boundary (space or
     punctuation followed by a non-space) at or before the budget, so the
     output always ends on a complete token. Falls back to a hard cut only
-    when the first token alone exceeds the budget (a single very long word).
+    when the first token alone exceeds the budget (a single very long word
+    with no internal spaces or punctuation at all).
     """
+    if n <= 0:
+        return ""
     if len(text) <= n:
         return text
     # Budget for the text portion (reserve 1 char for the … suffix).
@@ -105,11 +108,10 @@ def truncate(text: str, n: int) -> str:
         elif i > 0 and text[i - 1] in ":/;,，；：、)）】」—":
             # After punctuation is also a valid break point.
             candidate = i
-    if candidate > 0 and candidate >= limit * 0.5:
-        # Use the boundary only if it keeps at least half the budget —
-        # otherwise the cut loses too much information.
+    if candidate > 0:
         return text[:candidate].rstrip() + " …"
-    # Fallback: hard cut (the whole budget is one long token).
+    # Fallback: hard cut (the entire budget is one long token with no
+    # internal spaces or punctuation).
     return text[:limit] + "…"
 
 
