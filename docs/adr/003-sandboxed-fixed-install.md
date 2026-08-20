@@ -128,21 +128,23 @@ find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
   ! -path "$APP_SRC/Contents/MacOS/*" \
   -print0 | while IFS= read -r -d '' leaf; do
     # Guard: only sign actual Mach-O binaries
-    file -b "$leaf" | grep -q '^Mach-O' || continue
+    /usr/bin/file -b "$leaf" | /usr/bin/grep -q "Mach-O" || continue
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$leaf"
 done
 ```
 
 **Phase 2 — Nested code bundles (deepest-first).** In a **separate**
-enumeration pass, sign `.xpc` and `.appex` bundle directories nested
-inside `Contents/`. The traversal uses `find -depth` to guarantee
-depth-first (post-order) processing: inner bundles are always visited
-before enclosing bundles, regardless of directory name sort order.
+enumeration pass, sign `.xpc`, `.appex`, and nested `.app` bundle
+directories inside `Contents/`. The traversal uses `find -depth` to
+guarantee depth-first (post-order) processing: inner bundles are always
+visited before enclosing bundles, regardless of directory name sort order.
+`-depth` is the depth-order guarantee — never substitute `sort -rz`
+(reverse lexicographic, which does not guarantee depth ordering).
 
 ```bash
 # Phase 2: sign nested code bundles depth-first (post-order traversal)
-find "$APP_SRC/Contents" -depth \( -name "*.xpc" -o -name "*.appex" \) \
-  -type d -print0 | while IFS= read -r -d '' bundle; do
+find "$APP_SRC/Contents" -depth -type d \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) \
+  -print0 | while IFS= read -r -d '' bundle; do
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$bundle"
 done
 ```
