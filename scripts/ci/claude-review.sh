@@ -188,99 +188,10 @@ _phase_start "claude-cli"
 RAW_FILE="$(mktemp -t claude-review-raw.XXXXXX.json)"
 trap 'rm -f "$DIFF_FILE" "$RAW_FILE"' EXIT
 
-# `|| CLI_RC=$?`, not a bare call followed by `CLI_RC=$?`: the workflow runs
-# this script as `bash -e {0}`, so any non-zero here would abort the script
-# outright and skip the fail-closed messaging below. The check would still go
-# red — with an empty log, which is precisely the diagnosis problem MY-1404
-# exists to end.
-CLI_RC=0
-run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
-    env CLAUDE_REVIEW_PROMPT="$PROMPT" bash -c '
-        printf %s "$CLAUDE_REVIEW_PROMPT" | claude -p \
-            --output-format json \
-            --max-turns 2 \
-            --tools "" \
-            --json-schema "$1"
-    ' _ "$SCHEMA" >"$RAW_FILE" 2>/tmp/claude-review.err || CLI_RC=$?
-_phase_end "claude-cli"
-RAW="$(cat "$RAW_FILE" 2>/dev/null)"
-
-if [ "$CLI_RC" -eq "$REVIEW_TIMEOUT_RC" ]; then
-    echo "[claude-review] ❌ claude CLI 超时(>${REVIEW_CLI_TIMEOUT_SECONDS}s),已终止"
-    tail -c 2000 /tmp/claude-review.err >&2 || true
-    post_sticky "$STICKY
-⚠️ 自动 review 未能完成:claude CLI 超过 ${REVIEW_CLI_TIMEOUT_SECONDS} 秒仍未返回,已被终止。
-为安全起见 **暂不放行**,请人工检查或重跑。"
+# Invoke the shared production gate function (review-common.sh). This is the
+# single source of truth for CLI invocation, verdict extraction, rendering,
+# threshold enforcement, and failure diagnostics. Tests call the same function.
+if ! run_claude_review_gate "$SCHEMA" "$RAW_FILE" "/tmp/claude-review.err"; then
     exit 1
 fi
-
-if [ "$CLI_RC" -ne 0 ] || [ -z "$RAW" ]; then
-    # Extract actionable diagnostics from the CLI JSON output when available.
-    # This surfaces error_max_turns (and similar structured failures) without
-    # leaking prompt, diff, credentials, or untrusted payload bodies.
-    _terminal=""
-    _subtype=""
-    _turns=""
-    if [ -n "$RAW" ]; then
-        _terminal="$(printf %s "$RAW" | jq -r '.terminal_reason // empty' 2>/dev/null)"
-        _subtype="$(printf %s "$RAW" | jq -r '.subtype // empty' 2>/dev/null)"
-        _turns="$(printf %s "$RAW" | jq -r '.num_turns // empty' 2>/dev/null)"
-    fi
-    if [ -n "$_terminal" ]; then
-        echo "[claude-review] ❌ claude CLI 失败 (rc=$CLI_RC, terminal_reason=$_terminal, subtype=${_subtype:-n/a}, num_turns=${_turns:-n/a})"
-    else
-        echo "[claude-review] ❌ claude CLI 失败 (rc=$CLI_RC)"
-    fi
-    cat /tmp/claude-review.err >&2 || true
-    post_sticky "$STICKY
-⚠️ 自动 review 未能完成(claude CLI 异常)。为安全起见 **暂不放行**,请人工检查或重跑。"
-    exit 1
-fi
-
-# .structured_output 是已解析对象;.result 是同内容的 JSON 字符串,做兜底。
-VERDICT_JSON="$(printf %s "$RAW" | jq -c '.structured_output // (.result | fromjson)' 2>/dev/null)"
-if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
-    echo "[claude-review] ❌ 无法解析 verdict"; printf %s "$RAW" | head -c 2000 >&2
-    post_sticky "$STICKY
-⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
-    exit 1
-fi
-
-VERDICT="$(printf %s "$VERDICT_JSON" | jq -r '.verdict')"
-SUMMARY="$(printf %s "$VERDICT_JSON" | jq -r '.summary')"
-N_BLOCK="$(printf %s "$VERDICT_JSON" | jq -r '.blockers | length')"
-
-# 渲染评论正文
-render() {
-    printf '%s\n' "$STICKY"
-    if [ "$VERDICT" = "changes" ]; then
-        printf '## 🔴 自动 review:需要修改（%s 个阻塞项）\n\n' "$N_BLOCK"
-    else
-        printf '## ✅ 自动 review:通过\n\n'
-    fi
-    printf '%s\n' "$SUMMARY"
-    if [ "$N_BLOCK" -gt 0 ]; then
-        printf '\n### 阻塞项\n'
-        printf %s "$VERDICT_JSON" | jq -r \
-            '.blockers[] | "- **\(.severity)** `\(.file)\(if .line then ":\(.line)" else "" end)` — \(.why)"'
-    fi
-    local n_notes
-    n_notes="$(printf %s "$VERDICT_JSON" | jq -r '.notes | length')"
-    if [ "$n_notes" -gt 0 ]; then
-        printf '\n### 建议（不阻塞）\n'
-        printf %s "$VERDICT_JSON" | jq -r \
-            '.notes[] | "- `\(.file)\(if .line then ":\(.line)" else "" end)` — \(.note)"'
-    fi
-    printf '\n\n<sub>由本地 claude 自动生成。critical/high = 阻塞合并。</sub>\n'
-}
-BODY="$(render)"
-
-if [ "$VERDICT" = "changes" ] && [ "$N_BLOCK" -gt 0 ]; then
-    post_sticky "$BODY"
-    echo "[claude-review] ❌ verdict=changes, blockers=$N_BLOCK → exit 1"
-    exit 1
-fi
-
-post_sticky "$BODY"
-echo "[claude-review] ✅ verdict=pass → exit 0"
 exit 0
