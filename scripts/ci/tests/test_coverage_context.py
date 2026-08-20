@@ -12,9 +12,12 @@ from __future__ import annotations
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from coverage_context import (  # noqa: E402
+    AnalysisError,
     RemovedTest,
     build_coverage_evidence,
     extract_production_symbols,
@@ -533,8 +536,8 @@ def test_full_pipeline_swift_testing_shape(monkeypatch):
 
 
 def test_blob_read_failure_does_not_claim_removal(monkeypatch):
-    """When HEAD blob read fails (git error, not file deletion), the function
-    must NOT claim the test was removed — it cannot prove absence."""
+    """When HEAD blob read fails AND ls-tree fails (git tool error), the
+    function must raise AnalysisError — it cannot silently return empty."""
 
     base_source = EXISTING_TEST_SOURCE + """
     func testPublishThrowsOnNetworkError() async throws {
@@ -569,9 +572,8 @@ def test_blob_read_failure_does_not_claim_removal(monkeypatch):
     )
 
     path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
-    removed = find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
-    # Cannot prove absence when HEAD read failed — must return empty
-    assert removed == []
+    with pytest.raises(AnalysisError):
+        find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
 
 
 def test_verified_file_deletion_reports_removal(monkeypatch):
@@ -666,3 +668,157 @@ def test_find_func_end_handles_nested_braces():
     ]
     end = _find_func_end(lines, 0)
     assert end == 8
+
+
+def test_base_read_failure_raises_analysis_error(monkeypatch):
+    """When BASE blob read fails and ls-tree can't confirm the file is absent,
+    the analyzer must raise AnalysisError (fail-closed) rather than returning
+    empty (which would be indistinguishable from 'no removed tests')."""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            # BASE blob read fails
+            return None
+        if args[0] == "ls-tree":
+            if "--" in args:
+                # ls-tree says file EXISTS in base (blob entry present)
+                path_idx = args.index("--") + 1
+                path = args[path_idx]
+                return f"100644 blob abc123\t{path}"
+            return ""
+        return None
+
+    monkeypatch.setattr(
+        coverage_context, "run_git", fake_run_git, raising=True
+    )
+
+    path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
+    with pytest.raises(AnalysisError, match="BASE blob read failed"):
+        find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
+
+
+def test_base_read_failure_lstree_also_fails_raises(monkeypatch):
+    """When both BASE blob read and ls-tree fail (total git tool failure),
+    AnalysisError must be raised."""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        # Everything fails
+        return None
+
+    monkeypatch.setattr(
+        coverage_context, "run_git", fake_run_git, raising=True
+    )
+
+    path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
+    with pytest.raises(AnalysisError, match="both git-show and ls-tree failed"):
+        find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
+
+
+def test_base_new_file_returns_empty(monkeypatch):
+    """When the file doesn't exist in BASE (new file), return empty normally
+    — this is not an error, just no removed tests possible."""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            return None  # blob read fails
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return ""  # file genuinely absent from base tree
+            return ""
+        return None
+
+    monkeypatch.setattr(
+        coverage_context, "run_git", fake_run_git, raising=True
+    )
+
+    path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
+    removed = find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
+    assert removed == []
+
+
+def test_head_blob_fail_with_lstree_showing_file_exists_raises(monkeypatch):
+    """When HEAD blob read fails but ls-tree shows the file EXISTS in HEAD
+    (blob is unreadable due to git corruption/error), AnalysisError must be
+    raised rather than silently skipping."""
+
+    base_source = EXISTING_TEST_SOURCE + """
+    func testPublishThrowsOnNetworkError() async throws {
+        let client = MockAPIClient(throwing: NetworkError.timeout)
+        let cmd = BriefingPublishCommand(client: client)
+        do {
+            _ = try await cmd.run()
+            XCTFail("should have thrown")
+        } catch {
+            XCTAssertTrue(error is NetworkError)
+        }
+    }
+}
+"""
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref_path = args[1]
+            if ref_path.startswith("base123:"):
+                return base_source
+            # HEAD blob read fails
+            if ref_path.startswith("head456:"):
+                return None
+        if args[0] == "ls-tree":
+            if "--" in args:
+                path_idx = args.index("--") + 1
+                path = args[path_idx]
+                # File EXISTS in HEAD tree — blob is just unreadable
+                return f"100644 blob def456\t{path}"
+            return ""
+        return None
+
+    monkeypatch.setattr(
+        coverage_context, "run_git", fake_run_git, raising=True
+    )
+
+    path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
+    with pytest.raises(AnalysisError, match="Cannot verify HEAD state"):
+        find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
+
+
+def test_build_coverage_evidence_propagates_analysis_error(monkeypatch):
+    """build_coverage_evidence must let AnalysisError propagate to the caller
+    so the shell wrapper sees a nonzero exit code (fail-closed gate)."""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref_path = args[1]
+            if "base123:" in ref_path:
+                # First call to base works (file exists), later fails
+                return None
+        if args[0] == "ls-tree":
+            if "--" in args:
+                # File exists in base tree but blob unreadable
+                path_idx = args.index("--") + 1
+                path = args[path_idx]
+                return f"100644 blob abc\t{path}"
+            return ""
+        return None
+
+    monkeypatch.setattr(
+        coverage_context, "run_git", fake_run_git, raising=True
+    )
+
+    with pytest.raises(AnalysisError):
+        build_coverage_evidence(
+            head_sha="head456",
+            base_sha="base123",
+            diff_text=REMOVAL_DIFF,
+            changed_files=[
+                "CLI/aidash/Tests/BriefingPublishCommandTests.swift",
+            ],
+        )
