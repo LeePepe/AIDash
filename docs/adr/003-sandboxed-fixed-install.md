@@ -132,7 +132,10 @@ calling shell:
 # Phase 1: sign leaf Mach-O executables/dylibs (regular files only)
 signed_count=0
 while IFS= read -r -d '' leaf; do
-    /usr/bin/file -b "$leaf" | /usr/bin/grep -q "Mach-O" || continue
+    # Capture file type without a pipe — avoids pipefail/SIGPIPE
+    filetype=$(/usr/bin/file -b "$leaf") || {
+        echo "FATAL: /usr/bin/file failed on $leaf"; exit 1; }
+    case "$filetype" in *Mach-O*) ;; *) continue ;; esac
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$leaf" \
       || { echo "FATAL: codesign failed on $leaf"; exit 1; }
     signed_count=$((signed_count + 1))
@@ -179,26 +182,35 @@ not just the main executable.
 codesign --verify --deep --strict "$APP_SRC" \
   || { echo "FATAL: codesign --verify --deep --strict failed"; exit 1; }
 
+# Helper: capture-first entitlement check (no grep -q pipeline)
+check_sandbox_entitlement() {
+    local target=$1
+    local ent_out
+    ent_out=$(codesign -d --entitlements :- "$target" 2>&1) || {
+        echo "FATAL: codesign -d failed on $target"; exit 1; }
+    case "$ent_out" in
+        *com.apple.security.app-sandbox*) ;;
+        *) echo "FATAL: app-sandbox entitlement missing on $target"; exit 1 ;;
+    esac
+}
+
 # 2. Verify app-sandbox entitlement on the main executable
-codesign -d --entitlements :- "$APP_SRC/Contents/MacOS/AIDash" 2>&1 \
-  | /usr/bin/grep -q "com.apple.security.app-sandbox" \
-  || { echo "FATAL: app-sandbox entitlement missing on main executable"; exit 1; }
+check_sandbox_entitlement "$APP_SRC/Contents/MacOS/AIDash"
 
 # 3. Verify app-sandbox entitlement on every target signed in Phases 1/2
 if [ "$signed_count" -gt 0 ]; then
-    # Re-enumerate the same targets and check each one
+    # Re-enumerate leaf targets and check each one
     while IFS= read -r -d '' target; do
-        /usr/bin/file -b "$target" | /usr/bin/grep -q "Mach-O" || continue
-        codesign -d --entitlements :- "$target" 2>&1 \
-          | /usr/bin/grep -q "com.apple.security.app-sandbox" \
-          || { echo "FATAL: app-sandbox entitlement missing on $target"; exit 1; }
+        filetype=$(/usr/bin/file -b "$target") || {
+            echo "FATAL: /usr/bin/file failed on $target"; exit 1; }
+        case "$filetype" in *Mach-O*) ;; *) continue ;; esac
+        check_sandbox_entitlement "$target"
     done < <(find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
       ! -path "$APP_SRC/Contents/MacOS/AIDash" -print0)
 
+    # Re-enumerate nested bundles and check each one
     while IFS= read -r -d '' target; do
-        codesign -d --entitlements :- "$target" 2>&1 \
-          | /usr/bin/grep -q "com.apple.security.app-sandbox" \
-          || { echo "FATAL: app-sandbox entitlement missing on $target"; exit 1; }
+        check_sandbox_entitlement "$target"
     done < <(find "$APP_SRC/Contents" -depth -type d \
       \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) -print0)
 fi
@@ -238,44 +250,117 @@ signed, with no dependency on team identity or provisioning state.
 
 The installer must verify both store-independent and store-dependent XPC
 operation after signing and installing the bundle. Two probes are required,
-run sequentially:
+run sequentially.
 
-1. **Store-independent probe** (schema availability):
+#### 30-second timeout runner (stock macOS, no `timeout(1)`)
 
-   ```bash
-   aidash schema list --quiet
-   ```
+Stock macOS does not ship GNU `timeout`. Use a background-process runner
+that preserves child stdout/stderr, propagates exit status, and returns a
+distinct timeout failure:
 
-   This confirms the XPC agent started and the Mach service is reachable.
-   It does not open the SwiftData store and therefore cannot detect
-   container-access failures.
+```bash
+# run_with_timeout SECONDS CMD [ARGS...]
+# Returns: child exit status, or 124 on timeout (matching GNU convention).
+run_with_timeout() {
+    local limit=$1; shift
+    "$@" &
+    local pid=$!
+    ( sleep "$limit"; kill "$pid" 2>/dev/null ) &
+    local watcher=$!
+    wait "$pid" 2>/dev/null
+    local rc=$?
+    kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
+    # If child was killed by our watcher, report timeout
+    if [ $rc -ge 128 ]; then rc=124; fi
+    return $rc
+}
+```
 
-2. **Store-dependent probe** (container read under sandbox):
+#### Probe 1 — store-independent (schema availability)
 
-   ```bash
-   aidash briefing get --date today --json
-   ```
+```bash
+probe1_out=$(run_with_timeout 30 aidash schema list --quiet 2>&1)
+probe1_rc=$?
+if [ "$probe1_rc" -eq 124 ]; then
+    echo "FATAL: probe 1 timed out after 30 s"; exit 1
+fi
+if [ "$probe1_rc" -ne 0 ]; then
+    echo "FATAL: probe 1 failed (exit $probe1_rc): $probe1_out"; exit 1
+fi
+```
 
-   This forces the XPC agent to open the SwiftData store inside the
-   protected container path, execute a query, and return a result. If the
-   sandbox entitlement is missing or incorrectly applied, this probe will
-   block on `sqlite3BtreeOpen → robust_open2` (the exact failure mode
-   documented in the Context section).
+This confirms the XPC agent started and the Mach service is reachable.
+It does not open the SwiftData store and therefore cannot detect
+container-access failures.
 
-#### Cold-start timeout and failure conditions
+#### Probe 2 — store-dependent (container read under sandbox)
 
-Both probes must complete within a **30-second wall-clock timeout** per
-probe (60 seconds total). The cold-start budget accounts for:
+```bash
+probe2_out=$(run_with_timeout 30 aidash briefing get --date today --json 2>&1)
+probe2_rc=$?
+if [ "$probe2_rc" -eq 124 ]; then
+    echo "FATAL: probe 2 timed out after 30 s"; exit 1
+fi
+```
+
+This forces the XPC agent to open the SwiftData store inside the
+protected container path, execute a query, and return a result. If the
+sandbox entitlement is missing or incorrectly applied, this probe will
+block on `sqlite3BtreeOpen → robust_open2` (the exact failure mode
+documented in the Context section) and hit the 30 s timeout.
+
+#### Probe 2 exit-code validation (aligned with CLI contract)
+
+The `aidash` CLI uses structured JSON envelopes. The installer must
+validate both the exit code and the envelope shape:
+
+| Exit code | Meaning | Installer action |
+|-----------|---------|------------------|
+| 0 | Success — response is `{"ok":true,"data":...,"requestId":"..."}` | **PASS** if envelope is valid JSON with `ok`=`true` and `requestId` present. |
+| 3 | Domain error — response is `{"ok":false,"error":{"code":"briefing.not_found",...},"requestId":"..."}` | **PASS** — proves the store was opened and queried; no briefing exists for today. |
+| Any other | Infrastructure/XPC/timeout failure | **FAIL** |
+
+```bash
+case "$probe2_rc" in
+    0)
+        # Must be a valid success envelope
+        if ! printf '%s' "$probe2_out" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('ok') is True
+assert 'data' in d
+assert 'requestId' in d
+"; then
+            echo "FATAL: probe 2 exit 0 but malformed envelope: $probe2_out"
+            exit 1
+        fi
+        ;;
+    3)
+        # Must be a valid briefing.not_found error envelope
+        if ! printf '%s' "$probe2_out" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('ok') is False
+assert d.get('error', {}).get('code') == 'briefing.not_found'
+assert 'requestId' in d
+"; then
+            echo "FATAL: probe 2 exit 3 but malformed error envelope: $probe2_out"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "FATAL: probe 2 failed (exit $probe2_rc): $probe2_out"
+        exit 1
+        ;;
+esac
+```
+
+#### Cold-start timeout budget
+
+Both probes must complete within **30 seconds** each (60 seconds total).
+The cold-start budget accounts for:
 - launchd agent bootstrap (~2 s),
-- SwiftData `ModelContainer` initialization (~3–5 s first launch),
-- SPM package graph resolution (not applicable at runtime).
-
-**Failure conditions** (any one triggers installer failure):
-- Probe 1 (`schema list --quiet`) exits non-zero or exceeds 30 s.
-- Probe 2 (`briefing get --date today --json`) exits non-zero, exceeds
-  30 s, or returns malformed JSON (missing top-level `briefings` key).
-- Probe 2 returns a valid empty result (no briefings for today) — this is
-  a **PASS**: it proves the store was opened and queried successfully.
+- SwiftData `ModelContainer` initialization (~3–5 s first launch).
 
 If either probe fails, the installer must print the probe command, its
 exit code, and any stderr, then exit non-zero. The user should check that
