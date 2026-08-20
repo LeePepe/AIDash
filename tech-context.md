@@ -96,6 +96,45 @@ canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
 - 改跨 2+ 层 → 任务太大,按层拆成独立可 build/test 的 commit
 - 收尾遗留 → 记为新任务,不扩展原任务
 
+## Fixed Install Packaging (ADR-003) — Planned
+
+> **Status: Accepted decision, not yet implemented.** The entitlements file,
+> inside-out signing, and installer self-check described below are the
+> approved target posture (ADR-003). Implementation lands in MY-1453 after
+> the ADR merges. Until then, the fixed install remains unsandboxed with no
+> entitlements.
+
+`scripts/dev/install-fixed-build.sh` builds a Release binary for
+`/Applications/AIDash.app` + `~/.local/bin/aidash`, ad-hoc signed (`-`).
+
+| Posture | Entitlements | Sandbox | CloudKit |
+|---------|-------------|---------|----------|
+| Xcode dev / Release | `AIDashApp.macOS.entitlements` | Yes | Yes (provisioned) |
+| Fixed install (planned) | `AIDashApp.macOS.fixed.entitlements` | Yes | No (no profile) |
+
+Key constraints (apply once implemented):
+- **Minimal entitlements**: `app-sandbox` only. No `network.client`, no CloudKit
+  entitlements (would crash without provisioning profile).
+- **Inside-out signing**: the signing contract specifies three phases
+  (leaf Mach-O → nested bundles deepest-first → outer app). **Today the
+  repo ships no nested XPC helper or LaunchAgent executable** — the
+  LaunchAgent `Program` points to the outer app main binary
+  (`Contents/MacOS/AIDash`). Phases 1 and 2 are no-ops today and exist
+  as fail-closed future-proofing only.
+- **Local-only**: `hasCloudKitEntitlement()` returns `false` → `.localOnly`
+  fallback. Same runtime behavior as before; change is purely packaging.
+- **Store identity unchanged**: canonical path
+  `~/Library/Containers/<bundleID>/Data/Library/Application Support/AIDash/AIDash.store`
+  — no migration, no fork. See `docs/adr/003-sandboxed-fixed-install.md`.
+- **LaunchAgent compatible**: Mach services via `launchctl bootstrap` work
+  inside sandbox. launchd brokers the Mach service connection regardless of
+  sandbox posture. No SMAppService (avoids LWCR issues).
+- **Installer self-check**: must verify both `aidash schema list --quiet`
+  (store-independent) and `aidash briefing get --date today --json`
+  (store-dependent) within 30 s each.
+- **Data contract**: no new store path, no split-brain, no in-memory fallback,
+  no real-store enumeration/move/delete.
+
 ## 构建 / 测试
 
 见 `AGENTS.md → Build commands`。快速门:`swift test --package-path Packages/AIDashCore`。
