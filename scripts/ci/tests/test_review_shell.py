@@ -453,7 +453,7 @@ def test_oversized_printf_body_round_trips() -> None:
 # --------------------------------------------------------------------------
 
 def test_claude_review_passes_max_turns_and_disables_tools() -> None:
-    """The claude CLI invocation includes --max-turns 2 AND --tools "".
+    """The shared gate function includes --max-turns 2 AND --tools "".
 
     --max-turns 2 (not 1): with --json-schema the CLI needs turn 1 (model
     response) + turn 2 (structured output extraction). --max-turns 1 causes
@@ -468,16 +468,17 @@ def test_claude_review_passes_max_turns_and_disables_tools() -> None:
     stripped): removing the real CLI flags while leaving them in comments must
     fail the test.
     """
-    executable_lines = _code_lines(CLAUDE)
+    # The flags are in review-common.sh's run_claude_review_gate function.
+    executable_lines = _code_lines(COMMON)
     executable_text = "\n".join(code for _, code in executable_lines)
 
     assert "--max-turns 2" in executable_text, (
-        "claude-review.sh must pass --max-turns 2 to `claude -p` to bound "
-        "agentic turns while allowing structured output (MY-1452)"
+        "review-common.sh run_claude_review_gate must pass --max-turns 2 to "
+        "`claude -p` to bound agentic turns (MY-1452)"
     )
     assert '--tools ""' in executable_text, (
-        'claude-review.sh must pass --tools "" to `claude -p` to '
-        "deterministically disable all built-in tools (MY-1452)"
+        'review-common.sh run_claude_review_gate must pass --tools "" to '
+        "`claude -p` to deterministically disable all built-in tools (MY-1452)"
     )
 
 
@@ -490,72 +491,66 @@ def test_claude_review_emits_phase_timing() -> None:
 
     This check uses _code_lines (comments stripped) so that commenting out a
     _phase_start/_phase_end call while keeping a comment mentioning it will
-    correctly fail the test.
+    correctly fail the test. Phase calls may be in claude-review.sh or
+    review-common.sh (the shared function).
     """
-    executable_lines = _code_lines(CLAUDE)
-    executable_text = "\n".join(code for _, code in executable_lines)
+    claude_exec = "\n".join(code for _, code in _code_lines(CLAUDE))
+    common_exec = "\n".join(code for _, code in _code_lines(COMMON))
+    combined = claude_exec + "\n" + common_exec
+
     for phase in ("diff", "scope-evidence", "claude-cli"):
-        assert f'_phase_start "{phase}"' in executable_text, (
-            f"claude-review.sh is missing _phase_start for phase {phase!r} "
-            f"in executable code (MY-1452)"
+        assert f'_phase_start "{phase}"' in combined, (
+            f"Missing _phase_start for phase {phase!r} in executable code (MY-1452)"
         )
-        assert f'_phase_end "{phase}"' in executable_text, (
-            f"claude-review.sh is missing _phase_end for phase {phase!r} "
-            f"in executable code (MY-1452)"
+        assert f'_phase_end "{phase}"' in combined, (
+            f"Missing _phase_end for phase {phase!r} in executable code (MY-1452)"
         )
 
 
 def test_claude_review_structured_output_path() -> None:
-    """The structured_output extraction path handles the full verdict envelope.
+    """The structured_output extraction path in the shared function.
 
-    Contract: when the CLI exits 0 and produces JSON with .structured_output,
-    the script must extract verdict, summary, blockers, and notes. This test
-    verifies that the production script's jq extraction pipeline handles both
-    .structured_output (primary) and .result (fallback) paths correctly.
-
-    Destroying the --output-format json or --json-schema invocation or the
-    structured_output extraction must fail this test.
+    Contract: the production function must include --output-format json,
+    --json-schema, .structured_output extraction, and .result fallback.
+    Removing any of these from the real function breaks the test.
     """
-    executable_lines = _code_lines(CLAUDE)
+    executable_lines = _code_lines(COMMON)
     executable_text = "\n".join(code for _, code in executable_lines)
 
-    # Production invocation must include the structured output chain
     assert "--output-format json" in executable_text, (
-        "claude-review.sh must pass --output-format json to get "
+        "review-common.sh must pass --output-format json to get "
         "structured_output in the response envelope (MY-1452)"
     )
     assert "--json-schema" in executable_text, (
-        "claude-review.sh must pass --json-schema to enforce the verdict "
+        "review-common.sh must pass --json-schema to enforce the verdict "
         "schema on the CLI response (MY-1452)"
     )
-
-    # The extraction pipeline must handle both paths
     assert ".structured_output" in executable_text, (
-        "claude-review.sh must extract .structured_output from the CLI "
+        "review-common.sh must extract .structured_output from the CLI "
         "response for the verdict envelope (MY-1452)"
     )
     assert ".result" in executable_text, (
-        "claude-review.sh must have a .result fallback path for verdict "
+        "review-common.sh must have a .result fallback path for verdict "
         "extraction (MY-1452)"
     )
 
 
 def test_claude_review_error_max_turns_diagnostic() -> None:
-    """When CLI returns error_max_turns, the script extracts structured diag.
+    """The shared function extracts structured diagnostic on error_max_turns.
 
     MY-1452 requirement: non-zero CLI exit must surface terminal_reason,
     subtype, and num_turns from the JSON output so operators can distinguish
     error_max_turns from genuine crashes without leaking sensitive content.
     """
-    executable_lines = _code_lines(CLAUDE)
+    executable_lines = _code_lines(COMMON)
     executable_text = "\n".join(code for _, code in executable_lines)
 
     assert "terminal_reason" in executable_text, (
-        "claude-review.sh must extract terminal_reason from CLI JSON on "
+        "review-common.sh must extract terminal_reason from CLI JSON on "
         "non-zero exit for actionable diagnostics (MY-1452)"
     )
     assert "num_turns" in executable_text, (
-        "claude-review.sh must extract num_turns from CLI JSON on non-zero "
+        "review-common.sh must extract num_turns from CLI JSON on non-zero "
         "exit (MY-1452)"
     )
 
@@ -598,81 +593,30 @@ def test_timeout_kills_nested_env_bash_wrapper(tmp_path: pathlib.Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 6. MY-1452: Fake-Claude end-to-end gate contract tests.
+# 6. MY-1452: End-to-end gate contract — calls the REAL production function.
 #
-# These exercise the REAL production invocation pattern with a fake `claude`
-# binary, verifying argv plumbing, verdict extraction, fallback, diagnostics,
-# and fail-closed behavior. They complement the structural _code_lines tests
-# above: those catch accidental removal; these catch broken runtime semantics.
+# These tests call `run_claude_review_gate` from review-common.sh with a fake
+# `claude` binary on PATH. The function is the SAME code path that
+# claude-review.sh uses — there is no copied logic that can drift. Mutating
+# the real extractor, flag plumbing, diagnostic, or threshold in
+# review-common.sh will break these tests.
 # --------------------------------------------------------------------------
 
-# The exact production invocation and downstream handling from claude-review.sh,
-# extracted as a reusable shell template. The fake `claude` is injected via PATH.
-_GATE_TEMPLATE = """\
-. {common}
-REVIEW_CLI_TIMEOUT_SECONDS=30
-REVIEW_TIMEOUT_RC=124
-STICKY="<!-- test -->"
-post_sticky() {{ echo "STICKY:$1"; }}
-_phase_start() {{ true; }}
-_phase_end() {{ true; }}
-
-SCHEMA='{schema}'
-PROMPT="test prompt"
-RAW_FILE="{raw_file}"
-CLI_RC=0
-run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \\
-    env CLAUDE_REVIEW_PROMPT="$PROMPT" bash -c '
-        printf %s "$CLAUDE_REVIEW_PROMPT" | claude -p \\
-            --output-format json \\
-            --max-turns 2 \\
-            --tools "" \\
-            --json-schema "$1"
-    ' _ "$SCHEMA" >"$RAW_FILE" 2>/dev/null || CLI_RC=$?
-
-RAW="$(cat "$RAW_FILE" 2>/dev/null)"
-
-if [ "$CLI_RC" -eq "$REVIEW_TIMEOUT_RC" ]; then
-    echo "TIMEOUT"
-    exit 1
-fi
-
-if [ "$CLI_RC" -ne 0 ] || [ -z "$RAW" ]; then
-    _terminal=""
-    _subtype=""
-    _turns=""
-    if [ -n "$RAW" ]; then
-        _terminal="$(printf %s "$RAW" | jq -r '.terminal_reason // empty' 2>/dev/null)"
-        _subtype="$(printf %s "$RAW" | jq -r '.subtype // empty' 2>/dev/null)"
-        _turns="$(printf %s "$RAW" | jq -r '.num_turns // empty' 2>/dev/null)"
-    fi
-    if [ -n "$_terminal" ]; then
-        echo "DIAG:rc=$CLI_RC,terminal_reason=$_terminal,subtype=${{_subtype:-n/a}},num_turns=${{_turns:-n/a}}"
-    else
-        echo "DIAG:rc=$CLI_RC"
-    fi
-    post_sticky "fail"
-    exit 1
-fi
-
-VERDICT_JSON="$(printf %s "$RAW" | jq -c '.structured_output // (.result | fromjson)' 2>/dev/null)"
-if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
-    echo "PARSE_FAIL"
-    post_sticky "parse-fail"
-    exit 1
-fi
-
-VERDICT="$(printf %s "$VERDICT_JSON" | jq -r '.verdict')"
-echo "VERDICT:$VERDICT"
-"""
-
-_TEST_SCHEMA = (
+# The full production schema from claude-review.sh (must match exactly).
+_PRODUCTION_SCHEMA = (
     '{"type":"object","additionalProperties":false,'
     '"required":["verdict","summary","blockers","notes"],'
-    '"properties":{"verdict":{"type":"string","enum":["pass","changes"]},'
+    '"properties":{'
+    '"verdict":{"type":"string","enum":["pass","changes"]},'
     '"summary":{"type":"string"},'
-    '"blockers":{"type":"array","items":{"type":"object"}},'
-    '"notes":{"type":"array","items":{"type":"object"}}}}'
+    '"blockers":{"type":"array","items":{"type":"object","additionalProperties":false,'
+    '"required":["file","severity","why"],'
+    '"properties":{"file":{"type":"string"},"line":{"type":["integer","null"]},'
+    '"severity":{"type":"string","enum":["critical","high"]},"why":{"type":"string"}}}},'
+    '"notes":{"type":"array","items":{"type":"object","additionalProperties":false,'
+    '"required":["file","note"],'
+    '"properties":{"file":{"type":"string"},"line":{"type":["integer","null"]},"note":{"type":"string"}}}}'
+    '}}'
 )
 
 
@@ -697,14 +641,30 @@ def _make_fake_claude(
     return bin_dir
 
 
-def _run_gate(tmp_path: pathlib.Path, bin_dir: pathlib.Path) -> subprocess.CompletedProcess[str]:
-    """Run the gate template with the fake claude on PATH."""
+def _run_real_gate(
+    tmp_path: pathlib.Path, bin_dir: pathlib.Path, schema: str = _PRODUCTION_SCHEMA
+) -> subprocess.CompletedProcess[str]:
+    """Call the REAL run_claude_review_gate function with fake claude on PATH.
+
+    This sources review-common.sh and calls the production function directly.
+    No copied logic — any drift in the real function is caught here.
+    """
     raw_file = tmp_path / "raw.json"
-    script = _GATE_TEMPLATE.format(
-        common=COMMON,
-        schema=_TEST_SCHEMA,
-        raw_file=raw_file,
+    err_file = tmp_path / "err.log"
+    sticky_log = tmp_path / "sticky.log"
+
+    # Script that sources the real production helper and calls the real function.
+    script = (
+        f'. "{COMMON}"\n'
+        f'STICKY="<!-- test-marker -->"\n'
+        f'post_sticky() {{ printf "%s\\n" "$1" >> "{sticky_log}"; }}\n'
+        f'PROMPT="test review prompt content"\n'
+        f'run_claude_review_gate \'{schema}\' "{raw_file}" "{err_file}"\n'
     )
+
+    import os
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
     return subprocess.run(
         [_bash(), "-c", script],
         capture_output=True,
@@ -714,115 +674,166 @@ def _run_gate(tmp_path: pathlib.Path, bin_dir: pathlib.Path) -> subprocess.Compl
         timeout=60,
         cwd=CI_DIR,
         check=False,
-        env={
-            **__import__("os").environ,
-            "PATH": f"{bin_dir}:{__import__('os').environ['PATH']}",
-        },
+        env=env,
     )
 
 
-class TestFakeClaudeGateContract:
-    """End-to-end gate contract: real invocation with fake Claude."""
+class TestRealGateContract:
+    """End-to-end contract: calls the REAL run_claude_review_gate function."""
 
-    def test_argv_captures_all_required_flags(self, tmp_path: pathlib.Path) -> None:
-        """Fake claude receives --tools "", --max-turns 2, --output-format json,
-        --json-schema with the correct schema value."""
+    def test_argv_flag_value_adjacency(self, tmp_path: pathlib.Path) -> None:
+        """Real gate passes correct flag/value pairs to the claude binary.
+
+        Verifies flag-value adjacency: --tools followed by "", --max-turns
+        followed by 2, --output-format followed by json, and --json-schema
+        followed by the full production schema.
+        """
         valid_output = (
             '{"structured_output":{"verdict":"pass","summary":"ok",'
             '"blockers":[],"notes":[]}}'
         )
         bin_dir = _make_fake_claude(tmp_path, valid_output, exit_code=0)
-        result = _run_gate(tmp_path, bin_dir)
+        result = _run_real_gate(tmp_path, bin_dir)
 
         assert result.returncode == 0, f"gate failed: {result.stdout}\n{result.stderr}"
 
         argv_file = tmp_path / "claude_argv.txt"
-        argv_text = argv_file.read_text(encoding="utf-8")
-        argv_lines = argv_text.strip().splitlines()
+        argv_lines = argv_file.read_text(encoding="utf-8").strip().splitlines()
 
-        assert "-p" in argv_lines, f"missing -p in argv: {argv_lines}"
-        assert "--output-format" in argv_lines, f"missing --output-format: {argv_lines}"
-        assert "json" in argv_lines, f"missing json value: {argv_lines}"
-        assert "--max-turns" in argv_lines, f"missing --max-turns: {argv_lines}"
-        assert "2" in argv_lines, f"missing 2 value: {argv_lines}"
-        assert "--tools" in argv_lines, f"missing --tools: {argv_lines}"
-        # Empty string arg for --tools ""
-        assert "" in argv_lines or '""' in argv_text, (
-            f"missing empty-string --tools value: {argv_lines}"
+        # Flag-value adjacency checks
+        assert "-p" in argv_lines, f"missing -p: {argv_lines}"
+
+        of_idx = argv_lines.index("--output-format")
+        assert argv_lines[of_idx + 1] == "json", (
+            f"--output-format not followed by json: {argv_lines[of_idx:of_idx+2]}"
         )
-        assert "--json-schema" in argv_lines, f"missing --json-schema: {argv_lines}"
 
-    def test_structured_output_success_path(self, tmp_path: pathlib.Path) -> None:
-        """Gate succeeds when .structured_output contains full verdict envelope."""
+        mt_idx = argv_lines.index("--max-turns")
+        assert argv_lines[mt_idx + 1] == "2", (
+            f"--max-turns not followed by 2: {argv_lines[mt_idx:mt_idx+2]}"
+        )
+
+        tools_idx = argv_lines.index("--tools")
+        assert argv_lines[tools_idx + 1] == "", (
+            f"--tools not followed by empty string: {argv_lines[tools_idx:tools_idx+2]!r}"
+        )
+
+        schema_idx = argv_lines.index("--json-schema")
+        schema_val = argv_lines[schema_idx + 1]
+        # Verify it's the full production schema by checking key fields
+        import json as _json
+        parsed_schema = _json.loads(schema_val)
+        assert parsed_schema["required"] == ["verdict", "summary", "blockers", "notes"]
+        assert "severity" in str(parsed_schema["properties"]["blockers"])
+
+    def test_structured_output_pass(self, tmp_path: pathlib.Path) -> None:
+        """Gate exits 0 and renders pass comment for .structured_output envelope."""
         valid_output = (
-            '{"structured_output":{"verdict":"pass","summary":"all good",'
+            '{"structured_output":{"verdict":"pass","summary":"all clear",'
             '"blockers":[],"notes":[{"file":"a.swift","line":1,"note":"nit"}]}}'
         )
         bin_dir = _make_fake_claude(tmp_path, valid_output, exit_code=0)
-        result = _run_gate(tmp_path, bin_dir)
+        result = _run_real_gate(tmp_path, bin_dir)
 
         assert result.returncode == 0, f"unexpected failure: {result.stdout}"
-        assert "VERDICT:pass" in result.stdout
+        assert "verdict=pass" in result.stdout
+        # Verify rendering happened via sticky
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "✅ 自动 review:通过" in sticky
+        assert "all clear" in sticky
+        assert "nit" in sticky  # note rendered
+
+    def test_structured_output_changes_with_blockers_exits_1(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """verdict=changes + blockers enforces critical/high threshold → exit 1."""
+        output = (
+            '{"structured_output":{"verdict":"changes","summary":"issues",'
+            '"blockers":[{"file":"x.swift","severity":"critical","line":10,"why":"bug"}],'
+            '"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1, "gate must exit 1 on changes+blockers"
+        assert "verdict=changes" in result.stdout
+        assert "blockers=1" in result.stdout
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "🔴 自动 review:需要修改" in sticky
+        assert "bug" in sticky
 
     def test_result_fallback_path(self, tmp_path: pathlib.Path) -> None:
         """Gate extracts verdict from .result when .structured_output is absent."""
-        inner_json = (
-            '{"verdict":"changes","summary":"issue found",'
-            '"blockers":[{"file":"x.swift","severity":"critical","why":"bug"}],'
-            '"notes":[]}'
-        )
-        # .result is a JSON string (stringified envelope)
         import json as _json
-        fallback_output = _json.dumps({"result": _json.dumps(_json.loads(inner_json))})
+        inner = {"verdict": "pass", "summary": "ok via fallback", "blockers": [], "notes": []}
+        fallback_output = _json.dumps({"result": _json.dumps(inner)})
         bin_dir = _make_fake_claude(tmp_path, fallback_output, exit_code=0)
-        result = _run_gate(tmp_path, bin_dir)
+        result = _run_real_gate(tmp_path, bin_dir)
 
-        assert result.returncode == 0, f"unexpected failure: {result.stdout}"
-        assert "VERDICT:changes" in result.stdout
+        assert result.returncode == 0, f"fallback failed: {result.stdout}"
+        assert "verdict=pass" in result.stdout
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "ok via fallback" in sticky
 
     def test_error_max_turns_diagnostic(self, tmp_path: pathlib.Path) -> None:
-        """Non-zero exit with terminal_reason outputs structured diagnostic."""
+        """Non-zero + terminal_reason → structured, actionable diagnostic."""
         error_output = (
             '{"terminal_reason":"max_turns","subtype":"error_max_turns",'
             '"num_turns":2}'
         )
         bin_dir = _make_fake_claude(tmp_path, error_output, exit_code=1)
-        result = _run_gate(tmp_path, bin_dir)
+        result = _run_real_gate(tmp_path, bin_dir)
 
-        assert result.returncode != 0
+        assert result.returncode == 1
         assert "terminal_reason=max_turns" in result.stdout
         assert "subtype=error_max_turns" in result.stdout
         assert "num_turns=2" in result.stdout
-        assert "STICKY:" in result.stdout  # post_sticky was called
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
 
     def test_malformed_nonzero_failclosed(self, tmp_path: pathlib.Path) -> None:
-        """Non-zero exit with non-JSON output still fails closed with generic diag."""
+        """Non-zero + non-JSON → fail-closed with generic diagnostic + sticky."""
         bin_dir = _make_fake_claude(tmp_path, "not json at all", exit_code=1)
-        result = _run_gate(tmp_path, bin_dir)
+        result = _run_real_gate(tmp_path, bin_dir)
 
-        assert result.returncode != 0
-        assert "DIAG:rc=1" in result.stdout
-        # No terminal_reason since output is not valid JSON
+        assert result.returncode == 1
+        assert "rc=1" in result.stdout
+        # No structured diagnostic extracted
         assert "terminal_reason=" not in result.stdout
-        assert "STICKY:" in result.stdout
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
 
     def test_empty_output_failclosed(self, tmp_path: pathlib.Path) -> None:
-        """Zero exit but empty output fails closed."""
+        """CLI exits 0 but empty output → fail-closed with explicit diagnostic."""
         bin_dir = _make_fake_claude(tmp_path, "", exit_code=0)
-        result = _run_gate(tmp_path, bin_dir)
+        result = _run_real_gate(tmp_path, bin_dir)
 
-        # CLI_RC=0 but RAW is empty → enters the fail branch
-        assert result.returncode != 0
-        assert "DIAG:rc=0" in result.stdout or "STICKY:" in result.stdout
+        assert result.returncode == 1
+        assert "rc=0" in result.stdout
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
 
     def test_no_sensitive_leak_on_failure(self, tmp_path: pathlib.Path) -> None:
-        """Diagnostic output does not leak prompt, diff, or credentials."""
+        """Diagnostic output does not leak prompt content."""
         error_output = (
             '{"terminal_reason":"max_turns","subtype":"error_max_turns",'
             '"num_turns":1}'
         )
         bin_dir = _make_fake_claude(tmp_path, error_output, exit_code=1)
-        result = _run_gate(tmp_path, bin_dir)
+        result = _run_real_gate(tmp_path, bin_dir)
 
         combined = result.stdout + result.stderr
-        assert "test prompt" not in combined, "prompt leaked in diagnostic output"
+        assert "test review prompt content" not in combined, (
+            "prompt content leaked in diagnostic output"
+        )
+
+    def test_unparseable_verdict_failclosed(self, tmp_path: pathlib.Path) -> None:
+        """CLI exits 0 with JSON but no .structured_output/.result → fail-closed."""
+        # Valid JSON but missing verdict envelope
+        bin_dir = _make_fake_claude(tmp_path, '{"foo":"bar"}', exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        assert "无法解析 verdict" in result.stdout
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky

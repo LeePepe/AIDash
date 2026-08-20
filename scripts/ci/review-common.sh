@@ -188,3 +188,122 @@ review_evidence_rules() {
 '- 不确定一律降级为 note。这条只放宽「归属靠猜」的这一类判断;分层越界、崩溃、数据' \
 '  破坏、安全问题等有直接 diff 证据的 blocker,判定标准不变,照旧 fail-closed。'
 }
+
+# run_claude_review_gate <schema> <raw_file> <err_file>
+#
+# The single shared production function for invoking the claude CLI, extracting
+# the verdict envelope, rendering the review comment, and enforcing the
+# critical/high threshold. Both claude-review.sh and the test suite call this
+# function — there is no copied logic that can drift independently.
+#
+# Prerequisites (must be set/defined before calling):
+#   REVIEW_CLI_TIMEOUT_SECONDS, REVIEW_TIMEOUT_RC (from this file)
+#   PROMPT    — the full review prompt text
+#   STICKY    — the HTML comment marker for sticky comments
+#   post_sticky() — must be defined (real gh calls or test stub)
+#
+# Optional (no-op if undefined):
+#   _phase_start(), _phase_end() — phase timing helpers
+#
+# Outputs to stdout. Returns 0 on verdict=pass, 1 on any failure or blockers.
+run_claude_review_gate() {
+    local schema="$1" raw_file="$2" err_file="$3"
+    local cli_rc=0
+
+    # Phase timing (no-op if not defined by caller).
+    type _phase_start >/dev/null 2>&1 && _phase_start "claude-cli" || true
+
+    run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
+        env CLAUDE_REVIEW_PROMPT="$PROMPT" bash -c '
+            printf %s "$CLAUDE_REVIEW_PROMPT" | claude -p \
+                --output-format json \
+                --max-turns 2 \
+                --tools "" \
+                --json-schema "$1"
+        ' _ "$schema" >"$raw_file" 2>"$err_file" || cli_rc=$?
+
+    type _phase_end >/dev/null 2>&1 && _phase_end "claude-cli" || true
+
+    local raw
+    raw="$(cat "$raw_file" 2>/dev/null)"
+
+    # --- Timeout ---
+    if [ "$cli_rc" -eq "$REVIEW_TIMEOUT_RC" ]; then
+        echo "[claude-review] ❌ claude CLI 超时(>${REVIEW_CLI_TIMEOUT_SECONDS}s),已终止"
+        tail -c 2000 "$err_file" >&2 || true
+        post_sticky "$STICKY
+⚠️ 自动 review 未能完成:claude CLI 超过 ${REVIEW_CLI_TIMEOUT_SECONDS} 秒仍未返回,已被终止。
+为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+
+    # --- Non-zero or empty output ---
+    if [ "$cli_rc" -ne 0 ] || [ -z "$raw" ]; then
+        local _terminal="" _subtype="" _turns=""
+        if [ -n "$raw" ]; then
+            _terminal="$(printf %s "$raw" | jq -r '.terminal_reason // empty' 2>/dev/null)"
+            _subtype="$(printf %s "$raw" | jq -r '.subtype // empty' 2>/dev/null)"
+            _turns="$(printf %s "$raw" | jq -r '.num_turns // empty' 2>/dev/null)"
+        fi
+        if [ -n "$_terminal" ]; then
+            echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc, terminal_reason=$_terminal, subtype=${_subtype:-n/a}, num_turns=${_turns:-n/a})"
+        else
+            echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc)"
+        fi
+        cat "$err_file" >&2 || true
+        post_sticky "$STICKY
+⚠️ 自动 review 未能完成(claude CLI 异常)。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+
+    # --- Verdict extraction ---
+    local verdict_json
+    verdict_json="$(printf %s "$raw" | jq -c '.structured_output // (.result | fromjson)' 2>/dev/null)"
+    if [ -z "$verdict_json" ] || [ "$verdict_json" = "null" ]; then
+        echo "[claude-review] ❌ 无法解析 verdict"; printf %s "$raw" | head -c 2000 >&2
+        post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+
+    local verdict summary n_block
+    verdict="$(printf %s "$verdict_json" | jq -r '.verdict')"
+    summary="$(printf %s "$verdict_json" | jq -r '.summary')"
+    n_block="$(printf %s "$verdict_json" | jq -r '.blockers | length')"
+
+    # --- Render comment body ---
+    local body
+    body="$(
+        printf '%s\n' "$STICKY"
+        if [ "$verdict" = "changes" ]; then
+            printf '## 🔴 自动 review:需要修改（%s 个阻塞项）\n\n' "$n_block"
+        else
+            printf '## ✅ 自动 review:通过\n\n'
+        fi
+        printf '%s\n' "$summary"
+        if [ "$n_block" -gt 0 ]; then
+            printf '\n### 阻塞项\n'
+            printf %s "$verdict_json" | jq -r \
+                '.blockers[] | "- **\(.severity)** `\(.file)\(if .line then ":\(.line)" else "" end)` — \(.why)"'
+        fi
+        local n_notes
+        n_notes="$(printf %s "$verdict_json" | jq -r '.notes | length')"
+        if [ "$n_notes" -gt 0 ]; then
+            printf '\n### 建议（不阻塞）\n'
+            printf %s "$verdict_json" | jq -r \
+                '.notes[] | "- `\(.file)\(if .line then ":\(.line)" else "" end)` — \(.note)"'
+        fi
+        printf '\n\n<sub>由本地 claude 自动生成。critical/high = 阻塞合并。</sub>\n'
+    )"
+
+    # --- Threshold enforcement ---
+    if [ "$verdict" = "changes" ] && [ "$n_block" -gt 0 ]; then
+        post_sticky "$body"
+        echo "[claude-review] ❌ verdict=changes, blockers=$n_block → exit 1"
+        return 1
+    fi
+
+    post_sticky "$body"
+    echo "[claude-review] ✅ verdict=pass → exit 0"
+    return 0
+}
