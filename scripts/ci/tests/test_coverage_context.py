@@ -2870,3 +2870,194 @@ def test_multibyte_total_output_bounded():
     result_bytes = len(result.encode("utf-8", "replace"))
     assert result_bytes <= COVERAGE_MAX_TOTAL_BYTES
 
+
+# --- Fix 6: _find_all_test_functions preserves same-named declarations ---
+
+
+def test_find_all_test_functions_preserves_same_name_different_class():
+    """Same-named test functions in different classes must all be enumerated,
+    not deduplicated by bare function name."""
+    from coverage_context import _find_all_test_functions
+
+    source = """\
+import XCTest
+
+final class ClassATests: XCTestCase {
+    func testFoo() {
+        let svc = ServiceA()
+        XCTAssert(svc.validate())
+    }
+}
+
+final class ClassBTests: XCTestCase {
+    func testFoo() {
+        let svc = ServiceB()
+        XCTAssert(svc.process())
+    }
+}
+"""
+    results = _find_all_test_functions(source)
+    names = [name for name, _ in results]
+    # Both testFoo declarations must be present
+    assert names.count("testFoo") == 2
+    # They must have distinct offsets
+    offsets = [m.start() for _, m in results]
+    assert len(set(offsets)) == 2
+
+
+def test_find_all_test_functions_same_name_python_classes():
+    """Same-named test methods in different Python classes must all appear."""
+    from coverage_context import _find_all_test_functions
+
+    source = """\
+class TestSuiteA:
+    def test_process(self):
+        assert ServiceA().run()
+
+class TestSuiteB:
+    def test_process(self):
+        assert ServiceB().run()
+"""
+    results = _find_all_test_functions(source)
+    names = [name for name, _ in results]
+    assert names.count("test_process") == 2
+
+
+def test_find_all_test_functions_deduplicates_same_declaration():
+    """An XCTest function named testFoo matched at the same captured-group
+    position by multiple regexes should only appear once."""
+    from coverage_context import _find_all_test_functions
+
+    # @Test func testFoo() matches both Swift Testing and XCTest regexes
+    # but they capture "testFoo" at the same position
+    source = "    @Test func testFoo() {\n    }\n"
+    results = _find_all_test_functions(source)
+    names = [name for name, _ in results]
+    assert names.count("testFoo") == 1
+
+
+def test_same_file_classA_precedes_removed_classB_with_production_symbol(monkeypatch):
+    """When ClassA.testFoo precedes ClassB.testFoo in the same file and only
+    ClassB.testFoo contains the relevant production symbol, the removal of
+    ClassB.testFoo must still be detected and its symbol extracted."""
+
+    import coverage_context
+
+    # BASE: ClassA.testFoo (no DomainService) then ClassB.testFoo (has DomainService)
+    base_source = """\
+import XCTest
+
+final class ClassATests: XCTestCase {
+    func testFoo() {
+        let x = GenericHelper()
+        XCTAssert(x.ok())
+    }
+}
+
+final class ClassBTests: XCTestCase {
+    func testFoo() {
+        let svc = DomainService()
+        XCTAssert(svc.execute())
+    }
+}
+"""
+    # HEAD: ClassB entirely removed, ClassA remains
+    head_source = """\
+import XCTest
+
+final class ClassATests: XCTestCase {
+    func testFoo() {
+        let x = GenericHelper()
+        XCTAssert(x.ok())
+    }
+}
+"""
+    diff = """\
+diff --git a/Tests/FooTests.swift b/Tests/FooTests.swift
+--- a/Tests/FooTests.swift
++++ b/Tests/FooTests.swift
+@@ -9,8 +9,0 @@ final class ClassATests: XCTestCase {
+-final class ClassBTests: XCTestCase {
+-    func testFoo() {
+-        let svc = DomainService()
+-        XCTAssert(svc.execute())
+-    }
+-}
+-
+"""
+    test_path = "Tests/FooTests.swift"
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref = args[1]
+            if ref.startswith("base:"):
+                return base_source
+            if ref.startswith("head:"):
+                return head_source
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return f"100644 blob abc\t{test_path}"
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    removed = find_removed_test_functions(diff, test_path, "base", "head")
+    # ClassB.testFoo removed (DomainService symbol); ClassA.testFoo not removed
+    assert len(removed) == 1
+    assert removed[0].func_name == "testFoo"
+    assert removed[0].containing_type == "ClassBTests"
+    # The full body should contain the production symbol DomainService
+    assert "DomainService" in removed[0].full_body
+
+
+def test_same_file_only_second_same_named_has_symbol_in_coverage_scan(monkeypatch):
+    """In existing-coverage scanning, when ClassA.testFoo and ClassB.testFoo
+    both exist and only ClassB.testFoo references the production symbol,
+    both must be found by _find_all_test_functions so the scanner can
+    identify the correct one."""
+
+    import coverage_context
+
+    source = """\
+import XCTest
+
+final class ClassATests: XCTestCase {
+    func testFoo() {
+        let x = GenericHelper()
+        XCTAssert(x.ok())
+    }
+}
+
+final class ClassBTests: XCTestCase {
+    func testFoo() {
+        let svc = DomainService()
+        XCTAssert(svc.execute())
+    }
+}
+"""
+    results = coverage_context._find_all_test_functions(source)
+    # Both must be enumerated
+    assert len(results) == 2
+    names = [name for name, _ in results]
+    assert names == ["testFoo", "testFoo"]
+
+    # Simulate scanner logic: only the second one references DomainService
+    source_lines = source.splitlines()
+    found_domain = False
+    for func_name, match in results:
+        func_start = source[: match.start()].count("\n")
+        func_end = coverage_context._find_func_end(
+            source_lines, func_start, "Tests/FooTests.swift"
+        )
+        func_body = "\n".join(source_lines[func_start:func_end])
+        import re
+        if re.search(r'\bDomainService\b', func_body):
+            found_domain = True
+            # This should be the second occurrence (ClassBTests)
+            containing = coverage_context._find_containing_type(
+                source, match.start()
+            )
+            assert containing == "ClassBTests"
+    assert found_domain, "Scanner must find ClassB.testFoo with DomainService"
+
