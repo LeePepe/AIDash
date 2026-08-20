@@ -154,6 +154,12 @@ fi
 # Same rationale as claude-review.sh: prevents delimiter injection from
 # PR-controlled content escaping the untrusted region.
 FENCE_NONCE="$(head -c 16 /dev/urandom | xxd -p)"
+if [ -z "$FENCE_NONCE" ] || ! printf '%s' "$FENCE_NONCE" | grep -qE '^[0-9a-f]{32}$'; then
+    echo "[codex-review] ❌ nonce generation failed (empty or malformed)"
+    post_sticky "$STICKY
+⚠️ 自动 review nonce 生成失败,为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
 FENCE_OPEN="======== UNTRUSTED_DATA_BEGIN_${FENCE_NONCE} ========"
 FENCE_CLOSE="======== UNTRUSTED_DATA_END_${FENCE_NONCE} ========"
 

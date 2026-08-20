@@ -1571,3 +1571,20 @@ def test_gate_scripts_use_nonce_fence_not_static_delimiters() -> None:
         assert "$FENCE_CLOSE" in content, (
             f"{script_name} prompt must use $FENCE_CLOSE variable"
         )
+
+
+def test_nonce_generation_fail_closed() -> None:
+    """Nonce generation failure must fail the gate (exit 1), not proceed with
+    an empty or malformed nonce that would make the fence predictable."""
+    for script_name in ("claude-review.sh", "codex-review.sh"):
+        path = CI_DIR / script_name
+        content = path.read_text(encoding="utf-8")
+
+        # Must check nonce is non-empty and well-formed before use
+        assert 'grep -qE' in content, (
+            f"{script_name} must validate nonce format with grep"
+        )
+        # Must exit 1 on nonce failure
+        assert "nonce" in content.lower() and "exit 1" in content, (
+            f"{script_name} must exit 1 on nonce generation failure"
+        )

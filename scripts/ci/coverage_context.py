@@ -351,7 +351,10 @@ def find_related_tests_in_head(
     for test_file in test_files:
         source = run_git(["show", f"{head_sha}:{test_file}"])
         if source is None:
-            continue
+            raise AnalysisError(
+                f"HEAD blob read failed for candidate test file "
+                f"'{test_file}' (claimed in SEARCH SCOPE but unreadable)"
+            )
         if len(source.encode("utf-8", "replace")) > COVERAGE_MAX_FILE_BYTES:
             continue
 
