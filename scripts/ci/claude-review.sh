@@ -175,14 +175,16 @@ _phase_start "claude-cli"
 # 子进程后,那根管子的读端还可能被别的后代持有,于是 shell 继续等——正是本次要
 # 消除的那类静默悬挂。
 #
-# --max-turns 1 + --tools "" (MY-1452): single turn, zero tools.
+# --max-turns 2 + --tools "" (MY-1452): bounded turns, zero tools.
 # The review prompt is self-contained (diff + scope evidence); tool use is
 # unnecessary AND dangerous: even a single first-turn tool call (Read, Bash)
-# can run long enough to exhaust the 900s watchdog. --max-turns 1 alone only
-# bounds turns, not first-turn tool duration — PR #178's two consecutive
-# timeouts could have been a single long tool call, not multi-turn exploration.
+# can run long enough to exhaust the 900s watchdog.
 # --tools "" deterministically disables all built-in tools (Read, Edit, Bash,
 # etc.) per `claude --help`: 'Use "" to disable all tools'.
+# --max-turns 2 (not 1): with --json-schema the CLI needs turn 1 (model
+# response) + turn 2 (structured output extraction). --max-turns 1 causes
+# the CLI to exit with error_max_turns before producing structured_output.
+# Runner probe confirmed --max-turns 2 returns schema-valid verdict in ~7s.
 RAW_FILE="$(mktemp -t claude-review-raw.XXXXXX.json)"
 trap 'rm -f "$DIFF_FILE" "$RAW_FILE"' EXIT
 
@@ -196,7 +198,7 @@ run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
     env CLAUDE_REVIEW_PROMPT="$PROMPT" bash -c '
         printf %s "$CLAUDE_REVIEW_PROMPT" | claude -p \
             --output-format json \
-            --max-turns 1 \
+            --max-turns 2 \
             --tools "" \
             --json-schema "$1"
     ' _ "$SCHEMA" >"$RAW_FILE" 2>/tmp/claude-review.err || CLI_RC=$?
@@ -213,7 +215,23 @@ if [ "$CLI_RC" -eq "$REVIEW_TIMEOUT_RC" ]; then
 fi
 
 if [ "$CLI_RC" -ne 0 ] || [ -z "$RAW" ]; then
-    echo "[claude-review] ❌ claude CLI 失败 (rc=$CLI_RC)"; cat /tmp/claude-review.err >&2 || true
+    # Extract actionable diagnostics from the CLI JSON output when available.
+    # This surfaces error_max_turns (and similar structured failures) without
+    # leaking prompt, diff, credentials, or untrusted payload bodies.
+    _terminal=""
+    _subtype=""
+    _turns=""
+    if [ -n "$RAW" ]; then
+        _terminal="$(printf %s "$RAW" | jq -r '.terminal_reason // empty' 2>/dev/null)"
+        _subtype="$(printf %s "$RAW" | jq -r '.subtype // empty' 2>/dev/null)"
+        _turns="$(printf %s "$RAW" | jq -r '.num_turns // empty' 2>/dev/null)"
+    fi
+    if [ -n "$_terminal" ]; then
+        echo "[claude-review] ❌ claude CLI 失败 (rc=$CLI_RC, terminal_reason=$_terminal, subtype=${_subtype:-n/a}, num_turns=${_turns:-n/a})"
+    else
+        echo "[claude-review] ❌ claude CLI 失败 (rc=$CLI_RC)"
+    fi
+    cat /tmp/claude-review.err >&2 || true
     post_sticky "$STICKY
 ⚠️ 自动 review 未能完成(claude CLI 异常)。为安全起见 **暂不放行**,请人工检查或重跑。"
     exit 1
