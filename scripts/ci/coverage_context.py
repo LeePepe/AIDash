@@ -110,9 +110,14 @@ def removed_line_numbers(diff_text: str, path: str) -> Tuple[int, ...]:
 
 
 def find_removed_test_functions(
-    diff_text: str, path: str, base_sha: str
+    diff_text: str, path: str, base_sha: str, head_sha: str = ""
 ) -> list[RemovedTest]:
-    """Identify test functions removed by the diff from a test file."""
+    """Identify test functions truly removed (not merely modified) by the diff.
+
+    A function is considered removed only if its declaration line is absent from
+    HEAD source. Functions that merely had lines modified remain and are not
+    reported as removed — this distinguishes removal from refactoring.
+    """
     if "Test" not in path and "test" not in path:
         return []
 
@@ -125,6 +130,13 @@ def find_removed_test_functions(
     if not removed_lines:
         return []
 
+    # Get HEAD version to verify removal (not just modification)
+    head_source: Optional[str] = None
+    if head_sha:
+        head_source = run_git(["show", f"{head_sha}:{path}"])
+    # If file is deleted from HEAD entirely, all its functions are removed
+    file_deleted = head_source is None and head_sha != ""
+
     base_lines = base_source.splitlines()
     results: list[RemovedTest] = []
 
@@ -134,19 +146,33 @@ def find_removed_test_functions(
         func_start_line = base_source[: match.start()].count("\n") + 1
 
         # Check if any removed line overlaps with this function's range
-        # Approximate the function body range by finding its closing brace
         func_end_line = _find_func_end(base_lines, func_start_line - 1)
 
         overlap = any(
             func_start_line <= ln <= func_end_line for ln in removed_lines
         )
-        if overlap:
-            body_start = func_start_line - 1
-            body_end = min(func_end_line, body_start + 10)
-            snippet = "\n".join(base_lines[body_start:body_end])[:200]
-            results.append(RemovedTest(
-                file=path, func_name=func_name, body_snippet=snippet
-            ))
+        if not overlap:
+            continue
+
+        # Critical check: verify the function declaration is actually absent
+        # from HEAD source. If it still exists, this is modification not removal.
+        if not file_deleted and head_source is not None:
+            # Search for the function declaration in HEAD
+            if _TEST_FUNC_RE.search(
+                head_source,
+            ) is not None and any(
+                m.group(1) == func_name
+                for m in _TEST_FUNC_RE.finditer(head_source)
+            ):
+                # Function still exists at HEAD — it was modified, not removed
+                continue
+
+        body_start = func_start_line - 1
+        body_end = min(func_end_line, body_start + 10)
+        snippet = "\n".join(base_lines[body_start:body_end])[:200]
+        results.append(RemovedTest(
+            file=path, func_name=func_name, body_snippet=snippet
+        ))
 
     return results
 
@@ -171,7 +197,24 @@ def _find_func_end(lines: list[str], start_idx: int) -> int:
 
 
 def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
-    """Extract production symbol names referenced in removed test bodies."""
+    """Extract production symbol names referenced in removed test bodies.
+
+    Filters out common test/framework/mock identifiers that would cause
+    spurious matches — only production-shaped symbols are returned.
+    """
+    # Symbols that are test infrastructure, not production code
+    _NON_PRODUCTION_SYMBOLS = {
+        "XCTest", "XCTestCase", "XCTestExpectation", "XCTAssert",
+        "XCTAssertEqual", "XCTAssertTrue", "XCTAssertFalse",
+        "XCTAssertNil", "XCTAssertNotNil", "XCTAssertThrowsError",
+        "XCTFail", "XCTUnwrap", "XCTSkip",
+        "Mock", "Stub", "Fake", "Spy",
+        "Foundation", "Combine", "SwiftUI", "UIKit",
+        "Task", "Result", "Error", "Optional",
+        "String", "Int", "Bool", "Double", "Float", "Array", "Dictionary",
+        "Set", "Data", "URL", "Date", "UUID",
+    }
+
     symbols: set[str] = set()
     for test in removed_tests:
         # Look for CamelCase identifiers that look like production types/funcs
@@ -180,6 +223,15 @@ def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
         # Also look for common patterns like `sut.methodName`, `Command.run`
         methods = re.findall(r"\.(\w+)\s*\(", test.body_snippet)
         symbols.update(m for m in methods if len(m) > 2)
+
+    # Filter non-production symbols
+    symbols -= _NON_PRODUCTION_SYMBOLS
+    # Also filter anything starting with Mock/Stub/Fake prefix
+    symbols = {
+        s for s in symbols
+        if not s.startswith("Mock") and not s.startswith("Stub")
+        and not s.startswith("Fake") and not s.startswith("Spy")
+    }
     return symbols
 
 
@@ -189,7 +241,13 @@ def find_related_tests_in_head(
     production_symbols: set[str],
     max_excerpt_bytes: int,
 ) -> list[str]:
-    """Find existing test functions in HEAD that reference the same symbols."""
+    """Find existing test functions in HEAD that reference the same symbols.
+
+    Results are ADVISORY CANDIDATES — symbol co-occurrence is necessary but
+    not sufficient proof of equivalent branch coverage. The reviewer must
+    verify that a candidate actually exercises the same production branch
+    before concluding coverage is preserved.
+    """
     if not production_symbols:
         return []
 
@@ -289,12 +347,14 @@ def build_coverage_evidence(
     Returns non-empty evidence block when tests are removed and related
     coverage exists in HEAD.
     """
-    # Step 1: Find removed test functions
+    # Step 1: Find removed test functions (verified absent from HEAD)
     all_removed: list[RemovedTest] = []
     for path in changed_files:
         if not path.endswith(".swift") and not path.endswith(".py"):
             continue
-        removed = find_removed_test_functions(diff_text, path, base_sha)
+        removed = find_removed_test_functions(
+            diff_text, path, base_sha, head_sha
+        )
         all_removed.extend(removed)
 
     if not all_removed:
@@ -329,10 +389,14 @@ def render_coverage_evidence(
         "COVERAGE CONTEXT（由可信脚本在 base checkout 中，从 exact-HEAD 源码确定性搜索；"
         "PR 代码从未被执行）",
         "",
-        "本 diff 移除了以下测试函数。下方列出 HEAD 中仍存在的、覆盖相同生产路径的测试。",
-        "判断「测试覆盖丢失」时，必须先查看下方已有覆盖再下结论。",
+        "本 diff 移除了以下测试函数（已确认其声明在 HEAD 中不存在）。"
+        "下方列出 HEAD 中仍存在的、引用相同生产符号的测试作为 ADVISORY CANDIDATES。",
         "",
-        "REMOVED TESTS:",
+        "⚠️  ADVISORY — 以下候选测试基于符号共现检索，不等同于等价分支覆盖证明。",
+        "Reviewer 必须验证候选测试确实测试了相同生产分支后，才能判定覆盖未丢失。",
+        "若无法确认等价性，降级为 note，不得判 blocker。",
+        "",
+        "REMOVED TESTS (declaration absent from HEAD):",
     ]
 
     for rt in removed_tests:
@@ -342,7 +406,8 @@ def render_coverage_evidence(
 
     if related_excerpts:
         parts.append(
-            "EXISTING COVERAGE IN HEAD (tests covering the same production symbols):"
+            "CANDIDATE EXISTING COVERAGE IN HEAD "
+            "(tests referencing same production symbols — verify branch equivalence):"
         )
         parts.append("")
         for excerpt in related_excerpts:
@@ -351,7 +416,7 @@ def render_coverage_evidence(
     else:
         parts.append(
             "No related existing tests found in HEAD for the removed symbols. "
-            "This may indicate genuine coverage loss."
+            "This may indicate genuine coverage loss — reviewer should verify."
         )
         parts.append("")
 
