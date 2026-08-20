@@ -302,14 +302,16 @@ run_claude_review_gate() {
         return 1
     fi
     # Validate each blocker has required fields with correct types/values.
+    # If jq errors (e.g. non-object elements in blockers array), output is
+    # empty — that MUST be treated as validation failure, not silently skipped.
     _v_blockers_valid="$(printf %s "$verdict_json" | jq -r '
         [.blockers[] | select(
             (.file | type) != "string" or
             (.severity | . != "critical" and . != "high") or
             (.why | type) != "string"
         )] | length' 2>/dev/null)"
-    if [ -n "$_v_blockers_valid" ] && [ "$_v_blockers_valid" != "0" ]; then
-        echo "[claude-review] ❌ verdict schema 校验失败: $_v_blockers_valid blocker(s) have invalid file/severity/why"
+    if [ -z "$_v_blockers_valid" ] || [ "$_v_blockers_valid" != "0" ]; then
+        echo "[claude-review] ❌ verdict schema 校验失败: blocker(s) have invalid structure (file/severity/why)"
         post_sticky "$STICKY
 ⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
         return 1
@@ -344,6 +346,16 @@ run_claude_review_gate() {
         fi
         printf '\n\n<sub>由本地 claude 自动生成。critical/high = 阻塞合并。</sub>\n'
     )"
+
+    # --- Consistency check: verdict=pass must not carry blockers ---
+    # If the model returns pass but with non-empty critical/high blockers,
+    # this is an inconsistent envelope that must fail-closed (MY-1452).
+    if [ "$verdict" = "pass" ] && [ "$n_block" -gt 0 ]; then
+        echo "[claude-review] ❌ verdict=pass but blockers=$n_block — inconsistent envelope, fail-closed"
+        post_sticky "$STICKY
+⚠️ 自动 review 输出不一致(verdict=pass 但存在 $n_block 个阻塞项)。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
 
     # --- Threshold enforcement ---
     if [ "$verdict" = "changes" ] && [ "$n_block" -gt 0 ]; then
