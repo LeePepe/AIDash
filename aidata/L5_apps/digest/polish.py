@@ -78,11 +78,118 @@ def parse_slots(raw: str) -> PolishSlots:
                        todos=tuple(str(t) for t in todos))
 
 
+def _is_cjk(ch: str) -> bool:
+    """True if *ch* is a CJK ideograph (safe to cut after)."""
+    cp = ord(ch)
+    return (0x4E00 <= cp <= 0x9FFF      # CJK Unified Ideographs
+            or 0x3400 <= cp <= 0x4DBF   # Extension A
+            or 0xF900 <= cp <= 0xFAFF   # Compatibility Ideographs
+            or 0x20000 <= cp <= 0x2A6DF)  # Extension B
+
+
+# Characters that define valid word-boundary cut positions.
+_BREAK_PUNCT = frozenset(":/;,，；：、)）】」—")
+_BREAK_WS = frozenset(" \t\n")
+
+
+def _find_last_boundary(text: str, limit: int) -> int:
+    """Return the last valid cut position k in [1, limit] or -1.
+
+    text[:k] is the kept prefix.  A boundary is: right before whitespace,
+    right after punctuation, or right after a CJK ideograph.
+    """
+    candidate = -1
+    scan_end = min(limit + 1, len(text))
+    for i in range(scan_end):
+        if text[i] in _BREAK_WS:
+            candidate = i
+        elif i > 0 and text[i - 1] in _BREAK_PUNCT:
+            candidate = i
+        elif i > 0 and _is_cjk(text[i - 1]):
+            candidate = i
+    return candidate
+
+
+def _find_first_boundary(text: str, start: int) -> int:
+    """Return the first valid resume position k >= start, or -1.
+
+    text[k:] is the kept suffix.  Skips past whitespace/punctuation to
+    land on the start of a token; for CJK the character itself is a valid
+    resume point.
+    """
+    for i in range(max(start, 0), len(text)):
+        if text[i] in _BREAK_WS:
+            return i + 1
+        if text[i] in _BREAK_PUNCT:
+            return i + 1
+        if _is_cjk(text[i]):
+            return i
+    return -1
+
+
+_SUFFIX = " …"       # 2 chars — appended when head-only
+_SEPARATOR = " … "   # 3 chars — joins head and tail
+_OMISSION = "… [oversized token omitted]"
+
+
 def truncate(text: str, n: int) -> str:
-    """Hard char cap; append an ellipsis when the text was cut."""
+    """Boundary-aware truncation with head + tail retention.
+
+    Strategy (in priority order):
+    1. **Head + tail**: keep the problem-object prefix *and* the actionable
+       cue at the end, joined by ' … '.  Head gets ~60 % of the budget,
+       tail gets ~40 %.  Both cuts land on a word boundary.
+    2. **Head-only**: when no clean tail boundary exists but the head
+       boundary retains >= 60 % of the budget.
+    3. **Explicit omission**: when no boundary exists at all (indivisible
+       token) or the only boundary is too early (< 60 % retention), emit an
+       omission marker without copying a partial token.  If a complete prefix
+       exists, retain that prefix before the marker.
+
+    Word boundaries: spaces, common punctuation (:/;,)…), and CJK
+    ideographs (individually addressable — any inter-CJK position is valid).
+    ASCII identifiers are never split mid-word when a boundary exists.
+    """
+    if n <= 0:
+        return ""
     if len(text) <= n:
         return text
-    return text[: n - 1] + "…"
+    max_body = n - len(_SUFFIX)          # max text chars for head-only path
+    if max_body <= 0:
+        return "…"
+
+    # --- 1. head + tail ---------------------------------------------------
+    if n >= 10:
+        avail = n - len(_SEPARATOR)      # chars available for head + tail
+        head_budget = avail * 3 // 5     # ~60 % for head
+        tail_budget = avail - head_budget
+
+        hb = _find_last_boundary(text, head_budget)
+        if hb > 0:
+            head = text[:hb].rstrip()
+            tail_start = max(len(text) - tail_budget, hb)
+            tb = _find_first_boundary(text, tail_start)
+            if 0 < tb < len(text):
+                tail = text[tb:]
+                result = head + _SEPARATOR + tail
+                if len(result) <= n:
+                    return result
+
+    # --- 2. head-only (good retention) ------------------------------------
+    hb = _find_last_boundary(text, max_body)
+    if hb > 0 and hb >= max_body * 6 // 10:
+        return text[:hb].rstrip() + _SUFFIX
+
+    # --- 3. explicit omission (indivisible / early boundary) --------------
+    # Never hard-cut a boundary-free ASCII identifier: a partial identifier
+    # is misleading, while an explicit omission is honest and retry-safe.
+    if hb > 0:
+        result = text[:hb].rstrip() + " " + _OMISSION
+        if len(result) <= n:
+            return result
+    if len(_OMISSION) <= n:
+        return _OMISSION
+    return "…"
 
 
 def apply_slots(template_md: str, slots: PolishSlots) -> str:

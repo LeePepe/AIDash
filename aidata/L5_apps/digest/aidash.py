@@ -36,6 +36,7 @@ from L5_apps.digest.card_policy import (
     FIRST_SCREEN_CARDS, MAX_ACTIONS, MAX_CARDS,
     CardCandidate, DataProfile, choose_card, select_with_budget,
 )
+from L5_apps.digest.polish import MAX_TODO, truncate
 from L5_apps.digest.cst import yesterday
 from L5_apps.digest.trends import compute_trend
 
@@ -179,7 +180,7 @@ def _todo_items(todo_lines: list[str]) -> list[dict]:
                 prio = mapped
                 text = text[len(tag):].lstrip(": ").strip()
                 break
-        items.append({"title": text, "priority": prio})
+        items.append({"title": truncate(text, MAX_TODO), "priority": prio})
     return items
 
 
@@ -577,7 +578,7 @@ def _prose_containers(mmdd: str,
     # 今日规划 → real action inbox (§M3, goal ② 需要处理什么) when available,
     # else fall back to the markdown 今日 TODO section. The inbox merges stalls
     # / decisions / planned work / findings into one prioritized list.
-    inbox = [{"title": it.title, "priority": it.priority} for it in (inbox_items or [])]
+    inbox = [{"title": truncate(it.title, MAX_TODO), "priority": it.priority} for it in (inbox_items or [])]
     todos = _capped_actions(inbox or _todo_items(_section(sections, "今日 TODO")))
     if todos:
         out.append(Container(_cuid(mmdd, 4), "今日规划", 40,
