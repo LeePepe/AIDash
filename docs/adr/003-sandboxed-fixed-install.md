@@ -252,76 +252,106 @@ The installer must verify both store-independent and store-dependent XPC
 operation after signing and installing the bundle. Two probes are required,
 run sequentially.
 
-#### 30-second timeout runner (stock macOS, no `timeout(1)`)
+#### 30-second timeout runner (stock macOS `/usr/bin/perl`)
 
-Stock macOS does not ship GNU `timeout`. The runner uses temp files for
-stdout/stderr capture so the watcher subprocess cannot inherit or retain
-command-substitution file descriptors.
+Stock macOS does not ship GNU `timeout`. The shell-based watcher/sleep
+approach has fundamental flaws: the watcher sleeps the full timeout even
+on immediate success, and after `wait` reaps the child PID, the OS can
+reassign that PID to an unrelated process which the watcher then kills.
 
-**Race-safe timeout ownership protocol:** The watcher must atomically
-claim timeout ownership AND successfully signal a still-live child before
-the parent reads the timeout sentinel. A standalone `kill -0` check or a
-non-atomic sentinel file is insufficient — the child could exit between
-check and kill. The protocol uses atomic `mkdir` as the ownership claim:
+The runner instead uses a single `/usr/bin/perl` supervisor process
+(guaranteed on stock macOS 26). The parent `fork`s the child, sets
+`alarm`, and calls `waitpid`. Because the parent **owns the unreaped
+child PID throughout**, PID reuse is impossible. Immediate success
+returns immediately (no sleeping watcher to cancel). No watcher/sleep
+subprocess is created at all.
 
-1. After `sleep`, the watcher attempts `mkdir "$claim_dir"` (atomic on
-   POSIX filesystems). If `mkdir` fails, the child already exited and
-   the parent already cleaned up — the watcher exits without claiming
-   timeout.
-2. If `mkdir` succeeds, the watcher owns the timeout path. It sends
-   `kill -TERM "$pid"`. If `kill` fails (child already exited), the
-   watcher removes the claim dir and exits — no false timeout.
-3. If `kill` succeeds, the watcher leaves the claim dir in place as the
-   timeout sentinel, then exits.
-4. The parent `wait`s for the child, then `wait`s for the watcher to
-   ensure the watcher has finalized its state before reading the claim
-   dir. The parent never kills the watcher between signal and state
-   commit — it always lets the watcher run to completion.
-5. If the claim dir exists after the watcher exits, the parent returns
-   124 (timeout). Otherwise it returns the child's real exit status.
+**Protocol:**
+
+1. Parent opens stdout/stderr files, `fork`s, and calls `alarm($limit)`.
+2. Child `exec`s the command with stdout/stderr redirected to the files.
+3. Parent blocks on `waitpid($pid, 0)`.
+4. If `SIGALRM` fires first, the handler calls `waitpid($pid, WNOHANG)`.
+   If the child has already exited (was reaped), the handler preserves
+   that exit status and clears the timeout flag — **no false timeout**.
+   Otherwise the child is still alive: mark timeout, `kill(KILL, $pid)`,
+   and `waitpid` to reap.
+5. After `waitpid` returns in the main loop, the parent exits with 124
+   if the timeout flag won, `WEXITSTATUS` for normal exit, or
+   `128 + WTERMSIG` for signal death.
+6. All `fork`/`open`/`exec`/`waitpid` failures are fatal (`die`).
 
 ```bash
 # run_with_timeout SECONDS STDOUT_FILE STDERR_FILE CMD [ARGS...]
 # Writes child stdout/stderr to the named files.
-# Returns: child exit status, or 124 only when the watcher atomically
-#          claimed timeout ownership and successfully signaled the child.
+# Returns: child exit status, or 124 on timeout.
 run_with_timeout() {
-    local limit=$1 out_file=$2 err_file=$3; shift 3
-    local claim_dir
-    claim_dir="/tmp/aidash_timeout_claim.$$.$RANDOM"
+    /usr/bin/perl -e '
+use strict;
+use warnings;
+use POSIX qw(WNOHANG WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG);
 
-    "$@" >"$out_file" 2>"$err_file" &
-    local pid=$!
+my $limit    = shift @ARGV or die "usage: run_with_timeout LIMIT OUT ERR CMD...\n";
+my $out_file = shift @ARGV or die "missing stdout file\n";
+my $err_file = shift @ARGV or die "missing stderr file\n";
+@ARGV or die "missing command\n";
 
-    # Watcher: redirect own I/O to /dev/null so it cannot hold
-    # any inherited fd open after the child exits.
-    ( exec >/dev/null 2>/dev/null
-      sleep "$limit"
-      # Step 1: atomically claim timeout ownership
-      mkdir "$claim_dir" 2>/dev/null || exit 0  # lost race — child done
-      # Step 2: signal the child; if it already exited, unclaim
-      if ! kill -TERM "$pid" 2>/dev/null; then
-          rmdir "$claim_dir" 2>/dev/null
-          exit 0  # child exited between mkdir and kill — no timeout
-      fi
-      # Step 3: kill succeeded — leave claim_dir as timeout sentinel
-    ) &
-    local watcher=$!
+open(my $out_fh, ">", $out_file) or die "open $out_file: $!\n";
+open(my $err_fh, ">", $err_file) or die "open $err_file: $!\n";
 
-    wait "$pid" 2>/dev/null
-    local rc=$?
+my $timed_out   = 0;
+my $reaped_rc;          # set if SIGALRM handler reaps the child early
 
-    # Step 4: let the watcher finalize — never kill it between signal
-    # and state commit. The watcher is guaranteed to exit promptly
-    # after sleep + at most two syscalls.
-    wait "$watcher" 2>/dev/null
+my $pid = fork();
+defined $pid or die "fork: $!\n";
 
-    # Step 5: read the finalized timeout state.
-    if [ -d "$claim_dir" ]; then
-        rmdir "$claim_dir" 2>/dev/null
-        return 124
-    fi
-    return $rc
+if ($pid == 0) {
+    # Child: redirect stdout/stderr, exec command
+    open(STDOUT, ">&", $out_fh) or die "dup stdout: $!\n";
+    open(STDERR, ">&", $err_fh) or die "dup stderr: $!\n";
+    exec @ARGV or die "exec $ARGV[0]: $!\n";
+}
+
+# Parent: close file handles (child owns them now)
+close $out_fh;
+close $err_fh;
+
+$SIG{ALRM} = sub {
+    # Try non-blocking reap: if child already exited, preserve its status
+    my $w = waitpid($pid, WNOHANG);
+    if ($w == $pid) {
+        # Child already exited — NOT a timeout
+        if    (WIFEXITED($?))   { $reaped_rc = WEXITSTATUS($?); }
+        elsif (WIFSIGNALED($?)) { $reaped_rc = 128 + WTERMSIG($?); }
+        else                    { $reaped_rc = 255; }
+        return;  # main waitpid will see -1 / already reaped
+    }
+    # Child still alive — real timeout
+    $timed_out = 1;
+    kill("KILL", $pid) or die "kill $pid: $!\n";
+    waitpid($pid, 0);  # reap the killed child
+};
+
+alarm($limit);
+my $w = waitpid($pid, 0);
+alarm(0);  # cancel alarm if child exited before timeout
+
+my $rc;
+if (defined $reaped_rc) {
+    # SIGALRM handler already reaped — use its captured status
+    $rc = $reaped_rc;
+} elsif ($timed_out) {
+    $rc = 124;
+} elsif ($w == $pid) {
+    if    (WIFEXITED($?))   { $rc = WEXITSTATUS($?); }
+    elsif (WIFSIGNALED($?)) { $rc = 128 + WTERMSIG($?); }
+    else                    { $rc = 255; }
+} else {
+    die "waitpid returned unexpected $w: $!\n";
+}
+
+exit $rc;
+' "$@"
 }
 ```
 
