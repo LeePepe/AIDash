@@ -223,6 +223,7 @@ review_evidence_rules() {
 
 # Coverage-discipline clause (MY-1456): prevents false "missing test coverage"
 # blockers when tests are removed but equivalent coverage exists at HEAD.
+# Matches are ADVISORY candidates — reviewer must verify branch equivalence.
 review_coverage_rules() {
     printf '%s\n' \
 '【证据纪律 —— 测试覆盖判定】' \
@@ -232,15 +233,15 @@ review_coverage_rules() {
 '确实无其他测试。' \
 '' \
 '所以:' \
-'- 「改了源码却没有对应测试改动」的 blocker 条件 #4,其前提是**真的没有覆盖**,而不是' \
-'  「diff 里看不到覆盖」。如果 COVERAGE CONTEXT 列出了覆盖同一生产符号的 existing tests,' \
-'  那么覆盖并未丢失,该条件不满足,**不得**报 blocker。' \
+'- COVERAGE CONTEXT 中列出的候选测试基于符号共现检索,是 advisory candidates。' \
+'  Reviewer 必须验证候选测试确实测试了相同生产分支后,才能判定覆盖未丢失。' \
+'  但若无法确认,结论是降级为 note,**不是升级为 blocker**。' \
 '- 要报「移除测试后覆盖丢失」的 blocker,你**必须**提供具体证据:指出哪条生产分支/函数' \
 '  在 full-HEAD 中已无任何 test 调用。给不出 file:line 证据 = 不得报 blocker,最多 note。' \
 '- 被移除的测试如果测试的是**已不存在的 API**(如旧的 throw 路径被 refactor 掉),其移除' \
 '  不构成覆盖降级——这是清理死代码,不是删保护网。' \
-'- COVERAGE CONTEXT 中标注的 existing tests 是由可信脚本从 HEAD 中确定性搜索得到的;' \
-'  若其中已包含覆盖目标生产路径的测试,差异只是 diff 未展示——那是 diff 范围限制,' \
-'  不是覆盖缺失。' \
+'- COVERAGE CONTEXT 中标注 "declaration absent from HEAD" 的 removed tests 已由可信脚本' \
+'  验证确实从 HEAD 中消失(不是仅修改)。若一个 test function 仅被修改而非删除,' \
+'  它不会出现在 REMOVED TESTS 列表中。' \
 '- 不确定一律降级为 note。'
 }

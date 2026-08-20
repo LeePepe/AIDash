@@ -15,7 +15,6 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from coverage_context import (  # noqa: E402
-    CoverageEvidence,
     RemovedTest,
     build_coverage_evidence,
     extract_production_symbols,
@@ -118,15 +117,21 @@ final class BriefingPutCommandTests: XCTestCase {
 """
 
 
-def _stub_git(monkeypatch, file_map):
-    """Stub git to return sources from a dict of path→content."""
+def _stub_git(monkeypatch, file_map, base_file_map=None):
+    """Stub git to return sources from a dict of path→content.
+
+    file_map is used for HEAD (default). base_file_map is used for base SHA
+    lookups; if None, HEAD map is used for both.
+    """
     import coverage_context
 
     def fake_run_git(args):
         if args[0] == "show":
             # git show <sha>:<path>
             ref_path = args[1]
-            path = ref_path.split(":", 1)[-1] if ":" in ref_path else ""
+            sha_part, _, path = ref_path.partition(":")
+            if base_file_map and sha_part == "base123":
+                return base_file_map.get(path)
             return file_map.get(path)
         if args[0] == "ls-tree":
             return "\n".join(file_map.keys())
@@ -153,7 +158,7 @@ def test_removed_line_numbers_ignores_other_files():
 
 
 def test_find_removed_test_functions_detects_obsolete_tests(monkeypatch):
-    # Stub git to return the base-version source that includes the removed tests
+    # Stub git: BASE has the removed tests, HEAD does NOT have them (truly removed)
     base_source = EXISTING_TEST_SOURCE + """
     func testPublishThrowsOnNetworkError() async throws {
         // OBSOLETE: old API threw on network error
@@ -174,18 +179,78 @@ def test_find_removed_test_functions_detects_obsolete_tests(monkeypatch):
     }
 }
 """
+    # HEAD source: only the existing tests remain (removed tests are absent)
+    head_source = EXISTING_TEST_SOURCE
+
     import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref_path = args[1]
+            if ref_path.startswith("base123:"):
+                return base_source
+            if ref_path.startswith("head456:"):
+                return head_source
+        return None
+
     monkeypatch.setattr(
-        coverage_context, "run_git",
-        lambda args: base_source if "show" in args[0] else None,
-        raising=True,
+        coverage_context, "run_git", fake_run_git, raising=True
     )
 
     path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
-    removed = find_removed_test_functions(REMOVAL_DIFF, path, "base123")
+    removed = find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
     func_names = [r.func_name for r in removed]
     assert "testPublishThrowsOnNetworkError" in func_names
     assert "testPublishThrowsOnInvalidPayload" in func_names
+
+
+def test_find_removed_test_functions_ignores_modified_not_removed(monkeypatch):
+    """A function that has removed lines but still exists at HEAD is not 'removed'."""
+    base_source = EXISTING_TEST_SOURCE + """
+    func testPublishThrowsOnNetworkError() async throws {
+        // Old implementation
+        let client = MockAPIClient(throwing: NetworkError.timeout)
+        let cmd = BriefingPublishCommand(client: client)
+        do {
+            _ = try await cmd.run()
+            XCTFail("should have thrown")
+        } catch {
+            XCTAssertTrue(error is NetworkError)
+        }
+    }
+}
+"""
+    # HEAD still has the function (it was modified, not removed)
+    head_source = EXISTING_TEST_SOURCE + """
+    func testPublishThrowsOnNetworkError() async throws {
+        // Refactored: now tests the new API
+        let client = MockAPIClient(response: .init(ok: false, error: "timeout"))
+        let cmd = BriefingPublishCommand(client: client)
+        let result = try await cmd.run()
+        XCTAssertEqual(result, .failure("timeout"))
+    }
+}
+"""
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref_path = args[1]
+            if ref_path.startswith("base123:"):
+                return base_source
+            if ref_path.startswith("head456:"):
+                return head_source
+        return None
+
+    monkeypatch.setattr(
+        coverage_context, "run_git", fake_run_git, raising=True
+    )
+
+    path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
+    removed = find_removed_test_functions(REMOVAL_DIFF, path, "base123", "head456")
+    # testPublishThrowsOnNetworkError still exists at HEAD — not reported as removed
+    func_names = [r.func_name for r in removed]
+    assert "testPublishThrowsOnNetworkError" not in func_names
 
 
 def test_extract_production_symbols_finds_relevant_types():
@@ -199,6 +264,21 @@ def test_extract_production_symbols_finds_relevant_types():
     symbols = extract_production_symbols(removed)
     assert "BriefingPublishCommand" in symbols
     assert "run" in symbols
+    # Mock/framework symbols should be filtered out
+    assert "MockAPIClient" not in symbols
+
+
+def test_extract_production_symbols_filters_framework_symbols():
+    removed = [
+        RemovedTest(
+            file="Tests/FooTests.swift",
+            func_name="testSomething",
+            body_snippet="XCTAssertEqual(result, .failure)\nlet mock = MockService()",
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+    assert "XCTAssertEqual" not in symbols
+    assert "MockService" not in symbols
 
 
 def test_render_coverage_evidence_includes_removed_and_existing():
@@ -216,7 +296,8 @@ def test_render_coverage_evidence_includes_removed_and_existing():
     assert "COVERAGE CONTEXT" in result
     assert "testOldThrowPath" in result
     assert "testNewCoverage" in result
-    assert "EXISTING COVERAGE IN HEAD" in result
+    assert "CANDIDATE EXISTING COVERAGE" in result
+    assert "ADVISORY" in result
 
 
 def test_render_coverage_evidence_empty_when_no_removed():
@@ -241,12 +322,42 @@ def test_full_pipeline_surfaces_existing_coverage(monkeypatch):
     """The main false-positive shape from MY-1456: obsolete throw-path tests
     are removed, but returned-ok=false coverage exists at HEAD. The coverage
     context must surface testPublishReturnedFalse as existing coverage."""
-    file_map = {
+
+    # HEAD file map: the existing tests remain, obsolete ones are gone
+    head_file_map = {
         "CLI/aidash/Tests/BriefingPublishCommandTests.swift": EXISTING_TEST_SOURCE,
         "CLI/aidash/Sources/BriefingPublishCommand.swift": PROD_SOURCE,
         "CLI/aidash/Tests/BriefingPutCommandTests.swift": BRIEFING_PUT_TEST_SOURCE,
     }
-    _stub_git(monkeypatch, file_map)
+
+    # BASE file map: includes the obsolete tests that were removed
+    base_test_source = EXISTING_TEST_SOURCE.rstrip().rstrip("}") + """
+    func testPublishThrowsOnNetworkError() async throws {
+        // OBSOLETE: old API threw on network error
+        let client = MockAPIClient(throwing: NetworkError.timeout)
+        let cmd = BriefingPublishCommand(client: client)
+        do {
+            _ = try await cmd.run()
+            XCTFail("should have thrown")
+        } catch {
+            XCTAssertTrue(error is NetworkError)
+        }
+    }
+
+    func testPublishThrowsOnInvalidPayload() async throws {
+        let client = MockAPIClient(throwing: ValidationError.invalid)
+        let cmd = BriefingPublishCommand(client: client)
+        await XCTAssertThrowsError(try await cmd.run())
+    }
+}
+"""
+    base_file_map = {
+        "CLI/aidash/Tests/BriefingPublishCommandTests.swift": base_test_source,
+        "CLI/aidash/Sources/BriefingPublishCommand.swift": PROD_SOURCE,
+        "CLI/aidash/Tests/BriefingPutCommandTests.swift": BRIEFING_PUT_TEST_SOURCE,
+    }
+
+    _stub_git(monkeypatch, head_file_map, base_file_map)
 
     result = build_coverage_evidence(
         head_sha="ef2754a",
@@ -258,9 +369,9 @@ def test_full_pipeline_surfaces_existing_coverage(monkeypatch):
         ],
     )
 
-    # The coverage context must mention existing tests
+    # The coverage context must mention existing tests as advisory candidates
     assert "COVERAGE CONTEXT" in result
-    assert "testPublishReturnedFalse" in result or "EXISTING COVERAGE" in result
+    assert "testPublishReturnedFalse" in result or "CANDIDATE EXISTING COVERAGE" in result
 
 
 def test_no_removed_tests_yields_empty(monkeypatch):
