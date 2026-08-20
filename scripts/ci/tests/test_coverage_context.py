@@ -18,6 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from coverage_context import (  # noqa: E402
     AnalysisError,
+    COVERAGE_MAX_TOTAL_BYTES,
     RemovedTest,
     build_coverage_evidence,
     extract_production_symbols,
@@ -1477,3 +1478,317 @@ def test_build_with_config():
     assert "test_build_with_config" in combined
     # Verify the symbol AFTER the dict is visible in the extracted body
     assert "build_coverage_evidence" in combined
+
+
+# --- Repair #1: indented pytest class methods ---
+
+
+class TestPythonClassMethods:
+    """_PYTHON_TEST_FUNC_RE must recognize indented pytest class methods."""
+
+    def test_indented_method_in_class(self):
+        source = """\
+class TestCoverage:
+    def test_class_method(self):
+        assert True
+
+    def test_another(self):
+        pass
+"""
+        results = _find_all_test_functions(source)
+        names = [n for n, _ in results]
+        assert "test_class_method" in names
+        assert "test_another" in names
+
+    def test_indented_async_method_in_class(self):
+        source = """\
+class TestAsync:
+    async def test_async_class_method(self):
+        result = await something()
+        assert result is not None
+"""
+        results = _find_all_test_functions(source)
+        names = [n for n, _ in results]
+        assert "test_async_class_method" in names
+
+    def test_deeply_indented_method(self):
+        source = """\
+class TestOuter:
+    class TestInner:
+        def test_deep(self):
+            pass
+"""
+        results = _find_all_test_functions(source)
+        names = [n for n, _ in results]
+        assert "test_deep" in names
+
+    def test_find_func_end_indented_class_method(self):
+        """_find_func_end must compute correct body bounds for indented methods."""
+        lines = [
+            "    def test_class_method(self):",
+            "        result = compute()",
+            "        assert result == 42",
+            "",
+            "    def test_other(self):",
+            "        pass",
+        ]
+        end = _find_func_end(lines, 0, "tests/test_foo.py")
+        # Body is lines 1-3 (0-indexed); 1-based end = 3
+        assert end == 3
+
+
+# --- Repair #2: full_body for symbol extraction ---
+
+
+def test_extract_production_symbols_uses_full_body():
+    """Symbols after character 200 must be found when full_body is provided."""
+    # body_snippet is truncated at 200 chars — won't contain DistantSymbol
+    short_snippet = "x" * 200
+    # full_body contains the real symbol well past char 200
+    full_body = "x" * 300 + "\nlet sut = DistantSymbol()\nsut.execute()"
+    removed = [
+        RemovedTest(
+            file="Tests/Foo.swift",
+            func_name="testSomething",
+            body_snippet=short_snippet,
+            full_body=full_body,
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+    assert "DistantSymbol" in symbols
+    assert "execute" in symbols
+
+
+def test_extract_production_symbols_fallback_to_snippet():
+    """When full_body is empty (backward compat), falls back to body_snippet."""
+    removed = [
+        RemovedTest(
+            file="Tests/Foo.swift",
+            func_name="testOld",
+            body_snippet="let cmd = OldCommand()\ncmd.run()",
+            full_body="",
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+    assert "OldCommand" in symbols
+    assert "run" in symbols
+
+
+# --- Repair #3: framework/stdlib identifier filtering ---
+
+
+def test_extract_filters_xctest_no_throw():
+    """XCTAssertNoThrow must be filtered as a framework identifier."""
+    removed = [
+        RemovedTest(
+            file="Tests/Foo.swift",
+            func_name="testNoThrow",
+            body_snippet="XCTAssertNoThrow(try sut.validate())",
+            full_body="XCTAssertNoThrow(try sut.validate())\nlet s = MyService()",
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+    assert "XCTAssertNoThrow" not in symbols
+    # Production symbols preserved
+    assert "MyService" in symbols
+
+
+def test_extract_filters_json_decoder_and_url_session():
+    """JSONDecoder and URLSession must be filtered as stdlib identifiers."""
+    removed = [
+        RemovedTest(
+            file="Tests/Foo.swift",
+            func_name="testDecode",
+            body_snippet="let d = JSONDecoder()\nlet s = URLSession.shared",
+            full_body="let d = JSONDecoder()\nlet s = URLSession.shared\nlet cmd = BriefingCommand()",
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+    assert "JSONDecoder" not in symbols
+    assert "URLSession" not in symbols
+    # Production symbol preserved
+    assert "BriefingCommand" in symbols
+
+
+def test_extract_does_not_filter_genuine_domain_types():
+    """Genuine domain types like JSONParser (custom) must not be filtered."""
+    removed = [
+        RemovedTest(
+            file="Tests/Foo.swift",
+            func_name="testCustom",
+            body_snippet="let p = BriefingJSONParser()",
+            full_body="let p = BriefingJSONParser()\nlet u = URLBuilder()",
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+    # Custom types with similar-looking names are preserved
+    assert "BriefingJSONParser" in symbols
+    assert "URLBuilder" in symbols
+
+
+# --- Repair #4: UTF-8 byte cap on outer file scan ---
+
+
+def test_byte_cap_stops_outer_file_scan(monkeypatch):
+    """find_related_tests_in_head must stop scanning across files once
+    COVERAGE_MAX_TOTAL_BYTES is reached, and emit exactly one omission marker
+    whose bytes are included in the budget."""
+    import coverage_context
+
+    # Generate test sources that together exceed the byte cap
+    # Each file has one test function with a large body
+    large_body = "a" * 30_000  # 30KB per function body
+    file_template = (
+        "import XCTest\n"
+        "final class File{n}Tests: XCTestCase {{\n"
+        "    func testBig{n}() {{\n"
+        "        let cmd = TargetSymbol()\n"
+        "        {body}\n"
+        "    }}\n"
+        "}}\n"
+    )
+    # 4 files × 30KB = 120KB > 80KB cap
+    file_map = {}
+    file_list = []
+    for i in range(4):
+        path = f"Tests/File{i}Tests.swift"
+        file_map[path] = file_template.format(n=i, body=large_body)
+        file_list.append(path)
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref_path = args[1]
+            path = ref_path.split(":", 1)[1]
+            return file_map.get(path)
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "\n".join(file_map.keys())
+            return ""
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    excerpts = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=file_list,
+        production_symbols={"TargetSymbol"},
+        max_excerpt_bytes=50_000,
+    )
+
+    # Must have the omission marker
+    combined = "\n".join(excerpts)
+    assert "cap reached" in combined
+
+    # Total output bytes must not exceed COVERAGE_MAX_TOTAL_BYTES
+    total_output_bytes = sum(
+        len(e.encode("utf-8", "replace")) for e in excerpts
+    )
+    assert total_output_bytes <= coverage_context.COVERAGE_MAX_TOTAL_BYTES, (
+        f"Total output {total_output_bytes} exceeds cap "
+        f"{coverage_context.COVERAGE_MAX_TOTAL_BYTES}"
+    )
+
+    # Should NOT have all 4 files' tests (budget should cut it short)
+    assert len(excerpts) < 4 + 1  # at most some excerpts + 1 marker
+
+
+def test_byte_cap_multibyte_characters(monkeypatch):
+    """Byte cap must account for multibyte UTF-8 characters correctly."""
+    import coverage_context
+
+    # Chinese characters are 3 bytes each in UTF-8
+    # 27_000 chars × 3 bytes = 81_000 bytes > 80_000 cap
+    multibyte_body = "\u4e2d" * 27_000
+    source = (
+        "import XCTest\n"
+        "final class MultibyteTests: XCTestCase {\n"
+        "    func testMultibyte() {\n"
+        f"        let cmd = TargetSymbol() // {multibyte_body}\n"
+        "    }\n"
+        "}\n"
+    )
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            return source
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "Tests/MultibyteTests.swift"
+            return "100644 blob abc\tTests/MultibyteTests.swift"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    excerpts = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=["Tests/MultibyteTests.swift"],
+        production_symbols={"TargetSymbol"},
+        max_excerpt_bytes=50_000,
+    )
+
+    # The single excerpt exceeds max_excerpt_bytes, so it gets truncated,
+    # but the total must still respect COVERAGE_MAX_TOTAL_BYTES
+    total_output_bytes = sum(
+        len(e.encode("utf-8", "replace")) for e in excerpts
+    )
+    assert total_output_bytes <= coverage_context.COVERAGE_MAX_TOTAL_BYTES
+
+
+def test_byte_cap_multi_file_stops_at_cap(monkeypatch):
+    """Outer file loop must break when budget is exhausted, not just the
+    inner function loop."""
+    import coverage_context
+
+    # Create files where the first file alone exceeds half the budget
+    # and the second file should trigger the cap
+    file1_body = "x" * 45_000
+    file2_body = "y" * 45_000
+    file1 = (
+        "import XCTest\n"
+        "final class File1Tests: XCTestCase {\n"
+        "    func testFile1() {\n"
+        f"        let cmd = Target() // {file1_body}\n"
+        "    }\n"
+        "}\n"
+    )
+    file2 = (
+        "import XCTest\n"
+        "final class File2Tests: XCTestCase {\n"
+        "    func testFile2() {\n"
+        f"        let cmd = Target() // {file2_body}\n"
+        "    }\n"
+        "}\n"
+    )
+
+    file_map = {
+        "Tests/File1Tests.swift": file1,
+        "Tests/File2Tests.swift": file2,
+    }
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            path = args[1].split(":", 1)[1]
+            return file_map.get(path)
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "\n".join(file_map.keys())
+            return ""
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    excerpts = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=["Tests/File1Tests.swift", "Tests/File2Tests.swift"],
+        production_symbols={"Target"},
+        max_excerpt_bytes=50_000,
+    )
+
+    # Must have the omission marker (second file should trigger cap)
+    combined = "\n".join(excerpts)
+    assert "cap reached" in combined
+
+    total_output_bytes = sum(
+        len(e.encode("utf-8", "replace")) for e in excerpts
+    )
+    assert total_output_bytes <= coverage_context.COVERAGE_MAX_TOTAL_BYTES

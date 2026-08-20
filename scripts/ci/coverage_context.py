@@ -66,7 +66,7 @@ _SWIFT_TESTING_FUNC_RE = re.compile(
     r"^\s*@Test(?:\(.*?\))?\s+func\s+(\w+)\s*\(", re.MULTILINE
 )
 _PYTHON_TEST_FUNC_RE = re.compile(
-    r"^(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE
+    r"^[ \t]*(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE
 )
 
 
@@ -103,7 +103,8 @@ COVERAGE_MAX_TOTAL_BYTES = 80_000
 class RemovedTest(NamedTuple):
     file: str
     func_name: str
-    body_snippet: str  # first ~200 chars of the removed test body
+    body_snippet: str  # first ~200 chars of the removed test body (display)
+    full_body: str = ""  # bounded full body for symbol extraction
 
 
 class CoverageEvidence(NamedTuple):
@@ -272,8 +273,11 @@ def find_removed_test_functions(
         snippet = "\n".join(base_lines[body_start:body_end])[:200]
         # Sanitize snippet — base content is also PR-controlled in principle
         snippet = sanitize_untrusted_content(snippet)
+        # Full bounded body for symbol extraction (up to func_end_line)
+        full_body = "\n".join(base_lines[body_start:func_end_line])
         results.append(RemovedTest(
-            file=path, func_name=func_name, body_snippet=snippet
+            file=path, func_name=func_name, body_snippet=snippet,
+            full_body=full_body,
         ))
 
     return results
@@ -340,6 +344,9 @@ def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
 
     Filters out common test/framework/mock identifiers that would cause
     spurious matches — only production-shaped symbols are returned.
+
+    Uses the bounded full_body (entire function) rather than the truncated
+    body_snippet, so symbols appearing after character 200 remain visible.
     """
     # Symbols that are test infrastructure, not production code
     _NON_PRODUCTION_SYMBOLS = {
@@ -347,6 +354,7 @@ def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
         "XCTest", "XCTestCase", "XCTestExpectation", "XCTAssert",
         "XCTAssertEqual", "XCTAssertTrue", "XCTAssertFalse",
         "XCTAssertNil", "XCTAssertNotNil", "XCTAssertThrowsError",
+        "XCTAssertNoThrow",
         "XCTFail", "XCTUnwrap", "XCTSkip",
         # Swift Testing framework
         "Test", "Testing", "Suite", "Tag", "Trait",
@@ -358,15 +366,24 @@ def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
         "Task", "Result", "Error", "Optional",
         "String", "Int", "Bool", "Double", "Float", "Array", "Dictionary",
         "Set", "Data", "URL", "Date", "UUID",
+        # Common stdlib/framework types that are not production-specific
+        "JSONDecoder", "JSONEncoder", "URLSession", "URLRequest",
+        "URLResponse", "HTTPURLResponse",
+        "DispatchQueue", "OperationQueue",
+        "NotificationCenter", "UserDefaults",
+        "FileManager", "Bundle", "ProcessInfo",
     }
 
     symbols: set[str] = set()
     for test in removed_tests:
+        # Use full_body for symbol extraction; fall back to body_snippet
+        # for backward compatibility with manually-constructed RemovedTest
+        source_text = test.full_body if test.full_body else test.body_snippet
         # Look for CamelCase identifiers that look like production types/funcs
-        words = re.findall(r"\b([A-Z]\w{2,})\b", test.body_snippet)
+        words = re.findall(r"\b([A-Z]\w{2,})\b", source_text)
         symbols.update(words)
         # Also look for common patterns like `sut.methodName`, `Command.run`
-        methods = re.findall(r"\.(\w+)\s*\(", test.body_snippet)
+        methods = re.findall(r"\.(\w+)\s*\(", source_text)
         symbols.update(m for m in methods if len(m) > 2)
 
     # Filter non-production symbols
@@ -392,14 +409,29 @@ def find_related_tests_in_head(
     not sufficient proof of equivalent branch coverage. The reviewer must
     verify that a candidate actually exercises the same production branch
     before concluding coverage is preserved.
+
+    Enforces COVERAGE_MAX_TOTAL_BYTES across ALL files — stops scanning
+    entirely once the cap is reached, emitting one omission marker whose
+    byte cost is pre-reserved in the budget.
     """
     if not production_symbols:
         return []
 
+    # Pre-reserve bytes for the omission marker so it always fits.
+    _OMISSION_MARKER = (
+        f"[additional matching tests omitted — "
+        f"{COVERAGE_MAX_TOTAL_BYTES}-byte cap reached]"
+    )
+    _OMISSION_BYTES = len(_OMISSION_MARKER.encode("utf-8", "replace"))
+
     excerpts: list[str] = []
     total_bytes = 0
+    budget_exceeded = False
 
     for test_file in test_files:
+        if budget_exceeded:
+            break
+
         source = run_git(["show", f"{head_sha}:{test_file}"])
         if source is None:
             raise AnalysisError(
@@ -439,11 +471,11 @@ def find_related_tests_in_head(
                 excerpt = excerpt[:max_excerpt_bytes] + "\n[truncated]"
                 excerpt_bytes = max_excerpt_bytes
 
-            if total_bytes + excerpt_bytes > COVERAGE_MAX_TOTAL_BYTES:
-                excerpts.append(
-                    f"[additional matching tests omitted — "
-                    f"{COVERAGE_MAX_TOTAL_BYTES}-byte cap reached]"
-                )
+            # Check total cap (reserve space for omission marker)
+            if total_bytes + excerpt_bytes + _OMISSION_BYTES > COVERAGE_MAX_TOTAL_BYTES:
+                excerpts.append(_OMISSION_MARKER)
+                total_bytes += _OMISSION_BYTES
+                budget_exceeded = True
                 break
 
             excerpts.append(excerpt)
