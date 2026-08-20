@@ -24,5 +24,24 @@ enum RunMode: Equatable {
             || env["XCTestBundlePath"] != nil { return .testHost }
         return .gui
     }
+
+    /// Which container loader strategy this mode requires.
+    /// Used by `AIDashApp.init` to select the off-MainActor loader.
+    enum LoaderStrategy: Equatable {
+        /// Local-only container (headless agent, no CloudKit).
+        case agent
+        /// CloudKit-vs-local decision based on entitlement + account.
+        case gui
+        /// No loader — test host must not open the production store.
+        case none
+    }
+
+    var loaderStrategy: LoaderStrategy {
+        switch self {
+        case .agent: return .agent
+        case .gui: return .gui
+        case .testHost: return .none
+        }
+    }
 }
 #endif

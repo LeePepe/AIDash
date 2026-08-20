@@ -5,12 +5,13 @@ import AIDashUI
 
 @main
 struct AIDashApp: App {
-    private let containerState: CloudKitContainer.InitState
-
     #if os(macOS)
     private let runMode: RunMode
     private let menuBarController: MenuBarController?
     private let xpcListener: XPCListener?
+    @State private var bootstrap: AppBootstrap
+    #else
+    @State private var bootstrap: AppBootstrap
     #endif
 
     init() {
@@ -24,15 +25,6 @@ struct AIDashApp: App {
         // effects + `_xpc_api_misuse` on a machService resume inside a test proc).
         let mode = RunMode.decide(env: ProcessInfo.processInfo.environment)
         self.runMode = mode
-
-        // Resolve a ModelContainer for the listener. Agent mode forces local-only
-        // (never touch CloudKit). GUI mode uses the normal CloudKit-or-local state
-        // but — unlike before — still falls back to a local-only container when
-        // CloudKit init failed, so the listener always has a container to serve.
-        let state = mode.isAgent
-            ? CloudKitContainer.localOnly().state
-            : CloudKitContainer.shared.state
-        self.containerState = state
 
         // GUI chrome only in GUI mode.
         self.menuBarController = mode == .gui ? MenuBarController() : nil
@@ -48,19 +40,49 @@ struct AIDashApp: App {
             }
         }
 
-        // Start the XPC listener in gui + agent modes with a guaranteed
-        // container. Skip in test-host mode: the app is only loaded to host the
-        // XCTest bundle, and resuming the machService listener there traps.
+        // Start the XPC listener IMMEDIATELY — before any store loading —
+        // so the mach service is active from the moment the process starts.
+        // Store-independent commands (ping, schema.list) are served nonisolated
+        // in XPCHandlers.execute() and respond even while the store is loading.
+        // Store-dependent mutations return `internal.store_not_ready` until
+        // the container is delivered by the loader.
+        let handlers: XPCHandlers?
         if mode == .testHost {
             self.xpcListener = nil
+            handlers = nil
         } else {
-            let container = Self.resolveContainerForListener(state: state)
-            let listener = XPCListener(handlers: XPCHandlers(container: container))
+            let h = XPCHandlers(container: nil)
+            let listener = XPCListener(handlers: h)
             listener.start()
             self.xpcListener = listener
+            handlers = h
         }
+
+        let boot = AppBootstrap(handlers: handlers)
+        _bootstrap = State(initialValue: boot)
+
+        // Both agent and GUI modes load off-MainActor via nonisolated loaders.
+        // Even if the SQLite/CloudKit open hangs indefinitely, MainActor is
+        // never blocked: SwiftUI renders, XPC dispatches ping/schema.list.
+        //
+        // The loader strategy is a testable seam on RunMode — see
+        // RunMode.loaderStrategy and its tests in RunModeTests.
+        switch mode.loaderStrategy {
+        case .agent:
+            boot.startDetached(loader: AgentContainerLoader())
+        case .gui:
+            boot.startDetached(loader: GUIContainerLoader())
+        case .none:
+            break
+        }
+
         #else
-        self.containerState = CloudKitContainer.shared.state
+        // iOS/iPadOS: off-MainActor via GUIContainerLoader. Same guarantee as
+        // macOS — MainActor never blocks on store open. The CloudKit-vs-local
+        // decision runs nonisolated in CloudKitContainer's static methods.
+        let boot = AppBootstrap()
+        _bootstrap = State(initialValue: boot)
+        boot.startDetached(loader: GUIContainerLoader())
         #endif
     }
 
@@ -69,41 +91,13 @@ struct AIDashApp: App {
         #if os(macOS)
         // Present the window only in a real GUI launch; agent + test-host are
         // headless (LSUIElement already hides the Dock).
-        BriefingWindowScene(state: containerState, headless: runMode != .gui)
+        BriefingWindowScene(state: bootstrap.containerState, headless: runMode != .gui)
         #else
-        BriefingWindowScene(state: containerState)
+        BriefingWindowScene(state: bootstrap.containerState)
         #endif
     }
 
     #if os(macOS)
-    /// The container the XPC listener serves: the ready CloudKit/local container
-    /// when available, else a fresh local-only one so XPC never stays dead just
-    /// because CloudKit couldn't start.
-    private static func resolveContainerForListener(
-        state: CloudKitContainer.InitState
-    ) -> ModelContainer {
-        switch state {
-        case .ready(let container):
-            return container
-        case .failed:
-            // Best-effort local-only; if even that fails, fall back to an
-            // in-memory container so the process still serves (degraded).
-            if case .ready(let c) = CloudKitContainer.localOnly().state { return c }
-            return Self.inMemoryContainer()
-        }
-    }
-
-    private static func inMemoryContainer() -> ModelContainer {
-        // Schema mirrors CloudKitContainer's. In-memory is the last-resort floor.
-        let schema = Schema([BriefingModel.self, ContainerModel.self,
-                             CardModel.self, UserEventModel.self])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        // Force-try is acceptable at the last-resort floor: an in-memory store
-        // with a fixed schema cannot realistically fail to construct.
-        // swiftlint:disable:next force_try
-        return try! ModelContainer(for: schema, configurations: config)
-    }
-
     /// Append a loud, actionable line to the shared push-error log when the
     /// LaunchAgent install failed, so a broken XPC bring-up is visible to whoever
     /// inspects why AIDash pushes stopped landing — the same log the aidata push

@@ -11,6 +11,7 @@ public final class CloudKitContainer {
     public static let shared = CloudKitContainer()
 
     public enum InitState: Sendable {
+        case loading
         case ready(ModelContainer)
         case failed(reason: String)
     }
@@ -19,10 +20,28 @@ public final class CloudKitContainer {
 
     // `internal` (not `private`): the store-migration half lives in
     // CloudKitStoreMigration.swift and logs through the same category.
-    internal static let logger = Logger(
+    nonisolated internal static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.tianpli.aidash",
         category: "CloudKitContainer"
     )
+
+    // MARK: - Nonisolated shared helpers
+    //
+    // These are explicitly `nonisolated` so both `GUIContainerLoader` and
+    // `AgentContainerLoader` can call them from `Task.detached` without
+    // hopping to MainActor. They access no actor-isolated state — only
+    // pure computations, synchronous system APIs, and thread-safe frameworks
+    // (Security, FileManager).
+
+    /// The canonical SwiftData schema used by all container paths.
+    nonisolated internal static func makeSchema() -> Schema {
+        Schema([
+            BriefingModel.self,
+            ContainerModel.self,
+            CardModel.self,
+            UserEventModel.self,
+        ])
+    }
 
     /// Internal initializer for testing — allows injecting a specific state.
     internal init(state: InitState) {
@@ -98,7 +117,7 @@ public final class CloudKitContainer {
     /// Pure decision function: which backing store to use given whether an
     /// iCloud account is currently available. Extracted so the gate that
     /// prevents the CloudKit-mirror crash is deterministically testable.
-    internal static func storageMode(cloudAvailable: Bool) -> StorageMode {
+    nonisolated internal static func storageMode(cloudAvailable: Bool) -> StorageMode {
         cloudAvailable ? .cloudKit : .localOnly
     }
 
@@ -110,7 +129,7 @@ public final class CloudKitContainer {
     ///   2. an active iCloud account on the device (`ubiquityIdentityToken`).
     /// Both checks are synchronous, so they complete before `ModelContainer`
     /// spins up the async mirroring delegate that would otherwise crash.
-    internal static func isCloudKitAvailable() -> Bool {
+    nonisolated internal static func isCloudKitAvailable() -> Bool {
         hasCloudKitEntitlement() && FileManager.default.ubiquityIdentityToken != nil
     }
 
@@ -126,7 +145,7 @@ public final class CloudKitContainer {
     /// downstream `ubiquityIdentityToken` check in `isCloudKitAvailable()`
     /// still gracefully falls back to local-only when the user has no iCloud
     /// account signed in.
-    private static func hasCloudKitEntitlement() -> Bool {
+    private nonisolated static func hasCloudKitEntitlement() -> Bool {
         #if os(macOS)
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return false }
@@ -159,7 +178,7 @@ public final class CloudKitContainer {
     /// entitlement 用的 `$(AIDASH_CLOUDKIT_CONTAINER)` 默认也是同一个约定值。
     /// 若你的容器名不遵循该约定,在 xcconfig 里单独设 `AIDASH_CLOUDKIT_CONTAINER`,
     /// 并把下面的 fallback 常量改成同一个字符串。
-    internal static let cloudKitContainerIdentifier: String = {
+    nonisolated internal static let cloudKitContainerIdentifier: String = {
         if let bundleID = Bundle.main.bundleIdentifier, !bundleID.isEmpty {
             return "iCloud.\(bundleID)"
         }
@@ -207,7 +226,7 @@ public final class CloudKitContainer {
     /// process resolves it as its own container (it is literally what
     /// `NSHomeDirectory()` returns there), and an unsandboxed process can open
     /// it as a plain absolute path. One path, one store, either way.
-    internal static func storeURL() -> URL? {
+    nonisolated internal static func storeURL() -> URL? {
         #if os(macOS)
         let bundleID = Bundle.main.bundleIdentifier ?? "com.tianpli.aidash"
         return realHomeDirectory()
@@ -269,22 +288,32 @@ public final class CloudKitContainer {
     /// suppresses the real migration (adoption is skipped once the destination
     /// exists). Path math and data movement must not share a function.
     internal static func prepareStoreURL() -> URL? {
+        prepareStoreURL(sandboxRoot: Self.sandboxRoot)
+    }
+
+    /// Nonisolated store preparation for off-MainActor container creation.
+    ///
+    /// Resolves the pinned URL, creates the parent directory, and adopts any
+    /// legacy store — the same contract as the MainActor `prepareStoreURL()`,
+    /// callable from `ContainerLoading.load()` inside `Task.detached`.
+    ///
+    /// `sandboxRoot`: nil in production; non-nil in tests to confine ALL
+    /// filesystem mutation (pinned destination AND legacy-source search)
+    /// inside a temp directory.
+    nonisolated internal static func prepareStoreURL(sandboxRoot: URL?) -> URL? {
         #if os(macOS)
-        // ORDER MATTERS. The test guard comes FIRST, before any override is
-        // consulted. A previous revision checked the override first, so a test
-        // that set one re-opened the full real-home migration path and skipped
-        // this guard entirely. Under test, the only reachable locations are
-        // inside an explicit sandbox — never the real home, under any override.
         if isRunningTests {
             guard let root = sandboxRoot else {
                 logger.notice("Test process without a store sandbox: skipping pinned store + migration.")
                 return nil
             }
             return prepare(pinned: root.appendingPathComponent("AIDash.store"),
-                           legacyCandidates: legacyStoreURLs(under: root))
+                           legacyCandidates: legacyStoreURLs(under: root),
+                           confinedTo: sandboxRoot)
         }
         guard let pinned = storeURL() else { return nil }
-        return prepare(pinned: pinned, legacyCandidates: legacyStoreURLs())
+        return prepare(pinned: pinned, legacyCandidates: legacyStoreURLs(),
+                       confinedTo: sandboxRoot)
         #else
         return nil
         #endif
@@ -292,7 +321,7 @@ public final class CloudKitContainer {
 
     #if os(macOS)
     /// True when the process is hosting XCTest/swift-testing.
-    internal static var isRunningTests: Bool {
+    nonisolated internal static var isRunningTests: Bool {
         let env = ProcessInfo.processInfo.environment
         return env["XCTestConfigurationFilePath"] != nil
             || env["XCTestBundlePath"] != nil
@@ -301,21 +330,24 @@ public final class CloudKitContainer {
 
     /// Create the directory and adopt any legacy store for a given location.
     private static func prepare(pinned: URL, legacyCandidates: [URL]) -> URL? {
+        prepare(pinned: pinned, legacyCandidates: legacyCandidates,
+                confinedTo: Self.sandboxRoot)
+    }
+
+    /// Nonisolated prepare: creates the pinned store directory and adopts any
+    /// legacy store. `confinedTo` is the explicit sandbox root (nil in
+    /// production), forwarded to `adoptLegacyStore(from:to:confinedTo:)`.
+    nonisolated private static func prepare(
+        pinned: URL, legacyCandidates: [URL], confinedTo sandboxRoot: URL?
+    ) -> URL? {
         let dir = pinned.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {
-            // Both postures can normally create this directory — a sandboxed
-            // process owns its container, and an unsandboxed one has full home
-            // access — so reaching here means something genuinely unusual (disk
-            // full, a file occupying the path, revoked permissions). Degrade to
-            // SwiftData's default rather than failing container creation (§D):
-            // the app still launches. It does mean THIS launch reads a
-            // different store, so the failure is logged rather than swallowed.
             logger.warning("Pinned store dir unavailable (\(error.localizedDescription, privacy: .public)); using SwiftData default.")
             return nil
         }
-        adoptLegacyStore(from: legacyCandidates, to: pinned)
+        adoptLegacyStore(from: legacyCandidates, to: pinned, confinedTo: sandboxRoot)
         return pinned
     }
     #endif
@@ -325,6 +357,21 @@ public final class CloudKitContainer {
         mode: StorageMode
     ) -> ModelConfiguration {
         let url = prepareStoreURL()
+        return Self.makeConfiguration(schema: schema, mode: mode, url: url)
+    }
+
+    /// Nonisolated configuration builder for off-MainActor container creation.
+    ///
+    /// Unlike the private `makeConfiguration(schema:mode:)` which calls
+    /// `prepareStoreURL()` (filesystem mutation + legacy adoption), this overload
+    /// takes a pre-resolved URL and performs NO filesystem side effects beyond
+    /// what `ModelContainer` itself does on open. Used by `AgentContainerLoader`
+    /// and `GUIContainerLoader` in `AppBootstrap`.
+    nonisolated internal static func makeConfiguration(
+        schema: Schema,
+        mode: StorageMode,
+        url: URL?
+    ) -> ModelConfiguration {
         switch mode {
         case .cloudKit:
             if let url {
@@ -343,7 +390,6 @@ public final class CloudKitContainer {
                 cloudKitDatabase: .private(cloudKitContainerIdentifier)
             )
         case .localOnly:
-            logger.notice("iCloud unavailable; using local-only store without CloudKit sync.")
             if let url {
                 return ModelConfiguration(
                     schema: schema,
@@ -365,7 +411,7 @@ public final class CloudKitContainer {
     /// User-facing message used when CloudKit init fails. Resolved through the
     /// app's String Catalog (`Localizable.xcstrings`, key `cloudkit.unavailable.message`)
     /// so translations can be added without code changes (Constitution §F.1).
-    internal static var iCloudUnavailableMessage: String {
+    nonisolated internal static var iCloudUnavailableMessage: String {
         String(
             localized: "cloudkit.unavailable.message",
             defaultValue: "iCloud data sync is unavailable. Please check your iCloud account in Settings.",
@@ -388,6 +434,8 @@ public final class CloudKitContainer {
                 return container
             case .failed(let reason):
                 throw CloudKitContainerError.unavailable(reason: reason)
+            case .loading:
+                throw CloudKitContainerError.unavailable(reason: "Store is still loading")
             }
         }
     }

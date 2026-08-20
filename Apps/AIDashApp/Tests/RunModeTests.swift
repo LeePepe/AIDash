@@ -43,5 +43,22 @@ struct RunModeTests {
             "XCTestConfigurationFilePath": "/tmp/x",
         ]) == .agent)
     }
+
+    // MARK: - Loader strategy (production routing seam)
+
+    @Test("agent mode selects .agent loader strategy")
+    func agentLoaderStrategy() {
+        #expect(RunMode.agent.loaderStrategy == .agent)
+    }
+
+    @Test("GUI mode selects .gui loader strategy")
+    func guiLoaderStrategy() {
+        #expect(RunMode.gui.loaderStrategy == .gui)
+    }
+
+    @Test("testHost selects .none loader strategy — no production store opened")
+    func testHostLoaderStrategy() {
+        #expect(RunMode.testHost.loaderStrategy == .none)
+    }
 }
 #endif
