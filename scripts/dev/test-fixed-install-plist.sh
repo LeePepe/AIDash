@@ -250,15 +250,16 @@ else
   fail_count=$((fail_count + 1))
 fi
 
-# --- 9. Probe 2 envelope regression (exact real briefing.not_found) ----------
+# --- 9. Probe 2 envelope regression (exercises real production validator) -----
 # The canonical CLI error envelope for briefing.not_found contains ONLY
 # ok=false, error.code, and error.message — no requestId at any level.
-# The installer must accept this shape. This fixture uses the exact envelope
-# observed on real-machine acceptance (MY-1453).
+# All fixtures call the SAME validate_briefing_not_found_envelope production
+# helper that the installer exit-3 branch uses.
 P2_FIX_PASS=$(mktemp "${TMPDIR:-/tmp}/p2-pass.XXXXXX")
 P2_FIX_WRONG=$(mktemp "${TMPDIR:-/tmp}/p2-wrong.XXXXXX")
 P2_FIX_MISSING=$(mktemp "${TMPDIR:-/tmp}/p2-missing.XXXXXX")
-trap 'rm -rf "$TMP_PLIST_DIR" "$FAKE_LAUNCHCTL_LOG" "$FAKE_LAUNCHCTL_BIN" "$VJK_FIXTURE" "$P2_FIX_PASS" "$P2_FIX_WRONG" "$P2_FIX_MISSING"' EXIT
+P2_FIX_OKTRUE=$(mktemp "${TMPDIR:-/tmp}/p2-oktrue.XXXXXX")
+trap 'rm -rf "$TMP_PLIST_DIR" "$FAKE_LAUNCHCTL_LOG" "$FAKE_LAUNCHCTL_BIN" "$VJK_FIXTURE" "$P2_FIX_PASS" "$P2_FIX_WRONG" "$P2_FIX_MISSING" "$P2_FIX_OKTRUE"' EXIT
 
 # Exact real envelope (no requestId)
 cat > "$P2_FIX_PASS" <<'EOF'
@@ -275,29 +276,49 @@ cat > "$P2_FIX_MISSING" <<'EOF'
 {"error":{"message":"Something went wrong"},"ok":false}
 EOF
 
-# PASS: real no-requestId envelope must be accepted
-if validate_json_key "$P2_FIX_PASS" "ok" "false" \
-   && validate_json_key "$P2_FIX_PASS" "error.code" "briefing.not_found"; then
+# ok=true malformed envelope (must fail — not a valid error envelope)
+cat > "$P2_FIX_OKTRUE" <<'EOF'
+{"error":{"code":"briefing.not_found","message":"Not found"},"ok":true}
+EOF
+
+# PASS: real no-requestId envelope via production helper
+if validate_briefing_not_found_envelope "$P2_FIX_PASS"; then
   echo "  PASS: probe 2 envelope: real briefing.not_found (no requestId) accepted"
 else
   echo "  FAIL: probe 2 envelope: real briefing.not_found (no requestId) rejected" >&2
   fail_count=$((fail_count + 1))
 fi
 
-# FAIL: wrong error code must be rejected
-if validate_json_key "$P2_FIX_WRONG" "error.code" "briefing.not_found"; then
+# FAIL: wrong error code via production helper
+if validate_briefing_not_found_envelope "$P2_FIX_WRONG"; then
   echo "  FAIL: probe 2 envelope: wrong error code should be rejected" >&2
   fail_count=$((fail_count + 1))
 else
   echo "  PASS: probe 2 envelope: wrong error code correctly rejected"
 fi
 
-# FAIL: missing error.code must be rejected
-if validate_json_key "$P2_FIX_MISSING" "error.code" "briefing.not_found"; then
+# FAIL: missing error.code via production helper
+if validate_briefing_not_found_envelope "$P2_FIX_MISSING"; then
   echo "  FAIL: probe 2 envelope: missing error.code should be rejected" >&2
   fail_count=$((fail_count + 1))
 else
   echo "  PASS: probe 2 envelope: missing error.code correctly rejected"
+fi
+
+# FAIL: ok=true malformed envelope via production helper
+if validate_briefing_not_found_envelope "$P2_FIX_OKTRUE"; then
+  echo "  FAIL: probe 2 envelope: ok=true should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: ok=true malformed correctly rejected"
+fi
+
+# --- 10. Structural assertion: installer MUST call validate_briefing_not_found_envelope
+if grep -q 'validate_briefing_not_found_envelope "\$p2_err"' "$INSTALLER"; then
+  echo "  PASS: installer calls validate_briefing_not_found_envelope in exit-3 branch"
+else
+  echo "  FAIL: installer missing validate_briefing_not_found_envelope call" >&2
+  fail_count=$((fail_count + 1))
 fi
 
 # --- Result ------------------------------------------------------------------

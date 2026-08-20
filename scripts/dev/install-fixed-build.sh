@@ -370,15 +370,10 @@ case "$p2_rc" in
         fi
         ;;
     3)
-        # Must be a valid briefing.not_found error envelope on STDERR:
-        # ok=false, error.code=briefing.not_found. The canonical CLI error
-        # envelope contains only ok, error.code, and error.message — no
-        # requestId at any level.
-        if ! validate_json_key "$p2_err" "ok" "false"; then
-            probe_fail "probe 2 exit 3 (ok!=false)" "$p2_cmd" "$p2_rc" "$p2_err"
-        fi
-        if ! validate_json_key "$p2_err" "error.code" "briefing.not_found"; then
-            probe_fail "probe 2 exit 3 (error.code mismatch)" "$p2_cmd" "$p2_rc" "$p2_err"
+        # Must be a valid briefing.not_found error envelope on STDERR.
+        # Uses the shared production validator from lib-fixed-install-plist.sh.
+        if ! validate_briefing_not_found_envelope "$p2_err"; then
+            probe_fail "probe 2 exit 3 (invalid not_found envelope)" "$p2_cmd" "$p2_rc" "$p2_err"
         fi
         ;;
     *)

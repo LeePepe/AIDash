@@ -158,3 +158,17 @@ validate_json_key() {
         [ "$val" = "$expected" ]
     fi
 }
+
+# validate_briefing_not_found_envelope FILE
+#
+# Production validator for the CLI's briefing.not_found error envelope.
+# The canonical envelope contains exactly: ok=false, error.code=briefing.not_found,
+# error.message — no requestId at any level.
+#
+# Returns 0 if the envelope is valid, 1 otherwise.
+# Both the installer exit-3 branch and the hermetic test call this function.
+validate_briefing_not_found_envelope() {
+    local file=$1
+    validate_json_key "$file" "ok" "false" \
+      && validate_json_key "$file" "error.code" "briefing.not_found"
+}
