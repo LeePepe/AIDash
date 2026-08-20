@@ -266,6 +266,55 @@ run_claude_review_gate() {
         return 1
     fi
 
+    # --- Post-extraction schema validation (fail-closed) ---
+    # The extracted envelope must conform to the verdict contract before
+    # rendering or threshold evaluation. Unknown/missing verdict, non-string
+    # summary, non-array blockers/notes, or malformed blocker entries all
+    # trigger parse-failure. This prevents malformed envelopes from silently
+    # bypassing the critical/high threshold (MY-1452 fail-closed contract).
+    local _v_verdict _v_summary _v_blockers_type _v_notes_type _v_blockers_valid
+    _v_verdict="$(printf %s "$verdict_json" | jq -r '.verdict // empty' 2>/dev/null)"
+    if [ "$_v_verdict" != "pass" ] && [ "$_v_verdict" != "changes" ]; then
+        echo "[claude-review] ❌ verdict schema 校验失败: verdict='$_v_verdict' (expected pass|changes)"
+        post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+    _v_summary="$(printf %s "$verdict_json" | jq -r 'if .summary | type == "string" then "ok" else "bad" end' 2>/dev/null)"
+    if [ "$_v_summary" != "ok" ]; then
+        echo "[claude-review] ❌ verdict schema 校验失败: summary missing or not string"
+        post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+    _v_blockers_type="$(printf %s "$verdict_json" | jq -r '.blockers | type' 2>/dev/null)"
+    if [ "$_v_blockers_type" != "array" ]; then
+        echo "[claude-review] ❌ verdict schema 校验失败: blockers missing or not array"
+        post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+    _v_notes_type="$(printf %s "$verdict_json" | jq -r '.notes | type' 2>/dev/null)"
+    if [ "$_v_notes_type" != "array" ]; then
+        echo "[claude-review] ❌ verdict schema 校验失败: notes missing or not array"
+        post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+    # Validate each blocker has required fields with correct types/values.
+    _v_blockers_valid="$(printf %s "$verdict_json" | jq -r '
+        [.blockers[] | select(
+            (.file | type) != "string" or
+            (.severity | . != "critical" and . != "high") or
+            (.why | type) != "string"
+        )] | length' 2>/dev/null)"
+    if [ -n "$_v_blockers_valid" ] && [ "$_v_blockers_valid" != "0" ]; then
+        echo "[claude-review] ❌ verdict schema 校验失败: $_v_blockers_valid blocker(s) have invalid file/severity/why"
+        post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+
     local verdict summary n_block
     verdict="$(printf %s "$verdict_json" | jq -r '.verdict')"
     summary="$(printf %s "$verdict_json" | jq -r '.summary')"

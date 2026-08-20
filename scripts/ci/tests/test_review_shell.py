@@ -837,3 +837,157 @@ class TestRealGateContract:
         assert "无法解析 verdict" in result.stdout
         sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
         assert "暂不放行" in sticky
+
+    # ------------------------------------------------------------------
+    # Negative schema validation: malformed envelopes must fail-closed.
+    # ------------------------------------------------------------------
+
+    def test_unknown_verdict_value_structured_output(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Unknown verdict value in .structured_output → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"bogus","summary":"x",'
+            '"blockers":[],"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        assert "schema" in result.stdout.lower() or "校验" in result.stdout
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_missing_verdict_field_structured_output(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Missing verdict field in .structured_output → fail-closed."""
+        output = (
+            '{"structured_output":{"summary":"x","blockers":[],"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_missing_blockers_structured_output(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Missing blockers array in .structured_output → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"x","notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_non_array_blockers_structured_output(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Non-array blockers in .structured_output → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"changes","summary":"x",'
+            '"blockers":"not-array","notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_missing_notes_structured_output(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Missing notes array in .structured_output → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"x","blockers":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_malformed_blocker_severity_structured_output(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Blocker with invalid severity in .structured_output → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"changes","summary":"x",'
+            '"blockers":[{"file":"a.swift","severity":"low","why":"bad"}],'
+            '"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_malformed_blocker_missing_fields_structured_output(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Blocker missing required fields in .structured_output → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"changes","summary":"x",'
+            '"blockers":[{"file":"a.swift"}],"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_unknown_verdict_value_result_fallback(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Unknown verdict value via .result fallback → fail-closed."""
+        import json as _json
+        inner = {"verdict": "unknown", "summary": "x", "blockers": [], "notes": []}
+        output = _json.dumps({"result": _json.dumps(inner)})
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_missing_blockers_result_fallback(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Missing blockers via .result fallback → fail-closed."""
+        import json as _json
+        inner = {"verdict": "changes", "summary": "x", "notes": []}
+        output = _json.dumps({"result": _json.dumps(inner)})
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_malformed_blocker_severity_result_fallback(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Blocker with invalid severity via .result fallback → fail-closed."""
+        import json as _json
+        inner = {
+            "verdict": "changes", "summary": "x",
+            "blockers": [{"file": "a.swift", "severity": "medium", "why": "bad"}],
+            "notes": [],
+        }
+        output = _json.dumps({"result": _json.dumps(inner)})
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
