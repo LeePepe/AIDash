@@ -595,3 +595,234 @@ def test_timeout_kills_nested_env_bash_wrapper(tmp_path: pathlib.Path) -> None:
         f"orphaned process survived the nested env→bash→child kill: {result.stdout}"
     )
     assert "rc=124" in result.stdout
+
+
+# --------------------------------------------------------------------------
+# 6. MY-1452: Fake-Claude end-to-end gate contract tests.
+#
+# These exercise the REAL production invocation pattern with a fake `claude`
+# binary, verifying argv plumbing, verdict extraction, fallback, diagnostics,
+# and fail-closed behavior. They complement the structural _code_lines tests
+# above: those catch accidental removal; these catch broken runtime semantics.
+# --------------------------------------------------------------------------
+
+# The exact production invocation and downstream handling from claude-review.sh,
+# extracted as a reusable shell template. The fake `claude` is injected via PATH.
+_GATE_TEMPLATE = """\
+. {common}
+REVIEW_CLI_TIMEOUT_SECONDS=30
+REVIEW_TIMEOUT_RC=124
+STICKY="<!-- test -->"
+post_sticky() {{ echo "STICKY:$1"; }}
+_phase_start() {{ true; }}
+_phase_end() {{ true; }}
+
+SCHEMA='{schema}'
+PROMPT="test prompt"
+RAW_FILE="{raw_file}"
+CLI_RC=0
+run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \\
+    env CLAUDE_REVIEW_PROMPT="$PROMPT" bash -c '
+        printf %s "$CLAUDE_REVIEW_PROMPT" | claude -p \\
+            --output-format json \\
+            --max-turns 2 \\
+            --tools "" \\
+            --json-schema "$1"
+    ' _ "$SCHEMA" >"$RAW_FILE" 2>/dev/null || CLI_RC=$?
+
+RAW="$(cat "$RAW_FILE" 2>/dev/null)"
+
+if [ "$CLI_RC" -eq "$REVIEW_TIMEOUT_RC" ]; then
+    echo "TIMEOUT"
+    exit 1
+fi
+
+if [ "$CLI_RC" -ne 0 ] || [ -z "$RAW" ]; then
+    _terminal=""
+    _subtype=""
+    _turns=""
+    if [ -n "$RAW" ]; then
+        _terminal="$(printf %s "$RAW" | jq -r '.terminal_reason // empty' 2>/dev/null)"
+        _subtype="$(printf %s "$RAW" | jq -r '.subtype // empty' 2>/dev/null)"
+        _turns="$(printf %s "$RAW" | jq -r '.num_turns // empty' 2>/dev/null)"
+    fi
+    if [ -n "$_terminal" ]; then
+        echo "DIAG:rc=$CLI_RC,terminal_reason=$_terminal,subtype=${{_subtype:-n/a}},num_turns=${{_turns:-n/a}}"
+    else
+        echo "DIAG:rc=$CLI_RC"
+    fi
+    post_sticky "fail"
+    exit 1
+fi
+
+VERDICT_JSON="$(printf %s "$RAW" | jq -c '.structured_output // (.result | fromjson)' 2>/dev/null)"
+if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
+    echo "PARSE_FAIL"
+    post_sticky "parse-fail"
+    exit 1
+fi
+
+VERDICT="$(printf %s "$VERDICT_JSON" | jq -r '.verdict')"
+echo "VERDICT:$VERDICT"
+"""
+
+_TEST_SCHEMA = (
+    '{"type":"object","additionalProperties":false,'
+    '"required":["verdict","summary","blockers","notes"],'
+    '"properties":{"verdict":{"type":"string","enum":["pass","changes"]},'
+    '"summary":{"type":"string"},'
+    '"blockers":{"type":"array","items":{"type":"object"}},'
+    '"notes":{"type":"array","items":{"type":"object"}}}}'
+)
+
+
+def _make_fake_claude(
+    tmp_path: pathlib.Path, output: str, exit_code: int = 0
+) -> pathlib.Path:
+    """Create a fake claude binary that logs argv and outputs controlled JSON."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    argv_file = tmp_path / "claude_argv.txt"
+    fake = bin_dir / "claude"
+    # The fake reads stdin (to consume the pipe) and writes output to stdout.
+    fake.write_text(
+        f'#!/bin/sh\n'
+        f'cat > /dev/null\n'  # consume stdin to prevent SIGPIPE
+        f'printf "%s\\n" "$@" > "{argv_file}"\n'
+        f'printf "%s" \'{output}\'\n'
+        f'exit {exit_code}\n',
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return bin_dir
+
+
+def _run_gate(tmp_path: pathlib.Path, bin_dir: pathlib.Path) -> subprocess.CompletedProcess[str]:
+    """Run the gate template with the fake claude on PATH."""
+    raw_file = tmp_path / "raw.json"
+    script = _GATE_TEMPLATE.format(
+        common=COMMON,
+        schema=_TEST_SCHEMA,
+        raw_file=raw_file,
+    )
+    return subprocess.run(
+        [_bash(), "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+        cwd=CI_DIR,
+        check=False,
+        env={
+            **__import__("os").environ,
+            "PATH": f"{bin_dir}:{__import__('os').environ['PATH']}",
+        },
+    )
+
+
+class TestFakeClaudeGateContract:
+    """End-to-end gate contract: real invocation with fake Claude."""
+
+    def test_argv_captures_all_required_flags(self, tmp_path: pathlib.Path) -> None:
+        """Fake claude receives --tools "", --max-turns 2, --output-format json,
+        --json-schema with the correct schema value."""
+        valid_output = (
+            '{"structured_output":{"verdict":"pass","summary":"ok",'
+            '"blockers":[],"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, valid_output, exit_code=0)
+        result = _run_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 0, f"gate failed: {result.stdout}\n{result.stderr}"
+
+        argv_file = tmp_path / "claude_argv.txt"
+        argv_text = argv_file.read_text(encoding="utf-8")
+        argv_lines = argv_text.strip().splitlines()
+
+        assert "-p" in argv_lines, f"missing -p in argv: {argv_lines}"
+        assert "--output-format" in argv_lines, f"missing --output-format: {argv_lines}"
+        assert "json" in argv_lines, f"missing json value: {argv_lines}"
+        assert "--max-turns" in argv_lines, f"missing --max-turns: {argv_lines}"
+        assert "2" in argv_lines, f"missing 2 value: {argv_lines}"
+        assert "--tools" in argv_lines, f"missing --tools: {argv_lines}"
+        # Empty string arg for --tools ""
+        assert "" in argv_lines or '""' in argv_text, (
+            f"missing empty-string --tools value: {argv_lines}"
+        )
+        assert "--json-schema" in argv_lines, f"missing --json-schema: {argv_lines}"
+
+    def test_structured_output_success_path(self, tmp_path: pathlib.Path) -> None:
+        """Gate succeeds when .structured_output contains full verdict envelope."""
+        valid_output = (
+            '{"structured_output":{"verdict":"pass","summary":"all good",'
+            '"blockers":[],"notes":[{"file":"a.swift","line":1,"note":"nit"}]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, valid_output, exit_code=0)
+        result = _run_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 0, f"unexpected failure: {result.stdout}"
+        assert "VERDICT:pass" in result.stdout
+
+    def test_result_fallback_path(self, tmp_path: pathlib.Path) -> None:
+        """Gate extracts verdict from .result when .structured_output is absent."""
+        inner_json = (
+            '{"verdict":"changes","summary":"issue found",'
+            '"blockers":[{"file":"x.swift","severity":"critical","why":"bug"}],'
+            '"notes":[]}'
+        )
+        # .result is a JSON string (stringified envelope)
+        import json as _json
+        fallback_output = _json.dumps({"result": _json.dumps(_json.loads(inner_json))})
+        bin_dir = _make_fake_claude(tmp_path, fallback_output, exit_code=0)
+        result = _run_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 0, f"unexpected failure: {result.stdout}"
+        assert "VERDICT:changes" in result.stdout
+
+    def test_error_max_turns_diagnostic(self, tmp_path: pathlib.Path) -> None:
+        """Non-zero exit with terminal_reason outputs structured diagnostic."""
+        error_output = (
+            '{"terminal_reason":"max_turns","subtype":"error_max_turns",'
+            '"num_turns":2}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, error_output, exit_code=1)
+        result = _run_gate(tmp_path, bin_dir)
+
+        assert result.returncode != 0
+        assert "terminal_reason=max_turns" in result.stdout
+        assert "subtype=error_max_turns" in result.stdout
+        assert "num_turns=2" in result.stdout
+        assert "STICKY:" in result.stdout  # post_sticky was called
+
+    def test_malformed_nonzero_failclosed(self, tmp_path: pathlib.Path) -> None:
+        """Non-zero exit with non-JSON output still fails closed with generic diag."""
+        bin_dir = _make_fake_claude(tmp_path, "not json at all", exit_code=1)
+        result = _run_gate(tmp_path, bin_dir)
+
+        assert result.returncode != 0
+        assert "DIAG:rc=1" in result.stdout
+        # No terminal_reason since output is not valid JSON
+        assert "terminal_reason=" not in result.stdout
+        assert "STICKY:" in result.stdout
+
+    def test_empty_output_failclosed(self, tmp_path: pathlib.Path) -> None:
+        """Zero exit but empty output fails closed."""
+        bin_dir = _make_fake_claude(tmp_path, "", exit_code=0)
+        result = _run_gate(tmp_path, bin_dir)
+
+        # CLI_RC=0 but RAW is empty → enters the fail branch
+        assert result.returncode != 0
+        assert "DIAG:rc=0" in result.stdout or "STICKY:" in result.stdout
+
+    def test_no_sensitive_leak_on_failure(self, tmp_path: pathlib.Path) -> None:
+        """Diagnostic output does not leak prompt, diff, or credentials."""
+        error_output = (
+            '{"terminal_reason":"max_turns","subtype":"error_max_turns",'
+            '"num_turns":1}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, error_output, exit_code=1)
+        result = _run_gate(tmp_path, bin_dir)
+
+        combined = result.stdout + result.stderr
+        assert "test prompt" not in combined, "prompt leaked in diagnostic output"
