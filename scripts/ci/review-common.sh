@@ -164,6 +164,38 @@ build_scope_evidence() {
         "${args[@]}"
 }
 
+# build_coverage_context <head_sha> <base_sha> <diff_file> <changed_files_newline_separated>
+#
+# When tests are removed in the diff, searches HEAD for existing test functions
+# that cover the same production symbols. Returns empty on success when no tests
+# were removed (the common case). Returns non-zero ONLY on analyzer failure.
+build_coverage_context() {
+    local head_sha="$1" base_sha="$2" diff_file="$3" changed="$4"
+    local count=0
+    local -a args=()
+
+    command -v python3 >/dev/null 2>&1 || {
+        echo "[review-coverage] python3 not found" >&2
+        return 1
+    }
+
+    while IFS= read -r file; do
+        [ -z "$file" ] && continue
+        args[count]="--changed-file"
+        count=$((count + 1))
+        args[count]="$file"
+        count=$((count + 1))
+    done < <(printf '%s\n' "$changed")
+
+    [ "$count" -eq 0 ] && return 0
+
+    python3 "$REPO_ROOT/scripts/ci/coverage_context.py" \
+        --head-sha "$head_sha" \
+        --base-sha "$base_sha" \
+        --diff-file "$diff_file" \
+        "${args[@]}"
+}
+
 # The evidence-discipline clause both prompts share. Printed inside the trusted
 # (pre-untrusted-fence) region of the prompt, so it is an instruction, not data.
 #
@@ -187,4 +219,28 @@ review_evidence_rules() {
 '  不得下 blocker 结论。' \
 '- 不确定一律降级为 note。这条只放宽「归属靠猜」的这一类判断;分层越界、崩溃、数据' \
 '  破坏、安全问题等有直接 diff 证据的 blocker,判定标准不变,照旧 fail-closed。'
+}
+
+# Coverage-discipline clause (MY-1456): prevents false "missing test coverage"
+# blockers when tests are removed but equivalent coverage exists at HEAD.
+review_coverage_rules() {
+    printf '%s\n' \
+'【证据纪律 —— 测试覆盖判定】' \
+'diff 移除旧测试时,不代表覆盖丢失:被删的测试可能已过时(测旧 throw 路径),而当前' \
+'HEAD 中已有新测试覆盖同一条生产分支。仅凭 diff 看到「删了 testX」就判为 blocker' \
+'是错误的——必须先检查 COVERAGE CONTEXT(若存在)或 full-HEAD 源码确认该生产路径' \
+'确实无其他测试。' \
+'' \
+'所以:' \
+'- 「改了源码却没有对应测试改动」的 blocker 条件 #4,其前提是**真的没有覆盖**,而不是' \
+'  「diff 里看不到覆盖」。如果 COVERAGE CONTEXT 列出了覆盖同一生产符号的 existing tests,' \
+'  那么覆盖并未丢失,该条件不满足,**不得**报 blocker。' \
+'- 要报「移除测试后覆盖丢失」的 blocker,你**必须**提供具体证据:指出哪条生产分支/函数' \
+'  在 full-HEAD 中已无任何 test 调用。给不出 file:line 证据 = 不得报 blocker,最多 note。' \
+'- 被移除的测试如果测试的是**已不存在的 API**(如旧的 throw 路径被 refactor 掉),其移除' \
+'  不构成覆盖降级——这是清理死代码,不是删保护网。' \
+'- COVERAGE CONTEXT 中标注的 existing tests 是由可信脚本从 HEAD 中确定性搜索得到的;' \
+'  若其中已包含覆盖目标生产路径的测试,差异只是 diff 未展示——那是 diff 范围限制,' \
+'  不是覆盖缺失。' \
+'- 不确定一律降级为 note。'
 }

@@ -170,6 +170,26 @@ def test_review_evidence_rules_emits_full_text_without_hanging() -> None:
     assert "fail-closed" in result.stdout
 
 
+def test_review_coverage_rules_emits_full_text_without_hanging() -> None:
+    """The coverage-discipline clause (MY-1456) emits without hanging.
+
+    Same transport safety check as the modifier-evidence rules: printf-based
+    emission of a multi-KB body under the runner's bash must complete without
+    deadlocking on the pipe buffer.
+    """
+    result = _run(f". {COMMON}\nreview_coverage_rules\n", timeout=30)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "【证据纪律 —— 测试覆盖判定】"
+    # Must include key discipline sentences
+    assert "COVERAGE CONTEXT" in result.stdout
+    assert "blocker" in result.stdout
+    assert "note" in result.stdout
+    # Above pipe buffer size
+    assert len(result.stdout.encode("utf-8")) > 512
+
+
 def test_scope_evidence_helper_handles_many_changed_files(
     tmp_path: pathlib.Path,
 ) -> None:
