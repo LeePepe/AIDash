@@ -991,3 +991,79 @@ class TestRealGateContract:
         assert result.returncode == 1
         sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
         assert "暂不放行" in sticky
+
+    # ------------------------------------------------------------------
+    # Consistency and jq-error fail-closed tests (MY-1452 codex-review P0s)
+    # ------------------------------------------------------------------
+
+    def test_pass_with_blockers_inconsistency_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """verdict=pass + non-empty blockers is inconsistent → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"looks good",'
+            '"blockers":[{"file":"x.swift","severity":"critical","why":"oops"}],'
+            '"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1, (
+            "verdict=pass + blockers must exit 1"
+        )
+        assert "inconsistent" in result.stdout.lower() or "不一致" in result.stdout
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_pass_with_blockers_result_fallback_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """verdict=pass + blockers via .result fallback → fail-closed."""
+        import json as _json
+        inner = {
+            "verdict": "pass", "summary": "ok",
+            "blockers": [{"file": "b.swift", "severity": "high", "why": "leak"}],
+            "notes": [],
+        }
+        output = _json.dumps({"result": _json.dumps(inner)})
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_non_object_blocker_jq_error_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Non-object element in blockers (e.g. string) causes jq error → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"changes","summary":"x",'
+            '"blockers":["not-an-object"],"notes":[]}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1, (
+            "non-object blockers element must fail-closed"
+        )
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_non_object_blocker_result_fallback_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Non-object blocker via .result fallback → fail-closed."""
+        import json as _json
+        inner = {
+            "verdict": "changes", "summary": "x",
+            "blockers": [123, None],
+            "notes": [],
+        }
+        output = _json.dumps({"result": _json.dumps(inner)})
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
