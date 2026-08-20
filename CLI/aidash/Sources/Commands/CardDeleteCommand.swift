@@ -70,10 +70,13 @@ struct CardDeleteCommand: AsyncParsableCommand {
     // MARK: - Emit (extracted so tests can drive both branches with a
     // synthetic `XPCResponse`).
     //
-    // Mirrors `ContainerDeleteCommand.emit`:
+    // Per `cli-surface.md` §"Exit codes":
     //   - `ok=true`  → emit success envelope (unless `--quiet`). Empty result
     //     type, so a bodyless ok=true still reports success.
-    //   - `ok=false` → re-throw the remote error as `XPCError` (exit 3).
+    //   - `ok=false` with error → emit the remote error envelope on stderr
+    //     with `response.requestId` and throw `ExitCode(3)` (MY-1455).
+    //   - `ok=false` without error → malformed protocol reply; throw
+    //     `xpc.decode_failure` (exit 2 via central handler).
     static func emit(
         response: XPCResponse,
         globals: GlobalOptions

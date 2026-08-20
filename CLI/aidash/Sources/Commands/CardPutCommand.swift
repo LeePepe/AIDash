@@ -21,8 +21,10 @@ import Foundation
 ///      with a `schema.*` envelope on stderr.
 ///   2. Build `CardPutParams` and dispatch via `XPCClient`.
 ///   3. On success: decode `CardPutResult`, emit via the active formatter.
-///   4. On remote error: throw the `XPCError` so `AIDash.main`'s central
-///      handler emits the envelope and maps to the proper exit code.
+///   4. On remote error (`ok=false` with error payload): emit the error envelope
+///      on stderr with `response.requestId` and `Darwin.exit(3)` (MY-1455).
+///   5. On malformed reply (`ok=false` without error): throw `xpc.decode_failure`
+///      so the central handler maps to exit 2.
 ///
 /// Exit codes (mapped centrally by `AIDash.main` via `ExitCodeMapper`):
 ///   0 — success

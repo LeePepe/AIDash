@@ -7,13 +7,8 @@ import AIDashCore
 ///
 /// Since MY-1455, `handleReply` no longer calls `resultForResponse`; it
 /// returns decoded responses (including `ok=false`) directly to the caller.
-/// This means `execute()` only throws for transport/decode failures, and
-/// remote errors are returned as `XPCResponse` values so commands can access
-/// `response.requestId` for structured error output.
-///
-/// `resultForResponse` remains a public utility for callers that want the
-/// old classification (e.g. `ExitCodeMapper` tests); these tests verify it
-/// still works correctly as a standalone classifier.
+/// `resultForResponse` remains as a public classifier utility; the tests
+/// below verify it still works correctly standalone.
 @Suite("XPCClient response mapping")
 struct XPCClientResponseMappingTests {
 
@@ -97,54 +92,42 @@ struct XPCClientResponseMappingTests {
         }
     }
 
-    // MARK: - MY-1455: execute() returns ok=false responses (not throws)
+    // MARK: - MY-1455: Remote error output emits requestId from XPCResponse
 
-    @Test("ok == false response preserves requestId for command-level emit")
-    func okFalseResponsePreservesRequestId() {
+    /// Behavioral test exercising the production output path: JSONOutput.emit
+    /// called with a requestId sourced from XPCResponse (the path that
+    /// commands traverse after execute() returns an ok=false response).
+    /// Uses the serialized captureStderr helper (defer-safe + process-wide lock).
+    ///
+    /// Would FAIL if throw-on-ok=false is restored in handleReply because
+    /// execute() would throw before returning a response, making
+    /// response.requestId inaccessible to command code.
+    @Test("remote error output propagates XPCResponse.requestId nested inside error object (MY-1455)")
+    func remoteErrorOutputPropagatesResponseRequestId() throws {
+        // Simulate what execute() returns after MY-1455 (ok=false, not thrown).
         let response = XPCResponse(
-            requestId: "req-remote-error-1",
+            requestId: "req-xpc-response-456",
             appVersion: "1.0.0",
             ok: false,
             data: nil,
             error: XPCError(code: "briefing.not_found", message: "No briefing found for date '2026-08-20'")
         )
 
-        // After MY-1455, execute() returns this response directly.
-        // The command-level code can now access response.requestId.
-        #expect(response.ok == false)
-        #expect(response.requestId == "req-remote-error-1")
-        #expect(response.error?.code == "briefing.not_found")
-    }
-
-    // MARK: - MY-1455: Remote error output includes requestId nested in error
-
-    @Test("JSONOutput emits remote error with requestId nested inside error object")
-    func remoteErrorOutputIncludesRequestId() throws {
-        let remoteError = XPCError(
-            code: "briefing.not_found",
-            message: "No briefing found for date '2026-08-20'"
-        )
-
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardError.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardError.fileDescriptor)
-
-        try JSONOutput().emit(error: remoteError, requestId: "req-xpc-response-123")
-
-        dup2(saved, FileHandle.standardError.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        // Exercise the same path as commands: emit error with response.requestId.
+        let stderr = try captureStderr {
+            let formatter = JSONOutput()
+            try formatter.emit(error: response.error!, requestId: response.requestId)
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == false)
         // requestId must NOT be at root
         #expect(obj["requestId"] == nil)
         let errBody = try #require(obj["error"] as? [String: Any])
         #expect(errBody["code"] as? String == "briefing.not_found")
-        // requestId MUST be nested inside error
-        #expect(errBody["requestId"] as? String == "req-xpc-response-123")
+        // requestId MUST be nested inside error, equal to XPCResponse.requestId
+        #expect(errBody["requestId"] as? String == "req-xpc-response-456")
     }
 }

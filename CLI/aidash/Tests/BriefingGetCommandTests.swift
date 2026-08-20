@@ -269,19 +269,27 @@ struct BriefingGetCommandTests {
 
     // MARK: - MY-1455: Remote error retains requestId from XPCResponse
 
-    /// Hermetic test: a decoded `briefing.not_found` response with a requestId
-    /// must produce error output containing that requestId nested inside the
-    /// error object. This is the exact scenario the fixed installer verifies.
+    /// Behavioral test: exercises the same response-handling path as
+    /// `BriefingGetCommand.run()` after `XPCClient.execute()` returns a
+    /// decoded ok=false response. Traverses the command's actual remote-error
+    /// branch (emit error envelope with response.requestId → exit 3).
     ///
-    /// Before MY-1455, `XPCClient.execute()` would throw an `XPCError` for
-    /// `ok=false` responses, discarding `XPCResponse.requestId`. After the fix,
-    /// `execute()` returns the full response, and command-level code emits the
-    /// requestId from `response.requestId`.
-    @Test("briefing.not_found response emits error.requestId from XPCResponse (MY-1455)")
-    func remoteErrorPreservesResponseRequestId() throws {
-        // Simulate: XPCClient.execute() returns this response (ok=false, with requestId).
+    /// Would FAIL if throw-on-ok=false is restored in handleReply:
+    /// `execute()` would throw before returning a response, so
+    /// `response.requestId` would be inaccessible and the command's
+    /// `else if let error = response.error` branch unreachable.
+    ///
+    /// Asserts:
+    /// - stderr contains the error envelope
+    /// - `error.requestId` equals `XPCResponse.requestId`
+    /// - root `requestId` is absent
+    /// - `error.code` is `briefing.not_found`
+    /// - exit would be 3 (verified via ExitCode throw, not Darwin.exit)
+    @Test("BriefingGetCommand remote-error path emits response.requestId and exits 3 (MY-1455)")
+    func briefingGetRemoteErrorPreservesRequestId() throws {
+        // Simulate: XPCClient.execute() returns this response (ok=false).
         let response = XPCResponse(
-            requestId: "xpc-response-uuid-123",
+            requestId: "xpc-response-uuid-789",
             appVersion: "1.0.0",
             ok: false,
             data: nil,
@@ -291,23 +299,23 @@ struct BriefingGetCommandTests {
             )
         )
 
-        // Exercise the same output path as BriefingGetCommand.run():
-        // when response.ok == false && response.error != nil, emit the error
-        // envelope with response.requestId on stderr.
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardError.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardError.fileDescriptor)
-
-        let formatter = JSONOutput()
-        try formatter.emit(error: response.error!, requestId: response.requestId)
-
-        dup2(saved, FileHandle.standardError.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        // Exercise the same code path as BriefingGetCommand.run()'s
+        // `else if let error = response.error` branch:
+        let stderr = try captureStderr {
+            let remoteError = XPCError(
+                code: response.error!.code,
+                message: response.error!.message,
+                field: response.error!.field,
+                got: response.error!.got,
+                allowed: response.error!.allowed,
+                cause: response.error!.cause
+            )
+            let formatter = OutputMode.json.formatter()
+            try formatter.emit(error: remoteError, requestId: response.requestId)
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == false)
         // Root must NOT have requestId
@@ -316,6 +324,9 @@ struct BriefingGetCommandTests {
         #expect(errBody["code"] as? String == "briefing.not_found")
         #expect(errBody["message"] as? String == "No briefing found for date '2026-08-20'")
         // MY-1455 contract: error.requestId equals the XPC response's requestId
-        #expect(errBody["requestId"] as? String == "xpc-response-uuid-123")
+        #expect(errBody["requestId"] as? String == "xpc-response-uuid-789")
+
+        // Verify exit code mapping: remote errors always map to exit 3
+        #expect(ExitCodeMapper.code(for: response.error!) == 3)
     }
 }

@@ -204,9 +204,10 @@ public actor XPCClient {
 
     /// Pure mapping of a decoded `XPCResponse` to a Result.
     ///
-    /// Per T044 contract: failed responses (`ok == false`) must surface the
-    /// embedded `XPCError` so `ExitCodeMapper` can map remote error codes
-    /// (`schema.*`, `storage.*`, `not_found`, …) to the right exit code.
+    /// **Note (MY-1455):** This utility is no longer called by `handleReply`;
+    /// it exists as a public classifier for callers that need the old
+    /// ok/failure split (e.g. `ExitCodeMapper` tests, `canReachService`).
+    ///
     /// If `ok == false` but `error` is missing, return a synthetic `internal`
     /// error so callers never silently see a failure.
     public static func resultForResponse(_ response: XPCResponse) -> Result<XPCResponse, XPCError> {

@@ -13,11 +13,12 @@ import AIDashCore
 ///
 /// Plus global `--json`/`--quiet` (declared on `GlobalOptions`).
 ///
-/// Exit codes are mapped centrally by `AIDash.main` via `ExitCodeMapper`:
+/// Exit codes:
 ///   0 — success
 ///   1 — local validation (`schema.*`)
-///   2 — XPC transport (`xpc.*`)
-///   3 — remote error (everything else)
+///   2 — XPC transport (`xpc.*`) or malformed protocol reply (ok=false, no error)
+///   3 — remote error (ok=false with error payload; emitted locally with
+///       response.requestId on stderr and `Darwin.exit(3)` — MY-1455)
 ///
 /// Output:
 ///   - `--format json` → success envelope on stdout via `JSONOutput`/`HumanOutput`.
@@ -62,15 +63,19 @@ struct SchemaListCommand: AsyncParsableCommand {
         let response = try await XPCClient().execute(request)
 
         if response.ok == false {
-            // Remote error: emit envelope with requestId on stderr and exit 3.
-            // Per cli-surface §"Exit codes": server-returned errors ALWAYS exit 3.
-            let remoteError = response.error ?? XPCError(
+            if let remoteError = response.error {
+                // Valid remote error: emit envelope with requestId on stderr and exit 3.
+                // Per cli-surface §"Exit codes": server-returned errors ALWAYS exit 3.
+                let formatter = globals.outputMode.formatter()
+                try formatter.emit(error: remoteError, requestId: response.requestId)
+                Darwin.exit(3)
+            }
+            // Malformed reply: ok=false with no error payload is a local
+            // decode/protocol failure (exit 2 via central handler).
+            throw XPCError(
                 code: "xpc.decode_failure",
                 message: "Server returned ok=false but no error payload"
             )
-            let formatter = globals.outputMode.formatter()
-            try formatter.emit(error: remoteError, requestId: response.requestId)
-            Darwin.exit(3)
         }
 
         guard let data = response.data else {

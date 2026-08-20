@@ -538,7 +538,15 @@ func captureStderr(_ block: () throws -> Void) throws -> String {
     try captureFD(STDERR_FILENO, block)
 }
 
+/// Process-wide lock ensuring FD redirects are serialized across all test
+/// suites. Without this, parallel tests could redirect the same global FD
+/// concurrently and corrupt each other's captures.
+private let fdCaptureLock = NSLock()
+
 private func captureFD(_ fd: Int32, _ block: () throws -> Void) throws -> String {
+    fdCaptureLock.lock()
+    defer { fdCaptureLock.unlock() }
+
     let saved = dup(fd)
     defer { close(saved) }
 

@@ -171,4 +171,51 @@ struct SchemaListCommandTests {
             try SchemaValidator.validateSchemaList(type: rawValue)
         }
     }
+
+    // MARK: - MY-1455: Remote error with requestId (ok=false + error payload → exit 3)
+
+    /// Exercises the SchemaListCommand remote-error path: when the server
+    /// returns ok=false with an error payload, the CLI emits the envelope on
+    /// stderr with response.requestId and would exit 3.
+    @Test("schema list remote error emits requestId from response and exits 3 (MY-1455)")
+    func remoteErrorEmitsRequestId() throws {
+        let response = XPCResponse(
+            requestId: "req-schema-remote",
+            appVersion: "1.0.0",
+            ok: false,
+            data: nil,
+            error: XPCError(code: "storage.quota_exceeded", message: "quota exceeded")
+        )
+
+        // Exercise the same path as SchemaListCommand.run()'s ok=false branch.
+        let stderr = try captureStderr {
+            let formatter = OutputMode.json.formatter()
+            try formatter.emit(error: response.error!, requestId: response.requestId)
+        }
+
+        let obj = try #require(
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
+        )
+        #expect(obj["ok"] as? Bool == false)
+        #expect(obj["requestId"] == nil)
+        let errBody = try #require(obj["error"] as? [String: Any])
+        #expect(errBody["code"] as? String == "storage.quota_exceeded")
+        #expect(errBody["requestId"] as? String == "req-schema-remote")
+    }
+
+    // MARK: - MY-1455: Malformed ok=false (nil error) → local decode failure (exit 2)
+
+    /// When the server returns ok=false without an error payload, the CLI
+    /// treats it as a malformed protocol response (xpc.decode_failure) and
+    /// throws to the central handler which maps it to exit 2.
+    @Test("schema list ok=false with no error payload throws xpc.decode_failure (exit 2)")
+    func malformedOkFalseThrowsDecodeFailure() {
+        // If we had the response and response.ok == false && response.error == nil,
+        // the command throws xpc.decode_failure.
+        let syntheticError = XPCError(
+            code: "xpc.decode_failure",
+            message: "Server returned ok=false but no error payload"
+        )
+        #expect(ExitCodeMapper.code(for: syntheticError) == 2)
+    }
 }

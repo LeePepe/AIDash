@@ -76,8 +76,10 @@ struct ContainerDeleteCommand: AsyncParsableCommand {
     //   - `ok=true`  → emit success envelope on stdout (unless `--quiet`).
     //     A missing data payload is tolerated: `ContainerDeleteResult` is empty,
     //     so an `ok=true` with no `data` still decodes to an empty result.
-    //   - `ok=false` → remote error. Re-throw as `XPCError` so the central
-    //     handler emits the envelope and maps to exit 3 (App-side error).
+    //   - `ok=false` with error → emit the remote error envelope on stderr
+    //     with `response.requestId` and throw `ExitCode(3)` (MY-1455).
+    //   - `ok=false` without error → malformed protocol reply; throw
+    //     `xpc.decode_failure` (exit 2 via central handler).
     static func emit(
         response: XPCResponse,
         globals: GlobalOptions
