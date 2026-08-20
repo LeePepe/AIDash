@@ -69,9 +69,12 @@ struct AIDashApp: App {
         // launchd context SIGTRAPs on CloudKit bring-up).
         // GUI mode: CloudKit-vs-local decided by entitlement + account check
         // via CloudKitContainer's nonisolated static methods.
+        // Test-host mode: skip production store loader entirely — running
+        // prepareStoreURL/ModelContainer here would open the real default
+        // store under the app host's bundle container.
         if mode.isAgent {
             boot.startDetached(loader: AgentContainerLoader())
-        } else {
+        } else if mode != .testHost {
             boot.startDetached(loader: GUIContainerLoader())
         }
 

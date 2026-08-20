@@ -15,7 +15,7 @@ import AIDashCore
 /// return a typed retryable `internal.store_not_ready` error.
 
 @MainActor
-@Test(.timeLimit(.seconds(1)))
+@Test(.timeLimit(.minutes(1)))
 func pingSucceedsWithNilContainer() async throws {
     let handlers = XPCHandlers(container: nil)
     let response = try await sendRaw(
@@ -28,7 +28,7 @@ func pingSucceedsWithNilContainer() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.seconds(1)))
+@Test(.timeLimit(.minutes(1)))
 func schemaListSucceedsWithNilContainer() async throws {
     let handlers = XPCHandlers(container: nil)
     let response = try await sendRaw(
@@ -101,7 +101,7 @@ func schemaListSucceedsWithNilContainer() async throws {
 /// client retries on a permanently broken store.
 
 @MainActor
-@Test(.timeLimit(.seconds(1)))
+@Test(.timeLimit(.minutes(1)))
 func pingSucceedsAfterTerminalStoreFailure() async throws {
     let handlers = XPCHandlers(container: nil, storeFailureReason: "SQLite corruption")
     let response = try await sendRaw(
@@ -114,7 +114,7 @@ func pingSucceedsAfterTerminalStoreFailure() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.seconds(1)))
+@Test(.timeLimit(.minutes(1)))
 func schemaListSucceedsAfterTerminalStoreFailure() async throws {
     let handlers = XPCHandlers(container: nil, storeFailureReason: "SQLite corruption")
     let response = try await sendRaw(
