@@ -34,6 +34,8 @@ from coverage_context import (  # noqa: E402
     _find_all_test_functions,
     _find_containing_type,
     _bounded_blob_read,
+    _unquote_git_path,
+    _extract_b_path,
 )
 
 # --- Fixture: mimics the PR #185 failure shape ---
@@ -3918,8 +3920,6 @@ def test_global_work_budget_limits_total_file_operations(monkeypatch):
     import coverage_context
 
     # Create more files than the budget allows
-    from coverage_context import COVERAGE_GLOBAL_WORK_BUDGET
-
     num_files = COVERAGE_GLOBAL_WORK_BUDGET + 20
     all_files = [f"Tests/Test{i}Tests.swift" for i in range(num_files)]
     test_content = "import Testing\nstruct T {\n    @Test func testX() { DomainSvc() }\n}\n"
@@ -4048,3 +4048,135 @@ def test_content_discovery_oversize_is_bounded_outcome_not_error(monkeypatch):
     # BigTests should have an oversize note
     oversize_entries = [s for s in searched if "oversize" in s]
     assert len(oversize_entries) == 1
+
+
+# ---- Git C-quoting and path transport tests --------------------------------
+
+
+def test_unquote_git_path_plain():
+    """Plain paths (no quotes) pass through unchanged."""
+    assert _unquote_git_path("src/Foo.swift") == "src/Foo.swift"
+
+
+def test_unquote_git_path_with_space():
+    """C-quoted path with space is decoded correctly."""
+    assert _unquote_git_path('"src/My File.swift"') == "src/My File.swift"
+
+
+def test_unquote_git_path_with_backslash():
+    """C-quoted path with literal backslash."""
+    assert _unquote_git_path(r'"src\\path.swift"') == "src\\path.swift"
+
+
+def test_unquote_git_path_with_newline():
+    """C-quoted path with embedded newline."""
+    assert _unquote_git_path(r'"src/foo\nbar.swift"') == "src/foo\nbar.swift"
+
+
+def test_unquote_git_path_with_double_quote():
+    """C-quoted path with embedded double quote."""
+    assert _unquote_git_path(r'"src/foo\"bar.swift"') == 'src/foo"bar.swift'
+
+
+def test_unquote_git_path_with_octal():
+    """C-quoted path with octal escape for non-ASCII byte."""
+    # ñ in Latin-1 is 0xF1 = octal 361
+    assert _unquote_git_path('"src/se\\361or.swift"') == "src/señor.swift"
+
+
+def test_extract_b_path_plain():
+    """Standard non-quoted diff --git header."""
+    result = _extract_b_path("a/src/Foo.swift b/src/Foo.swift")
+    assert result == "src/Foo.swift"
+
+
+def test_extract_b_path_quoted_b():
+    """C-quoted b/ path (space in filename)."""
+    result = _extract_b_path('a/src/Foo.swift "b/src/My File.swift"')
+    assert result == "src/My File.swift"
+
+
+def test_extract_b_path_quoted_a_plain_b():
+    """C-quoted a/ path, plain b/ path."""
+    result = _extract_b_path('"a/src/My File.swift" b/src/Foo.swift')
+    assert result == "src/Foo.swift"
+
+
+def test_removed_line_numbers_cquoted_path():
+    """removed_line_numbers handles C-quoted paths in diff headers."""
+    path = 'src/My File.swift'
+    diff = (
+        'diff --git "a/src/My File.swift" "b/src/My File.swift"\n'
+        '--- "a/src/My File.swift"\n'
+        '+++ "b/src/My File.swift"\n'
+        '@@ -1,3 +1,2 @@\n'
+        ' line1\n'
+        '-removed\n'
+        ' line3\n'
+    )
+    result = removed_line_numbers(diff, path)
+    assert result == (2,)
+
+
+def test_removed_line_numbers_newline_in_path():
+    """removed_line_numbers handles path with embedded newline."""
+    path = "src/foo\nbar.swift"
+    diff = (
+        'diff --git "a/src/foo\\nbar.swift" "b/src/foo\\nbar.swift"\n'
+        '--- "a/src/foo\\nbar.swift"\n'
+        '+++ "b/src/foo\\nbar.swift"\n'
+        '@@ -1,3 +1,2 @@\n'
+        ' line1\n'
+        '-removed\n'
+        ' line3\n'
+    )
+    result = removed_line_numbers(diff, path)
+    assert result == (2,)
+
+
+def test_removed_line_numbers_backslash_in_path():
+    """removed_line_numbers handles path with backslash."""
+    path = "src\\path.swift"
+    diff = (
+        'diff --git "a/src\\\\path.swift" "b/src\\\\path.swift"\n'
+        '--- "a/src\\\\path.swift"\n'
+        '+++ "b/src\\\\path.swift"\n'
+        '@@ -1,3 +1,2 @@\n'
+        ' line1\n'
+        '-removed\n'
+        ' line3\n'
+    )
+    result = removed_line_numbers(diff, path)
+    assert result == (2,)
+
+
+def test_removed_line_numbers_plain_path_still_works():
+    """Standard non-quoted path still works after C-quoting support."""
+    diff = (
+        'diff --git a/Tests/FooTests.swift b/Tests/FooTests.swift\n'
+        '--- a/Tests/FooTests.swift\n'
+        '+++ b/Tests/FooTests.swift\n'
+        '@@ -5,3 +5,2 @@\n'
+        ' line5\n'
+        '-removed\n'
+        ' line7\n'
+    )
+    result = removed_line_numbers(diff, "Tests/FooTests.swift")
+    assert result == (6,)
+
+
+def test_removed_line_numbers_nonascii_path():
+    """removed_line_numbers handles non-ASCII path."""
+    path = "Tests/日本語Tests.swift"
+    # Non-ASCII in the path — git would C-quote this
+    diff = (
+        f'diff --git a/{path} b/{path}\n'
+        f'--- a/{path}\n'
+        f'+++ b/{path}\n'
+        '@@ -1,2 +1,1 @@\n'
+        '-removed\n'
+        ' kept\n'
+    )
+    result = removed_line_numbers(diff, path)
+    assert result == (1,)
+

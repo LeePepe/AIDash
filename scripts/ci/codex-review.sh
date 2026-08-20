@@ -72,8 +72,14 @@ if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || ! git cat-file -e "$HEA
 fi
 DIFF="$(git diff "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff "$BASE_SHA..$HEAD_SHA")"
 # NUL-delimited path transport: -z ensures paths with newlines, quotes,
-# backslashes, and non-ASCII are transmitted losslessly from git to shell.
-CHANGED="$(git diff -z --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff -z --name-only "$BASE_SHA..$HEAD_SHA")"
+# backslashes, and non-ASCII are transmitted losslessly from git.
+# Written to a temp file because NUL bytes are stripped by Bash command
+# substitution ($(...)) and scalars — a file preserves them intact.
+CHANGED_FILE="$(mktemp -t codex-review-changed.XXXXXX)"
+git diff -z --name-only "$BASE_SHA...$HEAD_SHA" > "$CHANGED_FILE" 2>/dev/null \
+    || git diff -z --name-only "$BASE_SHA..$HEAD_SHA" > "$CHANGED_FILE"
+# Newline-separated version for prompt display only.
+CHANGED_DISPLAY="$(tr '\0' '\n' < "$CHANGED_FILE" | sed '/^$/d')"
 
 # 此处 DIFF 为空 = BASE/HEAD 对象都在但两者间确无差异(罕见但合法)。对象已确认
 # 存在,空 diff 是真·无改动,可安全 pass。
@@ -103,7 +109,7 @@ ERR_FILE="$(mktemp -t codex-review-err.XXXXXX.log)"
 # 截断,而行号必须以完整 diff 为准)。
 DIFF_FILE="$(mktemp -t codex-review-diff.XXXXXX.patch)"
 printf %s "$FULL_DIFF" > "$DIFF_FILE"
-cleanup() { rm -f "$SCHEMA_FILE" "$OUT_FILE" "$ERR_FILE" "$DIFF_FILE"; }
+cleanup() { rm -f "$SCHEMA_FILE" "$OUT_FILE" "$ERR_FILE" "$DIFF_FILE" "$CHANGED_FILE"; }
 trap cleanup EXIT
 
 # 用 printf 写,不用 heredoc:brew bash 5.3 下 body 超过一个 pipe buffer(实测
@@ -135,7 +141,7 @@ printf '%s\n' \
 #
 # fail-closed:分析器失败 = 工具异常,不在缺证据的情况下继续 review。
 SCOPE_EVIDENCE=""
-if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED")"; then
+if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED_FILE")"; then
     echo "[codex-review] ❌ scope evidence 生成失败"
     post_sticky "$STICKY
 ⚠️ 自动 review 未能生成 exact-HEAD 作用域证据(分析器异常)。为安全起见 **暂不放行**,请重跑。"
@@ -145,7 +151,7 @@ fi
 # ---- exact-HEAD coverage context (MY-1456) --------------------------------
 # fail-closed: analyzer failure blocks the gate, same as scope evidence.
 COVERAGE_CONTEXT=""
-if ! COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED")"; then
+if ! COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED_FILE")"; then
     echo "[codex-review] ❌ coverage context 生成失败"
     post_sticky "$STICKY
 ⚠️ 自动 review 未能生成 exact-HEAD 覆盖上下文(分析器异常)。为安全起见 **暂不放行**,请重跑。"
@@ -195,7 +201,7 @@ $(review_coverage_rules "$FENCE_NONCE")
 
 $FENCE_OPEN
 改动文件:
-$CHANGED
+$CHANGED_DISPLAY
 $TRUNCATED
 
 DIFF:
@@ -208,7 +214,7 @@ $COVERAGE_CONTEXT
 ======== COVERAGE_EVIDENCE_${FENCE_NONCE}_END ========
 $FENCE_CLOSE"
 
-echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED" | grep -c . | tr -d ' ') files)..."
+echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED_DISPLAY" | grep -c . | tr -d ' ') files)..."
 
 # codex exec：非交互、结构化输出到 --output-last-message 文件。
 # --skip-git-repo-check：checkout 目录是 detached HEAD，跳过 git 仓库信任检查。
