@@ -1,10 +1,10 @@
 #!/bin/bash
-# Hermetic regression test for the fixed-install LaunchAgent plist shape.
+# Hermetic regression test for the fixed-install LaunchAgent plist.
 #
-# Validates that the plist generation logic in install-fixed-build.sh produces
-# a plist with the exact canonical keys required by LaunchdAgentInstaller and
-# the XPC service. Does NOT access the real store, call launchctl, or touch
-# ~/Library/LaunchAgents.
+# Sources the REAL lib-fixed-install-plist.sh helper (the same code path used
+# by install-fixed-build.sh in production) to render and validate the plist.
+# Injects a fake launchctl function to capture and assert the exact bootstrap
+# args without touching the real launchd job or store.
 #
 # Exit 0 = all assertions pass. Non-zero = regression.
 set -uo pipefail
@@ -12,7 +12,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# --- Parse bundle prefix from xcconfig (same logic as install-fixed-build.sh)
+# Source the shared helper — this IS the production code path.
+source "$SCRIPT_DIR/lib-fixed-install-plist.sh"
+
+# --- Parse bundle prefix from xcconfig (same as install-fixed-build.sh) ------
 _xcc_val() {
   local v=""
   for f in "$REPO_ROOT/Configs/Identity.xcconfig" "$REPO_ROOT/Configs/Identity.local.xcconfig"; do
@@ -30,38 +33,13 @@ if [ "$LABEL" = ".aidash" ]; then
 fi
 
 FIXED_EXEC="/Applications/AIDash.app/Contents/MacOS/AIDash"
+UID_N="$(id -u)"
 
-# --- Generate plist to a temp file (same template as install-fixed-build.sh)
+# --- Temp plist (cleaned up on exit) -----------------------------------------
 TMP_PLIST=$(mktemp "${TMPDIR:-/tmp}/aidash-plist-test.XXXXXX")
 trap 'rm -f "$TMP_PLIST"' EXIT
 
-cat > "$TMP_PLIST" <<PLIST_EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>$LABEL</string>
-    <key>Program</key>
-    <string>$FIXED_EXEC</string>
-    <key>MachServices</key>
-    <dict>
-        <key>$LABEL</key>
-        <true/>
-    </dict>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>AIDASH_XPC_AGENT</key>
-        <string>1</string>
-    </dict>
-    <key>ProcessType</key>
-    <string>Interactive</string>
-</dict>
-</plist>
-PLIST_EOF
-
-# --- Assertions ------------------------------------------------------------
+# --- Assertions framework ---------------------------------------------------
 fail_count=0
 assert_eq() {
   local desc=$1 expected=$2 actual=$3
@@ -73,37 +51,66 @@ assert_eq() {
   fi
 }
 
-_pv() { /usr/libexec/PlistBuddy -c "Print :$1" "$TMP_PLIST" 2>/dev/null; }
-
 echo "=== Hermetic plist shape regression test ==="
+echo "  (exercises the real lib-fixed-install-plist.sh helper)"
 
-# Syntax check
-if /usr/bin/plutil -lint "$TMP_PLIST" >/dev/null 2>&1; then
-  echo "  PASS: plutil -lint"
+# --- 1. Render plist via the shared helper -----------------------------------
+render_fixed_plist "$TMP_PLIST" "$LABEL" "$FIXED_EXEC"
+if [ -s "$TMP_PLIST" ]; then
+  echo "  PASS: render_fixed_plist produced non-empty output"
 else
-  echo "  FAIL: plutil -lint" >&2
+  echo "  FAIL: render_fixed_plist produced empty file" >&2
   fail_count=$((fail_count + 1))
 fi
 
-# Required keys
+# --- 2. Validate plist via the shared helper ---------------------------------
+if validate_fixed_plist "$TMP_PLIST" "$LABEL" "$FIXED_EXEC"; then
+  echo "  PASS: validate_fixed_plist succeeded"
+else
+  echo "  FAIL: validate_fixed_plist returned non-zero" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# --- 3. Verify exact 5-key shape --------------------------------------------
+_pv() { /usr/libexec/PlistBuddy -c "Print :$1" "$TMP_PLIST" 2>/dev/null; }
+
 assert_eq "Label"                               "$LABEL"       "$(_pv Label)"
 assert_eq "Program"                             "$FIXED_EXEC"  "$(_pv Program)"
 assert_eq "MachServices.$LABEL"                 "true"         "$(_pv "MachServices:$LABEL")"
 assert_eq "EnvironmentVariables.AIDASH_XPC_AGENT" "1"          "$(_pv "EnvironmentVariables:AIDASH_XPC_AGENT")"
 assert_eq "ProcessType"                         "Interactive"  "$(_pv ProcessType)"
 
-# No unexpected keys at top level (exactly 5 keys).
-# Use plutil -convert json then count top-level keys via /usr/bin/plutil.
+# Count top-level keys (exactly 5)
 top_keys=$(/usr/bin/plutil -convert json -o - "$TMP_PLIST" 2>/dev/null \
   | /usr/bin/python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
-if [ "$top_keys" = "5" ]; then
-  echo "  PASS: exactly 5 top-level keys"
-else
-  echo "  FAIL: expected 5 top-level keys, got ${top_keys:-<error>}" >&2
-  fail_count=$((fail_count + 1))
-fi
+assert_eq "top-level key count" "5" "${top_keys:-<error>}"
 
-# Entitlements file exists and contains only app-sandbox
+# --- 4. Verify bootstrap command args via shared helper ----------------------
+PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
+bootstrap_args=$(bootstrap_command_args "$UID_N" "$PLIST_PATH")
+expected_args="gui/$UID_N $PLIST_PATH"
+assert_eq "bootstrap_command_args" "$expected_args" "$bootstrap_args"
+
+# --- 5. Inject fake launchctl and verify exact invocation --------------------
+# Override launchctl with a shell function that records args instead of
+# touching the real launchd job.
+FAKE_LAUNCHCTL_LOG=$(mktemp "${TMPDIR:-/tmp}/fake-launchctl.XXXXXX")
+trap 'rm -f "$TMP_PLIST" "$FAKE_LAUNCHCTL_LOG"' EXIT
+
+launchctl() {
+  echo "$*" >> "$FAKE_LAUNCHCTL_LOG"
+  return 0
+}
+export -f launchctl 2>/dev/null || true
+
+# Simulate what the installer does: launchctl bootstrap <args>
+launchctl bootstrap $(bootstrap_command_args "$UID_N" "$PLIST_PATH")
+
+# Verify the fake launchctl saw the exact expected invocation
+recorded=$(cat "$FAKE_LAUNCHCTL_LOG" 2>/dev/null)
+assert_eq "fake launchctl args" "bootstrap gui/$UID_N $PLIST_PATH" "$recorded"
+
+# --- 6. Entitlements file checks --------------------------------------------
 ENT_FILE="$REPO_ROOT/Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements"
 if [ -f "$ENT_FILE" ]; then
   echo "  PASS: fixed entitlements file exists"
@@ -136,12 +143,7 @@ for forbidden_key in \
   fi
 done
 
-# Bootstrap command shape (verify the correct launchctl invocation)
-# We don't actually call launchctl, just verify the command would be well-formed.
-bootstrap_cmd="launchctl bootstrap gui/$(id -u) $HOME/Library/LaunchAgents/$LABEL.plist"
-echo "  INFO: bootstrap command would be: $bootstrap_cmd"
-echo "  PASS: bootstrap command shape verified"
-
+# --- Result ------------------------------------------------------------------
 echo
 if [ "$fail_count" -eq 0 ]; then
   echo "=== ALL ASSERTIONS PASSED ==="
