@@ -107,7 +107,7 @@ canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
 | Fixed install | `AIDashApp.macOS.fixed.entitlements` | Yes | No (no profile) |
 
 Key constraints:
-- **Minimal entitlements**: `app-sandbox` + `network.client` only. No CloudKit
+- **Minimal entitlements**: `app-sandbox` only. No `network.client`, no CloudKit
   entitlements (would crash without provisioning profile).
 - **Local-only**: `hasCloudKitEntitlement()` returns `false` → `.localOnly`
   fallback. Same runtime behavior as before; change is purely packaging.

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -60,8 +60,6 @@ Create `Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements`:
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <true/>
-    <key>com.apple.security.network.client</key>
-    <true/>
 </dict>
 </plist>
 ```
@@ -71,35 +69,30 @@ Create `Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements`:
 | Entitlement | Included | Rationale |
 |-------------|----------|-----------|
 | `app-sandbox` | **Yes** | Required to access the container path on macOS 26. The sandbox confines the process to its container — which is exactly where the pinned store lives. |
-| `network.client` | **Yes** | The XPC agent may need outbound network for diagnostics logging; matches the full macOS entitlements. Minimal additional attack surface. |
+| `network.client` | **No** | The fixed-install agent uses local-only SwiftData + Mach XPC. No demonstrated network requirement; omitting reduces attack surface. |
 | `icloud-services` | **No** | CloudKit entitlements without a valid provisioning profile cause `NSPersistentCloudKitContainer` to `os_crash`/`brk 1`. Omitting them makes `hasCloudKitEntitlement()` return `false` → clean `.localOnly` fallback. This is the existing runtime behavior; the change is purely packaging. |
 | `icloud-container-identifiers` | **No** | Same reason as above — no provisioning profile to back it. |
 | `ubiquity-container-identifiers` | **No** | Same reason as above. |
 
 ### Install script changes
 
-`install-fixed-build.sh` build flags change from:
+`install-fixed-build.sh` retains the current unsigned build flags
+(`CODE_SIGNING_ALLOWED=NO`) and adds a deterministic post-build ad-hoc
+codesign step that embeds the fixed entitlements:
 
 ```bash
-CODE_SIGN_IDENTITY=-
-CODE_SIGN_STYLE=Manual
-CODE_SIGNING_REQUIRED=NO
-CODE_SIGNING_ALLOWED=NO
+# After xcodebuild build (unchanged flags):
+codesign --force --sign - \
+  --entitlements Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements \
+  "$APP_SRC"
 ```
 
-to:
-
-```bash
-CODE_SIGN_IDENTITY=-
-CODE_SIGN_STYLE=Manual
-CODE_SIGNING_REQUIRED=YES
-CODE_SIGNING_ALLOWED=YES
-CODE_SIGN_ENTITLEMENTS=Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements
-```
-
-Ad-hoc signing (`-`) is retained. No Distribution certificate, no
-notarization, no TeamIdentifier. The entitlements are embedded into the
-binary's code signature so macOS recognizes the sandbox claim.
+This approach is preferred over passing `CODE_SIGNING_ALLOWED=YES` +
+`CODE_SIGN_ENTITLEMENTS` through xcodebuild, which may interact
+unpredictably with the placeholder `AIDASH_DEVELOPMENT_TEAM = REPLACE_ME`
+and the absence of a provisioning profile. Post-build codesign is
+deterministic: the entitlements are embedded exactly as specified, ad-hoc
+signed, with no dependency on team identity or provisioning state.
 
 ### Store-dependent self-check
 
@@ -146,20 +139,17 @@ because:
 
 The full entitlements file remains the default in `project.yml`. The fixed
 entitlements file is referenced only in `install-fixed-build.sh` via the
-`CODE_SIGN_ENTITLEMENTS` build setting override. No change to `project.yml`.
+post-build `codesign` step. No change to `project.yml`.
 
 ### Ad-hoc signing and Gatekeeper
 
-An ad-hoc signed (`-`) sandboxed binary may trigger Gatekeeper prompts on
-first launch or after replacement. This is acceptable for a dev-only local
-install tool:
-- The script is run by the developer on their own machine.
-- `open /Applications/AIDash.app` after install may require right-click →
-  Open or `xattr -d com.apple.quarantine` on first use.
-- Subsequent re-installs replace the bundle in-place; quarantine behavior
-  depends on macOS version.
+An ad-hoc signed (`-`) sandboxed binary is a locally built artifact. Since
+`install-fixed-build.sh` builds and installs on the same machine, macOS does
+not apply quarantine to the output — the binary is never downloaded from the
+internet. Standard Gatekeeper prompts should not apply to locally built
+artifacts installed via `ditto` + `mv`.
 
-If Gatekeeper friction becomes unacceptable, a future ADR can evaluate
+If Gatekeeper friction is observed in practice, a future ADR can evaluate
 Developer ID signing for the fixed install.
 
 ### Canonical store identity — unchanged
@@ -227,10 +217,10 @@ sandboxed) resolves the same path. One store identity for all builds.
   This is a security improvement: the dev tool no longer has unrestricted
   filesystem access.
 - CloudKit remains unavailable in fixed installs (unchanged behavior).
-- Gatekeeper may prompt on first launch of the fixed install (acceptable for
-  dev-only use).
+- Gatekeeper should not apply to locally built artifacts (no quarantine on
+  `ditto`/`mv` from a local build).
 - Two entitlements files must be maintained: full (Xcode) and minimal (fixed).
   The risk of drift is low because the fixed file is intentionally minimal
-  (2 keys) and rarely changes.
+  (1 key: `app-sandbox` only) and rarely changes.
 - Future changes to the store path or sandbox posture require updating this
   ADR.
