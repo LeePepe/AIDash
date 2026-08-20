@@ -6,13 +6,19 @@
 # Do NOT execute this file directly; source it:
 #   source "$(dirname "$0")/lib-fixed-install-plist.sh"
 
-# render_fixed_plist OUTPUT_FILE LABEL EXEC_PATH
+# render_fixed_plist OUTPUT_FILE JOB_LABEL MACH_SERVICE EXEC_PATH
 #
 # Writes the canonical LaunchAgent plist to OUTPUT_FILE with exactly 5
 # top-level keys: Label, Program, MachServices, EnvironmentVariables,
-# ProcessType. Returns 0 on success, 1 on write failure.
+# ProcessType.
+#
+# JOB_LABEL is the launchd job label (e.g. com.tianpli.aidash).
+# MACH_SERVICE is the XPC service name brokered by launchd
+# (e.g. com.tianpli.aidash.xpc.v1). These are intentionally different:
+# the job label identifies the launchd job; the mach service name is what
+# the CLI connects to via NSXPCConnection.
 render_fixed_plist() {
-    local output_file=$1 label=$2 exec_path=$3
+    local output_file=$1 job_label=$2 mach_service=$3 exec_path=$4
     cat > "$output_file" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -20,12 +26,12 @@ render_fixed_plist() {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>$label</string>
+    <string>$job_label</string>
     <key>Program</key>
     <string>$exec_path</string>
     <key>MachServices</key>
     <dict>
-        <key>$label</key>
+        <key>$mach_service</key>
         <true/>
     </dict>
     <key>EnvironmentVariables</key>
@@ -40,13 +46,15 @@ render_fixed_plist() {
 PLIST_EOF
 }
 
-# validate_fixed_plist PLIST_FILE LABEL EXEC_PATH
+# validate_fixed_plist PLIST_FILE JOB_LABEL MACH_SERVICE EXEC_PATH
 #
 # Validates syntax (plutil -lint) and shape (5 required keys with correct
-# values). Prints diagnostics to stderr on failure.
+# values). JOB_LABEL and MACH_SERVICE are validated separately — Label must
+# equal JOB_LABEL, MachServices must contain MACH_SERVICE (not JOB_LABEL).
+# Prints diagnostics to stderr on failure.
 # Returns 0 if valid, 1 if any check fails.
 validate_fixed_plist() {
-    local plist_file=$1 label=$2 exec_path=$3
+    local plist_file=$1 job_label=$2 mach_service=$3 exec_path=$4
     local ok=1
 
     # Syntax check
@@ -61,13 +69,13 @@ validate_fixed_plist() {
     local v_label v_program v_mach v_env v_ptype
     v_label="$(_pv Label)"
     v_program="$(_pv Program)"
-    v_mach="$(_pv "MachServices:$label")"
+    v_mach="$(_pv "MachServices:$mach_service")"
     v_env="$(_pv "EnvironmentVariables:AIDASH_XPC_AGENT")"
     v_ptype="$(_pv ProcessType)"
 
-    [ "$v_label"   = "$label" ]      || { echo "FATAL: plist Label mismatch: got '$v_label'" >&2; ok=0; }
+    [ "$v_label"   = "$job_label" ]  || { echo "FATAL: plist Label mismatch: got '$v_label', expected '$job_label'" >&2; ok=0; }
     [ "$v_program" = "$exec_path" ]  || { echo "FATAL: plist Program mismatch: got '$v_program'" >&2; ok=0; }
-    [ "$v_mach"    = "true" ]        || { echo "FATAL: plist MachServices.$label mismatch: got '$v_mach'" >&2; ok=0; }
+    [ "$v_mach"    = "true" ]        || { echo "FATAL: plist MachServices.$mach_service mismatch: got '$v_mach'" >&2; ok=0; }
     [ "$v_env"     = "1" ]           || { echo "FATAL: plist EnvironmentVariables.AIDASH_XPC_AGENT mismatch: got '$v_env'" >&2; ok=0; }
     [ "$v_ptype"   = "Interactive" ] || { echo "FATAL: plist ProcessType mismatch: got '$v_ptype'" >&2; ok=0; }
 

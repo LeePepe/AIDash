@@ -214,6 +214,7 @@ install -m 755 "$BIN_SRC" "$BIN_DST" || { echo "[install-fixed] ERROR: CLI insta
 source "$REPO_ROOT/scripts/dev/lib-fixed-install-plist.sh"
 
 FIXED_EXEC="$APP_DST/Contents/MacOS/AIDash"
+MACH_SERVICE="$LABEL.xpc.v1"
 PLIST_DIR="$HOME/Library/LaunchAgents"
 PLIST="$PLIST_DIR/$LABEL.plist"
 
@@ -225,10 +226,10 @@ launchctl bootout "gui/$UID_N/$LABEL" 2>/dev/null || true
 echo "[install-fixed] writing LaunchAgent plist → $PLIST"
 mkdir -p "$PLIST_DIR"
 PLIST_STAGE="${PLIST}.staging.$$"
-render_fixed_plist "$PLIST_STAGE" "$LABEL" "$FIXED_EXEC"
+render_fixed_plist "$PLIST_STAGE" "$LABEL" "$MACH_SERVICE" "$FIXED_EXEC"
 
 # 3. Validate plist syntax and shape via shared helper
-if ! validate_fixed_plist "$PLIST_STAGE" "$LABEL" "$FIXED_EXEC"; then
+if ! validate_fixed_plist "$PLIST_STAGE" "$LABEL" "$MACH_SERVICE" "$FIXED_EXEC"; then
   cat "$PLIST_STAGE" >&2
   rm -f "$PLIST_STAGE"
   exit 1
