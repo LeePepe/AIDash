@@ -452,22 +452,30 @@ def test_oversized_printf_body_round_trips() -> None:
 # 5. MY-1452: the claude CLI must be turn-bounded and phase-timed.
 # --------------------------------------------------------------------------
 
-def test_claude_review_passes_max_turns_1() -> None:
-    """The claude CLI invocation includes --max-turns 1.
+def test_claude_review_passes_max_turns_and_disables_tools() -> None:
+    """The claude CLI invocation includes --max-turns 1 AND --allowedTools "".
 
-    Without this flag, `claude -p` runs in full agentic mode — reading files,
-    running commands, taking multiple turns — easily exhausting the 900-second
-    watchdog on the self-hosted runner (the PR #178 root cause, MY-1452).
+    Without --max-turns 1, `claude -p` runs in full agentic mode — reading
+    files, running commands, taking multiple turns — easily exhausting the
+    900-second watchdog on the self-hosted runner (MY-1452).
 
-    The review prompt is self-contained (diff + scope evidence), so exactly one
-    turn suffices. This is a structural check: it reads the source to ensure
-    the flag is present even if the script is never executed during the test.
+    Without --allowedTools "", a single first-turn tool call can still run
+    long enough to exhaust the watchdog. Both flags are required.
+
+    This is a behavioural check restricted to executable lines (comments
+    stripped): removing the real CLI flags while leaving them in comments must
+    fail the test.
     """
-    source = CLAUDE.read_text(encoding="utf-8")
-    # The flag must appear within the `claude -p` invocation block.
-    assert "--max-turns 1" in source, (
+    executable_lines = _code_lines(CLAUDE)
+    executable_text = "\n".join(code for _, code in executable_lines)
+
+    assert "--max-turns 1" in executable_text, (
         "claude-review.sh must pass --max-turns 1 to `claude -p` to prevent "
         "unbounded agentic exploration (MY-1452)"
+    )
+    assert '--allowedTools ""' in executable_text, (
+        "claude-review.sh must pass --allowedTools \"\" to `claude -p` to "
+        "deterministically disable tool use (MY-1452)"
     )
 
 
@@ -499,7 +507,8 @@ def test_timeout_kills_nested_env_bash_wrapper(tmp_path: pathlib.Path) -> None:
     kill (the pipe-dangle that MY-1404 identified as a hang risk).
     """
     inner = tmp_path / "fake-claude"
-    inner.write_text("#!/bin/sh\necho $$ >/tmp/_test_claude_pid; exec sleep 120\n",
+    pidfile = tmp_path / "claude.pid"
+    inner.write_text(f"#!/bin/sh\necho $$ >\"{pidfile}\"; exec sleep 120\n",
                      encoding="utf-8")
     inner.chmod(0o755)
 
@@ -509,12 +518,11 @@ def test_timeout_kills_nested_env_bash_wrapper(tmp_path: pathlib.Path) -> None:
         f'run_with_timeout 2 env FOO=bar bash -c \'{inner} "$@"\' _ arg1 '
         "2>/dev/null || rc=$?\n"
         "sleep 3\n"
-        'PID="$(cat /tmp/_test_claude_pid 2>/dev/null)"\n'
+        f'PID="$(cat "{pidfile}" 2>/dev/null)"\n'
         'if [ -z "$PID" ]; then echo NO-PID\n'
         'elif kill -0 "$PID" 2>/dev/null; then echo LEAKED\n'
         "else echo CLEAN; fi\n"
-        'echo "rc=$rc"\n'
-        "rm -f /tmp/_test_claude_pid\n",
+        'echo "rc=$rc"\n',
         timeout=90,
     )
 
