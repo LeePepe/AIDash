@@ -59,12 +59,11 @@ private struct ImmediateLoader: ContainerLoading {
     try await Task.sleep(for: .milliseconds(50))
 
     // THEN: MainActor is responsive — we reached here — and the state is
-    // still the loading sentinel because the loader never completed.
-    guard case .failed(let reason) = bootstrap.containerState else {
-        Issue.record("Expected loading-sentinel (.failed with empty reason)")
+    // still .loading because the loader never completed.
+    guard case .loading = bootstrap.containerState else {
+        Issue.record("Expected .loading state while loader is blocked")
         return
     }
-    #expect(reason.isEmpty, "Should still be in loading-sentinel state")
 
     // TEARDOWN: release the gate and await the detached task to ensure
     // delivery back to MainActor completes deterministically.
@@ -224,25 +223,25 @@ private struct ImmediateLoader: ContainerLoading {
     #expect(handlers.storeFailureReason == failureReason)
 }
 
-/// Verifies that the loading sentinel (empty reason) does NOT set
+/// Verifies that the initial .loading state does NOT set
 /// storeFailureReason — it's a transient state, not a terminal failure.
 @MainActor
-@Test func loadingSentinelDoesNotSetStoreFailureReason() async throws {
+@Test func loadingStateDoesNotSetStoreFailureReason() async throws {
     let handlers = XPCHandlers(container: nil)
     let bootstrap = AppBootstrap(handlers: handlers)
 
-    // Empty-reason .failed is the loading sentinel used at init.
-    let task = bootstrap.startDetached(
-        loader: ImmediateLoader(result: .failed(reason: ""))
-    )
-    await task.value
+    // Initial state is .loading — no loader has completed yet.
+    guard case .loading = bootstrap.containerState else {
+        Issue.record("Expected .loading initial state")
+        return
+    }
 
     #expect(handlers.container == nil)
     #expect(handlers.storeFailureReason == nil)
 }
 
 /// Verifies that testHost mode behavior — no loader started — keeps
-/// bootstrap in the loading-sentinel state with no container and no
+/// bootstrap in .loading state with no container and no
 /// storeFailureReason on the handlers. This prevents testHost from
 /// opening the real production store via prepareStoreURL/ModelContainer.
 @MainActor
@@ -250,12 +249,11 @@ private struct ImmediateLoader: ContainerLoading {
     // testHost: handlers=nil (no XPC listener), no startDetached call.
     let bootstrap = AppBootstrap(handlers: nil)
 
-    // Without startDetached, state remains at loading sentinel.
-    guard case .failed(let reason) = bootstrap.containerState else {
-        Issue.record("Expected loading-sentinel (.failed with empty reason)")
+    // Without startDetached, state remains at .loading.
+    guard case .loading = bootstrap.containerState else {
+        Issue.record("Expected .loading state when no loader is started")
         return
     }
-    #expect(reason.isEmpty, "testHost must stay in loading-sentinel — no store opened")
 }
 #endif
 

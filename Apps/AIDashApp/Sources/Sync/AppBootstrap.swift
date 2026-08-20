@@ -146,9 +146,9 @@ struct GUIContainerLoader: ContainerLoading {
 @MainActor @Observable
 final class AppBootstrap {
     /// Current store state. Drives BriefingWindowScene content.
-    /// Starts as `.failed(reason: "")` (loading sentinel); transitions to
-    /// `.ready` or `.failed(reason:)` once loading completes.
-    private(set) var containerState: CloudKitContainer.InitState = .failed(reason: "")
+    /// Starts as `.loading`; transitions to `.ready` or `.failed(reason:)`
+    /// once loading completes.
+    private(set) var containerState: CloudKitContainer.InitState = .loading
 
     #if os(macOS)
     private let handlers: XPCHandlers?
@@ -184,13 +184,13 @@ final class AppBootstrap {
         switch state {
         case .ready(let container):
             self.handlers?.container = container
-        case .failed(let reason) where !reason.isEmpty:
+        case .failed(let reason):
             // Terminal failure: propagate to XPCHandlers so store-dependent
             // commands return non-retryable `internal.store_failed` instead
             // of the retryable `internal.store_not_ready`.
             self.handlers?.storeFailureReason = reason
-        case .failed:
-            // Empty reason = loading sentinel, not a real failure.
+        case .loading:
+            // Loaders never return .loading — it's the initial sentinel.
             break
         }
         #endif

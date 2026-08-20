@@ -11,6 +11,7 @@ public final class CloudKitContainer {
     public static let shared = CloudKitContainer()
 
     public enum InitState: Sendable {
+        case loading
         case ready(ModelContainer)
         case failed(reason: String)
     }
@@ -433,6 +434,8 @@ public final class CloudKitContainer {
                 return container
             case .failed(let reason):
                 throw CloudKitContainerError.unavailable(reason: reason)
+            case .loading:
+                throw CloudKitContainerError.unavailable(reason: "Store is still loading")
             }
         }
     }
