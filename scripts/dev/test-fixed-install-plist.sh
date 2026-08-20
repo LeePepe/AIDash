@@ -2,18 +2,15 @@
 # Hermetic regression test for the fixed-install LaunchAgent plist.
 #
 # Sources the REAL lib-fixed-install-plist.sh helper (the same code path used
-# by install-fixed-build.sh in production) to render and validate the plist.
-# Injects a fake launchctl function to capture and assert the exact bootstrap
-# args without touching the real launchd job or store.
+# by install-fixed-build.sh in production) to render, validate, and bootstrap.
+# Injects a fake launchctl via FIXED_LAUNCHCTL_CMD to capture and assert the
+# exact argv without touching the real launchd job or store.
 #
 # Exit 0 = all assertions pass. Non-zero = regression.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-
-# Source the shared helper — this IS the production code path.
-source "$SCRIPT_DIR/lib-fixed-install-plist.sh"
 
 # --- Parse bundle prefix from xcconfig (same as install-fixed-build.sh) ------
 _xcc_val() {
@@ -36,10 +33,30 @@ FIXED_EXEC="/Applications/AIDash.app/Contents/MacOS/AIDash"
 MACH_SERVICE="$LABEL.xpc.v1"
 UID_N="$(id -u)"
 
+# --- Create fake launchctl that records argv ---------------------------------
+FAKE_LAUNCHCTL_LOG=$(mktemp "${TMPDIR:-/tmp}/fake-launchctl-log.XXXXXX")
+FAKE_LAUNCHCTL_BIN=$(mktemp "${TMPDIR:-/tmp}/fake-launchctl.XXXXXX")
+chmod +x "$FAKE_LAUNCHCTL_BIN"
+cat > "$FAKE_LAUNCHCTL_BIN" <<'FAKE_EOF'
+#!/bin/bash
+# Fake launchctl: record all argv (one per line) then exit 0
+for arg in "$@"; do
+  printf '%s\n' "$arg"
+done > "$FAKE_LAUNCHCTL_LOG_PATH"
+exit 0
+FAKE_EOF
+# The fake reads its log path from env — inject it
+export FAKE_LAUNCHCTL_LOG_PATH="$FAKE_LAUNCHCTL_LOG"
+
+# Inject the fake into the helper via FIXED_LAUNCHCTL_CMD
+export FIXED_LAUNCHCTL_CMD="$FAKE_LAUNCHCTL_BIN"
+
+# --- Source the shared helper (production code path) -------------------------
+source "$SCRIPT_DIR/lib-fixed-install-plist.sh"
+
 # --- Temp plist (cleaned up on exit) -----------------------------------------
 TMP_PLIST=$(mktemp "${TMPDIR:-/tmp}/aidash-plist-test.XXXXXX")
-FAKE_LAUNCHCTL_LOG=$(mktemp "${TMPDIR:-/tmp}/fake-launchctl.XXXXXX")
-trap 'rm -f "$TMP_PLIST" "$FAKE_LAUNCHCTL_LOG"' EXIT
+trap 'rm -f "$TMP_PLIST" "$FAKE_LAUNCHCTL_LOG" "$FAKE_LAUNCHCTL_BIN"' EXIT
 
 # --- Assertions framework ---------------------------------------------------
 fail_count=0
@@ -108,26 +125,26 @@ else
   fail_count=$((fail_count + 1))
 fi
 
-# --- 5. Verify bootstrap command args via shared helper ----------------------
+# --- 5. Bootstrap via shared helper with fake launchctl ----------------------
+# Call the SAME bootstrap_fixed_launchagent helper that production uses.
+# FIXED_LAUNCHCTL_CMD points to our fake, which records argv.
 PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
-bootstrap_args=$(bootstrap_command_args "$UID_N" "$PLIST_PATH")
-expected_args="gui/$UID_N $PLIST_PATH"
-assert_eq "bootstrap_command_args" "$expected_args" "$bootstrap_args"
+bootstrap_fixed_launchagent "$UID_N" "$PLIST_PATH"
+bootstrap_rc=$?
+assert_eq "bootstrap_fixed_launchagent exit code" "0" "$bootstrap_rc"
 
-# --- 6. Inject fake launchctl and verify exact invocation --------------------
-launchctl() {
-  echo "$*" >> "$FAKE_LAUNCHCTL_LOG"
-  return 0
-}
-export -f launchctl 2>/dev/null || true
+# Assert the fake launchctl received exactly 3 argv: bootstrap gui/<uid> <plist>
+argv_line1=$(sed -n '1p' "$FAKE_LAUNCHCTL_LOG" 2>/dev/null)
+argv_line2=$(sed -n '2p' "$FAKE_LAUNCHCTL_LOG" 2>/dev/null)
+argv_line3=$(sed -n '3p' "$FAKE_LAUNCHCTL_LOG" 2>/dev/null)
+argv_count=$(wc -l < "$FAKE_LAUNCHCTL_LOG" 2>/dev/null | tr -d ' ')
 
-# Simulate what the installer does: launchctl bootstrap <args>
-launchctl bootstrap $(bootstrap_command_args "$UID_N" "$PLIST_PATH")
+assert_eq "launchctl argv count" "3" "$argv_count"
+assert_eq "launchctl argv[0]" "bootstrap" "$argv_line1"
+assert_eq "launchctl argv[1]" "gui/$UID_N" "$argv_line2"
+assert_eq "launchctl argv[2]" "$PLIST_PATH" "$argv_line3"
 
-recorded=$(cat "$FAKE_LAUNCHCTL_LOG" 2>/dev/null)
-assert_eq "fake launchctl args" "bootstrap gui/$UID_N $PLIST_PATH" "$recorded"
-
-# --- 7. Entitlements file checks --------------------------------------------
+# --- 6. Entitlements file checks --------------------------------------------
 ENT_FILE="$REPO_ROOT/Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements"
 if [ -f "$ENT_FILE" ]; then
   echo "  PASS: fixed entitlements file exists"

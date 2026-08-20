@@ -82,11 +82,20 @@ validate_fixed_plist() {
     [ "$ok" = "1" ] && return 0 || return 1
 }
 
-# bootstrap_command_args UID_N PLIST_PATH
+# bootstrap_fixed_launchagent UID_N PLIST_PATH
 #
-# Returns the exact arguments that should be passed to `launchctl bootstrap`.
-# Separated from execution so tests can verify args without calling launchctl.
-bootstrap_command_args() {
+# Executes the launchctl bootstrap command with exact argv:
+#   <launchctl> bootstrap gui/<uid> <plist>
+#
+# The launchctl binary is controlled by FIXED_LAUNCHCTL_CMD (default:
+# /bin/launchctl). Tests inject a shell script fake via this variable to
+# capture and assert the exact invocation without touching the real job.
+#
+# Uses an array to avoid word-splitting — each argument is a distinct
+# element, never interpolated through command substitution.
+# Returns the exit code of the launchctl command.
+bootstrap_fixed_launchagent() {
     local uid_n=$1 plist_path=$2
-    echo "gui/$uid_n" "$plist_path"
+    local cmd="${FIXED_LAUNCHCTL_CMD:-/bin/launchctl}"
+    "$cmd" bootstrap "gui/$uid_n" "$plist_path"
 }

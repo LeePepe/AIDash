@@ -238,9 +238,9 @@ fi
 # 4. Atomically install plist
 mv -f "$PLIST_STAGE" "$PLIST" || { echo "FATAL: plist install failed" >&2; exit 1; }
 
-# 5. Bootstrap the LaunchAgent
+# 5. Bootstrap the LaunchAgent via shared helper
 echo "[install-fixed] bootstrapping LaunchAgent"
-if ! launchctl bootstrap $(bootstrap_command_args "$UID_N" "$PLIST"); then
+if ! bootstrap_fixed_launchagent "$UID_N" "$PLIST"; then
   echo "[install-fixed] FATAL: launchctl bootstrap failed" >&2
   echo "    plist: $PLIST" >&2
   echo "    domain: gui/$UID_N" >&2
