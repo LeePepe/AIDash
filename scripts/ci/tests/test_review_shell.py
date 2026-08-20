@@ -446,3 +446,80 @@ def test_oversized_printf_body_round_trips() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert f"bytes={len(OVERSIZED_BODY)}" in result.stdout
+
+
+# --------------------------------------------------------------------------
+# 5. MY-1452: the claude CLI must be turn-bounded and phase-timed.
+# --------------------------------------------------------------------------
+
+def test_claude_review_passes_max_turns_1() -> None:
+    """The claude CLI invocation includes --max-turns 1.
+
+    Without this flag, `claude -p` runs in full agentic mode — reading files,
+    running commands, taking multiple turns — easily exhausting the 900-second
+    watchdog on the self-hosted runner (the PR #178 root cause, MY-1452).
+
+    The review prompt is self-contained (diff + scope evidence), so exactly one
+    turn suffices. This is a structural check: it reads the source to ensure
+    the flag is present even if the script is never executed during the test.
+    """
+    source = CLAUDE.read_text(encoding="utf-8")
+    # The flag must appear within the `claude -p` invocation block.
+    assert "--max-turns 1" in source, (
+        "claude-review.sh must pass --max-turns 1 to `claude -p` to prevent "
+        "unbounded agentic exploration (MY-1452)"
+    )
+
+
+def test_claude_review_emits_phase_timing() -> None:
+    """Phase timing helpers are defined and invoked for the three phases.
+
+    MY-1452 requires actionable phase-specific evidence: when a future timeout
+    occurs, the log must say WHERE it stalled (diff / scope-evidence /
+    claude-cli), not just that 900 seconds elapsed.
+    """
+    source = CLAUDE.read_text(encoding="utf-8")
+    for phase in ("diff", "scope-evidence", "claude-cli"):
+        assert f'_phase_start "{phase}"' in source, (
+            f"claude-review.sh is missing _phase_start for phase {phase!r}"
+        )
+        assert f'_phase_end "{phase}"' in source, (
+            f"claude-review.sh is missing _phase_end for phase {phase!r}"
+        )
+
+
+def test_timeout_kills_nested_env_bash_wrapper(tmp_path: pathlib.Path) -> None:
+    """The `env VAR=... bash -c '...'` wrapper used by claude-review is killed.
+
+    The claude gate wraps the CLI call in `env CLAUDE_REVIEW_PROMPT=... bash -c
+    '...'`, which creates an extra shell layer between `run_with_timeout` and
+    the actual CLI. This test verifies that the watchdog's process-group kill
+    reaches through the env→bash→child chain, and that the wrapper's stderr
+    redirect (`2>/tmp/...`) does not keep the write end of a pipe open past the
+    kill (the pipe-dangle that MY-1404 identified as a hang risk).
+    """
+    inner = tmp_path / "fake-claude"
+    inner.write_text("#!/bin/sh\necho $$ >/tmp/_test_claude_pid; exec sleep 120\n",
+                     encoding="utf-8")
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f'run_with_timeout 2 env FOO=bar bash -c \'{inner} "$@"\' _ arg1 '
+        "2>/dev/null || rc=$?\n"
+        "sleep 3\n"
+        'PID="$(cat /tmp/_test_claude_pid 2>/dev/null)"\n'
+        'if [ -z "$PID" ]; then echo NO-PID\n'
+        'elif kill -0 "$PID" 2>/dev/null; then echo LEAKED\n'
+        "else echo CLEAN; fi\n"
+        'echo "rc=$rc"\n'
+        "rm -f /tmp/_test_claude_pid\n",
+        timeout=90,
+    )
+
+    assert "NO-PID" not in result.stdout, "inner process never started; test is vacuous"
+    assert "CLEAN" in result.stdout, (
+        f"orphaned process survived the nested env→bash→child kill: {result.stdout}"
+    )
+    assert "rc=124" in result.stdout
