@@ -37,15 +37,35 @@ _FENCE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# Structural record patterns that trusted output uses as section headers.
+# PR-controlled content (test bodies, paths, func names) must not contain
+# these — a malicious test body could otherwise forge trusted structural
+# records inside the nonce-authenticated coverage block.
+# Matches the distinctive keyword phrases wherever they appear.
+_STRUCTURAL_RECORD_RE = re.compile(
+    r"COVERAGE CONTEXT|REMOVED TESTS|SEARCH SCOPE|"
+    r"CANDIDATE EXISTING COVERAGE|"
+    r"---\s+\S+[^(\n]*:\s+\w+[^(\n]*\(lines\s+\d+",
+)
+
 
 def sanitize_untrusted_content(text: str) -> str:
-    """Remove or neutralize prompt-fence markers in PR-controlled content.
+    """Remove or neutralize prompt-fence markers and structural record patterns
+    in PR-controlled content.
 
     Replaces any sequence resembling the review prompt's trusted/untrusted
     boundary delimiters with a safe placeholder, preventing delimiter
     injection attacks where test source could escape the untrusted region.
+
+    Also neutralizes structural record headers (SEARCH SCOPE, REMOVED TESTS,
+    CANDIDATE EXISTING COVERAGE, excerpt headers) that could forge trusted
+    records inside the nonce-authenticated coverage block.
     """
-    return _FENCE_PATTERNS.sub("[SANITIZED — fence marker removed]", text)
+    result = _FENCE_PATTERNS.sub("[SANITIZED — fence marker removed]", text)
+    result = _STRUCTURAL_RECORD_RE.sub(
+        "[SANITIZED — structural record removed]", result
+    )
+    return result
 
 
 class AnalysisError(Exception):
@@ -463,17 +483,31 @@ def find_related_tests_in_head(
             # Sanitize PR-controlled content before embedding in the prompt
             # to prevent delimiter injection attacks (MY-1456 security fix).
             safe_body = sanitize_untrusted_content(func_body)
+            # Path and func name are also PR-controlled — sanitize them
+            safe_file = sanitize_untrusted_content(test_file)
+            safe_func = sanitize_untrusted_content(func_name)
 
             excerpt = (
-                f"--- {test_file}: {func_name} "
+                f"--- {safe_file}: {safe_func} "
                 f"(lines {func_start + 1}-{func_end_idx}, "
                 f"references: {', '.join(sorted(referenced)[:5])})\n"
                 f"{safe_body}"
             )
             excerpt_bytes = len(excerpt.encode("utf-8", "replace"))
             if excerpt_bytes > max_excerpt_bytes:
-                excerpt = excerpt[:max_excerpt_bytes] + "\n[truncated]"
-                excerpt_bytes = max_excerpt_bytes
+                # True UTF-8 byte truncation: encode, slice bytes, decode.
+                # Use errors="ignore" to drop partial multibyte sequences at
+                # the boundary (not "replace" which expands them to 3-byte
+                # U+FFFD and overshoots the cap).
+                _TRUNC_MARKER = "\n[truncated]"
+                _TRUNC_MARKER_BYTES = len(_TRUNC_MARKER.encode("utf-8"))
+                usable = max(0, max_excerpt_bytes - _TRUNC_MARKER_BYTES)
+                excerpt = (
+                    excerpt.encode("utf-8", "replace")[:usable]
+                    .decode("utf-8", "ignore")
+                    + _TRUNC_MARKER
+                )
+                excerpt_bytes = len(excerpt.encode("utf-8", "replace"))
 
             if total_bytes + excerpt_bytes + _OMISSION_MARKER_BYTES > COVERAGE_MAX_TOTAL_BYTES:
                 # Include omission marker bytes in budget accounting
