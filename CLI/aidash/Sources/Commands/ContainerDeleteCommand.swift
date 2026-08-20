@@ -62,7 +62,11 @@ struct ContainerDeleteCommand: AsyncParsableCommand {
         let response = try await XPCClient().execute(request)
 
         // 4. Handle response.
-        try Self.emit(response: response, globals: globals)
+        do {
+            try Self.emit(response: response, globals: globals)
+        } catch let exitCode as ExitCode {
+            Darwin.exit(exitCode.rawValue)
+        }
     }
 
     // MARK: - Emit (extracted so tests can drive both branches with a
@@ -105,14 +109,9 @@ struct ContainerDeleteCommand: AsyncParsableCommand {
         }
 
         if let remoteError = response.error {
-            throw XPCError(
-                code: remoteError.code,
-                message: remoteError.message,
-                field: remoteError.field,
-                got: remoteError.got,
-                allowed: remoteError.allowed,
-                cause: remoteError.cause
-            )
+            let formatter = globals.outputMode.formatter()
+            try formatter.emit(error: remoteError, requestId: response.requestId)
+            throw ExitCode(3)
         }
 
         throw XPCError(

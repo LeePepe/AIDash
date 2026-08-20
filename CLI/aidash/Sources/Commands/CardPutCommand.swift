@@ -128,9 +128,9 @@ struct CardPutCommand: AsyncParsableCommand {
                 try formatter.emit(success: result, requestId: response.requestId)
             }
         } else if let error = response.error {
-            // Remote error — re-throw as XPCError so the central handler in
-            // AIDash.main emits the envelope and maps the exit code.
-            throw XPCError(
+            // Remote error — emit envelope with response.requestId and exit 3.
+            // Per cli-surface §"Exit codes": server-returned errors ALWAYS exit 3.
+            let remoteError = XPCError(
                 code: error.code,
                 message: error.message,
                 field: error.field,
@@ -138,6 +138,9 @@ struct CardPutCommand: AsyncParsableCommand {
                 allowed: error.allowed,
                 cause: error.cause
             )
+            let formatter = globals.outputMode.formatter()
+            try formatter.emit(error: remoteError, requestId: response.requestId)
+            Darwin.exit(3)
         } else {
             throw XPCError(
                 code: "xpc.decode_failure",

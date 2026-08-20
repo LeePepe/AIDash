@@ -38,7 +38,9 @@ public actor XPCClient {
     }
 
     /// Send an XPC request and await the response.
-    /// Throws `XPCError` on transport failure, timeout, or remote error.
+    /// Throws `XPCError` only on local transport failure, timeout, or decode error.
+    /// Remote `ok=false` responses are returned (not thrown) so callers can access
+    /// `response.requestId` for structured error output (MY-1455).
     /// If the app is not running, attempts to launch it via `AppLauncher` and retries once.
     public func execute(_ request: XPCRequest) async throws -> XPCResponse {
         do {
@@ -171,6 +173,11 @@ public actor XPCClient {
     }
 
     /// Decode the reply and resume the matching pending continuation.
+    ///
+    /// Remote `ok=false` responses are returned as-is (they are data, not
+    /// transport exceptions). Only local decode failures throw — this lets
+    /// command-level code access `response.requestId` for structured error
+    /// output (MY-1455).
     private func handleReply(requestId: String, data: Data) async {
         let decoded: Result<XPCResponse, any Error>
         do {
@@ -184,15 +191,8 @@ public actor XPCClient {
 
         switch decoded {
         case .success(let response):
-            switch XPCClient.resultForResponse(response) {
-            case .success(let value):
-                await pending.complete(requestId: requestId) { cont in
-                    cont.resume(returning: value)
-                }
-            case .failure(let remoteError):
-                await pending.complete(requestId: requestId) { cont in
-                    cont.resume(throwing: remoteError)
-                }
+            await pending.complete(requestId: requestId) { cont in
+                cont.resume(returning: response)
             }
         case .failure(let error):
             connection = nil

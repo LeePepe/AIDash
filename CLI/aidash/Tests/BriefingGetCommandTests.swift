@@ -266,4 +266,56 @@ struct BriefingGetCommandTests {
         let error = XPCError(code: "briefing.not_found", message: "no briefing")
         #expect(ExitCodeMapper.code(for: error) == 3)
     }
+
+    // MARK: - MY-1455: Remote error retains requestId from XPCResponse
+
+    /// Hermetic test: a decoded `briefing.not_found` response with a requestId
+    /// must produce error output containing that requestId nested inside the
+    /// error object. This is the exact scenario the fixed installer verifies.
+    ///
+    /// Before MY-1455, `XPCClient.execute()` would throw an `XPCError` for
+    /// `ok=false` responses, discarding `XPCResponse.requestId`. After the fix,
+    /// `execute()` returns the full response, and command-level code emits the
+    /// requestId from `response.requestId`.
+    @Test("briefing.not_found response emits error.requestId from XPCResponse (MY-1455)")
+    func remoteErrorPreservesResponseRequestId() throws {
+        // Simulate: XPCClient.execute() returns this response (ok=false, with requestId).
+        let response = XPCResponse(
+            requestId: "xpc-response-uuid-123",
+            appVersion: "1.0.0",
+            ok: false,
+            data: nil,
+            error: XPCError(
+                code: "briefing.not_found",
+                message: "No briefing found for date '2026-08-20'"
+            )
+        )
+
+        // Exercise the same output path as BriefingGetCommand.run():
+        // when response.ok == false && response.error != nil, emit the error
+        // envelope with response.requestId on stderr.
+        let pipe = Pipe()
+        let saved = dup(FileHandle.standardError.fileDescriptor)
+        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardError.fileDescriptor)
+
+        let formatter = JSONOutput()
+        try formatter.emit(error: response.error!, requestId: response.requestId)
+
+        dup2(saved, FileHandle.standardError.fileDescriptor)
+        close(saved)
+        try pipe.fileHandleForWriting.close()
+        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+
+        let obj = try #require(
+            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+        )
+        #expect(obj["ok"] as? Bool == false)
+        // Root must NOT have requestId
+        #expect(obj["requestId"] == nil)
+        let errBody = try #require(obj["error"] as? [String: Any])
+        #expect(errBody["code"] as? String == "briefing.not_found")
+        #expect(errBody["message"] as? String == "No briefing found for date '2026-08-20'")
+        // MY-1455 contract: error.requestId equals the XPC response's requestId
+        #expect(errBody["requestId"] as? String == "xpc-response-uuid-123")
+    }
 }

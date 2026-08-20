@@ -62,10 +62,15 @@ struct SchemaListCommand: AsyncParsableCommand {
         let response = try await XPCClient().execute(request)
 
         if response.ok == false {
-            throw response.error ?? XPCError(
+            // Remote error: emit envelope with requestId on stderr and exit 3.
+            // Per cli-surface §"Exit codes": server-returned errors ALWAYS exit 3.
+            let remoteError = response.error ?? XPCError(
                 code: "xpc.decode_failure",
                 message: "Server returned ok=false but no error payload"
             )
+            let formatter = globals.outputMode.formatter()
+            try formatter.emit(error: remoteError, requestId: response.requestId)
+            Darwin.exit(3)
         }
 
         guard let data = response.data else {
