@@ -162,13 +162,38 @@ validate_json_key() {
 # validate_briefing_not_found_envelope FILE
 #
 # Production validator for the CLI's briefing.not_found error envelope.
-# The canonical envelope contains exactly: ok=false, error.code=briefing.not_found,
-# error.message — no requestId at any level.
+# Required fields:
+#   - ok = false
+#   - error.code = briefing.not_found
+#   - error.message exists and is non-empty
+#   - root requestId is ABSENT (error envelopes do not carry root requestId)
+#
+# Optional fields (must not cause rejection):
+#   - error.requestId — currently omitted by the central-catch envelope;
+#     after MY-1455 restores the contract, a non-empty nested requestId
+#     will be present. Both shapes must pass.
+#   - Unknown additional error fields are not rejected.
 #
 # Returns 0 if the envelope is valid, 1 otherwise.
 # Both the installer exit-3 branch and the hermetic test call this function.
 validate_briefing_not_found_envelope() {
     local file=$1
-    validate_json_key "$file" "ok" "false" \
-      && validate_json_key "$file" "error.code" "briefing.not_found"
+
+    # Required: ok=false
+    validate_json_key "$file" "ok" "false" || return 1
+
+    # Required: error.code=briefing.not_found
+    validate_json_key "$file" "error.code" "briefing.not_found" || return 1
+
+    # Required: error.message exists and is non-empty
+    local msg
+    msg=$(/usr/bin/plutil -extract "error.message" raw -o - "$file" 2>/dev/null) || return 1
+    [ -n "$msg" ] || return 1
+
+    # Required: root requestId must be ABSENT
+    if /usr/bin/plutil -extract "requestId" xml1 -o /dev/null "$file" 2>/dev/null; then
+        return 1
+    fi
+
+    return 0
 }
