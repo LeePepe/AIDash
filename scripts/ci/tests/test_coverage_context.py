@@ -23,6 +23,7 @@ from coverage_context import (  # noqa: E402
     extract_production_symbols,
     find_related_tests_in_head,
     find_removed_test_functions,
+    find_test_files_in_changed_and_related,
     removed_line_numbers,
     render_coverage_evidence,
     sanitize_untrusted_content,
@@ -1038,3 +1039,281 @@ def test_delimiter_injection_in_claude_prompt_path(monkeypatch):
     assert "SANITIZED" in combined
     # But the legit content is present
     assert "publishReturnedFalse" in combined
+
+
+# --- Deleted test file exclusion tests (MY-1456 blocker #1) ---
+
+
+def test_deleted_test_file_excluded_from_candidates(monkeypatch):
+    """When a changed test file is deleted from HEAD (absent from ls-tree),
+    find_test_files_in_changed_and_related must exclude it from candidates
+    rather than including it (which would cause AnalysisError downstream)."""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                # Only the production file and a symbol-matching test remain in HEAD
+                return (
+                    "CLI/aidash/Sources/BriefingPublishCommand.swift\n"
+                    "CLI/aidash/Tests/BriefingPublishCommandNewTests.swift"
+                )
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    test_files, searched = find_test_files_in_changed_and_related(
+        head_sha="head123",
+        changed_files=[
+            "CLI/aidash/Tests/BriefingPublishCommandTests.swift",  # DELETED
+            "CLI/aidash/Sources/BriefingPublishCommand.swift",
+        ],
+        production_symbols={"BriefingPublishCommand"},
+    )
+
+    # Deleted file must NOT be in candidates
+    assert "CLI/aidash/Tests/BriefingPublishCommandTests.swift" not in test_files
+    # Searched summary must note the deletion
+    assert any("deleted" in s or "absent" in s for s in searched)
+    # Symbol-matching sibling should be found
+    assert "CLI/aidash/Tests/BriefingPublishCommandNewTests.swift" in test_files
+
+
+def test_deleted_test_file_full_pipeline_completes_normally(monkeypatch):
+    """End-to-end: a diff deletes an entire test file. The pipeline must
+    detect the removed tests, exclude the deleted file from candidate search,
+    and complete without AnalysisError."""
+
+    # BASE has the test file, HEAD does not
+    base_test_source = """\
+import XCTest
+@testable import AIDashCLI
+
+final class OldNetworkTests: XCTestCase {
+    func testNetworkTimeout() async throws {
+        let client = MockAPIClient(throwing: NetworkError.timeout)
+        let cmd = BriefingPublishCommand(client: client)
+        do { _ = try await cmd.run(); XCTFail() } catch {}
+    }
+}
+"""
+
+    # A sibling test file at HEAD that covers the same production symbol
+    sibling_test = """\
+import XCTest
+@testable import AIDashCLI
+
+final class BriefingPublishCommandTests: XCTestCase {
+    func testPublishReturnedFalse() async throws {
+        let client = MockAPIClient(response: .init(ok: false, error: "x"))
+        let cmd = BriefingPublishCommand(client: client)
+        let result = try await cmd.run()
+        XCTAssertEqual(result, .failure("x"))
+    }
+}
+"""
+
+    diff_deletes_file = """\
+diff --git a/CLI/aidash/Tests/OldNetworkTests.swift b/CLI/aidash/Tests/OldNetworkTests.swift
+deleted file mode 100644
+index abc1234..0000000
+--- a/CLI/aidash/Tests/OldNetworkTests.swift
++++ /dev/null
+@@ -1,11 +0,0 @@
+-import XCTest
+-@testable import AIDashCLI
+-
+-final class OldNetworkTests: XCTestCase {
+-    func testNetworkTimeout() async throws {
+-        let client = MockAPIClient(throwing: NetworkError.timeout)
+-        let cmd = BriefingPublishCommand(client: client)
+-        do { _ = try await cmd.run(); XCTFail() } catch {}
+-    }
+-}
+"""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref_path = args[1]
+            if ref_path.startswith("base123:"):
+                path = ref_path.split(":", 1)[1]
+                if path == "CLI/aidash/Tests/OldNetworkTests.swift":
+                    return base_test_source
+                return None
+            if ref_path.startswith("head456:"):
+                path = ref_path.split(":", 1)[1]
+                if path == "CLI/aidash/Tests/BriefingPublishCommandTests.swift":
+                    return sibling_test
+                return None  # OldNetworkTests is deleted
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                # HEAD tree: deleted file is absent
+                return "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
+            if "--" in args:
+                path_idx = args.index("--") + 1
+                path = args[path_idx]
+                if path == "CLI/aidash/Tests/OldNetworkTests.swift":
+                    return ""  # confirmed absent from HEAD
+                if path == "CLI/aidash/Tests/BriefingPublishCommandTests.swift":
+                    return f"100644 blob abc\t{path}"
+            return ""
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    # Should NOT raise AnalysisError — deleted file is a valid case
+    result = build_coverage_evidence(
+        head_sha="head456",
+        base_sha="base123",
+        diff_text=diff_deletes_file,
+        changed_files=["CLI/aidash/Tests/OldNetworkTests.swift"],
+    )
+
+    # Removed test was detected
+    assert "testNetworkTimeout" in result
+    assert "COVERAGE CONTEXT" in result
+
+
+# --- Python test declaration support tests (MY-1456 blocker #2) ---
+
+
+def test_find_all_test_functions_finds_python_def():
+    """_find_all_test_functions must detect Python def test_* declarations."""
+    source = """\
+import pytest
+
+def test_coverage_pipeline():
+    result = build_coverage_evidence(...)
+    assert result != ""
+
+def test_another_case():
+    pass
+"""
+    results = _find_all_test_functions(source)
+    names = [n for n, _ in results]
+    assert "test_coverage_pipeline" in names
+    assert "test_another_case" in names
+
+
+def test_find_all_test_functions_finds_python_async_def():
+    """_find_all_test_functions must detect Python async def test_*."""
+    source = """\
+import pytest
+
+async def test_async_operation():
+    result = await some_async()
+    assert result is not None
+"""
+    results = _find_all_test_functions(source)
+    names = [n for n, _ in results]
+    assert "test_async_operation" in names
+
+
+def test_find_func_end_python_indentation():
+    """_find_func_end must handle Python indentation-based functions."""
+    lines = [
+        "def test_something():",
+        "    result = compute()",
+        "    assert result == 42",
+        "",
+        "def test_other():",
+        "    pass",
+    ]
+    end = _find_func_end(lines, 0)
+    # Should cover lines 1-3 (the blank line is ambiguous but the next def
+    # at same indent terminates), returning 1-based line 3
+    assert end == 3
+
+
+def test_removed_python_test_end_to_end(monkeypatch):
+    """End-to-end: a diff removes a Python test function. The pipeline must
+    detect removal, find related existing Python tests, and complete normally."""
+
+    base_py_test = """\
+import pytest
+from coverage_context import build_coverage_evidence
+
+def test_old_throw_path():
+    # Tests the old exception path
+    with pytest.raises(AnalysisError):
+        build_coverage_evidence(head_sha="bad", base_sha="bad",
+                                diff_text="", changed_files=[])
+
+def test_normal_empty_result():
+    result = build_coverage_evidence(head_sha="ok", base_sha="ok",
+                                     diff_text="", changed_files=[])
+    assert result == ""
+"""
+
+    # HEAD: the old throw-path test is removed
+    head_py_test = """\
+import pytest
+from coverage_context import build_coverage_evidence
+
+def test_normal_empty_result():
+    result = build_coverage_evidence(head_sha="ok", base_sha="ok",
+                                     diff_text="", changed_files=[])
+    assert result == ""
+
+def test_build_coverage_evidence_propagates_error():
+    # This test covers the AnalysisError path
+    with pytest.raises(AnalysisError):
+        build_coverage_evidence(head_sha="x", base_sha="y",
+                                diff_text="diff", changed_files=["test.swift"])
+"""
+
+    py_diff = """\
+diff --git a/scripts/ci/tests/test_coverage_context.py b/scripts/ci/tests/test_coverage_context.py
+index abc1234..def5678 100644
+--- a/scripts/ci/tests/test_coverage_context.py
++++ b/scripts/ci/tests/test_coverage_context.py
+@@ -3,7 +3,0 @@ from coverage_context import build_coverage_evidence
+-def test_old_throw_path():
+-    # Tests the old exception path
+-    with pytest.raises(AnalysisError):
+-        build_coverage_evidence(head_sha="bad", base_sha="bad",
+-                                diff_text="", changed_files=[])
+-
+"""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref_path = args[1]
+            if ref_path.startswith("base123:"):
+                path = ref_path.split(":", 1)[1]
+                if path == "scripts/ci/tests/test_coverage_context.py":
+                    return base_py_test
+                return None
+            if ref_path.startswith("head456:"):
+                path = ref_path.split(":", 1)[1]
+                if path == "scripts/ci/tests/test_coverage_context.py":
+                    return head_py_test
+                return None
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "scripts/ci/tests/test_coverage_context.py"
+            if "--" in args:
+                path_idx = args.index("--") + 1
+                path = args[path_idx]
+                if path == "scripts/ci/tests/test_coverage_context.py":
+                    return f"100644 blob abc\t{path}"
+            return ""
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    result = build_coverage_evidence(
+        head_sha="head456",
+        base_sha="base123",
+        diff_text=py_diff,
+        changed_files=["scripts/ci/tests/test_coverage_context.py"],
+    )
+
+    # The removed Python test must be detected
+    assert "test_old_throw_path" in result
+    assert "COVERAGE CONTEXT" in result
