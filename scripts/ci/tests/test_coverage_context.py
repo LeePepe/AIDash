@@ -377,7 +377,9 @@ def test_extract_production_symbols_finds_relevant_types():
     ]
     symbols = extract_production_symbols(removed)
     assert "BriefingPublishCommand" in symbols
-    assert "run" in symbols
+    # Low-signal method tokens like "run" are filtered to prevent
+    # false matches against unrelated candidates (e.g. runtime, rerun)
+    assert "run" not in symbols
     # Mock/framework symbols should be filtered out
     assert "MockAPIClient" not in symbols
 
@@ -418,7 +420,8 @@ def test_extract_production_symbols_filters_swift_testing_framework():
     symbols = extract_production_symbols(removed)
     # Production symbols preserved
     assert "BriefingPublishCommand" in symbols
-    assert "run" in symbols
+    # "run" is a low-signal method token, filtered to prevent false matches
+    assert "run" not in symbols
     # Swift Testing framework identifiers filtered
     assert "Test" not in symbols
     assert "Testing" not in symbols
@@ -1964,7 +1967,7 @@ struct EvilTests {
     combined = "\n".join(excerpts)
     # Forged COVERAGE CONTEXT must be sanitized in the body
     lines = combined.splitlines()
-    body_lines = [l for l in lines if not l.startswith("--- ")]
+    body_lines = [line for line in lines if not line.startswith("--- ")]
     body_text = "\n".join(body_lines)
     # The exact phrase "COVERAGE CONTEXT" must be sanitized away
     assert "COVERAGE CONTEXT" not in body_text
@@ -2034,4 +2037,325 @@ def test_sanitize_preserves_normal_structural_like_code():
         // removed old assertion
     }"""
     assert sanitize_untrusted_content(code) == code
+
+
+# --- Fix 2: shell contract — empty COVERAGE CONTEXT semantics ---
+
+def test_review_common_sh_empty_coverage_not_failure():
+    """review-common.sh review_coverage_rules must state that an empty
+    COVERAGE CONTEXT block is a normal no-removed-tests result, not an
+    analyzer failure."""
+    import pathlib
+    sh_path = pathlib.Path(__file__).resolve().parents[1] / "review-common.sh"
+    content = sh_path.read_text(encoding="utf-8")
+    # Must explicitly state empty = normal
+    assert "正常结果" in content or "normal" in content.lower()
+    # Must not conflate empty with analyzer failure
+    assert "空块不是分析器异常" in content or "not analyzer failure" in content.lower()
+    # Must state empty does not supply SEARCH SCOPE evidence
+    assert "不提供 SEARCH SCOPE 证据" in content
+
+
+# --- Fix 3: no-production-symbols scope marking ---
+
+def test_merge_search_outcomes_no_symbols_marks_not_searched():
+    """When no production symbols were extracted (no_symbols=True),
+    all discovery entries must be marked not-searched so they cannot
+    support negative evidence claims."""
+    from coverage_context import _merge_search_outcomes
+
+    discovery = [
+        "changed: Tests/FooTests.swift",
+        "sibling: Tests/BarTests.swift",
+    ]
+    result = _merge_search_outcomes(discovery, [], no_symbols=True)
+    assert len(result) == 2
+    for entry in result:
+        assert "not searched" in entry
+        assert "no production symbols" in entry
+
+
+def test_merge_search_outcomes_no_symbols_preserves_deleted():
+    """Deleted/excluded entries pass through unchanged even when
+    no_symbols=True."""
+    from coverage_context import _merge_search_outcomes
+
+    discovery = [
+        "changed-deleted: Tests/Old.swift (excluded — absent from HEAD)",
+        "changed: Tests/Foo.swift",
+    ]
+    result = _merge_search_outcomes(discovery, [], no_symbols=True)
+    assert "deleted" in result[0]
+    assert "not searched" not in result[0]
+    assert "not searched" in result[1]
+
+
+def test_full_pipeline_no_production_symbols_marks_scope(monkeypatch):
+    """When removed tests yield no production symbols, SEARCH SCOPE must
+    report discovery entries as not-searched, and negative evidence claims
+    must not be supported."""
+
+    # A removed test whose body references only framework/low-signal symbols
+    base_source = """\
+import XCTest
+
+final class TrivialTests: XCTestCase {
+    func testTrivial() {
+        XCTAssertTrue(true)
+    }
+}
+"""
+    head_source = """\
+import XCTest
+
+final class TrivialTests: XCTestCase {
+}
+"""
+    diff_text = """\
+diff --git a/Tests/TrivialTests.swift b/Tests/TrivialTests.swift
+--- a/Tests/TrivialTests.swift
++++ b/Tests/TrivialTests.swift
+@@ -3,5 +3,2 @@ final class TrivialTests: XCTestCase {
+-    func testTrivial() {
+-        XCTAssertTrue(true)
+-    }
+ }
+"""
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref = args[1]
+            if ref.startswith("base:"):
+                return base_source
+            if ref.startswith("head:"):
+                return head_source
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "Tests/TrivialTests.swift"
+            if "--" in args:
+                return "100644 blob abc\tTests/TrivialTests.swift"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    result = build_coverage_evidence(
+        head_sha="head",
+        base_sha="base",
+        diff_text=diff_text,
+        changed_files=["Tests/TrivialTests.swift"],
+    )
+
+    # Should have removed test but no production symbols
+    assert "REMOVED TESTS" in result
+    # SEARCH SCOPE must indicate not-searched
+    assert "not searched" in result
+    assert "no production symbols" in result
+
+
+# --- Fix 4: identifier-boundary matching + low-signal token suppression ---
+
+def test_word_boundary_matching_rejects_substring(monkeypatch):
+    """find_related_tests_in_head must use word-boundary matching, not
+    substring containment. 'run' must not match 'runtime' or 'rerun'."""
+
+    import coverage_context
+
+    # A test file that mentions "runtime" and "rerun" but NOT standalone "run"
+    test_source = """\
+import Testing
+@testable import AIDashCLI
+
+struct RuntimeTests {
+    @Test func testRuntimeSetup() async throws {
+        let runtime = AppRuntime()
+        runtime.configure()
+        let rerunCount = runtime.rerun()
+    }
+}
+"""
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            return test_source
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "Tests/RuntimeTests.swift"
+            return "100644 blob abc\tTests/RuntimeTests.swift"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    excerpts, _ = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=["Tests/RuntimeTests.swift"],
+        production_symbols={"run"},  # should NOT match "runtime"/"rerun"
+        max_excerpt_bytes=30000,
+    )
+
+    # No excerpts should be found — "run" doesn't appear as a standalone word
+    assert len(excerpts) == 0
+
+
+def test_word_boundary_matching_accepts_exact(monkeypatch):
+    """'run' as a standalone identifier (e.g., 'cmd.run()') must still match
+    with word-boundary matching."""
+
+    import coverage_context
+
+    test_source = """\
+import Testing
+@testable import AIDashCLI
+
+struct CommandTests {
+    @Test func testCommand() async throws {
+        let cmd = BriefingPublishCommand()
+        _ = try await cmd.run()
+    }
+}
+"""
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            return test_source
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "Tests/CommandTests.swift"
+            return "100644 blob abc\tTests/CommandTests.swift"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    excerpts, _ = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=["Tests/CommandTests.swift"],
+        production_symbols={"run"},
+        max_excerpt_bytes=30000,
+    )
+
+    # "run" appears as a standalone word in "cmd.run()" — should match
+    assert len(excerpts) == 1
+
+
+def test_low_signal_tokens_filtered_from_production_symbols():
+    """Low-signal method names like 'run', 'init', 'shared', 'map' must be
+    filtered from production symbols to prevent false matches that consume
+    the search budget before genuine domain candidates."""
+    removed = [
+        RemovedTest(
+            file="Tests/FooTests.swift",
+            func_name="testCommand",
+            body_snippet=(
+                "let cmd = BriefingPublishCommand(client: client)\n"
+                "_ = try await cmd.run()\n"
+                "let x = Foo.shared\n"
+                "items.map { $0.value }"
+            ),
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+    # Domain type must be preserved
+    assert "BriefingPublishCommand" in symbols
+    assert "Foo" in symbols
+    # Low-signal method tokens must be filtered
+    assert "run" not in symbols
+    assert "shared" not in symbols
+    assert "map" not in symbols
+    assert "value" not in symbols
+
+
+def test_irrelevant_run_candidates_cannot_consume_cap(monkeypatch):
+    """Prove that low-signal tokens like 'run' are filtered from production
+    symbols so irrelevant candidates (RuntimeConfig, RerunManager) cannot
+    consume the byte cap before the genuine domain candidate."""
+
+    import coverage_context
+
+    # Source body references BriefingPublishCommand.run()
+    removed = [
+        RemovedTest(
+            file="Tests/FooTests.swift",
+            func_name="testPublish",
+            body_snippet="let cmd = BriefingPublishCommand(client: c)\n_ = cmd.run()",
+            full_body="let cmd = BriefingPublishCommand(client: c)\n_ = cmd.run()",
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+
+    # "run" should be filtered — only BriefingPublishCommand remains
+    assert "run" not in symbols
+    assert "BriefingPublishCommand" in symbols
+
+    # Construct test files: first two are irrelevant "runtime" files, third
+    # is the genuine domain match. With old substring matching + "run" in
+    # symbols, the irrelevant files would consume the budget first.
+    runtime_source = """\
+import Testing
+
+struct RuntimeConfigTests {
+    @Test func testRuntimeConfig() {
+        let config = RuntimeConfig.shared
+        config.reload()
+    }
+}
+"""
+    rerun_source = """\
+import Testing
+
+struct RerunManagerTests {
+    @Test func testRerunManager() {
+        let mgr = RerunManager()
+        mgr.rerun()
+    }
+}
+"""
+    domain_source = """\
+import Testing
+@testable import AIDashCLI
+
+struct BriefingPublishCommandTests {
+    @Test func testPublishWorks() async throws {
+        let cmd = BriefingPublishCommand(client: MockAPIClient())
+        let result = try await cmd.run()
+    }
+}
+"""
+
+    file_map = {
+        "Tests/RuntimeConfigTests.swift": runtime_source,
+        "Tests/RerunManagerTests.swift": rerun_source,
+        "Tests/BriefingPublishCommandTests.swift": domain_source,
+    }
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref_path = args[1]
+            for path, source in file_map.items():
+                if ref_path.endswith(f":{path}"):
+                    return source
+            return None
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "\n".join(file_map.keys())
+            return ""
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    # With a tiny byte cap, if "run" were in symbols and substring matching
+    # was used, the two irrelevant files would consume the budget
+    excerpts, outcomes = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=list(file_map.keys()),
+        production_symbols=symbols,
+        max_excerpt_bytes=30000,
+    )
+
+    # Only the genuine domain match should appear
+    combined = "\n".join(excerpts)
+    assert "BriefingPublishCommand" in combined
+    # Irrelevant tests should NOT appear (they don't contain
+    # BriefingPublishCommand as a word-boundary match)
+    assert "RuntimeConfig" not in combined
+    assert "RerunManager" not in combined
 

@@ -413,6 +413,20 @@ def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
         if not s.startswith("Mock") and not s.startswith("Stub")
         and not s.startswith("Fake") and not s.startswith("Spy")
     }
+    # Suppress low-signal lowercase method tokens (init, run, shared, map,
+    # etc.) that cause false matches against unrelated candidates. These are
+    # too common to be meaningful search terms on their own. Only keep them
+    # if a domain-type CamelCase signal also exists — the CamelCase symbol
+    # already provides the selectivity needed.
+    _LOW_SIGNAL_METHODS = {
+        "init", "run", "shared", "map", "get", "set", "start", "stop",
+        "reset", "update", "delete", "create", "load", "save", "parse",
+        "handle", "execute", "call", "send", "receive", "fetch", "post",
+        "put", "remove", "add", "build", "make", "setup", "teardown",
+        "configure", "validate", "process", "perform", "apply", "cancel",
+        "close", "open", "read", "write", "main", "test", "value",
+    }
+    symbols -= _LOW_SIGNAL_METHODS
     return symbols
 
 
@@ -474,8 +488,11 @@ def find_related_tests_in_head(
             func_body = "\n".join(source_lines[func_start:func_end_idx])
 
             # Check if this test references any of the production symbols
+            # using word-boundary matching to avoid false positives from
+            # substring containment (e.g. "run" matching "runtime"/"rerun")
             referenced = [
-                sym for sym in production_symbols if sym in func_body
+                sym for sym in production_symbols
+                if re.search(r'\b' + re.escape(sym) + r'\b', func_body)
             ]
             if not referenced:
                 continue
@@ -610,7 +627,8 @@ def find_test_files_in_changed_and_related(
 
 
 def _merge_search_outcomes(
-    discovery: list[str], file_outcomes: list[str]
+    discovery: list[str], file_outcomes: list[str],
+    *, no_symbols: bool = False,
 ) -> list[str]:
     """Merge discovery labels with actual read outcomes.
 
@@ -621,7 +639,26 @@ def _merge_search_outcomes(
     Only files with outcome "read:" are reported as successfully searched.
     Files skipped or budget-omitted get distinct labels so the reviewer knows
     the scope limitation.
+
+    When no_symbols is True, no production symbols were extracted from the
+    removed tests, so find_related_tests_in_head was not invoked with any
+    search terms. All discovery entries must be marked not-searched so they
+    cannot support negative evidence claims.
     """
+    # When no production symbols exist, nothing was actually searched —
+    # mark every discovery entry accordingly.
+    if no_symbols:
+        merged: list[str] = []
+        for entry in discovery:
+            if "deleted" in entry or "absent" in entry or "excluded" in entry:
+                merged.append(entry)
+            else:
+                merged.append(
+                    f"{entry} [not searched — no production symbols extracted]"
+                )
+        return merged if merged else [
+            "(no test files searched — no production symbols extracted)"
+        ]
     # Parse outcomes into a lookup: path -> status
     outcome_map: dict[str, str] = {}
     for entry in file_outcomes:
@@ -715,7 +752,12 @@ def build_coverage_evidence(
     # from find_test_files_in_changed_and_related with actual read outcomes
     # from find_related_tests_in_head so the output only claims "searched"
     # for files that were actually read.
-    accurate_scope = _merge_search_outcomes(searched_summary, file_outcomes)
+    # When production_symbols is empty, find_related_tests_in_head returns
+    # no outcomes — discovery entries must be marked not-searched so they
+    # cannot support negative evidence.
+    accurate_scope = _merge_search_outcomes(
+        searched_summary, file_outcomes, no_symbols=not symbols
+    )
 
     return render_coverage_evidence(
         all_removed, related_excerpts, accurate_scope
