@@ -87,42 +87,109 @@ def _is_cjk(ch: str) -> bool:
             or 0x20000 <= cp <= 0x2A6DF)  # Extension B
 
 
-def truncate(text: str, n: int) -> str:
-    """Hard char cap with word-boundary awareness; append … when cut.
+# Characters that define valid word-boundary cut positions.
+_BREAK_PUNCT = frozenset(":/;,，；：、)）】」—")
+_BREAK_WS = frozenset(" \t\n")
 
-    Never cuts inside an ASCII word or identifier (e.g. "LaunchAgent" won't
-    become "LaunchAgen…" or "Launc…"). Finds the last word boundary (space,
-    punctuation, or CJK character) at or before the budget, so the output
-    always ends on a complete token. CJK characters are individually
-    addressable — any position between two CJK characters is a valid cut
-    point. Falls back to a hard cut only when the entire budget is one long
-    ASCII token with no internal spaces, punctuation, or CJK characters.
+
+def _find_last_boundary(text: str, limit: int) -> int:
+    """Return the last valid cut position k in [1, limit] or -1.
+
+    text[:k] is the kept prefix.  A boundary is: right before whitespace,
+    right after punctuation, or right after a CJK ideograph.
+    """
+    candidate = -1
+    scan_end = min(limit + 1, len(text))
+    for i in range(scan_end):
+        if text[i] in _BREAK_WS:
+            candidate = i
+        elif i > 0 and text[i - 1] in _BREAK_PUNCT:
+            candidate = i
+        elif i > 0 and _is_cjk(text[i - 1]):
+            candidate = i
+    return candidate
+
+
+def _find_first_boundary(text: str, start: int) -> int:
+    """Return the first valid resume position k >= start, or -1.
+
+    text[k:] is the kept suffix.  Skips past whitespace/punctuation to
+    land on the start of a token; for CJK the character itself is a valid
+    resume point.
+    """
+    for i in range(max(start, 0), len(text)):
+        if text[i] in _BREAK_WS:
+            return i + 1
+        if text[i] in _BREAK_PUNCT:
+            return i + 1
+        if _is_cjk(text[i]):
+            return i
+    return -1
+
+
+_SUFFIX = " …"       # 2 chars — appended when head-only
+_SEPARATOR = " … "   # 3 chars — joins head and tail
+_OMISSION = "… [oversized token omitted]"
+
+
+def truncate(text: str, n: int) -> str:
+    """Boundary-aware truncation with head + tail retention.
+
+    Strategy (in priority order):
+    1. **Head + tail**: keep the problem-object prefix *and* the actionable
+       cue at the end, joined by ' … '.  Head gets ~60 % of the budget,
+       tail gets ~40 %.  Both cuts land on a word boundary.
+    2. **Head-only**: when no clean tail boundary exists but the head
+       boundary retains >= 60 % of the budget.
+    3. **Explicit omission**: when no boundary exists at all (indivisible
+       token) or the only boundary is too early (< 60 % retention), emit an
+       omission marker without copying a partial token.  If a complete prefix
+       exists, retain that prefix before the marker.
+
+    Word boundaries: spaces, common punctuation (:/;,)…), and CJK
+    ideographs (individually addressable — any inter-CJK position is valid).
+    ASCII identifiers are never split mid-word when a boundary exists.
     """
     if n <= 0:
         return ""
     if len(text) <= n:
         return text
-    # The suffix is " …" (space + ellipsis = 2 chars). The max text body
-    # length that fits the budget is therefore n - 2.
-    max_body = n - 2
+    max_body = n - len(_SUFFIX)          # max text chars for head-only path
     if max_body <= 0:
         return "…"
-    # Scan up to position max_body (exclusive via range) to find the last
-    # word boundary.  candidate = k means text[:k] is the body.
-    candidate = -1
-    scan_end = min(max_body + 1, len(text))
-    for i in range(scan_end):
-        if text[i] in " \t\n":
-            candidate = i
-        elif i > 0 and text[i - 1] in ":/;,，；：、)）】」—":
-            candidate = i
-        elif i > 0 and _is_cjk(text[i - 1]):
-            candidate = i
-    if candidate > 0:
-        return text[:candidate].rstrip() + " …"
-    # Fallback: hard cut (the entire budget is one long ASCII token with no
-    # internal spaces, punctuation, or CJK characters).
-    return text[:max_body] + " …"
+
+    # --- 1. head + tail ---------------------------------------------------
+    if n >= 10:
+        avail = n - len(_SEPARATOR)      # chars available for head + tail
+        head_budget = avail * 3 // 5     # ~60 % for head
+        tail_budget = avail - head_budget
+
+        hb = _find_last_boundary(text, head_budget)
+        if hb > 0:
+            head = text[:hb].rstrip()
+            tail_start = max(len(text) - tail_budget, hb)
+            tb = _find_first_boundary(text, tail_start)
+            if 0 < tb < len(text):
+                tail = text[tb:]
+                result = head + _SEPARATOR + tail
+                if len(result) <= n:
+                    return result
+
+    # --- 2. head-only (good retention) ------------------------------------
+    hb = _find_last_boundary(text, max_body)
+    if hb > 0 and hb >= max_body * 6 // 10:
+        return text[:hb].rstrip() + _SUFFIX
+
+    # --- 3. explicit omission (indivisible / early boundary) --------------
+    # Never hard-cut a boundary-free ASCII identifier: a partial identifier
+    # is misleading, while an explicit omission is honest and retry-safe.
+    if hb > 0:
+        result = text[:hb].rstrip() + " " + _OMISSION
+        if len(result) <= n:
+            return result
+    if len(_OMISSION) <= n:
+        return _OMISSION
+    return "…"
 
 
 def apply_slots(template_md: str, slots: PolishSlots) -> str:
