@@ -27,6 +27,16 @@ import subprocess
 import sys
 from typing import NamedTuple, Optional, Sequence, Tuple
 
+
+class AnalysisError(Exception):
+    """Raised when Git/tool failures prevent reliable coverage analysis.
+
+    Distinguished from 'no removed tests found' (normal empty result).
+    The caller must treat this as fail-closed: the gate blocks because the
+    analyzer cannot determine whether coverage was lost.
+    """
+    pass
+
 # Matches Swift test function declarations — both XCTest (`func testFoo()`)
 # and Swift Testing (`@Test func arbitraryName()` / `@Test("label") func …`).
 _XCTEST_FUNC_RE = re.compile(
@@ -143,10 +153,29 @@ def find_removed_test_functions(
     if "Test" not in path and "test" not in path:
         return []
 
-    # Get the BASE version of the file to see what was there
+    # Get the BASE version of the file to see what was there.
+    # A None return means git failed — could be a real error or file not in
+    # base. Use ls-tree to distinguish: if the path is absent from the base
+    # tree, there are genuinely no removed tests (return []).  If ls-tree
+    # also fails, we can't determine anything → raise AnalysisError.
     base_source = run_git(["show", f"{base_sha}:{path}"])
     if base_source is None:
-        return []
+        # Check whether the file simply doesn't exist in base (new file)
+        base_tree = run_git(["ls-tree", base_sha, "--", path])
+        if base_tree is not None and base_tree.strip() == "":
+            # File genuinely absent from base — no tests to have removed
+            return []
+        if base_tree is not None and base_tree.strip():
+            # File exists in base tree but blob read failed — analysis error
+            raise AnalysisError(
+                f"BASE blob read failed for {base_sha}:{path} "
+                f"(file exists in tree but content unreadable)"
+            )
+        # ls-tree itself failed — can't determine anything
+        raise AnalysisError(
+            f"Cannot read BASE source for {path}: both git-show and "
+            f"ls-tree failed (git tool error)"
+        )
 
     removed_lines = set(removed_line_numbers(diff_text, path))
     if not removed_lines:
@@ -167,7 +196,14 @@ def find_removed_test_functions(
             if tree_out is not None and tree_out.strip() == "":
                 # File confirmed absent from HEAD tree — genuine deletion.
                 head_read_succeeded = True  # "successfully determined absent"
-            # else: ls-tree itself failed → can't confirm, leave unknown
+            elif tree_out is not None and tree_out.strip():
+                # File exists in HEAD tree but blob read failed — tool error.
+                # Will be caught when we try to verify specific functions below.
+                pass
+            else:
+                # ls-tree itself failed → can't confirm anything.
+                # Will be caught when we try to verify specific functions below.
+                pass
 
     base_lines = base_source.splitlines()
     # Build HEAD function name set once (empty if HEAD unavailable)
@@ -196,8 +232,12 @@ def find_removed_test_functions(
             # else: confirmed absent, proceed to report
         else:
             # HEAD read failed (blob error, not confirmed deletion).
-            # Cannot prove absence — skip this function to avoid false claims.
-            continue
+            # Cannot prove absence — this is an analysis error, not a
+            # normal "no removal" result. Raise so the gate fails closed.
+            raise AnalysisError(
+                f"Cannot verify HEAD state for {path}: both git-show and "
+                f"ls-tree failed; cannot determine if {func_name} was removed"
+            )
 
         body_start = func_start_line - 1
         body_end = min(func_end_line, body_start + 10)
@@ -414,6 +454,9 @@ def build_coverage_evidence(
     Returns empty string when no removed tests are detected (normal case).
     Returns non-empty evidence block when tests are removed and related
     coverage exists in HEAD.
+
+    Raises AnalysisError when Git/tool failures prevent reliable analysis.
+    The caller must treat this as fail-closed (exit nonzero).
     """
     # Step 1: Find removed test functions (verified absent from HEAD)
     all_removed: list[RemovedTest] = []
@@ -520,10 +563,18 @@ if __name__ == "__main__":
         print(f"[coverage-context] cannot read diff file: {e}", file=sys.stderr)
         sys.exit(2)
 
-    result = build_coverage_evidence(
-        head_sha=args.head_sha,
-        base_sha=args.base_sha,
-        diff_text=diff_text,
-        changed_files=args.changed_file,
-    )
+    try:
+        result = build_coverage_evidence(
+            head_sha=args.head_sha,
+            base_sha=args.base_sha,
+            diff_text=diff_text,
+            changed_files=args.changed_file,
+        )
+    except AnalysisError as e:
+        print(
+            f"[coverage-context] analysis failed (fail-closed): {e}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     sys.stdout.write(result)
