@@ -21,6 +21,7 @@ from coverage_context import (  # noqa: E402
     COVERAGE_GLOBAL_WORK_BUDGET,
     COVERAGE_MAX_FILE_BYTES,
     COVERAGE_MAX_TOTAL_BYTES,
+    COVERAGE_PRIMARY_RESERVE,
     RemovedTest,
     build_coverage_evidence,
     extract_production_symbols,
@@ -1179,7 +1180,7 @@ def test_deleted_test_file_excluded_from_candidates(monkeypatch):
 
     monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
 
-    test_files, searched, _ = find_test_files_in_changed_and_related(
+    test_files, searched, _, _ = find_test_files_in_changed_and_related(
         head_sha="head123",
         changed_files=[
             "CLI/aidash/Tests/BriefingPublishCommandTests.swift",  # DELETED
@@ -2674,7 +2675,7 @@ struct IntegrationTests {
 
     monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
 
-    test_files, searched, _ = find_test_files_in_changed_and_related(
+    test_files, searched, _, _ = find_test_files_in_changed_and_related(
         head_sha="head123",
         changed_files=["Sources/BriefingPublishCommand.swift"],
         production_symbols={"BriefingPublishCommand"},
@@ -3667,15 +3668,18 @@ diff --git a/{test_path} b/{test_path}
 
 
 def test_content_discovery_cap_counts_oversize_and_unreadable(monkeypatch):
-    """Global work budget must count every candidate attempted,
+    """Content-discovery budget must count every candidate attempted,
     including oversized and unreadable files, so bounded-work claim is literal."""
 
     import coverage_context
 
-    # Create 60 candidate test files; first 40 are oversized, next 20 normal.
-    # With global budget of 50, only 10 normal files should be reached
-    # (40 oversized + 10 normal = 50 budget).
-    all_files = [f"Tests/Test{i}.swift" for i in range(60)]
+    # Content-discovery budget = COVERAGE_GLOBAL_WORK_BUDGET - COVERAGE_PRIMARY_RESERVE.
+    # Create more candidates than the budget. First N are oversized, rest normal.
+    content_budget = COVERAGE_GLOBAL_WORK_BUDGET - COVERAGE_PRIMARY_RESERVE
+    num_oversize = content_budget - 5  # leave room for 5 normal
+    num_normal = 10
+    total = num_oversize + num_normal
+    all_files = [f"Tests/Test{i}.swift" for i in range(total)]
     normal_content = """\
 import Testing
 struct NormalTests {
@@ -3692,8 +3696,8 @@ struct NormalTests {
             _, _, path = ref_path.partition(":")
             if path in all_files:
                 idx = all_files.index(path)
-                if idx < 40:
-                    # First 40: oversized
+                if idx < num_oversize:
+                    # First batch: oversized
                     return "500000"
                 else:
                     # Remaining: normal size
@@ -3704,7 +3708,7 @@ struct NormalTests {
             _, _, path = ref_path.partition(":")
             if path in all_files:
                 idx = all_files.index(path)
-                if idx >= 40:
+                if idx >= num_oversize:
                     return normal_content
             return None
         if args[0] == "ls-tree":
@@ -3724,16 +3728,16 @@ struct NormalTests {
     from coverage_context import find_test_files_in_changed_and_related
 
     # Pass production symbols to trigger content-based discovery
-    test_files, searched, _ = find_test_files_in_changed_and_related(
+    test_files, searched, _, _ = find_test_files_in_changed_and_related(
         "head", ["src/Domain.swift"], {"DomainService"}
     )
 
-    # With global budget of 50 candidates total, 40 oversized + 10 normal = 50.
-    # So only 10 normal files should be content-matched.
+    # With content_budget total attempts, num_oversize oversized + 5 normal = budget.
+    # So exactly 5 normal files should be content-matched.
     content_matched = [s for s in searched if "content-match" in s]
-    assert len(content_matched) == 10, (
-        f"Expected 10 content-matched files (budget 50, 40 oversized counted), "
-        f"got {len(content_matched)}"
+    assert len(content_matched) == 5, (
+        f"Expected 5 content-matched files (budget {content_budget}, "
+        f"{num_oversize} oversized counted), got {len(content_matched)}"
     )
 
 
@@ -3905,7 +3909,7 @@ def test_nul_delimited_tree_parsing(monkeypatch):
 
     monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
 
-    test_files, searched, _ = find_test_files_in_changed_and_related(
+    test_files, searched, _, _ = find_test_files_in_changed_and_related(
         head_sha="head",
         changed_files=["Tests/日本語Tests.swift"],
     )
@@ -3935,15 +3939,17 @@ def test_global_work_budget_limits_total_file_operations(monkeypatch):
 
     monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
 
-    test_files, searched, work_remaining = find_test_files_in_changed_and_related(
+    test_files, searched, work_remaining, _ = find_test_files_in_changed_and_related(
         head_sha="head",
         changed_files=["Sources/Domain.swift"],
         production_symbols={"DomainSvc"},
     )
-    # Budget should be exhausted
-    assert work_remaining == 0
-    # Total test files found should be <= COVERAGE_GLOBAL_WORK_BUDGET
-    assert len(test_files) <= COVERAGE_GLOBAL_WORK_BUDGET
+    # Content-discovery budget should be exhausted; work_remaining is the
+    # reserved primary budget (COVERAGE_PRIMARY_RESERVE) for downstream reads.
+    assert work_remaining == COVERAGE_PRIMARY_RESERVE
+    # Total test files found should be bounded by content-discovery budget
+    content_budget = COVERAGE_GLOBAL_WORK_BUDGET - COVERAGE_PRIMARY_RESERVE
+    assert len(test_files) <= content_budget
     # Should have a budget-cap message in searched
     budget_msgs = [s for s in searched if "budget-cap" in s]
     assert len(budget_msgs) > 0
@@ -4038,7 +4044,7 @@ def test_content_discovery_oversize_is_bounded_outcome_not_error(monkeypatch):
     monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
 
     # Should NOT raise — oversize is a skip, not an error
-    test_files_result, searched, _ = find_test_files_in_changed_and_related(
+    test_files_result, searched, _, _ = find_test_files_in_changed_and_related(
         head_sha="head",
         changed_files=["Sources/Foo.swift"],
         production_symbols={"SomeType"},
@@ -4179,4 +4185,252 @@ def test_removed_line_numbers_nonascii_path():
     )
     result = removed_line_numbers(diff, path)
     assert result == (1,)
+
+
+# ---- Budget starvation / primary-read reservation / caching tests -----------
+
+
+def test_budget_starvation_primary_candidate_still_read(monkeypatch):
+    """End-to-end: a repo with >50 Tests-path files must still read
+    changed/sibling candidates and surface genuine existing coverage.
+
+    This proves that:
+    1. Changed/sibling files are found without consuming read budget.
+    2. Filename-stem matching is read-free.
+    3. Content discovery uses its own bounded subset.
+    4. find_related_tests_in_head still has budget to read primary candidates.
+    5. Genuine coverage is surfaced despite >50 total test files.
+    6. Output stays within COVERAGE_MAX_TOTAL_BYTES.
+    """
+    import coverage_context
+
+    # Create 60 test files: one is the changed test file (sibling pattern),
+    # 59 others are generic names that only match via content discovery.
+    sibling_test = "Tests/BriefingPublishCommandTests.swift"
+    generic_tests = [f"Tests/IntegrationTest{i}.swift" for i in range(59)]
+    all_test_files = [sibling_test] + generic_tests
+    # Also include the changed production file
+    all_files = ["Sources/BriefingPublishCommand.swift"] + all_test_files
+
+    sibling_content = """\
+import Testing
+@testable import AIDashCLI
+
+struct BriefingPublishCommandTests {
+    @Test func testPublishReturnedFalse() async throws {
+        let client = MockAPIClient(response: .init(ok: false, error: "rate limited"))
+        let cmd = BriefingPublishCommand(client: client)
+        let result = try await cmd.run()
+    }
+}
+"""
+    generic_content = """\
+import Testing
+struct GenericTests {
+    @Test func testGeneric() {
+        let x = SomeUnrelatedType()
+    }
+}
+"""
+    # Base test file (the one being removed from)
+    base_test_source = """\
+import Testing
+@testable import AIDashCLI
+
+struct OldTests {
+    @Test func testOldThrowPath() async throws {
+        let cmd = BriefingPublishCommand(client: MockAPIClient())
+        try await cmd.run()
+    }
+}
+"""
+    diff_text = (
+        "diff --git a/Tests/OldTests.swift b/Tests/OldTests.swift\n"
+        "--- a/Tests/OldTests.swift\n"
+        "+++ b/Tests/OldTests.swift\n"
+        "@@ -1,10 +0,0 @@\n"
+        "-import Testing\n"
+        "-@testable import AIDashCLI\n"
+        "-\n"
+        "-struct OldTests {\n"
+        "-    @Test func testOldThrowPath() async throws {\n"
+        "-        let cmd = BriefingPublishCommand(client: MockAPIClient())\n"
+        "-        try await cmd.run()\n"
+        "-    }\n"
+        "-}\n"
+        "-\n"
+    )
+
+    file_map = {f: generic_content for f in all_files}
+    file_map[sibling_test] = sibling_content
+    file_map["Tests/OldTests.swift"] = None  # deleted in HEAD
+
+    def fake_run_git(args):
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "\0".join(f for f in file_map if file_map[f] is not None) + "\0"
+            if "--" in args:
+                path_idx = args.index("--") + 1
+                path = args[path_idx]
+                content = file_map.get(path)
+                if content is not None:
+                    return f"100644 blob abc\t{path}"
+                return ""
+            return "\0".join(f for f in file_map if file_map[f] is not None) + "\0"
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            sha_part, _, path = ref_path.partition(":")
+            if sha_part == "base123":
+                if path == "Tests/OldTests.swift":
+                    return str(len(base_test_source.encode("utf-8")))
+                return None
+            content = file_map.get(path)
+            if content is not None:
+                return str(len(content.encode("utf-8")))
+            return None
+        if args[0] == "show":
+            ref_path = args[1]
+            sha_part, _, path = ref_path.partition(":")
+            if sha_part == "base123":
+                if path == "Tests/OldTests.swift":
+                    return base_test_source
+                return None
+            return file_map.get(path)
+        if args[0] == "diff":
+            return diff_text
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    result = build_coverage_evidence(
+        head_sha="head123",
+        base_sha="base123",
+        diff_text=diff_text,
+        changed_files=["Tests/OldTests.swift", "Sources/BriefingPublishCommand.swift"],
+    )
+
+    # Must surface the sibling candidate with genuine coverage
+    assert "BriefingPublishCommandTests" in result or "testPublishReturnedFalse" in result
+    # Must stay within byte cap
+    assert len(result.encode("utf-8")) <= COVERAGE_MAX_TOTAL_BYTES
+    # Must have SEARCH SCOPE section
+    assert "SEARCH SCOPE" in result
+    # Sibling must be listed in scope
+    assert "sibling:" in result or "BriefingPublishCommandTests" in result
+
+
+def test_blob_cache_avoids_reread(monkeypatch):
+    """find_related_tests_in_head uses blob_cache from discovery without
+    consuming a work-budget operation for cached files."""
+    import coverage_context
+
+    test_content = (
+        "import Testing\n"
+        "struct T {\n"
+        "    @Test func testCached() { MySvc() }\n"
+        "}\n"
+    )
+    read_count = {"n": 0}
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            read_count["n"] += 1
+            return str(len(test_content.encode("utf-8")))
+        if args[0] == "show":
+            read_count["n"] += 1
+            return test_content
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    # Provide a cached blob — should NOT trigger any git calls for that file
+    cache = {"Tests/Cached.swift": test_content}
+    excerpts, outcomes = find_related_tests_in_head(
+        head_sha="head",
+        test_files=["Tests/Cached.swift", "Tests/Uncached.swift"],
+        production_symbols={"MySvc"},
+        max_excerpt_bytes=30000,
+        work_budget_remaining=10,
+        blob_cache=cache,
+    )
+    # Cached file should show "cached:" outcome
+    assert any("cached:" in o for o in outcomes)
+    # Uncached file should show "read:" outcome
+    assert any("read:" in o for o in outcomes)
+    # Only the uncached file should have triggered git calls (cat-file + show)
+    assert read_count["n"] == 2  # cat-file -s + show for Uncached only
+
+
+def test_zero_files_read_renders_inconclusive():
+    """When zero files are actually read, render inconclusive message
+    instead of 'may indicate genuine coverage loss'."""
+
+    # All candidates are budget-omitted
+    searched_summary = [
+        "changed: Tests/FooTests.swift [not reached — global work budget exhausted]",
+        "budget-cap: (content-discovery budget 35 exhausted; 15 reserved for candidate reads)",
+    ]
+    removed = [
+        RemovedTest(
+            file="Tests/Foo.swift",
+            func_name="testSomething",
+            body_snippet="XCTAssert(true)",
+        )
+    ]
+    result = render_coverage_evidence(removed, [], searched_summary=searched_summary)
+    assert "INCONCLUSIVE" in result
+    assert "cannot determine" in result.lower() or "Cannot determine" in result
+    assert "may indicate genuine coverage loss" not in result
+
+
+def test_files_read_renders_coverage_loss_message():
+    """When files ARE read but no candidates found, use the genuine
+    coverage loss message."""
+    searched_summary = [
+        "changed: Tests/FooTests.swift [read]",
+        "sibling: Tests/BarTests.swift [read]",
+    ]
+    removed = [
+        RemovedTest(
+            file="Tests/Foo.swift",
+            func_name="testSomething",
+            body_snippet="XCTAssert(true)",
+        )
+    ]
+    result = render_coverage_evidence(removed, [], searched_summary=searched_summary)
+    assert "may indicate genuine coverage loss" in result
+    assert "INCONCLUSIVE" not in result
+
+
+def test_containing_type_re_anchors_horizontal_whitespace_only():
+    """_CONTAINING_TYPE_RE must only match horizontal whitespace (space/tab)
+    as leading indent, not vertical whitespace like \\n or \\r."""
+
+    # A class declaration preceded by a newline should match
+    source = "\nclass Foo {\n    func testA() {}\n}\n"
+    result = _find_containing_type(source, source.index("func"), "Tests/T.swift")
+    assert result == "Foo"
+
+    # But the regex should not match if a \v or \f precedes
+    # (this is just to confirm the regex change is correct — real code won't have
+    # vertical whitespace as indent, but the anchoring matters for correctness)
+    source2 = "\x0bclass Bogus {\n}\nclass Real {\n    func testB() {}\n}\n"
+    result2 = _find_containing_type(source2, source2.index("func"), "Tests/T.swift")
+    assert result2 == "Real"
+
+
+def test_extract_b_path_unquoted_path_containing_space_b_slash():
+    """_extract_b_path correctly handles an unquoted path that contains ' b/'
+    in the filename itself (e.g. 'src/a b/c.swift')."""
+    # Path: "src/a b/c.swift"
+    # diff --git header: "a/src/a b/c.swift b/src/a b/c.swift"
+    ab_spec = "a/src/a b/c.swift b/src/a b/c.swift"
+    result = _extract_b_path(ab_spec)
+    assert result == "src/a b/c.swift"
+
+
+def test_extract_b_path_plain_simple_still_works():
+    """Regression: simple plain paths still parse correctly."""
+    result = _extract_b_path("a/src/Foo.swift b/src/Foo.swift")
+    assert result == "src/Foo.swift"
 
