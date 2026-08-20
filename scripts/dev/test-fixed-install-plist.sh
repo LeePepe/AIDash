@@ -250,6 +250,131 @@ else
   fail_count=$((fail_count + 1))
 fi
 
+# --- 9. Probe 2 envelope regression (exercises real production validator) -----
+# All fixtures call the SAME validate_briefing_not_found_envelope production
+# helper that the installer exit-3 branch uses.
+P2_FIX_PASS=$(mktemp "${TMPDIR:-/tmp}/p2-pass.XXXXXX")
+P2_FIX_FUTURE=$(mktemp "${TMPDIR:-/tmp}/p2-future.XXXXXX")
+P2_FIX_WRONG=$(mktemp "${TMPDIR:-/tmp}/p2-wrong.XXXXXX")
+P2_FIX_MISSING_CODE=$(mktemp "${TMPDIR:-/tmp}/p2-misscode.XXXXXX")
+P2_FIX_MISSING_MSG=$(mktemp "${TMPDIR:-/tmp}/p2-missmsg.XXXXXX")
+P2_FIX_EMPTY_MSG=$(mktemp "${TMPDIR:-/tmp}/p2-emptymsg.XXXXXX")
+P2_FIX_OKTRUE=$(mktemp "${TMPDIR:-/tmp}/p2-oktrue.XXXXXX")
+P2_FIX_ROOT_RID=$(mktemp "${TMPDIR:-/tmp}/p2-rootrid.XXXXXX")
+trap 'rm -rf "$TMP_PLIST_DIR" "$FAKE_LAUNCHCTL_LOG" "$FAKE_LAUNCHCTL_BIN" "$VJK_FIXTURE" "$P2_FIX_PASS" "$P2_FIX_FUTURE" "$P2_FIX_WRONG" "$P2_FIX_MISSING_CODE" "$P2_FIX_MISSING_MSG" "$P2_FIX_EMPTY_MSG" "$P2_FIX_OKTRUE" "$P2_FIX_ROOT_RID"' EXIT
+
+# Current real envelope (no error.requestId — central-catch shape)
+cat > "$P2_FIX_PASS" <<'EOF'
+{"error":{"code":"briefing.not_found","message":"No briefing found for date '2026-08-20'"},"ok":false}
+EOF
+
+# Future envelope with nested error.requestId (MY-1455 restored contract)
+cat > "$P2_FIX_FUTURE" <<'EOF'
+{"error":{"code":"briefing.not_found","message":"No briefing found for date '2026-08-20'","requestId":"abc-123"},"ok":false}
+EOF
+
+# Wrong error code (must fail)
+cat > "$P2_FIX_WRONG" <<'EOF'
+{"error":{"code":"internal.store_failed","message":"Store failed"},"ok":false}
+EOF
+
+# Missing error.code entirely (must fail)
+cat > "$P2_FIX_MISSING_CODE" <<'EOF'
+{"error":{"message":"Something went wrong"},"ok":false}
+EOF
+
+# Missing error.message (must fail)
+cat > "$P2_FIX_MISSING_MSG" <<'EOF'
+{"error":{"code":"briefing.not_found"},"ok":false}
+EOF
+
+# Empty error.message (must fail)
+cat > "$P2_FIX_EMPTY_MSG" <<'EOF'
+{"error":{"code":"briefing.not_found","message":""},"ok":false}
+EOF
+
+# ok=true malformed (must fail)
+cat > "$P2_FIX_OKTRUE" <<'EOF'
+{"error":{"code":"briefing.not_found","message":"Not found"},"ok":true}
+EOF
+
+# Root requestId present (must fail — error envelopes must NOT have root requestId)
+cat > "$P2_FIX_ROOT_RID" <<'EOF'
+{"error":{"code":"briefing.not_found","message":"Not found"},"ok":false,"requestId":"should-not-exist"}
+EOF
+
+# PASS: current no-requestId envelope
+if validate_briefing_not_found_envelope "$P2_FIX_PASS"; then
+  echo "  PASS: probe 2 envelope: current (no error.requestId) accepted"
+else
+  echo "  FAIL: probe 2 envelope: current (no error.requestId) rejected" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# PASS: future envelope with nested error.requestId (MY-1455 forward compat)
+if validate_briefing_not_found_envelope "$P2_FIX_FUTURE"; then
+  echo "  PASS: probe 2 envelope: future (nested error.requestId) accepted"
+else
+  echo "  FAIL: probe 2 envelope: future (nested error.requestId) rejected" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# FAIL: wrong error code
+if validate_briefing_not_found_envelope "$P2_FIX_WRONG"; then
+  echo "  FAIL: probe 2 envelope: wrong error code should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: wrong error code correctly rejected"
+fi
+
+# FAIL: missing error.code
+if validate_briefing_not_found_envelope "$P2_FIX_MISSING_CODE"; then
+  echo "  FAIL: probe 2 envelope: missing error.code should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: missing error.code correctly rejected"
+fi
+
+# FAIL: missing error.message
+if validate_briefing_not_found_envelope "$P2_FIX_MISSING_MSG"; then
+  echo "  FAIL: probe 2 envelope: missing error.message should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: missing error.message correctly rejected"
+fi
+
+# FAIL: empty error.message
+if validate_briefing_not_found_envelope "$P2_FIX_EMPTY_MSG"; then
+  echo "  FAIL: probe 2 envelope: empty error.message should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: empty error.message correctly rejected"
+fi
+
+# FAIL: ok=true malformed
+if validate_briefing_not_found_envelope "$P2_FIX_OKTRUE"; then
+  echo "  FAIL: probe 2 envelope: ok=true should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: ok=true malformed correctly rejected"
+fi
+
+# FAIL: root requestId present
+if validate_briefing_not_found_envelope "$P2_FIX_ROOT_RID"; then
+  echo "  FAIL: probe 2 envelope: root requestId should be rejected" >&2
+  fail_count=$((fail_count + 1))
+else
+  echo "  PASS: probe 2 envelope: root requestId correctly rejected"
+fi
+
+# --- 10. Structural assertion: installer MUST call validate_briefing_not_found_envelope
+if grep -q 'validate_briefing_not_found_envelope "\$p2_err"' "$INSTALLER"; then
+  echo "  PASS: installer calls validate_briefing_not_found_envelope in exit-3 branch"
+else
+  echo "  FAIL: installer missing validate_briefing_not_found_envelope call" >&2
+  fail_count=$((fail_count + 1))
+fi
+
 # --- Result ------------------------------------------------------------------
 echo
 if [ "$fail_count" -eq 0 ]; then
