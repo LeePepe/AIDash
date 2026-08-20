@@ -41,11 +41,18 @@ post_sticky() {
     gh pr comment "$PR_NUMBER" --body "$body" >/dev/null
 }
 
+# ---- phase timing --------------------------------------------------------
+# Emit wall-clock timestamps for each phase so a future timeout log
+# immediately says WHERE it stalled (MY-1452).
+_phase_start() { printf '[claude-review] ⏱  %s started at %s\n' "$1" "$(date -u +%FT%TZ)"; }
+_phase_end()   { printf '[claude-review] ⏱  %s finished at %s\n' "$1" "$(date -u +%FT%TZ)"; }
+
 # ---- 取 diff ------------------------------------------------------------
 # 工作树是 checkout base 的,PR 的 HEAD 对象只能靠这次 fetch 才存在。因此 fetch
 # 失败不能吞掉——否则 HEAD 取不到 → diff 为空 → 被误判成"无 diff pass",一次网络
 # 抖动就能让 review 门在未审 diff 的情况下放绿灯(fail-open)。这里 fail-closed:
 # fetch 失败、或 fetch 后 BASE/HEAD 对象仍缺失,一律 exit 1(宁可卡住不放行)。
+_phase_start "diff"
 if ! git fetch --no-tags --depth=100 origin "$BASE_SHA" "$HEAD_SHA" 2>/tmp/claude-fetch.err; then
     echo "[claude-review] ❌ git fetch 失败,无法取 PR diff"; cat /tmp/claude-fetch.err >&2 || true
     post_sticky "$STICKY
@@ -83,6 +90,7 @@ if [ "$(printf %s "$DIFF" | wc -c)" -gt "$MAX_BYTES" ]; then
     DIFF="$(printf %s "$DIFF" | head -c "$MAX_BYTES")"
     TRUNCATED="（diff 已截断至 ${MAX_BYTES} 字节；未覆盖部分请人工留意）"
 fi
+_phase_end "diff"
 
 # ---- exact-HEAD scope evidence(MY-1402)---------------------------------
 # hunk 边界不是作用域边界:一个 `}` 上方新增的 `.modifier(...)` 到底挂在内层闭包
@@ -96,12 +104,14 @@ fi
 # fail-closed:分析器本身失败(python3 缺失 / 异常)= 工具异常,与 fetch 失败同级,
 # 不允许在缺证据的情况下继续 review。
 SCOPE_EVIDENCE=""
+_phase_start "scope-evidence"
 if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED")"; then
     echo "[claude-review] ❌ scope evidence 生成失败"
     post_sticky "$STICKY
 ⚠️ 自动 review 未能生成 exact-HEAD 作用域证据(分析器异常)。为安全起见 **暂不放行**,请重跑。"
     exit 1
 fi
+_phase_end "scope-evidence"
 
 # ---- verdict schema -----------------------------------------------------
 SCHEMA='{
@@ -155,6 +165,7 @@ $SCOPE_EVIDENCE
 ======== 不可信数据结束 ========"
 
 echo "[claude-review] running claude on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED" | grep -c . | tr -d ' ') files)..."
+_phase_start "claude-cli"
 
 # CLI 调用套 wall-clock 看门狗(MY-1404):卡住的 CLI 由**我们**在 15 分钟内收掉并
 # 留下诊断,而不是等 job 的 20 分钟上限把 step cancel 掉——后者只留一份空日志,
@@ -163,6 +174,11 @@ echo "[claude-review] running claude on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGE
 # 输出仍走文件而不是命令替换:`$(...)` 会把 CLI 挂到一根管子上,而看门狗 KILL 掉
 # 子进程后,那根管子的读端还可能被别的后代持有,于是 shell 继续等——正是本次要
 # 消除的那类静默悬挂。
+#
+# --max-turns 1 (MY-1452): 限制 CLI 只跑一轮(直接给 verdict,不要调工具)。
+# review prompt 已包含完整 diff + scope evidence,不需要 tool use。不限制时 CLI
+# 会以 agentic 模式读仓库文件、跑命令,在 self-hosted runner 上轻松耗光 900s
+# 预算——PR #178 连续两次超时的根因。
 RAW_FILE="$(mktemp -t claude-review-raw.XXXXXX.json)"
 trap 'rm -f "$DIFF_FILE" "$RAW_FILE"' EXIT
 
@@ -176,8 +192,10 @@ run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
     env CLAUDE_REVIEW_PROMPT="$PROMPT" bash -c '
         printf %s "$CLAUDE_REVIEW_PROMPT" | claude -p \
             --output-format json \
+            --max-turns 1 \
             --json-schema "$1"
     ' _ "$SCHEMA" >"$RAW_FILE" 2>/tmp/claude-review.err || CLI_RC=$?
+_phase_end "claude-cli"
 RAW="$(cat "$RAW_FILE" 2>/dev/null)"
 
 if [ "$CLI_RC" -eq "$REVIEW_TIMEOUT_RC" ]; then
