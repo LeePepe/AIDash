@@ -585,14 +585,14 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
 // MARK: - JSON Coder Configuration
 
-/// Fresh encoder/decoder per call — mutable reference types must not be shared.
-func makeXPCEncoder() -> JSONEncoder {
+/// Fresh encoder/decoder per call — nonisolated for the XPC fast path.
+nonisolated func makeXPCEncoder() -> JSONEncoder {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     return encoder
 }
 
-private func makeXPCDecoder() -> JSONDecoder {
+private nonisolated func makeXPCDecoder() -> JSONDecoder {
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
     return decoder
