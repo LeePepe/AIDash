@@ -65,16 +65,24 @@ _XCTEST_FUNC_RE = re.compile(
 _SWIFT_TESTING_FUNC_RE = re.compile(
     r"^\s*@Test(?:\(.*?\))?\s+func\s+(\w+)\s*\(", re.MULTILINE
 )
+_PYTHON_TEST_FUNC_RE = re.compile(
+    r"^(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE
+)
 
 
 def _find_all_test_functions(source: str) -> list[tuple[str, re.Match]]:
-    """Find all test function declarations in source using both conventions.
+    """Find all test function declarations in source using all conventions.
+
+    Supports:
+    - XCTest: `func testFoo()`
+    - Swift Testing: `@Test func arbitraryName()` / `@Test("label") func …`
+    - Python: `def test_foo()` / `async def test_foo()`
 
     Returns (func_name, match) pairs. Deduplicates by name (a function that
     matches both regexes is returned once).
     """
     seen: dict[str, re.Match] = {}
-    for rx in (_XCTEST_FUNC_RE, _SWIFT_TESTING_FUNC_RE):
+    for rx in (_XCTEST_FUNC_RE, _SWIFT_TESTING_FUNC_RE, _PYTHON_TEST_FUNC_RE):
         for m in rx.finditer(source):
             name = m.group(1)
             if name not in seen:
@@ -274,8 +282,10 @@ def find_removed_test_functions(
 def _find_func_end(lines: list[str], start_idx: int) -> int:
     """Find the closing line of a function starting at start_idx (0-based).
 
-    Returns 1-based line number. Uses simple brace counting.
+    Returns 1-based line number. Uses brace counting for Swift or
+    indentation-based detection for Python (no braces found).
     """
+    # First pass: try brace counting (Swift/C-family)
     depth = 0
     started = False
     for i in range(start_idx, min(start_idx + 500, len(lines))):
@@ -287,7 +297,24 @@ def _find_func_end(lines: list[str], start_idx: int) -> int:
                 depth -= 1
                 if started and depth == 0:
                     return i + 1  # 1-based
-    return min(start_idx + 50, len(lines))
+    if started:
+        return min(start_idx + 50, len(lines))
+
+    # Fallback: indentation-based (Python). The function body is everything
+    # indented more than the def line, or blank lines between indented lines.
+    def_line = lines[start_idx] if start_idx < len(lines) else ""
+    base_indent = len(def_line) - len(def_line.lstrip())
+    last_body = start_idx
+    for i in range(start_idx + 1, min(start_idx + 500, len(lines))):
+        line = lines[i]
+        if line.strip() == "":
+            continue  # blank lines are part of the body
+        line_indent = len(line) - len(line.lstrip())
+        if line_indent > base_indent:
+            last_body = i
+        else:
+            break
+    return last_body + 1  # 1-based
 
 
 def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
@@ -409,22 +436,31 @@ def find_test_files_in_changed_and_related(
     """Find test files: changed, naming-convention siblings, and repo-wide
     symbol matches. Returns (test_files, searched_paths_summary).
 
+    Only includes files proven present in the HEAD tree — deleted test files
+    are excluded so downstream readers do not raise AnalysisError on expected
+    absent blobs.
+
     The searched_paths_summary lists what was actually searched, so the
     evidence block can report scope and the reviewer can judge completeness.
     """
     test_files: list[str] = []
     searched: list[str] = []
 
-    # 1. Changed test files
-    for path in changed_files:
-        if "Test" in path or "test" in path:
-            test_files.append(path)
-            searched.append(f"changed: {path}")
-
-    # 2. Sibling test files by naming convention
+    # Fetch the full HEAD tree once for existence checks and symbol search
     tree = run_git(["ls-tree", "-r", "--name-only", head_sha])
     all_tree_files = tree.splitlines() if tree else []
+    head_paths: set[str] = set(all_tree_files)
 
+    # 1. Changed test files (only if still present in HEAD)
+    for path in changed_files:
+        if "Test" in path or "test" in path:
+            if path in head_paths:
+                test_files.append(path)
+                searched.append(f"changed: {path}")
+            else:
+                searched.append(f"changed-deleted: {path} (excluded — absent from HEAD)")
+
+    # 2. Sibling test files by naming convention
     for path in changed_files:
         if "Test" in path or "test" in path:
             continue
