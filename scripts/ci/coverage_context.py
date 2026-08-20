@@ -28,6 +28,26 @@ import sys
 from typing import NamedTuple, Optional, Sequence, Tuple
 
 
+# Characters used to build the untrusted-data fence in review prompts.
+# Any occurrence of these markers in PR-controlled content (test source
+# bodies) must be neutralized before embedding — otherwise a malicious test
+# can prematurely close the untrusted region and inject forged instructions.
+_FENCE_PATTERNS = re.compile(
+    r"={4,}[^=\n]*(?:不可信|untrusted|数据结束|指令)[^=\n]*={4,}",
+    re.IGNORECASE,
+)
+
+
+def sanitize_untrusted_content(text: str) -> str:
+    """Remove or neutralize prompt-fence markers in PR-controlled content.
+
+    Replaces any sequence resembling the review prompt's trusted/untrusted
+    boundary delimiters with a safe placeholder, preventing delimiter
+    injection attacks where test source could escape the untrusted region.
+    """
+    return _FENCE_PATTERNS.sub("[SANITIZED — fence marker removed]", text)
+
+
 class AnalysisError(Exception):
     """Raised when Git/tool failures prevent reliable coverage analysis.
 
@@ -242,6 +262,8 @@ def find_removed_test_functions(
         body_start = func_start_line - 1
         body_end = min(func_end_line, body_start + 10)
         snippet = "\n".join(base_lines[body_start:body_end])[:200]
+        # Sanitize snippet — base content is also PR-controlled in principle
+        snippet = sanitize_untrusted_content(snippet)
         results.append(RemovedTest(
             file=path, func_name=func_name, body_snippet=snippet
         ))
@@ -348,11 +370,15 @@ def find_related_tests_in_head(
             if not referenced:
                 continue
 
+            # Sanitize PR-controlled content before embedding in the prompt
+            # to prevent delimiter injection attacks (MY-1456 security fix).
+            safe_body = sanitize_untrusted_content(func_body)
+
             excerpt = (
                 f"--- {test_file}: {func_name} "
                 f"(lines {func_start + 1}-{func_end_idx}, "
                 f"references: {', '.join(sorted(referenced)[:5])})\n"
-                f"{func_body}"
+                f"{safe_body}"
             )
             excerpt_bytes = len(excerpt.encode("utf-8", "replace"))
             if excerpt_bytes > max_excerpt_bytes:
