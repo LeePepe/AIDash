@@ -141,10 +141,10 @@ def _stub_git(monkeypatch, file_map):
 def test_removed_line_numbers_tracks_base_side():
     path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
     numbers = removed_line_numbers(REMOVAL_DIFF, path)
-    # Lines 25-39 are removed (15 lines starting at base line 25)
+    # Lines 25-41 are removed (17 lines starting at base line 25)
     assert 25 in numbers
-    assert 39 in numbers
-    assert len(numbers) == 15
+    assert 41 in numbers
+    assert len(numbers) == 17
 
 
 def test_removed_line_numbers_ignores_other_files():
