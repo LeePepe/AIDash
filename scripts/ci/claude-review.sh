@@ -175,10 +175,13 @@ _phase_start "claude-cli"
 # 子进程后,那根管子的读端还可能被别的后代持有,于是 shell 继续等——正是本次要
 # 消除的那类静默悬挂。
 #
-# --max-turns 1 (MY-1452): 限制 CLI 只跑一轮(直接给 verdict,不要调工具)。
-# review prompt 已包含完整 diff + scope evidence,不需要 tool use。不限制时 CLI
-# 会以 agentic 模式读仓库文件、跑命令,在 self-hosted runner 上轻松耗光 900s
-# 预算——PR #178 连续两次超时的根因。
+# --max-turns 1 + --allowedTools "" (MY-1452): single turn, zero tools.
+# The review prompt is self-contained (diff + scope evidence); tool use is
+# unnecessary AND dangerous: even a single first-turn tool call (Read, Bash)
+# can run long enough to exhaust the 900s watchdog. --max-turns 1 alone only
+# bounds turns, not first-turn tool duration — PR #178's two consecutive
+# timeouts could have been a single long tool call, not multi-turn exploration.
+# --allowedTools "" deterministically prevents any tool invocation.
 RAW_FILE="$(mktemp -t claude-review-raw.XXXXXX.json)"
 trap 'rm -f "$DIFF_FILE" "$RAW_FILE"' EXIT
 
@@ -193,6 +196,7 @@ run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
         printf %s "$CLAUDE_REVIEW_PROMPT" | claude -p \
             --output-format json \
             --max-turns 1 \
+            --allowedTools "" \
             --json-schema "$1"
     ' _ "$SCHEMA" >"$RAW_FILE" 2>/tmp/claude-review.err || CLI_RC=$?
 _phase_end "claude-cli"
