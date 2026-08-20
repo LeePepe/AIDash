@@ -27,10 +27,29 @@ import subprocess
 import sys
 from typing import NamedTuple, Optional, Sequence, Tuple
 
-# Matches Swift test function declarations.
-_TEST_FUNC_RE = re.compile(
+# Matches Swift test function declarations — both XCTest (`func testFoo()`)
+# and Swift Testing (`@Test func arbitraryName()` / `@Test("label") func …`).
+_XCTEST_FUNC_RE = re.compile(
     r"^\s*(?:@\w+\s+)*func\s+(test\w+)\s*\(", re.MULTILINE
 )
+_SWIFT_TESTING_FUNC_RE = re.compile(
+    r"^\s*@Test(?:\(.*?\))?\s+func\s+(\w+)\s*\(", re.MULTILINE
+)
+
+
+def _find_all_test_functions(source: str) -> list[tuple[str, re.Match]]:
+    """Find all test function declarations in source using both conventions.
+
+    Returns (func_name, match) pairs. Deduplicates by name (a function that
+    matches both regexes is returned once).
+    """
+    seen: dict[str, re.Match] = {}
+    for rx in (_XCTEST_FUNC_RE, _SWIFT_TESTING_FUNC_RE):
+        for m in rx.finditer(source):
+            name = m.group(1)
+            if name not in seen:
+                seen[name] = m
+    return list(seen.items())
 
 # Matches production symbol names: types, functions, protocols.
 _SYMBOL_RE = re.compile(
@@ -117,6 +136,9 @@ def find_removed_test_functions(
     A function is considered removed only if its declaration line is absent from
     HEAD source. Functions that merely had lines modified remain and are not
     reported as removed — this distinguishes removal from refactoring.
+
+    Recognizes both XCTest (`func testFoo()`) and Swift Testing
+    (`@Test func arbitraryName()`) conventions.
     """
     if "Test" not in path and "test" not in path:
         return []
@@ -130,22 +152,34 @@ def find_removed_test_functions(
     if not removed_lines:
         return []
 
-    # Get HEAD version to verify removal (not just modification)
+    # Get HEAD version to verify removal (not just modification).
+    # Distinguish three states: verified-present, verified-absent, unknown.
     head_source: Optional[str] = None
+    head_read_succeeded = False
     if head_sha:
         head_source = run_git(["show", f"{head_sha}:{path}"])
-    # If file is deleted from HEAD entirely, all its functions are removed
-    file_deleted = head_source is None and head_sha != ""
+        if head_source is not None:
+            head_read_succeeded = True
+        else:
+            # Verify file is truly deleted vs blob read failure by checking
+            # ls-tree (lightweight, path-only — no blob content needed).
+            tree_out = run_git(["ls-tree", head_sha, "--", path])
+            if tree_out is not None and tree_out.strip() == "":
+                # File confirmed absent from HEAD tree — genuine deletion.
+                head_read_succeeded = True  # "successfully determined absent"
+            # else: ls-tree itself failed → can't confirm, leave unknown
 
     base_lines = base_source.splitlines()
+    # Build HEAD function name set once (empty if HEAD unavailable)
+    head_func_names: set[str] = set()
+    if head_source is not None:
+        for name, _ in _find_all_test_functions(head_source):
+            head_func_names.add(name)
+
     results: list[RemovedTest] = []
 
-    for match in _TEST_FUNC_RE.finditer(base_source):
-        func_name = match.group(1)
-        # Find line number of this function (1-based)
+    for func_name, match in _find_all_test_functions(base_source):
         func_start_line = base_source[: match.start()].count("\n") + 1
-
-        # Check if any removed line overlaps with this function's range
         func_end_line = _find_func_end(base_lines, func_start_line - 1)
 
         overlap = any(
@@ -154,18 +188,16 @@ def find_removed_test_functions(
         if not overlap:
             continue
 
-        # Critical check: verify the function declaration is actually absent
-        # from HEAD source. If it still exists, this is modification not removal.
-        if not file_deleted and head_source is not None:
-            # Search for the function declaration in HEAD
-            if _TEST_FUNC_RE.search(
-                head_source,
-            ) is not None and any(
-                m.group(1) == func_name
-                for m in _TEST_FUNC_RE.finditer(head_source)
-            ):
-                # Function still exists at HEAD — it was modified, not removed
+        # Verify the function declaration is actually absent from HEAD.
+        if head_read_succeeded:
+            if func_name in head_func_names:
+                # Function still exists at HEAD — modified, not removed
                 continue
+            # else: confirmed absent, proceed to report
+        else:
+            # HEAD read failed (blob error, not confirmed deletion).
+            # Cannot prove absence — skip this function to avoid false claims.
+            continue
 
         body_start = func_start_line - 1
         body_end = min(func_end_line, body_start + 10)
@@ -263,8 +295,7 @@ def find_related_tests_in_head(
 
         source_lines = source.splitlines()
 
-        for match in _TEST_FUNC_RE.finditer(source):
-            func_name = match.group(1)
+        for func_name, match in _find_all_test_functions(source):
             func_start = source[: match.start()].count("\n")
             func_end_idx = _find_func_end(source_lines, func_start)
 
@@ -302,37 +333,74 @@ def find_related_tests_in_head(
 
 
 def find_test_files_in_changed_and_related(
-    head_sha: str, changed_files: list[str]
-) -> list[str]:
-    """Find test files: both changed and related by naming convention."""
-    test_files: list[str] = []
+    head_sha: str,
+    changed_files: list[str],
+    production_symbols: Optional[set[str]] = None,
+) -> tuple[list[str], list[str]]:
+    """Find test files: changed, naming-convention siblings, and repo-wide
+    symbol matches. Returns (test_files, searched_paths_summary).
 
+    The searched_paths_summary lists what was actually searched, so the
+    evidence block can report scope and the reviewer can judge completeness.
+    """
+    test_files: list[str] = []
+    searched: list[str] = []
+
+    # 1. Changed test files
     for path in changed_files:
         if "Test" in path or "test" in path:
             test_files.append(path)
+            searched.append(f"changed: {path}")
 
-    # Also find sibling test files for changed production files
+    # 2. Sibling test files by naming convention
+    tree = run_git(["ls-tree", "-r", "--name-only", head_sha])
+    all_tree_files = tree.splitlines() if tree else []
+
     for path in changed_files:
         if "Test" in path or "test" in path:
             continue
         if not path.endswith(".swift"):
             continue
-        # Convention: FooCommand.swift → FooCommandTests.swift
         stem = path.rsplit("/", 1)[-1].replace(".swift", "")
-        # Search in the same directory structure under Tests
         candidate_patterns = [
             f"{stem}Tests.swift",
             f"{stem}Test.swift",
         ]
-        # Use git ls-tree to find matching test files
-        tree = run_git(["ls-tree", "-r", "--name-only", head_sha])
-        if tree:
-            for line in tree.splitlines():
-                for pattern in candidate_patterns:
-                    if line.endswith(pattern) and line not in test_files:
-                        test_files.append(line)
+        for line in all_tree_files:
+            for pattern in candidate_patterns:
+                if line.endswith(pattern) and line not in test_files:
+                    test_files.append(line)
+                    searched.append(f"sibling: {line}")
 
-    return test_files
+    # 3. Repo-wide bounded symbol search: find any test file in the tree
+    # whose name contains a production symbol stem (e.g. BriefingPut appears
+    # in BriefingPutCommandTests.swift). This catches differently-named test
+    # files that cover the same production code but aren't naming-convention
+    # siblings of the changed files.
+    if production_symbols:
+        # Build search stems from production symbols (CamelCase type names)
+        search_stems = {
+            sym for sym in production_symbols
+            if len(sym) > 3 and sym[0].isupper()
+        }
+        for line in all_tree_files:
+            if line in test_files:
+                continue
+            if not (line.endswith(".swift") or line.endswith(".py")):
+                continue
+            if "Test" not in line and "test" not in line:
+                continue
+            basename = line.rsplit("/", 1)[-1]
+            for stem in search_stems:
+                if stem in basename:
+                    test_files.append(line)
+                    searched.append(f"symbol-match({stem}): {line}")
+                    break
+
+    if not searched:
+        searched.append("(no test files found in scope)")
+
+    return test_files, searched
 
 
 def build_coverage_evidence(
@@ -363,9 +431,9 @@ def build_coverage_evidence(
     # Step 2: Extract production symbols from removed tests
     symbols = extract_production_symbols(all_removed)
 
-    # Step 3: Find all test files that might have coverage
-    test_files = find_test_files_in_changed_and_related(
-        head_sha, changed_files
+    # Step 3: Find all test files that might have coverage (bounded repo-wide)
+    test_files, searched_summary = find_test_files_in_changed_and_related(
+        head_sha, changed_files, symbols
     )
 
     # Step 4: Find existing tests covering the same symbols
@@ -373,13 +441,16 @@ def build_coverage_evidence(
         head_sha, test_files, symbols, COVERAGE_MAX_EXCERPT_BYTES
     )
 
-    # Step 5: Render
-    return render_coverage_evidence(all_removed, related_excerpts)
+    # Step 5: Render with search scope
+    return render_coverage_evidence(
+        all_removed, related_excerpts, searched_summary
+    )
 
 
 def render_coverage_evidence(
     removed_tests: list[RemovedTest],
     related_excerpts: list[str],
+    searched_summary: Optional[list[str]] = None,
 ) -> str:
     """Render the coverage evidence block."""
     if not removed_tests:
@@ -404,6 +475,13 @@ def render_coverage_evidence(
 
     parts.append("")
 
+    # Report search scope so the reviewer can judge completeness
+    if searched_summary:
+        parts.append("SEARCH SCOPE (files actually searched for related tests):")
+        for s in searched_summary:
+            parts.append(f"  - {s}")
+        parts.append("")
+
     if related_excerpts:
         parts.append(
             "CANDIDATE EXISTING COVERAGE IN HEAD "
@@ -415,8 +493,9 @@ def render_coverage_evidence(
             parts.append("")
     else:
         parts.append(
-            "No related existing tests found in HEAD for the removed symbols. "
-            "This may indicate genuine coverage loss — reviewer should verify."
+            "No related existing tests found in HEAD within the searched scope. "
+            "This may indicate genuine coverage loss — reviewer should verify "
+            "within the searched scope above; claims beyond searched scope are notes."
         )
         parts.append("")
 

@@ -574,6 +574,8 @@ run_claude_review_gate() {
 # Coverage-discipline clause (MY-1456): prevents false "missing test coverage"
 # blockers when tests are removed but equivalent coverage exists at HEAD.
 # Matches are ADVISORY candidates — reviewer must verify branch equivalence.
+# Blockers require concrete evidence within the declared SEARCH SCOPE;
+# claims beyond searched scope are notes, not blockers.
 review_coverage_rules() {
     printf '%s\n' \
 '【证据纪律 —— 测试覆盖判定】' \
@@ -589,8 +591,11 @@ review_coverage_rules() {
 '- COVERAGE CONTEXT 中列出的候选测试基于符号共现检索,是 advisory candidates。' \
 '  Reviewer 必须验证候选测试确实测试了相同生产分支后,才能判定覆盖未丢失。' \
 '  但若无法确认,结论是降级为 note,**不是升级为 blocker**。' \
-'- 要报「移除测试后覆盖丢失」的 blocker,你**必须**提供具体证据:指出哪条生产分支/函数' \
-'  在 full-HEAD 中已无任何 test 调用。给不出 file:line 证据 = 不得报 blocker,最多 note。' \
+'- COVERAGE CONTEXT 包含 SEARCH SCOPE——实际搜索过的文件列表。' \
+'  要报「覆盖丢失」的 blocker,你**必须**在 SEARCH SCOPE 列出的文件中提供具体 file:line' \
+'  证据,证明该生产分支在已搜索范围内无任何 test 调用。' \
+'  超出 SEARCH SCOPE 的缺失 = note(搜索有界,不能从有限搜索推出普遍不存在)。' \
+'  SEARCH SCOPE 内已搜索文件确认无覆盖 = 可报 blocker(有具体证据)。' \
 '- 被移除的测试如果测试的是**已不存在的 API**(如旧的 throw 路径被 refactor 掉),其移除' \
 '  不构成覆盖降级——这是清理死代码,不是删保护网。' \
 '- COVERAGE CONTEXT 中标注 "declaration absent from HEAD" 的 removed tests 已由可信脚本' \
@@ -598,5 +603,6 @@ review_coverage_rules() {
 '  它不会出现在 REMOVED TESTS 列表中。' \
 '- 判断某个匹配是否属于覆盖候选时,**只应按 evidence 认定,不能把它等同于已证实的 blocker**;' \
 '  也就是说,匹配结果是建议信息,不自动构成覆盖缺失。' \
+'- 若 COVERAGE CONTEXT 完全缺失(分析器异常),gate 已 fail-closed,不会走到这里。' \
 '- 不确定一律降级为 note。'
 }

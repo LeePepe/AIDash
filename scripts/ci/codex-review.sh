@@ -141,8 +141,14 @@ if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED")
 fi
 
 # ---- exact-HEAD coverage context (MY-1456) --------------------------------
+# fail-closed: analyzer failure blocks the gate, same as scope evidence.
 COVERAGE_CONTEXT=""
-COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED" 2>/dev/null)" || true
+if ! COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED")"; then
+    echo "[codex-review] ❌ coverage context 生成失败"
+    post_sticky "$STICKY
+⚠️ 自动 review 未能生成 exact-HEAD 覆盖上下文(分析器异常)。为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
 
 # ---- review prompt ------------------------------------------------------
 # 维度与 claude-review.sh 保持一致（同一套仓库宪法），两个模型交叉验证。

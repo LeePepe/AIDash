@@ -118,12 +118,16 @@ _phase_end "scope-evidence"
 # production symbols — prevents false "missing coverage" blockers when
 # equivalent tests exist outside the diff window.
 #
-# Non-fatal: coverage context is advisory. If the analyzer fails, review
-# proceeds without it (fail-open for this specific evidence, unlike scope
-# evidence which is fail-closed). The evidence-discipline clause tells the
-# reviewer to demote uncertainty without coverage context to a note.
+# fail-closed: like scope evidence, if the analyzer itself fails (python3
+# crash / bug), the gate blocks. An EMPTY result (no tests removed) is the
+# normal success — the distinction is exit code, not output length.
 COVERAGE_CONTEXT=""
-COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED" 2>/dev/null)" || true
+if ! COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED")"; then
+    echo "[claude-review] ❌ coverage context 生成失败"
+    post_sticky "$STICKY
+⚠️ 自动 review 未能生成 exact-HEAD 覆盖上下文(分析器异常)。为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
 
 # ---- verdict schema -----------------------------------------------------
 SCHEMA='{
