@@ -109,6 +109,30 @@ def _find_all_test_functions(source: str) -> list[tuple[str, re.Match]]:
                 seen[name] = m
     return list(seen.items())
 
+
+# Regex to find containing type declarations (class, struct, enum, extension)
+_CONTAINING_TYPE_RE = re.compile(
+    r"^\s*(?:final\s+)?(?:class|struct|enum|extension|actor)\s+(\w+)",
+    re.MULTILINE,
+)
+
+
+def _find_containing_type(source: str, func_offset: int) -> str:
+    """Find the enclosing type name for a function at the given character offset.
+
+    Searches backwards from the function position for the nearest type
+    declaration (class/struct/enum/extension/actor). Returns empty string
+    if no containing type is found (top-level function).
+    """
+    # Look at all type declarations before the function position
+    best_name = ""
+    for m in _CONTAINING_TYPE_RE.finditer(source):
+        if m.start() < func_offset:
+            best_name = m.group(1)
+        else:
+            break
+    return best_name
+
 # Matches production symbol names: types, functions, protocols.
 _SYMBOL_RE = re.compile(
     r"(?:class|struct|enum|protocol|func|actor)\s+(\w+)"
@@ -125,6 +149,7 @@ class RemovedTest(NamedTuple):
     func_name: str
     body_snippet: str  # first ~200 chars of the removed test body (for display)
     full_body: str = ""  # full extracted body for symbol analysis
+    containing_type: str = ""  # enclosing class/struct/enum for qualified identity
 
 
 class CoverageEvidence(NamedTuple):
@@ -149,6 +174,44 @@ def run_git(args: Sequence[str]) -> Optional[str]:
     if done.returncode != 0:
         return None
     return done.stdout
+
+
+def _git_blob_size(ref_path: str) -> Optional[int]:
+    """Get the byte size of a git blob without reading its content.
+
+    Uses `git cat-file -s <ref>` which returns size without full capture.
+    Returns None on failure.
+    """
+    result = run_git(["cat-file", "-s", ref_path])
+    if result is None:
+        return None
+    try:
+        return int(result.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def _bounded_blob_read(
+    ref_path: str, max_bytes: int
+) -> tuple[Optional[str], bool]:
+    """Read a git blob only if it does not exceed max_bytes.
+
+    Returns (content, was_oversize). If oversize, content is None and
+    was_oversize is True. If the read fails for other reasons, content is None
+    and was_oversize is False.
+    """
+    size = _git_blob_size(ref_path)
+    if size is not None and size > max_bytes:
+        return None, True
+    # Size is within bounds (or unknown — fall through to full read and
+    # check post-hoc for safety)
+    content = run_git(["show", ref_path])
+    if content is None:
+        return None, False
+    # Post-hoc check in case cat-file -s was unavailable
+    if len(content.encode("utf-8", "replace")) > max_bytes:
+        return None, True
+    return content, False
 
 
 def removed_line_numbers(diff_text: str, path: str) -> Tuple[int, ...]:
@@ -255,11 +318,15 @@ def find_removed_test_functions(
                 pass
 
     base_lines = base_source.splitlines()
-    # Build HEAD function name set once (empty if HEAD unavailable)
-    head_func_names: set[str] = set()
+    # Build HEAD qualified function identity set (type.func_name) for removal
+    # check. Using qualified identity prevents a same-named test in a different
+    # suite/class from hiding a true removal.
+    head_qualified_names: set[str] = set()
     if head_source is not None:
-        for name, _ in _find_all_test_functions(head_source):
-            head_func_names.add(name)
+        for name, m in _find_all_test_functions(head_source):
+            containing = _find_containing_type(head_source, m.start())
+            qualified = f"{containing}.{name}" if containing else name
+            head_qualified_names.add(qualified)
 
     results: list[RemovedTest] = []
 
@@ -273,10 +340,17 @@ def find_removed_test_functions(
         if not overlap:
             continue
 
+        # Determine qualified identity for this function in base
+        base_containing = _find_containing_type(base_source, match.start())
+
         # Verify the function declaration is actually absent from HEAD.
         if head_read_succeeded:
-            if func_name in head_func_names:
-                # Function still exists at HEAD — modified, not removed
+            qualified = (
+                f"{base_containing}.{func_name}" if base_containing
+                else func_name
+            )
+            if qualified in head_qualified_names:
+                # Function still exists at HEAD in the same type — modified, not removed
                 continue
             # else: confirmed absent, proceed to report
         else:
@@ -298,7 +372,7 @@ def find_removed_test_functions(
         full_body = sanitize_untrusted_content(full_body)
         results.append(RemovedTest(
             file=path, func_name=func_name, body_snippet=snippet,
-            full_body=full_body,
+            full_body=full_body, containing_type=base_containing,
         ))
 
     return results
@@ -320,11 +394,27 @@ def _find_func_end(lines: list[str], start_idx: int, path: str = "") -> int:
     if path.endswith(".py"):
         return _find_func_end_python(lines, start_idx)
 
-    # Swift/C-family: brace counting
+    # Swift/C-family: lexical-aware brace counting that skips braces
+    # inside string literals, comments, and @Test(...) label parameters.
     depth = 0
     started = False
     for i in range(start_idx, min(start_idx + 500, len(lines))):
-        for ch in lines[i]:
+        line = lines[i]
+        j = 0
+        while j < len(line):
+            ch = line[j]
+            # Skip single-line comments
+            if ch == '/' and j + 1 < len(line) and line[j + 1] == '/':
+                break  # rest of line is comment
+            # Skip string literals (double-quoted)
+            if ch == '"':
+                j += 1
+                while j < len(line) and line[j] != '"':
+                    if line[j] == '\\':
+                        j += 1  # skip escaped char
+                    j += 1
+                j += 1  # skip closing quote
+                continue
             if ch == "{":
                 depth += 1
                 started = True
@@ -332,6 +422,7 @@ def _find_func_end(lines: list[str], start_idx: int, path: str = "") -> int:
                 depth -= 1
                 if started and depth == 0:
                     return i + 1  # 1-based
+            j += 1
     if started:
         return min(start_idx + 50, len(lines))
 
@@ -468,15 +559,19 @@ def find_related_tests_in_head(
             file_outcomes.append(f"budget-omitted: {test_file}")
             continue
 
-        source = run_git(["show", f"{head_sha}:{test_file}"])
+        # Bounded read: check blob size BEFORE capturing full content to
+        # prevent oversized PR-controlled blobs from consuming runner memory.
+        source, was_oversize = _bounded_blob_read(
+            f"{head_sha}:{test_file}", COVERAGE_MAX_FILE_BYTES
+        )
+        if was_oversize:
+            file_outcomes.append(f"skipped-oversize: {test_file}")
+            continue
         if source is None:
             raise AnalysisError(
                 f"HEAD blob read failed for candidate test file "
                 f"'{test_file}' (claimed in SEARCH SCOPE but unreadable)"
             )
-        if len(source.encode("utf-8", "replace")) > COVERAGE_MAX_FILE_BYTES:
-            file_outcomes.append(f"skipped-oversize: {test_file}")
-            continue
 
         file_outcomes.append(f"read: {test_file}")
         source_lines = source.splitlines()
@@ -595,17 +690,17 @@ def find_test_files_in_changed_and_related(
                     test_files.append(line)
                     searched.append(f"sibling: {line}")
 
-    # 3. Repo-wide bounded symbol search: find any test file in the tree
-    # whose name contains a production symbol stem (e.g. BriefingPut appears
-    # in BriefingPutCommandTests.swift). This catches differently-named test
-    # files that cover the same production code but aren't naming-convention
-    # siblings of the changed files.
+    # 3. Repo-wide bounded symbol search: find test files by filename stems
+    # AND by content. First tries filename matching (fast, no blob reads),
+    # then does bounded content-based discovery for generically named test
+    # files that contain exact domain identifiers.
     if production_symbols:
         # Build search stems from production symbols (CamelCase type names)
         search_stems = {
             sym for sym in production_symbols
             if len(sym) > 3 and sym[0].isupper()
         }
+        # 3a. Filename-stem matching (fast — no blob reads needed)
         for line in all_tree_files:
             if line in test_files:
                 continue
@@ -618,6 +713,36 @@ def find_test_files_in_changed_and_related(
                 if stem in basename:
                     test_files.append(line)
                     searched.append(f"symbol-match({stem}): {line}")
+                    break
+
+        # 3b. Content-based discovery: for test files not yet selected,
+        # do a bounded read and check if they contain any production symbol.
+        # This catches generically named files (e.g. "IntegrationTests.swift")
+        # that reference exact domain identifiers. Bounded by work cap.
+        _CONTENT_DISCOVERY_MAX_FILES = 20
+        _CONTENT_DISCOVERY_MAX_BYTES = COVERAGE_MAX_FILE_BYTES
+        content_candidates = [
+            f for f in all_tree_files
+            if f not in test_files
+            and (f.endswith(".swift") or f.endswith(".py"))
+            and ("Test" in f or "test" in f)
+        ]
+        content_scanned = 0
+        for candidate in content_candidates:
+            if content_scanned >= _CONTENT_DISCOVERY_MAX_FILES:
+                break
+            # Bounded read — skip oversized files without full capture
+            source, was_oversize = _bounded_blob_read(
+                f"{head_sha}:{candidate}", _CONTENT_DISCOVERY_MAX_BYTES
+            )
+            if was_oversize or source is None:
+                continue
+            content_scanned += 1
+            # Check for word-boundary matches of production symbols
+            for sym in search_stems:
+                if re.search(r'\b' + re.escape(sym) + r'\b', source):
+                    test_files.append(candidate)
+                    searched.append(f"content-match({sym}): {candidate}")
                     break
 
     if not searched:
@@ -774,9 +899,19 @@ def render_coverage_evidence(
     Path/name values from removed_tests and searched_summary originate from
     PR-controlled content (file paths can be attacker-chosen). They are
     sanitized before embedding to prevent injection into the reviewer prompt.
+
+    Enforces COVERAGE_MAX_TOTAL_BYTES over the ENTIRE rendered output —
+    including removed-test records, SEARCH SCOPE metadata, headers, excerpts,
+    and exactly one omission marker. This prevents unbounded metadata from
+    consuming runner memory.
     """
     if not removed_tests:
         return ""
+
+    _TOTAL_OMISSION = (
+        f"\n[output truncated — {COVERAGE_MAX_TOTAL_BYTES}-byte total cap reached]\n"
+    )
+    _TOTAL_OMISSION_BYTES = len(_TOTAL_OMISSION.encode("utf-8"))
 
     parts: list[str] = [
         "COVERAGE CONTEXT（由可信脚本在 base checkout 中，从 exact-HEAD 源码确定性搜索；"
@@ -825,7 +960,19 @@ def render_coverage_evidence(
         )
         parts.append("")
 
-    return "\n".join(parts)
+    # Enforce COVERAGE_MAX_TOTAL_BYTES over the entire rendered output.
+    result = "\n".join(parts)
+    result_bytes = len(result.encode("utf-8", "replace"))
+    if result_bytes > COVERAGE_MAX_TOTAL_BYTES:
+        # Truncate to fit within budget including the omission marker
+        usable = max(0, COVERAGE_MAX_TOTAL_BYTES - _TOTAL_OMISSION_BYTES)
+        result = (
+            result.encode("utf-8", "replace")[:usable]
+            .decode("utf-8", "ignore")
+            + _TOTAL_OMISSION
+        )
+
+    return result
 
 
 if __name__ == "__main__":

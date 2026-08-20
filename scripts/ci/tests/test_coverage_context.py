@@ -31,6 +31,8 @@ from coverage_context import (  # noqa: E402
     sanitize_untrusted_content,
     _find_func_end,
     _find_all_test_functions,
+    _find_containing_type,
+    _bounded_blob_read,
 )
 
 # --- Fixture: mimics the PR #185 failure shape ---
@@ -186,7 +188,8 @@ def _stub_git(monkeypatch, file_map, base_file_map=None):
 
     file_map is used for HEAD (default). base_file_map is used for base SHA
     lookups; if None, HEAD map is used for both.
-    Also handles `ls-tree <sha> -- <path>` for file existence checks.
+    Also handles `ls-tree <sha> -- <path>` for file existence checks
+    and `cat-file -s <ref>` for blob size preflight.
     """
     import coverage_context
 
@@ -198,6 +201,14 @@ def _stub_git(monkeypatch, file_map, base_file_map=None):
             if base_file_map and sha_part == "base123":
                 return base_file_map.get(path)
             return file_map.get(path)
+        if args[0] == "cat-file" and "-s" in args:
+            # git cat-file -s <sha>:<path> — return byte size
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            _, _, path = ref_path.partition(":")
+            content = file_map.get(path)
+            if content is not None:
+                return str(len(content.encode("utf-8")))
+            return None
         if args[0] == "ls-tree":
             # ls-tree -r --name-only <sha> → list all files
             if "-r" in args:
@@ -2358,4 +2369,504 @@ struct BriefingPublishCommandTests {
     # BriefingPublishCommand as a word-boundary match)
     assert "RuntimeConfig" not in combined
     assert "RerunManager" not in combined
+
+
+# --- P1 #1: Swift lexical-aware brace counting ---
+
+
+def test_swift_brace_in_test_label_does_not_truncate():
+    """Braces inside @Test("label with {braces}") must NOT terminate the
+    function body. This is the real BriefingPut returned-response shape where
+    @Test labels contain braces."""
+    lines = [
+        '    @Test("returned ok={false} is handled")',
+        '    func publishReturnedFalse() async throws {',
+        '        let client = MockAPIClient(response: .init(ok: false, error: "rate limited"))',
+        '        let cmd = BriefingPutCommand(client: client)',
+        '        let result = try await cmd.run()',
+        '        #expect(result == .failure("rate limited"))',
+        '    }',
+    ]
+    end = _find_func_end(lines, 0, "Tests/BriefingPutCommandTests.swift")
+    # Must include the full function body up to line 7 (1-based)
+    assert end == 7, (
+        f"_find_func_end stopped at line {end} — brace in @Test label "
+        f"falsely terminated the body"
+    )
+
+
+def test_swift_brace_in_string_literal_does_not_truncate():
+    """Braces inside string literals must NOT be counted."""
+    lines = [
+        '    func testJsonParsing() {',
+        '        let json = "{\\"key\\": \\"value\\"}"',
+        '        let result = parse(json)',
+        '        XCTAssertNotNil(result)',
+        '    }',
+    ]
+    end = _find_func_end(lines, 0, "Tests/JsonTests.swift")
+    assert end == 5
+
+
+def test_swift_brace_in_comment_does_not_truncate():
+    """Braces inside comments must NOT be counted."""
+    lines = [
+        '    func testSomething() {',
+        '        // This dict { "a": 1 } is just a comment',
+        '        let x = compute()',
+        '        XCTAssertEqual(x, 42)',
+        '    }',
+    ]
+    end = _find_func_end(lines, 0, "Tests/CommentTests.swift")
+    assert end == 5
+
+
+def test_swift_real_briefing_put_brace_label_fixture(monkeypatch):
+    """End-to-end: the real BriefingPut returned-response test with a brace-
+    bearing @Test label must have its production symbols fully extracted.
+    This is the AC1 fixture the reviewer required."""
+
+    # Real shape: @Test label contains braces
+    test_source = '''\
+import Testing
+@testable import AIDashCLI
+
+struct BriefingPutCommandTests {
+    @Test("returned ok={false} is handled correctly")
+    func putReturnedFalse() async throws {
+        let client = MockAPIClient(response: .init(ok: false, error: "quota"))
+        let cmd = BriefingPutCommand(client: client)
+        let result = try await cmd.run()
+        #expect(result == .failure("quota"))
+    }
+
+    @Test func putSuccess() async throws {
+        let client = MockAPIClient(response: .init(ok: true, briefing: .mock))
+        let cmd = BriefingPutCommand(client: client)
+        let result = try await cmd.run()
+        #expect(result == .success(.mock))
+    }
+}
+'''
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            return test_source
+        if args[0] == "cat-file":
+            # Size check for bounded read
+            return str(len(test_source.encode("utf-8")))
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "Tests/BriefingPutCommandTests.swift"
+            return "100644 blob abc\tTests/BriefingPutCommandTests.swift"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    excerpts, _ = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=["Tests/BriefingPutCommandTests.swift"],
+        production_symbols={"BriefingPutCommand"},
+        max_excerpt_bytes=30000,
+    )
+
+    # Both test functions must be found — brace in label must not truncate
+    combined = "\n".join(excerpts)
+    assert "putReturnedFalse" in combined
+    assert "putSuccess" in combined
+    assert "BriefingPutCommand" in combined
+
+
+# --- P1 #2: Content-based discovery ---
+
+
+def test_content_based_discovery_finds_generic_test_file(monkeypatch):
+    """A generically named test file (e.g. IntegrationTests.swift) that
+    contains the exact production identifier must be discovered via
+    content-based search, not just filename matching."""
+
+    import coverage_context
+
+    # A generically named file whose name does NOT contain "BriefingPublish"
+    # but whose content DOES reference BriefingPublishCommand
+    generic_test = """\
+import Testing
+@testable import AIDashCLI
+
+struct IntegrationTests {
+    @Test func testEndToEndFlow() async throws {
+        let cmd = BriefingPublishCommand(client: MockAPIClient())
+        let result = try await cmd.run()
+        #expect(result == .success(.mock))
+    }
+}
+"""
+
+    call_count = {"cat_file": 0}
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref = args[1]
+            if "IntegrationTests.swift" in ref:
+                return generic_test
+            return None
+        if args[0] == "cat-file":
+            call_count["cat_file"] += 1
+            return str(len(generic_test.encode("utf-8")))
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "Tests/IntegrationTests.swift"
+            return ""
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    test_files, searched = find_test_files_in_changed_and_related(
+        head_sha="head123",
+        changed_files=["Sources/BriefingPublishCommand.swift"],
+        production_symbols={"BriefingPublishCommand"},
+    )
+
+    # The generic file must be found via content-based discovery
+    assert "Tests/IntegrationTests.swift" in test_files
+    assert any("content-match" in s for s in searched)
+
+
+# --- P1 #3: Qualified identity for removed-test tracking ---
+
+
+def test_same_named_test_different_class_still_reports_removal(monkeypatch):
+    """A test function with the same name in a DIFFERENT class must not hide
+    a true removal from the original class."""
+
+    import coverage_context
+
+    # BASE: ClassA has testFoo which gets removed
+    base_source = """\
+import XCTest
+
+final class ClassATests: XCTestCase {
+    func testFoo() {
+        let cmd = ClassACommand()
+        XCTAssert(cmd.works())
+    }
+}
+
+final class ClassBTests: XCTestCase {
+    func testFoo() {
+        let cmd = ClassBCommand()
+        XCTAssert(cmd.works())
+    }
+}
+"""
+    # HEAD: ClassA.testFoo is removed, ClassB.testFoo remains
+    head_source = """\
+import XCTest
+
+final class ClassBTests: XCTestCase {
+    func testFoo() {
+        let cmd = ClassBCommand()
+        XCTAssert(cmd.works())
+    }
+}
+"""
+    # Diff removes ClassA lines
+    diff = """\
+diff --git a/Tests/FooTests.swift b/Tests/FooTests.swift
+--- a/Tests/FooTests.swift
++++ b/Tests/FooTests.swift
+@@ -3,7 +3,0 @@ import XCTest
+-final class ClassATests: XCTestCase {
+-    func testFoo() {
+-        let cmd = ClassACommand()
+-        XCTAssert(cmd.works())
+-    }
+-}
+-
+"""
+    test_path = "Tests/FooTests.swift"
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref = args[1]
+            if ref.startswith("base:"):
+                return base_source
+            if ref.startswith("head:"):
+                return head_source
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return f"100644 blob abc\t{test_path}"
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    removed = find_removed_test_functions(diff, test_path, "base", "head")
+    func_names = [r.func_name for r in removed]
+    # ClassA.testFoo must be reported as removed despite ClassB.testFoo existing
+    assert "testFoo" in func_names
+
+
+def test_same_named_test_same_class_not_reported(monkeypatch):
+    """A test function modified (not removed) in the same class must NOT be
+    reported as removed — qualified identity preserves the existing behavior."""
+
+    import coverage_context
+
+    base_source = """\
+import XCTest
+
+final class FooTests: XCTestCase {
+    func testBar() {
+        XCTAssert(oldImpl())
+    }
+}
+"""
+    head_source = """\
+import XCTest
+
+final class FooTests: XCTestCase {
+    func testBar() {
+        XCTAssert(newImpl())
+    }
+}
+"""
+    diff = """\
+diff --git a/Tests/FooTests.swift b/Tests/FooTests.swift
+--- a/Tests/FooTests.swift
++++ b/Tests/FooTests.swift
+@@ -4,3 +4,3 @@ final class FooTests: XCTestCase {
+-        XCTAssert(oldImpl())
++        XCTAssert(newImpl())
+"""
+    test_path = "Tests/FooTests.swift"
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref = args[1]
+            if ref.startswith("base:"):
+                return base_source
+            if ref.startswith("head:"):
+                return head_source
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return f"100644 blob abc\t{test_path}"
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    removed = find_removed_test_functions(diff, test_path, "base", "head")
+    assert removed == []
+
+
+def test_find_containing_type_basic():
+    """_find_containing_type must find the enclosing class/struct."""
+    source = """\
+import XCTest
+
+final class MyTests: XCTestCase {
+    func testFoo() {
+    }
+}
+"""
+    # Position of "func testFoo"
+    offset = source.index("func testFoo")
+    result = _find_containing_type(source, offset)
+    assert result == "MyTests"
+
+
+def test_find_containing_type_no_enclosing():
+    """Top-level functions return empty string."""
+    source = """\
+import XCTest
+
+func testFoo() {
+}
+"""
+    offset = source.index("func testFoo")
+    result = _find_containing_type(source, offset)
+    assert result == ""
+
+
+# --- P1 #4: Bounded blob read preflight ---
+
+
+def test_bounded_blob_read_rejects_oversize(monkeypatch):
+    """_bounded_blob_read must reject blobs exceeding the limit without
+    capturing full content into memory."""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            # Report size as 500KB (exceeds 400KB limit)
+            return "500000"
+        if args[0] == "show":
+            # Should NOT be called if cat-file reports oversize
+            return "x" * 500000
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    content, was_oversize = _bounded_blob_read("head:big.swift", 400000)
+    assert was_oversize is True
+    assert content is None
+
+
+def test_bounded_blob_read_allows_within_limit(monkeypatch):
+    """_bounded_blob_read must allow blobs within the limit."""
+
+    import coverage_context
+
+    small_content = "func testFoo() {}\n"
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            return str(len(small_content.encode("utf-8")))
+        if args[0] == "show":
+            return small_content
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    content, was_oversize = _bounded_blob_read("head:small.swift", 400000)
+    assert was_oversize is False
+    assert content == small_content
+
+
+def test_oversize_blob_not_fully_captured_in_related_search(monkeypatch):
+    """find_related_tests_in_head must skip oversize blobs without fully
+    capturing them into runner memory (using bounded preflight)."""
+
+    import coverage_context
+
+    normal_source = """\
+import Testing
+struct SmallTests {
+    @Test func testSmall() {
+        let cmd = BriefingPublishCommand()
+    }
+}
+"""
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref = args[2] if len(args) > 2 else ""
+            if "Oversize" in ref:
+                return str(COVERAGE_MAX_FILE_BYTES + 1000)
+            return str(len(normal_source.encode("utf-8")))
+        if args[0] == "show":
+            ref = args[1]
+            if "Oversize" in ref:
+                # This should NOT be reached due to preflight
+                assert False, "Oversize blob was fully captured!"
+            return normal_source
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    excerpts, outcomes = find_related_tests_in_head(
+        head_sha="abc",
+        test_files=["Tests/OversizeTests.swift", "Tests/SmallTests.swift"],
+        production_symbols={"BriefingPublishCommand"},
+        max_excerpt_bytes=30000,
+    )
+
+    assert any("skipped-oversize" in o for o in outcomes)
+    assert any("read" in o and "Small" in o for o in outcomes)
+
+
+# --- P1 #5: Total byte cap over entire rendered output ---
+
+
+def test_render_total_output_bounded():
+    """render_coverage_evidence must enforce COVERAGE_MAX_TOTAL_BYTES over the
+    entire output including removed-test records, SEARCH SCOPE metadata, and
+    excerpts — not just excerpts alone."""
+
+    # Create enough removed tests and scope entries to exceed the cap
+    removed = [
+        RemovedTest(
+            file=f"Tests/{'A' * 50}File{i}Tests.swift",
+            func_name=f"testFunction{'B' * 50}_{i}",
+            body_snippet="let x = 1",
+        )
+        for i in range(300)
+    ]
+    searched = [
+        f"changed: Tests/{'C' * 50}File{i}Tests.swift [read]" for i in range(300)
+    ]
+    # Big excerpts
+    excerpts = [
+        f"--- Tests/File{i}.swift: testBig{i} (lines 1-50)\n" + "x" * 1000
+        for i in range(100)
+    ]
+
+    result = render_coverage_evidence(removed, excerpts, searched)
+    result_bytes = len(result.encode("utf-8", "replace"))
+    assert result_bytes <= COVERAGE_MAX_TOTAL_BYTES, (
+        f"Total rendered output is {result_bytes} bytes, exceeds "
+        f"cap {COVERAGE_MAX_TOTAL_BYTES}"
+    )
+    # Must contain the truncation marker
+    assert "total cap reached" in result
+
+
+def test_render_small_output_not_truncated():
+    """Small outputs must NOT be truncated."""
+    removed = [
+        RemovedTest(
+            file="Tests/Foo.swift",
+            func_name="testBar",
+            body_snippet="let x = 1",
+        )
+    ]
+    result = render_coverage_evidence(removed, [], ["changed: Tests/Foo.swift"])
+    assert "total cap reached" not in result
+    assert "COVERAGE CONTEXT" in result
+
+
+def test_large_removed_and_scope_metadata_bounded():
+    """Even with zero excerpts, large removed-test + SEARCH SCOPE metadata
+    must still be bounded by COVERAGE_MAX_TOTAL_BYTES."""
+
+    # Many removed tests with long paths to generate large metadata
+    long_path = "Tests/" + "A" * 200 + "Tests.swift"
+    removed = [
+        RemovedTest(
+            file=long_path,
+            func_name=f"testVeryLongName{'X' * 100}_{i}",
+            body_snippet="x",
+        )
+        for i in range(500)
+    ]
+    searched = [f"changed: {long_path} [read]" for _ in range(500)]
+
+    result = render_coverage_evidence(removed, [], searched)
+    result_bytes = len(result.encode("utf-8", "replace"))
+    assert result_bytes <= COVERAGE_MAX_TOTAL_BYTES
+
+
+def test_multibyte_total_output_bounded():
+    """Multibyte characters in removed-test metadata must be correctly counted
+    toward the total byte cap (UTF-8 encoded size)."""
+
+    # CJK paths: each char is 3 bytes
+    cjk_path = "Tests/" + "测试" * 50 + "Tests.swift"
+    removed = [
+        RemovedTest(
+            file=cjk_path,
+            func_name=f"test{'测试' * 30}_{i}",
+            body_snippet="x",
+        )
+        for i in range(200)
+    ]
+    searched = [f"changed: {cjk_path} [read]" for _ in range(200)]
+
+    result = render_coverage_evidence(removed, [], searched)
+    result_bytes = len(result.encode("utf-8", "replace"))
+    assert result_bytes <= COVERAGE_MAX_TOTAL_BYTES
 
