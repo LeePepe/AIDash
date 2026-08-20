@@ -393,6 +393,39 @@ def test_extract_production_symbols_filters_framework_symbols():
     assert "MockService" not in symbols
 
 
+def test_extract_production_symbols_filters_swift_testing_framework():
+    """Swift Testing framework identifiers (Test, Testing, Expect, Suite, etc.)
+    must not appear in production symbols. A real @Test-annotated body that uses
+    #expect and references production types should keep only the production ones.
+    """
+    removed = [
+        RemovedTest(
+            file="Tests/BriefingPublishCommandTests.swift",
+            func_name="publishThrowsOnNetworkError",
+            body_snippet=(
+                "import Testing\n"
+                "@Test func publishThrowsOnNetworkError() {\n"
+                "    let cmd = BriefingPublishCommand(client: MockAPIClient())\n"
+                "    let result = try await cmd.run()\n"
+                "    #expect(result.ok == false)\n"
+                "    let suite = Suite.shared\n"
+                "}"
+            ),
+        )
+    ]
+    symbols = extract_production_symbols(removed)
+    # Production symbols preserved
+    assert "BriefingPublishCommand" in symbols
+    assert "run" in symbols
+    # Swift Testing framework identifiers filtered
+    assert "Test" not in symbols
+    assert "Testing" not in symbols
+    assert "Expect" not in symbols
+    assert "Suite" not in symbols
+    # Mock prefix filtered
+    assert "MockAPIClient" not in symbols
+
+
 def test_render_coverage_evidence_includes_removed_and_existing():
     removed = [
         RemovedTest(

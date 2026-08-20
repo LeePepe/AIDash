@@ -343,11 +343,17 @@ def extract_production_symbols(removed_tests: list[RemovedTest]) -> set[str]:
     """
     # Symbols that are test infrastructure, not production code
     _NON_PRODUCTION_SYMBOLS = {
+        # XCTest framework
         "XCTest", "XCTestCase", "XCTestExpectation", "XCTAssert",
         "XCTAssertEqual", "XCTAssertTrue", "XCTAssertFalse",
         "XCTAssertNil", "XCTAssertNotNil", "XCTAssertThrowsError",
         "XCTFail", "XCTUnwrap", "XCTSkip",
+        # Swift Testing framework
+        "Test", "Testing", "Suite", "Tag", "Trait",
+        "Expect", "Issue", "Confirmation",
+        # Common mock/stub/fake prefixes handled below
         "Mock", "Stub", "Fake", "Spy",
+        # Standard library / system frameworks
         "Foundation", "Combine", "SwiftUI", "UIKit",
         "Task", "Result", "Error", "Optional",
         "String", "Int", "Bool", "Double", "Float", "Array", "Dictionary",
