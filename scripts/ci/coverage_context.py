@@ -468,8 +468,10 @@ def find_related_tests_in_head(
             )
             excerpt_bytes = len(excerpt.encode("utf-8", "replace"))
             if excerpt_bytes > max_excerpt_bytes:
-                excerpt = excerpt[:max_excerpt_bytes] + "\n[truncated]"
-                excerpt_bytes = max_excerpt_bytes
+                # Truncate by bytes, not characters (multibyte safety).
+                encoded = excerpt.encode("utf-8", "replace")[:max_excerpt_bytes]
+                excerpt = encoded.decode("utf-8", "replace") + "\n[truncated]"
+                excerpt_bytes = len(excerpt.encode("utf-8", "replace"))
 
             # Check total cap (reserve space for omission marker)
             if total_bytes + excerpt_bytes + _OMISSION_BYTES > COVERAGE_MAX_TOTAL_BYTES:
