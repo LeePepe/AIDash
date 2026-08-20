@@ -16,8 +16,8 @@ import Foundation
 ///      (exit 1) with a `schema.*` envelope on stderr.
 ///   2. Build `ContainerDeleteParams` and dispatch via `XPCClient`.
 ///   3. On success: decode `ContainerDeleteResult`, emit via the active formatter.
-///   4. On remote error (e.g. `container.not_found`): re-throw as `XPCError` so
-///      `AIDash.main`'s central handler emits the envelope and maps the exit code.
+///   4. On remote error (e.g. `container.not_found`): emit the error envelope
+///      with `response.requestId` on stderr and exit 3 directly (MY-1455).
 ///
 /// Deleting a container cascades to its child cards (the app-side handler removes
 /// the `ContainerModel`, and SwiftData deletes the owned `CardModel`s). Delete is

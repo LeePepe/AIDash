@@ -256,19 +256,12 @@ struct CardPutCommandTests {
             wasCreated: true
         )
 
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardOutput.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardOutput.fileDescriptor)
-
-        try JSONOutput().emit(success: result, requestId: "req-card-put-2")
-
-        dup2(saved, FileHandle.standardOutput.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = try captureStdout {
+            try JSONOutput().emit(success: result, requestId: "req-card-put-2")
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stdout.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == true)
         #expect(obj["requestId"] as? String == "req-card-put-2")
@@ -294,19 +287,12 @@ struct CardPutCommandTests {
             got: Self.validContainerID
         )
 
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardError.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardError.fileDescriptor)
-
-        try JSONOutput().emit(error: remoteError, requestId: "req-card-put-err")
-
-        dup2(saved, FileHandle.standardError.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stderr = try captureStderr {
+            try JSONOutput().emit(error: remoteError, requestId: "req-card-put-err")
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == false)
         let errBody = try #require(obj["error"] as? [String: Any])

@@ -172,6 +172,21 @@ public actor XPCClient {
         await pending.failAll(code: code, message: message)
     }
 
+    /// Test seam: exposes the decoded-reply delivery logic used by `handleReply`.
+    /// Returns `XPCResponse` on successful decode (including ok=false), throws
+    /// `XPCError` on decode failure. Tests can feed encoded bytes through this to
+    /// verify ok=false responses are returned (not thrown).
+    public static func decodeReply(_ data: Data) throws -> XPCResponse {
+        do {
+            return try JSONDecoder().decode(XPCResponse.self, from: data)
+        } catch {
+            throw XPCError(
+                code: "xpc.decode_failure",
+                message: error.localizedDescription
+            )
+        }
+    }
+
     /// Decode the reply and resume the matching pending continuation.
     ///
     /// Remote `ok=false` responses are returned as-is (they are data, not
@@ -181,12 +196,9 @@ public actor XPCClient {
     private func handleReply(requestId: String, data: Data) async {
         let decoded: Result<XPCResponse, any Error>
         do {
-            decoded = .success(try JSONDecoder().decode(XPCResponse.self, from: data))
+            decoded = .success(try Self.decodeReply(data))
         } catch {
-            decoded = .failure(XPCError(
-                code: "xpc.decode_failure",
-                message: error.localizedDescription
-            ))
+            decoded = .failure(error)
         }
 
         switch decoded {
@@ -200,25 +212,6 @@ public actor XPCClient {
                 cont.resume(throwing: error)
             }
         }
-    }
-
-    /// Pure mapping of a decoded `XPCResponse` to a Result.
-    ///
-    /// **Note (MY-1455):** This utility is no longer called by `handleReply`;
-    /// it exists as a public classifier for callers that need the old
-    /// ok/failure split (e.g. `ExitCodeMapper` tests, `canReachService`).
-    ///
-    /// If `ok == false` but `error` is missing, return a synthetic `internal`
-    /// error so callers never silently see a failure.
-    public static func resultForResponse(_ response: XPCResponse) -> Result<XPCResponse, XPCError> {
-        if response.ok {
-            return .success(response)
-        }
-        let remoteError = response.error ?? XPCError(
-            code: "internal",
-            message: "XPC response ok=false but no error payload"
-        )
-        return .failure(remoteError)
     }
 
     // MARK: - Connection lifecycle

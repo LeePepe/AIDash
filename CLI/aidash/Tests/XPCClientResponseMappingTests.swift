@@ -2,20 +2,19 @@ import Foundation
 import Testing
 import AIDashCore
 
-/// Tests for `XPCClient.resultForResponse` — the pure mapping utility that
-/// classifies `XPCResponse.ok == false` into a `.failure(XPCError)`.
+/// Tests for `XPCClient.decodeReply` — the production test seam that exposes
+/// the decode-to-Result logic used by `handleReply`.
 ///
-/// Since MY-1455, `handleReply` no longer calls `resultForResponse`; it
-/// returns decoded responses (including `ok=false`) directly to the caller.
-/// `resultForResponse` remains as a public classifier utility; the tests
-/// below verify it still works correctly standalone.
+/// Since MY-1455, `handleReply` returns decoded responses (including `ok=false`)
+/// directly to the caller. `decodeReply` is the public test seam that lets tests
+/// feed encoded bytes through the same production decode path.
 @Suite("XPCClient response mapping")
 struct XPCClientResponseMappingTests {
 
-    // MARK: - Success path
+    // MARK: - decodeReply: ok=true returns success
 
-    @Test("ok == true returns success with the original response")
-    func okReturnsSuccess() throws {
+    @Test("decodeReply returns ok=true response without throwing")
+    func decodeReplyOkTrue() throws {
         let response = XPCResponse(
             requestId: "req-1",
             appVersion: "1.0.0",
@@ -23,22 +22,52 @@ struct XPCClientResponseMappingTests {
             data: Data("{}".utf8),
             error: nil
         )
+        let encoded = try JSONEncoder().encode(response)
 
-        let result = XPCClient.resultForResponse(response)
+        let decoded = try XPCClient.decodeReply(encoded)
+        #expect(decoded.requestId == "req-1")
+        #expect(decoded.ok == true)
+    }
 
-        switch result {
-        case .success(let value):
-            #expect(value.requestId == "req-1")
-            #expect(value.ok == true)
-        case .failure(let error):
-            Issue.record("expected success, got \(error)")
+    // MARK: - decodeReply: ok=false is returned (not thrown)
+
+    @Test("decodeReply returns ok=false response without throwing (MY-1455)")
+    func decodeReplyOkFalseNotThrown() throws {
+        let response = XPCResponse(
+            requestId: "req-2",
+            appVersion: "1.0.0",
+            ok: false,
+            data: nil,
+            error: XPCError(code: "briefing.not_found", message: "No briefing found")
+        )
+        let encoded = try JSONEncoder().encode(response)
+
+        let decoded = try XPCClient.decodeReply(encoded)
+        #expect(decoded.ok == false)
+        #expect(decoded.requestId == "req-2")
+        #expect(decoded.error?.code == "briefing.not_found")
+    }
+
+    // MARK: - decodeReply: invalid bytes throw xpc.decode_failure
+
+    @Test("decodeReply throws xpc.decode_failure on invalid bytes")
+    func decodeReplyThrowsOnInvalidBytes() {
+        let garbage = Data("not json at all".utf8)
+
+        do {
+            _ = try XPCClient.decodeReply(garbage)
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "xpc.decode_failure")
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
         }
     }
 
-    // MARK: - Failure paths — each forced category from the T044 acceptance
+    // MARK: - MY-1455: ok=false with various error codes decoded correctly
 
     @Test(
-        "ok == false classifies the embedded XPCError for ExitCodeMapper",
+        "decodeReply preserves error codes for all remote error categories",
         arguments: [
             "schema.unknown_card_type",
             "schema.invalid_date",
@@ -48,31 +77,26 @@ struct XPCClientResponseMappingTests {
             "internal",
         ]
     )
-    func failedResponseClassifiesEmbeddedError(code: String) throws {
-        let remote = XPCError(code: code, message: "synthesised")
+    func decodeReplyPreservesErrorCodes(code: String) throws {
         let response = XPCResponse(
-            requestId: "req-2",
+            requestId: "req-codes",
             appVersion: "1.0.0",
             ok: false,
             data: nil,
-            error: remote
+            error: XPCError(code: code, message: "synthesised")
         )
+        let encoded = try JSONEncoder().encode(response)
 
-        let result = XPCClient.resultForResponse(response)
-
-        switch result {
-        case .success:
-            Issue.record("expected failure for code \(code)")
-        case .failure(let error):
-            #expect(error.code == code)
-            #expect(error.message == "synthesised")
-        }
+        let decoded = try XPCClient.decodeReply(encoded)
+        #expect(decoded.ok == false)
+        #expect(decoded.error?.code == code)
+        #expect(decoded.error?.message == "synthesised")
     }
 
-    // MARK: - Defensive path — malformed reply with ok=false but no error
+    // MARK: - MY-1455: ok=false with nil error also decoded (not thrown)
 
-    @Test("ok == false with nil error returns synthetic internal error")
-    func failedResponseWithoutErrorReturnsInternal() throws {
+    @Test("decodeReply returns ok=false with nil error without throwing")
+    func decodeReplyOkFalseNilError() throws {
         let response = XPCResponse(
             requestId: "req-3",
             appVersion: "1.0.0",
@@ -80,54 +104,10 @@ struct XPCClientResponseMappingTests {
             data: nil,
             error: nil
         )
+        let encoded = try JSONEncoder().encode(response)
 
-        let result = XPCClient.resultForResponse(response)
-
-        switch result {
-        case .success:
-            Issue.record("expected failure for ok=false response")
-        case .failure(let error):
-            #expect(error.code == "internal")
-            #expect(error.message.contains("ok=false"))
-        }
-    }
-
-    // MARK: - MY-1455: Remote error output emits requestId from XPCResponse
-
-    /// Behavioral test exercising the production output path: JSONOutput.emit
-    /// called with a requestId sourced from XPCResponse (the path that
-    /// commands traverse after execute() returns an ok=false response).
-    /// Uses the serialized captureStderr helper (defer-safe + process-wide lock).
-    ///
-    /// Would FAIL if throw-on-ok=false is restored in handleReply because
-    /// execute() would throw before returning a response, making
-    /// response.requestId inaccessible to command code.
-    @Test("remote error output propagates XPCResponse.requestId nested inside error object (MY-1455)")
-    func remoteErrorOutputPropagatesResponseRequestId() throws {
-        // Simulate what execute() returns after MY-1455 (ok=false, not thrown).
-        let response = XPCResponse(
-            requestId: "req-xpc-response-456",
-            appVersion: "1.0.0",
-            ok: false,
-            data: nil,
-            error: XPCError(code: "briefing.not_found", message: "No briefing found for date '2026-08-20'")
-        )
-
-        // Exercise the same path as commands: emit error with response.requestId.
-        let stderr = try captureStderr {
-            let formatter = JSONOutput()
-            try formatter.emit(error: response.error!, requestId: response.requestId)
-        }
-
-        let obj = try #require(
-            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
-        )
-        #expect(obj["ok"] as? Bool == false)
-        // requestId must NOT be at root
-        #expect(obj["requestId"] == nil)
-        let errBody = try #require(obj["error"] as? [String: Any])
-        #expect(errBody["code"] as? String == "briefing.not_found")
-        // requestId MUST be nested inside error, equal to XPCResponse.requestId
-        #expect(errBody["requestId"] as? String == "req-xpc-response-456")
+        let decoded = try XPCClient.decodeReply(encoded)
+        #expect(decoded.ok == false)
+        #expect(decoded.error == nil)
     }
 }

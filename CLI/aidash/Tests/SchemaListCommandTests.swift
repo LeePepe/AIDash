@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import AIDashCore
+import ArgumentParser
 
 /// Tests for `aidash schema list` (T055 / MY-972).
 ///
@@ -56,20 +57,12 @@ struct SchemaListCommandTests {
         let result = Self.sampleResult()
         let envelope = SchemaListRendering.makeEnvelopeData(result)
 
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardOutput.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardOutput.fileDescriptor)
-
-        try JSONOutput().emit(success: envelope, requestId: "req-1")
-
-        // Restore stdout before reading the pipe to avoid deadlock.
-        dup2(saved, FileHandle.standardOutput.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = try captureStdout {
+            try JSONOutput().emit(success: envelope, requestId: "req-1")
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stdout.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == true)
         #expect(obj["requestId"] as? String == "req-1")
@@ -84,19 +77,12 @@ struct SchemaListCommandTests {
             markdown: SchemaListRendering.renderMarkdown(Self.sampleResult())
         )
 
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardOutput.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardOutput.fileDescriptor)
-
-        try JSONOutput().emit(success: envelope, requestId: "req-md")
-
-        dup2(saved, FileHandle.standardOutput.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = try captureStdout {
+            try JSONOutput().emit(success: envelope, requestId: "req-md")
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stdout.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == true)
         #expect(obj["requestId"] as? String == "req-md")
@@ -172,12 +158,11 @@ struct SchemaListCommandTests {
         }
     }
 
-    // MARK: - MY-1455: Remote error with requestId (ok=false + error payload → exit 3)
+    // MARK: - MY-1455: Remote error via production handleFailedResponse (exit 3)
 
-    /// Exercises the SchemaListCommand remote-error path: when the server
-    /// returns ok=false with an error payload, the CLI emits the envelope on
-    /// stderr with response.requestId and would exit 3.
-    @Test("schema list remote error emits requestId from response and exits 3 (MY-1455)")
+    /// Production-seam test: exercises SchemaListCommand.handleFailedResponse
+    /// with a valid remote error. Verifies stderr has requestId, ExitCode(3) thrown.
+    @Test("schema list handleFailedResponse emits requestId from response and exits 3 (MY-1455)")
     func remoteErrorEmitsRequestId() throws {
         let response = XPCResponse(
             requestId: "req-schema-remote",
@@ -186,12 +171,18 @@ struct SchemaListCommandTests {
             data: nil,
             error: XPCError(code: "storage.quota_exceeded", message: "quota exceeded")
         )
+        let globals = GlobalOptions.test(json: true, quiet: false)
 
-        // Exercise the same path as SchemaListCommand.run()'s ok=false branch.
+        var capturedExit: Int32?
         let stderr = try captureStderr {
-            let formatter = OutputMode.json.formatter()
-            try formatter.emit(error: response.error!, requestId: response.requestId)
+            do {
+                try SchemaListCommand.handleFailedResponse(response, globals: globals)
+            } catch let exitCode as ExitCode {
+                capturedExit = exitCode.rawValue
+            }
         }
+
+        #expect(capturedExit == 3)
 
         let obj = try #require(
             try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
@@ -203,19 +194,30 @@ struct SchemaListCommandTests {
         #expect(errBody["requestId"] as? String == "req-schema-remote")
     }
 
-    // MARK: - MY-1455: Malformed ok=false (nil error) → local decode failure (exit 2)
+    // MARK: - MY-1455: Malformed ok=false (nil error) → xpc.decode_failure (exit 2)
 
-    /// When the server returns ok=false without an error payload, the CLI
-    /// treats it as a malformed protocol response (xpc.decode_failure) and
-    /// throws to the central handler which maps it to exit 2.
-    @Test("schema list ok=false with no error payload throws xpc.decode_failure (exit 2)")
+    /// Production-seam test: handleFailedResponse with response.error == nil
+    /// throws XPCError with code "xpc.decode_failure", which ExitCodeMapper maps to 2.
+    @Test("schema list handleFailedResponse with nil error throws xpc.decode_failure (exit 2)")
     func malformedOkFalseThrowsDecodeFailure() {
-        // If we had the response and response.ok == false && response.error == nil,
-        // the command throws xpc.decode_failure.
-        let syntheticError = XPCError(
-            code: "xpc.decode_failure",
-            message: "Server returned ok=false but no error payload"
+        let response = XPCResponse(
+            requestId: "req-malformed",
+            appVersion: "1.0.0",
+            ok: false,
+            data: nil,
+            error: nil
         )
-        #expect(ExitCodeMapper.code(for: syntheticError) == 2)
+        let globals = GlobalOptions.test(json: true, quiet: false)
+
+        do {
+            try SchemaListCommand.handleFailedResponse(response, globals: globals)
+            Issue.record("Expected XPCError to be thrown")
+        } catch let error as XPCError {
+            #expect(error.code == "xpc.decode_failure")
+            #expect(error.message.contains("ok=false"))
+            #expect(ExitCodeMapper.code(for: error) == 2)
+        } catch {
+            Issue.record("Expected XPCError, got: \(error)")
+        }
     }
 }
