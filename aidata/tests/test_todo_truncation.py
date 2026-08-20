@@ -8,7 +8,7 @@ and use an explicit … to mark omission.
 
 import pytest
 
-from L5_apps.digest.polish import MAX_TODO, truncate
+from L5_apps.digest.polish import MAX_TODO, truncate, _is_cjk
 from L5_apps.digest.aidash import _todo_items
 
 
@@ -21,7 +21,9 @@ def _assert_cut_at_token_boundary(result: str, source: str) -> None:
 
     After stripping the trailing " …" marker the body text must satisfy:
     the very next character in the *original* source (at the cut position)
-    is a space, punctuation, or doesn't exist (end of source).
+    is a space, punctuation, CJK ideograph, or doesn't exist (end of source).
+    CJK characters are individually addressable so cutting right before one
+    is always valid.
     """
     assert "…" in result, "expected truncation marker"
     body = result.rstrip("…").rstrip()
@@ -29,7 +31,7 @@ def _assert_cut_at_token_boundary(result: str, source: str) -> None:
     pos = len(body)
     if pos < len(source):
         next_char = source[pos]
-        assert next_char in _BREAK_CHARS, (
+        assert next_char in _BREAK_CHARS or _is_cjk(next_char), (
             f"Cut inside a word: '…{body[-15:]}'|'{next_char}{source[pos+1:pos+10]}…'"
         )
 
@@ -158,6 +160,26 @@ class TestTruncateBoundaryAware:
     @pytest.mark.unit
     def test_n_one_returns_ellipsis(self):
         assert truncate("hello world", 1) == "…"
+
+    @pytest.mark.unit
+    def test_continuous_cjk_retains_sixty_percent(self):
+        """Continuous CJK text must retain >= 60% of budget, not collapse."""
+        text = "排查 " + "一" * 200
+        result = truncate(text, MAX_TODO)
+        assert len(result) <= MAX_TODO
+        assert "…" in result
+        body = result.rstrip("…").rstrip()
+        assert len(body) >= MAX_TODO * 0.6, (
+            f"CJK retention too low: {len(body)}/{MAX_TODO} "
+            f"({len(body)/MAX_TODO:.0%})"
+        )
+
+    @pytest.mark.unit
+    def test_cjk_cut_at_valid_boundary(self):
+        """CJK characters are individually addressable cut points."""
+        text = "排查 " + "一" * 200
+        result = truncate(text, MAX_TODO)
+        _assert_cut_at_token_boundary(result, text)
 
 
 class TestTodoItemsFallbackTruncation:

@@ -78,41 +78,51 @@ def parse_slots(raw: str) -> PolishSlots:
                        todos=tuple(str(t) for t in todos))
 
 
+def _is_cjk(ch: str) -> bool:
+    """True if *ch* is a CJK ideograph (safe to cut after)."""
+    cp = ord(ch)
+    return (0x4E00 <= cp <= 0x9FFF      # CJK Unified Ideographs
+            or 0x3400 <= cp <= 0x4DBF   # Extension A
+            or 0xF900 <= cp <= 0xFAFF   # Compatibility Ideographs
+            or 0x20000 <= cp <= 0x2A6DF)  # Extension B
+
+
 def truncate(text: str, n: int) -> str:
     """Hard char cap with word-boundary awareness; append … when cut.
 
-    Never cuts inside a word or identifier (e.g. "LaunchAgent" won't become
-    "LaunchAgen…" or "Launc…"). Finds the last word boundary (space or
-    punctuation followed by a non-space) at or before the budget, so the
-    output always ends on a complete token. Falls back to a hard cut only
-    when the first token alone exceeds the budget (a single very long word
-    with no internal spaces or punctuation at all).
+    Never cuts inside an ASCII word or identifier (e.g. "LaunchAgent" won't
+    become "LaunchAgen…" or "Launc…"). Finds the last word boundary (space,
+    punctuation, or CJK character) at or before the budget, so the output
+    always ends on a complete token. CJK characters are individually
+    addressable — any position between two CJK characters is a valid cut
+    point. Falls back to a hard cut only when the entire budget is one long
+    ASCII token with no internal spaces, punctuation, or CJK characters.
     """
     if n <= 0:
         return ""
     if len(text) <= n:
         return text
-    # Budget for the text portion (reserve 1 char for the … suffix).
-    limit = n - 1
-    if limit <= 0:
+    # The suffix is " …" (space + ellipsis = 2 chars). The max text body
+    # length that fits the budget is therefore n - 2.
+    max_body = n - 2
+    if max_body <= 0:
         return "…"
-    # Find the last word boundary at or before `limit`.
-    # A boundary is a position where we can cut without splitting a word:
-    # right after a space, or right after common punctuation (:/;,)）】」) when
-    # followed by more text.
+    # Scan up to position max_body (exclusive via range) to find the last
+    # word boundary.  candidate = k means text[:k] is the body.
     candidate = -1
-    for i in range(min(limit, len(text))):
+    scan_end = min(max_body + 1, len(text))
+    for i in range(scan_end):
         if text[i] in " \t\n":
-            # Cut right before the space (keep text[:i] which ends on a word).
             candidate = i
         elif i > 0 and text[i - 1] in ":/;,，；：、)）】」—":
-            # After punctuation is also a valid break point.
+            candidate = i
+        elif i > 0 and _is_cjk(text[i - 1]):
             candidate = i
     if candidate > 0:
         return text[:candidate].rstrip() + " …"
-    # Fallback: hard cut (the entire budget is one long token with no
-    # internal spaces or punctuation).
-    return text[:limit] + "…"
+    # Fallback: hard cut (the entire budget is one long ASCII token with no
+    # internal spaces, punctuation, or CJK characters).
+    return text[:max_body] + " …"
 
 
 def apply_slots(template_md: str, slots: PolishSlots) -> str:
