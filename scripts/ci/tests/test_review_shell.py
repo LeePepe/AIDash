@@ -453,14 +453,16 @@ def test_oversized_printf_body_round_trips() -> None:
 # --------------------------------------------------------------------------
 
 def test_claude_review_passes_max_turns_and_disables_tools() -> None:
-    """The claude CLI invocation includes --max-turns 1 AND --allowedTools "".
+    """The claude CLI invocation includes --max-turns 1 AND --tools "".
 
     Without --max-turns 1, `claude -p` runs in full agentic mode — reading
     files, running commands, taking multiple turns — easily exhausting the
     900-second watchdog on the self-hosted runner (MY-1452).
 
-    Without --allowedTools "", a single first-turn tool call can still run
-    long enough to exhaust the watchdog. Both flags are required.
+    Without --tools "", built-in tools (Read, Edit, Bash, etc.) remain active
+    and a single first-turn tool call can exhaust the watchdog. Both flags are
+    required. `--tools ""` is the documented way to disable all tools per
+    `claude --help`.
 
     This is a behavioural check restricted to executable lines (comments
     stripped): removing the real CLI flags while leaving them in comments must
@@ -473,9 +475,9 @@ def test_claude_review_passes_max_turns_and_disables_tools() -> None:
         "claude-review.sh must pass --max-turns 1 to `claude -p` to prevent "
         "unbounded agentic exploration (MY-1452)"
     )
-    assert '--allowedTools ""' in executable_text, (
-        "claude-review.sh must pass --allowedTools \"\" to `claude -p` to "
-        "deterministically disable tool use (MY-1452)"
+    assert '--tools ""' in executable_text, (
+        'claude-review.sh must pass --tools "" to `claude -p` to '
+        "deterministically disable all built-in tools (MY-1452)"
     )
 
 
@@ -485,14 +487,21 @@ def test_claude_review_emits_phase_timing() -> None:
     MY-1452 requires actionable phase-specific evidence: when a future timeout
     occurs, the log must say WHERE it stalled (diff / scope-evidence /
     claude-cli), not just that 900 seconds elapsed.
+
+    This check uses _code_lines (comments stripped) so that commenting out a
+    _phase_start/_phase_end call while keeping a comment mentioning it will
+    correctly fail the test.
     """
-    source = CLAUDE.read_text(encoding="utf-8")
+    executable_lines = _code_lines(CLAUDE)
+    executable_text = "\n".join(code for _, code in executable_lines)
     for phase in ("diff", "scope-evidence", "claude-cli"):
-        assert f'_phase_start "{phase}"' in source, (
-            f"claude-review.sh is missing _phase_start for phase {phase!r}"
+        assert f'_phase_start "{phase}"' in executable_text, (
+            f"claude-review.sh is missing _phase_start for phase {phase!r} "
+            f"in executable code (MY-1452)"
         )
-        assert f'_phase_end "{phase}"' in source, (
-            f"claude-review.sh is missing _phase_end for phase {phase!r}"
+        assert f'_phase_end "{phase}"' in executable_text, (
+            f"claude-review.sh is missing _phase_end for phase {phase!r} "
+            f"in executable code (MY-1452)"
         )
 
 
