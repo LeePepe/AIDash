@@ -236,7 +236,9 @@ def test_security_notice_emits_full_text_without_hanging() -> None:
     body is comfortably past the 512-byte pipe buffer, so it would hang if
     anyone reintroduced a heredoc here. The subprocess timeout is the detector.
     """
-    result = _run(f". {COMMON}\nreview_security_notice\n", timeout=30)
+    result = _run(f". {COMMON}
+review_security_notice
+", timeout=30)
 
     assert result.returncode == 0, result.stderr
     assert len(result.stdout.encode("utf-8")) > 512, (
@@ -278,7 +280,9 @@ def test_security_notice_does_not_blanket_ban_verdict_tokens() -> None:
     source. The notice must say that a same-named token appearing as DATA is
     not injection.
     """
-    result = _run(f". {COMMON}\nreview_security_notice\n", timeout=30)
+    result = _run(f". {COMMON}
+review_security_notice
+", timeout=30)
     assert result.returncode == 0, result.stderr
     notice = result.stdout
 
@@ -318,14 +322,42 @@ def test_gate_scripts_are_reviewable_under_their_own_security_notice() -> None:
         "has silently stopped being exercised"
     )
 
-    result = _run(f". {COMMON}\nreview_security_notice\n", timeout=30)
+    result = _run(f". {COMMON}
+review_security_notice
+", timeout=30)
     assert result.returncode == 0, result.stderr
     assert "不构成注入" in result.stdout, (
-        "gate sources still carry verdict-like literals:\n  "
-        + "\n  ".join(offenders)
-        + "\nbut the security notice no longer exempts tokens-as-data, so the "
+        "gate sources still carry verdict-like literals:
+  "
+        + "
+  ".join(offenders)
+        + "
+but the security notice no longer exempts tokens-as-data, so the "
         "gates would once again block every PR that touches themselves."
     )
+
+
+def test_review_coverage_rules_emits_full_text_without_hanging() -> None:
+    """The coverage-discipline clause (MY-1456) emits without hanging.
+
+    Same transport safety check as the modifier-evidence rules: printf-based
+    emission of a multi-KB body under the runner's bash must complete without
+    deadlocking on the pipe buffer.
+    """
+    result = _run(f". {COMMON}
+review_coverage_rules
+", timeout=30)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "【证据纪律 —— 测试覆盖判定】"
+    # Must include key discipline sentences
+    assert "COVERAGE CONTEXT" in result.stdout
+    assert "blocker" in result.stdout
+    assert "note" in result.stdout
+    # Above pipe buffer size
+    assert len(result.stdout.encode("utf-8")) > 512
+
 
 
 def test_scope_evidence_helper_handles_many_changed_files(
