@@ -181,8 +181,17 @@ final class AppBootstrap {
     private func deliver(_ state: CloudKitContainer.InitState) {
         self.containerState = state
         #if os(macOS)
-        if case .ready(let container) = state {
+        switch state {
+        case .ready(let container):
             self.handlers?.container = container
+        case .failed(let reason) where !reason.isEmpty:
+            // Terminal failure: propagate to XPCHandlers so store-dependent
+            // commands return non-retryable `internal.store_failed` instead
+            // of the retryable `internal.store_not_ready`.
+            self.handlers?.storeFailureReason = reason
+        case .failed:
+            // Empty reason = loading sentinel, not a real failure.
+            break
         }
         #endif
     }

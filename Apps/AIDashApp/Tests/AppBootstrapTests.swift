@@ -200,7 +200,47 @@ private struct ImmediateLoader: ContainerLoading {
 }
 #endif
 
-// MARK: - Nonisolated legacy-store adoption (off-MainActor path)
+// MARK: - Terminal failure propagation to XPCHandlers
+
+#if os(macOS)
+/// Verifies that when the loader fails terminally, AppBootstrap propagates
+/// the failure reason to XPCHandlers so store-dependent commands return
+/// non-retryable `internal.store_failed` instead of retryable
+/// `internal.store_not_ready`.
+@MainActor
+@Test func terminalFailurePropagatesStoreFailureReasonToHandlers() async throws {
+    let handlers = XPCHandlers(container: nil)
+    let bootstrap = AppBootstrap(handlers: handlers)
+    let failureReason = "Local store unavailable: The file couldn't be opened."
+
+    let task = bootstrap.startDetached(
+        loader: ImmediateLoader(result: .failed(reason: failureReason))
+    )
+    await task.value
+
+    // Container must remain nil — no ephemeral in-memory fallback.
+    #expect(handlers.container == nil)
+    // Failure reason propagated so XPC returns non-retryable error.
+    #expect(handlers.storeFailureReason == failureReason)
+}
+
+/// Verifies that the loading sentinel (empty reason) does NOT set
+/// storeFailureReason — it's a transient state, not a terminal failure.
+@MainActor
+@Test func loadingSentinelDoesNotSetStoreFailureReason() async throws {
+    let handlers = XPCHandlers(container: nil)
+    let bootstrap = AppBootstrap(handlers: handlers)
+
+    // Empty-reason .failed is the loading sentinel used at init.
+    let task = bootstrap.startDetached(
+        loader: ImmediateLoader(result: .failed(reason: ""))
+    )
+    await task.value
+
+    #expect(handlers.container == nil)
+    #expect(handlers.storeFailureReason == nil)
+}
+#endif
 
 #if os(macOS)
 /// Verifies that the nonisolated `prepareStoreURL(sandboxRoot:)` — the path

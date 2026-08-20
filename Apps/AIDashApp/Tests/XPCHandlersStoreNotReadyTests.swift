@@ -93,6 +93,92 @@ func schemaListSucceedsWithNilContainer() async throws {
     #expect(response.error?.cause == "retryable")
 }
 
+// MARK: - Terminal store failure tests
+
+/// Verifies that when the store has terminally failed (storeFailureReason set),
+/// store-dependent commands return a non-retryable `internal.store_failed` error
+/// instead of the retryable `internal.store_not_ready`, preventing infinite
+/// client retries on a permanently broken store.
+
+@MainActor
+@Test(.timeLimit(.seconds(1)))
+func pingSucceedsAfterTerminalStoreFailure() async throws {
+    let handlers = XPCHandlers(container: nil, storeFailureReason: "SQLite corruption")
+    let response = try await sendRaw(
+        handlers,
+        command: "ping",
+        paramsJSON: Data("{}".utf8)
+    )
+    #expect(response.ok == true)
+    #expect(response.error == nil)
+}
+
+@MainActor
+@Test(.timeLimit(.seconds(1)))
+func schemaListSucceedsAfterTerminalStoreFailure() async throws {
+    let handlers = XPCHandlers(container: nil, storeFailureReason: "SQLite corruption")
+    let response = try await sendRaw(
+        handlers,
+        command: "schema.list",
+        paramsJSON: Data("{}".utf8)
+    )
+    #expect(response.ok == true)
+    #expect(response.error == nil)
+    #expect(response.data != nil)
+}
+
+@MainActor
+@Test func briefingPutReturnsStoreFailedAfterTerminalFailure() async throws {
+    let handlers = XPCHandlers(container: nil, storeFailureReason: "Local store unavailable")
+    let response = try await sendRaw(
+        handlers,
+        command: "briefing.put",
+        paramsJSON: Data(#"{"date":"2025-01-01","generatedBy":"test","published":false}"#.utf8)
+    )
+    #expect(response.ok == false)
+    #expect(response.error?.code == "internal.store_failed")
+    #expect(response.error?.cause != "retryable")
+}
+
+@MainActor
+@Test func containerPutReturnsStoreFailedAfterTerminalFailure() async throws {
+    let handlers = XPCHandlers(container: nil, storeFailureReason: "Local store unavailable")
+    let response = try await sendRaw(
+        handlers,
+        command: "container.put",
+        paramsJSON: Data(#"{"id":"c1","briefingDate":"2025-01-01","title":"T","order":0,"layout":"single","style":"default"}"#.utf8)
+    )
+    #expect(response.ok == false)
+    #expect(response.error?.code == "internal.store_failed")
+    #expect(response.error?.cause != "retryable")
+}
+
+@MainActor
+@Test func cardPutReturnsStoreFailedAfterTerminalFailure() async throws {
+    let handlers = XPCHandlers(container: nil, storeFailureReason: "Local store unavailable")
+    let response = try await sendRaw(
+        handlers,
+        command: "card.put",
+        paramsJSON: Data(#"{"containerId":"c1","id":"k1","type":"metric","size":"small","style":"default","payload":{}}"#.utf8)
+    )
+    #expect(response.ok == false)
+    #expect(response.error?.code == "internal.store_failed")
+    #expect(response.error?.cause != "retryable")
+}
+
+@MainActor
+@Test func eventsPullReturnsStoreFailedAfterTerminalFailure() async throws {
+    let handlers = XPCHandlers(container: nil, storeFailureReason: "Local store unavailable")
+    let response = try await sendRaw(
+        handlers,
+        command: "events.pull",
+        paramsJSON: Data(#"{"since":"2025-01-01T00:00:00Z"}"#.utf8)
+    )
+    #expect(response.ok == false)
+    #expect(response.error?.code == "internal.store_failed")
+    #expect(response.error?.cause != "retryable")
+}
+
 // MARK: - Helpers
 
 /// Minimal send helper that takes raw JSON params data, avoiding coupling to

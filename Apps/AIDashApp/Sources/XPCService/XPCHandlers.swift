@@ -8,15 +8,16 @@ import AIDashCore
 @MainActor
 final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
-    /// The persistent store container. Starts `nil` during bootstrap (store
-    /// loads asynchronously so it does not block MainActor / the XPC listener).
-    /// Store-independent commands (`ping`, `schema.list`) respond immediately
-    /// regardless; store-dependent mutations return a typed retryable
-    /// `internal.store_not_ready` error until this is set.
+    /// Persistent store container. Nil during bootstrap; store-independent
+    /// commands respond immediately, store-dependent ones return typed error
+    /// (retryable while loading, non-retryable after terminal failure).
     internal(set) var container: ModelContainer?
+    /// Non-nil after terminal loader failure → `internal.store_failed`.
+    internal(set) var storeFailureReason: String?
 
-    init(container: ModelContainer?) {
+    init(container: ModelContainer?, storeFailureReason: String? = nil) {
         self.container = container
+        self.storeFailureReason = storeFailureReason
         super.init()
     }
 
@@ -25,9 +26,8 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     nonisolated func execute(requestData: Data, reply: @escaping (Data) -> Void) {
         nonisolated(unsafe) let reply = reply
 
-        // Fast path: store-independent commands respond WITHOUT hopping to
-        // MainActor. This guarantees `schema.list` and `ping` reply even while
-        // MainActor is occupied by the async store load or any other work.
+        // Fast path: store-independent commands respond nonisolated, even
+        // while MainActor is occupied by store load or other work.
         if let request = try? makeXPCDecoder().decode(XPCRequest.self, from: requestData) {
             switch request.command {
             case "ping":
@@ -58,7 +58,6 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     }
 
     // MARK: - Request Routing
-
     private func handleRequest(_ data: Data) async -> XPCResponse {
         let requestId: String
         do {
@@ -67,16 +66,26 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
             // Gate: store-dependent commands require a ready container.
             guard let container else {
+                let (code, message, cause): (String, String, String)
+                if let reason = storeFailureReason {
+                    (code, message, cause) = (
+                        "internal.store_failed",
+                        "Persistent store failed to initialize: \(reason)",
+                        reason
+                    )
+                } else {
+                    (code, message, cause) = (
+                        "internal.store_not_ready",
+                        "Persistent store is still loading. Retry shortly.",
+                        "retryable"
+                    )
+                }
                 return XPCResponse(
                     requestId: requestId,
                     appVersion: Self.appVersion,
                     ok: false,
                     data: nil,
-                    error: XPCError(
-                        code: "internal.store_not_ready",
-                        message: "Persistent store is still loading. Retry shortly.",
-                        cause: "retryable"
-                    )
+                    error: XPCError(code: code, message: message, cause: cause)
                 )
             }
 
@@ -132,8 +141,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     private func dispatch(_ request: XPCRequest, container: ModelContainer) async throws -> Data? {
         switch request.command {
         case "ping", "schema.list":
-            // Handled in the nonisolated fast path of execute(); reaching here
-            // means a future code path routed them through MainActor — still safe.
+            // Fast-path fallback; normally handled nonisolated in execute().
             if request.command == "ping" { return nil }
             return try handleSchemaList(request)
         case "briefing.put":
@@ -163,7 +171,6 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     }
 
     // MARK: - Briefing Handlers
-
     private func handleBriefingPut(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(BriefingPutParams.self, from: request)
         try SchemaValidator.validateBriefingPut(date: params.date, generatedBy: params.generatedBy)
@@ -280,7 +287,6 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     }
 
     // MARK: - Container Handlers
-
     private func handleContainerPut(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(ContainerPutParams.self, from: request)
         try SchemaValidator.validateContainerPut(
@@ -376,7 +382,6 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     }
 
     // MARK: - Card Handlers
-
     private func handleCardPut(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(CardPutParams.self, from: request)
         try SchemaValidator.validateCardPut(
@@ -470,7 +475,6 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     }
 
     // MARK: - Events Handler
-
     private func handleEventsPull(_ request: XPCRequest, container: ModelContainer) async throws -> Data {
         let params = try decodeParams(EventsPullParams.self, from: request)
         try SchemaValidator.validateEventsPull(cardId: params.cardId)
@@ -562,7 +566,6 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
     }
 
     // MARK: - Helpers
-
     private func decodeParams<T: Decodable>(_ type: T.Type, from request: XPCRequest) throws -> T {
         do {
             return try makeXPCDecoder().decode(type, from: request.params)
@@ -582,9 +585,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
 
 // MARK: - JSON Coder Configuration
 
-/// Factory functions that return a fresh encoder/decoder per call.
-/// JSONEncoder and JSONDecoder are mutable reference types and must not be
-/// shared across concurrent XPC callbacks.
+/// Fresh encoder/decoder per call — mutable reference types must not be shared.
 func makeXPCEncoder() -> JSONEncoder {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
