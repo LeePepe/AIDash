@@ -71,7 +71,9 @@ if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || ! git cat-file -e "$HEA
     exit 1
 fi
 DIFF="$(git diff "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff "$BASE_SHA..$HEAD_SHA")"
-CHANGED="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff --name-only "$BASE_SHA..$HEAD_SHA")"
+# NUL-delimited path transport: -z ensures paths with newlines, quotes,
+# backslashes, and non-ASCII are transmitted losslessly from git to shell.
+CHANGED="$(git diff -z --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff -z --name-only "$BASE_SHA..$HEAD_SHA")"
 
 # 此处 DIFF 为空 = BASE/HEAD 对象都在但两者间确无差异(罕见但合法)。对象已确认
 # 存在,空 diff 是真·无改动,可安全 pass。

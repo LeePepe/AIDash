@@ -161,14 +161,143 @@ def _find_containing_type(source: str, func_offset: int, path: str = "") -> str:
                 best_name = ""
         return best_name
 
-    # Non-Python (Swift etc.): nearest preceding type declaration
-    best_name = ""
+    # Non-Python (Swift etc.): lexical enclosure via brace tracking.
+    # A function is "inside" a type only if the type's opening brace has been
+    # reached and its scope has not yet closed at the function's position.
+    # This correctly handles top-level functions after a closed type, and
+    # nested types (innermost enclosing wins).
+    #
+    # Algorithm: scan the source up to func_offset character by character,
+    # maintaining a stack of (type_name, depth_when_opened). When a type
+    # declaration's opening `{` is found, push it. When depth returns to that
+    # level, pop it. Whatever remains on the stack at func_offset is the
+    # enclosing type chain; return the innermost (top of stack).
+    type_stack: list[tuple[str, int]] = []  # (name, brace_depth_at_open)
+    # Find all type declarations before func_offset
+    type_positions: list[tuple[int, str]] = []
     for m in _CONTAINING_TYPE_RE.finditer(source):
-        if m.start() < func_offset:
-            best_name = m.group(1)
-        else:
+        if m.start() >= func_offset:
             break
-    return best_name
+        type_positions.append((m.end(), m.group(1)))
+
+    if not type_positions:
+        return ""
+
+    # Scan source up to func_offset tracking brace depth and type scopes
+    depth = 0
+    type_idx = 0  # next type_positions entry to process
+    in_block_comment = 0
+    in_multiline_string = False
+    raw_string_hashes = 0
+    i = 0
+    src_limit = func_offset
+    while i < src_limit:
+        ch = source[i]
+
+        # Block comment state
+        if in_block_comment > 0:
+            if ch == '/' and i + 1 < src_limit and source[i + 1] == '*':
+                in_block_comment += 1
+                i += 2
+                continue
+            if ch == '*' and i + 1 < src_limit and source[i + 1] == '/':
+                in_block_comment -= 1
+                i += 2
+                continue
+            i += 1
+            continue
+
+        # Multiline string state
+        if in_multiline_string:
+            if ch == '\\':
+                i += 2
+                continue
+            if (ch == '"' and i + 2 < src_limit
+                    and source[i + 1] == '"' and source[i + 2] == '"'):
+                in_multiline_string = False
+                i += 3
+                continue
+            i += 1
+            continue
+
+        # Raw string state
+        if raw_string_hashes > 0:
+            if ch == '"':
+                closing = True
+                for k in range(1, raw_string_hashes + 1):
+                    if i + k >= src_limit or source[i + k] != '#':
+                        closing = False
+                        break
+                if closing:
+                    i += 1 + raw_string_hashes
+                    raw_string_hashes = 0
+                    continue
+            i += 1
+            continue
+
+        # Single-line comment
+        if ch == '/' and i + 1 < src_limit and source[i + 1] == '/':
+            # Skip to end of line
+            nl = source.find('\n', i)
+            i = nl + 1 if nl != -1 else src_limit
+            continue
+
+        # Block comment start
+        if ch == '/' and i + 1 < src_limit and source[i + 1] == '*':
+            in_block_comment = 1
+            i += 2
+            continue
+
+        # Raw string
+        if ch == '#':
+            hash_count = 0
+            while i + hash_count < src_limit and source[i + hash_count] == '#':
+                hash_count += 1
+            if i + hash_count < src_limit and source[i + hash_count] == '"':
+                raw_string_hashes = hash_count
+                i += hash_count + 1
+                continue
+            i += 1
+            continue
+
+        # Multiline string
+        if (ch == '"' and i + 2 < src_limit
+                and source[i + 1] == '"' and source[i + 2] == '"'):
+            in_multiline_string = True
+            i += 3
+            continue
+
+        # Single-line string
+        if ch == '"':
+            i += 1
+            while i < src_limit and source[i] != '"':
+                if source[i] == '\\':
+                    i += 1
+                i += 1
+            i += 1  # skip closing quote
+            continue
+
+        # Brace tracking
+        if ch == '{':
+            depth += 1
+            # Check if any type declaration's end position is before this {
+            # and hasn't been assigned yet — this { opens that type's scope.
+            while (type_idx < len(type_positions)
+                   and type_positions[type_idx][0] <= i):
+                # This type's opening brace is at current depth
+                type_stack.append((type_positions[type_idx][1], depth))
+                type_idx += 1
+        elif ch == '}':
+            # Pop any types whose scope closes at this depth
+            while type_stack and type_stack[-1][1] == depth:
+                type_stack.pop()
+            depth -= 1
+
+        i += 1
+
+    # Any remaining unprocessed types that appear before func_offset but
+    # whose opening brace we haven't seen are not enclosing.
+    return type_stack[-1][0] if type_stack else ""
 
 # Matches production symbol names: types, functions, protocols.
 _SYMBOL_RE = re.compile(
@@ -179,6 +308,13 @@ _SYMBOL_RE = re.compile(
 COVERAGE_MAX_FILE_BYTES = 400_000
 COVERAGE_MAX_EXCERPT_BYTES = 30_000
 COVERAGE_MAX_TOTAL_BYTES = 80_000
+
+# Global work budget: maximum number of file-level operations (reads, size
+# checks) across ALL discovery and candidate-read routes combined. This
+# prevents unbounded work even when many files match naming conventions.
+# Every attempted file counts (changed, sibling, filename-stem, content-
+# discovery, and later candidate reads in find_related_tests_in_head).
+COVERAGE_GLOBAL_WORK_BUDGET = 50
 
 
 class RemovedTest(NamedTuple):
@@ -440,29 +576,117 @@ def _find_func_end(lines: list[str], start_idx: int, path: str = "") -> int:
     Returns 1-based line number. Language detection is path-based:
     - `.py` files: indentation-based (Python dict/set literals contain braces
       that would falsely terminate brace counting)
-    - All other files: brace counting (Swift/C-family)
+    - All other files: lexical-aware brace counting (Swift/C-family)
 
     The `path` parameter enables correct language dispatch. When omitted,
     falls back to brace-first with indentation fallback (legacy behavior).
+
+    The Swift lexical scanner handles:
+    - Single-line comments (`// ...`)
+    - Block comments (`/* ... */`), including nested (`/* /* */ */`)
+    - Single-line string literals (`"..."` with backslash escapes)
+    - Multiline string literals (`\"\"\"...\"\"\"`)
+    - Raw strings (`#"..."#`, `##"..."##`, etc.)
+
+    When braces do not balance within the 500-line scan window, this is an
+    explicit truncation — never a silent fallback to an unrelated body size.
+    The returned line number is capped at start_idx + 500 (the scan limit).
     """
     # Language-aware dispatch: Python files MUST use indentation parsing
     # because dict/set literals ({...}) would terminate brace counting early.
     if path.endswith(".py"):
         return _find_func_end_python(lines, start_idx)
 
-    # Swift/C-family: lexical-aware brace counting that skips braces
-    # inside string literals, comments, and @Test(...) label parameters.
+    # Swift/C-family: full lexical-aware brace counting.
     depth = 0
     started = False
-    for i in range(start_idx, min(start_idx + 500, len(lines))):
+    in_block_comment = 0  # nesting depth for block comments
+    in_multiline_string = False
+    # Raw string state: 0 = not in raw string; >0 = number of # in delimiter
+    raw_string_hashes = 0
+
+    scan_end = min(start_idx + 500, len(lines))
+    for i in range(start_idx, scan_end):
         line = lines[i]
         j = 0
         while j < len(line):
             ch = line[j]
-            # Skip single-line comments
+
+            # --- Inside block comment: only look for nested /* or closing */
+            if in_block_comment > 0:
+                if ch == '/' and j + 1 < len(line) and line[j + 1] == '*':
+                    in_block_comment += 1
+                    j += 2
+                    continue
+                if ch == '*' and j + 1 < len(line) and line[j + 1] == '/':
+                    in_block_comment -= 1
+                    j += 2
+                    continue
+                j += 1
+                continue
+
+            # --- Inside multiline string (""" ... """)
+            if in_multiline_string:
+                if ch == '\\':
+                    j += 2  # skip escaped char
+                    continue
+                if (ch == '"' and j + 2 < len(line)
+                        and line[j + 1] == '"' and line[j + 2] == '"'):
+                    in_multiline_string = False
+                    j += 3
+                    continue
+                j += 1
+                continue
+
+            # --- Inside raw string (#"..."#, ##"..."##, etc.)
+            if raw_string_hashes > 0:
+                if ch == '"':
+                    # Check if followed by the right number of #
+                    closing = True
+                    for k in range(1, raw_string_hashes + 1):
+                        if j + k >= len(line) or line[j + k] != '#':
+                            closing = False
+                            break
+                    if closing:
+                        j += 1 + raw_string_hashes
+                        raw_string_hashes = 0
+                        continue
+                j += 1
+                continue
+
+            # --- Normal code parsing ---
+
+            # Single-line comment
             if ch == '/' and j + 1 < len(line) and line[j + 1] == '/':
                 break  # rest of line is comment
-            # Skip string literals (double-quoted)
+
+            # Block comment start
+            if ch == '/' and j + 1 < len(line) and line[j + 1] == '*':
+                in_block_comment = 1
+                j += 2
+                continue
+
+            # Raw string literal: #"..."#, ##"..."##, etc.
+            if ch == '#':
+                hash_count = 0
+                while j + hash_count < len(line) and line[j + hash_count] == '#':
+                    hash_count += 1
+                if j + hash_count < len(line) and line[j + hash_count] == '"':
+                    raw_string_hashes = hash_count
+                    j += hash_count + 1  # skip hashes + opening quote
+                    continue
+                # Not a raw string — just a # character
+                j += 1
+                continue
+
+            # Multiline string literal (""")
+            if (ch == '"' and j + 2 < len(line)
+                    and line[j + 1] == '"' and line[j + 2] == '"'):
+                in_multiline_string = True
+                j += 3
+                continue
+
+            # Single-line string literal
             if ch == '"':
                 j += 1
                 while j < len(line) and line[j] != '"':
@@ -471,6 +695,8 @@ def _find_func_end(lines: list[str], start_idx: int, path: str = "") -> int:
                     j += 1
                 j += 1  # skip closing quote
                 continue
+
+            # Brace counting
             if ch == "{":
                 depth += 1
                 started = True
@@ -478,9 +704,13 @@ def _find_func_end(lines: list[str], start_idx: int, path: str = "") -> int:
                 depth -= 1
                 if started and depth == 0:
                     return i + 1  # 1-based
+
             j += 1
+
+    # Explicit truncation: braces did not balance within the scan window.
+    # Return the scan limit — never a silent 50-line arbitrary body.
     if started:
-        return min(start_idx + 50, len(lines))
+        return scan_end
 
     # No braces found at all — fall back to indentation (handles edge cases)
     return _find_func_end_python(lines, start_idx)
@@ -582,6 +812,7 @@ def find_related_tests_in_head(
     test_files: list[str],
     production_symbols: set[str],
     max_excerpt_bytes: int,
+    work_budget_remaining: int = COVERAGE_GLOBAL_WORK_BUDGET,
 ) -> tuple[list[str], list[str]]:
     """Find existing test functions in HEAD that reference the same symbols.
 
@@ -590,11 +821,15 @@ def find_related_tests_in_head(
     verify that a candidate actually exercises the same production branch
     before concluding coverage is preserved.
 
+    work_budget_remaining: number of file-level operations allowed. Each file
+    read counts. When exhausted, remaining files are reported as budget-omitted.
+
     Returns (excerpts, file_outcomes) where file_outcomes tracks what
     actually happened to each candidate file:
     - "read: <path>" — successfully read and scanned
     - "skipped-oversize: <path>" — exceeded COVERAGE_MAX_FILE_BYTES
-    - "budget-omitted: <path>" — not reached due to COVERAGE_MAX_TOTAL_BYTES
+    - "budget-omitted: <path>" — not reached due to global work budget
+    - "read-failed: <path>" — preflight/read tool error (fail-closed)
     """
     if not production_symbols:
         return [], []
@@ -603,6 +838,7 @@ def find_related_tests_in_head(
     file_outcomes: list[str] = []
     total_bytes = 0
     budget_exhausted = False
+    work_used = 0  # count against work_budget_remaining
     # Pre-compute omission marker so its bytes can be reserved in budget
     _OMISSION_MARKER = (
         f"[additional matching tests omitted — "
@@ -614,6 +850,12 @@ def find_related_tests_in_head(
         if budget_exhausted:
             file_outcomes.append(f"budget-omitted: {test_file}")
             continue
+
+        # Global work budget: each file read counts
+        if work_used >= work_budget_remaining:
+            file_outcomes.append(f"budget-omitted: {test_file}")
+            continue
+        work_used += 1
 
         # Bounded read: check blob size BEFORE capturing full content to
         # prevent oversized PR-controlled blobs from consuming runner memory.
@@ -694,9 +936,13 @@ def find_test_files_in_changed_and_related(
     head_sha: str,
     changed_files: list[str],
     production_symbols: Optional[set[str]] = None,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], int]:
     """Find test files: changed, naming-convention siblings, and repo-wide
-    symbol matches. Returns (test_files, searched_paths_summary).
+    symbol matches. Returns (test_files, searched_paths_summary, work_remaining).
+
+    work_remaining is the number of file-level operations left in the global
+    work budget after discovery. Downstream readers (find_related_tests_in_head)
+    must respect this budget for their candidate reads.
 
     Only includes files proven present in the HEAD tree — deleted test files
     are excluded so downstream readers do not raise AnalysisError on expected
@@ -707,22 +953,34 @@ def find_test_files_in_changed_and_related(
     """
     test_files: list[str] = []
     searched: list[str] = []
+    work_used = 0  # global budget counter
 
     # Fetch the full HEAD tree once for existence checks and symbol search.
+    # Uses -z for NUL-delimited output to handle paths with newlines, quotes,
+    # backslashes, and non-ASCII losslessly.
     # A None return means git/tool failure — must fail-closed, not silently
     # produce empty results (which would be indistinguishable from "no tests").
-    tree = run_git(["ls-tree", "-r", "--name-only", head_sha])
+    tree = run_git(["ls-tree", "-r", "--name-only", "-z", head_sha])
     if tree is None:
         raise AnalysisError(
             f"Cannot list HEAD tree ({head_sha}): ls-tree failed "
             f"(git tool error); cannot determine which test files exist"
         )
-    all_tree_files = tree.splitlines()
+    # Split on NUL; filter empty strings from trailing NUL
+    all_tree_files = [f for f in tree.split("\0") if f]
     head_paths: set[str] = set(all_tree_files)
 
     # 1. Changed test files (only if still present in HEAD)
+    # Each file counts toward the global work budget.
     for path in changed_files:
+        if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
+            searched.append(
+                f"budget-cap: (global work budget {COVERAGE_GLOBAL_WORK_BUDGET} "
+                f"exhausted during changed-file enumeration)"
+            )
+            break
         if "Test" in path or "test" in path:
+            work_used += 1
             if path in head_paths:
                 test_files.append(path)
                 searched.append(f"changed: {path}")
@@ -731,6 +989,12 @@ def find_test_files_in_changed_and_related(
 
     # 2. Sibling test files by naming convention
     for path in changed_files:
+        if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
+            searched.append(
+                f"budget-cap: (global work budget {COVERAGE_GLOBAL_WORK_BUDGET} "
+                f"exhausted during sibling enumeration)"
+            )
+            break
         if "Test" in path or "test" in path:
             continue
         if not path.endswith(".swift"):
@@ -741,8 +1005,11 @@ def find_test_files_in_changed_and_related(
             f"{stem}Test.swift",
         ]
         for line in all_tree_files:
+            if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
+                break
             for pattern in candidate_patterns:
                 if line.endswith(pattern) and line not in test_files:
+                    work_used += 1
                     test_files.append(line)
                     searched.append(f"sibling: {line}")
 
@@ -750,14 +1017,21 @@ def find_test_files_in_changed_and_related(
     # AND by content. First tries filename matching (fast, no blob reads),
     # then does bounded content-based discovery for generically named test
     # files that contain exact domain identifiers.
-    if production_symbols:
+    if production_symbols and work_used < COVERAGE_GLOBAL_WORK_BUDGET:
         # Build search stems from production symbols (CamelCase type names)
-        search_stems = {
+        search_stems = sorted({
             sym for sym in production_symbols
             if len(sym) > 3 and sym[0].isupper()
-        }
+        })
         # 3a. Filename-stem matching (fast — no blob reads needed)
         for line in all_tree_files:
+            if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
+                searched.append(
+                    f"budget-cap: (global work budget "
+                    f"{COVERAGE_GLOBAL_WORK_BUDGET} exhausted during "
+                    f"filename-stem discovery)"
+                )
+                break
             if line in test_files:
                 continue
             if not (line.endswith(".swift") or line.endswith(".py")):
@@ -767,6 +1041,7 @@ def find_test_files_in_changed_and_related(
             basename = line.rsplit("/", 1)[-1]
             for stem in search_stems:
                 if stem in basename:
+                    work_used += 1
                     test_files.append(line)
                     searched.append(f"symbol-match({stem}): {line}")
                     break
@@ -774,28 +1049,41 @@ def find_test_files_in_changed_and_related(
         # 3b. Content-based discovery: for test files not yet selected,
         # do a bounded read and check if they contain any production symbol.
         # This catches generically named files (e.g. "IntegrationTests.swift")
-        # that reference exact domain identifiers. Bounded by work cap.
-        _CONTENT_DISCOVERY_MAX_FILES = 20
-        _CONTENT_DISCOVERY_MAX_BYTES = COVERAGE_MAX_FILE_BYTES
+        # that reference exact domain identifiers. Bounded by global work cap.
         content_candidates = [
             f for f in all_tree_files
             if f not in test_files
             and (f.endswith(".swift") or f.endswith(".py"))
             and ("Test" in f or "test" in f)
         ]
-        content_scanned = 0
         for candidate in content_candidates:
-            if content_scanned >= _CONTENT_DISCOVERY_MAX_FILES:
+            if work_used >= COVERAGE_GLOBAL_WORK_BUDGET:
+                searched.append(
+                    f"budget-cap: (global work budget "
+                    f"{COVERAGE_GLOBAL_WORK_BUDGET} exhausted during "
+                    f"content discovery)"
+                )
                 break
             # Count every candidate attempted toward the work cap, including
             # oversized/unreadable files, so the bounded-work claim is literal.
-            content_scanned += 1
-            # Bounded read — skip oversized files without full capture
+            work_used += 1
+            # Bounded read — oversize files are a bounded outcome (skip).
+            # Read/preflight failure is a tool error — fail closed.
             source, was_oversize = _bounded_blob_read(
-                f"{head_sha}:{candidate}", _CONTENT_DISCOVERY_MAX_BYTES
+                f"{head_sha}:{candidate}", COVERAGE_MAX_FILE_BYTES
             )
-            if was_oversize or source is None:
+            if was_oversize:
+                searched.append(
+                    f"content-skipped-oversize: {candidate} "
+                    f"(exceeded {COVERAGE_MAX_FILE_BYTES}-byte file limit)"
+                )
                 continue
+            if source is None:
+                raise AnalysisError(
+                    f"Content-discovery read failed for candidate "
+                    f"'{candidate}' (size preflight or blob read error); "
+                    f"cannot determine if file contains relevant tests"
+                )
             # Check for word-boundary matches of production symbols
             for sym in search_stems:
                 if re.search(r'\b' + re.escape(sym) + r'\b', source):
@@ -806,7 +1094,8 @@ def find_test_files_in_changed_and_related(
     if not searched:
         searched.append("(no test files found in scope)")
 
-    return test_files, searched
+    work_remaining = max(0, COVERAGE_GLOBAL_WORK_BUDGET - work_used)
+    return test_files, searched, work_remaining
 
 
 def _merge_search_outcomes(
@@ -867,7 +1156,7 @@ def _merge_search_outcomes(
         elif outcome == "skipped-oversize":
             merged.append(f"{entry} [skipped — exceeded {COVERAGE_MAX_FILE_BYTES}-byte file limit]")
         elif outcome == "budget-omitted":
-            merged.append(f"{entry} [not reached — {COVERAGE_MAX_TOTAL_BYTES}-byte total budget exhausted]")
+            merged.append(f"{entry} [not reached — global work budget exhausted]")
         else:
             # File was in discovery but not in test_files passed to
             # find_related_tests_in_head, or no outcome recorded
@@ -883,7 +1172,7 @@ def _merge_search_outcomes(
         path = path.strip()
         if path not in discovery_paths:
             if status.strip() == "budget-omitted":
-                merged.append(f"budget-omitted: {path} [not reached — {COVERAGE_MAX_TOTAL_BYTES}-byte total budget exhausted]")
+                merged.append(f"budget-omitted: {path} [not reached — global work budget exhausted]")
             elif status.strip() == "skipped-oversize":
                 merged.append(f"skipped-oversize: {path} [skipped — exceeded {COVERAGE_MAX_FILE_BYTES}-byte file limit]")
 
@@ -922,13 +1211,17 @@ def build_coverage_evidence(
     symbols = extract_production_symbols(all_removed)
 
     # Step 3: Find all test files that might have coverage (bounded repo-wide)
-    test_files, searched_summary = find_test_files_in_changed_and_related(
-        head_sha, changed_files, symbols
+    test_files, searched_summary, work_remaining = (
+        find_test_files_in_changed_and_related(
+            head_sha, changed_files, symbols
+        )
     )
 
     # Step 4: Find existing tests covering the same symbols
+    # Pass remaining work budget so candidate reads share the global cap.
     related_excerpts, file_outcomes = find_related_tests_in_head(
-        head_sha, test_files, symbols, COVERAGE_MAX_EXCERPT_BYTES
+        head_sha, test_files, symbols, COVERAGE_MAX_EXCERPT_BYTES,
+        work_budget_remaining=work_remaining,
     )
 
     # Step 5: Render with accurate search scope — merge discovery context
