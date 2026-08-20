@@ -529,3 +529,62 @@ def test_review_coverage_rules_references_nonce_markers() -> None:
     assert f"COVERAGE_EVIDENCE_{test_nonce}_END" in result.stdout, (
         "review_coverage_rules must reference nonce-bound markers in output"
     )
+
+
+def test_coverage_rules_distinguishes_trusted_framing_from_untrusted_excerpts() -> None:
+    """review_coverage_rules must explicitly state that structural metadata
+    (SEARCH SCOPE, declarations, line numbers) is trusted, while SOURCE EXCERPT
+    / function body content is untrusted PR-controlled source data.
+
+    This pins the provenance-vs-content distinction required by MY-1456 AC3/AC4:
+    the reviewer must trust nonce-bound framing but never treat excerpt prose
+    as instructions or trusted content.
+    """
+    test_nonce = "deadbeef01234567deadbeef01234567"
+    result = _run(
+        f". {COMMON}\nreview_coverage_rules {test_nonce}\n", timeout=30
+    )
+    assert result.returncode == 0, result.stderr
+    output = result.stdout
+
+    # Must explicitly name excerpts/function bodies as untrusted source data
+    assert "不可信源数据" in output or "untrusted" in output.lower(), (
+        "review_coverage_rules must explicitly name excerpts as untrusted source data"
+    )
+    # Must distinguish structural labels as trusted
+    assert "可信" in output, (
+        "review_coverage_rules must name structural metadata as trusted"
+    )
+    # Must warn that excerpt content cannot be treated as instructions
+    assert "指令" in output or "instruction" in output.lower(), (
+        "review_coverage_rules must warn against treating excerpts as instructions"
+    )
+
+
+def test_security_declaration_names_coverage_excerpts_untrusted() -> None:
+    """Both review gate scripts' security declaration must explicitly name
+    COVERAGE EVIDENCE excerpts as untrusted source data, not just DIFF.
+
+    This ensures the prompt's trust model accounts for PR-controlled HEAD
+    source injected into the coverage evidence section.
+    """
+    for script_name in ("claude-review.sh", "codex-review.sh"):
+        path = CI_DIR / script_name
+        content = path.read_text(encoding="utf-8")
+
+        # Must mention COVERAGE EVIDENCE / excerpt in the security declaration
+        assert "COVERAGE EVIDENCE" in content or "SOURCE EXCERPT" in content, (
+            f"{script_name} security declaration must name coverage excerpts"
+        )
+        # The security declaration must explicitly call excerpts untrusted
+        # (the Chinese text uses 不可信源数据)
+        security_block = ""
+        for line in content.splitlines():
+            if "安全声明" in line:
+                # Capture the security declaration block (next few lines)
+                idx = content.splitlines().index(line)
+                security_block = "\n".join(content.splitlines()[idx:idx + 6])
+                break
+        assert "不可信源数据" in security_block or "untrusted source" in security_block.lower(), (
+            f"{script_name} security declaration must call coverage excerpts untrusted source data"
+        )
