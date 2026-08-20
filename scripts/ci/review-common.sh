@@ -301,17 +301,46 @@ run_claude_review_gate() {
 ⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
         return 1
     fi
-    # Validate each blocker has required fields with correct types/values.
-    # If jq errors (e.g. non-object elements in blockers array), output is
-    # empty — that MUST be treated as validation failure, not silently skipped.
+    # Validate each blocker against full production schema:
+    #   required: file(string), severity("critical"|"high"), why(string)
+    #   optional: line(integer|null)
+    #   additionalProperties: false (only file, severity, why, line allowed)
+    # If jq errors (e.g. non-object elements), output is empty — fail-closed.
     _v_blockers_valid="$(printf %s "$verdict_json" | jq -r '
+        def valid_line: (. == null) or (type == "number" and . == floor);
+        def allowed_keys: ["file","severity","why","line"];
         [.blockers[] | select(
-            (.file | type) != "string" or
-            (.severity | . != "critical" and . != "high") or
-            (.why | type) != "string"
+            (type != "object") or
+            ((.file | type) != "string") or
+            ((.severity | . != "critical" and . != "high")) or
+            ((.why | type) != "string") or
+            (has("line") and (.line | valid_line | not)) or
+            ((keys - allowed_keys) | length > 0)
         )] | length' 2>/dev/null)"
     if [ -z "$_v_blockers_valid" ] || [ "$_v_blockers_valid" != "0" ]; then
-        echo "[claude-review] ❌ verdict schema 校验失败: blocker(s) have invalid structure (file/severity/why)"
+        echo "[claude-review] ❌ verdict schema 校验失败: blocker(s) have invalid structure"
+        post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+    # Validate each note against full production schema:
+    #   required: file(string), note(string)
+    #   optional: line(integer|null)
+    #   additionalProperties: false (only file, note, line allowed)
+    # If jq errors (e.g. non-object elements), output is empty — fail-closed.
+    local _v_notes_valid
+    _v_notes_valid="$(printf %s "$verdict_json" | jq -r '
+        def valid_line: (. == null) or (type == "number" and . == floor);
+        def allowed_keys: ["file","note","line"];
+        [.notes[] | select(
+            (type != "object") or
+            ((.file | type) != "string") or
+            ((.note | type) != "string") or
+            (has("line") and (.line | valid_line | not)) or
+            ((keys - allowed_keys) | length > 0)
+        )] | length' 2>/dev/null)"
+    if [ -z "$_v_notes_valid" ] || [ "$_v_notes_valid" != "0" ]; then
+        echo "[claude-review] ❌ verdict schema 校验失败: note(s) have invalid structure"
         post_sticky "$STICKY
 ⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
         return 1
