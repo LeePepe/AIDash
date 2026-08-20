@@ -3061,3 +3061,230 @@ final class ClassBTests: XCTestCase {
             assert containing == "ClassBTests"
     assert found_domain, "Scanner must find ClassB.testFoo with DomainService"
 
+
+# --- Python indentation-aware containing type ---
+
+
+def test_find_containing_type_python_class_method():
+    """Python method indented under a class is correctly associated."""
+    from coverage_context import _find_containing_type
+
+    source = """\
+class TestSuiteA:
+    def test_process(self):
+        assert True
+"""
+    offset = source.index("def test_process")
+    result = _find_containing_type(source, offset, "tests/test_foo.py")
+    assert result == "TestSuiteA"
+
+
+def test_find_containing_type_python_module_level_after_class():
+    """Module-level Python function after a class must NOT be associated
+    with that class — indentation determines scope."""
+    from coverage_context import _find_containing_type
+
+    source = """\
+class TestSuiteA:
+    def test_inside(self):
+        assert True
+
+def test_module_level():
+    assert True
+"""
+    offset = source.index("def test_module_level")
+    result = _find_containing_type(source, offset, "tests/test_foo.py")
+    assert result == ""
+
+
+def test_find_containing_type_python_two_classes():
+    """Second class method is associated with the second class, not the first."""
+    from coverage_context import _find_containing_type
+
+    source = """\
+class TestSuiteA:
+    def test_process(self):
+        assert ServiceA().run()
+
+class TestSuiteB:
+    def test_process(self):
+        assert ServiceB().run()
+"""
+    offset_a = source.index("def test_process")
+    result_a = _find_containing_type(source, offset_a, "tests/test_foo.py")
+    assert result_a == "TestSuiteA"
+
+    offset_b = source.index("def test_process", offset_a + 1)
+    result_b = _find_containing_type(source, offset_b, "tests/test_foo.py")
+    assert result_b == "TestSuiteB"
+
+
+def test_find_containing_type_python_async_method():
+    """Async test method indented under a class is correctly associated."""
+    from coverage_context import _find_containing_type
+
+    source = """\
+class TestAsyncSuite:
+    async def test_async_op(self):
+        await do_something()
+"""
+    offset = source.index("async def test_async_op")
+    result = _find_containing_type(source, offset, "tests/test_async.py")
+    assert result == "TestAsyncSuite"
+
+
+def test_python_classA_loses_test_classB_retains(monkeypatch):
+    """When Python ClassA.test_process is removed but ClassB.test_process
+    remains, only ClassA.test_process should be reported as removed."""
+
+    import coverage_context
+
+    base_source = """\
+class TestSuiteA:
+    def test_process(self):
+        assert ServiceA().run()
+
+class TestSuiteB:
+    def test_process(self):
+        assert ServiceB().run()
+"""
+    # HEAD: ClassA removed, ClassB remains
+    head_source = """\
+class TestSuiteB:
+    def test_process(self):
+        assert ServiceB().run()
+"""
+    diff = """\
+diff --git a/tests/test_foo.py b/tests/test_foo.py
+--- a/tests/test_foo.py
++++ b/tests/test_foo.py
+@@ -1,7 +1,0 @@
+-class TestSuiteA:
+-    def test_process(self):
+-        assert ServiceA().run()
+-
+"""
+    test_path = "tests/test_foo.py"
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref = args[1]
+            if ref.startswith("base:"):
+                return base_source
+            if ref.startswith("head:"):
+                return head_source
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return f"100644 blob abc\t{test_path}"
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    removed = find_removed_test_functions(diff, test_path, "base", "head")
+    assert len(removed) == 1
+    assert removed[0].func_name == "test_process"
+    assert removed[0].containing_type == "TestSuiteA"
+
+
+def test_python_same_class_retains_not_reported(monkeypatch):
+    """When Python ClassA.test_process exists in both base and HEAD
+    (same class), it should NOT be reported as removed."""
+
+    import coverage_context
+
+    base_source = """\
+class TestSuiteA:
+    def test_process(self):
+        assert ServiceA().run()
+        assert ServiceA().validate()
+"""
+    # HEAD: same class, modified body
+    head_source = """\
+class TestSuiteA:
+    def test_process(self):
+        assert ServiceA().run()
+"""
+    diff = """\
+diff --git a/tests/test_foo.py b/tests/test_foo.py
+--- a/tests/test_foo.py
++++ b/tests/test_foo.py
+@@ -2,3 +2,2 @@ class TestSuiteA:
+     def test_process(self):
+         assert ServiceA().run()
+-        assert ServiceA().validate()
+"""
+    test_path = "tests/test_foo.py"
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref = args[1]
+            if ref.startswith("base:"):
+                return base_source
+            if ref.startswith("head:"):
+                return head_source
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return f"100644 blob abc\t{test_path}"
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    removed = find_removed_test_functions(diff, test_path, "base", "head")
+    # test_process still exists in same class — not removed
+    assert len(removed) == 0
+
+
+def test_python_module_level_function_stable_identity(monkeypatch):
+    """Module-level Python test functions retain stable identity and are
+    correctly detected as removed even when classes exist in the file."""
+
+    import coverage_context
+
+    base_source = """\
+class TestSuiteA:
+    def test_inside(self):
+        assert True
+
+def test_module_level():
+    assert ModuleService().check()
+"""
+    # HEAD: module-level function removed, class remains
+    head_source = """\
+class TestSuiteA:
+    def test_inside(self):
+        assert True
+"""
+    diff = """\
+diff --git a/tests/test_foo.py b/tests/test_foo.py
+--- a/tests/test_foo.py
++++ b/tests/test_foo.py
+@@ -4,4 +4,0 @@ class TestSuiteA:
+-
+-def test_module_level():
+-    assert ModuleService().check()
+"""
+    test_path = "tests/test_foo.py"
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            ref = args[1]
+            if ref.startswith("base:"):
+                return base_source
+            if ref.startswith("head:"):
+                return head_source
+        if args[0] == "ls-tree":
+            if "--" in args:
+                return f"100644 blob abc\t{test_path}"
+            return test_path
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    removed = find_removed_test_functions(diff, test_path, "base", "head")
+    assert len(removed) == 1
+    assert removed[0].func_name == "test_module_level"
+    # Module-level function has no containing type
+    assert removed[0].containing_type == ""
+

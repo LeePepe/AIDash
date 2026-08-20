@@ -125,14 +125,43 @@ _CONTAINING_TYPE_RE = re.compile(
 )
 
 
-def _find_containing_type(source: str, func_offset: int) -> str:
+def _find_containing_type(source: str, func_offset: int, path: str = "") -> str:
     """Find the enclosing type name for a function at the given character offset.
 
     Searches backwards from the function position for the nearest type
     declaration (class/struct/enum/extension/actor). Returns empty string
     if no containing type is found (top-level function).
+
+    For Python files, uses indentation-aware scoping: a function is inside a
+    class only if the function line is indented deeper than the class
+    declaration line. This prevents module-level functions after a class from
+    being incorrectly associated with that class.
     """
-    # Look at all type declarations before the function position
+    is_python = path.endswith(".py")
+
+    if is_python:
+        # Python: indentation determines scope. Find the function's line and
+        # its indentation, then look for the nearest preceding class whose
+        # indentation is strictly less.
+        func_line_start = source.rfind("\n", 0, func_offset) + 1
+        func_line = source[func_line_start:func_offset + 80]  # enough for indent
+        func_indent = len(func_line) - len(func_line.lstrip())
+
+        best_name = ""
+        for m in _CONTAINING_TYPE_RE.finditer(source):
+            if m.start() >= func_offset:
+                break
+            class_line = source[m.start():m.end()]
+            class_indent = len(class_line) - len(class_line.lstrip())
+            if class_indent < func_indent:
+                best_name = m.group(1)
+            else:
+                # A class at the same or deeper indentation cannot contain
+                # this function — reset.
+                best_name = ""
+        return best_name
+
+    # Non-Python (Swift etc.): nearest preceding type declaration
     best_name = ""
     for m in _CONTAINING_TYPE_RE.finditer(source):
         if m.start() < func_offset:
@@ -332,7 +361,7 @@ def find_removed_test_functions(
     head_qualified_names: set[str] = set()
     if head_source is not None:
         for name, m in _find_all_test_functions(head_source):
-            containing = _find_containing_type(head_source, m.start())
+            containing = _find_containing_type(head_source, m.start(), path)
             qualified = f"{containing}.{name}" if containing else name
             head_qualified_names.add(qualified)
 
@@ -349,7 +378,7 @@ def find_removed_test_functions(
             continue
 
         # Determine qualified identity for this function in base
-        base_containing = _find_containing_type(base_source, match.start())
+        base_containing = _find_containing_type(base_source, match.start(), path)
 
         # Verify the function declaration is actually absent from HEAD.
         if head_read_succeeded:
