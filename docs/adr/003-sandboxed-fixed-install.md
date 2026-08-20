@@ -256,20 +256,39 @@ run sequentially.
 
 Stock macOS does not ship GNU `timeout`. The runner uses temp files for
 stdout/stderr capture so the watcher subprocess cannot inherit or retain
-command-substitution file descriptors. A race-safe sentinel file proves
-whether the watcher actually fired; the child's real exit/signal status
-is preserved unless the sentinel confirms a timeout.
+command-substitution file descriptors.
+
+**Race-safe timeout ownership protocol:** The watcher must atomically
+claim timeout ownership AND successfully signal a still-live child before
+the parent reads the timeout sentinel. A standalone `kill -0` check or a
+non-atomic sentinel file is insufficient — the child could exit between
+check and kill. The protocol uses atomic `mkdir` as the ownership claim:
+
+1. After `sleep`, the watcher attempts `mkdir "$claim_dir"` (atomic on
+   POSIX filesystems). If `mkdir` fails, the child already exited and
+   the parent already cleaned up — the watcher exits without claiming
+   timeout.
+2. If `mkdir` succeeds, the watcher owns the timeout path. It sends
+   `kill -TERM "$pid"`. If `kill` fails (child already exited), the
+   watcher removes the claim dir and exits — no false timeout.
+3. If `kill` succeeds, the watcher leaves the claim dir in place as the
+   timeout sentinel, then exits.
+4. The parent `wait`s for the child, then `wait`s for the watcher to
+   ensure the watcher has finalized its state before reading the claim
+   dir. The parent never kills the watcher between signal and state
+   commit — it always lets the watcher run to completion.
+5. If the claim dir exists after the watcher exits, the parent returns
+   124 (timeout). Otherwise it returns the child's real exit status.
 
 ```bash
 # run_with_timeout SECONDS STDOUT_FILE STDERR_FILE CMD [ARGS...]
 # Writes child stdout/stderr to the named files.
-# Returns: child exit status, or 124 only when the watcher sentinel
-#          proves the timeout fired.
+# Returns: child exit status, or 124 only when the watcher atomically
+#          claimed timeout ownership and successfully signaled the child.
 run_with_timeout() {
     local limit=$1 out_file=$2 err_file=$3; shift 3
-    local sentinel
-    sentinel=$(mktemp /tmp/aidash_timeout.XXXXXX)
-    rm -f "$sentinel"  # sentinel absent = watcher has not fired
+    local claim_dir
+    claim_dir="/tmp/aidash_timeout_claim.$$.$RANDOM"
 
     "$@" >"$out_file" 2>"$err_file" &
     local pid=$!
@@ -278,24 +297,30 @@ run_with_timeout() {
     # any inherited fd open after the child exits.
     ( exec >/dev/null 2>/dev/null
       sleep "$limit"
-      touch "$sentinel"
-      kill "$pid" 2>/dev/null
+      # Step 1: atomically claim timeout ownership
+      mkdir "$claim_dir" 2>/dev/null || exit 0  # lost race — child done
+      # Step 2: signal the child; if it already exited, unclaim
+      if ! kill -TERM "$pid" 2>/dev/null; then
+          rmdir "$claim_dir" 2>/dev/null
+          exit 0  # child exited between mkdir and kill — no timeout
+      fi
+      # Step 3: kill succeeded — leave claim_dir as timeout sentinel
     ) &
     local watcher=$!
 
     wait "$pid" 2>/dev/null
     local rc=$?
 
-    # Cancel watcher immediately — success returns immediately.
-    kill "$watcher" 2>/dev/null
+    # Step 4: let the watcher finalize — never kill it between signal
+    # and state commit. The watcher is guaranteed to exit promptly
+    # after sleep + at most two syscalls.
     wait "$watcher" 2>/dev/null
 
-    # Return 124 only if the sentinel proves the watcher fired.
-    if [ -f "$sentinel" ]; then
-        rm -f "$sentinel"
+    # Step 5: read the finalized timeout state.
+    if [ -d "$claim_dir" ]; then
+        rmdir "$claim_dir" 2>/dev/null
         return 124
     fi
-    rm -f "$sentinel" 2>/dev/null
     return $rc
 }
 ```
