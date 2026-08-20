@@ -130,6 +130,13 @@ calling shell:
 
 ```bash
 # Phase 1: sign leaf Mach-O executables/dylibs (regular files only)
+# Materialize find output to a temp file; fail closed on find error.
+p1_list=$(mktemp)
+find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
+  ! -path "$APP_SRC/Contents/MacOS/AIDash" \
+  -print0 > "$p1_list" \
+  || { echo "FATAL: find failed enumerating leaf executables"; exit 1; }
+
 signed_count=0
 while IFS= read -r -d '' leaf; do
     # Capture file type without a pipe — avoids pipefail/SIGPIPE
@@ -139,9 +146,8 @@ while IFS= read -r -d '' leaf; do
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$leaf" \
       || { echo "FATAL: codesign failed on $leaf"; exit 1; }
     signed_count=$((signed_count + 1))
-done < <(find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
-  ! -path "$APP_SRC/Contents/MacOS/AIDash" \
-  -print0)
+done < "$p1_list"
+rm -f "$p1_list"
 ```
 
 **Phase 2 — Nested code bundles (deepest-first).** In a **separate**
@@ -154,12 +160,19 @@ visited before enclosing bundles, regardless of directory name sort order.
 
 ```bash
 # Phase 2: sign nested code bundles depth-first (post-order traversal)
+# Materialize find output to a temp file; fail closed on find error.
+p2_list=$(mktemp)
+find "$APP_SRC/Contents" -depth -type d \
+  \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) \
+  -print0 > "$p2_list" \
+  || { echo "FATAL: find failed enumerating nested bundles"; exit 1; }
+
 while IFS= read -r -d '' bundle; do
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$bundle" \
       || { echo "FATAL: codesign failed on $bundle"; exit 1; }
     signed_count=$((signed_count + 1))
-done < <(find "$APP_SRC/Contents" -depth -type d \
-  \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) -print0)
+done < "$p2_list"
+rm -f "$p2_list"
 ```
 
 **Phase 3 — Outer app bundle.** Sign the top-level `.app` last, sealing
@@ -167,7 +180,8 @@ all nested signatures from Phases 1 and 2.
 
 ```bash
 # Phase 3: sign the outer app bundle last
-codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_SRC"
+codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_SRC" \
+  || { echo "FATAL: codesign failed on outer app bundle"; exit 1; }
 ```
 
 #### Post-sign verification gate (fail-closed)
@@ -199,20 +213,30 @@ check_sandbox_entitlement "$APP_SRC/Contents/MacOS/AIDash"
 
 # 3. Verify app-sandbox entitlement on every target signed in Phases 1/2
 if [ "$signed_count" -gt 0 ]; then
-    # Re-enumerate leaf targets and check each one
+    # Re-enumerate leaf targets (materialized + verified find)
+    v1_list=$(mktemp)
+    find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
+      ! -path "$APP_SRC/Contents/MacOS/AIDash" \
+      -print0 > "$v1_list" \
+      || { echo "FATAL: find failed in verification (leaf)"; exit 1; }
     while IFS= read -r -d '' target; do
         filetype=$(/usr/bin/file -b "$target") || {
             echo "FATAL: /usr/bin/file failed on $target"; exit 1; }
         case "$filetype" in *Mach-O*) ;; *) continue ;; esac
         check_sandbox_entitlement "$target"
-    done < <(find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
-      ! -path "$APP_SRC/Contents/MacOS/AIDash" -print0)
+    done < "$v1_list"
+    rm -f "$v1_list"
 
-    # Re-enumerate nested bundles and check each one
+    # Re-enumerate nested bundles (materialized + verified find)
+    v2_list=$(mktemp)
+    find "$APP_SRC/Contents" -depth -type d \
+      \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) \
+      -print0 > "$v2_list" \
+      || { echo "FATAL: find failed in verification (bundles)"; exit 1; }
     while IFS= read -r -d '' target; do
         check_sandbox_entitlement "$target"
-    done < <(find "$APP_SRC/Contents" -depth -type d \
-      \( -name "*.xpc" -o -name "*.appex" -o -name "*.app" \) -print0)
+    done < "$v2_list"
+    rm -f "$v2_list"
 fi
 ```
 
@@ -254,30 +278,28 @@ run sequentially.
 
 #### 30-second timeout runner (stock macOS `/usr/bin/perl`)
 
-Stock macOS does not ship GNU `timeout`. The shell-based watcher/sleep
-approach has fundamental flaws: the watcher sleeps the full timeout even
-on immediate success, and after `wait` reaps the child PID, the OS can
-reassign that PID to an unrelated process which the watcher then kills.
-
-The runner instead uses a single `/usr/bin/perl` supervisor process
-(guaranteed on stock macOS 26). The parent `fork`s the child, sets
-`alarm`, and calls `waitpid`. Because the parent **owns the unreaped
-child PID throughout**, PID reuse is impossible. Immediate success
-returns immediately (no sleeping watcher to cancel). No watcher/sleep
-subprocess is created at all.
+Stock macOS does not ship GNU `timeout`. The runner uses a single
+`/usr/bin/perl` supervisor process (guaranteed on stock macOS 26) with a
+synchronous WNOHANG/deadline poll loop — no async signal delivery, no
+SIGALRM handler, no race between signal and reap.
 
 **Protocol:**
 
-1. Parent opens stdout/stderr files, `fork`s, and calls `alarm($limit)`.
-2. Child `exec`s the command with stdout/stderr redirected to the files.
-3. Parent blocks on `waitpid($pid, 0)`.
-4. If `SIGALRM` fires first, the handler calls `waitpid($pid, WNOHANG)`.
-   If the child has already exited (was reaped), the handler preserves
-   that exit status and clears the timeout flag — **no false timeout**.
-   Otherwise the child is still alive: mark timeout, `kill(KILL, $pid)`,
-   and `waitpid` to reap.
-5. After `waitpid` returns in the main loop, the parent exits with 124
-   if the timeout flag won, `WEXITSTATUS` for normal exit, or
+1. Parent opens stdout/stderr files, `fork`s the child.
+2. Child `exec`s the command with stdout/stderr redirected.
+3. Parent enters a tight loop: `waitpid($pid, WNOHANG)` polls the child.
+   If the child has exited, capture its status immediately and exit the
+   loop. If `Time::HiRes::time()` exceeds the deadline, send
+   `SIGKILL` to the still-owned unreaped child, then blocking
+   `waitpid($pid, 0)` to reap, mark timeout, and exit the loop.
+   Otherwise `select(undef, undef, undef, 0.05)` (50 ms sleep) and
+   retry.
+4. Because the parent never reaps the child until the loop body does so
+   explicitly, the child PID remains owned throughout — PID reuse is
+   impossible. After timeout-kill, the reaping `waitpid` validates the
+   child was actually killed; `ECHILD` (already reaped by something
+   else) is a fatal error.
+5. Exit with 124 if timeout, `WEXITSTATUS` for normal exit, or
    `128 + WTERMSIG` for signal death.
 6. All `fork`/`open`/`exec`/`waitpid` failures are fatal (`die`).
 
@@ -290,6 +312,7 @@ run_with_timeout() {
 use strict;
 use warnings;
 use POSIX qw(WNOHANG WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG);
+use Time::HiRes qw(time);
 
 my $limit    = shift @ARGV or die "usage: run_with_timeout LIMIT OUT ERR CMD...\n";
 my $out_file = shift @ARGV or die "missing stdout file\n";
@@ -299,55 +322,45 @@ my $err_file = shift @ARGV or die "missing stderr file\n";
 open(my $out_fh, ">", $out_file) or die "open $out_file: $!\n";
 open(my $err_fh, ">", $err_file) or die "open $err_file: $!\n";
 
-my $timed_out   = 0;
-my $reaped_rc;          # set if SIGALRM handler reaps the child early
-
 my $pid = fork();
 defined $pid or die "fork: $!\n";
 
 if ($pid == 0) {
-    # Child: redirect stdout/stderr, exec command
     open(STDOUT, ">&", $out_fh) or die "dup stdout: $!\n";
     open(STDERR, ">&", $err_fh) or die "dup stderr: $!\n";
     exec @ARGV or die "exec $ARGV[0]: $!\n";
 }
 
-# Parent: close file handles (child owns them now)
 close $out_fh;
 close $err_fh;
 
-$SIG{ALRM} = sub {
-    # Try non-blocking reap: if child already exited, preserve its status
+my $deadline  = time() + $limit;
+my $timed_out = 0;
+my $rc;
+
+while (1) {
     my $w = waitpid($pid, WNOHANG);
     if ($w == $pid) {
-        # Child already exited — NOT a timeout
-        if    (WIFEXITED($?))   { $reaped_rc = WEXITSTATUS($?); }
-        elsif (WIFSIGNALED($?)) { $reaped_rc = 128 + WTERMSIG($?); }
-        else                    { $reaped_rc = 255; }
-        return;  # main waitpid will see -1 / already reaped
+        # Child exited — capture status and break
+        if    (WIFEXITED($?))   { $rc = WEXITSTATUS($?); }
+        elsif (WIFSIGNALED($?)) { $rc = 128 + WTERMSIG($?); }
+        else                    { $rc = 255; }
+        last;
     }
-    # Child still alive — real timeout
-    $timed_out = 1;
-    kill("KILL", $pid) or die "kill $pid: $!\n";
-    waitpid($pid, 0);  # reap the killed child
-};
-
-alarm($limit);
-my $w = waitpid($pid, 0);
-alarm(0);  # cancel alarm if child exited before timeout
-
-my $rc;
-if (defined $reaped_rc) {
-    # SIGALRM handler already reaped — use its captured status
-    $rc = $reaped_rc;
-} elsif ($timed_out) {
-    $rc = 124;
-} elsif ($w == $pid) {
-    if    (WIFEXITED($?))   { $rc = WEXITSTATUS($?); }
-    elsif (WIFSIGNALED($?)) { $rc = 128 + WTERMSIG($?); }
-    else                    { $rc = 255; }
-} else {
-    die "waitpid returned unexpected $w: $!\n";
+    if ($w == -1) {
+        die "waitpid($pid, WNOHANG) returned -1 unexpectedly: $!\n";
+    }
+    # $w == 0: child still running
+    if (time() >= $deadline) {
+        # Timeout: kill the still-owned unreaped child
+        kill("KILL", $pid) or die "kill $pid: $!\n";
+        my $w2 = waitpid($pid, 0);
+        $w2 == $pid or die "post-kill waitpid: expected $pid, got $w2: $!\n";
+        $timed_out = 1;
+        $rc = 124;
+        last;
+    }
+    select(undef, undef, undef, 0.05);  # 50 ms poll interval
 }
 
 exit $rc;
