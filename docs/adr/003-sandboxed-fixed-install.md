@@ -78,14 +78,43 @@ Create `Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements`:
 
 `install-fixed-build.sh` retains the current unsigned build flags
 (`CODE_SIGNING_ALLOWED=NO`) and adds a deterministic post-build ad-hoc
-codesign step that embeds the fixed entitlements:
+codesign step. The signing order is **inside-out**: every nested executable
+inside the app bundle must be individually signed before the outer app is
+signed, so that each executable carries the sandbox entitlement in its own
+code signature.
 
-```bash
-# After xcodebuild build (unchanged flags):
-codesign --force --sign - \
-  --entitlements Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements \
-  "$APP_SRC"
-```
+#### Signing order (inside-out, deterministic)
+
+1. **Sign every nested executable first.** The app bundle contains at least
+   the LaunchAgent/XPC helper (`AIDash.app/Contents/Library/LaunchAgents/`
+   or `Contents/XPCServices/`). Each nested Mach-O must be ad-hoc signed
+   with the same fixed entitlements before the outer bundle signature is
+   applied:
+
+   ```bash
+   # Sign each nested executable with sandbox entitlements:
+   find "$APP_SRC/Contents" \( -name "*.xpc" -o -type f -perm +111 \) \
+     ! -path "$APP_SRC/Contents/MacOS/*" -print0 | while IFS= read -r -d '' nested; do
+       codesign --force --sign - \
+         --entitlements Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements \
+         "$nested"
+   done
+   ```
+
+2. **Sign the outer app bundle last**, sealing all nested signatures:
+
+   ```bash
+   codesign --force --sign - \
+     --entitlements Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements \
+     "$APP_SRC"
+   ```
+
+Signing only the outer app is **insufficient**: nested executables spawned
+by launchd (e.g. the XPC agent registered via a LaunchAgent plist) run as
+independent processes. macOS evaluates each process's own code signature for
+sandbox enforcement. A nested executable that inherits an outer-only
+signature but has no embedded entitlements of its own will run unsandboxed
+and fail to access the protected container on macOS 26.
 
 This approach is preferred over passing `CODE_SIGNING_ALLOWED=YES` +
 `CODE_SIGN_ENTITLEMENTS` through xcodebuild, which may interact
@@ -96,9 +125,51 @@ signed, with no dependency on team identity or provisioning state.
 
 ### Store-dependent self-check
 
-The installer self-check must add a store-dependent probe beyond `schema list`
-(which bypasses store readiness). The implementation issue will specify the
-exact probe command.
+The installer must verify both store-independent and store-dependent XPC
+operation after signing and installing the bundle. Two probes are required,
+run sequentially:
+
+1. **Store-independent probe** (schema availability):
+
+   ```bash
+   aidash schema list --quiet
+   ```
+
+   This confirms the XPC agent started and the Mach service is reachable.
+   It does not open the SwiftData store and therefore cannot detect
+   container-access failures.
+
+2. **Store-dependent probe** (container read under sandbox):
+
+   ```bash
+   aidash briefing get --date today --json
+   ```
+
+   This forces the XPC agent to open the SwiftData store inside the
+   protected container path, execute a query, and return a result. If the
+   sandbox entitlement is missing or incorrectly applied, this probe will
+   block on `sqlite3BtreeOpen → robust_open2` (the exact failure mode
+   documented in the Context section).
+
+#### Cold-start timeout and failure conditions
+
+Both probes must complete within a **30-second wall-clock timeout** per
+probe (60 seconds total). The cold-start budget accounts for:
+- launchd agent bootstrap (~2 s),
+- SwiftData `ModelContainer` initialization (~3–5 s first launch),
+- SPM package graph resolution (not applicable at runtime).
+
+**Failure conditions** (any one triggers installer failure):
+- Probe 1 (`schema list --quiet`) exits non-zero or exceeds 30 s.
+- Probe 2 (`briefing get --date today --json`) exits non-zero, exceeds
+  30 s, or returns malformed JSON (missing top-level `briefings` key).
+- Probe 2 returns a valid empty result (no briefings for today) — this is
+  a **PASS**: it proves the store was opened and queried successfully.
+
+If either probe fails, the installer must print the probe command, its
+exit code, and any stderr, then exit non-zero. The user should check that
+the installed binary has the correct entitlements (`codesign -d --entitlements :-
+/Applications/AIDash.app/Contents/MacOS/AIDash`).
 
 ## Analysis
 
