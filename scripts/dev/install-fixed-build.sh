@@ -205,53 +205,103 @@ echo "[install-fixed] installing CLI → $BIN_DST"
 mkdir -p "$BIN_DIR"
 install -m 755 "$BIN_SRC" "$BIN_DST" || { echo "[install-fixed] ERROR: CLI install failed" >&2; exit 1; }
 
-# --- Repoint XPC to the fixed app ------------------------------------------
-# Reuse the existing recovery path: bootout stale job + drop old plist, then
-# launch the fixed app so LaunchdAgentInstaller writes a fresh plist whose
-# Program points at /Applications/AIDash.app and bootstraps it.
-echo "[install-fixed] resetting XPC LaunchAgent"
-if ! bash "$REPO_ROOT/scripts/dev/reset-xpc.sh"; then
-  echo "[install-fixed] ERROR: reset-xpc.sh failed — stale job may still be registered" >&2
-  exit 1
-fi
-
-echo "[install-fixed] launching fixed app to (re)register LaunchAgent"
-open "$APP_DST"
-
-# --- LaunchAgent validation -------------------------------------------------
-# Wait for the LaunchAgent to come up brokered to the FIXED build. Poll for
-# job loaded + plist Program == fixed exec.
+# --- Provision LaunchAgent (script-authored) ---------------------------------
+# The sandboxed app cannot write ~/Library/LaunchAgents or call launchctl for
+# job management (app-sandbox confines it to its container). The UNSANDBOXED
+# installer script authors the canonical plist and bootstraps the job itself.
 FIXED_EXEC="$APP_DST/Contents/MacOS/AIDash"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-echo "[install-fixed] waiting for LaunchAgent to register on the fixed build…"
-la_ok=0
-prog=""
-for i in $(seq 1 20); do
-  sleep 1
-  prog="$(/usr/libexec/PlistBuddy -c 'Print :Program' "$PLIST" 2>/dev/null)"
-  if launchctl print "gui/$UID_N/$LABEL" >/dev/null 2>&1 \
-     && [ "$prog" = "$FIXED_EXEC" ]; then
-    la_ok=1
-    break
-  fi
-done
+PLIST_DIR="$HOME/Library/LaunchAgents"
+PLIST="$PLIST_DIR/$LABEL.plist"
 
-if [ "$la_ok" != "1" ]; then
-  echo "[install-fixed] FATAL: LaunchAgent did not register on fixed build within 20 s" >&2
-  echo "    Required: job LOADED + plist Program == $FIXED_EXEC" >&2
-  echo "    Observed plist Program: ${prog:-<unreadable>}" >&2
-  if [ -n "$prog" ] && [ "$prog" != "$FIXED_EXEC" ]; then
-    echo "    XPC is still pointed at a NON-fixed build (stale DerivedData?)." >&2
-  fi
-  echo "    Diagnostics:" >&2
-  echo "    - launchctl print gui/$UID_N/$LABEL:" >&2
-  launchctl print "gui/$UID_N/$LABEL" 2>&1 | head -5 >&2 || echo "      (job not loaded)" >&2
-  echo "    - last push-error lines:" >&2
-  tail -3 "$REPO_ROOT/.aidash-state/aidash-push-errors.log" 2>/dev/null >&2 || true
+# 1. Bootout any stale job (ignore errors — common if no prior job exists)
+echo "[install-fixed] booting out stale LaunchAgent (if any)"
+launchctl bootout "gui/$UID_N/$LABEL" 2>/dev/null || true
+
+# 2. Author the canonical plist with required keys:
+#    Label, Program, MachServices, EnvironmentVariables, ProcessType
+echo "[install-fixed] writing LaunchAgent plist → $PLIST"
+mkdir -p "$PLIST_DIR"
+PLIST_STAGE="${PLIST}.staging.$$"
+cat > "$PLIST_STAGE" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$LABEL</string>
+    <key>Program</key>
+    <string>$FIXED_EXEC</string>
+    <key>MachServices</key>
+    <dict>
+        <key>$LABEL</key>
+        <true/>
+    </dict>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AIDASH_XPC_AGENT</key>
+        <string>1</string>
+    </dict>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>
+PLIST_EOF
+
+# 3. Validate plist syntax before installing
+if ! /usr/bin/plutil -lint "$PLIST_STAGE" >/dev/null 2>&1; then
+  echo "[install-fixed] FATAL: generated plist failed plutil -lint" >&2
+  cat "$PLIST_STAGE" >&2
+  rm -f "$PLIST_STAGE"
   exit 1
 fi
 
-echo "[install-fixed] LaunchAgent registered: Program == $FIXED_EXEC"
+# 4. Validate plist shape: required keys present with correct values
+_plist_val() { /usr/libexec/PlistBuddy -c "Print :$1" "$PLIST_STAGE" 2>/dev/null; }
+plist_label="$(_plist_val Label)"
+plist_program="$(_plist_val Program)"
+plist_mach="$(_plist_val "MachServices:$LABEL")"
+plist_env="$(_plist_val "EnvironmentVariables:AIDASH_XPC_AGENT")"
+plist_ptype="$(_plist_val ProcessType)"
+
+plist_ok=1
+[ "$plist_label"   = "$LABEL" ]       || { echo "FATAL: plist Label mismatch: got '$plist_label'" >&2; plist_ok=0; }
+[ "$plist_program" = "$FIXED_EXEC" ]  || { echo "FATAL: plist Program mismatch: got '$plist_program'" >&2; plist_ok=0; }
+[ "$plist_mach"    = "true" ]         || { echo "FATAL: plist MachServices.$LABEL mismatch: got '$plist_mach'" >&2; plist_ok=0; }
+[ "$plist_env"     = "1" ]            || { echo "FATAL: plist EnvironmentVariables.AIDASH_XPC_AGENT mismatch: got '$plist_env'" >&2; plist_ok=0; }
+[ "$plist_ptype"   = "Interactive" ]  || { echo "FATAL: plist ProcessType mismatch: got '$plist_ptype'" >&2; plist_ok=0; }
+if [ "$plist_ok" != "1" ]; then
+  rm -f "$PLIST_STAGE"
+  exit 1
+fi
+
+# 5. Atomically install plist
+mv -f "$PLIST_STAGE" "$PLIST" || { echo "FATAL: plist install failed" >&2; exit 1; }
+
+# 6. Bootstrap the LaunchAgent
+echo "[install-fixed] bootstrapping LaunchAgent"
+if ! launchctl bootstrap "gui/$UID_N" "$PLIST"; then
+  echo "[install-fixed] FATAL: launchctl bootstrap failed" >&2
+  echo "    plist: $PLIST" >&2
+  echo "    domain: gui/$UID_N" >&2
+  launchctl print "gui/$UID_N/$LABEL" 2>&1 | head -5 >&2 || echo "    (job not loaded)" >&2
+  exit 1
+fi
+
+# 7. Verify the job is loaded and Program matches
+prog="$(/usr/libexec/PlistBuddy -c 'Print :Program' "$PLIST" 2>/dev/null)"
+if ! launchctl print "gui/$UID_N/$LABEL" >/dev/null 2>&1; then
+  echo "[install-fixed] FATAL: job not loaded after bootstrap" >&2
+  exit 1
+fi
+if [ "$prog" != "$FIXED_EXEC" ]; then
+  echo "[install-fixed] FATAL: plist Program != expected after install" >&2
+  echo "    expected: $FIXED_EXEC" >&2
+  echo "    got:      ${prog:-<unreadable>}" >&2
+  exit 1
+fi
+
+echo "[install-fixed] LaunchAgent bootstrapped: Program == $FIXED_EXEC"
 
 # --- Store-dependent self-check (ADR-003) ------------------------------------
 # Two probes validate XPC operation: store-independent (schema availability)
