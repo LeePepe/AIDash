@@ -185,7 +185,7 @@ $(review_security_notice)
 
 $(review_evidence_rules)
 
-$(review_coverage_rules)
+$(review_coverage_rules "$FENCE_NONCE")
 
 $FENCE_OPEN
 改动文件:
@@ -197,7 +197,9 @@ $DIFF
 
 $SCOPE_EVIDENCE
 
+======== COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN ========
 $COVERAGE_CONTEXT
+======== COVERAGE_EVIDENCE_${FENCE_NONCE}_END ========
 $FENCE_CLOSE"
 
 echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED" | grep -c . | tr -d ' ') files)..."

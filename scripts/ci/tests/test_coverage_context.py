@@ -1249,10 +1249,54 @@ def test_find_func_end_python_indentation():
         "def test_other():",
         "    pass",
     ]
-    end = _find_func_end(lines, 0)
+    end = _find_func_end(lines, 0, "scripts/ci/tests/test_foo.py")
     # Should cover lines 1-3 (the blank line is ambiguous but the next def
     # at same indent terminates), returning 1-based line 3
     assert end == 3
+
+
+def test_find_func_end_python_dict_set_literals():
+    """Python dict/set literals ({...}) must NOT terminate function body.
+
+    _find_func_end must use indentation-based parsing for .py files, so
+    brace-containing expressions (dicts, sets, dict comprehensions) inside
+    a test function do not falsely close the extracted body. This is the
+    blocker #2 regression: related-symbol detection must see statements
+    AFTER dict/set literals."""
+    lines = [
+        "def test_build_coverage_evidence():",
+        "    config = {",
+        '        "head_sha": "abc123",',
+        '        "base_sha": "def456",',
+        "    }",
+        "    nested = {k: {v} for k, v in items.items()}",
+        "    result = build_coverage_evidence(**config)",
+        "    assert result != ''",
+        "",
+        "def test_other():",
+        "    pass",
+    ]
+    end = _find_func_end(lines, 0, "scripts/ci/tests/test_foo.py")
+    # Must include line 8 (assert result != '') — the last indented line
+    # before the next def at base indent. 1-based line 8.
+    assert end == 8, (
+        f"_find_func_end stopped at line {end} — dict/set braces falsely "
+        f"terminated the body before reaching statements after the literal"
+    )
+
+
+def test_find_func_end_swift_braces_still_work():
+    """Swift brace counting must still work correctly for .swift files."""
+    lines = [
+        "    func testComplex() {",
+        "        let dict = [\"a\": 1, \"b\": 2]",
+        "        if condition {",
+        "            doSomething()",
+        "        }",
+        "    }",
+    ]
+    end = _find_func_end(lines, 0, "Tests/FooTests.swift")
+    assert end == 6
 
 
 def test_removed_python_test_end_to_end(monkeypatch):
@@ -1344,3 +1388,59 @@ index abc1234..def5678 100644
     # The removed Python test must be detected
     assert "test_old_throw_path" in result
     assert "COVERAGE CONTEXT" in result
+
+
+def test_python_dict_in_test_body_does_not_truncate_related_symbol(monkeypatch):
+    """End-to-end: a Python test containing dict/set literals must still have
+    its full body visible to related-symbol detection. Symbols referenced
+    AFTER the dict literal must be found by find_related_tests_in_head.
+
+    This is the blocker #2 regression contract: brace counting on .py files
+    would falsely terminate the body at the first `}`, making symbols after
+    it invisible to the coverage context."""
+
+    # A test file with a dict literal followed by a production symbol call
+    head_py_test = """\
+import pytest
+from coverage_context import build_coverage_evidence, AnalysisError
+
+def test_build_with_config():
+    config = {
+        "head_sha": "abc123",
+        "base_sha": "def456",
+    }
+    nested = {k: {v} for k, v in items.items()}
+    result = build_coverage_evidence(**config)
+    assert result != ""
+"""
+
+    import coverage_context
+
+    def fake_run_git(args):
+        if args[0] == "show":
+            return head_py_test
+        if args[0] == "ls-tree":
+            if "-r" in args:
+                return "scripts/ci/tests/test_coverage_context.py"
+            return "100644 blob abc\tscripts/ci/tests/test_coverage_context.py"
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    # Search for 'build_coverage_evidence' as a production symbol
+    excerpts = find_related_tests_in_head(
+        head_sha="head456",
+        test_files=["scripts/ci/tests/test_coverage_context.py"],
+        production_symbols={"build_coverage_evidence"},
+        max_excerpt_bytes=30000,
+    )
+
+    # The function must be found despite the dict/set braces in its body
+    assert len(excerpts) > 0, (
+        "find_related_tests_in_head failed to find test_build_with_config — "
+        "dict/set braces likely terminated the body early (blocker #2)"
+    )
+    combined = "\n".join(excerpts)
+    assert "test_build_with_config" in combined
+    # Verify the symbol AFTER the dict is visible in the extracted body
+    assert "build_coverage_evidence" in combined

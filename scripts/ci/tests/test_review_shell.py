@@ -1588,3 +1588,49 @@ def test_nonce_generation_fail_closed() -> None:
         assert "nonce" in content.lower() and "exit 1" in content, (
             f"{script_name} must exit 1 on nonce generation failure"
         )
+
+
+# --------------------------------------------------------------------------
+# 6. Nonce-bound coverage evidence inner markers (MY-1456 blocker repair).
+# --------------------------------------------------------------------------
+
+
+def test_coverage_evidence_uses_nonce_bound_inner_markers() -> None:
+    """Both review gate scripts must wrap COVERAGE_CONTEXT with nonce-bound
+    inner markers (COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN/END).
+
+    This prevents a forged static 'COVERAGE CONTEXT' header in the PR diff
+    from being mistaken for trusted analyzer output — only the nonce-bound
+    section is authoritative, and the nonce is unpredictable to the PR author.
+    """
+    for script_name in ("claude-review.sh", "codex-review.sh"):
+        path = CI_DIR / script_name
+        content = path.read_text(encoding="utf-8")
+
+        # Must contain the nonce-bound inner markers around coverage context
+        assert "COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN" in content, (
+            f"{script_name} must wrap coverage context with nonce-bound BEGIN marker"
+        )
+        assert "COVERAGE_EVIDENCE_${FENCE_NONCE}_END" in content, (
+            f"{script_name} must wrap coverage context with nonce-bound END marker"
+        )
+
+
+def test_review_coverage_rules_references_nonce_markers() -> None:
+    """review_coverage_rules must accept a nonce parameter and include a
+    nonce-bound trust instruction so the reviewer knows which coverage
+    context block is authoritative vs. forged in the diff."""
+    # Call with a known nonce to verify it's referenced in output
+    test_nonce = "abc123def456abc123def456abc12345"
+    result = _run(
+        f". {COMMON}\nreview_coverage_rules {test_nonce}\n", timeout=30
+    )
+
+    assert result.returncode == 0, result.stderr
+    # The output must reference the nonce to bind trust
+    assert f"COVERAGE_EVIDENCE_{test_nonce}_BEGIN" in result.stdout, (
+        "review_coverage_rules must reference nonce-bound markers in output"
+    )
+    assert f"COVERAGE_EVIDENCE_{test_nonce}_END" in result.stdout, (
+        "review_coverage_rules must reference nonce-bound markers in output"
+    )

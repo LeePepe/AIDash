@@ -244,7 +244,7 @@ def find_removed_test_functions(
 
     for func_name, match in _find_all_test_functions(base_source):
         func_start_line = base_source[: match.start()].count("\n") + 1
-        func_end_line = _find_func_end(base_lines, func_start_line - 1)
+        func_end_line = _find_func_end(base_lines, func_start_line - 1, path)
 
         overlap = any(
             func_start_line <= ln <= func_end_line for ln in removed_lines
@@ -279,13 +279,23 @@ def find_removed_test_functions(
     return results
 
 
-def _find_func_end(lines: list[str], start_idx: int) -> int:
+def _find_func_end(lines: list[str], start_idx: int, path: str = "") -> int:
     """Find the closing line of a function starting at start_idx (0-based).
 
-    Returns 1-based line number. Uses brace counting for Swift or
-    indentation-based detection for Python (no braces found).
+    Returns 1-based line number. Language detection is path-based:
+    - `.py` files: indentation-based (Python dict/set literals contain braces
+      that would falsely terminate brace counting)
+    - All other files: brace counting (Swift/C-family)
+
+    The `path` parameter enables correct language dispatch. When omitted,
+    falls back to brace-first with indentation fallback (legacy behavior).
     """
-    # First pass: try brace counting (Swift/C-family)
+    # Language-aware dispatch: Python files MUST use indentation parsing
+    # because dict/set literals ({...}) would terminate brace counting early.
+    if path.endswith(".py"):
+        return _find_func_end_python(lines, start_idx)
+
+    # Swift/C-family: brace counting
     depth = 0
     started = False
     for i in range(start_idx, min(start_idx + 500, len(lines))):
@@ -300,8 +310,16 @@ def _find_func_end(lines: list[str], start_idx: int) -> int:
     if started:
         return min(start_idx + 50, len(lines))
 
-    # Fallback: indentation-based (Python). The function body is everything
-    # indented more than the def line, or blank lines between indented lines.
+    # No braces found at all — fall back to indentation (handles edge cases)
+    return _find_func_end_python(lines, start_idx)
+
+
+def _find_func_end_python(lines: list[str], start_idx: int) -> int:
+    """Indentation-based function end detection for Python.
+
+    The function body is everything indented more than the def line,
+    including blank lines between indented lines.
+    """
     def_line = lines[start_idx] if start_idx < len(lines) else ""
     base_indent = len(def_line) - len(def_line.lstrip())
     last_body = start_idx
@@ -389,7 +407,7 @@ def find_related_tests_in_head(
 
         for func_name, match in _find_all_test_functions(source):
             func_start = source[: match.start()].count("\n")
-            func_end_idx = _find_func_end(source_lines, func_start)
+            func_end_idx = _find_func_end(source_lines, func_start, test_file)
 
             func_body = "\n".join(source_lines[func_start:func_end_idx])
 
