@@ -387,10 +387,15 @@ probe_fail() {
 
 #### Probe 1 — store-independent (schema availability)
 
+Both probes must invoke the exact installed CLI binary (`$BIN_DST`,
+defined by the installer as `$HOME/.local/bin/aidash`), never a bare
+PATH-resolved `aidash`, to guarantee the newly installed binary is
+tested — not a stale copy elsewhere in `$PATH`.
+
 ```bash
-p1_cmd="aidash schema list --quiet"
+p1_cmd="$BIN_DST schema list --quiet"
 p1_out=$(mktemp) p1_err=$(mktemp)
-run_with_timeout 30 "$p1_out" "$p1_err" aidash schema list --quiet
+run_with_timeout 30 "$p1_out" "$p1_err" "$BIN_DST" schema list --quiet
 p1_rc=$?
 if [ "$p1_rc" -eq 124 ]; then
     probe_fail "probe 1 (timeout)" "$p1_cmd" "$p1_rc" "$p1_err"
@@ -408,9 +413,9 @@ container-access failures.
 #### Probe 2 — store-dependent (container read under sandbox)
 
 ```bash
-p2_cmd="aidash briefing get --date today --json"
+p2_cmd="$BIN_DST briefing get --date today --json"
 p2_out=$(mktemp) p2_err=$(mktemp)
-run_with_timeout 30 "$p2_out" "$p2_err" aidash briefing get --date today --json
+run_with_timeout 30 "$p2_out" "$p2_err" "$BIN_DST" briefing get --date today --json
 p2_rc=$?
 if [ "$p2_rc" -eq 124 ]; then
     probe_fail "probe 2 (timeout)" "$p2_cmd" "$p2_rc" "$p2_err"
