@@ -153,6 +153,13 @@ jobs:
       - name: Anti-rot — tasks.md in sync with spec + single-layer
         run: scripts/hooks/check-tasks-fresh
 
+      - name: Fixed-install plist + entitlements regression
+        # Hermetic: exercises the real lib-fixed-install-plist.sh helper with
+        # fake launchctl, validates 5-key plist shape, Label vs MachServices
+        # semantics, bootstrap argv, structural signature in the installer,
+        # and app-sandbox-only entitlements. No store, no launchd, no network.
+        run: bash scripts/dev/test-fixed-install-plist.sh
+
       - name: Gate — code changes must include tests
         # 改了 .swift 源码却没动任何测试文件 → 失败。逃生舱:PR 任一 commit
         # message 含 "Allow-No-Tests:"。PR 用 base..head;push-to-main 用 before..after。
