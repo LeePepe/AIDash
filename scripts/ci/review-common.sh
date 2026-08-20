@@ -272,6 +272,18 @@ run_claude_review_gate() {
     # summary, non-array blockers/notes, or malformed blocker entries all
     # trigger parse-failure. This prevents malformed envelopes from silently
     # bypassing the critical/high threshold (MY-1452 fail-closed contract).
+
+    # Top-level additionalProperties:false — only verdict, summary, blockers, notes allowed.
+    local _v_toplevel_extra
+    _v_toplevel_extra="$(printf %s "$verdict_json" | jq -r '
+        (keys - ["verdict","summary","blockers","notes"]) | length' 2>/dev/null)"
+    if [ -z "$_v_toplevel_extra" ] || [ "$_v_toplevel_extra" != "0" ]; then
+        echo "[claude-review] ❌ verdict schema 校验失败: unexpected top-level properties"
+        post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        return 1
+    fi
+
     local _v_verdict _v_summary _v_blockers_type _v_notes_type _v_blockers_valid
     _v_verdict="$(printf %s "$verdict_json" | jq -r '.verdict // empty' 2>/dev/null)"
     if [ "$_v_verdict" != "pass" ] && [ "$_v_verdict" != "changes" ]; then

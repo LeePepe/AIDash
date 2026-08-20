@@ -1225,3 +1225,41 @@ class TestRealGateContract:
         result = _run_real_gate(tmp_path, bin_dir)
 
         assert result.returncode == 0, f"valid notes should pass: {result.stdout}"
+
+    # ------------------------------------------------------------------
+    # Top-level additionalProperties:false (MY-1452 full schema)
+    # ------------------------------------------------------------------
+
+    def test_toplevel_extra_property_structured_output_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Extra top-level property in .structured_output → fail-closed."""
+        output = (
+            '{"structured_output":{"verdict":"pass","summary":"ok",'
+            '"blockers":[],"notes":[],"extra":"bad"}}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1, (
+            "top-level extra property must fail-closed"
+        )
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
+
+    def test_toplevel_extra_property_result_fallback_failclosed(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Extra top-level property via .result fallback → fail-closed."""
+        import json as _json
+        inner = {
+            "verdict": "pass", "summary": "ok",
+            "blockers": [], "notes": [], "injected": True,
+        }
+        output = _json.dumps({"result": _json.dumps(inner)})
+        bin_dir = _make_fake_claude(tmp_path, output, exit_code=0)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        assert result.returncode == 1
+        sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
+        assert "暂不放行" in sticky
