@@ -389,8 +389,75 @@ def _bounded_blob_read(
     return content, False
 
 
+def _unquote_git_path(raw: str) -> str:
+    """Decode a Git C-quoted path back to its literal form.
+
+    Git C-quotes paths containing special characters (newlines, backslashes,
+    double quotes, non-ASCII bytes): the path is surrounded by double quotes
+    and special bytes are backslash-escaped (\\n, \\t, \\\\, \\", \\ooo octal).
+    Unquoted paths are returned unchanged.
+    """
+    if not raw.startswith('"') or not raw.endswith('"'):
+        return raw
+    inner = raw[1:-1]
+    result: list[str] = []
+    i = 0
+    while i < len(inner):
+        if inner[i] == '\\' and i + 1 < len(inner):
+            c = inner[i + 1]
+            if c == 'n':
+                result.append('\n')
+                i += 2
+            elif c == 't':
+                result.append('\t')
+                i += 2
+            elif c == '\\':
+                result.append('\\')
+                i += 2
+            elif c == '"':
+                result.append('"')
+                i += 2
+            elif c == 'a':
+                result.append('\a')
+                i += 2
+            elif c == 'b':
+                result.append('\b')
+                i += 2
+            elif c == 'f':
+                result.append('\f')
+                i += 2
+            elif c == 'r':
+                result.append('\r')
+                i += 2
+            elif c == 'v':
+                result.append('\v')
+                i += 2
+            elif '0' <= c <= '7':
+                # Octal escape: up to 3 digits
+                end = min(i + 4, len(inner))
+                octal = ''
+                j = i + 1
+                while j < end and '0' <= inner[j] <= '7':
+                    octal += inner[j]
+                    j += 1
+                result.append(chr(int(octal, 8)))
+                i = j
+            else:
+                result.append(inner[i])
+                i += 1
+        else:
+            result.append(inner[i])
+            i += 1
+    return ''.join(result)
+
+
 def removed_line_numbers(diff_text: str, path: str) -> Tuple[int, ...]:
-    """BASE-side line numbers removed from `path` by this diff."""
+    """BASE-side line numbers removed from `path` by this diff.
+
+    Handles Git's C-quoting of paths with special characters: paths containing
+    newlines, backslashes, double quotes, or non-ASCII bytes are surrounded by
+    double quotes with backslash escapes in the `diff --git` header.
+    """
     hunk_re = re.compile(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@")
     lines = diff_text.splitlines()
     removed: list[int] = []
@@ -400,7 +467,13 @@ def removed_line_numbers(diff_text: str, path: str) -> Tuple[int, ...]:
 
     for line in lines:
         if line.startswith("diff --git "):
-            in_file = line.endswith(f" b/{path}")
+            # Parse the `diff --git a/<path> b/<path>` header.
+            # Git may C-quote paths with special characters.
+            rest = line[len("diff --git "):]
+            # Extract the b/ path: it may be C-quoted with spaces inside.
+            # Strategy: find the b/ portion by scanning from the end.
+            diff_path = _extract_b_path(rest)
+            in_file = (diff_path == path)
             in_hunk = False
             continue
         if not in_file:
@@ -423,6 +496,35 @@ def removed_line_numbers(diff_text: str, path: str) -> Tuple[int, ...]:
             base_line += 1
 
     return tuple(removed)
+
+
+def _extract_b_path(ab_spec: str) -> str:
+    """Extract the b/ path from a `diff --git a/... b/...` payload.
+
+    Handles both plain and C-quoted paths. The payload is everything after
+    'diff --git '. For C-quoted paths, finds the opening quote of b/ path.
+    """
+    # Case 1: b/ path is C-quoted — look for ' "b/' or ' b/"' pattern
+    # The pattern is: <a-spec> "b/<quoted-path>"
+    idx = ab_spec.find(' "b/')
+    if idx != -1:
+        quoted = ab_spec[idx + 1:]  # includes the opening quote
+        return _unquote_git_path(quoted)[2:]  # strip b/ prefix
+
+    # Case 2: a/ path is C-quoted, b/ path is plain
+    # Pattern: "a/<quoted>" b/<plain>
+    idx = ab_spec.find('" b/')
+    if idx != -1:
+        return ab_spec[idx + 4:]  # everything after b/
+
+    # Case 3: both plain — find b/ by splitting in the middle
+    # Standard: a/<path> b/<path>, where both paths are the same.
+    # Find ' b/' — the separator between a-path and b-path.
+    idx = ab_spec.find(' b/')
+    if idx != -1:
+        return ab_spec[idx + 3:]
+
+    return ""
 
 
 def find_removed_test_functions(

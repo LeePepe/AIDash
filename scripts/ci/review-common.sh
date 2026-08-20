@@ -215,14 +215,18 @@ run_with_timeout() {
     return "$child_status"
 }
 
-# build_scope_evidence <head_sha> <diff_file> <changed_files_newline_separated>
+# build_scope_evidence <head_sha> <diff_file> <changed_paths_nul_file>
+#
+# $3 is a temp file containing NUL-delimited paths (written by `git diff -z`).
+# NUL bytes survive in files but NOT in Bash scalars/command substitutions, so
+# the callers must never store `git diff -z` output in a variable.
 #
 # Prints the evidence block on stdout (possibly empty — most PRs touch no Swift
 # modifier lines, and empty is a normal success). Returns non-zero ONLY when the
 # analyzer itself fails, so callers can fail closed on a broken tool rather than
 # reviewing with silently missing context.
 build_scope_evidence() {
-    local head_sha="$1" diff_file="$2" changed="$3"
+    local head_sha="$1" diff_file="$2" changed_file="$3"
     local count=0
     local -a args=()
 
@@ -231,9 +235,8 @@ build_scope_evidence() {
         return 1
     }
 
-    # NUL-delimited path parsing: $changed arrives from `git diff -z --name-only`
-    # with NUL separators (not newlines), ensuring paths containing newlines,
-    # quotes, backslashes, and non-ASCII are transmitted losslessly.
+    # NUL-delimited path parsing: read from the temp file that preserves NUL
+    # bytes (Bash scalars strip them). -d '' splits on NUL.
     while IFS= read -r -d '' file; do
         [ -z "$file" ] && continue
         case "$file" in
@@ -244,9 +247,7 @@ build_scope_evidence() {
                 count=$((count + 1))
                 ;;
         esac
-    # Process substitution with printf '%s' (no trailing newline) feeds the
-    # NUL-delimited blob. The -d '' in read splits on NUL.
-    done < <(printf '%s' "$changed")
+    done < "$changed_file"
 
     # No Swift files changed → nothing to resolve; empty output, success.
     # Checked with a plain counter (not ${#args[@]}) and returned BEFORE any
@@ -263,13 +264,17 @@ build_scope_evidence() {
         "${args[@]}"
 }
 
-# build_coverage_context <head_sha> <base_sha> <diff_file> <changed_files_newline_separated>
+# build_coverage_context <head_sha> <base_sha> <diff_file> <changed_paths_nul_file>
+#
+# $4 is a temp file containing NUL-delimited paths (written by `git diff -z`).
+# NUL bytes survive in files but NOT in Bash scalars/command substitutions, so
+# the callers must never store `git diff -z` output in a variable.
 #
 # When tests are removed in the diff, searches HEAD for existing test functions
 # that cover the same production symbols. Returns empty on success when no tests
 # were removed (the common case). Returns non-zero ONLY on analyzer failure.
 build_coverage_context() {
-    local head_sha="$1" base_sha="$2" diff_file="$3" changed="$4"
+    local head_sha="$1" base_sha="$2" diff_file="$3" changed_file="$4"
     local count=0
     local -a args=()
 
@@ -278,16 +283,15 @@ build_coverage_context() {
         return 1
     }
 
-    # NUL-delimited path parsing: $changed arrives from `git diff -z --name-only`
-    # with NUL separators, ensuring lossless path transport for non-ASCII,
-    # quoted, backslash-bearing, and newline-containing paths.
+    # NUL-delimited path parsing: read from the temp file that preserves NUL
+    # bytes (Bash scalars strip them). -d '' splits on NUL.
     while IFS= read -r -d '' file; do
         [ -z "$file" ] && continue
         args[count]="--changed-file"
         count=$((count + 1))
         args[count]="$file"
         count=$((count + 1))
-    done < <(printf '%s' "$changed")
+    done < "$changed_file"
 
     [ "$count" -eq 0 ] && return 0
 
