@@ -91,11 +91,41 @@ validate_fixed_plist() {
 # /bin/launchctl). Tests inject a shell script fake via this variable to
 # capture and assert the exact invocation without touching the real job.
 #
-# Uses an array to avoid word-splitting — each argument is a distinct
-# element, never interpolated through command substitution.
 # Returns the exit code of the launchctl command.
 bootstrap_fixed_launchagent() {
     local uid_n=$1 plist_path=$2
     local cmd="${FIXED_LAUNCHCTL_CMD:-/bin/launchctl}"
     "$cmd" bootstrap "gui/$uid_n" "$plist_path"
+}
+
+# provision_fixed_launchagent PLIST_DIR JOB_LABEL MACH_SERVICE EXEC_PATH UID_N
+#
+# Complete provisioning seam: render → validate → atomic install → bootstrap.
+# This is the single production entry point for LaunchAgent provisioning.
+# Both install-fixed-build.sh and the hermetic test call this function.
+#
+# Injectable seams:
+#   FIXED_LAUNCHCTL_CMD — launchctl binary (default /bin/launchctl)
+#   PLIST_DIR — target directory (production: ~/Library/LaunchAgents;
+#               test: a temp directory)
+#
+# Returns 0 on success, non-zero on any step failure.
+provision_fixed_launchagent() {
+    local plist_dir=$1 job_label=$2 mach_service=$3 exec_path=$4 uid_n=$5
+    local plist_path="$plist_dir/$job_label.plist"
+    local staging="${plist_path}.staging.$$"
+
+    mkdir -p "$plist_dir" || { echo "FATAL: cannot create $plist_dir" >&2; return 1; }
+
+    render_fixed_plist "$staging" "$job_label" "$mach_service" "$exec_path"
+
+    if ! validate_fixed_plist "$staging" "$job_label" "$mach_service" "$exec_path"; then
+        cat "$staging" >&2
+        rm -f "$staging"
+        return 1
+    fi
+
+    mv -f "$staging" "$plist_path" || { echo "FATAL: plist install failed" >&2; return 1; }
+
+    bootstrap_fixed_launchagent "$uid_n" "$plist_path"
 }

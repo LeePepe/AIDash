@@ -1,10 +1,10 @@
 #!/bin/bash
 # Hermetic regression test for the fixed-install LaunchAgent plist.
 #
-# Sources the REAL lib-fixed-install-plist.sh helper (the same code path used
-# by install-fixed-build.sh in production) to render, validate, and bootstrap.
-# Injects a fake launchctl via FIXED_LAUNCHCTL_CMD to capture and assert the
-# exact argv without touching the real launchd job or store.
+# Invokes the SAME provision_fixed_launchagent function that production uses
+# (from lib-fixed-install-plist.sh), with a temp plist directory and a fake
+# launchctl. If production deletes/reorders/changes the provisioning call,
+# the structural assertion on the installer source fails.
 #
 # Exit 0 = all assertions pass. Non-zero = regression.
 set -uo pipefail
@@ -39,24 +39,20 @@ FAKE_LAUNCHCTL_BIN=$(mktemp "${TMPDIR:-/tmp}/fake-launchctl.XXXXXX")
 chmod +x "$FAKE_LAUNCHCTL_BIN"
 cat > "$FAKE_LAUNCHCTL_BIN" <<'FAKE_EOF'
 #!/bin/bash
-# Fake launchctl: record all argv (one per line) then exit 0
 for arg in "$@"; do
   printf '%s\n' "$arg"
 done > "$FAKE_LAUNCHCTL_LOG_PATH"
 exit 0
 FAKE_EOF
-# The fake reads its log path from env — inject it
 export FAKE_LAUNCHCTL_LOG_PATH="$FAKE_LAUNCHCTL_LOG"
-
-# Inject the fake into the helper via FIXED_LAUNCHCTL_CMD
 export FIXED_LAUNCHCTL_CMD="$FAKE_LAUNCHCTL_BIN"
 
 # --- Source the shared helper (production code path) -------------------------
 source "$SCRIPT_DIR/lib-fixed-install-plist.sh"
 
-# --- Temp plist (cleaned up on exit) -----------------------------------------
-TMP_PLIST=$(mktemp "${TMPDIR:-/tmp}/aidash-plist-test.XXXXXX")
-trap 'rm -f "$TMP_PLIST" "$FAKE_LAUNCHCTL_LOG" "$FAKE_LAUNCHCTL_BIN"' EXIT
+# --- Temp plist dir (not ~/Library/LaunchAgents) -----------------------------
+TMP_PLIST_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aidash-plist-test.XXXXXX")
+trap 'rm -rf "$TMP_PLIST_DIR" "$FAKE_LAUNCHCTL_LOG" "$FAKE_LAUNCHCTL_BIN"' EXIT
 
 # --- Assertions framework ---------------------------------------------------
 fail_count=0
@@ -80,27 +76,24 @@ assert_neq() {
 }
 
 echo "=== Hermetic plist shape regression test ==="
-echo "  (exercises the real lib-fixed-install-plist.sh helper)"
+echo "  (invokes the real provision_fixed_launchagent production seam)"
 
-# --- 1. Render plist via the shared helper -----------------------------------
-render_fixed_plist "$TMP_PLIST" "$LABEL" "$MACH_SERVICE" "$FIXED_EXEC"
-if [ -s "$TMP_PLIST" ]; then
-  echo "  PASS: render_fixed_plist produced non-empty output"
-else
-  echo "  FAIL: render_fixed_plist produced empty file" >&2
-  fail_count=$((fail_count + 1))
-fi
+# --- 1. Invoke the production seam with temp dir + fake launchctl ------------
+provision_fixed_launchagent "$TMP_PLIST_DIR" "$LABEL" "$MACH_SERVICE" "$FIXED_EXEC" "$UID_N"
+provision_rc=$?
+assert_eq "provision_fixed_launchagent exit code" "0" "$provision_rc"
 
-# --- 2. Validate plist via the shared helper ---------------------------------
-if validate_fixed_plist "$TMP_PLIST" "$LABEL" "$MACH_SERVICE" "$FIXED_EXEC"; then
-  echo "  PASS: validate_fixed_plist succeeded"
+# --- 2. Verify the plist was written to the expected path --------------------
+PLIST_PATH="$TMP_PLIST_DIR/$LABEL.plist"
+if [ -f "$PLIST_PATH" ]; then
+  echo "  PASS: plist file exists at expected path"
 else
-  echo "  FAIL: validate_fixed_plist returned non-zero" >&2
+  echo "  FAIL: plist file missing at $PLIST_PATH" >&2
   fail_count=$((fail_count + 1))
 fi
 
 # --- 3. Verify exact 5-key shape --------------------------------------------
-_pv() { /usr/libexec/PlistBuddy -c "Print :$1" "$TMP_PLIST" 2>/dev/null; }
+_pv() { /usr/libexec/PlistBuddy -c "Print :$1" "$PLIST_PATH" 2>/dev/null; }
 
 assert_eq "Label"                               "$LABEL"        "$(_pv Label)"
 assert_eq "Program"                             "$FIXED_EXEC"   "$(_pv Program)"
@@ -108,32 +101,22 @@ assert_eq "MachServices.$MACH_SERVICE"          "true"          "$(_pv "MachServ
 assert_eq "EnvironmentVariables.AIDASH_XPC_AGENT" "1"           "$(_pv "EnvironmentVariables:AIDASH_XPC_AGENT")"
 assert_eq "ProcessType"                         "Interactive"   "$(_pv ProcessType)"
 
-# Count top-level keys (exactly 5)
-top_keys=$(/usr/bin/plutil -convert json -o - "$TMP_PLIST" 2>/dev/null \
+top_keys=$(/usr/bin/plutil -convert json -o - "$PLIST_PATH" 2>/dev/null \
   | /usr/bin/python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
 assert_eq "top-level key count" "5" "${top_keys:-<error>}"
 
 # --- 4. Assert Label != MachServices key (they MUST differ) ------------------
 assert_neq "Label differs from MachServices key" "$LABEL" "$MACH_SERVICE"
 
-# MachServices must NOT contain Label as a key (only MACH_SERVICE)
-mach_label_val=$(/usr/libexec/PlistBuddy -c "Print :MachServices:$LABEL" "$TMP_PLIST" 2>/dev/null)
+mach_label_val=$(/usr/libexec/PlistBuddy -c "Print :MachServices:$LABEL" "$PLIST_PATH" 2>/dev/null)
 if [ -z "$mach_label_val" ]; then
   echo "  PASS: MachServices does NOT contain Label key '$LABEL'"
 else
-  echo "  FAIL: MachServices contains Label key '$LABEL' (should only have '$MACH_SERVICE')" >&2
+  echo "  FAIL: MachServices contains Label key '$LABEL'" >&2
   fail_count=$((fail_count + 1))
 fi
 
-# --- 5. Bootstrap via shared helper with fake launchctl ----------------------
-# Call the SAME bootstrap_fixed_launchagent helper that production uses.
-# FIXED_LAUNCHCTL_CMD points to our fake, which records argv.
-PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
-bootstrap_fixed_launchagent "$UID_N" "$PLIST_PATH"
-bootstrap_rc=$?
-assert_eq "bootstrap_fixed_launchagent exit code" "0" "$bootstrap_rc"
-
-# Assert the fake launchctl received exactly 3 argv: bootstrap gui/<uid> <plist>
+# --- 5. Assert fake launchctl received exact 3 argv from bootstrap -----------
 argv_line1=$(sed -n '1p' "$FAKE_LAUNCHCTL_LOG" 2>/dev/null)
 argv_line2=$(sed -n '2p' "$FAKE_LAUNCHCTL_LOG" 2>/dev/null)
 argv_line3=$(sed -n '3p' "$FAKE_LAUNCHCTL_LOG" 2>/dev/null)
@@ -144,7 +127,18 @@ assert_eq "launchctl argv[0]" "bootstrap" "$argv_line1"
 assert_eq "launchctl argv[1]" "gui/$UID_N" "$argv_line2"
 assert_eq "launchctl argv[2]" "$PLIST_PATH" "$argv_line3"
 
-# --- 6. Entitlements file checks --------------------------------------------
+# --- 6. Structural assertion: installer MUST call provision_fixed_launchagent -
+# If production deletes, reorders, or replaces the provisioning call, this
+# assertion fails. Greps the installer source for the exact call signature.
+INSTALLER="$REPO_ROOT/scripts/dev/install-fixed-build.sh"
+if grep -q 'provision_fixed_launchagent "\$PLIST_DIR" "\$LABEL" "\$MACH_SERVICE" "\$FIXED_EXEC" "\$UID_N"' "$INSTALLER"; then
+  echo "  PASS: installer calls provision_fixed_launchagent with exact signature"
+else
+  echo "  FAIL: installer missing provision_fixed_launchagent call with expected args" >&2
+  fail_count=$((fail_count + 1))
+fi
+
+# --- 7. Entitlements file checks --------------------------------------------
 ENT_FILE="$REPO_ROOT/Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements"
 if [ -f "$ENT_FILE" ]; then
   echo "  PASS: fixed entitlements file exists"

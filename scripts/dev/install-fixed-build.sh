@@ -209,8 +209,8 @@ install -m 755 "$BIN_SRC" "$BIN_DST" || { echo "[install-fixed] ERROR: CLI insta
 # The sandboxed app cannot write ~/Library/LaunchAgents or call launchctl for
 # job management (app-sandbox confines it to its container). The UNSANDBOXED
 # installer script authors the canonical plist and bootstraps the job itself.
-# Plist authoring is in a shared helper so the hermetic test exercises the same
-# code path.
+# The complete provisioning step is in a shared helper so the hermetic test
+# exercises the exact same code path.
 source "$REPO_ROOT/scripts/dev/lib-fixed-install-plist.sh"
 
 FIXED_EXEC="$APP_DST/Contents/MacOS/AIDash"
@@ -222,33 +222,20 @@ PLIST="$PLIST_DIR/$LABEL.plist"
 echo "[install-fixed] booting out stale LaunchAgent (if any)"
 launchctl bootout "gui/$UID_N/$LABEL" 2>/dev/null || true
 
-# 2. Author the canonical plist via shared helper
-echo "[install-fixed] writing LaunchAgent plist → $PLIST"
-mkdir -p "$PLIST_DIR"
-PLIST_STAGE="${PLIST}.staging.$$"
-render_fixed_plist "$PLIST_STAGE" "$LABEL" "$MACH_SERVICE" "$FIXED_EXEC"
-
-# 3. Validate plist syntax and shape via shared helper
-if ! validate_fixed_plist "$PLIST_STAGE" "$LABEL" "$MACH_SERVICE" "$FIXED_EXEC"; then
-  cat "$PLIST_STAGE" >&2
-  rm -f "$PLIST_STAGE"
-  exit 1
-fi
-
-# 4. Atomically install plist
-mv -f "$PLIST_STAGE" "$PLIST" || { echo "FATAL: plist install failed" >&2; exit 1; }
-
-# 5. Bootstrap the LaunchAgent via shared helper
-echo "[install-fixed] bootstrapping LaunchAgent"
-if ! bootstrap_fixed_launchagent "$UID_N" "$PLIST"; then
-  echo "[install-fixed] FATAL: launchctl bootstrap failed" >&2
-  echo "    plist: $PLIST" >&2
-  echo "    domain: gui/$UID_N" >&2
+# 2. Provision: render → validate → atomic install → bootstrap (single seam)
+echo "[install-fixed] provisioning LaunchAgent → $PLIST"
+if ! provision_fixed_launchagent "$PLIST_DIR" "$LABEL" "$MACH_SERVICE" "$FIXED_EXEC" "$UID_N"; then
+  echo "[install-fixed] FATAL: LaunchAgent provisioning failed" >&2
+  echo "    plist_dir: $PLIST_DIR" >&2
+  echo "    label:     $LABEL" >&2
+  echo "    mach:      $MACH_SERVICE" >&2
+  echo "    exec:      $FIXED_EXEC" >&2
+  echo "    domain:    gui/$UID_N" >&2
   launchctl print "gui/$UID_N/$LABEL" 2>&1 | head -5 >&2 || echo "    (job not loaded)" >&2
   exit 1
 fi
 
-# 6. Verify the job is loaded and Program matches
+# 3. Verify the job is loaded and Program matches
 prog="$(/usr/libexec/PlistBuddy -c 'Print :Program' "$PLIST" 2>/dev/null)"
 if ! launchctl print "gui/$UID_N/$LABEL" >/dev/null 2>&1; then
   echo "[install-fixed] FATAL: job not loaded after bootstrap" >&2
