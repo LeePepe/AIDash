@@ -78,49 +78,73 @@ Create `Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements`:
 
 `install-fixed-build.sh` retains the current unsigned build flags
 (`CODE_SIGNING_ALLOWED=NO`) and adds a deterministic post-build ad-hoc
-codesign step. The signing order is **inside-out**: every nested executable
-inside the app bundle must be individually signed before the outer app is
-signed, so that each executable carries the sandbox entitlement in its own
-code signature.
+codesign step that embeds the fixed entitlements into the app bundle.
+
+#### Current bundle layout
+
+Today the repo ships a single-executable app bundle:
+
+```
+AIDash.app/
+  Contents/
+    MacOS/AIDash          ← the one Mach-O; LaunchAgent Program points here
+    Info.plist
+    Resources/
+    _CodeSignature/
+```
+
+There is **no** nested XPC service bundle, no nested helper executable, and
+no embedded LaunchAgent helper inside the app bundle. The LaunchAgent plist
+sets `Program` to the outer app's main executable
+(`/Applications/AIDash.app/Contents/MacOS/AIDash`), which handles both
+GUI and headless XPC-agent modes. The separately installed CLI
+(`~/.local/bin/aidash`) is a standalone binary outside the app bundle; it
+does not access the SwiftData store and is not subject to this signing
+contract.
 
 #### Signing order (inside-out, three-phase, deterministic)
 
 The signing contract has three phases executed strictly in order. Each
-phase signs only the targets listed; no later phase may modify the
-contents of a bundle signed in an earlier phase.
-
-**Phase 1 — Leaf Mach-O executables.** Sign every standalone executable
-file that is NOT the main app binary and is NOT a bundle directory. This
-covers helpers, CLI tools, and the inner executables of XPC services or
-LaunchAgent helpers. Only regular Mach-O files are matched; `.xpc` and
-`.app` bundle directories are excluded.
+phase uses a **separate enumeration pass** — never a single combined
+traversal that could sign a bundle directory before its inner contents.
+No later phase may modify the contents of a bundle signed in an earlier
+phase.
 
 ```bash
 ENTITLEMENTS="Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements"
+```
 
-# Phase 1: sign leaf Mach-O executables (not bundle dirs, not main binary)
-find "$APP_SRC/Contents" -type f -perm +111 \
+**Phase 1 — Leaf Mach-O executables and libraries.** Sign every regular
+executable file and dynamic library inside `Contents/` that is not the
+main app binary (`Contents/MacOS/*`). This phase matches only regular
+files (`-type f`), never bundle directories.
+
+```bash
+# Phase 1: sign leaf executables/dylibs (regular files only, not main binary)
+find "$APP_SRC/Contents" -type f \( -perm +111 -o -name "*.dylib" \) \
   ! -path "$APP_SRC/Contents/MacOS/*" \
-  ! -name "*.xpc" \
-  -print0 | while IFS= read -r -d '' exe; do
-    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$exe"
+  -print0 | while IFS= read -r -d '' leaf; do
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$leaf"
 done
 ```
 
-**Phase 2 — Nested bundles (deepest-first).** Sign `.xpc` service
-bundles and any other nested bundle directories, processing the deepest
-nesting level first so that an outer bundle is never sealed before its
-inner contents. After this phase every nested bundle's seal covers all
-of its already-signed leaf executables from Phase 1.
+With today's single-executable bundle this phase is a no-op. It exists
+so that the contract remains correct if future work adds nested helpers.
+
+**Phase 2 — Nested code bundles (deepest-first).** In a **separate**
+enumeration pass, sign `.xpc`, `.appex`, and `.app` bundle directories
+nested inside `Contents/`, processing the deepest nesting level first so
+that an enclosing bundle is never sealed before its inner contents.
 
 ```bash
-# Phase 2: sign nested bundles deepest-first (sort by depth descending)
-find "$APP_SRC/Contents" -name "*.xpc" -type d -print0 \
-  | sort -rz \
-  | while IFS= read -r -d '' bundle; do
-      codesign --force --sign - --entitlements "$ENTITLEMENTS" "$bundle"
-  done
+# Phase 2: sign nested code bundles deepest-first (separate pass)
+find "$APP_SRC/Contents" \( -name "*.xpc" -o -name "*.appex" \) -type d \
+  -print0 | sort -rz | while IFS= read -r -d '' bundle; do
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$bundle"
+done
 ```
+
+With today's bundle this phase is also a no-op.
 
 **Phase 3 — Outer app bundle.** Sign the top-level `.app` last, sealing
 all nested signatures from Phases 1 and 2.
@@ -130,17 +154,45 @@ all nested signatures from Phases 1 and 2.
 codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_SRC"
 ```
 
-**Invariant:** no command in Phase 2 or 3 may write inside a bundle
-that was already sealed in a prior phase. Violating this (e.g. signing
-a `.xpc` directory before its inner executable, then signing that
-executable) invalidates the outer seal and produces a broken signature.
+#### Post-sign verification gate (fail-closed)
 
-Signing only the outer app is **insufficient**: nested executables spawned
-by launchd (e.g. the XPC agent registered via a LaunchAgent plist) run as
-independent processes. macOS evaluates each process's own code signature for
-sandbox enforcement. A nested executable that inherits an outer-only
-signature but has no embedded entitlements of its own will run unsandboxed
-and fail to access the protected container on macOS 26.
+After all three phases, the installer **must** verify the result. If any
+nested code bundle exists (Phase 1 or Phase 2 was non-empty), the
+verification must confirm that the deep signature is intact and that
+every signed executable carries the expected entitlements:
+
+```bash
+# Verify deep signature integrity
+codesign --verify --deep --strict "$APP_SRC"
+
+# Verify the main executable has app-sandbox
+codesign -d --entitlements :- "$APP_SRC/Contents/MacOS/AIDash" \
+  | grep -q "com.apple.security.app-sandbox" \
+  || { echo "FATAL: app-sandbox entitlement missing"; exit 1; }
+```
+
+If `codesign --verify --deep --strict` fails, the installer must exit
+non-zero without proceeding to install. This is fail-closed: a broken
+nested signature is never silently installed.
+
+#### Design rationale
+
+**Why inside-out?** macOS evaluates each process's own code signature
+for sandbox enforcement. The LaunchAgent `Program` today points to the
+outer app executable, so signing the outer `.app` alone is sufficient
+for the current single-executable layout. However, if a future change
+adds a nested XPC service or helper that launchd spawns as a separate
+process, that nested executable must carry its own embedded entitlements
+— an outer-only signature would leave it unsandboxed and unable to
+access the protected container on macOS 26.
+
+**Why separate enumeration passes?** A single combined `find` that
+matches both `-type f` executables and `-type d` bundle directories in
+one traversal can process them in pre-order (parent before children).
+This signs the `.xpc` bundle directory before its inner executable,
+then re-signs that executable — mutating the already-sealed bundle and
+invalidating its signature. Separate passes guarantee Phase 1 (leaves)
+completes before Phase 2 (enclosing bundles) begins.
 
 This approach is preferred over passing `CODE_SIGNING_ALLOWED=YES` +
 `CODE_SIGN_ENTITLEMENTS` through xcodebuild, which may interact
@@ -209,19 +261,24 @@ launchd-agent context.
 
 ### LaunchAgent sandbox compatibility
 
-The XPC agent runs as a launchd-agent via `launchctl bootstrap gui/<uid>`.
-The LaunchAgent installer (`LaunchdAgentInstaller.swift`) deliberately uses
-plain `launchctl bootstrap` instead of `SMAppService` to avoid Lightweight
-Code Requirement (LWCR) issues with debug builds. This remains unchanged.
+The LaunchAgent plist sets `Program` to the outer app's main executable:
+`/Applications/AIDash.app/Contents/MacOS/AIDash`. There is no separate
+nested XPC helper binary — the main executable handles both GUI and
+headless XPC-agent modes. `LaunchdAgentInstaller.swift` deliberately
+uses plain `launchctl bootstrap` instead of `SMAppService` to avoid
+Lightweight Code Requirement (LWCR) issues with debug builds. This
+remains unchanged.
 
 Mach services brokered by launchd work inside the App Sandbox. The XPC
-connection between CLI (`aidash`) and the sandboxed agent uses a Mach
-service name registered in the LaunchAgent plist. launchd brokers the
-connection regardless of sandbox posture — the sandbox does not restrict
-incoming Mach service connections that launchd has registered for the job.
+connection between the CLI (`aidash`, a separately installed standalone
+binary at `~/.local/bin/aidash` that does not access the store) and the
+sandboxed agent uses a Mach service name registered in the LaunchAgent
+plist. launchd brokers the connection regardless of sandbox posture —
+the sandbox does not restrict incoming Mach service connections that
+launchd has registered for the job.
 
-The agent's file access is confined to its container. This is compatible
-because:
+The agent process's file access is confined to its container. This is
+compatible because:
 - SwiftData store: lives inside `~/Library/Containers/<bundleID>/Data/...`
   (the agent's own container).
 - XPC communication: Mach services, no filesystem dependency.
