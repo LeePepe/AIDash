@@ -32,12 +32,11 @@ jobs:
         # flakiness a gate must not have. Bump this deliberately, with the
         # resulting fixes in the same commit.
         run: python -m pip install --upgrade pip pytest 'ruff==0.15.13'
-      - name: pytest
+      - name: pytest (resolved AidataIntegrationTests gate)
         # The warehouse (L3_merge/warehouse.db) is a gitignored local artifact,
         # so integration tests that need it skip themselves here. The hermetic
         # unit tests — including the digest golden — must pass.
-        working-directory: aidata
-        run: python -m pytest tests/ -q
+        run: scripts/context/run AidataIntegrationTests --mode ci
       - name: ruff (production code + tests)
         # Data layers are gitignored, but exclude them explicitly so a stray
         # local artifact can never fail CI.
@@ -127,12 +126,10 @@ jobs:
         # Stdlib-only in production; same pinned ruff as the aidata job so a
         # new linter release cannot turn this gate red with no code change.
         run: python -m pip install --upgrade pip pytest 'ruff==0.15.13'
-      - name: pytest
-        working-directory: scripts/ci
-        run: python -m pytest tests/ -q
+      - name: pytest (review + recursive context gates)
+        run: python -m pytest scripts/ci/tests scripts/context/tests -q
       - name: ruff
-        working-directory: scripts/ci
-        run: ruff check .
+        run: ruff check scripts/ci scripts/context
 
   build:
     name: build + test (macOS 26)
@@ -149,6 +146,9 @@ jobs:
 
       - name: Anti-rot — frontmatter matches code
         run: scripts/hooks/check-frontmatter
+
+      - name: Anti-rot — recursive contexts resolve every file exactly once
+        run: scripts/context/audit
 
       - name: Anti-rot — tasks.md in sync with spec + single-layer
         run: scripts/hooks/check-tasks-fresh
@@ -214,21 +214,13 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        run: xcodegen generate
+      - name: Generate Xcode project (resolved XcodeWorkspace gate)
+        run: scripts/context/run XcodeWorkspace --mode ci
 
-      - name: swift test (AIDashCore)
-        run: swift test --package-path Packages/AIDashCore
+      - name: swift test (resolved AIDashCore gate)
+        run: scripts/context/run AIDashCore --mode ci
 
-      - name: Build AIDashApp (macOS)
-        run: |
-          xcodebuild \
-            -scheme AIDashApp \
-            -destination "platform=macOS" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-
-      - name: Build AIDashApp (iOS)
+      - name: Build AIDashApp (resolved macOS + iOS gates)
         # 宪法 §Testing gate 1(四端构建门)的 iOS 边。AIDashApp 是
         # supportedDestinations: [macOS, iOS] 的单 target,generic/platform=iOS
         # 编一次即覆盖 iPhone/iPad(同 target、同代码),不必再加 iPad destination。
@@ -236,17 +228,7 @@ jobs:
         # 这个门防的是 T201 那类回归:macOS 专属 API(SecCode 等)悄悄漏进
         # 共用代码路径,macOS 绿、iOS 却编不过——只跑 macOS 的话看不见。
         # CI 不签名,所以 CODE_SIGNING_ALLOWED=NO(entitlements 按 SDK 拆分见 T202)。
-        run: |
-          xcodebuild \
-            -scheme AIDashApp \
-            -destination "generic/platform=iOS" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+        run: scripts/context/run AIDashApp --mode ci
 
-      - name: Build aidash CLI (macOS)
-        run: |
-          xcodebuild \
-            -scheme aidash \
-            -destination "platform=macOS" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+      - name: Build aidash CLI (resolved macOS gate)
+        run: scripts/context/run aidashCLI --mode ci

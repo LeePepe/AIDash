@@ -3,6 +3,11 @@
 本仓库的合并门禁分三层:**本地 hooks**(快、可绕)、**GitHub Actions**(服务端、
 不可绕)、**GitHub ruleset**(把关键 check 变成合并硬门)。
 
+路径到 gate 的单一来源是递归 `CONTEXT.md` 树。`scripts/context/resolve <path>`
+给出 owning leaf;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gates;
+`scripts/context/audit` 保证所有文件唯一归类并核对依赖与 manifest。hooks 不维护
+第二份 package/path registry;CI 的 SPM、XcodeGen、App 与 CLI 命令也从 leaf gate 读取。
+
 ## 一图
 
 ```

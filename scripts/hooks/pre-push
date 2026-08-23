@@ -6,8 +6,8 @@
 #
 #     git config core.hooksPath scripts/hooks
 #
-# Runs Core tests + workspace build before push. Skips the heavy
-# xcodebuild gate for docs-only pushes. Bypass for emergencies with
+# Resolves changed files to leaf gates. Heavy App/CLI builds remain required in
+# CI, where they cannot touch local app-host state. Bypass for emergencies with
 # `git push --no-verify`.
 
 set -e
@@ -28,6 +28,7 @@ zero="0000000000000000000000000000000000000000"
 # Captured diff range for the quality gates (require-tests / diff-size).
 gate_base=""
 gate_head=""
+changed_paths=""
 
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "$local_sha" ] && continue
@@ -56,6 +57,8 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     if [ -z "$changed_files" ]; then
         continue
     fi
+    changed_paths="${changed_paths}${changed_files}
+"
 
     # Anything outside docs/, *.md, .specify/, .github/, scripts/hooks/
     # counts as code.
@@ -71,8 +74,20 @@ if [ "$pushing_anything" = "0" ]; then
     exit 0
 fi
 
+# The recursive audit is the routing anti-rot gate. Resolve every changed path
+# before deciding which local gates apply; no hook-local layer registry exists.
+scripts/context/audit >/dev/null
+layers=""
+while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    layer="$(scripts/context/resolve --format layer "$file")"
+    [ -z "$layer" ] || layers="${layers}${layer}
+"
+done <<< "$(printf '%s' "$changed_paths" | sed '/^$/d' | sort -u)"
+layers="$(printf '%s' "$layers" | sed '/^$/d' | sort -u)"
+
 if [ "$docs_only" = "1" ]; then
-    echo "[pre-push] docs-only push; skipping build/test gate."
+    echo "[pre-push] docs-only push; routing audit passed."
     exit 0
 fi
 
@@ -139,57 +154,13 @@ if [ -f "$REPO_ROOT/.swiftlint.yml" ]; then
     fi
 fi
 
-# Test gate — Core package only (fast, no Xcode required for SPM tests).
-if [ -d "Packages/AIDashCore" ]; then
-    echo "[pre-push] swift test (AIDashCore)..."
-    if ! swift test --package-path Packages/AIDashCore > /tmp/aidash-pre-push-test.log 2>&1; then
-        echo "[pre-push] FAILED: swift test"
-        tail -40 /tmp/aidash-pre-push-test.log
-        exit 1
-    fi
-fi
-
-# Build gate — generate xcodeproj if missing, then build macOS app.
-# Skip if xcodegen / xcodebuild not yet available (during very early
-# scaffolding tasks T001-T008 the project may not yet exist).
-if [ -f "project.yml" ]; then
-    if ! command -v xcodegen >/dev/null 2>&1; then
-        echo "[pre-push] WARNING: project.yml exists but xcodegen not installed; skipping build gate."
-    elif ! command -v xcodebuild >/dev/null 2>&1; then
-        echo "[pre-push] WARNING: xcodebuild not found; skipping build gate."
-    else
-        echo "[pre-push] xcodegen generate..."
-        if ! xcodegen generate > /tmp/aidash-pre-push-xcodegen.log 2>&1; then
-            echo "[pre-push] FAILED: xcodegen generate"
-            tail -40 /tmp/aidash-pre-push-xcodegen.log
-            exit 1
-        fi
-
-        # If a workspace/project exists, do a macOS build of every shipped
-        # target. Both AIDashApp and the aidash CLI must build cleanly —
-        # CLI breakage previously slipped through because only AIDashApp
-        # was gated here (MY-1023).
-        if [ -d "AIDash.xcodeproj" ] || [ -d "AIDash.xcworkspace" ]; then
-            echo "[pre-push] xcodebuild AIDashApp (macOS)..."
-            if ! xcodebuild -scheme AIDashApp -destination "platform=macOS" \
-                    CODE_SIGNING_ALLOWED=NO build \
-                    > /tmp/aidash-pre-push-build-app.log 2>&1; then
-                echo "[pre-push] FAILED: xcodebuild AIDashApp"
-                tail -50 /tmp/aidash-pre-push-build-app.log
-                exit 1
-            fi
-
-            echo "[pre-push] xcodebuild aidash CLI (macOS)..."
-            if ! xcodebuild -scheme aidash -destination "platform=macOS" \
-                    CODE_SIGNING_ALLOWED=NO build \
-                    > /tmp/aidash-pre-push-build-cli.log 2>&1; then
-                echo "[pre-push] FAILED: xcodebuild aidash"
-                tail -50 /tmp/aidash-pre-push-build-cli.log
-                exit 1
-            fi
-        fi
-    fi
-fi
+# Run only local gates declared by affected leaves. Package leaves provide SPM
+# build/test gates. App, CLI, and workspace leaves deliberately expose their
+# heavy xcodebuild/xcodegen gates to CI only.
+while IFS= read -r layer; do
+    [ -z "$layer" ] && continue
+    scripts/context/run "$layer" --mode local
+done <<< "$layers"
 
 echo "[pre-push] all checks passed."
 exit 0

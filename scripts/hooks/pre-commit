@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# AIDash pre-commit hook — 增量 SPM 级发现(秒级)。
+# AIDash pre-commit hook — resolver-driven incremental gates.
 #
-# 只对本次暂存改动**涉及的 SPM 包**跑 swift build + test,并对暂存的 .swift
-# 跑 swiftlint。全量测试与 App/CLI 构建在 pre-push,不在这里(commit 应快)。
+# Resolve staged leaves, run their local gates, and lint staged Swift. Package
+# leaves provide SPM build/test gates; heavy App/CLI builds stay in required CI.
 #
 # 装法(每个 worktree 一次):
 #     git config core.hooksPath scripts/hooks
 #
-# 失败输出结构化,便于编排层解析出 {package, 失败原因} 并派对应层 subagent 修。
+# Gate failures are structured as {layer,path,kind,detail,red_lines}.
 # 逃生:纯 docs/非包改动自动跳过;紧急可 `git commit --no-verify`
 # (但 CI 仍会拦——不可跳过的门在服务端)。
 
@@ -19,39 +19,35 @@ cd "$REPO_ROOT"
 staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 [ -z "$staged" ] && exit 0
 
-# 改动映射到受影响的 SPM 包(Packages/<name>/...)
-pkgs="$(echo "$staged" | grep -oE '^Packages/[^/]+' | sort -u || true)"
+# Context integrity and path ownership are fast enough to enforce per commit.
+scripts/context/audit >/dev/null || exit 1
 
-if [ -z "$pkgs" ]; then
-    echo "[pre-commit] 无 SPM 包改动;跳过包级 build/test。"
+# Resolve staged paths through the recursive context tree. Gate availability is
+# leaf metadata; this hook contains no package-name/path registry.
+layers=""
+while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    layer="$(scripts/context/resolve --format layer "$file")" || exit 1
+    [ -z "$layer" ] || layers="${layers}${layer}
+"
+done <<< "$staged"
+layers="$(printf '%s' "$layers" | sed '/^$/d' | sort -u)"
+
+if [ -z "$layers" ]; then
+    echo "[pre-commit] no routed leaf changes."
 else
     fail=0
-    while IFS= read -r p; do
-        [ -z "$p" ] && continue
-        [ -d "$p" ] || continue
-        name="${p#Packages/}"
-        log="/tmp/aidash-precommit-$name.log"
-
-        echo "[pre-commit] swift build [$name]..."
-        if ! swift build --package-path "$p" > "$log" 2>&1; then
-            echo "[pre-commit] ❌ build 失败 [layer=$name]"
-            tail -20 "$log"
-            fail=1
-            continue
-        fi
-
-        echo "[pre-commit] swift test [$name]..."
-        if ! swift test --package-path "$p" >> "$log" 2>&1; then
-            echo "[pre-commit] ❌ test 失败 [layer=$name]"
-            tail -30 "$log"
+    while IFS= read -r layer; do
+        [ -z "$layer" ] && continue
+        if ! scripts/context/run "$layer" --mode local; then
             fail=1
         fi
-    done <<< "$pkgs"
+    done <<< "$layers"
 
     if [ "$fail" -ne 0 ]; then
         echo ""
         echo "[pre-commit] 修复后重新 commit。勿用 --no-verify 绕过(CI 照样拦)。"
-        echo "[pre-commit] 分层修复:失败标了 layer=<包>,改该层前先读 Packages/<包>/tech-context.md。"
+        echo "[pre-commit] resolve the failed path and fix only its owning leaf."
         exit 1
     fi
 fi
