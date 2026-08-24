@@ -14,7 +14,7 @@
     "Concurrency escape hatches require an ADR."
   ],
   "gates": [
-    {"id": "spm-build", "kind": "build", "mode": "local", "command": ["swift", "build", "--package-path", "Packages/AIDashCore"]},
+    {"id": "spm-build", "kind": "build", "mode": "both", "command": ["swift", "build", "--package-path", "Packages/AIDashCore"]},
     {"id": "spm-test", "kind": "test", "mode": "both", "command": ["swift", "test", "--package-path", "Packages/AIDashCore"]}
   ],
   "manifest": {"kind": "swift-package", "path": "Packages/AIDashCore/Package.swift", "local_dependencies": []},

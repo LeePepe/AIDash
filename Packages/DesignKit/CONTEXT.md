@@ -13,7 +13,7 @@
     "Raw color values remain inside token sources, never feature views."
   ],
   "gates": [
-    {"id": "spm-build", "kind": "build", "mode": "local", "command": ["swift", "build", "--package-path", "Packages/DesignKit"]},
+    {"id": "spm-build", "kind": "build", "mode": "both", "command": ["swift", "build", "--package-path", "Packages/DesignKit"]},
     {"id": "spm-test", "kind": "test", "mode": "both", "command": ["swift", "test", "--package-path", "Packages/DesignKit"]}
   ],
   "manifest": {"kind": "swift-package", "path": "Packages/DesignKit/Package.swift", "local_dependencies": []},

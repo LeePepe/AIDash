@@ -14,7 +14,7 @@
     "View-layer code is MainActor-isolated by default."
   ],
   "gates": [
-    {"id": "spm-build", "kind": "build", "mode": "local", "command": ["swift", "build", "--package-path", "Packages/AIDashUI"]},
+    {"id": "spm-build", "kind": "build", "mode": "both", "command": ["swift", "build", "--package-path", "Packages/AIDashUI"]},
     {"id": "spm-test", "kind": "test", "mode": "both", "command": ["swift", "test", "--package-path", "Packages/AIDashUI"]}
   ],
   "manifest": {"kind": "swift-package", "path": "Packages/AIDashUI/Package.swift", "local_dependencies": ["AIDashCore", "DesignKit"]},

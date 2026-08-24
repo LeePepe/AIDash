@@ -22,13 +22,56 @@ url="$2"
 # Read the ref ranges being pushed from stdin.
 # Format per line: <local_ref> <local_sha> <remote_ref> <remote_sha>
 pushing_anything=0
-docs_only=1
 zero="0000000000000000000000000000000000000000"
 
-# Captured diff range for the quality gates (require-tests / diff-size).
-gate_base=""
-gate_head=""
-changed_paths=""
+# Keep every pushed range. A hook invocation can update multiple refs, and
+# require-tests/review gating must inspect each ref rather than only the last.
+ranges_file="$(mktemp "${TMPDIR:-/tmp}/aidash-pre-push-ranges.XXXXXX")"
+paths_file="$(mktemp "${TMPDIR:-/tmp}/aidash-pre-push-paths.XXXXXX")"
+trap 'rm -f "$ranges_file" "$paths_file"' EXIT
+
+resolve_new_branch_base() {
+    local head="$1"
+    local preferred_ref=""
+    local candidate_ref=""
+    local base=""
+    local roots=""
+
+    if [ -n "$remote" ]; then
+        preferred_ref="refs/remotes/$remote/main"
+        if git show-ref --verify --quiet "$preferred_ref"; then
+            base="$(git merge-base "$head" "$preferred_ref" 2>/dev/null || true)"
+            if [ -n "$base" ]; then
+                printf '%s\n' "$base"
+                return 0
+            fi
+        fi
+    fi
+
+    while IFS= read -r candidate_ref; do
+        case "$candidate_ref" in
+            refs/remotes/*/main) ;;
+            *) continue ;;
+        esac
+        [ "$candidate_ref" = "$preferred_ref" ] && continue
+
+        base="$(git merge-base "$head" "$candidate_ref" 2>/dev/null || true)"
+        if [ -n "$base" ]; then
+            printf '%s\n' "$base"
+            return 0
+        fi
+    done < <(git for-each-ref --format='%(refname)' refs/remotes)
+
+    roots="$(git rev-list --max-parents=0 "$head" 2>/dev/null || true)"
+    while IFS= read -r base; do
+        if [ -n "$base" ]; then
+            printf '%s\n' "$base"
+            return 0
+        fi
+    done <<< "$roots"
+
+    return 1
+}
 
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "$local_sha" ] && continue
@@ -37,37 +80,19 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     pushing_anything=1
 
     if [ "$remote_sha" = "$zero" ]; then
-        # New branch on remote — compare against merge-base with main.
-        base="$(git merge-base "$local_sha" origin/main 2>/dev/null || echo "")"
+        # New remote branch — prefer its main, then any tracked main, then root.
+        base="$(resolve_new_branch_base "$local_sha" || true)"
     else
         base="$remote_sha"
     fi
 
     if [ -z "$base" ]; then
-        # Can't compute diff range; be conservative.
-        docs_only=0
-        continue
+        echo "[pre-push] FAILED: cannot compute diff base for $local_ref ($local_sha)" >&2
+        exit 1
     fi
 
-    # Remember the range so the quality gates can inspect this push.
-    gate_base="$base"
-    gate_head="$local_sha"
-
-    changed_files="$(git diff --name-only "$base..$local_sha")"
-    if [ -z "$changed_files" ]; then
-        continue
-    fi
-    changed_paths="${changed_paths}${changed_files}
-"
-
-    # Anything outside docs/, *.md, .specify/, .github/, scripts/hooks/
-    # counts as code.
-    while IFS= read -r f; do
-        case "$f" in
-            docs/*|*.md|.specify/*|.github/*|scripts/hooks/*) ;;
-            *) docs_only=0 ;;
-        esac
-    done <<<"$changed_files"
+    printf '%s %s\n' "$base" "$local_sha" >> "$ranges_file"
+    git diff --name-only --diff-filter=ACMRD "$base..$local_sha" >> "$paths_file"
 done
 
 if [ "$pushing_anything" = "0" ]; then
@@ -78,22 +103,14 @@ fi
 # before deciding which local gates apply; no hook-local layer registry exists.
 scripts/context/audit >/dev/null
 layers=""
-while IFS= read -r file; do
-    [ -z "$file" ] && continue
-    layer="$(scripts/context/resolve --format layer "$file")"
-    [ -z "$layer" ] || layers="${layers}${layer}
-"
-done <<< "$(printf '%s' "$changed_paths" | sed '/^$/d' | sort -u)"
-layers="$(printf '%s' "$layers" | sed '/^$/d' | sort -u)"
-
-if [ "$docs_only" = "1" ]; then
-    echo "[pre-push] docs-only push; routing audit passed."
-    exit 0
+if [ -s "$paths_file" ]; then
+    layers="$(sed '/^$/d' "$paths_file" | sort -u | scripts/context/layers --stdin)"
 fi
 
-# Quality gates — require-tests (blocking) + diff-size (advisory).
-# Only run when we have a concrete diff range for this push.
-if [ -n "$gate_base" ] && [ -n "$gate_head" ]; then
+# Quality gates — require-tests (blocking) + diff-size (advisory) — run for
+# every pushed ref range.
+while IFS=' ' read -r gate_base gate_head; do
+    [ -z "$gate_base" ] && continue
     if [ -x "scripts/quality/check-diff-size.sh" ]; then
         scripts/quality/check-diff-size.sh "$gate_base" "$gate_head" || true
     fi
@@ -104,46 +121,27 @@ if [ -n "$gate_base" ] && [ -n "$gate_head" ]; then
             exit 1
         fi
     fi
-fi
+done < "$ranges_file"
 
-# Review-gate tests — the Swift scope resolver that keeps the automated
-# review gates from raising modifier-attachment blockers off an ambiguous
-# hunk (MY-1402). Only runs when this push touches scripts/ci/**.
-#
-# Picks the first interpreter that actually has pytest: on macOS the system
-# python3 carries it while a Homebrew python3 (PEP 668) usually does not, so
-# probing `python3` alone would silently skip this gate on most dev machines.
-if [ -n "$gate_base" ] && [ -n "$gate_head" ]; then
-    if git diff --name-only "$gate_base..$gate_head" | grep -q '^scripts/ci/'; then
-        review_py=""
-        for candidate in python3 /usr/bin/python3; do
-            if command -v "$candidate" >/dev/null 2>&1 \
-                    && "$candidate" -c "import pytest" >/dev/null 2>&1; then
-                review_py="$candidate"
-                break
+# Lint only deduplicated, existing Swift files changed across all pushed refs.
+# --force-exclude applies the root config's included/excluded paths even when
+# files are passed explicitly. CI retains the full-repo lint scan.
+swift_paths=()
+while IFS= read -r changed_path; do
+    case "$changed_path" in
+        *.swift)
+            if [ -f "$changed_path" ]; then
+                swift_paths+=("$changed_path")
             fi
-        done
-        if [ -n "$review_py" ]; then
-            echo "[pre-push] pytest (scripts/ci review gate, $review_py)..."
-            if ! (cd "$REPO_ROOT/scripts/ci" && "$review_py" -m pytest tests/ -q) \
-                    > /tmp/aidash-pre-push-review-gate.log 2>&1; then
-                echo "[pre-push] FAILED: review-gate pytest"
-                tail -40 /tmp/aidash-pre-push-review-gate.log
-                exit 1
-            fi
-        else
-            echo "[pre-push] WARNING: no python3 with pytest; skipping review-gate tests (CI enforces them)."
-        fi
-    fi
-fi
+            ;;
+    esac
+done < <(sort -u "$paths_file")
 
-# Lint gate — full-repo swiftlint with the root config (single source of
-# truth shared by pre-commit and CI). Fails fast, before the slow build.
-# Graceful skip if swiftlint is not installed locally (CI enforces it).
-if [ -f "$REPO_ROOT/.swiftlint.yml" ]; then
+if [ "${#swift_paths[@]}" -gt 0 ] && [ -f "$REPO_ROOT/.swiftlint.yml" ]; then
     if command -v swiftlint >/dev/null 2>&1; then
-        echo "[pre-push] swiftlint (root config)..."
-        if ! swiftlint lint --strict --quiet --config "$REPO_ROOT/.swiftlint.yml" \
+        echo "[pre-push] swiftlint (changed Swift files, root config)..."
+        if ! swiftlint lint --strict --quiet --force-exclude \
+                --config "$REPO_ROOT/.swiftlint.yml" "${swift_paths[@]}" \
                 > /tmp/aidash-pre-push-lint.log 2>&1; then
             echo "[pre-push] FAILED: swiftlint"
             tail -40 /tmp/aidash-pre-push-lint.log
@@ -154,9 +152,9 @@ if [ -f "$REPO_ROOT/.swiftlint.yml" ]; then
     fi
 fi
 
-# Run only local gates declared by affected leaves. Package leaves provide SPM
-# build/test gates. App, CLI, and workspace leaves deliberately expose their
-# heavy xcodebuild/xcodegen gates to CI only.
+# Run only local gates declared by affected leaves. RepoInfra owns resolver,
+# review-gate, and hook checks; package leaves provide SPM build/test gates.
+# App, CLI, and workspace heavy xcodebuild/xcodegen gates remain CI-only.
 while IFS= read -r layer; do
     [ -z "$layer" ] && continue
     scripts/context/run "$layer" --mode local

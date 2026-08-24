@@ -43,7 +43,7 @@ macOS/iPadOS/iOS App(用户侧)读展示,两者经 CloudKit 同步。核心是�
 | **AIDashCore** | 领域模型 + CloudKit 客户端 + XPC 协议 + schema 校验。零 UI 依赖 | 无 | `Packages/AIDashCore/tech-context.md` |
 | **DesignKit** | seed 色彩系统(规范源)+ 通用 SwiftUI 组件词汇。零本地依赖 | 无 | `Packages/DesignKit/tech-context.md` |
 | **AIDashUI** | 跨平台 SwiftUI 视图、布局、卡片语义令牌 | Core + DesignKit | `Packages/AIDashUI/tech-context.md` |
-| **AIDashApp** | macOS/iPadOS/iOS App target(XcodeGen 管理) | UI + Core | (app target,见 project.yml) |
+| **AIDashApp** | macOS/iPadOS/iOS App target(XcodeGen 管理) | UI + Core + DesignKit | (app target,见 project.yml) |
 | **aidash CLI** | Swift Argument Parser CLI,仅 macOS | **仅 Core**,禁 import UI | (CLI target) |
 | **aidata** | **非 SPM(Python)**。上游数据生产 L1-L5,产出卡片 payload | 无(不 import Swift) | `aidata/tech-context.md` |
 
@@ -51,7 +51,7 @@ macOS/iPadOS/iOS App(用户侧)读展示,两者经 CloudKit 同步。核心是�
 
 ```
 AIDashCore ← AIDashUI ← AIDashApp
-DesignKit  ← AIDashUI           (DesignKit 零本地依赖,与 Core 平级但正交:Core 管数据,DesignKit 管视觉)
+DesignKit  ← AIDashUI ← AIDashApp (App 也直接注入 DesignKit theme;DesignKit 零本地依赖)
 AIDashCore ← aidash CLI        (CLI 绝不 import UI)
 ```
 方向单向不可逆。改动跨越这条边界 = 信号:任务太大或分层错了,应拆(见分层路由)。

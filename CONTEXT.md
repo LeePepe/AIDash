@@ -21,3 +21,8 @@
 Resolve the file being changed with `scripts/context/resolve <path>`, then read
 the returned context chain. Run `scripts/context/audit` after changing routing,
 dependencies, manifests, hooks, or context documents.
+
+Parent route `patterns` mirror a leaf's implementation `scope`; optional
+`test_paths` mirror the tests and fixtures owned by that same leaf. The
+resolver considers both fields together and rejects sibling overlap, while the
+audit verifies exact parent/leaf mirroring and unique tracked-file ownership.

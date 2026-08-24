@@ -98,7 +98,7 @@ AIDashCore (zero UI deps, used by both app and CLI)
    ↑
 AIDashUI  (SwiftUI views; depends on Core + DesignKit)
    ↑
-AIDashApp (macOS + iPadOS + iOS app; depends on UI + Core)
+AIDashApp (macOS + iPadOS + iOS app; depends on UI + Core + DesignKit)
 
 DesignKit (seed color system + components; zero local deps)
    ↑
@@ -201,8 +201,10 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
      路径,先 audit 唯一归类,再跑 affected leaf 的 local gates;SPM leaf 是
      `swift build` + `swift test`。暂存 `.swift` 另过根 SwiftLint config。
   2. **Local `pre-push` hook** (`scripts/hooks/pre-push`) — resolve push diff,跑
-     affected leaf 的 local gates +「改代码必带测试」+ 全仓 SwiftLint。App / CLI /
-     XcodeWorkspace 的 heavy gates 标为 CI-only,本地不启动 host app test target。
+     affected leaf 的 local gates +「改代码必带测试」+ 所有 pushed ranges 中去重后仍
+     存在的变更 `.swift` 文件 SwiftLint(`--force-exclude`,故 Tests/.build 仍按根 config
+     排除)。App / CLI / XcodeWorkspace 的 heavy gates 标为 CI-only,本地不启动 host
+     app test target。
      Activated per-worktree via `git config core.hooksPath scripts/hooks`.
   3. **GitHub Actions** (`.github/workflows/build.yml`) — re-runs the same
      gates(含防腐校验 + 改代码必带测试 + `swiftlint` job)on `macos-26` for every
@@ -215,8 +217,9 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
      ruleset(脚本进 workflow ≠ 已 required)。
      另:ruleset 的 `bypass_actors` 含 admin 且 `bypass_mode: always`,所以
      维护者本人直推/强推会被放行,remote 的提示只是告知而非拦截。
-- **SwiftLint 单源.** 根 `.swiftlint.yml` 是全仓库唯一 config(pre-commit/pre-push/CI
-  共用)。阈值目前 lenient(放宽到覆盖既有代码,零改动兑绿),但仍拦明显糟糕的新代码;
+- **SwiftLint 单源.** 根 `.swiftlint.yml` 是全仓库唯一 config(pre-commit 按文件、
+  pre-push 按 pushed ranges 的变更 Swift 文件、CI 全仓共用;CI job 当前非 required)。
+  阈值目前 lenient(放宽到覆盖既有代码,零改动兑绿),但仍拦明显糟糕的新代码;
   逐规则收紧是后续独立 issue。`Tests/` 豁免(`try!` 等惯例)。
 - **改代码必带测试.** 改了 `.swift` 源码却没动任何测试文件 → pre-push / CI 拦。
   逃生舱:任一 commit message 写 `Allow-No-Tests: <原因>`(仅限确无法测的改动)。

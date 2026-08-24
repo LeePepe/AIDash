@@ -4,9 +4,12 @@
 不可绕)、**GitHub ruleset**(把关键 check 变成合并硬门)。
 
 路径到 gate 的单一来源是递归 `CONTEXT.md` 树。`scripts/context/resolve <path>`
-给出 owning leaf;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gates;
+给出 owning leaf;`scripts/context/layers <path...>`(或 `--stdin`)产出排序去重的
+touched leaves;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gates;
 `scripts/context/audit` 保证所有文件唯一归类并核对依赖与 manifest。hooks 不维护
 第二份 package/path registry;CI 的 SPM、XcodeGen、App 与 CLI 命令也从 leaf gate 读取。
+文档与仓库自动化都路由到 RepoInfra;其 local gate 只跑 resolver/review/hook
+检查,不跑 `xcodebuild`。
 
 ## 一图
 
@@ -73,7 +76,7 @@ PR #171 上两道门(claude / codex)因此同时误判:`private var labelLine` �
 | `scripts/ci/swift_scope.py` | 纯词法括号匹配(先抹掉注释与字符串字面量),算出每个 leading-dot modifier 的 receiver 与所在声明 |
 | `scripts/ci/review_context.py` | 从 exact-HEAD 读源码,产出 RECEIVER TABLE + 按声明完整摘录的 SCOPE EXCERPTS |
 | `scripts/ci/review-common.sh` | 两道门共用的调用入口 + 证据纪律 prompt(避免两边漂移) |
-| `scripts/ci/tests/` | pytest;CI 的 `review-gate (pytest)` job 与 pre-push(改到 `scripts/ci/**` 时)都跑 |
+| `scripts/ci/tests/` | pytest;CI 的 `review-gate (pytest)` job 与 RepoInfra local gate 都跑 |
 
 要点:
 
