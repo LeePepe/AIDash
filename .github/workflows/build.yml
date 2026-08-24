@@ -32,33 +32,16 @@ jobs:
         # flakiness a gate must not have. Bump this deliberately, with the
         # resulting fixes in the same commit.
         run: python -m pip install --upgrade pip pytest 'ruff==0.15.13'
-      - name: pytest
+      - name: pytest + ruff + degrade (resolved aidata leaf gates)
         # The warehouse (L3_merge/warehouse.db) is a gitignored local artifact,
         # so integration tests that need it skip themselves here. The hermetic
-        # unit tests — including the digest golden — must pass.
-        working-directory: aidata
-        run: python -m pytest tests/ -q
-      - name: ruff (production code + tests)
-        # Data layers are gitignored, but exclude them explicitly so a stray
-        # local artifact can never fail CI.
-        working-directory: aidata
-        run: ruff check . --exclude L1_collect,L2_normalize,L3_merge
-      - name: Degrade-not-crash — imports clean with no config_local.py
-        # config_local.py is git-ignored, so CI is the real "fresh clone" test:
-        # every source must degrade to a no-op rather than raise (ADR-23).
-        working-directory: aidata
+        # unit tests — including the digest golden — must pass. Each test and
+        # Python file is selected from its owning leaf's test_paths/scope.
         run: |
           set -euo pipefail
-          test ! -f config_local.py  # sanity: it must never be committed
-          python -c "
-          import config, adapters.ado_pr as ado, adapters.github_pr as gh
-          assert config.ADO_ORG == '', 'ADO_ORG should default empty'
-          assert config.MULTICA_WORKSPACES == (), 'workspaces should default empty'
-          assert config.GITHUB_PR_REPOS == (), 'GITHUB_PR_REPOS should default empty'
-          assert ado.collect() == 0, 'ado_pr must degrade to 0'
-          assert gh.collect() == 0, 'github_pr must degrade to 0'
-          print('degrade-not-crash OK')
-          "
+          scripts/context/layers --group aidata | while read -r layer; do
+            scripts/context/run "$layer" --mode ci
+          done
 
   swiftlint:
     name: swiftlint (root config)
@@ -70,9 +53,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Lint (root .swiftlint.yml, strict)
-        # Same config + flags as pre-commit (per-file) and pre-push (full).
-        # This is the authoritative, unbypassable style gate — the only one
-        # that holds against `git commit/push --no-verify`.
+        # Same root config as pre-commit (per-file) and pre-push (changed Swift
+        # files). This full-repo anti-rot scan runs in CI but is currently not
+        # a required status check, so it does not block merging on its own.
         run: swiftlint lint --strict --config .swiftlint.yml
 
   require-tests:
@@ -127,12 +110,8 @@ jobs:
         # Stdlib-only in production; same pinned ruff as the aidata job so a
         # new linter release cannot turn this gate red with no code change.
         run: python -m pip install --upgrade pip pytest 'ruff==0.15.13'
-      - name: pytest
-        working-directory: scripts/ci
-        run: python -m pytest tests/ -q
-      - name: ruff
-        working-directory: scripts/ci
-        run: ruff check .
+      - name: Resolver-declared RepoInfra gates
+        run: scripts/context/run RepoInfra --mode ci
 
   build:
     name: build + test (macOS 26)
@@ -149,6 +128,9 @@ jobs:
 
       - name: Anti-rot — frontmatter matches code
         run: scripts/hooks/check-frontmatter
+
+      - name: Anti-rot — recursive contexts resolve every file exactly once
+        run: scripts/context/audit
 
       - name: Anti-rot — tasks.md in sync with spec + single-layer
         run: scripts/hooks/check-tasks-fresh
@@ -214,21 +196,19 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        run: xcodegen generate
+      - name: Generate Xcode project (resolved XcodeWorkspace gate)
+        run: scripts/context/run XcodeWorkspace --mode ci
 
-      - name: swift test (AIDashCore)
-        run: swift test --package-path Packages/AIDashCore
+      - name: AIDashCore SPM gates
+        run: scripts/context/run AIDashCore --mode ci
 
-      - name: Build AIDashApp (macOS)
-        run: |
-          xcodebuild \
-            -scheme AIDashApp \
-            -destination "platform=macOS" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+      - name: AIDashUI SPM gates
+        run: scripts/context/run AIDashUI --mode ci
 
-      - name: Build AIDashApp (iOS)
+      - name: DesignKit SPM gates
+        run: scripts/context/run DesignKit --mode ci
+
+      - name: Build AIDashApp (resolved macOS + iOS gates)
         # 宪法 §Testing gate 1(四端构建门)的 iOS 边。AIDashApp 是
         # supportedDestinations: [macOS, iOS] 的单 target,generic/platform=iOS
         # 编一次即覆盖 iPhone/iPad(同 target、同代码),不必再加 iPad destination。
@@ -236,17 +216,7 @@ jobs:
         # 这个门防的是 T201 那类回归:macOS 专属 API(SecCode 等)悄悄漏进
         # 共用代码路径,macOS 绿、iOS 却编不过——只跑 macOS 的话看不见。
         # CI 不签名,所以 CODE_SIGNING_ALLOWED=NO(entitlements 按 SDK 拆分见 T202)。
-        run: |
-          xcodebuild \
-            -scheme AIDashApp \
-            -destination "generic/platform=iOS" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+        run: scripts/context/run AIDashApp --mode ci
 
-      - name: Build aidash CLI (macOS)
-        run: |
-          xcodebuild \
-            -scheme aidash \
-            -destination "platform=macOS" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+      - name: Build aidash CLI (resolved macOS gate)
+        run: scripts/context/run aidashCLI --mode ci

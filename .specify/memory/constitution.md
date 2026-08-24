@@ -194,7 +194,7 @@ AIDash/
 │                         vocabulary. Zero local deps.
 ├── Apps/
 │   └── AIDashApp/        macOS + iPadOS + iPhone app target (XcodeGen
-│                         managed). Depends on UI + Core.
+│                         managed). Depends on UI + Core + DesignKit.
 ├── CLI/
 │   └── aidash/           Swift Argument Parser CLI, macOS-only.
 │                         Depends on Core. Does not depend on UI.
@@ -209,8 +209,9 @@ AIDash/
 ```
 
 Dependency direction is unidirectional: `UI → Core`, `UI → DesignKit`,
-`App → UI + Core`, `CLI → Core`. The CLI may never import UI. The package
-boundary enforces this.
+`App → UI + Core + DesignKit`, `CLI → Core`. The app's direct DesignKit
+dependency supplies theme injection used by app lifecycle code. The CLI may
+never import UI. The package boundary enforces this.
 
 `aidata/` sits **outside** that graph. It couples to the Swift side by a
 one-way **data flow**, not a compile-time dependency: it emits card payloads
@@ -276,10 +277,11 @@ Three gates, in priority order:
 
 **The git hooks run the tests. A human or agent working locally does not.**
 
-`scripts/hooks/pre-commit` and `pre-push` already run exactly the right set
-(SPM package tests, then the build gate). Running suites by hand on top of
-that adds no signal — the hook will run them anyway before anything leaves
-the machine — and it is how the two worst incidents in this repo happened.
+`scripts/hooks/pre-commit` and `pre-push` resolve changed paths and run the
+owning leaves' declared **local** gates (SPM build/tests and focused repository
+checks). Heavy App/CLI/XcodeWorkspace builds are CI-only. Running suites by
+hand on top of the hook-driven gates adds no signal and is how the two worst
+incidents in this repo happened.
 
 - **Never run a host-based test target locally.** `AIDashAppTests` pins
   `TEST_HOST` to the real `AIDash.app`, so the bundle executes AS the
@@ -920,7 +922,29 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.11.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-12
+**Version**: 1.12.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-24
+
+<!--
+1.12.0 — MINOR (material quality-gate execution change; no core principle
+removed or inverted). Local hooks no longer run the heavy
+AIDashApp/aidashCLI/XcodeWorkspace build and generation gates. Those gates are
+CI-only; the required macOS app, iOS app (shared iPhone/iPad target), and CLI
+CI builds remain mandatory. Local hooks continue to run resolver-selected SPM,
+Python, repository, lint, and test gates.
+
+Migration note: no code or stored-data migration. In-flight work must not
+expect pre-commit or pre-push to run App/CLI/XcodeWorkspace heavy builds and
+must not weaken or remove the corresponding required CI gates. Existing local
+SPM and focused repository/data checks remain hook-driven.
+-->
+
+<!--
+1.11.1 — PATCH. The module table records AIDashApp's existing direct DesignKit
+dependency used for theme injection, matching project.yml and source imports.
+
+Migration note: no code or stored data migration. In-flight work should not
+remove the existing AIDashApp → DesignKit manifest edge.
+-->
 
 <!--
 1.11.0 — MINOR (new `relationship` CardType recipe and visualization
@@ -1055,4 +1079,3 @@ spacing literals and MUST be updated in lockstep with the AIDashUI
 implementation PR. Stored briefings are unaffected (new metric fields are
 optional and decode to nil on old records).
 -->
-

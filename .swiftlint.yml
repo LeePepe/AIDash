@@ -1,6 +1,7 @@
 # SwiftLint — repo-wide single source of truth.
 #
-# This root config governs pre-commit (per-file), pre-push (full), and CI.
+# This root config governs pre-commit (per-file), pre-push (changed existing
+# Swift files across pushed refs), and CI (full repo; currently non-required).
 # Thresholds are set LENIENT: relaxed just far enough to pass the existing
 # code as-is (zero code changes) while still catching clearly-bad NEW code.
 # Existing violations are tolerated by threshold, NOT fixed — tightening any

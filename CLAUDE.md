@@ -8,10 +8,10 @@ front of you before you touch anything.
 
 ## Do not run tests proactively. The git hooks run them.
 
-`scripts/hooks/pre-commit` and `pre-push` already run the correct set — SPM
-package tests, then the four-target build gate — before anything leaves the
-machine. Running suites by hand on top of that produces no extra signal, and
-on this repo it has produced real harm twice.
+`scripts/hooks/pre-commit` and `pre-push` resolve changed files through
+`CONTEXT.md` and run their local leaf gates. Required App/CLI builds run in CI.
+Running suites by hand on top of those gates produces no extra signal, and on
+this repo it has produced real harm twice.
 
 **Forbidden locally:**
 
@@ -45,7 +45,7 @@ hooks do it" does not.
 
 ## Verification, ranked
 
-1. Let the hooks run. They are the gate that actually matters.
+1. Let the resolver-driven hooks run. They are the local gate that matters.
 2. Build gates (`xcodebuild ... build`) — cheap, no app launch, no prompts.
 3. `swift test --package-path Packages/<X>` for package-local logic.
 4. `AIDashAppLogicTests` for app-layer logic, when 1–3 cannot answer it.
