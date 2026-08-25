@@ -455,6 +455,46 @@ def test_run_with_timeout_kills_the_whole_process_group(
     )
 
 
+def test_run_with_timeout_kills_term_resistant_descendant_in_original_pgid(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A TERM-resistant grandchild must not survive once the leader exits.
+
+    This is the exact liveness gap the reviewer flagged: the leader may exit
+    before a descendant in the same original PGID is gone, and a watchdog that
+    only polls the leader PID is blind to that leak.
+    """
+    pidfile = tmp_path / "grandchild.pid"
+    inner = tmp_path / "term_resistant.sh"
+    inner.write_text(
+        f'#!/bin/sh\n'
+        'trap "" TERM\n'
+        f'sh -c \'echo $$ > "{pidfile}"; trap "" TERM; while :; do sleep 1; done\' &\n'
+        'wait\n',
+        encoding="utf-8",
+    )
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f"run_with_timeout 2 {inner} || rc=$?\n"
+        "sleep 3\n"
+        f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; \n'
+        'elif kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; \n'
+        "else echo CLEAN; fi\n"
+        'echo "rc=$rc"\n',
+        timeout=90,
+    )
+
+    assert "NO-PID" not in result.stdout, "term-resistant grandchild never started"
+    assert "CLEAN" in result.stdout, (
+        f"term-resistant descendant survived timeout leak: {result.stdout}"
+    )
+    assert "rc=124" in result.stdout
+
+
 def test_run_with_timeout_does_not_abort_caller_under_errexit() -> None:
     """A timeout must not kill the script before it can explain itself.
 
@@ -942,6 +982,23 @@ class TestRealGateContract:
         assert "test review prompt content" not in combined, (
             "prompt content leaked in diagnostic output"
         )
+
+    def test_no_sensitive_leak_with_raw_failure_payloads(self, tmp_path: pathlib.Path) -> None:
+        """Failure diagnostics keep only bounded allowlisted metadata."""
+        payload = (
+            '{"terminal_reason":"max_turns","subtype":"error_max_turns",'
+            '"num_turns":1,"result":"secret prompt body xxxxxx","stderr":"'
+            + ("x" * 1024)
+            + '"}'
+        )
+        bin_dir = _make_fake_claude(tmp_path, payload, exit_code=1)
+        result = _run_real_gate(tmp_path, bin_dir)
+
+        combined = result.stdout + result.stderr
+        assert "secret prompt body" not in combined
+        assert "stderr" not in combined.lower()
+        assert "result" not in combined.lower()
+        assert "terminal_reason=max_turns" in result.stdout
 
     def test_unparseable_verdict_failclosed(self, tmp_path: pathlib.Path) -> None:
         """CLI exits 0 with JSON but no .structured_output/.result → fail-closed."""

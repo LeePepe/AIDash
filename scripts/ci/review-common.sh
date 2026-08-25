@@ -63,7 +63,7 @@ REVIEW_TIMEOUT_RC=124
 
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid watchdog_pid status=0
+    local child_pid child_pgid watchdog_pid status=0
 
     # Job control ON for the launch, so the child becomes a PROCESS GROUP
     # LEADER (pgid == pid). Signalling `-$child_pid` then reaches the CLI *and
@@ -75,25 +75,33 @@ run_with_timeout() {
     child_pid=$!
     set +m
 
+    # Track the exact process group, not just the leader PID. A leader can exit
+    # before a TERM-resistant descendant on the same PGID is gone; at that point
+    # `kill -0 "$child_pid"` returns false even though the group still contains
+    # live work. The watchdog must keep polling the original PGID until the
+    # whole group is empty before it decides the command is done.
+    child_pgid="$(ps -o pgid= -p "$child_pid" 2>/dev/null | tr -d '[:space:]' | head -n 1)"
+    if [ -z "$child_pgid" ]; then
+        child_pgid="$child_pid"
+    fi
+
     # Watchdog: wait out the budget, then escalate TERM → KILL on the group.
-    # `kill -0` first so a finished child is never signalled (its pid may have
-    # been recycled by then).
     (
         local waited=0
         while [ "$waited" -lt "$seconds" ]; do
-            kill -0 "$child_pid" 2>/dev/null || exit 0
+            kill -0 -- "-$child_pgid" 2>/dev/null || exit 0
             sleep 1
             waited=$((waited + 1))
         done
-        kill -0 "$child_pid" 2>/dev/null || exit 0
-        kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+        kill -0 -- "-$child_pgid" 2>/dev/null || exit 0
+        kill -TERM -- "-$child_pgid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
         local grace=0
         while [ "$grace" -lt 10 ]; do
-            kill -0 "$child_pid" 2>/dev/null || exit 0
+            kill -0 -- "-$child_pgid" 2>/dev/null || exit 0
             sleep 1
             grace=$((grace + 1))
         done
-        kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+        kill -KILL -- "-$child_pgid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
     ) &
     watchdog_pid=$!
 
@@ -265,30 +273,33 @@ run_claude_review_gate() {
 
     # --- Timeout ---
     if [ "$cli_rc" -eq "$REVIEW_TIMEOUT_RC" ]; then
-        echo "[claude-review] ❌ claude CLI 超时(>${REVIEW_CLI_TIMEOUT_SECONDS}s),已终止"
-        tail -c 2000 "$err_file" >&2 || true
+       local out_bytes err_bytes
+       out_bytes="$(wc -c <"$raw_file" 2>/dev/null | tr -d '[:space:]')"
+       err_bytes="$(wc -c <"$err_file" 2>/dev/null | tr -d '[:space:]')"
+       echo "[claude-review] ❌ claude CLI 超时(>${REVIEW_CLI_TIMEOUT_SECONDS}s),已终止 (rc=$REVIEW_TIMEOUT_RC, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0})"
         post_sticky "$STICKY
 ⚠️ 自动 review 未能完成:claude CLI 超过 ${REVIEW_CLI_TIMEOUT_SECONDS} 秒仍未返回,已被终止。
-为安全起见 **暂不放行**,请人工检查或重跑。"
+为安全起见 **暂不放行**。诊断: rc=$REVIEW_TIMEOUT_RC, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0}."
         return 1
     fi
 
     # --- Non-zero or empty output ---
     if [ "$cli_rc" -ne 0 ] || [ -z "$raw" ]; then
-        local _terminal="" _subtype="" _turns=""
+       local out_bytes err_bytes _terminal="" _subtype="" _turns=""
+       out_bytes="$(wc -c <"$raw_file" 2>/dev/null | tr -d '[:space:]')"
+       err_bytes="$(wc -c <"$err_file" 2>/dev/null | tr -d '[:space:]')"
         if [ -n "$raw" ]; then
             _terminal="$(printf %s "$raw" | jq -r '.terminal_reason // empty' 2>/dev/null)"
             _subtype="$(printf %s "$raw" | jq -r '.subtype // empty' 2>/dev/null)"
             _turns="$(printf %s "$raw" | jq -r '.num_turns // empty' 2>/dev/null)"
         fi
         if [ -n "$_terminal" ]; then
-            echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc, terminal_reason=$_terminal, subtype=${_subtype:-n/a}, num_turns=${_turns:-n/a})"
+           echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0}, terminal_reason=$_terminal, subtype=${_subtype:-n/a}, num_turns=${_turns:-n/a})"
         else
-            echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc)"
+           echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0})"
         fi
-        cat "$err_file" >&2 || true
         post_sticky "$STICKY
-⚠️ 自动 review 未能完成(claude CLI 异常)。为安全起见 **暂不放行**,请人工检查或重跑。"
+⚠️ 自动 review 未能完成(claude CLI 异常)。为安全起见 **暂不放行**。诊断: rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0}."
         return 1
     fi
 
@@ -296,9 +307,12 @@ run_claude_review_gate() {
     local verdict_json
     verdict_json="$(printf %s "$raw" | jq -c '.structured_output // (.result | fromjson)' 2>/dev/null)"
     if [ -z "$verdict_json" ] || [ "$verdict_json" = "null" ]; then
-        echo "[claude-review] ❌ 无法解析 verdict"; printf %s "$raw" | head -c 2000 >&2
+       local out_bytes err_bytes
+       out_bytes="$(wc -c <"$raw_file" 2>/dev/null | tr -d '[:space:]')"
+       err_bytes="$(wc -c <"$err_file" 2>/dev/null | tr -d '[:space:]')"
+       echo "[claude-review] ❌ 无法解析 verdict (rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0})"
         post_sticky "$STICKY
-⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**。诊断: rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0}."
         return 1
     fi
 
