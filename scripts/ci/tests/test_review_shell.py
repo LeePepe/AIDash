@@ -495,6 +495,40 @@ def test_run_with_timeout_kills_term_resistant_descendant_in_original_pgid(
     assert "rc=124" in result.stdout
 
 
+def test_run_with_timeout_waits_for_leader_exits_first_descendant_cleanup(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The leader may die before a descendant in the same PGID; watchdog must not give up."""
+    pidfile = tmp_path / "grandchild.pid"
+    inner = tmp_path / "leader_exits_first.sh"
+    inner.write_text(
+        f'#!/bin/sh\n'
+        f'sh -c \'echo $$ > "{pidfile}"; trap "" TERM; while :; do sleep 1; done\' &\n'
+        'sleep 120\n',
+        encoding="utf-8",
+    )
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f"run_with_timeout 2 {inner} || rc=$?\n"
+        "sleep 3\n"
+        f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; \n'
+        'elif kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; \n'
+        "else echo CLEAN; fi\n"
+        'echo "rc=$rc"\n',
+        timeout=90,
+    )
+
+    assert "NO-PID" not in result.stdout, "descendant never started; test is vacuous"
+    assert "CLEAN" in result.stdout, (
+        f"leader-exits-first descendant survived timeout cleanup: {result.stdout}"
+    )
+    assert "rc=124" in result.stdout
+
+
 def test_run_with_timeout_does_not_abort_caller_under_errexit() -> None:
     """A timeout must not kill the script before it can explain itself.
 
@@ -514,6 +548,23 @@ def test_run_with_timeout_does_not_abort_caller_under_errexit() -> None:
         "caller aborted on the timeout instead of continuing: " + result.stderr
     )
     assert "still-running-after-timeout rc=124" in result.stdout
+
+
+def test_sanitize_review_metadata_rejects_untrusted_values() -> None:
+    """Only bounded allowlisted metadata survives a failure log."""
+    result = _run(
+        f". {COMMON}\n"
+        'printf "%s|%s|%s\\n" \
+'
+        '  "$(sanitize_review_metadata terminal_reason "max_turns; echo pwned")" \
+'
+        '  "$(sanitize_review_metadata subtype "error_max_turns\\nmalicious")" \
+'
+        '  "$(sanitize_review_metadata num_turns 99999999)"\n',
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "n/a|n/a|n/a"
 
 
 # --------------------------------------------------------------------------
@@ -954,8 +1005,9 @@ class TestRealGateContract:
 
         assert result.returncode == 1
         assert "rc=1" in result.stdout
-        # No structured diagnostic extracted
-        assert "terminal_reason=" not in result.stdout
+        assert "terminal_reason=n/a" in result.stdout
+        assert "subtype=n/a" in result.stdout
+        assert "num_turns=n/a" in result.stdout
         sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
         assert "暂不放行" in sticky
 

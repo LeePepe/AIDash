@@ -61,6 +61,27 @@ REVIEW_CLI_TIMEOUT_SECONDS="${REVIEW_CLI_TIMEOUT_SECONDS:-900}"
 # much included — as a tool failure that blocks the merge.
 REVIEW_TIMEOUT_RC=124
 
+sanitize_review_metadata() {
+    local field_name="${1:-}"
+    local value="${2:-}"
+
+    case "$field_name" in
+        terminal_reason|subtype)
+            [[ "$value" =~ ^[A-Za-z0-9_.:/-]+$ ]] || value="n/a"
+            [[ ${#value} -le 64 ]] || value="n/a"
+            printf '%s\n' "$value"
+            ;;
+        num_turns)
+            [[ "$value" =~ ^[0-9]+$ ]] || value="n/a"
+            [[ ${#value} -le 6 ]] || value="n/a"
+            printf '%s\n' "$value"
+            ;;
+        *)
+            printf '%s\n' "n/a"
+            ;;
+    esac
+}
+
 run_with_timeout() {
     local seconds="$1"; shift
     local child_pid child_pgid watchdog_pid status=0
@@ -102,6 +123,12 @@ run_with_timeout() {
             grace=$((grace + 1))
         done
         kill -KILL -- "-$child_pgid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+        local final_wait=0
+        while [ "$final_wait" -lt 5 ]; do
+            kill -0 -- "-$child_pgid" 2>/dev/null || exit 0
+            sleep 1
+            final_wait=$((final_wait + 1))
+        done
     ) &
     watchdog_pid=$!
 
@@ -112,8 +139,10 @@ run_with_timeout() {
     # reason, which is the failure mode MY-1404 is about.
     wait "$child_pid" || status=$?
 
-    # Watchdog outlived its usefulness the moment the child exited.
-    kill -KILL "$watchdog_pid" 2>/dev/null || true
+    # The watchdog must remain alive until the exact process group is empty or
+    # the timeout/kill path has finished. Killing it early lets a TERM-resistant
+    # descendant survive after the leader exits, which violates the PGID-liveness
+    # contract in docs/ci-gates.md.
     wait "$watchdog_pid" 2>/dev/null || true
 
     # 143 = 128+SIGTERM, 137 = 128+SIGKILL — i.e. the watchdog fired. Reported
@@ -288,20 +317,19 @@ run_claude_review_gate() {
        local out_bytes err_bytes _terminal="" _subtype="" _turns=""
        out_bytes="$(wc -c <"$raw_file" 2>/dev/null | tr -d '[:space:]')"
        err_bytes="$(wc -c <"$err_file" 2>/dev/null | tr -d '[:space:]')"
-        if [ -n "$raw" ]; then
-            _terminal="$(printf %s "$raw" | jq -r '.terminal_reason // empty' 2>/dev/null)"
-            _subtype="$(printf %s "$raw" | jq -r '.subtype // empty' 2>/dev/null)"
-            _turns="$(printf %s "$raw" | jq -r '.num_turns // empty' 2>/dev/null)"
-        fi
-        if [ -n "$_terminal" ]; then
-           echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0}, terminal_reason=$_terminal, subtype=${_subtype:-n/a}, num_turns=${_turns:-n/a})"
-        else
-           echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0})"
-        fi
-        post_sticky "$STICKY
-⚠️ 自动 review 未能完成(claude CLI 异常)。为安全起见 **暂不放行**。诊断: rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0}."
-        return 1
-    fi
+       if [ -n "$raw" ]; then
+           _terminal="$(printf %s "$raw" | jq -r '.terminal_reason // empty' 2>/dev/null | tr -d '\r' | tr '\n' ' ' | xargs)"
+           _subtype="$(printf %s "$raw" | jq -r '.subtype // empty' 2>/dev/null | tr -d '\r' | tr '\n' ' ' | xargs)"
+           _turns="$(printf %s "$raw" | jq -r '.num_turns // empty' 2>/dev/null | tr -d '\r' | tr '\n' ' ' | xargs)"
+           _terminal="$(sanitize_review_metadata terminal_reason "$_terminal")"
+           _subtype="$(sanitize_review_metadata subtype "$_subtype")"
+           _turns="$(sanitize_review_metadata num_turns "$_turns")"
+       fi
+       echo "[claude-review] ❌ claude CLI 失败 (rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0}, terminal_reason=${_terminal:-n/a}, subtype=${_subtype:-n/a}, num_turns=${_turns:-n/a})"
+       post_sticky "$STICKY
+⚠️ 自动 review 未能完成(claude CLI 异常)。为安全起见 **暂不放行**。诊断: rc=$cli_rc, out_bytes=${out_bytes:-0}, err_bytes=${err_bytes:-0}, terminal_reason=${_terminal:-n/a}, subtype=${_subtype:-n/a}, num_turns=${_turns:-n/a}."
+       return 1
+   fi
 
     # --- Verdict extraction ---
     local verdict_json
