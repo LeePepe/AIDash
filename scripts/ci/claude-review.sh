@@ -71,8 +71,14 @@ DIFF="$(git diff "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff "$BASE_SHA..$HE
 # Written to a temp file because NUL bytes are stripped by Bash command
 # substitution ($(...)) and scalars — a file preserves them intact.
 CHANGED_FILE="$(mktemp -t claude-review-changed.XXXXXX)"
-git diff -z --name-only "$BASE_SHA...$HEAD_SHA" > "$CHANGED_FILE" 2>/dev/null \
-    || git diff -z --name-only "$BASE_SHA..$HEAD_SHA" > "$CHANGED_FILE"
+if ! git diff -z --name-only "$BASE_SHA...$HEAD_SHA" > "$CHANGED_FILE" 2>/dev/null; then
+    if ! git diff -z --name-only "$BASE_SHA..$HEAD_SHA" > "$CHANGED_FILE" 2>/dev/null; then
+        echo "[claude-review] ❌ git diff -z 生成 changed paths 失败,无法可靠评审 diff"
+        post_sticky "$STICKY
+⚠️ 自动 review 无法生成 changed-file 范围(无法读取 git diff -z 输出)。为安全起见 **暂不放行**,请重跑。"
+        exit 1
+    fi
+fi
 # Newline-separated version for prompt display only. Each path is
 # JSON-encoded (control chars/newlines/backslashes/quotes escaped) so a
 # malicious path containing newlines cannot inject additional lines into
@@ -81,7 +87,7 @@ CHANGED_DISPLAY="$(python3 -c "
 import json, sys
 for p in sys.stdin.buffer.read().split(b'\\x00'):
     if p:
-        sys.stdout.write(json.dumps(p.decode('utf-8','replace'),ensure_ascii=False) + '\\n')
+        sys.stdout.write(json.dumps(p.decode('utf-8','replace'), ensure_ascii=True) + '\\n')
 " < "$CHANGED_FILE")"
 
 # 未截断的原始 diff 落盘,供 scope 分析器解析行号(prompt 里那份可能被截断,

@@ -373,11 +373,14 @@ def test_scope_evidence_helper_handles_many_changed_files(
     evidence" — the analyzer's normal empty-output success. What is under test
     is that the loop TERMINATES, with no network and no repository needed.
     """
-    paths = "\n".join(
+    paths = [
         f"Packages/AIDashUI/Sources/AIDashUI/CardView/Generated{n:04d}.swift"
         for n in range(100)
-    )
-    assert len(paths.encode("utf-8")) > 512
+    ]
+    assert sum(len(path.encode("utf-8")) for path in paths) > 512
+
+    changed_file = tmp_path / "changed_paths.bin"
+    changed_file.write_bytes(b"\0".join(path.encode("utf-8") for path in paths) + b"\0")
 
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir()
@@ -391,10 +394,10 @@ def test_scope_evidence_helper_handles_many_changed_files(
         f". {COMMON}\n"
         f'REPO_ROOT="{CI_DIR.parent.parent}"\n'
         f'export PATH="{stub_dir}:$PATH"\n'
-        f'CHANGED="{paths}"\n'
+        f'CHANGED_FILE="{changed_file}"\n'
         "rc=0\n"
         "build_scope_evidence 0000000000000000000000000000000000000000 "
-        f'"{empty_diff}" "$CHANGED" >/dev/null || rc=$?\n'
+        f'"{empty_diff}" "$CHANGED_FILE" >/dev/null || rc=$?\n'
         'echo "completed rc=$rc"\n'
     )
     result = _run(script, timeout=60)

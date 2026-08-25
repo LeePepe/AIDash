@@ -73,17 +73,18 @@ def _json_encode_untrusted(value: str) -> str:
     """Encode a PR-controlled value as a JSON string literal.
 
     All control characters (newlines, tabs, etc.), backslashes, and double
-    quotes are escaped per RFC 8259. The result is always a single line
-    surrounded by double quotes, making it impossible for an attacker to
-    inject newlines that create additional output lines, structural record
-    headers, or reviewer directives.
+    quotes are escaped per RFC 8259. We intentionally preserve non-ASCII text in
+    its original Unicode form so rendered evidence remains readable, but literal
+    U+2028/U+2029 are escaped as their corresponding JSON sequences to prevent
+    them from acting as line separators in prompt consumers.
 
     Use this for every PR-controlled path/name value embedded in rendered
-    evidence (REMOVED TESTS, SEARCH SCOPE, candidate headers). The
-    analyzer's internal logic uses lossless original values; encoding is
-    applied only at render time.
+    evidence (REMOVED TESTS, SEARCH SCOPE, candidate headers). The analyzer's
+    internal logic keeps the original values; encoding is applied only at render
+    time.
     """
-    return json.dumps(value, ensure_ascii=False)
+    encoded = json.dumps(value, ensure_ascii=False)
+    return encoded.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 
 class AnalysisError(Exception):

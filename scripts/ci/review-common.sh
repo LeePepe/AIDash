@@ -235,15 +235,20 @@ build_scope_evidence() {
         return 1
     }
 
+    if [ ! -r "$changed_file" ]; then
+        echo "[review-scope] changed path file missing/unreadable: $changed_file" >&2
+        return 1
+    fi
+
     # NUL-delimited path parsing: read from the temp file that preserves NUL
     # bytes (Bash scalars strip them). -d '' splits on NUL.
     while IFS= read -r -d '' file; do
         [ -z "$file" ] && continue
         case "$file" in
             *.swift)
-                args[count]="--changed-file"
-                count=$((count + 1))
-                args[count]="$file"
+                # Pass the value in the same argv slot as the flag so a leading
+                # '-' path cannot be reinterpreted as a new argparse option.
+                args[count]="--changed-file=$file"
                 count=$((count + 1))
                 ;;
         esac
@@ -283,13 +288,16 @@ build_coverage_context() {
         return 1
     }
 
+    if [ ! -r "$changed_file" ]; then
+        echo "[review-coverage] changed path file missing/unreadable: $changed_file" >&2
+        return 1
+    fi
+
     # NUL-delimited path parsing: read from the temp file that preserves NUL
     # bytes (Bash scalars strip them). -d '' splits on NUL.
     while IFS= read -r -d '' file; do
         [ -z "$file" ] && continue
-        args[count]="--changed-file"
-        count=$((count + 1))
-        args[count]="$file"
+        args[count]="--changed-file=$file"
         count=$((count + 1))
     done < "$changed_file"
 
