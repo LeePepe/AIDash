@@ -3956,6 +3956,18 @@ def test_global_work_budget_limits_total_file_operations(monkeypatch):
     assert len(budget_msgs) > 0
 
 
+def test_build_coverage_evidence_rejects_excessive_changed_files():
+    """Changed-file lists must be bounded before any git/blob analysis."""
+    many_paths = [f"Tests/Case{i}Tests.swift" for i in range(COVERAGE_GLOBAL_WORK_BUDGET + 1)]
+    with pytest.raises(AnalysisError, match="Changed-file analysis budget exhausted"):
+        build_coverage_evidence(
+            head_sha="head",
+            base_sha="base",
+            diff_text="",
+            changed_files=many_paths,
+        )
+
+
 def test_global_work_budget_shared_with_candidate_reads(monkeypatch):
     """find_related_tests_in_head respects remaining work budget from discovery."""
     import coverage_context

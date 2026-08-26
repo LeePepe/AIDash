@@ -342,6 +342,36 @@ COVERAGE_GLOBAL_WORK_BUDGET = 50
 # always readable, even in repos with many test files.
 COVERAGE_PRIMARY_RESERVE = 15
 
+# Changed-file analysis must also be bounded before any blob reads or expensive
+# parsing. A diff with hundreds of touched paths can otherwise force a large
+# number of Git subprocesses, parse passes, and in-memory buffers before the
+# 80KB output cap ever activates.
+# We fail closed here: if the changed-file worklist is too large or too large in
+# aggregate path byte-length, we block the analysis instead of silently
+# proceeding with partial evidence.
+COVERAGE_MAX_CHANGED_FILES = COVERAGE_GLOBAL_WORK_BUDGET
+COVERAGE_MAX_CHANGED_PATH_BYTES = COVERAGE_MAX_TOTAL_BYTES
+
+
+def _enforce_changed_file_budget(changed_files: Sequence[str]) -> None:
+    """Fail closed before expensive Git/blob analysis on oversized changed-file sets."""
+    changed_file_count = len(changed_files)
+    changed_path_bytes = sum(
+        len(path.encode("utf-8", "replace")) for path in changed_files
+    )
+    if changed_file_count > COVERAGE_MAX_CHANGED_FILES:
+        raise AnalysisError(
+            f"Changed-file analysis budget exhausted: {changed_file_count} files "
+            f"exceeds {COVERAGE_MAX_CHANGED_FILES}; cannot analyze coverage "
+            "reliably"
+        )
+    if changed_path_bytes > COVERAGE_MAX_CHANGED_PATH_BYTES:
+        raise AnalysisError(
+            f"Changed-file analysis budget exhausted: {changed_path_bytes} bytes "
+            f"of changed-path metadata exceeds {COVERAGE_MAX_CHANGED_PATH_BYTES}; "
+            "cannot analyze coverage reliably"
+        )
+
 
 class RemovedTest(NamedTuple):
     file: str
@@ -1359,6 +1389,8 @@ def build_coverage_evidence(
     Raises AnalysisError when Git/tool failures prevent reliable analysis.
     The caller must treat this as fail-closed (exit nonzero).
     """
+    _enforce_changed_file_budget(changed_files)
+
     # Step 1: Find removed test functions (verified absent from HEAD)
     all_removed: list[RemovedTest] = []
     for path in changed_files:
