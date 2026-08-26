@@ -56,7 +56,8 @@ cd ~/actions-runner-aidash && ./svc.sh install && ./svc.sh start
 ### 安全(public repo + self-hosted 的高危组合)
 self-hosted runner + `pull_request` + checkout PR head = 公认高危:step 执行的是 PR 版本的代码。
 Kimi 使用 `pull_request_target`,由 base 分支评估 workflow YAML。Codex 的
-`codex-review-target.yml` 已落地并成为 required；旧 `pull_request` workflow 已停用:
+`codex-review-target.yml` 已落地并于 2026-08-26 同步为线上 required；旧
+`pull_request` workflow 已停用:
 - Codex/Kimi jobs 都只接收同仓库 PR;fork job 在 GitHub 托管 runner 上跳过本机执行。
 - 两者 checkout trusted base。Kimi 的显式 agent声明 `tools: []`、`subagents: []`,
   PR diff 只能作为围栏内数据进入模型。
