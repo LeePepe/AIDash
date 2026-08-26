@@ -37,7 +37,7 @@
         "required_status_checks": [
           { "context": "build + test (macOS 26)" },
           { "context": "aidata (pytest + ruff)" },
-          { "context": "codex-review" }
+          { "context": "codex-review-target" }
         ]
       }
     }
