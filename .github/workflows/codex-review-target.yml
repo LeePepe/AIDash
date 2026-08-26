@@ -1,8 +1,8 @@
-name: kimi-review
+name: codex-review-target
 
-# Advisory-only Kimi review. This check is intentionally absent from the main ruleset.
-# pull_request_target evaluates trusted base YAML. The trusted base script embeds the
-# PR diff as data and launches a tool-less Kimi agent.
+# Trusted replacement for codex-review. pull_request_target evaluates this workflow from
+# the default branch; the job also checks out the trusted base before reading the PR diff as data.
+# Keep non-required until this workflow has landed and reported once, then switch the ruleset.
 
 on:
   pull_request_target:
@@ -14,14 +14,14 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: kimi-review-${{ github.event.pull_request.number }}
+  group: codex-review-target-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  kimi-review:
+  codex-review-target:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, aidash-mac]
-    timeout-minutes: 12
+    timeout-minutes: 25
     steps:
       - name: Checkout base (trusted script source)
         uses: actions/checkout@v4
@@ -29,17 +29,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.base.sha }}
 
-      - name: Run local Kimi advisory review
+      - name: Run local Codex review (trusted target gate)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REPO: ${{ github.repository }}
-        run: scripts/ci/kimi-review.sh
+        run: scripts/ci/codex-review.sh
 
-  kimi-review-fork:
+  codex-review-target-fork:
     if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Kimi advisory review is skipped for fork pull requests."
+      - run: echo "Codex review is skipped for fork pull requests."

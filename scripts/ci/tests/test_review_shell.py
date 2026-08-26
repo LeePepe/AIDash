@@ -62,6 +62,7 @@ def test_kimi_is_toolless_advisory_and_claude_is_paused() -> None:
     kimi_source = KIMI.read_text()
     agent_source = KIMI_AGENT.read_text()
     kimi_workflow = (WORKFLOWS / "kimi-review.yml").read_text()
+    codex_target_workflow = (WORKFLOWS / "codex-review-target.yml").read_text()
     claude_workflow = (WORKFLOWS / "claude-review.yml").read_text()
     ruleset = (CI_DIR.parents[1] / "scripts" / "rulesets" / "main-protection.json").read_text()
 
@@ -72,8 +73,14 @@ def test_kimi_is_toolless_advisory_and_claude_is_paused() -> None:
     assert "Advisory only: this check and its findings are not required for merge" in kimi_source
     assert not re.search(r"(^|\s)(--yolo|--auto)(\s|$)", kimi_source)
     assert "pull_request_target:" in kimi_workflow
+    assert "branches: [main]" in kimi_workflow
     assert "ref: ${{ github.event.pull_request.base.sha }}" in kimi_workflow
     assert "ref: ${{ github.event.pull_request.head.sha }}" not in kimi_workflow
+    assert "pull_request_target:" in codex_target_workflow
+    assert "codex-review-target:" in codex_target_workflow
+    assert "branches: [main]" in codex_target_workflow
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in codex_target_workflow
+    assert "ref: ${{ github.event.pull_request.head.sha }}" not in codex_target_workflow
     assert "workflow_dispatch:" in claude_workflow
     assert "pull_request:" not in claude_workflow
     assert '"context": "codex-review"' in ruleset
