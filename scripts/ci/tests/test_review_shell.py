@@ -71,7 +71,7 @@ def test_kimi_is_toolless_advisory_and_claude_is_paused() -> None:
     assert "--output-format stream-json" in kimi_source
     assert "Advisory only: this check and its findings are not required for merge" in kimi_source
     assert not re.search(r"(^|\s)(--yolo|--auto)(\s|$)", kimi_source)
-    assert "pull_request:" in kimi_workflow
+    assert "pull_request_target:" in kimi_workflow
     assert "ref: ${{ github.event.pull_request.base.sha }}" in kimi_workflow
     assert "ref: ${{ github.event.pull_request.head.sha }}" not in kimi_workflow
     assert "workflow_dispatch:" in claude_workflow
