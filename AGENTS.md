@@ -211,10 +211,11 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
      PR against `main` and for every push to `main`. This is the authoritative
      CI signal; 只有它挡得住 `--no-verify`。
      **实际 required status checks(ruleset `main protection`,2026-08-02 核实):**
-     `build + test (macOS 26)`、`claude-review`、`aidata (pytest + ruff)`,strict
+     `build + test (macOS 26)`、`codex-review`、`aidata (pytest + ruff)`,strict
      模式开(分支须与 main 同步)。**注意 `require-tests` 与 `swiftlint (root config)`
      两个 job 会跑但目前 NOT required** —— 它们红了不挡合并。要设为强制,改
      ruleset(脚本进 workflow ≠ 已 required)。
+     `claude-review` 已暂停;`kimi-review` 只发 advisory comment,不进入 required ruleset。
      另:ruleset 的 `bypass_actors` 含 admin 且 `bypass_mode: always`,所以
      维护者本人直推/强推会被放行,remote 的提示只是告知而非拦截。
 - **SwiftLint 单源.** 根 `.swiftlint.yml` 是全仓库唯一 config(pre-commit 按文件、
