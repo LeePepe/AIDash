@@ -61,9 +61,66 @@ REVIEW_CLI_TIMEOUT_SECONDS="${REVIEW_CLI_TIMEOUT_SECONDS:-900}"
 # much included — as a tool failure that blocks the merge.
 REVIEW_TIMEOUT_RC=124
 
+sanitize_log_value() {
+    local field="$1"
+    local value="${2:-}"
+
+    case "$field" in
+        terminal_reason)
+            case "$value" in
+                timeout|tool_failure|parse_failure|fetch_failure|coverage_failure|nonce_generation|schema_validation)
+                    printf '%s' "$value"
+                    ;;
+                *)
+                    printf 'n/a'
+                    ;;
+            esac
+            ;;
+        subtype)
+            case "$value" in
+                claude|codex|git_fetch|scope_evidence|coverage_context|timeout|parse|schema|nonce|stderr|stdout|tool_error)
+                    printf '%s' "$value"
+                    ;;
+                *)
+                    printf 'n/a'
+                    ;;
+            esac
+            ;;
+        num_turns)
+            if [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -le 999999 ]; then
+                printf '%s' "$value"
+            else
+                printf 'n/a'
+            fi
+            ;;
+        *)
+            printf 'n/a'
+            ;;
+    esac
+}
+
+emit_failure_metadata() {
+    local phase="${1:-unknown}"
+    local rc="${2:-0}"
+    local reason="${3:-unknown}"
+    local subtype="${4:-unknown}"
+    local turns="${5:-0}"
+    local stderr_bytes="${6:-0}"
+    local stdout_bytes="${7:-0}"
+    local safe_reason safe_subtype safe_turns
+
+    safe_reason="$(sanitize_log_value terminal_reason "$reason")"
+    safe_subtype="$(sanitize_log_value subtype "$subtype")"
+    safe_turns="$(sanitize_log_value num_turns "$turns")"
+
+    printf '[review] phase=%s rc=%s stderr_bytes=%s stdout_bytes=%s terminal_reason=%s subtype=%s num_turns=%s\n' \
+        "$phase" "$rc" "$stderr_bytes" "$stdout_bytes" "$safe_reason" "$safe_subtype" "$safe_turns" >&2
+}
+
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid watchdog_pid status=0
+    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file
+    state_file="$(mktemp)"
 
     # Job control ON for the launch, so the child becomes a PROCESS GROUP
     # LEADER (pgid == pid). Signalling `-$child_pid` then reaches the CLI *and
@@ -75,25 +132,53 @@ run_with_timeout() {
     child_pid=$!
     set +m
 
-    # Watchdog: wait out the budget, then escalate TERM → KILL on the group.
-    # `kill -0` first so a finished child is never signalled (its pid may have
-    # been recycled by then).
+    # Watchdog: either the child is still active until the deadline, or it has
+    # already exited but left descendants in the original PGID. In the latter
+    # case we still do a bounded TERM→KILL cleanup, but we must not erroneously
+    # treat that as a timeout. We record the watchdog's explicit state so the
+    # caller can prefer an actual timeout even when the leader handles TERM and
+    # exits 0 on its own.
     (
         local waited=0
         while [ "$waited" -lt "$seconds" ]; do
-            kill -0 "$child_pid" 2>/dev/null || exit 0
+            if ! kill -0 "$child_pid" 2>/dev/null; then
+                if kill -0 "-$child_pid" 2>/dev/null; then
+                    kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+                    local grace=0
+                    while [ "$grace" -lt 10 ]; do
+                        kill -0 "-$child_pid" 2>/dev/null || break
+                        sleep 1
+                        grace=$((grace + 1))
+                    done
+                    kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+                fi
+                printf '%s\n' "clean" >"$state_file"
+                exit 0
+            fi
             sleep 1
             waited=$((waited + 1))
         done
-        kill -0 "$child_pid" 2>/dev/null || exit 0
+
+        if ! kill -0 "-$child_pid" 2>/dev/null; then
+            printf '%s\n' "clean" >"$state_file"
+            exit 0
+        fi
+
         kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+
         local grace=0
         while [ "$grace" -lt 10 ]; do
-            kill -0 "$child_pid" 2>/dev/null || exit 0
+            kill -0 "-$child_pid" 2>/dev/null || break
             sleep 1
             grace=$((grace + 1))
         done
-        kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+
+        if kill -0 "-$child_pid" 2>/dev/null; then
+            kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+        fi
+
+        printf '%s\n' "timeout" >"$state_file"
+        exit "$REVIEW_TIMEOUT_RC"
     ) &
     watchdog_pid=$!
 
@@ -102,18 +187,32 @@ run_with_timeout() {
     # WHOLE SCRIPT with 143 — before the timeout branch below can post its
     # sticky comment. The gate would still be red, but for an unexplained
     # reason, which is the failure mode MY-1404 is about.
-    wait "$child_pid" || status=$?
+    if wait "$child_pid"; then
+        child_status=0
+    else
+        child_status=$?
+    fi
 
-    # Watchdog outlived its usefulness the moment the child exited.
-    kill -KILL "$watchdog_pid" 2>/dev/null || true
-    wait "$watchdog_pid" 2>/dev/null || true
+    # The watchdog's exit status is the authoritative timeout signal. We must
+    # wait for its cleanup to finish rather than killing it early; otherwise a
+    # TERM-resistant descendant can remain alive in the original PGID.
+    if wait "$watchdog_pid"; then
+        watchdog_status=0
+    else
+        watchdog_status=$?
+    fi
 
-    # 143 = 128+SIGTERM, 137 = 128+SIGKILL — i.e. the watchdog fired. Reported
-    # as 124 so callers get one unambiguous "timed out" code to message on.
-    if [ "$status" -eq 143 ] || [ "$status" -eq 137 ]; then
+    local watchdog_state="$(cat "$state_file" 2>/dev/null || printf 'clean')"
+    rm -f "$state_file"
+
+    # Prefer a real watchdog timeout over the child status. The child may exit
+    # 0 after handling TERM, but the watchdog state is the truth for whether the
+    # deadline itself fired.
+    if [ "$watchdog_state" = "timeout" ] || [ "$watchdog_status" -eq "$REVIEW_TIMEOUT_RC" ]; then
         return "$REVIEW_TIMEOUT_RC"
     fi
-    return "$status"
+
+    return "$child_status"
 }
 
 # build_scope_evidence <head_sha> <diff_file> <changed_files_newline_separated>

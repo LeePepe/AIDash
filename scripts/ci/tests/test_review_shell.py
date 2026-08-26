@@ -297,6 +297,86 @@ def test_run_with_timeout_kills_the_whole_process_group(
     )
 
 
+def test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Leader exits 0 while descendants linger: cleanup is bounded and fast."""
+    pidfile = tmp_path / "grandchild.pid"
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        f'#!/bin/sh\n'
+        'sh -c \'echo $$ > "'
+        f"{pidfile}"
+        '"; exec sleep 120\' &\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f"run_with_timeout 2 {inner} || rc=$?\n"
+        'echo "rc=$rc"\n'
+        f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -n "$GRANDCHILD" ] && kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=0" in result.stdout, result.stdout
+    assert "CLEAN" in result.stdout, result.stdout
+
+
+def test_run_with_timeout_prefers_watchdog_when_term_trap_exits_zero(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The watchdog wins even when the leader traps TERM and exits 0."""
+    pidfile = tmp_path / "grandchild.pid"
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        f'#!/bin/sh\n'
+        'sh -c \'trap "" TERM; echo $$ > "'
+        f"{pidfile}"
+        '"; exec sleep 120\' &\n'
+        'trap "exit 0" TERM\n'
+        'sleep 120\n',
+        encoding="utf-8",
+    )
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f"run_with_timeout 2 {inner} || rc=$?\n"
+        'echo "rc=$rc"\n'
+        f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -n "$GRANDCHILD" ] && kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        timeout=90,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=124" in result.stdout, result.stdout
+    assert "CLEAN" in result.stdout, result.stdout
+
+
+def test_emit_failure_metadata_rejects_untrusted_payloads() -> None:
+    """Only allowlisted fields survive in stderr diagnostics."""
+    result = _run(
+        f". {COMMON}\n"
+        'emit_failure_metadata "timeout" 124 "timeout" "bad$(printf HACK)" "1234567890123" 8 9 1>&2\n'
+        'echo "done"\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "bad$(printf" not in result.stderr
+    assert "HACK" not in result.stderr
+    assert "terminal_reason=timeout" in result.stderr
+    assert "subtype=n/a" in result.stderr
+    assert "num_turns=n/a" in result.stderr
+
+
 def test_run_with_timeout_does_not_abort_caller_under_errexit() -> None:
     """A timeout must not kill the script before it can explain itself.
 
