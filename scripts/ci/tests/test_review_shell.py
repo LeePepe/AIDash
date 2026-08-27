@@ -72,6 +72,10 @@ def test_kimi_is_toolless_advisory_and_claude_is_paused() -> None:
     assert '--agent-file "$SCRIPT_DIR/kimi-review-agent.md"' in kimi_source
     assert "--output-format stream-json" in kimi_source
     assert "Advisory only: this check and its findings are not required for merge" in kimi_source
+    untrusted_begin = kimi_source.index("===== BEGIN UNTRUSTED PR DIFF")
+    changed_paths = kimi_source.index("Changed paths:")
+    untrusted_end = kimi_source.index("===== END UNTRUSTED PR DIFF")
+    assert untrusted_begin < changed_paths < untrusted_end
     assert not re.search(r"(^|\s)(--yolo|--auto)(\s|$)", kimi_source)
     assert "pull_request_target:" in kimi_workflow
     assert "branches: [main]" in kimi_workflow
