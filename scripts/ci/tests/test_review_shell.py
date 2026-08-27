@@ -63,6 +63,7 @@ def test_kimi_is_toolless_advisory_and_claude_is_paused() -> None:
     agent_source = KIMI_AGENT.read_text()
     kimi_workflow = (WORKFLOWS / "kimi-review.yml").read_text()
     codex_target_workflow = (WORKFLOWS / "codex-review-target.yml").read_text()
+    codex_legacy_workflow = (WORKFLOWS / "codex-review.yml").read_text()
     claude_workflow = (WORKFLOWS / "claude-review.yml").read_text()
     ruleset = (CI_DIR.parents[1] / "scripts" / "rulesets" / "main-protection.json").read_text()
 
@@ -81,9 +82,11 @@ def test_kimi_is_toolless_advisory_and_claude_is_paused() -> None:
     assert "branches: [main]" in codex_target_workflow
     assert "ref: ${{ github.event.pull_request.base.sha }}" in codex_target_workflow
     assert "ref: ${{ github.event.pull_request.head.sha }}" not in codex_target_workflow
+    assert "workflow_dispatch:" in codex_legacy_workflow
+    assert "pull_request:" not in codex_legacy_workflow
     assert "workflow_dispatch:" in claude_workflow
     assert "pull_request:" not in claude_workflow
-    assert '"context": "codex-review"' in ruleset
+    assert '"context": "codex-review-target"' in ruleset
     assert '"context": "claude-review"' not in ruleset
     assert '"context": "kimi-review"' not in ruleset
 

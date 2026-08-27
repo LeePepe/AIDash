@@ -16,10 +16,10 @@ touched leaves;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gate
 ```
 建 PR ──► auto-merge.yml         → 立即挂上 squash auto-merge(draft 除外)
        └► build + test (macOS 26) → SPM/App/CLI 构建+测试、frontmatter、tests-with-code
-       └► codex-review            → self-hosted 本机跑 Codex;required
+       └► codex-review-target     → self-hosted 本机跑 Codex;required
        └► kimi-review             → self-hosted 本机跑 Kimi;advisory-only
                                       │
-        ruleset「main protection」要求:build/aidata + codex-review 全绿并与 main 同步
+        ruleset「main protection」要求:build/aidata + codex-review-target 全绿并与 main 同步
                                       ▼
                             required 门皆绿 → 自动 squash 合并 + 删分支
 ```
@@ -31,7 +31,8 @@ touched leaves;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gate
 | pre-commit / pre-push | `scripts/hooks/*` | 本地 git | `--no-verify` 可绕 |
 | CI 构建测试 | `.github/workflows/build.yml` | PR / push main | 否(服务端) |
 | review-gate 测试 | `.github/workflows/build.yml` 的 `review-gate` job + `scripts/ci/tests/` | PR / push main | 否 |
-| required review | `.github/workflows/codex-review.yml` + `scripts/ci/codex-review.sh` | PR | 否 |
+| required review | `.github/workflows/codex-review-target.yml` + `scripts/ci/codex-review.sh` | PR | 否 |
+| paused legacy review | `.github/workflows/codex-review.yml` | 手动 no-op | — |
 | advisory review | `.github/workflows/kimi-review.yml` + `scripts/ci/kimi-review.sh` | PR | 不阻塞 |
 | paused review | `.github/workflows/claude-review.yml` | 手动 no-op | — |
 | 自动合并 | `.github/workflows/auto-merge.yml` | PR | — |
@@ -40,7 +41,7 @@ touched leaves;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gate
 ## 自动 review 是怎么工作的
 
 - 跑在维护者本机的 self-hosted runner(标签 `aidash-mac`)。
-- `codex-review` 使用独立只读 `CODEX_HOME`,是 ruleset 中唯一 required AI check。
+- `codex-review-target` 使用独立只读 `CODEX_HOME`,是 ruleset 中唯一 required AI check。
 - `kimi-review` 固定 tool-less agent 与 `kimi-code/k3`,只更新 advisory sticky comment;
   findings、超时和解析失败均不阻塞 merge。
 - `claude-review` 只保留手动 no-op workflow,不再响应 PR。
@@ -55,9 +56,8 @@ cd ~/actions-runner-aidash && ./svc.sh install && ./svc.sh start
 ### 安全(public repo + self-hosted 的高危组合)
 self-hosted runner + `pull_request` + checkout PR head = 公认高危:step 执行的是 PR 版本的代码。
 Kimi 使用 `pull_request_target`,由 base 分支评估 workflow YAML。Codex 的
-`codex-review-target.yml` 已作为 Stage A 落地；旧 `pull_request` check 仅维持
-bootstrap PR 的 required-check 连续性。target check 首次上报后，Stage B 必须切换 ruleset
-并停用旧 workflow:
+`codex-review-target.yml` 已落地并于 2026-08-26 同步为线上 required；旧
+`pull_request` workflow 已停用:
 - Codex/Kimi jobs 都只接收同仓库 PR;fork job 在 GitHub 托管 runner 上跳过本机执行。
 - 两者 checkout trusted base。Kimi 的显式 agent声明 `tools: []`、`subagents: []`,
   PR diff 只能作为围栏内数据进入模型。
