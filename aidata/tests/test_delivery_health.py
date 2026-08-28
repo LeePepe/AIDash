@@ -215,3 +215,39 @@ def test_xpc_unavailable_allows_local_digest():
     assert briefing.date == "2026-08-18"
     assert len(briefing.containers) >= 1
     assert briefing.containers[0].title == "总览"
+
+
+@pytest.mark.unit
+def test_push_wrapper_persists_xpc_failure_and_next_digest_keeps_sources_healthy(tmp_path, monkeypatch):
+    """Drive the actual production push wrapper with a required XPC failure and
+    confirm the next digest keeps source health separate from the persisted
+    delivery failure (MY-1450 acceptance criterion 1)."""
+    from L5_apps.digest import app
+    import L5_apps.digest.aidash as aidash
+
+    monkeypatch.setattr("config.STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(aidash, "resolve_aidash_bin", lambda: "/x/aidash")
+    monkeypatch.setattr(aidash, "ensure_app_running",
+                        lambda **kwargs: True)
+    monkeypatch.setattr(aidash, "ensure_xpc_ready",
+                        lambda *args, **kwargs: False)
+    monkeypatch.setattr(aidash, "_record_push_failure",
+                        lambda *args, **kwargs: None)
+
+    revision = _minimal_raven_trends()
+    source_bundle = aidash._normalize_sources(revision)
+    md = render_digest(revision, "2026-08-19")
+    result = app._push_to_aidash(md, "2026-08-19", source_bundle)
+
+    assert result.ok is False
+    assert "XPC not reachable" in result.reason
+    persisted = load_delivery_state()
+    assert persisted is not None
+    assert persisted.ok is False
+    assert "XPC" in persisted.reason
+
+    next_md = app._render_template("2026-08-19", source_bundle)
+    assert "> 数据源:" in next_md
+    assert "> 投递:" in next_md
+    assert "raven✅" in next_md
+    assert "XPC⚠️" in next_md or "XPC not reachable" in next_md
