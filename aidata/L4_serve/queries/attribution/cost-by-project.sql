@@ -38,6 +38,14 @@ WITH session_cost AS (
       AND (:day IS NULL OR cst_day = :day)
     GROUP BY session_uuid
 ),
+-- The day's TOTAL spend (all requests, whether attributable or not).
+-- This is the denominator readers expect when they see a percentage on a cost
+-- card: "41% of what I spent today", not "41% of the portion we could trace".
+day_total AS (
+    SELECT COALESCE(sum(COALESCE(cost_usd, 0)), 0) AS total
+    FROM fact_request
+    WHERE :day IS NULL OR cst_day = :day
+),
 -- Each session's turn mix, as weights summing to 1.0 per session.
 project_weight AS (
     SELECT session_id AS sid,
@@ -62,9 +70,11 @@ allocated AS (
 SELECT project                                              AS project,
        round(cost_usd, 2)                                   AS cost_usd,
        round(100.0 * cost_usd
-             / NULLIF((SELECT sum(cost_usd) FROM allocated), 0), 1) AS cost_pct,
+             / NULLIF((SELECT total FROM day_total), 0), 1) AS cost_pct,
        round(tokens / 1000.0, 1)                            AS ktokens,
        round(requests)                                      AS requests,
-       sessions                                             AS sessions
+       sessions                                             AS sessions,
+       round((SELECT total FROM day_total), 2)              AS day_total,
+       round((SELECT sum(cost_usd) FROM allocated), 2)      AS attributed_total
 FROM allocated
 ORDER BY cost_usd DESC;

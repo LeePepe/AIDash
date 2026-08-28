@@ -44,15 +44,19 @@ class _Missing:
 @pytest.mark.unit
 def test_cost_by_project_ranks_by_share(monkeypatch):
     monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [("AIDash", 1552.93, 41.4, 331680.5, 1492.0, 19),
-         ("VitalStride", 900.04, 24.0, 191641.8, 1807.0, 26)],
-        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
+        [("AIDash", 1552.93, 41.4, 331680.5, 1492.0, 19, 3748.50, 3748.50),
+         ("VitalStride", 900.04, 24.0, 191641.8, 1807.0, 26, 3748.50, 3748.50)],
+        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions",
+         "day_total", "attributed_total"]))
     bundle = s.fetch_cost_by_project("2026-08-02")
     assert bundle.health.state == "ok"
     assert [i.label for i in bundle.items] == ["AIDash", "VitalStride"]
     # The bar is drawn from the SHARE, so the card reads as "where the money
     # went" rather than an unanchored dollar figure.
     assert bundle.items[0].value_text == "41%"
+    # Full coverage — no "未归因" row appended.
+    assert bundle.coverage_pct >= 99.5
+    assert all(i.label != "未归因" for i in bundle.items)
 
 
 @pytest.mark.unit
@@ -69,104 +73,98 @@ def test_cost_by_project_degrades_on_failure(monkeypatch):
 @pytest.mark.unit
 def test_cost_by_project_handles_empty(monkeypatch):
     monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [], ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
+        [], ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions",
+             "day_total", "attributed_total"]))
     bundle = s.fetch_cost_by_project(None)
     assert bundle.items == []
     assert bundle.health.state == "ok"
 
 
 # --------------------------------------------------------------------------- #
-# MY-1435 regression: coverage must be explicit when attribution is partial
+# MY-1435 regression: partial coverage must be explicit
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
-def test_cost_by_project_partial_coverage_shows_unattributed(monkeypatch):
-    """Headline 2858.35, attributed 2107.23 → explicit unattributed row.
+def test_cost_by_project_partial_coverage_regression(monkeypatch):
+    """Regression for headline $2858.35 with attributed total $2107.23.
 
-    Before MY-1435 the card presented percentages summing to 100% of the
-    attributed subtotal, silently implying full-cost coverage. After the fix,
-    percentages use the headline as denominator and the unattributed portion
-    appears as a named row so the reader can reconcile:
-      Σ(project %) + 未归因 % == 100% of headline.
+    The unattributed portion ($751.12, ~26%) must be explicitly visible as a
+    "未归因" row and the bundle must carry coverage metadata so the container
+    can surface the gap in its subtitle. Previously, percentages were shown
+    relative to the attributed total alone, silently implying full coverage.
     """
+    # Simulate 3 projects summing to $2107.23, against a day total of $2858.35.
     monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [("AIDash", 1200.00, 56.9, 300000, 800, 10),
-         ("VitalStride", 600.00, 28.5, 150000, 400, 8),
-         ("Multica", 307.23, 14.6, 80000, 200, 5)],
-        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
-    headline = 2858.35
-    attributed = 1200.00 + 600.00 + 307.23  # 2107.23
-    bundle = s.fetch_cost_by_project("2026-08-02", headline_cost=headline)
+        [("AIDash", 1200.00, 41.97, 200000.0, 800.0, 12, 2858.35, 2107.23),
+         ("VitalStride", 600.00, 20.99, 100000.0, 400.0, 8, 2858.35, 2107.23),
+         ("Multica", 307.23, 10.75, 50000.0, 200.0, 5, 2858.35, 2107.23)],
+        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions",
+         "day_total", "attributed_total"]))
+    bundle = s.fetch_cost_by_project("2026-08-15")
 
-    assert bundle.health.state == "ok"
+    # Coverage metadata is explicit and reconcilable.
+    assert bundle.headline_total == 2858.35
+    assert bundle.attributed_total == 2107.23
+    assert bundle.coverage_pct < 99.5, "partial coverage must be flagged"
+    assert abs(bundle.coverage_pct - 100.0 * 2107.23 / 2858.35) < 0.1
+
+    # The unattributed portion is visible as a row.
     labels = [i.label for i in bundle.items]
-    # The unattributed portion must be explicit
     assert "未归因" in labels, (
-        "partial coverage must produce an explicit unattributed row"
+        "partial coverage must append an explicit unattributed row"
     )
-    unattributed_item = next(i for i in bundle.items if i.label == "未归因")
-    # The gap must be the arithmetic difference
-    expected_gap = headline - attributed
-    assert abs(unattributed_item.value - expected_gap) < 0.01
-    # Percentages must use headline as denominator (not attributed subtotal)
-    first = bundle.items[0]
-    expected_pct = round(100.0 * 1200.00 / headline, 1)
-    assert first.value_text == f"{expected_pct:.0f}%"
-    # ALL percentages must reconcile to 100% of headline
-    all_pcts = []
-    for item in bundle.items:
-        pct_str = item.value_text.rstrip("%")
-        all_pcts.append(float(pct_str))
-    # Allow rounding tolerance (±2%)
-    assert abs(sum(all_pcts) - 100.0) < 2.0, (
-        f"percentages must reconcile to ~100% of headline; got {sum(all_pcts)}"
-    )
-    # Unattributed has semantic="warning" to draw attention
-    assert unattributed_item.semantic == "warning"
+    gap_item = next(i for i in bundle.items if i.label == "未归因")
+    expected_gap = 2858.35 - 2107.23
+    assert abs(gap_item.value - expected_gap) < 0.01
+    # Gap percentage is relative to headline, not attributed total.
+    assert gap_item.value_text == "26%"
+
+    # Arithmetic reconciliation: headline = attributed + gap.
+    assert abs(bundle.headline_total
+               - bundle.attributed_total - gap_item.value) < 0.01
 
 
 @pytest.mark.unit
-def test_cost_by_project_full_coverage_no_warning(monkeypatch):
-    """When attributed == headline, no unnecessary warning row appears."""
-    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [("AIDash", 1800.00, 60.0, 400000, 1000, 15),
-         ("VitalStride", 1200.00, 40.0, 300000, 800, 12)],
-        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
-    headline = 3000.00  # exactly equals attributed total
-    bundle = s.fetch_cost_by_project("2026-08-02", headline_cost=headline)
-    labels = [i.label for i in bundle.items]
-    assert "未归因" not in labels, (
-        "full coverage must NOT produce a warning row"
+def test_attribution_container_shows_coverage_subtitle(monkeypatch):
+    """When coverage < 99.5%, the container subtitle surfaces the gap."""
+    from L5_apps.digest.aidash import _attribution_container
+
+    bundle = s.CostByProjectBundle(
+        items=[s.RankItem("AIDash", 41.4, "42%")],
+        headline_total=2858.35,
+        attributed_total=2107.23,
+        coverage_pct=73.7,
+        health=s.SourceHealth("attribution", "ok"),
     )
+    model_bundle = s.RankBundle(
+        [s.RankItem("opus-5", 1200.0, "$1200")],
+        s.SourceHealth("attribution", "ok"))
+    container = _attribution_container("0815", bundle, model_bundle)
+    assert container is not None
+    assert "归因覆盖" in container.subtitle
+    assert "73%" in container.subtitle
+    # Dollar amounts present for reconciliation.
+    assert "$2107" in container.subtitle
+    assert "$2858" in container.subtitle
 
 
 @pytest.mark.unit
-def test_cost_by_project_no_headline_falls_back_to_attributed_pct(monkeypatch):
-    """Without headline_cost, percentages use SQL's own cost_pct (legacy)."""
-    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [("AIDash", 1552.93, 41.4, 331680.5, 1492.0, 19),
-         ("VitalStride", 900.04, 24.0, 191641.8, 1807.0, 26)],
-        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
-    bundle = s.fetch_cost_by_project("2026-08-02")  # no headline_cost
-    # Uses SQL-computed cost_pct (41.4) directly
-    assert bundle.items[0].value_text == "41%"
-    assert "未归因" not in [i.label for i in bundle.items]
+def test_attribution_container_no_warning_at_full_coverage():
+    """Full coverage (>=99.5%) produces a clean subtitle, no warning."""
+    from L5_apps.digest.aidash import _attribution_container
 
-
-@pytest.mark.unit
-def test_headline_cost_extracts_day_from_raven_series():
-    """_headline_cost returns the raven cost for the given day."""
-    from L5_apps.digest.app import _headline_cost
-
-    raven = s.RavenTrends(
-        cost=[("2026-08-01", 2858.35), ("2026-08-02", 3100.0)],
-        tokens=[], requests=[], waste=[],
-        pipeline_completed=[], pipeline_cancelled=[], sessions=[],
-        health=s.SourceHealth("raven", "ok"),
+    bundle = s.CostByProjectBundle(
+        items=[s.RankItem("AIDash", 99.8, "100%")],
+        headline_total=3000.0,
+        attributed_total=2998.50,
+        coverage_pct=99.95,
+        health=s.SourceHealth("attribution", "ok"),
     )
-    assert _headline_cost(raven, "2026-08-01") == 2858.35
-    assert _headline_cost(raven, "2026-08-03") is None  # day not in series
-    assert _headline_cost(raven, None) is None
-    assert _headline_cost(None, "2026-08-01") is None
+    model_bundle = s.RankBundle(
+        [s.RankItem("opus-5", 3000.0, "$3000")],
+        s.SourceHealth("attribution", "ok"))
+    container = _attribution_container("0815", bundle, model_bundle)
+    assert container is not None
+    assert "归因覆盖" not in container.subtitle
 
 
 # --------------------------------------------------------------------------- #
@@ -199,11 +197,16 @@ def test_model_by_project_degrades(monkeypatch):
 def test_attribution_container_sits_below_the_trends_it_explains():
     from L5_apps.digest.aidash import _attribution_container
 
-    bundle = s.RankBundle(
-        [s.RankItem("AIDash", 41.4, "41%")], s.SourceHealth("attribution", "ok"))
-    container = _attribution_container("0803", bundle, bundle)
+    bundle = s.CostByProjectBundle(
+        [s.RankItem("AIDash", 41.4, "41%")],
+        3748.50, 3748.50, 100.0,
+        s.SourceHealth("attribution", "ok"))
+    model_bundle = s.RankBundle(
+        [s.RankItem("opus-5", 1200.0, "$1200")],
+        s.SourceHealth("attribution", "ok"))
+    container = _attribution_container("0803", bundle, model_bundle)
     assert container is not None
-    # 趋势指标 is order 20; attribution must land between it and AI 效能 (25),
+    # 趋势指標 is order 20; attribution must land between it and AI 效能 (25),
     # because it exists to explain the arrows directly above it.
     assert 20 < container.order < 25
     assert container.title == "成本归因"
@@ -218,8 +221,10 @@ def test_attribution_container_omitted_when_unavailable():
     """An empty frame is worse than no section (ADR-23)."""
     from L5_apps.digest.aidash import _attribution_container
 
-    empty = s.RankBundle([], s.SourceHealth("attribution", "skipped:未取"))
-    assert _attribution_container("0803", empty, empty) is None
+    empty = s.CostByProjectBundle(
+        [], 0.0, 0.0, 100.0, s.SourceHealth("attribution", "skipped:未取"))
+    model_empty = s.RankBundle([], s.SourceHealth("attribution", "skipped:未取"))
+    assert _attribution_container("0803", empty, model_empty) is None
 
 
 @pytest.mark.unit

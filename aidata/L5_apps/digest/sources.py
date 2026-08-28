@@ -434,8 +434,9 @@ class DigestSources:
     # ── attribution (§07-17 目标⑤「为什么」): the cross-source layer ──
     # Every other bundle above is single-dimension. These two answer "why did
     # the number move", which no trend arrow can.
-    cost_by_project: "RankBundle" = field(
-        default_factory=lambda: RankBundle([], SourceHealth("attribution", "skipped:未取"))
+    cost_by_project: "CostByProjectBundle" = field(
+        default_factory=lambda: CostByProjectBundle(
+            [], 0.0, 0.0, 100.0, SourceHealth("attribution", "skipped:未取"))
     )
     model_by_project: "RankBundle" = field(
         default_factory=lambda: RankBundle([], SourceHealth("attribution", "skipped:未取"))
@@ -779,8 +780,32 @@ def fetch_ai_efficiency() -> "AiEfficiency":
 
 
 # ---- ⏱ 时间与产出 -------------------------------------------------------
-def fetch_cost_by_project(day: str | None, top_n: int = 6, *,
-                          headline_cost: float | None = None) -> "RankBundle":
+@dataclass(frozen=True)
+class CostByProjectBundle:
+    """Cost attribution with explicit coverage against the headline total.
+
+    Duck-compatible with RankBundle (has .items and .health), so existing
+    card builders (e.g. _bar_card) work unchanged. Additionally carries the
+    headline total, attributed total, and coverage percentage so the
+    presentation layer can surface when projects do NOT cover the full cost.
+
+    When coverage < 99.5%, an explicit "未归因" (Unattributed) item is
+    appended to `items` so the gap is visible in the barList card and the
+    reader can arithmetically reconcile headline vs attributed.
+    """
+    items: list[RankItem]
+    headline_total: float
+    attributed_total: float
+    coverage_pct: float
+    health: SourceHealth
+
+
+# Threshold below which the unattributed portion is explicitly shown.
+# At or above this, the gap is negligible (rounding) and no warning needed.
+_COVERAGE_THRESHOLD_PCT = 99.5
+
+
+def fetch_cost_by_project(day: str | None, top_n: int = 6) -> "CostByProjectBundle":
     """Where the day's spend actually went, as a descending barList.
 
     This is the attribution layer: every other trend card reports one
@@ -792,51 +817,44 @@ def fetch_cost_by_project(day: str | None, top_n: int = 6, *,
     double-count (see the query header). Degrades to empty + non-ok health
     when the warehouse or query fails (ADR-23).
 
-    When `headline_cost` is provided (the day's total spend from raven), all
-    percentages are computed against THAT denominator — never the attributed
-    subtotal — so displayed values never imply full-cost coverage. If the
-    attributed total < headline_cost, an explicit '未归因' row shows the gap
-    (MY-1435). Full coverage produces no extra row. This guarantees arithmetic
-    reconciliation: headline = Σ(project costs) + unattributed.
+    Percentages are relative to the DAY TOTAL (headline cost), not the
+    attributed subset alone — so 41% means "41% of everything you spent
+    today", and the reader can always reconcile. When attribution does not
+    cover the full headline, an explicit "未归因" row makes the gap visible.
     """
     try:
         rows, idx = _rows("attribution/cost-by-project", {"day": day})
+        if not rows:
+            return CostByProjectBundle(
+                [], 0.0, 0.0, 100.0, SourceHealth("attribution", "ok"))
         pi, ci, pci = idx["project"], idx["cost_usd"], idx["cost_pct"]
+        dti, ati = idx["day_total"], idx["attributed_total"]
+        # day_total and attributed_total are constant across rows.
+        headline = float(rows[0][dti] or 0)
+        attributed = float(rows[0][ati] or 0)
+        coverage = (100.0 * attributed / headline) if headline > 0 else 100.0
 
-        attributed_total = sum(float(r[ci] or 0) for r in rows)
-
-        # When headline_cost is available, recompute percentages against it so
-        # every % answers "of total spend" (honest denominator). Otherwise use
-        # the SQL's own cost_pct which is relative to the full attributed base
-        # (includes projects beyond top_n).
-        if headline_cost and headline_cost > 0:
-            ranked = [
-                (str(r[pi]), float(r[ci] or 0),
-                 round(100.0 * float(r[ci] or 0) / headline_cost, 1))
-                for r in rows
-            ]
-        else:
-            ranked = [(str(r[pi]), float(r[ci] or 0), float(r[pci] or 0))
-                      for r in rows]
-
+        ranked = [(str(r[pi]), float(r[ci] or 0), float(r[pci] or 0))
+                  for r in rows]
         items = _fold_top_n(
             ranked, top_n,
             value_text=lambda pct: f"{pct:.0f}%",
             semantic=lambda _label: None,
         )
-
-        # Explicit unattributed row when headline > attributed (MY-1435).
-        # Threshold: >1% gap avoids noise from floating-point rounding.
-        if (headline_cost and headline_cost > 0
-                and attributed_total < headline_cost * 0.99):
-            gap = headline_cost - attributed_total
-            gap_pct = round(100.0 * gap / headline_cost, 1)
-            items.append(RankItem("未归因", gap, f"{gap_pct:.0f}%",
-                                  semantic="warning"))
-
-        return RankBundle(items, SourceHealth("attribution", "ok"))
+        # When coverage is incomplete, add an explicit "未归因" row so the
+        # gap is visible and arithmetic reconciliation is possible.
+        if coverage < _COVERAGE_THRESHOLD_PCT and headline > 0:
+            gap = headline - attributed
+            gap_pct = 100.0 - coverage
+            items.append(RankItem(
+                "未归因", gap, f"{gap_pct:.0f}%", semantic="muted"))
+        return CostByProjectBundle(
+            items, headline, attributed, coverage,
+            SourceHealth("attribution", "ok"))
     except Exception as exc:
-        return RankBundle([], SourceHealth("attribution", "error", str(exc)[:200]))
+        return CostByProjectBundle(
+            [], 0.0, 0.0, 100.0,
+            SourceHealth("attribution", "error", str(exc)[:200]))
 
 
 def fetch_model_by_project(day: str | None, top_n: int = 5) -> "RankBundle":
