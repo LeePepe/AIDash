@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import AIDashCore
+import ArgumentParser
 
 /// Tests for `aidash card put` (T054 / MY-971).
 ///
@@ -256,19 +257,12 @@ struct CardPutCommandTests {
             wasCreated: true
         )
 
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardOutput.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardOutput.fileDescriptor)
-
-        try JSONOutput().emit(success: result, requestId: "req-card-put-2")
-
-        dup2(saved, FileHandle.standardOutput.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = try captureStdout {
+            try JSONOutput().emit(success: result, requestId: "req-card-put-2")
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stdout.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == true)
         #expect(obj["requestId"] as? String == "req-card-put-2")
@@ -294,19 +288,12 @@ struct CardPutCommandTests {
             got: Self.validContainerID
         )
 
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardError.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardError.fileDescriptor)
-
-        try JSONOutput().emit(error: remoteError, requestId: "req-card-put-err")
-
-        dup2(saved, FileHandle.standardError.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stderr = try captureStderr {
+            try JSONOutput().emit(error: remoteError, requestId: "req-card-put-err")
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == false)
         let errBody = try #require(obj["error"] as? [String: Any])
@@ -314,5 +301,42 @@ struct CardPutCommandTests {
         #expect(errBody["field"] as? String == "containerId")
         #expect(errBody["got"] as? String == Self.validContainerID)
         #expect(errBody["requestId"] as? String == "req-card-put-err")
+    }
+
+    // MARK: - MY-1455: CardPut remote-error handler
+
+    @Test("CardPut emitRemoteError emits requestId from response on stderr and exits 3 (MY-1455)")
+    func cardPutRemoteErrorPreservesRequestId() throws {
+        let remoteError = XPCError(
+            code: "container.not_found",
+            message: "No container with that id",
+            field: "containerId",
+            got: Self.validContainerID
+        )
+        let globals = GlobalOptions.test(json: true, quiet: false)
+
+        var capturedExit: Int32?
+        let stderr = try captureStderr {
+            do {
+                try CardPutCommand.emitRemoteError(
+                    remoteError,
+                    requestId: "req-card-put-remote",
+                    globals: globals
+                )
+            } catch let exitCode as ExitCode {
+                capturedExit = exitCode.rawValue
+            }
+        }
+
+        #expect(capturedExit == 3)
+
+        let obj = try #require(
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
+        )
+        #expect(obj["ok"] as? Bool == false)
+        #expect(obj["requestId"] == nil)
+        let errBody = try #require(obj["error"] as? [String: Any])
+        #expect(errBody["code"] as? String == "container.not_found")
+        #expect(errBody["requestId"] as? String == "req-card-put-remote")
     }
 }

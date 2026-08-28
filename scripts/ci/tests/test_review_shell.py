@@ -49,8 +49,50 @@ CI_DIR = pathlib.Path(__file__).resolve().parents[1]
 COMMON = CI_DIR / "review-common.sh"
 CLAUDE = CI_DIR / "claude-review.sh"
 CODEX = CI_DIR / "codex-review.sh"
+KIMI = CI_DIR / "kimi-review.sh"
+KIMI_AGENT = CI_DIR / "kimi-review-agent.md"
+WORKFLOWS = CI_DIR.parents[1] / ".github" / "workflows"
 
 GATE_SCRIPTS = (COMMON, CLAUDE, CODEX)
+
+
+def test_kimi_is_toolless_advisory_and_claude_is_paused() -> None:
+    """Kimi may report findings but cannot execute PR-driven tools or gate merge."""
+
+    kimi_source = KIMI.read_text()
+    agent_source = KIMI_AGENT.read_text()
+    kimi_workflow = (WORKFLOWS / "kimi-review.yml").read_text()
+    codex_target_workflow = (WORKFLOWS / "codex-review-target.yml").read_text()
+    codex_legacy_workflow = (WORKFLOWS / "codex-review.yml").read_text()
+    claude_workflow = (WORKFLOWS / "claude-review.yml").read_text()
+    ruleset = (CI_DIR.parents[1] / "scripts" / "rulesets" / "main-protection.json").read_text()
+
+    assert "tools: []" in agent_source
+    assert "subagents: []" in agent_source
+    assert '--agent-file "$SCRIPT_DIR/kimi-review-agent.md"' in kimi_source
+    assert "--output-format stream-json" in kimi_source
+    assert "Advisory only: this check and its findings are not required for merge" in kimi_source
+    untrusted_begin = kimi_source.index("===== BEGIN UNTRUSTED PR DIFF")
+    changed_paths = kimi_source.index("Changed paths:")
+    untrusted_end = kimi_source.index("===== END UNTRUSTED PR DIFF")
+    assert untrusted_begin < changed_paths < untrusted_end
+    assert not re.search(r"(^|\s)(--yolo|--auto)(\s|$)", kimi_source)
+    assert "pull_request_target:" in kimi_workflow
+    assert "branches: [main]" in kimi_workflow
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in kimi_workflow
+    assert "ref: ${{ github.event.pull_request.head.sha }}" not in kimi_workflow
+    assert "pull_request_target:" in codex_target_workflow
+    assert "codex-review-target:" in codex_target_workflow
+    assert "branches: [main]" in codex_target_workflow
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in codex_target_workflow
+    assert "ref: ${{ github.event.pull_request.head.sha }}" not in codex_target_workflow
+    assert "workflow_dispatch:" in codex_legacy_workflow
+    assert "pull_request:" not in codex_legacy_workflow
+    assert "workflow_dispatch:" in claude_workflow
+    assert "pull_request:" not in claude_workflow
+    assert '"context": "codex-review-target"' in ruleset
+    assert '"context": "claude-review"' not in ruleset
+    assert '"context": "kimi-review"' not in ruleset
 
 # The exact clause MY-1402 introduced and MY-1404 re-plumbed. Kept as the head
 # and tail of the expected text so a silent truncation cannot pass.

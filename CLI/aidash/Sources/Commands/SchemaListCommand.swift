@@ -13,11 +13,12 @@ import AIDashCore
 ///
 /// Plus global `--json`/`--quiet` (declared on `GlobalOptions`).
 ///
-/// Exit codes are mapped centrally by `AIDash.main` via `ExitCodeMapper`:
+/// Exit codes:
 ///   0 — success
 ///   1 — local validation (`schema.*`)
-///   2 — XPC transport (`xpc.*`)
-///   3 — remote error (everything else)
+///   2 — XPC transport (`xpc.*`) or malformed protocol reply (ok=false, no error)
+///   3 — remote error (ok=false with error payload; emitted locally with
+///       response.requestId on stderr and `Darwin.exit(3)` — MY-1455)
 ///
 /// Output:
 ///   - `--format json` → success envelope on stdout via `JSONOutput`/`HumanOutput`.
@@ -26,9 +27,10 @@ import AIDashCore
 ///     in the standard success envelope as a string (`data.markdown`) so that
 ///     `aidash --json schema list --format markdown` still emits the contract
 ///     envelope (per Constitution §B.1).
-///   - Errors are always JSON envelopes on stderr (per cli-surface contract);
-///     this command throws `XPCError` so `AIDash.main`'s central handler emits
-///     and exits with the correct code.
+///   - Errors are always JSON envelopes on stderr; remote errors are emitted
+///     locally via `handleFailedResponse` with `response.requestId` and exit 3
+///     directly (MY-1455). Malformed ok=false (nil error) throws to the central
+///     handler for exit 2.
 struct SchemaListCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "list",
@@ -62,10 +64,12 @@ struct SchemaListCommand: AsyncParsableCommand {
         let response = try await XPCClient().execute(request)
 
         if response.ok == false {
-            throw response.error ?? XPCError(
-                code: "xpc.decode_failure",
-                message: "Server returned ok=false but no error payload"
-            )
+            do {
+                try Self.handleFailedResponse(response, globals: globals)
+            } catch let exitCode as ExitCode {
+                Darwin.exit(exitCode.rawValue)
+            }
+            return  // unreachable after Darwin.exit, but satisfies compiler
         }
 
         guard let data = response.data else {
@@ -98,6 +102,25 @@ struct SchemaListCommand: AsyncParsableCommand {
             format: format,
             outputMode: globals.outputMode,
             requestId: response.requestId
+        )
+    }
+
+    /// Production response handler for schema.list. Valid remote errors emit
+    /// the envelope with response.requestId on stderr and throw ExitCode(3).
+    /// Malformed ok=false (nil error) throws xpc.decode_failure (exit 2 via
+    /// central handler).
+    static func handleFailedResponse(
+        _ response: XPCResponse,
+        globals: GlobalOptions
+    ) throws {
+        if let remoteError = response.error {
+            let formatter = globals.outputMode.formatter()
+            try formatter.emit(error: remoteError, requestId: response.requestId)
+            throw ExitCode(3)
+        }
+        throw XPCError(
+            code: "xpc.decode_failure",
+            message: "Server returned ok=false but no error payload"
         )
     }
 
