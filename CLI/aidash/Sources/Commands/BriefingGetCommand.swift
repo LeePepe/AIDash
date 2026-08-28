@@ -49,11 +49,9 @@ struct BriefingGetCommand: AsyncParsableCommand {
     ///     (central handler maps to exit 1).
     ///   - `XPCError` with `xpc.*` code on local XPC transport failure
     ///     (central handler maps to exit 2).
-    ///   - `XPCError` re-thrown from the remote `XPCResponse.error`
-    ///     envelope. To keep server-returned errors mapped to exit 3
-    ///     regardless of code prefix, this method writes the error envelope
-    ///     and calls `Darwin.exit(3)` directly rather than relying on the
-    ///     central prefix mapper (per the contract's reserved-prefix rule).
+    ///   - Remote errors are emitted locally via `emitRemoteError` with
+    ///     `response.requestId` on stderr, then `Darwin.exit(3)` is called
+    ///     directly (per the contract's reserved-prefix rule — MY-1455).
     func run() async throws {
         let resolvedDate = Self.resolveDate(date)
         try SchemaValidator.validateBriefingGet(date: resolvedDate)
@@ -95,23 +93,11 @@ struct BriefingGetCommand: AsyncParsableCommand {
                 try formatter.emit(success: result.briefing, requestId: response.requestId)
             }
         } else if let error = response.error {
-            // Per `cli-surface.md` §"Exit codes": any error returned inside
-            // `XPCResponse.error` is a REMOTE failure and ALWAYS exits 3,
-            // even if its `code` starts with `schema.` or `xpc.`. Those
-            // prefixes are reserved for LOCAL classification only, so we
-            // emit the envelope and exit 3 directly here rather than letting
-            // the central prefix-based mapper remap it to 1 or 2.
-            let remoteError = XPCError(
-                code: error.code,
-                message: error.message,
-                field: error.field,
-                got: error.got,
-                allowed: error.allowed,
-                cause: error.cause
-            )
-            let formatter = globals.outputMode.formatter()
-            try formatter.emit(error: remoteError, requestId: response.requestId)
-            Darwin.exit(3)
+            do {
+                try Self.emitRemoteError(error, requestId: response.requestId, globals: globals)
+            } catch let exitCode as ExitCode {
+                Darwin.exit(exitCode.rawValue)
+            }
         } else {
             throw XPCError(
                 code: "xpc.decode_failure",
@@ -121,6 +107,28 @@ struct BriefingGetCommand: AsyncParsableCommand {
     }
 
     // MARK: - Internal helpers (visible to tests)
+
+    /// Production remote-error handler: emits the error envelope with
+    /// response.requestId on stderr and throws ExitCode(3). Extracted
+    /// for testability — the test seam covers the full decoded-reply →
+    /// command-emit path (MY-1455).
+    static func emitRemoteError(
+        _ error: XPCError,
+        requestId: String,
+        globals: GlobalOptions
+    ) throws {
+        let remoteError = XPCError(
+            code: error.code,
+            message: error.message,
+            field: error.field,
+            got: error.got,
+            allowed: error.allowed,
+            cause: error.cause
+        )
+        let formatter = globals.outputMode.formatter()
+        try formatter.emit(error: remoteError, requestId: requestId)
+        throw ExitCode(3)
+    }
 
     /// Resolves CLI date sugar per `contracts/cli-surface.md` §"briefing get".
     ///

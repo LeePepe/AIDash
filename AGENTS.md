@@ -24,6 +24,7 @@ before doing anything material.** It governs every decision below.
 | Agent quickstart (how to publish a briefing) | `specs/001-core-briefing-cli/quickstart.md` |
 | Task breakdown | `specs/001-core-briefing-cli/tasks.md` |
 | Original grill decisions (audit trail) | `docs/grill-2026-06-23-decisions.md` |
+| **Recursive layer routing** | `CONTEXT.md` → `scripts/context/resolve <path>` |
 | **Global technical context** (architecture, data flow, layers) | `tech-context.md` |
 | **Per-layer technical context** | `Packages/<X>/tech-context.md` |
 | **aidata 数据层**(Python,上游内容生产) | `aidata/tech-context.md` |
@@ -37,11 +38,12 @@ before doing anything material.** It governs every decision below.
 ## Read Contract(读取契约)
 
 任务开始前,按你要碰的东西,先读对应文档 —— 不读就动手 = 违规。
-优先级:Constitution > spec > tech-context > plan > task > intuition。
+优先级:Constitution > spec > CONTEXT.md leaf > tech-context > plan > task > intuition。
 
 | 你要做的事 | 必读(前置) | 拿什么 |
 |---|---|---|
 | 任何任务 | `.specify/memory/constitution.md` | 不可违反的红线 |
+| 改任何文件 | `scripts/context/contexts <path>` 返回的链 | 唯一 owning leaf、依赖、red lines、gate |
 | 决定"做什么" / 改需求 | `specs/<当前>/spec.md` | 功能意图、验收标准、范围边界 |
 | 改全局架构 / 跨层设计 | `tech-context.md`(顶层) | 架构决策、数据流、分层规则 |
 | **改 `Packages/<X>/**`** | **`Packages/<X>/tech-context.md`** | 该层职责、依赖、红线、测试约定 |
@@ -51,8 +53,11 @@ before doing anything material.** It governs every decision below.
 
 ### 分层路由(Layer Routing)—— 核心
 
-- 改哪个包,**先读那个包的 `tech-context.md`**(顶部 frontmatter 有 layer/依赖/红线)。
-  Python 数据层同理:改 `aidata/**` 先读 `aidata/tech-context.md`。
+- 先跑 `scripts/context/resolve <path>`;再读 `scripts/context/contexts <path>`
+  返回的 root → child index → leaf 链。leaf frontmatter 是 layer / dependency /
+  red-lines / gate 的单一结构化来源;`tech-context.md` 是 leaf 指向的深入参考。
+- `scripts/context/audit` 必须让每个 tracked file 恰好落到一个 leaf 或带原因的
+  exclusion。路由、依赖或 manifest 改动和 audit 修复同一个 commit 落地。
 - 改动只落在 **1 个层** → 一个 agent 直接做。
 - 改动跨 **2+ 层** → 任务太大,**按层拆**成 N 个子任务;每个子任务 = 一层 =
   一个独立可 build/test 的 commit。
@@ -62,9 +67,8 @@ before doing anything material.** It governs every decision below.
 
 ### 分层发现(Layer Discovery)
 
-lint / UT 失败时:解析失败路径 → 映射到 layer(哪个 Package)→ 派该层的修复
-(带上该层 `tech-context.md` frontmatter 的 `red_lines`)→ 只在该层内修 → 跑该层
-test 验证 → 若根因在别层,记为新任务,不跨层改。
+lint / UT 失败时:读取结构化 `{layer,path,kind,detail,red_lines}` → 只在该 leaf
+内修 → `scripts/context/run <layer>` → 若根因在别层,记为新任务,不跨层改。
 
 ## Hard constraints (from Constitution)
 
@@ -94,7 +98,7 @@ AIDashCore (zero UI deps, used by both app and CLI)
    ↑
 AIDashUI  (SwiftUI views; depends on Core + DesignKit)
    ↑
-AIDashApp (macOS + iPadOS + iOS app; depends on UI + Core)
+AIDashApp (macOS + iPadOS + iOS app; depends on UI + Core + DesignKit)
 
 DesignKit (seed color system + components; zero local deps)
    ↑
@@ -126,12 +130,10 @@ aidata/ (Python, L1→L5)  ──JSON payload──>  aidash CLI  ──XPC─�
 
 ## Test through hooks; do not manually repeat suites
 
-**Verification is mandatory and hook-driven.** Do not manually run the same
-test suites that `scripts/hooks/pre-commit` and `pre-push` run. Instead, make
-normal verified commits and pushes: `pre-commit` runs the affected package
-build/tests and lint; `pre-push` runs the repository-wide gates. A hook failure
-is the test signal: map its path to the owning layer, fix that layer, and commit
-again. Do not bypass hooks for code changes.
+**Verification is mandatory and hook-driven.** Do not manually repeat suites.
+`pre-commit` and `pre-push` resolve changed paths and run declared local leaf
+gates; CI runs the required resolver-declared App/CLI builds and repository-wide
+gates. A hook failure is the test signal: fix its owning leaf and commit again.
 
 **NEVER run a host-based test target locally:**
 
@@ -195,35 +197,36 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
   `docs:`, `chore:`.
 - **PR is the unit of merge.** Each PR closes one Multica issue.
 - **`main` is protected.** Three gates guard every change (发现→修复解耦):
-  1. **Local `pre-commit` hook** (`scripts/hooks/pre-commit`) — 增量:只对本次
-     暂存改动涉及的 SPM 包跑 `swift build` + `swift test` + 对暂存 `.swift`
-     跑 swiftlint(用根 `.swiftlint.yml`)。秒级。**注意:顶层代码(`Apps/**`、
-     `CLI/**`)不属于任何 `Packages/<X>` 层,pre-commit 的 build/test 不覆盖——
-     但 swiftlint 用根 config 覆盖全仓库;它们的 build 门禁落在 pre-push/CI。**
-  2. **Local `pre-push` hook** (`scripts/hooks/pre-push`) — 全量:防腐校验
-     (frontmatter 对代码)、「改代码必带测试」门、`swiftlint`(根 config,全仓库)、
-     `swift test`(AIDashCore)、`xcodegen generate`、`xcodebuild` for BOTH
-     `AIDashApp` and `aidash` CLI。
+  1. **Local `pre-commit` hook** (`scripts/hooks/pre-commit`) — 递归 resolve 暂存
+     路径,先 audit 唯一归类,再跑 affected leaf 的 local gates;SPM leaf 是
+     `swift build` + `swift test`。暂存 `.swift` 另过根 SwiftLint config。
+  2. **Local `pre-push` hook** (`scripts/hooks/pre-push`) — resolve push diff,跑
+     affected leaf 的 local gates +「改代码必带测试」+ 所有 pushed ranges 中去重后仍
+     存在的变更 `.swift` 文件 SwiftLint(`--force-exclude`,故 Tests/.build 仍按根 config
+     排除)。App / CLI / XcodeWorkspace 的 heavy gates 标为 CI-only,本地不启动 host
+     app test target。
      Activated per-worktree via `git config core.hooksPath scripts/hooks`.
   3. **GitHub Actions** (`.github/workflows/build.yml`) — re-runs the same
      gates(含防腐校验 + 改代码必带测试 + `swiftlint` job)on `macos-26` for every
      PR against `main` and for every push to `main`. This is the authoritative
      CI signal; 只有它挡得住 `--no-verify`。
      **实际 required status checks(ruleset `main protection`,2026-08-02 核实):**
-     `build + test (macOS 26)`、`claude-review`、`aidata (pytest + ruff)`,strict
+     `build + test (macOS 26)`、`codex-review-target`、`aidata (pytest + ruff)`,strict
      模式开(分支须与 main 同步)。**注意 `require-tests` 与 `swiftlint (root config)`
      两个 job 会跑但目前 NOT required** —— 它们红了不挡合并。要设为强制,改
      ruleset(脚本进 workflow ≠ 已 required)。
+     `claude-review` 已暂停;`kimi-review` 只发 advisory comment,不进入 required ruleset。
      另:ruleset 的 `bypass_actors` 含 admin 且 `bypass_mode: always`,所以
      维护者本人直推/强推会被放行,remote 的提示只是告知而非拦截。
-- **SwiftLint 单源.** 根 `.swiftlint.yml` 是全仓库唯一 config(pre-commit/pre-push/CI
-  共用)。阈值目前 lenient(放宽到覆盖既有代码,零改动兑绿),但仍拦明显糟糕的新代码;
+- **SwiftLint 单源.** 根 `.swiftlint.yml` 是全仓库唯一 config(pre-commit 按文件、
+  pre-push 按 pushed ranges 的变更 Swift 文件、CI 全仓共用;CI job 当前非 required)。
+  阈值目前 lenient(放宽到覆盖既有代码,零改动兑绿),但仍拦明显糟糕的新代码;
   逐规则收紧是后续独立 issue。`Tests/` 豁免(`try!` 等惯例)。
 - **改代码必带测试.** 改了 `.swift` 源码却没动任何测试文件 → pre-push / CI 拦。
   逃生舱:任一 commit message 写 `Allow-No-Tests: <原因>`(仅限确无法测的改动)。
-- **防腐校验.** `scripts/hooks/check-frontmatter` 核对每层 `tech-context.md`
-  frontmatter 与代码一致(layer 名==目录名、`depends_on` ⇄ `Package.swift`
-  双向一致、`depended_by` 镜像、`test` 路径存在)。架构变了就更新对应层文档。
+- **防腐校验.** `scripts/context/audit` 是递归 routing/dependency/manifest 单源门;
+  CI 暂时继续跑 legacy `scripts/hooks/check-frontmatter`,直到旧 `tech-context.md`
+  深入参考完成迁移。架构变了就更新 owning leaf context。
 - **Hooks live in `scripts/hooks/`** (under version control), activated
   via `git config core.hooksPath scripts/hooks`. `.git/hooks/` is
   per-worktree and ignored. Bypass with `--no-verify` is allowed only

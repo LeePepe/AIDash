@@ -65,17 +65,15 @@ struct BriefingPublishCommand: AsyncParsableCommand {
 
     // MARK: - Execute-error triage (extracted for tests).
     //
-    // `XPCClient.execute` throws a single `XPCError` type for two distinct
-    // failure classes (the actor's `resultForResponse` re-throws remote
-    // envelope errors instead of returning the failed `XPCResponse`). Per
-    // `cli-surface.md` §"Exit codes" we MUST disambiguate before exiting:
+    // `XPCClient.execute` only throws `XPCError` on local transport/decode
+    // failures (MY-1455: ok=false responses are now returned, not thrown).
+    // This handler remains as a safety net:
     //
     //   - Local `xpc.*` (transport/timeout/decode) → rethrow so the
     //     central handler maps via `ExitCodeMapper` → exit 2.
     //   - Anything else → REMOTE server error. Every server-returned error
-    //     exits 3 regardless of code class, so remote `schema.*` and
-    //     remote `xpc.*` still exit 3. Emit the envelope on stderr with
-    //     the request id and throw `ExitCode(3)`.
+    //     exits 3 regardless of code class. Emit the envelope on stderr
+    //     with the request id and throw `ExitCode(3)`.
     static func handleExecuteError(
         _ error: XPCError,
         requestId: String,

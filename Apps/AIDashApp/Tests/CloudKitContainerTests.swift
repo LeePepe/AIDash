@@ -26,7 +26,7 @@ import AIDashCore
     switch sut.state {
     case .ready(let c):
         #expect(c.schema.entities.count == 4)
-    case .failed:
+    case .failed, .loading:
         Issue.record("Expected .ready state")
     }
 
@@ -111,6 +111,8 @@ import AIDashCore
     switch CloudKitContainer.shared.state {
     case .ready, .failed:
         #expect(Bool(true))
+    case .loading:
+        Issue.record("Shared singleton must not be in .loading state")
     }
 }
 
@@ -125,6 +127,8 @@ import AIDashCore
         #expect(!reason.isEmpty)
         #expect(!reason.contains("/"))
         #expect(!reason.contains("NSError"))
+    case .loading:
+        Issue.record("Shared singleton must not be in .loading state")
     }
 }
 

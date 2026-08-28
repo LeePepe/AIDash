@@ -21,14 +21,16 @@ import Foundation
 ///      with a `schema.*` envelope on stderr.
 ///   2. Build `CardPutParams` and dispatch via `XPCClient`.
 ///   3. On success: decode `CardPutResult`, emit via the active formatter.
-///   4. On remote error: throw the `XPCError` so `AIDash.main`'s central
-///      handler emits the envelope and maps to the proper exit code.
+///   4. On remote error (`ok=false` with error payload): emit the error envelope
+///      on stderr with `response.requestId` and `Darwin.exit(3)` (MY-1455).
+///   5. On malformed reply (`ok=false` without error): throw `xpc.decode_failure`
+///      so the central handler maps to exit 2.
 ///
-/// Exit codes (mapped centrally by `AIDash.main` via `ExitCodeMapper`):
+/// Exit codes:
 ///   0 — success
-///   1 — local validation (`schema.*`)
-///   2 — XPC transport (`xpc.*`)
-///   3 — remote error (everything else)
+///   1 — local validation (`schema.*`, mapped centrally via `ExitCodeMapper`)
+///   2 — XPC transport/decode (`xpc.*`, mapped centrally via `ExitCodeMapper`)
+///   3 — remote error (emitted locally with `response.requestId` on stderr)
 struct CardPutCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "put",
@@ -128,22 +130,41 @@ struct CardPutCommand: AsyncParsableCommand {
                 try formatter.emit(success: result, requestId: response.requestId)
             }
         } else if let error = response.error {
-            // Remote error — re-throw as XPCError so the central handler in
-            // AIDash.main emits the envelope and maps the exit code.
-            throw XPCError(
-                code: error.code,
-                message: error.message,
-                field: error.field,
-                got: error.got,
-                allowed: error.allowed,
-                cause: error.cause
-            )
+            // Remote error — emit envelope with response.requestId and exit 3.
+            // Per cli-surface §"Exit codes": server-returned errors ALWAYS exit 3.
+            do {
+                try Self.emitRemoteError(error, requestId: response.requestId, globals: globals)
+            } catch let exitCode as ExitCode {
+                Darwin.exit(exitCode.rawValue)
+            }
         } else {
             throw XPCError(
                 code: "xpc.decode_failure",
                 message: "Server returned ok=false but no error payload"
             )
         }
+    }
+
+    // MARK: - Remote-error handler (extracted for testability, MY-1455)
+
+    /// Production remote-error handler for card.put: emits the error envelope
+    /// with response.requestId on stderr and throws ExitCode(3) (MY-1455).
+    static func emitRemoteError(
+        _ error: XPCError,
+        requestId: String,
+        globals: GlobalOptions
+    ) throws {
+        let remoteError = XPCError(
+            code: error.code,
+            message: error.message,
+            field: error.field,
+            got: error.got,
+            allowed: error.allowed,
+            cause: error.cause
+        )
+        let formatter = globals.outputMode.formatter()
+        try formatter.emit(error: remoteError, requestId: requestId)
+        throw ExitCode(3)
     }
 
     // MARK: - Payload resolution

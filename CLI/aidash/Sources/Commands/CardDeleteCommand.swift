@@ -16,17 +16,17 @@ import Foundation
 ///      (exit 1) with a `schema.*` envelope on stderr.
 ///   2. Build `CardDeleteParams` and dispatch via `XPCClient`.
 ///   3. On success: decode `CardDeleteResult`, emit via the active formatter.
-///   4. On remote error (e.g. `card.not_found`): re-throw as `XPCError` so
-///      `AIDash.main`'s central handler emits the envelope and maps the exit code.
+///   4. On remote error (e.g. `card.not_found`): emit the error envelope
+///      with `response.requestId` on stderr and exit 3 directly (MY-1455).
 ///
 /// Unlike `container delete`, this removes only the named card; its parent
 /// container and sibling cards are untouched.
 ///
-/// Exit codes (mapped centrally by `AIDash.main` via `ExitCodeMapper`):
+/// Exit codes:
 ///   0 — success
-///   1 — local validation (`schema.*`)
-///   2 — XPC transport (`xpc.*`)
-///   3 — remote error (everything else, incl. `card.not_found`)
+///   1 — local validation (`schema.*`, mapped centrally via `ExitCodeMapper`)
+///   2 — XPC transport/decode (`xpc.*`, mapped centrally via `ExitCodeMapper`)
+///   3 — remote error (emitted locally with `response.requestId` on stderr)
 struct CardDeleteCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "delete",
@@ -60,16 +60,23 @@ struct CardDeleteCommand: AsyncParsableCommand {
         let response = try await XPCClient().execute(request)
 
         // 4. Handle response.
-        try Self.emit(response: response, globals: globals)
+        do {
+            try Self.emit(response: response, globals: globals)
+        } catch let exitCode as ExitCode {
+            Darwin.exit(exitCode.rawValue)
+        }
     }
 
     // MARK: - Emit (extracted so tests can drive both branches with a
     // synthetic `XPCResponse`).
     //
-    // Mirrors `ContainerDeleteCommand.emit`:
+    // Per `cli-surface.md` §"Exit codes":
     //   - `ok=true`  → emit success envelope (unless `--quiet`). Empty result
     //     type, so a bodyless ok=true still reports success.
-    //   - `ok=false` → re-throw the remote error as `XPCError` (exit 3).
+    //   - `ok=false` with error → emit the remote error envelope on stderr
+    //     with `response.requestId` and throw `ExitCode(3)` (MY-1455).
+    //   - `ok=false` without error → malformed protocol reply; throw
+    //     `xpc.decode_failure` (exit 2 via central handler).
     static func emit(
         response: XPCResponse,
         globals: GlobalOptions
@@ -98,14 +105,9 @@ struct CardDeleteCommand: AsyncParsableCommand {
         }
 
         if let remoteError = response.error {
-            throw XPCError(
-                code: remoteError.code,
-                message: remoteError.message,
-                field: remoteError.field,
-                got: remoteError.got,
-                allowed: remoteError.allowed,
-                cause: remoteError.cause
-            )
+            let formatter = globals.outputMode.formatter()
+            try formatter.emit(error: remoteError, requestId: response.requestId)
+            throw ExitCode(3)
         }
 
         throw XPCError(

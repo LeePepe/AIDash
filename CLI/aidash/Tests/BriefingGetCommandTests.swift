@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import AIDashCore
+import ArgumentParser
 
 /// Tests for `aidash briefing get` (T052 / MY-969).
 ///
@@ -187,19 +188,12 @@ struct BriefingGetCommandTests {
             containers: []
         )
 
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardOutput.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardOutput.fileDescriptor)
-
-        try JSONOutput().emit(success: briefing, requestId: "req-briefing-get-2")
-
-        dup2(saved, FileHandle.standardOutput.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = try captureStdout {
+            try JSONOutput().emit(success: briefing, requestId: "req-briefing-get-2")
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stdout.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == true)
         #expect(obj["requestId"] as? String == "req-briefing-get-2")
@@ -223,19 +217,12 @@ struct BriefingGetCommandTests {
             got: "2026-06-24"
         )
 
-        let pipe = Pipe()
-        let saved = dup(FileHandle.standardError.fileDescriptor)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, FileHandle.standardError.fileDescriptor)
-
-        try JSONOutput().emit(error: remoteError, requestId: "req-briefing-get-err")
-
-        dup2(saved, FileHandle.standardError.fileDescriptor)
-        close(saved)
-        try pipe.fileHandleForWriting.close()
-        let captured = pipe.fileHandleForReading.readDataToEndOfFile()
+        let stderr = try captureStderr {
+            try JSONOutput().emit(error: remoteError, requestId: "req-briefing-get-err")
+        }
 
         let obj = try #require(
-            try JSONSerialization.jsonObject(with: captured) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
         )
         #expect(obj["ok"] as? Bool == false)
         let errBody = try #require(obj["error"] as? [String: Any])
@@ -265,5 +252,71 @@ struct BriefingGetCommandTests {
     func remoteBriefingMapsToThree() {
         let error = XPCError(code: "briefing.not_found", message: "no briefing")
         #expect(ExitCodeMapper.code(for: error) == 3)
+    }
+
+    // MARK: - MY-1455: Remote error retains requestId from XPCResponse
+
+    /// Production-seam test: encodes a synthetic XPCResponse with ok=false,
+    /// decodes it through `XPCClient.deliverReply` (the production delivery
+    /// policy), then calls `BriefingGetCommand.emitRemoteError` to verify the
+    /// full decoded-reply → command-emit path.
+    ///
+    /// Asserts:
+    /// - deliverReply returns the response (does not throw for ok=false)
+    /// - stderr contains the error envelope
+    /// - `error.requestId` equals `XPCResponse.requestId`
+    /// - root `requestId` is absent
+    /// - `error.code` is `briefing.not_found`
+    /// - ExitCode(3) is thrown
+    @Test("BriefingGetCommand remote-error path via production seam emits response.requestId and exits 3 (MY-1455)")
+    func briefingGetRemoteErrorPreservesRequestId() throws {
+        // Build and encode a synthetic XPCResponse with ok=false.
+        let response = XPCResponse(
+            requestId: "xpc-resp-id-456",
+            appVersion: "1.0.0",
+            ok: false,
+            data: nil,
+            error: XPCError(
+                code: "briefing.not_found",
+                message: "No briefing found for date '2026-08-20'"
+            )
+        )
+        let encodedBytes = try JSONEncoder().encode(response)
+
+        // Decode through the production delivery policy (XPCClient.deliverReply).
+        let decoded = try XPCClient.deliverReply(encodedBytes)
+
+        // Assert deliverReply returns ok=false (not thrown).
+        #expect(decoded.ok == false)
+        #expect(decoded.requestId == "xpc-resp-id-456")
+
+        // Exercise the command's emitRemoteError with the decoded response.
+        let globals = GlobalOptions.test(json: true, quiet: false)
+        var capturedExit: Int32?
+        let stderr = try captureStderr {
+            do {
+                try BriefingGetCommand.emitRemoteError(
+                    decoded.error!,
+                    requestId: decoded.requestId,
+                    globals: globals
+                )
+            } catch let exitCode as ExitCode {
+                capturedExit = exitCode.rawValue
+            }
+        }
+
+        #expect(capturedExit == 3)
+
+        let obj = try #require(
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
+        )
+        #expect(obj["ok"] as? Bool == false)
+        // Root must NOT have requestId
+        #expect(obj["requestId"] == nil)
+        let errBody = try #require(obj["error"] as? [String: Any])
+        #expect(errBody["code"] as? String == "briefing.not_found")
+        #expect(errBody["message"] as? String == "No briefing found for date '2026-08-20'")
+        // MY-1455 contract: error.requestId equals the XPC response's requestId
+        #expect(errBody["requestId"] as? String == "xpc-resp-id-456")
     }
 }

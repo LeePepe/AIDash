@@ -287,7 +287,7 @@ struct BriefingPublishCommandTests {
     }
 }
 
-// MARK: - handleExecuteError (XPCClient.execute throws-only path)
+// MARK: - handleExecuteError (local transport/decode failure triage)
 
 @Suite("BriefingPublishCommand.handleExecuteError")
 struct BriefingPublishExecuteErrorTests {
@@ -306,58 +306,6 @@ struct BriefingPublishExecuteErrorTests {
             #expect(err.code == "xpc.timeout")
             #expect(err.message == "no reply in 5s")
         }
-    }
-
-    @Test("remote briefing.* error emits envelope on stderr with requestId and throws ExitCode(3)")
-    func remoteAppErrorEmitsAndExits3() throws {
-        let remote = XPCError(
-            code: "briefing.not_found",
-            message: "Not found",
-            field: "date",
-            got: "2099-01-01"
-        )
-        var capturedExit: Int32? = nil
-        let stderr = try captureStderr {
-            do {
-                try BriefingPublishCommand.handleExecuteError(
-                    remote,
-                    requestId: "req-pub-remote",
-                    globals: GlobalOptions.test(json: true, quiet: false)
-                )
-                Issue.record("Expected ExitCode to be thrown")
-            } catch let code as ExitCode {
-                capturedExit = code.rawValue
-            }
-        }
-        #expect(capturedExit == 3)
-
-        let json = try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
-        try #require(json != nil)
-        #expect(json?["ok"] as? Bool == false)
-        let errObj = json?["error"] as? [String: Any]
-        try #require(errObj != nil)
-        #expect(errObj?["code"] as? String == "briefing.not_found")
-        #expect(errObj?["requestId"] as? String == "req-pub-remote")
-        #expect(json?["requestId"] == nil)
-    }
-
-    @Test("remote schema.* error still exits 3 (reserved-prefix rule applies to local only)")
-    func remoteSchemaErrorStillExits3() throws {
-        let remote = XPCError(code: "schema.invalid_uuid", message: "server-side bad UUID")
-        var capturedExit: Int32? = nil
-        _ = try captureStderr {
-            do {
-                try BriefingPublishCommand.handleExecuteError(
-                    remote,
-                    requestId: "req-pub-schema-remote",
-                    globals: GlobalOptions.test(json: true, quiet: false)
-                )
-                Issue.record("Expected ExitCode to be thrown")
-            } catch let code as ExitCode {
-                capturedExit = code.rawValue
-            }
-        }
-        #expect(capturedExit == 3)
     }
 }
 

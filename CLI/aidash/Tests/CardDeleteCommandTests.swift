@@ -123,10 +123,10 @@ struct CardDeleteCommandTests {
         #expect(stdout.isEmpty)
     }
 
-    // MARK: - emit — remote error re-throw
+    // MARK: - emit — remote error with requestId (MY-1455)
 
-    @Test("card delete not_found re-throws XPCError verbatim")
-    func notFoundRethrows() throws {
+    @Test("card delete not_found emits error envelope with requestId and throws ExitCode(3)")
+    func notFoundEmitsRequestId() throws {
         let errorBody = XPCError(
             code: "card.not_found",
             message: "No card found with id 'x'"
@@ -138,15 +138,26 @@ struct CardDeleteCommandTests {
             data: nil,
             error: errorBody
         )
-        do {
-            try CardDeleteCommand.emit(
-                response: response,
-                globals: GlobalOptions.test(json: true, quiet: false)
-            )
-            Issue.record("Expected XPCError to be thrown")
-        } catch let error as XPCError {
-            #expect(error.code == "card.not_found")
+
+        let stderr = try captureStderr {
+            do {
+                try CardDeleteCommand.emit(
+                    response: response,
+                    globals: GlobalOptions.test(json: true, quiet: false)
+                )
+                Issue.record("Expected ExitCode to be thrown")
+            } catch let exit as ExitCode {
+                #expect(exit.rawValue == 3)
+            }
         }
+
+        let obj = try #require(
+            try JSONSerialization.jsonObject(with: Data(stderr.utf8)) as? [String: Any]
+        )
+        #expect(obj["ok"] as? Bool == false)
+        let errBody = try #require(obj["error"] as? [String: Any])
+        #expect(errBody["code"] as? String == "card.not_found")
+        #expect(errBody["requestId"] as? String == "req-nf")
     }
 
     // MARK: - Exit-code mapping

@@ -62,26 +62,12 @@ struct BriefingPutCommand: AsyncParsableCommand {
 
         // Step 3: send via XPC.
         //
-        // `XPCClient.execute` throws on BOTH local transport failures AND
-        // remote `ok=false` returns (the actor's `resultForResponse` maps
-        // remote envelopes to `.failure(remoteError)` and rethrows). We
-        // disambiguate here by the error's code prefix:
-        //
-        //   - `xpc.*` codes raised pre-reply are LOCAL transport failures
-        //     (`xpc.transport_failure`, `xpc.timeout`, `xpc.proxy_unavailable`,
-        //     `xpc.invalidated`, `xpc.interrupted`, `xpc.decode_failure`).
-        //     Rethrow so the central handler in `AIDash.main` exits 2 via
-        //     `ExitCodeMapper`. Per `cli-surface.md` §"Exit codes" the
-        //     `xpc.*` / `schema.*` prefix rule on LOCAL classification is
-        //     what determines 1 / 2.
-        //
-        //   - Any other code is a REMOTE error returned by the app. Per the
-        //     same contract, server-returned errors ALWAYS exit 3 regardless
-        //     of code class (including remote `schema.*`). Emit the server
-        //     envelope on stderr with the request id and exit 3 directly,
-        //     so the central handler doesn't double-emit and so the
-        //     prefix-based mapper can't downgrade a remote `schema.*` to
-        //     exit 1.
+        // `XPCClient.execute` returns `XPCResponse` (including ok=false) on
+        // successful decode. It only throws `XPCError` on local transport
+        // failure (timeout, proxy unavailable, decode failure). Remote
+        // ok=false responses are returned to the caller so command-level
+        // code can access `response.requestId` for structured error output
+        // (MY-1455).
         let response: XPCResponse
         do {
             response = try await XPCClient().execute(request)
@@ -118,21 +104,17 @@ struct BriefingPutCommand: AsyncParsableCommand {
     // MARK: - Execute-error triage (extracted so tests can drive both
     // branches without standing up a real `XPCClient`).
     //
-    // `XPCClient.execute` throws a single `XPCError` type for two distinct
-    // failure classes (the actor's `resultForResponse` re-throws remote
-    // envelope errors instead of returning the failed `XPCResponse`).
-    // Per `cli-surface.md` §"Exit codes" we MUST disambiguate before
-    // exiting:
+    // `XPCClient.execute` only throws `XPCError` on local transport/decode
+    // failures (MY-1455: ok=false responses are now returned, not thrown).
+    // However, this handler remains as a safety net for code paths that
+    // catch thrown errors from execute:
     //
     //   - Local `xpc.*` (transport/timeout/decode/etc.) → rethrow so the
     //     central handler maps via `ExitCodeMapper` → exit 2.
     //   - Anything else → REMOTE server error. Per the contract every
     //     server-returned error exits 3 regardless of code class, so
-    //     remote `schema.*` and remote `xpc.*` still exit 3 (the prefix
-    //     rule only applies to LOCAL classification). Emit the envelope
-    //     on stderr with the request id and throw `ExitCode(3)` so the
-    //     caller can `Darwin.exit` without the central handler
-    //     double-emitting on top.
+    //     remote `schema.*` and remote `xpc.*` still exit 3. Emit the
+    //     envelope on stderr with the request id and throw `ExitCode(3)`.
     static func handleExecuteError(
         _ error: XPCError,
         requestId: String,

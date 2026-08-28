@@ -55,9 +55,8 @@ struct EventsPullCommand: AsyncParsableCommand {
     ///     (central handler maps to exit 1).
     ///   - `XPCError` with `xpc.*` code on local XPC transport failure
     ///     (central handler maps to exit 2).
-    ///   - `XPCError` re-thrown from the remote `XPCResponse.error` envelope;
-    ///     remote failures write the envelope and `Darwin.exit(3)` directly
-    ///     (see the reserved-prefix rule in `BriefingGetCommand`).
+    ///   - Remote errors are emitted locally with `response.requestId` on
+    ///     stderr and `Darwin.exit(3)` is called directly (MY-1455).
     func run() async throws {
         let sinceDate = try Self.parseBound(since, field: "--since")
         let untilDate = try until.map { try Self.parseBound($0, field: "--until") }

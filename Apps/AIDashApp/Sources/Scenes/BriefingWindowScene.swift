@@ -36,6 +36,9 @@ public struct BriefingWindowScene: Scene {
                     EmptyView()
                 } else {
                     switch state {
+                    case .loading:
+                        ProgressView()
+                            .controlSize(.large)
                     case .ready(let container):
                         StarFeedbackScope(container: container)
                             .designTheme(seed: .lime, neutral: .slate)
