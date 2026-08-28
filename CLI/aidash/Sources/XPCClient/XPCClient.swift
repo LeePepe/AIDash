@@ -38,7 +38,9 @@ public actor XPCClient {
     }
 
     /// Send an XPC request and await the response.
-    /// Throws `XPCError` on transport failure, timeout, or remote error.
+    /// Throws `XPCError` only on local transport failure, timeout, or decode error.
+    /// Remote `ok=false` responses are returned (not thrown) so callers can access
+    /// `response.requestId` for structured error output (MY-1455).
     /// If the app is not running, attempts to launch it via `AppLauncher` and retries once.
     public func execute(_ request: XPCRequest) async throws -> XPCResponse {
         do {
@@ -170,29 +172,46 @@ public actor XPCClient {
         await pending.failAll(code: code, message: message)
     }
 
+    /// Production delivery policy for decoded XPC replies (MY-1455).
+    ///
+    /// This is the single authoritative seam that determines whether a decoded
+    /// reply is returned or thrown. The policy: any successfully decoded
+    /// `XPCResponse` (including `ok=false`) is RETURNED to the caller. Only
+    /// bytes that fail JSON decoding throw `XPCError(code: "xpc.decode_failure")`.
+    ///
+    /// `handleReply` delegates to this method without applying any additional
+    /// `ok=false` classification. Tests feed encoded bytes through this exact
+    /// seam to verify the policy; reintroducing throw-on-decoded-`ok=false`
+    /// here will fail the MY-1455 regression test.
+    public static func deliverReply(_ data: Data) throws -> XPCResponse {
+        do {
+            return try JSONDecoder().decode(XPCResponse.self, from: data)
+        } catch {
+            throw XPCError(
+                code: "xpc.decode_failure",
+                message: error.localizedDescription
+            )
+        }
+    }
+
     /// Decode the reply and resume the matching pending continuation.
+    ///
+    /// Remote `ok=false` responses are returned as-is (they are data, not
+    /// transport exceptions). Only local decode failures throw — this lets
+    /// command-level code access `response.requestId` for structured error
+    /// output (MY-1455).
     private func handleReply(requestId: String, data: Data) async {
         let decoded: Result<XPCResponse, any Error>
         do {
-            decoded = .success(try JSONDecoder().decode(XPCResponse.self, from: data))
+            decoded = .success(try Self.deliverReply(data))
         } catch {
-            decoded = .failure(XPCError(
-                code: "xpc.decode_failure",
-                message: error.localizedDescription
-            ))
+            decoded = .failure(error)
         }
 
         switch decoded {
         case .success(let response):
-            switch XPCClient.resultForResponse(response) {
-            case .success(let value):
-                await pending.complete(requestId: requestId) { cont in
-                    cont.resume(returning: value)
-                }
-            case .failure(let remoteError):
-                await pending.complete(requestId: requestId) { cont in
-                    cont.resume(throwing: remoteError)
-                }
+            await pending.complete(requestId: requestId) { cont in
+                cont.resume(returning: response)
             }
         case .failure(let error):
             connection = nil
@@ -200,24 +219,6 @@ public actor XPCClient {
                 cont.resume(throwing: error)
             }
         }
-    }
-
-    /// Pure mapping of a decoded `XPCResponse` to a Result.
-    ///
-    /// Per T044 contract: failed responses (`ok == false`) must surface the
-    /// embedded `XPCError` so `ExitCodeMapper` can map remote error codes
-    /// (`schema.*`, `storage.*`, `not_found`, …) to the right exit code.
-    /// If `ok == false` but `error` is missing, return a synthetic `internal`
-    /// error so callers never silently see a failure.
-    public static func resultForResponse(_ response: XPCResponse) -> Result<XPCResponse, XPCError> {
-        if response.ok {
-            return .success(response)
-        }
-        let remoteError = response.error ?? XPCError(
-            code: "internal",
-            message: "XPC response ok=false but no error payload"
-        )
-        return .failure(remoteError)
     }
 
     // MARK: - Connection lifecycle
