@@ -1286,6 +1286,25 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     return tuple([head] + published)
 
 
+def _normalize_sources(sources):
+    """Accept either the full DigestSources bundle or a raven-only bundle."""
+    if hasattr(sources, "raven"):
+        return sources
+    from L5_apps.digest.sources import (
+        AdoPrTrends,
+        AutomationTrends,
+        DigestSources,
+        MulticaTrends,
+        SourceHealth,
+    )
+    return DigestSources(
+        raven=sources,
+        multica=MulticaTrends([], {}, SourceHealth("multica", "skipped:未取")),
+        ado=AdoPrTrends([], [], SourceHealth("ado_pr", "skipped:未取")),
+        automation=AutomationTrends([], [], [], SourceHealth("state_db", "skipped:未取")),
+    )
+
+
 def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
                    must_see: str,
                    delivery: "DeliveryState | None" = None) -> Briefing:
@@ -1306,6 +1325,7 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     A degraded digest (no series data) still yields a valid briefing: the overview
     `digest` card is always present, so the briefing is never empty/invalid.
     """
+    sources = _normalize_sources(sources)
     reported_day = yesterday(report_date)
     sections = parse_sections(full_md)
     mmdd = _mmdd(reported_day)
@@ -1638,10 +1658,12 @@ def load_delivery_state() -> DeliveryState | None:
     raw = get_watermark(_DELIVERY_KEY)
     if raw is None or not isinstance(raw, dict):
         return None
+    if not raw.get("ok") and not raw.get("reason") and not raw.get("timestamp"):
+        return None
     return DeliveryState(
-        ok=raw.get("ok", False),
-        reason=raw.get("reason", ""),
-        timestamp=raw.get("timestamp", ""),
+        ok=bool(raw.get("ok", False)),
+        reason=str(raw.get("reason", "")),
+        timestamp=str(raw.get("timestamp", "")),
     )
 
 
