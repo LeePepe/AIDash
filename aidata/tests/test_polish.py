@@ -257,6 +257,13 @@ def test_validate_rejects_positive_activity_without_counter_signal():
 
 
 @pytest.mark.unit
+def test_validate_rejects_positive_activity_without_input_signal():
+    ev = EfficiencyEvidence(cost_pct=None, waste_pct=None, tasks_pct=20, issues_pct=0)
+    assert validate_efficiency_claim("完成任务上升", ev) is False
+    assert validate_efficiency_claim("任务上升", ev) is False
+
+
+@pytest.mark.unit
 def test_validate_rejects_partial_metric_evidence():
     ev = EfficiencyEvidence(cost_pct=71, waste_pct=None, issues_pct=0)
     assert validate_efficiency_claim("成本上升，浪费下降", ev) is False
@@ -390,6 +397,31 @@ def test_polish_digest_keeps_valid_neutral_commentary():
                         '"todos": ["排查浪费来源"]}')
     out = polish_digest(TEMPLATE_COST_UP, client)
     assert "成本上升，需关注" in out
+
+
+@pytest.mark.unit
+def test_polish_digest_rejects_task_growth_without_input_signal():
+    """Tasks can rise without proving efficiency; missing cost/waste data must fall back."""
+    partial_template = """# AI 使用日报 2026-08-18
+
+> 数据源: raven✅
+
+## ⚡ Trending
+- 完成任务: 120 ↑(+20%) vs 昨 100
+- 完成 issue(近似): 10 ↑(+5%) vs 昨 9
+
+## 📅 今日 TODO
+- P0: 继续推进
+
+## 🗂 昨日汇总
+- 昨日花费 $0.00，请求 0 次
+
+## 🔍 可改良
+- 无额外信息"""
+    client = FakeClient('{"tldr": "完成任务上升", "todos": ["继续推进"]}')
+    out = polish_digest(partial_template, client)
+    assert "完成任务上升" not in out
+    assert "整体趋势需关注" in out or "数据不足以判断" in out
 
 
 @pytest.mark.unit

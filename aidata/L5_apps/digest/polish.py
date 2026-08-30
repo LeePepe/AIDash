@@ -317,9 +317,18 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
         return False
 
     if _metric_direction_assertions(tldr):
+        if not _metric_direction_matches(tldr, evidence):
+            return False
+        if evidence.cost_pct is None and evidence.waste_pct is None:
+            return False
         if evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
             return False
-        return _metric_direction_matches(tldr, evidence)
+        if not evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
+            # Positive output-only statements are insufficient unless the template
+            # also provides an actual input signal (cost/waste) to anchor the
+            # efficiency conclusion.
+            return evidence.cost_pct is not None or evidence.waste_pct is not None
+        return True
     if _named_adverse_signal_matches(tldr, evidence):
         return True
     return False
