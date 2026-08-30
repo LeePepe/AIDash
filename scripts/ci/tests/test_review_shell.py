@@ -324,8 +324,29 @@ def test_gate_scripts_are_reviewable_under_their_own_security_notice() -> None:
         "gate sources still carry verdict-like literals:\n  "
         + "\n  ".join(offenders)
         + "\nbut the security notice no longer exempts tokens-as-data, so the "
-        "gates would once again block every PR that touches themselves."
+        + "gates would once again block every PR that touches themselves."
     )
+
+
+def test_review_coverage_rules_emits_full_text_without_hanging() -> None:
+    """The coverage-discipline clause (MY-1456) emits without hanging.
+
+    Same transport safety check as the modifier-evidence rules: printf-based
+    emission of a multi-KB body under the runner's bash must complete without
+    deadlocking on the pipe buffer.
+    """
+    result = _run(f". {COMMON}\nreview_coverage_rules\n", timeout=30)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "【证据纪律 —— 测试覆盖判定】"
+    # Must include key discipline sentences
+    assert "COVERAGE CONTEXT" in result.stdout
+    assert "blocker" in result.stdout
+    assert "note" in result.stdout
+    # Above pipe buffer size
+    assert len(result.stdout.encode("utf-8")) > 512
+
 
 
 def test_scope_evidence_helper_handles_many_changed_files(
@@ -341,11 +362,14 @@ def test_scope_evidence_helper_handles_many_changed_files(
     evidence" — the analyzer's normal empty-output success. What is under test
     is that the loop TERMINATES, with no network and no repository needed.
     """
-    paths = "\n".join(
+    paths = [
         f"Packages/AIDashUI/Sources/AIDashUI/CardView/Generated{n:04d}.swift"
         for n in range(100)
-    )
-    assert len(paths.encode("utf-8")) > 512
+    ]
+    assert sum(len(path.encode("utf-8")) for path in paths) > 512
+
+    changed_file = tmp_path / "changed_paths.bin"
+    changed_file.write_bytes(b"\0".join(path.encode("utf-8") for path in paths) + b"\0")
 
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir()
@@ -359,10 +383,10 @@ def test_scope_evidence_helper_handles_many_changed_files(
         f". {COMMON}\n"
         f'REPO_ROOT="{CI_DIR.parent.parent}"\n'
         f'export PATH="{stub_dir}:$PATH"\n'
-        f'CHANGED="{paths}"\n'
+        f'CHANGED_FILE="{changed_file}"\n'
         "rc=0\n"
         "build_scope_evidence 0000000000000000000000000000000000000000 "
-        f'"{empty_diff}" "$CHANGED" >/dev/null || rc=$?\n'
+        f'"{empty_diff}" "$CHANGED_FILE" >/dev/null || rc=$?\n'
         'echo "completed rc=$rc"\n'
     )
     result = _run(script, timeout=60)
@@ -725,6 +749,50 @@ def test_claude_review_structured_output_path() -> None:
         "review-common.sh must extract .structured_output from the CLI "
         "response for the verdict envelope (MY-1452)"
     )
+
+# --------------------------------------------------------------------------
+# 5. Nonce-based untrusted-data fence (MY-1456 security fix).
+# --------------------------------------------------------------------------
+
+
+def test_gate_scripts_use_nonce_fence_not_static_delimiters() -> None:
+    """Both review gate scripts must use nonce-based FENCE_OPEN/FENCE_CLOSE
+    variables instead of hardcoded static untrusted-data markers.
+
+    A static delimiter allows PR-controlled content (test source embedded via
+    COVERAGE_CONTEXT) to inject the exact closing marker and escape the
+    untrusted region. The nonce makes the boundary unpredictable.
+    """
+    executable_lines = _code_lines(COMMON)
+    executable_text = "\n".join(code for _, code in executable_lines)
+
+    for script_name in ("claude-review.sh", "codex-review.sh"):
+        path = CI_DIR / script_name
+        content = path.read_text(encoding="utf-8")
+
+        # Must contain nonce generation and variable usage
+        assert "FENCE_NONCE" in content, (
+            f"{script_name} missing FENCE_NONCE generation"
+        )
+        assert "FENCE_OPEN" in content, (
+            f"{script_name} missing FENCE_OPEN variable"
+        )
+        assert "FENCE_CLOSE" in content, (
+            f"{script_name} missing FENCE_CLOSE variable"
+        )
+        assert "/dev/urandom" in content, (
+            f"{script_name} must use /dev/urandom for nonce generation"
+        )
+
+        # The prompt must reference $FENCE_OPEN and $FENCE_CLOSE, not
+        # hardcoded static delimiters. Check that the prompt area uses the
+        # variable (the prompt is in a string assigned to PROMPT="...")
+        assert "$FENCE_OPEN" in content, (
+            f"{script_name} prompt must use $FENCE_OPEN variable"
+        )
+        assert "$FENCE_CLOSE" in content, (
+            f"{script_name} prompt must use $FENCE_CLOSE variable"
+        )
     assert ".result" in executable_text, (
         "review-common.sh must have a .result fallback path for verdict "
         "extraction (MY-1452)"
@@ -1459,3 +1527,164 @@ class TestRealGateContract:
         assert result.returncode == 1
         sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
         assert "暂不放行" in sticky
+# 5. Nonce-based untrusted-data fence (MY-1456 security fix).
+# --------------------------------------------------------------------------
+
+
+def test_gate_scripts_use_nonce_fence_not_static_delimiters() -> None:
+    """Both review gate scripts must use nonce-based FENCE_OPEN/FENCE_CLOSE
+    variables instead of hardcoded static untrusted-data markers.
+
+    A static delimiter allows PR-controlled content (test source embedded via
+    COVERAGE_CONTEXT) to inject the exact closing marker and escape the
+    untrusted region. The nonce makes the boundary unpredictable.
+    """
+    for script_name in ("claude-review.sh", "codex-review.sh"):
+        path = CI_DIR / script_name
+        content = path.read_text(encoding="utf-8")
+
+        # Must contain nonce generation and variable usage
+        assert "FENCE_NONCE" in content, (
+            f"{script_name} missing FENCE_NONCE generation"
+        )
+        assert "FENCE_OPEN" in content, (
+            f"{script_name} missing FENCE_OPEN variable"
+        )
+        assert "FENCE_CLOSE" in content, (
+            f"{script_name} missing FENCE_CLOSE variable"
+        )
+        assert "/dev/urandom" in content, (
+            f"{script_name} must use /dev/urandom for nonce generation"
+        )
+
+        # The prompt must reference $FENCE_OPEN and $FENCE_CLOSE, not
+        # hardcoded static delimiters. Check that the prompt area uses the
+        # variable (the prompt is in a string assigned to PROMPT="...")
+        assert "$FENCE_OPEN" in content, (
+            f"{script_name} prompt must use $FENCE_OPEN variable"
+        )
+        assert "$FENCE_CLOSE" in content, (
+            f"{script_name} prompt must use $FENCE_CLOSE variable"
+        )
+
+
+def test_nonce_generation_fail_closed() -> None:
+    """Nonce generation failure must fail the gate (exit 1), not proceed with
+    an empty or malformed nonce that would make the fence predictable."""
+    for script_name in ("claude-review.sh", "codex-review.sh"):
+        path = CI_DIR / script_name
+        content = path.read_text(encoding="utf-8")
+
+        # Must check nonce is non-empty and well-formed before use
+        assert 'grep -qE' in content, (
+            f"{script_name} must validate nonce format with grep"
+        )
+        # Must exit 1 on nonce failure
+        assert "nonce" in content.lower() and "exit 1" in content, (
+            f"{script_name} must exit 1 on nonce generation failure"
+        )
+
+
+# --------------------------------------------------------------------------
+# 6. Nonce-bound coverage evidence inner markers (MY-1456 blocker repair).
+# --------------------------------------------------------------------------
+
+
+def test_coverage_evidence_uses_nonce_bound_inner_markers() -> None:
+    """Both review gate scripts must wrap COVERAGE_CONTEXT with nonce-bound
+    inner markers (COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN/END).
+
+    This prevents a forged static 'COVERAGE CONTEXT' header in the PR diff
+    from being mistaken for trusted analyzer output — only the nonce-bound
+    section is authoritative, and the nonce is unpredictable to the PR author.
+    """
+    for script_name in ("claude-review.sh", "codex-review.sh"):
+        path = CI_DIR / script_name
+        content = path.read_text(encoding="utf-8")
+
+        # Must contain the nonce-bound inner markers around coverage context
+        assert "COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN" in content, (
+            f"{script_name} must wrap coverage context with nonce-bound BEGIN marker"
+        )
+        assert "COVERAGE_EVIDENCE_${FENCE_NONCE}_END" in content, (
+            f"{script_name} must wrap coverage context with nonce-bound END marker"
+        )
+
+
+def test_review_coverage_rules_references_nonce_markers() -> None:
+    """review_coverage_rules must accept a nonce parameter and include a
+    nonce-bound trust instruction so the reviewer knows which coverage
+    context block is authoritative vs. forged in the diff."""
+    # Call with a known nonce to verify it's referenced in output
+    test_nonce = "abc123def456abc123def456abc12345"
+    result = _run(
+        f". {COMMON}\nreview_coverage_rules {test_nonce}\n", timeout=30
+    )
+
+    assert result.returncode == 0, result.stderr
+    # The output must reference the nonce to bind trust
+    assert f"COVERAGE_EVIDENCE_{test_nonce}_BEGIN" in result.stdout, (
+        "review_coverage_rules must reference nonce-bound markers in output"
+    )
+    assert f"COVERAGE_EVIDENCE_{test_nonce}_END" in result.stdout, (
+        "review_coverage_rules must reference nonce-bound markers in output"
+    )
+
+
+def test_coverage_rules_distinguishes_trusted_framing_from_untrusted_excerpts() -> None:
+    """review_coverage_rules must explicitly state that structural metadata
+    (SEARCH SCOPE, declarations, line numbers) is trusted, while SOURCE EXCERPT
+    / function body content is untrusted PR-controlled source data.
+
+    This pins the provenance-vs-content distinction required by MY-1456 AC3/AC4:
+    the reviewer must trust nonce-bound framing but never treat excerpt prose
+    as instructions or trusted content.
+    """
+    test_nonce = "deadbeef01234567deadbeef01234567"
+    result = _run(
+        f". {COMMON}\nreview_coverage_rules {test_nonce}\n", timeout=30
+    )
+    assert result.returncode == 0, result.stderr
+    output = result.stdout
+
+    # Must explicitly name excerpts/function bodies as untrusted source data
+    assert "不可信源数据" in output or "untrusted" in output.lower(), (
+        "review_coverage_rules must explicitly name excerpts as untrusted source data"
+    )
+    # Must distinguish structural labels as trusted
+    assert "可信" in output, (
+        "review_coverage_rules must name structural metadata as trusted"
+    )
+    # Must warn that excerpt content cannot be treated as instructions
+    assert "指令" in output or "instruction" in output.lower(), (
+        "review_coverage_rules must warn against treating excerpts as instructions"
+    )
+
+
+def test_security_declaration_names_coverage_excerpts_untrusted() -> None:
+    """Both review gate scripts' security declaration must explicitly name
+    COVERAGE EVIDENCE excerpts as untrusted source data, not just DIFF.
+
+    This ensures the prompt's trust model accounts for PR-controlled HEAD
+    source injected into the coverage evidence section.
+    """
+    for script_name in ("claude-review.sh", "codex-review.sh"):
+        path = CI_DIR / script_name
+        content = path.read_text(encoding="utf-8")
+
+        # Must mention COVERAGE EVIDENCE / excerpt in the security declaration
+        assert "COVERAGE EVIDENCE" in content or "SOURCE EXCERPT" in content, (
+            f"{script_name} security declaration must name coverage excerpts"
+        )
+        # The security declaration must explicitly call excerpts untrusted
+        # (the Chinese text uses 不可信源数据)
+        security_block = ""
+        for line in content.splitlines():
+            if "安全声明" in line:
+                # Capture the security declaration block (next few lines)
+                idx = content.splitlines().index(line)
+                security_block = "\n".join(content.splitlines()[idx:idx + 6])
+                break
+        assert "不可信源数据" in security_block or "untrusted source" in security_block.lower(), (
+            f"{script_name} security declaration must call coverage excerpts untrusted source data"
+        )
