@@ -1,0 +1,43 @@
+{
+  "kind": "snapshot",
+  "identity": "audit:team:weekly:2026-09-01",
+  "hash": "bundle-hash-v1",
+  "cohort": "team-audit",
+  "cursor": "sprint-42",
+  "instruction_hash": "inst:hash:abc123",
+  "axes": ["quality", "velocity"],
+  "subject_id": "team:core-platform",
+  "responsibility_layer": "AidataL1L2",
+  "feedback_lineage": ["T001", "T002"],
+  "agent_repeat": ["reviewed-contract"],
+  "limitations": ["manual import only"],
+  "artifacts": ["finding-brief.md"],
+  "grill": ["what-was-the-root-cause"],
+  "sidecar_id": "sidecar:team:weekly:2026-09-01",
+  "sidecar_hash": "sidecar-hash-v1",
+  "records": [
+    {
+      "kind": "finding",
+      "identity": "finding:team:weekly:2026-09-01",
+      "hash": "finding-hash-v1",
+      "subject_id": "team:core-platform",
+      "responsibility_layer": "AidataL1L2",
+      "feedback_lineage": ["T001", "T002"],
+      "agent_repeat": ["reviewed-contract"],
+      "limitations": ["manual import only"],
+      "artifacts": ["finding-brief.md"],
+      "grill": ["what-was-the-root-cause"]
+    }
+  ],
+  "children": [
+    {
+      "kind": "snapshot",
+      "identity": "audit:team:weekly:2026-09-01",
+      "hash": "bundle-hash-v2",
+      "parent_snapshot_id": "audit:team:weekly:2026-09-01",
+      "parent_snapshot_hash": "bundle-hash-v1",
+      "observation_kind": "collision",
+      "detail": "replayed snapshot differs from accepted parent"
+    }
+  ]
+}

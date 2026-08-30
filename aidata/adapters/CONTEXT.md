@@ -6,7 +6,7 @@
   "group": "aidata",
   "parent": "aidata/CONTEXT.md",
   "scope": ["adapters/**"],
-  "test_paths": ["tests/test_ado_pr_adapter.py", "tests/test_aidash_events_adapter.py", "tests/test_browser_history_adapter.py", "tests/test_claude_jsonl_adapter.py", "tests/test_claude_prompts_adapter.py", "tests/test_codex_prompts_adapter.py", "tests/test_gecko_adapter.py", "tests/test_github_pr_adapter.py", "tests/test_github_repo_adapter.py", "tests/test_hermes_messages_adapter.py", "tests/test_hermes_tools_adapter.py", "tests/test_kimi_prompts_adapter.py", "tests/test_local_git_adapter.py", "tests/test_model_canon.py", "tests/test_multica_comment_adapter.py", "tests/test_multica_issue_collect.py", "tests/test_multica_run_collect.py", "tests/test_multica_shared.py", "tests/test_news_adapter.py", "tests/test_raven_cost.py", "tests/test_state_db_adapter.py"],
+  "test_paths": ["tests/test_ado_pr_adapter.py", "tests/test_aidash_events_adapter.py", "tests/test_browser_history_adapter.py", "tests/test_claude_jsonl_adapter.py", "tests/test_claude_prompts_adapter.py", "tests/test_codex_prompts_adapter.py", "tests/test_gecko_adapter.py", "tests/test_github_pr_adapter.py", "tests/test_github_repo_adapter.py", "tests/test_hermes_messages_adapter.py", "tests/test_hermes_tools_adapter.py", "tests/test_kimi_prompts_adapter.py", "tests/test_local_git_adapter.py", "tests/test_model_canon.py", "tests/test_multica_comment_adapter.py", "tests/test_multica_issue_collect.py", "tests/test_multica_run_collect.py", "tests/test_multica_shared.py", "tests/test_news_adapter.py", "tests/test_raven_cost.py", "tests/test_state_db_adapter.py", "tests/test_team_audit_adapter.py"],
   "dependencies": ["AidataFoundation"],
   "dependents": ["AidataL3", "AidataOps"],
   "red_lines": [
