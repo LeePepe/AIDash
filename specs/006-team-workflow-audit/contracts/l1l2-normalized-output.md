@@ -33,8 +33,11 @@ Primary key:
 `entity_sha256` for decoded child records is SHA-256 over UTF-8
 `json.dumps(value, sort_keys=True, separators=(",", ":"),
 ensure_ascii=False)`. Snapshot and sidecar rows instead retain their exact
-captured file-byte hashes. `record_json` uses the same canonical JSON encoding
-for deterministic T003 consumption.
+captured file-byte hashes. Artifact rows are the one child exception:
+`entity_sha256` hashes canonical `ArtifactManifestEntryWire` bytes before
+enrichment, so a sidecar-wide hash or grill-only change cannot create a false
+artifact collision. `record_json` still contains the enriched artifact model
+and uses canonical JSON encoding for deterministic T003 consumption.
 
 Every row from a bundle repeats the accepted `snapshot_id` and
 `snapshot_sha256`. When a valid sidecar exists, every row also repeats its
@@ -68,7 +71,7 @@ columns null and the required unpublishable limitation in the snapshot record.
 | `repeatEvent` | actor role | event ID | actor role and event ID | `bridge_team_audit_repeat_event` |
 | `importCollisionObservation` | accepted snapshot ID | observation ID | observed-at, portable source, entity kind/stable identity, accepted/rejected hashes, locked disposition, limitation, accepted parent ID/hash; no rejected body | `fact_team_audit_import_collision_observation` |
 | `artifactSidecar` | snapshot ID | sidecar ID | schema version, snapshot ID, sidecar ID, exact sidecar-byte hash | `fact_team_audit_artifact_sidecar` |
-| `artifact` | sidecar ID | artifact ID | kind/title, snapshot/sidecar binding, optional finding/case binding, event/revision evidence, source content hash, importer-computed encoded byte count, URL value/status | `fact_team_audit_artifact` |
+| `artifact` | sidecar ID | artifact ID | enriched `ArtifactManifestEntry`: all raw wire fields plus validated sidecar binding/hash, canonical wire-only `encodedByteCount`, and URL value/status | `fact_team_audit_artifact` |
 | `grillLink` | sidecar ID | `grillMe` or `grillWithDocs` | sidecar binding plus original untrusted URL string and `actionableHTTPS` or `nonActionable` status | `fact_team_audit_grill_link` |
 
 `coreAxisSummary` permits exactly the three core axes.
@@ -82,6 +85,15 @@ Mandatory generic-workflow, team-relationship, and P0/P1-chain artifact rows
 exist only after the decoder accepts a present HTTPS URL with a non-empty host
 and validates their hashes/references. Invalid mandatory values reject the
 bundle before raw or clean output.
+
+Artifact entry counting uses only canonical `ArtifactManifestEntryWire` JSON
+as specified in `data-model.md`; it excludes the sidecar envelope and derived
+sidecar ID/hash, byte count, and URL status. Every nullable wire key is present
+with JSON null when absent, and duplicate JSON object members reject before
+canonicalization. Mandatory 65,536-byte entries are accepted; 65,537-byte
+entries reject before raw output. This is a pre-ingest defense margin, not a
+fit guarantee; L5 still measures the complete serialized card against 262,144
+bytes. The normalized row stores the enriched model and exact computed count.
 
 Optional artifact and grill URL strings do not reject an otherwise valid
 bundle solely for URL safety. The decoder preserves the original untrusted
@@ -100,6 +112,9 @@ revalidates before rendering a link.
   number of tagged rows written.
 - T026 writes no row for rejected snapshot, sidecar, or child content and no
   local filesystem provenance.
+- Artifact `entity_sha256` and `encodedByteCount` both derive from the same
+  canonical raw wire bytes; enriched sidecar hash/status fields never affect
+  child collision identity.
 - T003 reads only this table, verifies locked `record_type`, hash formats,
   parent keys, sidecar nullability, and canonical `record_json`, then maps each
   row to the named L3 grain without reinterpreting optional URL status.

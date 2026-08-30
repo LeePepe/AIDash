@@ -124,6 +124,15 @@ snapshot/sidecar/parent linkage, optional
 `absent|actionableHTTPS|nonActionable` status, complete type set, and
 one-to-one L3 grain mapping.
 
+Artifact fixture boundaries use the raw `ArtifactManifestEntryWire`, never the
+enriched model. Canonical raw-entry UTF-8 size 65,536 is accepted for a
+mandatory entry; 65,537 rejects before raw append. Fixtures also prove the raw
+entry rejects derived sidecar hash/status/count keys and that enrichment adds
+them only after the exact full `artifacts.json` byte hash is known. Nullable
+wire keys are present with JSON null, duplicate object members reject, and an
+unchanged artifact wire entry keeps its child hash across sidecar-only changes.
+This pre-ingest margin does not replace L5's 262,144-byte complete-card gate.
+
 ## 5. CI evidence
 
 The implementation PR must obtain the repository-required CI checks, including

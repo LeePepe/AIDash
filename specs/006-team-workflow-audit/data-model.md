@@ -234,7 +234,10 @@ Overlap-event deduplication uses the event stable identity through the same
 index. The full restart/collision proof is
 `contracts/t002-acceptance-matrix.md`.
 
-### ArtifactManifestEntry
+### ArtifactManifestEntryWire
+
+`ArtifactManifestEntryWire` is the exact raw entry allowed inside
+`artifacts.json`. It contains source-authored fields only:
 
 | Field | Type | Rules |
 |---|---|---|
@@ -242,15 +245,60 @@ index. The full restart/collision proof is
 | `snapshotID` | String | Required parent |
 | `kind` | ArtifactKind | `genericWorkflow | teamRelationship | findingEventChain | fullReport` |
 | `title` | String | Redacted display label |
-| `findingFingerprint` | String? | Required for finding event chains |
-| `caseID` | String? | Optional case binding |
+| `findingFingerprint` | String? | Key is always present; non-null for finding event chains, JSON null otherwise |
+| `caseID` | String? | Key is always present; optional binding uses JSON null when absent |
 | `eventIDs` | [String] | Evidence relationship |
 | `revisionEvidence` | [String] | Verified revision/blob/line references |
-| `contentSHA256` | String | Generated artifact hash |
-| `encodedByteCount` | Int | Non-negative importer-computed UTF-8 byte count of the canonical manifest entry; used for individual bounded-entry rejection |
-| `url` | String? | Mandatory artifacts require a present HTTPS+host value or publication rejects; optional invalid values remain non-actionable text under central URL policy |
-| `requirement` | ArtifactRequirement | `mandatory` or `optional`; controls publication rejection versus non-actionable degradation |
-| `sidecarID` / `sidecarSHA256` | String | Must equal the payload envelope and owning sidecar |
+| `contentSHA256` | String | Generated artifact content hash |
+| `url` | String? | Key is always present; untrusted source value or JSON null; mandatory safety is validated during enrichment |
+| `requirement` | ArtifactRequirement | `mandatory` or `optional` |
+
+Raw entries MUST NOT contain `sidecarID`, `sidecarSHA256`,
+`encodedByteCount`, `urlStatus`, or another importer-derived key. Their
+presence is an unknown-wire-field rejection.
+
+Every wire-table key above is required. The three nullable keys use explicit
+JSON null; omitting one rejects the wire entry. Duplicate JSON object members
+at any raw sidecar/entry level reject before canonicalization. These rules make
+semantically equal entries produce one canonical byte sequence and hash.
+
+For each valid wire entry, T022 computes `encodedByteCount` from exactly:
+
+```python
+len(json.dumps(
+    wire_entry,
+    sort_keys=True,
+    separators=(",", ":"),
+    ensure_ascii=False,
+).encode("utf-8"))
+```
+
+`wire_entry` contains all accepted raw keys above, including JSON null for an
+absent nullable value. The entry ceiling is **65,536 bytes inclusive**—an
+explicit one-quarter pre-ingest defense margin beneath the existing 262,144-byte
+card ceiling. A mandatory wire entry with
+`encodedByteCount <= 65_536` passes this size gate; `65_537` or greater rejects
+the entire bundle before raw append. An oversized optional entry remains typed
+with its exact count for the later L5 externalization/rejection contract.
+Importer-derived fields and the surrounding sidecar envelope are excluded from
+this entry count. The same canonical wire-entry bytes define that artifact's
+immutable child `entitySHA256`; enrichment never changes it. Separately,
+`ArtifactSidecar.contentSHA256` hashes the exact captured `artifacts.json` file
+bytes, not canonical entry bytes. Passing this pre-ingest gate does not
+guarantee publication: L5 still measures the complete serialized card,
+including its envelope and other entries, against 262,144 bytes.
+
+### ArtifactManifestEntry
+
+`ArtifactManifestEntry` is the importer-enriched normalized model. It contains
+every wire field plus:
+
+| Derived field | Type | Rules |
+|---|---|---|
+| `encodedByteCount` | Int | Exact canonical wire-entry byte count above |
+| `urlStatus` | ArtifactURLStatus | `absent | actionableHTTPS | nonActionable`; mandatory entries require `actionableHTTPS` |
+| `sidecarID` | String | Copied from the validated raw sidecar envelope after entry counting |
+| `sidecarSHA256` | String | Importer-computed SHA-256 of the exact captured `artifacts.json` bytes; never present in raw wire input |
 
 Every P0/P1 finding requires a direct `findingEventChain` entry. Each snapshot
 requires one generic workflow and every applicable team/repository relationship
@@ -259,7 +307,13 @@ they are never converted into optional limitations or one full-report link.
 
 ### ArtifactSidecar, grill links, and publication coverage
 
-`ArtifactSidecar` contains:
+`ArtifactSidecarWire` is the raw `artifacts.json` envelope and contains only
+`schemaVersion`, `snapshotID`, `sidecarID`,
+`artifacts: [ArtifactManifestEntryWire]`, and optional untrusted
+`grillMeURL`/`grillWithDocsURL` strings. It contains no content hash or URL
+status.
+
+The importer-enriched `ArtifactSidecar` contains:
 
 | Field | Type | Rules |
 |---|---|---|
@@ -267,7 +321,7 @@ they are never converted into optional limitations or one full-report link.
 | `contentSHA256` | String | Importer-computed SHA-256 of the exact immutable `artifacts.json` bytes; normalized field, not self-declared inside the raw file |
 | `schemaVersion` | Int | Exactly 1 |
 | `snapshotID` | String | Must match the snapshot parent |
-| `artifacts` | [ArtifactManifestEntry] | Every entry binds back to this sidecar and snapshot |
+| `artifacts` | [ArtifactManifestEntry] | Enriched entries bind back to this sidecar and snapshot |
 | `grillMeURL` / `grillWithDocsURL` | String? | Optional untrusted raw sidecar strings |
 
 Sidecar identity/hash is preserved through normalized rows, warehouse facts,

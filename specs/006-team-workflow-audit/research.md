@@ -248,6 +248,18 @@ untrusted string as `actionableHTTPS` only for HTTPS plus non-empty host and as
 `nonActionable` otherwise; an absent optional artifact URL is null/`absent`,
 and an absent grill field emits no link row.
 
+Raw sidecar entries and enriched normalized artifacts are distinct models.
+`ArtifactManifestEntryWire` contains source-authored fields only. After hashing
+the exact captured sidecar file, the decoder adds sidecar ID/hash, URL status,
+and `encodedByteCount`. That count is canonical UTF-8 JSON of the raw entry
+only (sorted keys, compact separators, unescaped Unicode); envelope and derived
+fields are excluded. A mandatory entry accepts through 65,536 bytes and rejects
+at 65,537 as a pre-ingest defense margin; L5's complete-card 262,144-byte gate
+remains authoritative, so this does not guarantee publication fit. Nullable
+wire keys are always present with JSON null, duplicate object members reject,
+and artifact child identity hashes the canonical wire bytes rather than the
+enriched sidecar-wide fields.
+
 **Rationale**: Three exact-SHA implementation reviews found the same privacy,
 active-validator, atomic-byte, sidecar, collision, and test-matrix gaps. The
 current large adapter mixes validation, filesystem races, identity decisions,

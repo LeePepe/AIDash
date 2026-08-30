@@ -47,8 +47,12 @@ Each immutable bundle is a directory containing:
 }
 ```
 
-`artifacts` contains `ArtifactManifestEntry[]` as defined in `data-model.md`;
-both grill fields are optional untrusted strings. The sidecar never changes
+`artifacts` contains raw `ArtifactManifestEntryWire[]` as defined in
+`data-model.md`; both grill fields are optional untrusted strings. The raw
+envelope and entries contain no `contentSHA256` for the sidecar,
+`sidecarSHA256`, `encodedByteCount`, or `urlStatus`. Every nullable entry key
+is present with JSON null when absent, and duplicate object members reject
+before canonicalization. The sidecar never changes
 the snapshot body or hash. A missing sidecar may be ingested as an import
 limitation, but the snapshot is not publishable until its mandatory generic,
 team/repository, and P0/P1 chain entries are present and valid.
@@ -57,6 +61,19 @@ The importer computes normalized `ArtifactSidecar.contentSHA256` from the exact
 immutable `artifacts.json` bytes; the file does not self-declare its hash. The stable
 `sidecarID` plus computed hash is retained on normalized artifact/grill rows,
 warehouse facts, L4 bundles, payload provenance, and collision observations.
+
+T022 enriches each accepted wire entry only after it has captured and hashed
+the complete sidecar bytes. It computes `encodedByteCount` from the canonical
+UTF-8 JSON of the raw entry alone using sorted keys, compact separators, and
+unescaped Unicode exactly as specified in `data-model.md`; the sidecar envelope
+and all derived fields are excluded. The mandatory-entry ceiling is an
+inclusive 65,536-byte pre-ingest defense margin: 65,536 passes and 65,537
+rejects the bundle before raw append. This gate does not guarantee final fit;
+L5 still measures the complete card and envelope against 262,144 bytes.
+Oversized optional entries retain their exact count for later L5
+externalization/rejection. Enrichment then adds the validated envelope
+`sidecarID`, exact `sidecarSHA256`, and derived
+`absent|actionableHTTPS|nonActionable` URL status.
 
 ## Contract-first internal seams
 
@@ -115,8 +132,9 @@ The complete observable proof is locked in
    preserving hashes, provenance, and `(parentSnapshotID, observationID)`.
 8. Validate that every mandatory generic workflow, team/repository
    relationship, and P0/P1 finding-event-chain sidecar entry satisfies the
-   bounded direct-link contract. A malformed or individually oversized
-   mandatory entry rejects publication instead of being truncated.
+   bounded direct-link contract. A malformed entry or mandatory canonical wire
+   entry of 65,537 bytes or more rejects before raw append instead of being
+   truncated; importer-derived fields never affect that count.
 
 ## Prohibited behavior
 

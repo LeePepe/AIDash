@@ -52,5 +52,6 @@
 - [x] AIDashUI future-CardType compatibility precedes the Core-only T005 expansion, and watchdog work is an independent RepoInfra task/PR.
 - [x] The former monolithic T002 is coordination-only; T022–T026 are serial, layer-scoped, file-pinned, independently hook-gated tasks, with collector wiring last.
 - [x] T022 rejects invalid mandatory URL/hash/reference data while retaining unsafe optional artifact/grill strings with explicit non-actionable status.
+- [x] Raw artifact wire entries exclude importer-derived fields; nullable/duplicate-key handling, enrichment order, canonical byte basis, independent artifact-versus-sidecar hashes, and the inclusive 65,536-byte pre-ingest ceiling are deterministic without replacing the final card gate.
 - [x] HTTPS-only artifact and grill entry-point behavior agrees with the repository URL policy.
 - [x] The specification is ready for Plan-stage architecture and contract design.

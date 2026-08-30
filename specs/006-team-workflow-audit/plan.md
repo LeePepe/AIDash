@@ -144,8 +144,12 @@ surface.
 **Strict decoder interface**: `decode_team_audit_bundle(snapshot_bytes,
 sidecar_bytes)` is a pure seam in `team_audit_contract.py`. It returns one
 immutable decoded model or structured rejection. All nested allowlists, locked
-enums, mode/count/reference rules, mandatory artifacts, and exact byte hashes
-live here; no caller or test learns a second validator.
+enums, mode/count/reference rules, raw artifact wire validation, importer
+enrichment, mandatory 65,536-byte canonical wire-entry pre-ingest ceiling, and
+exact sidecar-file hashes live here. Nullable wire keys are explicit null,
+duplicates reject, and canonical wire bytes—not enriched sidecar-wide
+fields—define artifact child identity; no caller or test learns a second
+validator. L5's full-card 262,144-byte gate remains authoritative.
 
 **Filesystem adapter**: `read_bundle(root, bundle_dir)` in
 `team_audit_bundle.py` resolves one immediate contained bundle and reads each
