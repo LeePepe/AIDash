@@ -46,13 +46,14 @@ class PolishSlots:
 # Matches trend lines like "- 成本: 2699$ ↑(+24%) vs 昨 2180$"
 # Captures the label and the signed percentage inside parentheses.
 _TREND_PCT_RE = re.compile(
-    r"^- (成本|Token|请求数|浪费额|完成任务|会话数|开PR|完成 issue)"
+    r"^- (成本|Token|请求数|浪费额|完成任务|已完成 issue|issues|tasks|会话数|开PR|完成 issue)"
     r".*?\(([+-]\d+)%\)"
 )
 
 # Labels whose percentage changes are relevant to efficiency claims.
 _COST_LABELS = frozenset({"成本"})
 _WASTE_LABELS = frozenset({"浪费额"})
+_OUTPUT_LABELS = frozenset({"Token", "请求数", "完成任务", "tasks", "issues", "已完成 issue"})
 
 
 @dataclass(frozen=True)
@@ -64,21 +65,29 @@ class EfficiencyEvidence:
     """
     cost_pct: int | None
     waste_pct: int | None
+    token_pct: int | None = None
+    requests_pct: int | None = None
+    tasks_pct: int | None = None
+    issues_pct: int | None = None
 
     def allows_positive_claim(self) -> bool:
-        """Return True only when evidence supports a positive efficiency claim.
+        """Return True only when positive efficiency is auditable.
 
-        Condition (auditable threshold):
-          - cost_pct is present AND <= 0 (cost did not rise)
-          - waste_pct is absent OR <= 0 (waste did not rise)
-
-        Any upward cost or waste movement makes the evidence insufficient.
+        The evidence must show spending did not rise, waste did not rise, and at
+        least one output signal was present and not declining. This is a fail-closed
+        policy: missing or mixed evidence never authorizes a positive claim.
         """
-        if self.cost_pct is None:
-            return False  # no data → cannot claim improvement
-        if self.cost_pct > 0:
+        if self.cost_pct is None or self.cost_pct > 0:
             return False
         if self.waste_pct is not None and self.waste_pct > 0:
+            return False
+
+        output_values = [self.token_pct, self.requests_pct, self.tasks_pct, self.issues_pct]
+        if not any(v is not None for v in output_values):
+            return False
+        if any(v is not None and v < 0 for v in output_values):
+            return False
+        if all(v is not None and v <= 0 for v in output_values):
             return False
         return True
 
@@ -89,6 +98,10 @@ class EfficiencyEvidence:
             signals.append((self.waste_pct, "浪费上升"))
         if self.cost_pct is not None and self.cost_pct > 0:
             signals.append((self.cost_pct, "成本上升"))
+        if self.tasks_pct is not None and self.tasks_pct < 0:
+            signals.append((abs(self.tasks_pct), "任务下降"))
+        if self.issues_pct is not None and self.issues_pct < 0:
+            signals.append((abs(self.issues_pct), "问题积压"))
         if signals:
             signals.sort(reverse=True)
             return signals[0][1]
@@ -99,6 +112,10 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
     """Parse trend percentages from the template to build auditable evidence."""
     cost_pct: int | None = None
     waste_pct: int | None = None
+    token_pct: int | None = None
+    requests_pct: int | None = None
+    tasks_pct: int | None = None
+    issues_pct: int | None = None
     for line in template_md.splitlines():
         m = _TREND_PCT_RE.match(line)
         if m:
@@ -108,16 +125,42 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
                 cost_pct = pct
             elif label in _WASTE_LABELS:
                 waste_pct = pct
-    return EfficiencyEvidence(cost_pct=cost_pct, waste_pct=waste_pct)
+            elif label == "Token":
+                token_pct = pct
+            elif label == "请求数":
+                requests_pct = pct
+            elif label in {"完成任务", "tasks"}:
+                tasks_pct = pct
+            elif label in {"issues", "已完成 issue"}:
+                issues_pct = pct
+    return EfficiencyEvidence(
+        cost_pct=cost_pct,
+        waste_pct=waste_pct,
+        token_pct=token_pct,
+        requests_pct=requests_pct,
+        tasks_pct=tasks_pct,
+        issues_pct=issues_pct,
+    )
 
 
-# Positive-efficiency keywords that must not appear when evidence is negative.
+# Closed policy: reject explicit efficiency-positive wording under mixed/insufficient
+# evidence and keep neutral/uncertain wording only when the counter-signal is still
+# present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
-    r"效率.{0,4}(提升|提高|改善|进步|优化|好转|增强)"
-    r"|efficiency.{0,6}(improv|increas|better|gain)"
-    r"|(省|节约|降低).{0,4}(成本|开销|花费)"
-    r"|用得更(省|好|高效)"
-    r"|整体(向好|改善|优化)",
+    r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步)"
+    r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain)"
+    r"|(?:降低|减少).{0,6}(?:成本|开销|花费)"
+    r"|(?:效率更高|效能提升|投入产出更好|整体向好|整体改善|整体优化)",
+    re.IGNORECASE,
+)
+
+_COUNTER_SIGNAL_RE = re.compile(
+    r"(?:浪费|成本|需关注|谨慎|仍需|波动|不确定|风险|待观察|反向|上升|下降|压缩)",
+    re.IGNORECASE,
+)
+
+_UNCERTAINTY_RE = re.compile(
+    r"(?:需关注|谨慎|仍需|待观察|不确定|可能|待确认|有待|需留意)",
     re.IGNORECASE,
 )
 
@@ -125,18 +168,26 @@ _POSITIVE_EFFICIENCY_RE = re.compile(
 def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
     """Return True if the TL;DR is consistent with the evidence.
 
-    Rejects when:
-      - evidence does NOT allow a positive efficiency claim, AND
-      - the TL;DR contains positive efficiency language.
+    Positive efficiency claims are allowed only when the evidence is sufficient.
+    Under mixed/insufficient evidence, the TL;DR must remain neutral or uncertain and
+    retain a material counter-signal. This is fail-closed by design.
     """
+    if not tldr or not tldr.strip():
+        return False
+
     if evidence.allows_positive_claim():
-        return True  # positive claims are fine when evidence supports them
-    return _POSITIVE_EFFICIENCY_RE.search(tldr) is None
+        return True
+
+    if _POSITIVE_EFFICIENCY_RE.search(tldr):
+        return False
+    return bool(_COUNTER_SIGNAL_RE.search(tldr) or _UNCERTAINTY_RE.search(tldr))
 
 
 def neutral_fallback_tldr(evidence: EfficiencyEvidence) -> str:
     """Deterministic neutral TL;DR when the LLM's claim is rejected."""
     counter = evidence.top_counter_signal()
+    if counter == "数据不足以判断":
+        return "整体趋势需观察，数据不足以判断效率变化"
     return f"整体趋势需关注，{counter}"
 
 

@@ -186,26 +186,26 @@ def test_extract_evidence_no_trend_lines():
 
 
 @pytest.mark.unit
-def test_allows_positive_claim_when_cost_down_waste_down():
-    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58)
+def test_allows_positive_claim_when_cost_down_waste_down_with_output_signal():
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, requests_pct=7)
     assert ev.allows_positive_claim() is True
 
 
 @pytest.mark.unit
 def test_disallows_positive_claim_when_cost_up():
-    ev = EfficiencyEvidence(cost_pct=71, waste_pct=-10)
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=-10, tasks_pct=12)
     assert ev.allows_positive_claim() is False
 
 
 @pytest.mark.unit
 def test_disallows_positive_claim_when_waste_up():
-    ev = EfficiencyEvidence(cost_pct=-10, waste_pct=141)
+    ev = EfficiencyEvidence(cost_pct=-10, waste_pct=141, tasks_pct=12)
     assert ev.allows_positive_claim() is False
 
 
 @pytest.mark.unit
 def test_disallows_positive_claim_when_both_up():
-    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141)
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, tasks_pct=12)
     assert ev.allows_positive_claim() is False
 
 
@@ -216,17 +216,18 @@ def test_disallows_positive_claim_when_no_data():
 
 
 @pytest.mark.unit
-def test_allows_positive_claim_cost_down_no_waste():
+def test_disallows_positive_claim_when_output_signal_missing():
     ev = EfficiencyEvidence(cost_pct=-10, waste_pct=None)
-    assert ev.allows_positive_claim() is True
+    assert ev.allows_positive_claim() is False
 
 
 @pytest.mark.unit
 def test_validate_rejects_positive_claim_when_cost_up():
     ev = EfficiencyEvidence(cost_pct=71, waste_pct=141)
     assert validate_efficiency_claim("效率明显提升", ev) is False
-    assert validate_efficiency_claim("整体向好", ev) is False
-    assert validate_efficiency_claim("用得更高效", ev) is False
+    assert validate_efficiency_claim("效率更高", ev) is False
+    assert validate_efficiency_claim("效能提升", ev) is False
+    assert validate_efficiency_claim("投入产出更好", ev) is False
 
 
 @pytest.mark.unit
@@ -238,7 +239,7 @@ def test_validate_allows_neutral_wording_when_cost_up():
 
 @pytest.mark.unit
 def test_validate_allows_positive_claim_when_evidence_supports():
-    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58)
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, requests_pct=7)
     assert validate_efficiency_claim("效率明显提升", ev) is True
 
 
@@ -263,11 +264,9 @@ def test_build_prompt_injects_constraint_when_cost_up():
 
 
 @pytest.mark.unit
-def test_build_prompt_no_constraint_when_cost_down():
+def test_build_prompt_includes_constraint_when_cost_down_but_evidence_is_insufficient():
     system, _ = build_prompt(TEMPLATE_COST_DOWN)
-    # The base system always mentions 数字; when evidence is positive,
-    # the extra efficiency constraint should NOT be appended.
-    assert "成本或浪费上升" not in system
+    assert "成本或浪费上升" in system
 
 
 @pytest.mark.unit
@@ -292,8 +291,9 @@ def test_polish_digest_keeps_valid_neutral_commentary():
 
 
 @pytest.mark.unit
-def test_polish_digest_allows_positive_when_cost_down():
-    """LLM claims efficiency improved when cost is genuinely down."""
+def test_polish_digest_rejects_positive_when_cost_down_but_evidence_is_insufficient():
+    """The evidence is insufficient to authorize a positive efficiency claim."""
     client = FakeClient('{"tldr": "效率明显提升", "todos": ["继续优化"]}')
     out = polish_digest(TEMPLATE_COST_DOWN, client)
-    assert "效率明显提升" in out
+    assert "效率明显提升" not in out
+    assert "整体趋势需" in out or "数据不足以判断" in out
