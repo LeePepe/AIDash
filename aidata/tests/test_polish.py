@@ -425,6 +425,23 @@ def test_polish_digest_rejects_task_growth_without_input_signal():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "成本上升，但效率增长",
+        "效率增长，但成本上升",
+    ],
+)
+def test_polish_digest_rejects_contradictory_metric_and_efficiency_clauses(claim):
+    """Contradictory metric facts must win over the positive claim, regardless of ordering."""
+    client = FakeClient(f'{{"tldr": "{claim}", "todos": ["继续优化"]}}')
+    out = polish_digest(TEMPLATE_COST_DOWN, client)
+    assert claim not in out
+    assert "整体趋势需" in out or "数据不足以判断" in out
+    assert "效率增长" not in out
+
+
+@pytest.mark.unit
 def test_polish_digest_rejects_positive_when_cost_down_but_evidence_is_insufficient():
     """The evidence is insufficient to authorize a positive efficiency claim."""
     client = FakeClient('{"tldr": "效率明显提升", "todos": ["继续优化"]}')

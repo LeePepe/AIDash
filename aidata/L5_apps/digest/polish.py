@@ -308,6 +308,20 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
     if re.search(r"\d|[$%]", tldr):
         return False
 
+    metric_assertions = _metric_direction_assertions(tldr)
+    if metric_assertions:
+        fact_match = _metric_direction_matches(tldr, evidence)
+        if not fact_match:
+            return False
+        if evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
+            return False
+        if not evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
+            # Output-only activity growth is never enough to support a stronger
+            # directional claim; facts are valid only when the template also has
+            # a real input signal to anchor them.
+            if evidence.cost_pct is None and evidence.waste_pct is None:
+                return False
+
     if re.search(r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|efficiency|productivity|throughput)", tldr, re.IGNORECASE):
         assertion_kind = _efficiency_assertion_kind(tldr)
         if assertion_kind == "positive":
@@ -316,18 +330,7 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
             return evidence.allows_negative_claim()
         return False
 
-    if _metric_direction_assertions(tldr):
-        if not _metric_direction_matches(tldr, evidence):
-            return False
-        if evidence.cost_pct is None and evidence.waste_pct is None:
-            return False
-        if evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
-            return False
-        if not evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
-            # Positive output-only statements are insufficient unless the template
-            # also provides an actual input signal (cost/waste) to anchor the
-            # efficiency conclusion.
-            return evidence.cost_pct is not None or evidence.waste_pct is not None
+    if metric_assertions:
         return True
     if _named_adverse_signal_matches(tldr, evidence):
         return True
