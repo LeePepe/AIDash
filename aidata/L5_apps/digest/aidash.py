@@ -1685,7 +1685,7 @@ def delivery_health_line(report_date: str,
     stale_tag = ""
     if delivery.timestamp and report_date:
         try:
-            from datetime import datetime, timezone, timedelta
+            from datetime import datetime, timedelta
             ts = datetime.fromisoformat(delivery.timestamp.replace("Z", "+00:00"))
             from L5_apps.digest.cst import _parse as _parse_cst_day, _CST
             report_dt = _parse_cst_day(report_date).replace(tzinfo=_CST)
