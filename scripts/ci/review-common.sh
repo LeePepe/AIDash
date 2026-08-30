@@ -133,22 +133,10 @@ cleanup_lingering_descendants() {
     done < <(ps -o pid= --ppid "$root_pid" 2>/dev/null || true)
 }
 
-cleanup_process_group() {
-    local group_pid="${1:-}"
-    [ -n "$group_pid" ] || return 0
-
-    if kill -0 "-$group_pid" 2>/dev/null; then
-        kill -TERM "-$group_pid" 2>/dev/null || kill -TERM "$group_pid" 2>/dev/null || true
-        sleep 1
-        if kill -0 "-$group_pid" 2>/dev/null; then
-            kill -KILL "-$group_pid" 2>/dev/null || kill -KILL "$group_pid" 2>/dev/null || true
-        fi
-    fi
-}
-
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid child_status=0 waited=0 grace=0
+    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file
+    state_file="$(mktemp)"
 
     # Job control ON for the launch, so the child becomes a PROCESS GROUP
     # LEADER (pgid == pid). Signalling `-$child_pid` then reaches the CLI *and
@@ -160,56 +148,81 @@ run_with_timeout() {
     child_pid=$!
     set +m
 
-    # Watch the leader directly rather than blocking on `wait` before we know
-    # whether the deadline fired. A shell that exits 0 while spawning a
-    # grandchild can still leave that grandchild in the same process group, so
-    # we must distinguish "leader exited cleanly" from "the deadline fired".
-    while [ "$waited" -lt "$seconds" ]; do
-        if ! kill -0 "$child_pid" 2>/dev/null || ps -o stat= -p "$child_pid" 2>/dev/null | grep -q 'Z'; then
-            # Give a just-started background job a brief window to emit its
-            # pidfile/descendants before the watchdog declares the run clean.
-            sleep 1
-            cleanup_process_group "$child_pid"
-            cleanup_lingering_descendants "$child_pid"
-            if wait "$child_pid" 2>/dev/null; then
-                child_status=0
-            else
-                child_status=$?
+    # Watchdog: either the child is still active until the deadline, or it has
+    # already exited but left descendants in the original PGID. In the latter
+    # case we still do a bounded TERM→KILL cleanup, but we must not erroneously
+    # treat that as a timeout. We record the watchdog's explicit state so the
+    # caller can prefer an actual timeout even when the leader handles TERM and
+    # exits 0 on its own.
+    (
+        local waited=0
+        while [ "$waited" -lt "$seconds" ]; do
+            if ! kill -0 "$child_pid" 2>/dev/null || ps -o stat= -p "$child_pid" 2>/dev/null | grep -q 'Z'; then
+                # Give a just-started background job a brief window to emit its
+                # pidfile/descendants before the watchdog declares the run clean.
+                sleep 1
+                cleanup_lingering_descendants "$child_pid"
+                printf '%s\n' "clean" >"$state_file"
+                exit 0
             fi
-            return "$child_status"
+            sleep 1
+            waited=$((waited + 1))
+        done
+
+        if ! kill -0 "-$child_pid" 2>/dev/null; then
+            printf '%s\n' "clean" >"$state_file"
+            exit 0
         fi
 
-        sleep 1
-        waited=$((waited + 1))
-    done
+        kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
 
-    if ! kill -0 "-$child_pid" 2>/dev/null; then
-        sleep 1
-        cleanup_process_group "$child_pid"
-        cleanup_lingering_descendants "$child_pid"
-        if wait "$child_pid" 2>/dev/null; then
-            child_status=0
-        else
-            child_status=$?
+        local grace=0
+        while [ "$grace" -lt 10 ]; do
+            kill -0 "-$child_pid" 2>/dev/null || break
+            sleep 1
+            grace=$((grace + 1))
+        done
+
+        if kill -0 "-$child_pid" 2>/dev/null; then
+            kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
         fi
-        return "$child_status"
+
+        printf '%s\n' "timeout" >"$state_file"
+        exit "$REVIEW_TIMEOUT_RC"
+    ) &
+    watchdog_pid=$!
+
+    # `|| status=$?`, never a bare `wait`: these scripts run under the
+    # workflow's `bash -e {0}`, where a bare `wait` on a killed child exits the
+    # WHOLE SCRIPT with 143 — before the timeout branch below can post its
+    # sticky comment. The gate would still be red, but for an unexplained
+    # reason, which is the failure mode MY-1404 is about.
+    if wait "$child_pid"; then
+        child_status=0
+    else
+        child_status=$?
     fi
 
-    # A real timeout is authoritative even when the leader traps TERM and exits 0
-    # immediately afterward: the deadline fired, so the timeout must win.
-    kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
-
-    while [ "$grace" -lt 10 ]; do
-        kill -0 "-$child_pid" 2>/dev/null || break
-        sleep 1
-        grace=$((grace + 1))
-    done
-
-    if kill -0 "-$child_pid" 2>/dev/null; then
-        kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+    # The watchdog's exit status is the authoritative timeout signal. We must
+    # wait for its cleanup to finish rather than killing it early; otherwise a
+    # TERM-resistant descendant can remain alive in the original PGID.
+    if wait "$watchdog_pid"; then
+        watchdog_status=0
+    else
+        watchdog_status=$?
     fi
 
-    return "$REVIEW_TIMEOUT_RC"
+    local watchdog_state="$(cat "$state_file" 2>/dev/null || printf 'clean')"
+    rm -f "$state_file"
+
+    # Prefer a real watchdog timeout over the child status. The child may exit
+    # 0 after handling TERM, but the watchdog state is the truth for whether the
+    # deadline itself fired.
+    if [ "$watchdog_state" = "timeout" ] || [ "$watchdog_status" -eq "$REVIEW_TIMEOUT_RC" ]; then
+        return "$REVIEW_TIMEOUT_RC"
+    fi
+
+    return "$child_status"
 }
 
 # build_scope_evidence <head_sha> <diff_file> <changed_paths_nul_file>
