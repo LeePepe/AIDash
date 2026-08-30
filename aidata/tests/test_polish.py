@@ -271,6 +271,19 @@ def test_validate_rejects_partial_metric_evidence():
 
 
 @pytest.mark.unit
+def test_validate_routes_activity_direction_and_direct_cost_savings_through_guard():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, requests_pct=19, token_pct=46, sessions_pct=9)
+    assert validate_efficiency_claim("请求量下降", ev) is False
+    assert validate_efficiency_claim("Token 上升", ev) is False
+    assert validate_efficiency_claim("会话数下降", ev) is False
+    assert validate_efficiency_claim("用得更省", ev) is False
+    assert validate_efficiency_claim("节省成本", ev) is False
+
+    good_ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, token_pct=-10, requests_pct=-12, tasks_pct=12, issues_pct=4)
+    assert validate_efficiency_claim("节省成本", good_ev) is True
+
+
+@pytest.mark.unit
 def test_validate_neutral_requires_named_adverse_metric():
     ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, issues_pct=0)
     assert validate_efficiency_claim("整体平稳，需关注", ev) is False
@@ -327,6 +340,19 @@ def test_polish_digest_rejects_false_efficiency_claim():
     assert "效率" not in out or "提升" not in out
     assert "浪费上升" in out or "成本上升" in out
     assert "- P0: 优先排查浪费来源" in out  # TODOs are kept
+
+
+@pytest.mark.unit
+def test_polish_digest_rejects_request_direction_and_direct_cost_savings():
+    client = FakeClient('{"tldr": "请求量下降", "todos": ["继续观察"]}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    assert "请求量下降" not in out
+    assert "浪费上升" in out or "成本上升" in out
+
+    cost_saver = FakeClient('{"tldr": "用得更省", "todos": ["继续观察"]}')
+    out = polish_digest(TEMPLATE_COST_UP, cost_saver)
+    assert "用得更省" not in out
+    assert "浪费上升" in out or "成本上升" in out
 
 
 @pytest.mark.unit

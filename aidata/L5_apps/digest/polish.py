@@ -46,14 +46,14 @@ class PolishSlots:
 # Matches trend lines like "- 成本: 2699$ ↑(+24%) vs 昨 2180$"
 # Captures the label and the signed percentage inside parentheses.
 _TREND_PCT_RE = re.compile(
-    r"^- (成本|Token|请求数|浪费额|完成任务|已完成 issue|issues|tasks|会话数|开PR|完成 issue|完成 issue\(近似\))"
+    r"^- (成本|Token|请求数|请求量|浪费额|完成任务|已完成 issue|issues|tasks|会话数|会话|开PR|完成 issue|完成 issue\(近似\))"
     r".*?\(([+-]\d+)%\)"
 )
 
 # Labels whose percentage changes are relevant to efficiency claims.
 _COST_LABELS = frozenset({"成本"})
 _WASTE_LABELS = frozenset({"浪费额"})
-_OUTPUT_LABELS = frozenset({"Token", "请求数", "完成任务", "tasks", "issues", "已完成 issue", "完成 issue", "完成 issue(近似)"})
+_OUTPUT_LABELS = frozenset({"Token", "请求数", "请求量", "完成任务", "tasks", "issues", "已完成 issue", "完成 issue", "完成 issue(近似)", "会话数", "会话"})
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,7 @@ class EfficiencyEvidence:
     waste_pct: int | None
     token_pct: int | None = None
     requests_pct: int | None = None
+    sessions_pct: int | None = None
     tasks_pct: int | None = None
     issues_pct: int | None = None
 
@@ -155,6 +156,7 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
     waste_pct: int | None = None
     token_pct: int | None = None
     requests_pct: int | None = None
+    sessions_pct: int | None = None
     tasks_pct: int | None = None
     issues_pct: int | None = None
     for line in template_md.splitlines():
@@ -168,8 +170,10 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
                 waste_pct = pct
             elif label == "Token":
                 token_pct = pct
-            elif label == "请求数":
+            elif label in {"请求数", "请求量"}:
                 requests_pct = pct
+            elif label in {"会话数", "会话"}:
+                sessions_pct = pct
             elif label in {"完成任务", "tasks"}:
                 tasks_pct = pct
             elif label in {"issues", "已完成 issue", "完成 issue", "完成 issue(近似)"}:
@@ -179,6 +183,7 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
         waste_pct=waste_pct,
         token_pct=token_pct,
         requests_pct=requests_pct,
+        sessions_pct=sessions_pct,
         tasks_pct=tasks_pct,
         issues_pct=issues_pct,
     )
@@ -188,9 +193,10 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # evidence and keep neutral/uncertain wording only when the counter-signal is still
 # present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出|用得更|更省|节省|省下|生产力).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好)"
+    r"(?:效率|效能|投入产出|产出|用得更|更省|更划算|节省|省下|降本|省成本|节省成本|用得更省|生产力).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好)"
+    r"|(?:效益|效率|效能|投入产出|产出|用得更省|更省|更划算|节省成本|省成本|降本|省下成本).{0,18}"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|现在更高效了|生产力提升|更高效了)",
+    r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|现在更高效了|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本)",
     re.IGNORECASE,
 )
 
@@ -231,6 +237,21 @@ def _metric_direction_assertions(tldr: str) -> list[tuple[str, str]]:
             re.compile(r"(?:浪费).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
         ),
         (
+            "requests",
+            re.compile(r"(?:请求量|请求数|requests?).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:请求量|请求数|requests?).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+        ),
+        (
+            "token",
+            re.compile(r"(?:Token|token).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:Token|token).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+        ),
+        (
+            "sessions",
+            re.compile(r"(?:会话数|会话|session).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:会话数|会话|session).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+        ),
+        (
             "tasks",
             re.compile(r"(?:完成任务|任务|产出).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
             re.compile(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|回落|减弱)", re.IGNORECASE),
@@ -258,6 +279,9 @@ def _metric_direction_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
         return {
             "cost": evidence.cost_pct,
             "waste": evidence.waste_pct,
+            "requests": evidence.requests_pct,
+            "token": evidence.token_pct,
+            "sessions": evidence.sessions_pct,
             "tasks": evidence.tasks_pct,
             "issues": evidence.issues_pct,
         }[metric]
@@ -287,10 +311,10 @@ def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bo
 
 def _efficiency_assertion_kind(tldr: str) -> str | None:
     """Return 'positive', 'negative', or None for the claim direction."""
-    if _POSITIVE_EFFICIENCY_RE.search(tldr):
-        return "positive"
     if _NEGATIVE_EFFICIENCY_RE.search(tldr):
         return "negative"
+    if _POSITIVE_EFFICIENCY_RE.search(tldr):
+        return "positive"
     return None
 
 
@@ -298,12 +322,16 @@ def _needs_efficiency_validation(tldr: str) -> bool:
     """Whether the TL;DR is an efficiency claim or a tracked metric-direction statement."""
     if not tldr or not tldr.strip():
         return False
-    if re.search(r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|efficiency|productivity|throughput)", tldr, re.IGNORECASE):
+    if re.search(
+        r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|efficiency|productivity|throughput)",
+        tldr,
+        re.IGNORECASE,
+    ):
         return True
     if _metric_direction_assertions(tldr):
         return True
     if re.search(r"(?:上升|增长|提升|提高|改善|优化|好转|更好|增强|回升|变好|下降|降低|减少|恶化|变差|回落|趋弱|下滑|走弱)", tldr, re.IGNORECASE):
-        if re.search(r"(?:整体|趋势|成本|浪费|任务|issue|产出|效率|效能|生产力|throughput|productivity|efficiency)", tldr, re.IGNORECASE):
+        if re.search(r"(?:整体|趋势|成本|浪费|任务|issue|产出|效率|效能|生产力|请求|Token|会话|throughput|productivity|efficiency)", tldr, re.IGNORECASE):
             return True
     return False
 
@@ -336,7 +364,11 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
             if evidence.cost_pct is None and evidence.waste_pct is None:
                 return False
 
-    if re.search(r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|efficiency|productivity|throughput)", tldr, re.IGNORECASE):
+    if re.search(
+        r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|efficiency|productivity|throughput)",
+        tldr,
+        re.IGNORECASE,
+    ):
         assertion_kind = _efficiency_assertion_kind(tldr)
         if assertion_kind == "positive":
             return evidence.allows_positive_claim()
