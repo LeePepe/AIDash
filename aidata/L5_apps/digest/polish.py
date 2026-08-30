@@ -261,6 +261,18 @@ _UNCERTAINTY_RE = re.compile(
     re.IGNORECASE,
 )
 
+_QUALITATIVE_PROSE_VALUES = frozenset({
+    "会话活跃",
+    "需关注波动",
+    "会话活跃，需关注波动",
+    "整体趋势需关注",
+    "整体趋势需观察",
+    "数据不足以判断",
+    "整体保持活跃",
+    "活动明显增加",
+    "趋势需观察",
+})
+
 _NON_CLAIM_QUALITATIVE_RE = re.compile(
     r"(?:会话活跃|整体趋势需关注|整体趋势需观察|需关注波动|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察)",
     re.IGNORECASE,
@@ -488,7 +500,24 @@ def _efficiency_assertion_kind(tldr: str) -> str | None:
 
 def _is_recognized_non_claim_qualitative(tldr: str) -> bool:
     """True only for explicitly approved non-claim qualitative prose."""
-    return bool(tldr and _NON_CLAIM_QUALITATIVE_RE.search(tldr.strip()) and not _ECONOMIC_COMPARATIVE_RE.search(tldr))
+    text = (tldr or "").strip()
+    if not text:
+        return False
+    canonical = text.replace(" ", "")
+    return canonical in _QUALITATIVE_PROSE_VALUES or any(
+        re.fullmatch(pattern, canonical)
+        for pattern in (
+            r"会话活跃",
+            r"需关注波动",
+            r"整体趋势需关注",
+            r"整体趋势需观察",
+            r"数据不足以判断",
+            r"整体保持活跃",
+            r"活动明显增加",
+            r"趋势需观察",
+            r"会话活跃，需关注波动",
+        )
+    )
 
 
 def _needs_efficiency_validation(tldr: str) -> bool:
@@ -787,9 +816,9 @@ def _refine_todos(lines: list[str], todo_iter) -> list[str]:
 def polish_digest(template_md: str, client: LLMClient) -> str:
     """Run the LLM polish pass. Propagates LLMError for the caller to catch.
 
-    Only validate TL;DRs that look like an efficiency claim or a tracked
-    metric-direction statement. Neutral qualitative prose such as "会话活跃，需关注波动"
-    is preserved without being forced through the efficiency fallback path.
+    Every non-empty TL;DR must be classified into the closed allowlist before
+    publication: either a proven directional metric assertion or an exact
+    qualitative non-claim phrase. Anything else deterministically falls back.
     """
     system, user = build_prompt(template_md)
     raw = client.complete(system, user)
@@ -797,10 +826,9 @@ def polish_digest(template_md: str, client: LLMClient) -> str:
     if re.search(r"\d|[$%]", slots.tldr):
         return template_md
     evidence = extract_efficiency_evidence(template_md)
-    if _needs_efficiency_validation(slots.tldr):
-        if not validate_efficiency_claim(slots.tldr, evidence):
-            slots = PolishSlots(
-                tldr=neutral_fallback_tldr(evidence),
-                todos=slots.todos,
-            )
+    if slots.tldr.strip() and not validate_efficiency_claim(slots.tldr, evidence):
+        slots = PolishSlots(
+            tldr=neutral_fallback_tldr(evidence),
+            todos=slots.todos,
+        )
     return apply_slots(template_md, slots)

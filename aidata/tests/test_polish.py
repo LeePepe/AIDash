@@ -466,6 +466,23 @@ def test_polish_digest_falls_back_for_unclassified_economic_comparatives(claim):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("claim", ["物超所值", "会话活跃，效率大幅改善"])
+def test_validate_rejects_unknown_or_composite_qualitative_claims(claim):
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, tasks_pct=256, issues_pct=0)
+    assert validate_efficiency_claim(claim, ev) is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("claim", ["物超所值", "会话活跃，效率大幅改善"])
+def test_polish_digest_falls_back_for_unknown_or_composite_claims(claim):
+    client = FakeClient(f'{{"tldr": "{claim}", "todos": ["优先排查浪费来源"]}}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    assert claim not in out
+    assert "浪费上升" in out or "成本上升" in out
+    assert "- P0: 优先排查浪费来源" in out
+
+
+@pytest.mark.unit
 def test_polish_digest_keeps_valid_positive_when_evidence_supports():
     """A sufficient evidence set should still permit a genuine positive claim."""
     valid_template = """# AI 使用日报 2026-08-18
