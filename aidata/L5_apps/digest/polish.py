@@ -265,6 +265,7 @@ _QUALITATIVE_PROSE_VALUES = frozenset({
     "会话活跃",
     "需关注波动",
     "会话活跃，需关注波动",
+    "会话活跃,需关注波动",
     "整体趋势需关注",
     "整体趋势需观察",
     "数据不足以判断",
@@ -281,6 +282,12 @@ _NON_CLAIM_QUALITATIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_CLAUSE_SPLIT_RE = r"[，,;；。!?！？]|(?:但|然而|不过|尽管|虽然|并且|且|却|同时|仍|反而)"
+
+
+def _canonicalize_clause_text(text: str) -> str:
+    return re.sub(r"[\s\u3000]+", "", (text or "")).replace("，", ",").replace("；", ";").replace("。", "").replace("、", "")
+
 _NEUTRAL_FOLLOWUP_RE = re.compile(
     r"(?:需关注|谨慎|待观察|需留意|波动|风险|不确定)",
     re.IGNORECASE,
@@ -291,7 +298,7 @@ def _split_tldr_clauses(text: str) -> list[str]:
     cleaned = (text or "").strip()
     if not cleaned:
         return []
-    clauses = re.split(r"[，,;；。!?！？]|(?:但|然而|不过|尽管|虽然|并且|却|同时|仍|反而)", cleaned)
+    clauses = re.split(_CLAUSE_SPLIT_RE, cleaned)
     return [clause.strip() for clause in clauses if clause and clause.strip()]
 
 
@@ -535,10 +542,7 @@ def _efficiency_clause_status(clause: str) -> str | None:
 
 def _efficiency_assertion_kind(tldr: str) -> str | None:
     """Return 'positive', 'negative', 'mixed', or None for the claim direction."""
-    clauses = [
-        part.strip() for part in re.split(r"[,，;；。!?！？]|但|然而|不过|尽管|虽然|并且|却|同时|仍|反而", tldr)
-        if part.strip()
-    ]
+    clauses = _split_tldr_clauses(tldr)
     positive = 0
     negative = 0
     for clause in clauses:
@@ -561,14 +565,15 @@ def _is_recognized_non_claim_qualitative(tldr: str) -> bool:
     text = (tldr or "").strip()
     if not text:
         return False
-    canonical = text.replace(" ", "")
-    if canonical in _QUALITATIVE_PROSE_VALUES:
+    canonical = _canonicalize_clause_text(text)
+    if canonical in frozenset(_canonicalize_clause_text(v) for v in _QUALITATIVE_PROSE_VALUES):
         return True
-    if canonical.startswith("会话活跃") and "效率" not in canonical and "成本" not in canonical:
-        return True
-    if canonical.endswith("需关注波动") or canonical in {"整体趋势需关注", "整体趋势需观察", "趋势需观察", "数据不足以判断", "整体保持活跃", "活动明显增加"}:
-        return True
-    return bool(re.fullmatch(r"(?:会话活跃|需关注波动|整体趋势需关注|整体趋势需观察|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察|需关注|谨慎|待观察)", canonical))
+    return bool(
+        re.fullmatch(
+            r"(?:会话活跃|需关注波动|整体趋势需关注|整体趋势需观察|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察|需关注|谨慎|待观察|会话活跃,需关注波动)",
+            canonical,
+        )
+    )
 
 
 def _needs_efficiency_validation(tldr: str) -> bool:
