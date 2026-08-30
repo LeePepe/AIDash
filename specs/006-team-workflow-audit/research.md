@@ -204,6 +204,37 @@ interface and localizes implementation and verification to one resolver leaf.
   expands the DesignKit-to-AIDashUI interface and creates a per-type special
   case when one calibrated classification value satisfies the contract.
 
+## Decision 10: Repair the existing remote-branch gate as a separate RepoInfra prerequisite
+
+**Decision**: Add one RepoInfra-only delivery task to stabilize
+`run_with_timeout` when a command leader exits zero before the deadline but
+leaves descendants to clean. Merge that repair independently to `main`; only
+then may Fullstack integrate the exact main revision into the preserved MY-1505
+workspace/branch and retry its normal push. T006 remains a three-file DesignKit
+task and PR #200 remains Draft.
+
+**Rationale**: PR #200's remote branch already exists. For an existing remote
+ref, `scripts/hooks/pre-push` compares the remote SHA directly with the local
+SHA, not with the PR merge-base. The remote branch's `scripts/hooks/pre-push`
+blob differs from both the preserved local candidate and `main`; therefore
+every compliant successor that removes the inherited hook drift necessarily
+selects RepoInfra. Commit ancestry cannot remove a tree difference between
+those two endpoints. A passing RepoInfra gate is consequently a real delivery
+prerequisite, not T006 implementation scope.
+
+**Alternatives rejected**:
+
+- Another in-place topology wrapper: endpoint path selection is invariant to
+  ancestry once the remote SHA is nonzero, so RepoInfra remains selected.
+- Reintroduce the remote hook blob: makes the PR endpoint out of scope and
+  repeats the reviewer P0.
+- Delete/recreate the branch, force-push, bypass hooks, or change the hook:
+  violates the delivery constraints and/or destroys PR #200's preserved Draft
+  history.
+- Depend on existing Draft PR #186: its current review and `review-gate`
+  checks fail and its broader coverage-context scope is not an accepted repair
+  for this blocker.
+
 ## Resolved source ambiguities
 
 - “Three independent axes” means Workflow Conformance, Workflow Fitness, and

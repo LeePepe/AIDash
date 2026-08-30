@@ -209,6 +209,7 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
 | Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore payload + AIDashUI URLPolicy | stable sidecar ID/exact byte hash, typed grill/full-report fields, mandatory invalid-link rejection, optional invalid-link text |
 | Assembled contract checker | RepoInfra hook gate | Core/App/UI/AidataL5 revision | T018 waits for all adapters, resolves current worktree, and runs only through normal hook selection |
+| Repository timeout gate | RepoInfra | T006 delivery only | T019 stabilizes pre-deadline descendant cleanup and merges independently to `main`; T006 scope remains DesignKit-only |
 
 ## Dependency Graph
 
@@ -229,6 +230,9 @@ US3 data: T002 + T013 → T016
 
 Assembled RepoInfra gate:
 T007 + T008 + T009 + T011 + T012 + T015 + T016 + T017 → T018
+
+External delivery prerequisite (not a product edge):
+T019 → T006 normal push
 ```
 
 The graph is acyclic. Parallel markers are allowed only for tasks whose files
@@ -246,6 +250,11 @@ do not overlap and whose blocking contract has landed.
 - T018 corrects the cross-language checker to use the current worktree and
   current App/Aidata anchors, registers it as a RepoInfra lint gate, and runs
   it once through normal hook selection on the assembled revision.
+- T019 repairs the independent RepoInfra timeout seam before T006 retries its
+  unavoidable hook-restoration push range. It lands on `main` in a separate
+  RepoInfra PR; Fullstack then integrates that exact revision into the existing
+  T006 workspace/branch without force, bypass, hook edits, or product-scope
+  expansion.
 - AIDashApp and aidashCLI heavy build gates run only in CI. The host-based
   AIDashApp test target is forbidden locally; the hostless target is only a
   focused diagnostic exception after a concrete failure.

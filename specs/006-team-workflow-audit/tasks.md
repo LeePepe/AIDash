@@ -87,7 +87,7 @@ overview renderer; default collection performs no audit import or invocation.
 | Interface / contract | `contracts/card-payload.md`: `teamAudit` classification uses light `#E6294D`, dark `#FF375F`; the glyph remains full tint over the same tint source-over composited at `0.15` alpha; product layout/copy remains in AIDashUI |
 | Functional acceptance | Golden values lock the exact pair; a measured test asserts `ratio(tint, composite(tint, ground, 0.15)) >= 3.0` for `Neutral.allCases` × both schemes × `card`/`inner`/`bg`; no second palette, badge-recipe special case, feature layout, semantic-token change, or raw color outside the token source is introduced |
 | Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected DesignKit Swift build/test gates must exit 0. A focused resolver rerun is diagnostic only after an emitted hook failure. |
-| Dependencies / slice | None; parallel visual-token foundation for US1/US2 |
+| Dependencies / slice | Product dependency: none; delivery dependency: T019 must merge to `main` before the preserved T006 candidate can push normally; parallel visual-token foundation for US1/US2 |
 
 - [ ] T007 [US1] Map the overview bundle to bounded `teamAudit` cards in `aidata/L5_apps/digest/team_audit.py` and `aidata/L5_apps/digest/aidash.py`.
 
@@ -271,6 +271,24 @@ adapter is assembled.
 | Exact verification | Normal `git commit` and `git push` with configured hooks after all dependencies; the updated RepoInfra local gate, including the registered contract checker and regression tests, must exit 0. No proactive standalone checker/test invocation. |
 | Dependencies / slice | T007, T008, T009, T011, T012, T015, T016, T017; final US1–US3 integration-only verification |
 
+## Phase 5: External delivery prerequisite
+
+**Purpose**: Restore a deterministic RepoInfra local gate so the already-scoped
+T006 candidate can remove inherited hook drift and push normally. This changes
+no Team Audit product behavior and does not expand T006's DesignKit scope.
+
+- [ ] T019 Stabilize pre-deadline descendant cleanup in `scripts/ci/review-common.sh`.
+
+| Metadata | T019 |
+|---|---|
+| Owning layer / context | **RepoInfra delivery-only** — `CONTEXT.md` → `scripts/CONTEXT.md`; root `tech-context.md` |
+| Files in scope | `scripts/ci/review-common.sh`; `scripts/ci/tests/test_review_shell.py` |
+| Files NOT to touch | `scripts/hooks/**`; `scripts/context/**`, including `scripts/context/tests/test_hooks.py`; `Packages/**`; `Apps/**`; `CLI/**`; `aidata/**`; Team Audit contracts/product implementation |
+| Interface / contract | `run_with_timeout` returns the leader's real status when it exits before the deadline while still cleaning descendants in its original process group; it returns `124` only when the deadline actually fires. RepoInfra routing, external-index preservation, and outer-ref behavior remain unchanged. |
+| Functional acceptance | The leader-exits-zero cleanup test returns `0` with no leaked descendant; the unchanged nested `GitHookTests.test_repo_infra_gate_preserves_injected_index_and_outer_ref` completes with an intact injected index/ref; no timeout is lengthened, test is weakened/deleted/skipped, or hook bypass/skip path is introduced; the full local RepoInfra gate passes both normal commit and push hook invocations. |
+| Exact verification | Normal `git commit` and `git push` with configured hooks on a separate RepoInfra branch; `scripts/context/run RepoInfra --mode local` must exit 0 through those hooks, including both named regressions. No `--no-verify` or force push. |
+| Dependencies / slice | None; external delivery prerequisite for T006 push only. Merge T019 to `main`, then Fullstack integrates that exact main revision into the same MY-1505 delivery branch/workspace and retries the normal push. |
+
 ## Dependency and Scheduling Summary
 
 ```text
@@ -293,6 +311,9 @@ US3 done: T015 + T016 + T017
 
 Assembled gate:
 T007 + T008 + T009 + T011 + T012 + T015 + T016 + T017 → T018
+
+External delivery gate (no product dependency):
+T019 → T006 normal push
 ```
 
 Parallel tasks marked `[P]` have non-conflicting files. T012 may run in
@@ -337,6 +358,9 @@ contract. T016 and T017 may run in parallel with UI/App work after T013.
 - The hooks' routing audit reports zero findings after routing changes.
 - T018's registered RepoInfra hook gate runs the revision-local checker and
   confirms the assembled Core/App/UI/aidata card seam.
+- T019 is merged independently to `main`; the preserved T006 candidate then
+  integrates that exact main revision and passes the unavoidable RepoInfra
+  verification selected by its remote-to-local hook-restoration range.
 - The implementation PR's required CI App/CLI/aidata/review checks pass.
 - No host-based AIDashApp test is run locally.
 - Exact implementation SHA matches local HEAD, pushed branch, and PR head
