@@ -149,7 +149,8 @@ persistence.
 scope/provenance/limitations, baseline cohort or incremental cursors, three
 independent core axes, separate Task Effectiveness, every P0/P1 finding, and
 all mandatory generic/team/P0/P1 artifact links. L4 supplies immutable required
-inputs; L5 packs them and computes final publication coverage.
+inputs; L5 packs them and computes final publication coverage with independently
+reconciled P0/P1-finding and mandatory-link count pairs.
 
 **Layer path**:
 

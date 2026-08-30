@@ -103,6 +103,10 @@ event IDs, revision evidence, and content hash. Required/published counts in
 `PublicationCoverage` must reconcile exactly. If the briefing/card budget
 cannot contain every mandatory part, publication of that snapshot is rejected;
 a full-report link never substitutes for a mandatory item.
+`requiredP0P1FindingCount` is derived from L4's immutable mandatory-finding
+input, while `publishedP0P1FindingCount` is computed only after L5 packs each
+complete finding. Finding and chain count pairs reconcile independently; a
+published chain cannot satisfy a missing finding.
 Mandatory URLs must satisfy the same HTTPS+host rule at L5 publication and are
 revalidated by `URLPolicy` at render; an unsafe mandatory URL rejects
 publication rather than producing a false “published” count.
@@ -121,8 +125,9 @@ Oversized behavior is deterministic:
 Boundary fixtures encode the final payload and prove: 262,144 bytes accepted;
 262,145 bytes rejected or externalized only for optional detail; oversized
 overview rejected; optional detail with/without full report; oversized
-mandatory P0/P1 chain rejected; and every mandatory required/published count
-equal.
+mandatory P0/P1 finding or chain rejected; and the mandatory P0/P1-finding,
+generic-workflow, team-relationship, and P0/P1-chain required/published pairs
+equal independently.
 
 ## Accessibility and localization
 

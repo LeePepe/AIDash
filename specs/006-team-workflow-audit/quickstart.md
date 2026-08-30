@@ -64,12 +64,14 @@ through the hook signal; it is not part of the normal task acceptance path.
 - Finding subject/responsibility and exact artifact-sidecar ID/content hash
   survive import, warehouse, query, payload, and rendering.
 - Final encoded payload boundary fixtures cover 262,144/262,145 bytes;
-  mandatory P0/P1 links are never omitted or externalized, while oversized
-  optional detail requires a typed full-report reference.
+  mandatory P0/P1 findings and links have independently reconciled
+  required/published counts and are never omitted or externalized, while
+  oversized optional detail requires a typed full-report reference.
 - Acknowledgement and approval produce one append-only receipt each and leave
   the source snapshot unchanged.
-- No-op UI environments, write failure, missing source, and missing artifact
-  cases degrade without crash.
+- No-op UI environments, write failure, missing source, and missing optional
+  artifact cases degrade without crash; missing mandatory artifacts reject
+  publication without crashing.
 - Spies observe no audit invocation, cron registration, source mutation,
   issue/run mutation, agent dispatch, or remediation execution.
 

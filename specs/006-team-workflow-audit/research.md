@@ -145,6 +145,8 @@ it never computes published/omitted/externalized results. L5 adds one audit
 container for the latest accepted snapshot, packs the final cards, computes
 `PublicationCoverage`, and emits in US1 a compact overview plus every P0/P1
 finding, generic workflow, team relationship, and P0/P1 event-chain link.
+Coverage reconciles P0/P1 findings independently from their event-chain links
+through distinct required/published count pairs.
 Those mandatory items are reserved before optional details. If the budget
 cannot contain every mandatory part, publication is rejected. Optional
 oversized details may externalize only to a typed validated full-report
