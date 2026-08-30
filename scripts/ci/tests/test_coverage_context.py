@@ -16,6 +16,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+import coverage_context
+
 from coverage_context import (  # noqa: E402
     AnalysisError,
     COVERAGE_GLOBAL_WORK_BUDGET,
@@ -199,7 +201,6 @@ def _stub_git(monkeypatch, file_map, base_file_map=None):
     Also handles `ls-tree <sha> -- <path>` for file existence checks
     and `cat-file -s <ref>` for blob size preflight.
     """
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "show":
@@ -310,7 +311,6 @@ def test_find_removed_test_functions_detects_obsolete_tests(monkeypatch):
     head_source = EXISTING_TEST_SOURCE
     test_path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -369,7 +369,6 @@ def test_find_removed_test_functions_ignores_modified_not_removed(monkeypatch):
 }
 """
     test_path = "CLI/aidash/Tests/BriefingPublishCommandTests.swift"
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -628,7 +627,6 @@ def test_blob_read_failure_does_not_claim_removal(monkeypatch):
     }
 }
 """
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -674,7 +672,6 @@ def test_verified_file_deletion_reports_removal(monkeypatch):
     }
 }
 """
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -705,7 +702,6 @@ def test_verified_file_deletion_reports_removal(monkeypatch):
 
 def test_no_removed_tests_yields_empty(monkeypatch):
     """When no tests are removed, coverage context is empty (normal case)."""
-    import coverage_context
     monkeypatch.setattr(
         coverage_context, "run_git", lambda args: PROD_SOURCE, raising=True
     )
@@ -761,7 +757,6 @@ def test_base_read_failure_raises_analysis_error(monkeypatch):
     the analyzer must raise AnalysisError (fail-closed) rather than returning
     empty (which would be indistinguishable from 'no removed tests')."""
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -794,7 +789,6 @@ def test_base_read_failure_lstree_also_fails_raises(monkeypatch):
     """When both BASE blob read and ls-tree fail (total git tool failure),
     AnalysisError must be raised."""
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -818,7 +812,6 @@ def test_base_new_file_returns_empty(monkeypatch):
     """When the file doesn't exist in BASE (new file), return empty normally
     — this is not an error, just no removed tests possible."""
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -861,7 +854,6 @@ def test_head_blob_fail_with_lstree_showing_file_exists_raises(monkeypatch):
     }
 }
 """
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -898,7 +890,6 @@ def test_build_coverage_evidence_propagates_analysis_error(monkeypatch):
     """build_coverage_evidence must let AnalysisError propagate to the caller
     so the shell wrapper sees a nonzero exit code (fail-closed gate)."""
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -941,7 +932,6 @@ def test_find_related_tests_head_blob_fail_raises(monkeypatch):
     AnalysisError rather than silently skipping — the file was promised in
     SEARCH SCOPE so silent skip would produce a false absence claim."""
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -1103,7 +1093,6 @@ def test_delimiter_injection_in_claude_prompt_path(monkeypatch):
 
     The payload is assembled from non-contiguous fragments to avoid the trusted
     reviewer policy treating this test file itself as an attack signal."""
-    import coverage_context
 
     # Build the malicious marker from fragments at runtime
     _FENCE_EQUALS = "=" * 8
@@ -1165,7 +1154,6 @@ def test_deleted_test_file_excluded_from_candidates(monkeypatch):
     find_test_files_in_changed_and_related must exclude it from candidates
     rather than including it (which would cause AnalysisError downstream)."""
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -1206,7 +1194,6 @@ def test_find_test_files_lstree_failure_raises(monkeypatch):
     must raise AnalysisError — it must never silently generate changed-deleted
     evidence or claim 'no related tests' based on a git tool failure."""
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -1285,7 +1272,6 @@ index abc1234..0000000
 -}
 """
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -1480,7 +1466,6 @@ index abc1234..def5678 100644
 -
 """
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -1549,7 +1534,6 @@ def test_build_with_config():
     assert result != ""
 """
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -1593,7 +1577,6 @@ def test_oversize_file_skipped_and_reported(monkeypatch):
     """Files exceeding COVERAGE_MAX_FILE_BYTES must be skipped and reported
     as 'skipped-oversize' in file_outcomes, not claimed as 'searched'."""
 
-    import coverage_context
 
     # Source that exceeds the file byte limit
     oversize_source = "x" * (COVERAGE_MAX_FILE_BYTES + 1)
@@ -1646,7 +1629,6 @@ def test_budget_omitted_file_reported(monkeypatch):
     """Files not reached due to COVERAGE_MAX_TOTAL_BYTES must be reported
     as 'budget-omitted' in file_outcomes."""
 
-    import coverage_context
 
     # Create a source that fills the budget when its test is extracted
     big_body = "a" * (COVERAGE_MAX_TOTAL_BYTES + 100)
@@ -1752,7 +1734,6 @@ def test_file_outcomes_only_read_supports_negative_evidence(monkeypatch):
     """Only files with 'read' outcome may support scoped negative coverage
     evidence. The render output must distinguish file statuses clearly."""
 
-    import coverage_context
 
     oversize_source = "x" * (COVERAGE_MAX_FILE_BYTES + 1)
 
@@ -1851,7 +1832,6 @@ def test_multibyte_total_bytes_cap_bounded(monkeypatch):
     multibyte characters (e.g. CJK) are correctly counted by UTF-8 byte length
     and that the omission marker bytes are included in the budget."""
 
-    import coverage_context
 
     # Create source with multibyte characters that fills budget quickly
     # Each CJK char is 3 bytes in UTF-8
@@ -1918,7 +1898,6 @@ def test_malicious_body_injects_search_scope(monkeypatch):
     """A malicious test body containing 'SEARCH SCOPE' structural record
     text must be sanitized — the forged record cannot appear in output."""
 
-    import coverage_context
 
     # Malicious test body that forges a SEARCH SCOPE header
     malicious_source = """\
@@ -1971,7 +1950,6 @@ def test_malicious_body_injects_removed_tests(monkeypatch):
     """A malicious test body containing 'REMOVED TESTS' structural record
     text must be sanitized."""
 
-    import coverage_context
 
     malicious_source = """\
 import Testing
@@ -2019,7 +1997,6 @@ def test_malicious_body_injects_excerpt_header(monkeypatch):
     """A malicious test body containing a forged excerpt header line
     (--- path: func (lines N-M, ...)) must be sanitized."""
 
-    import coverage_context
 
     malicious_source = """\
 import Testing
@@ -2068,7 +2045,6 @@ def test_malicious_body_injects_coverage_context(monkeypatch):
     """A malicious test body containing 'COVERAGE CONTEXT' header must be
     sanitized — cannot forge the top-level evidence block header."""
 
-    import coverage_context
 
     malicious_source = """\
 import Testing
@@ -2121,7 +2097,6 @@ def test_multibyte_excerpt_truncation_uses_byte_boundary(monkeypatch):
     not character slicing. The rendered excerpt_bytes must equal the actual
     encoded length, and the total must stay within budget."""
 
-    import coverage_context
 
     # Build a test body with CJK characters (3 bytes each in UTF-8)
     # so character count != byte count, exposing false accounting
@@ -2268,7 +2243,6 @@ diff --git a/Tests/TrivialTests.swift b/Tests/TrivialTests.swift
 -    }
  }
 """
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -2311,7 +2285,6 @@ def test_word_boundary_matching_rejects_substring(monkeypatch):
     """find_related_tests_in_head must use word-boundary matching, not
     substring containment. 'run' must not match 'runtime' or 'rerun'."""
 
-    import coverage_context
 
     # A test file that mentions "runtime" and "rerun" but NOT standalone "run"
     test_source = """\
@@ -2358,7 +2331,6 @@ def test_word_boundary_matching_accepts_exact(monkeypatch):
     """'run' as a standalone identifier (e.g., 'cmd.run()') must still match
     with word-boundary matching."""
 
-    import coverage_context
 
     test_source = """\
 import Testing
@@ -2431,7 +2403,6 @@ def test_irrelevant_run_candidates_cannot_consume_cap(monkeypatch):
     symbols so irrelevant candidates (RuntimeConfig, RerunManager) cannot
     consume the byte cap before the genuine domain candidate."""
 
-    import coverage_context
 
     # Source body references BriefingPublishCommand.run()
     removed = [
@@ -2605,7 +2576,6 @@ struct BriefingPutCommandTests {
 }
 '''
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "show":
@@ -2643,7 +2613,6 @@ def test_content_based_discovery_finds_generic_test_file(monkeypatch):
     contains the exact production identifier must be discovered via
     content-based search, not just filename matching."""
 
-    import coverage_context
 
     # A generically named file whose name does NOT contain "BriefingPublish"
     # but whose content DOES reference BriefingPublishCommand
@@ -2697,7 +2666,6 @@ def test_same_named_test_different_class_still_reports_removal(monkeypatch):
     """A test function with the same name in a DIFFERENT class must not hide
     a true removal from the original class."""
 
-    import coverage_context
 
     # BASE: ClassA has testFoo which gets removed
     base_source = """\
@@ -2774,7 +2742,6 @@ def test_same_named_test_same_class_not_reported(monkeypatch):
     """A test function modified (not removed) in the same class must NOT be
     reported as removed — qualified identity preserves the existing behavior."""
 
-    import coverage_context
 
     base_source = """\
 import XCTest
@@ -2864,7 +2831,6 @@ def test_bounded_blob_read_rejects_oversize(monkeypatch):
     """_bounded_blob_read must reject blobs exceeding the limit without
     capturing full content into memory."""
 
-    import coverage_context
 
     def fake_run_git(args):
         if args[0] == "cat-file" and "-s" in args:
@@ -2885,7 +2851,6 @@ def test_bounded_blob_read_rejects_oversize(monkeypatch):
 def test_bounded_blob_read_allows_within_limit(monkeypatch):
     """_bounded_blob_read must allow blobs within the limit."""
 
-    import coverage_context
 
     small_content = "func testFoo() {}\n"
 
@@ -2907,7 +2872,6 @@ def test_oversize_blob_not_fully_captured_in_related_search(monkeypatch):
     """find_related_tests_in_head must skip oversize blobs without fully
     capturing them into runner memory (using bounded preflight)."""
 
-    import coverage_context
 
     normal_source = """\
 import Testing
@@ -3107,7 +3071,6 @@ def test_same_file_classA_precedes_removed_classB_with_production_symbol(monkeyp
     ClassB.testFoo contains the relevant production symbol, the removal of
     ClassB.testFoo must still be detected and its symbol extracted."""
 
-    import coverage_context
 
     # BASE: ClassA.testFoo (no DomainService) then ClassB.testFoo (has DomainService)
     base_source = """\
@@ -3188,7 +3151,6 @@ def test_same_file_only_second_same_named_has_symbol_in_coverage_scan(monkeypatc
     both must be found by _find_all_test_functions so the scanner can
     identify the correct one."""
 
-    import coverage_context
 
     source = """\
 import XCTest
@@ -3308,7 +3270,6 @@ def test_python_classA_loses_test_classB_retains(monkeypatch):
     """When Python ClassA.test_process is removed but ClassB.test_process
     remains, only ClassA.test_process should be reported as removed."""
 
-    import coverage_context
 
     base_source = """\
 class TestSuiteA:
@@ -3367,7 +3328,6 @@ def test_python_same_class_retains_not_reported(monkeypatch):
     """When Python ClassA.test_process exists in both base and HEAD
     (same class), it should NOT be reported as removed."""
 
-    import coverage_context
 
     base_source = """\
 class TestSuiteA:
@@ -3421,7 +3381,6 @@ def test_python_module_level_function_stable_identity(monkeypatch):
     """Module-level Python test functions retain stable identity and are
     correctly detected as removed even when classes exist in the file."""
 
-    import coverage_context
 
     base_source = """\
 class TestSuiteA:
@@ -3483,7 +3442,6 @@ def test_bounded_blob_read_fails_closed_when_size_preflight_fails(monkeypatch):
     _bounded_blob_read must NOT fall through to unbounded git show.
     It must return (None, False) immediately."""
 
-    import coverage_context
 
     show_called = []
 
@@ -3512,7 +3470,6 @@ def test_head_oversize_blob_raises_analysis_error_in_find_removed(monkeypatch):
     find_removed_test_functions must raise AnalysisError without capturing
     the full blob content."""
 
-    import coverage_context
 
     base_source = """\
 import XCTest
@@ -3577,7 +3534,6 @@ def test_head_size_preflight_failure_uses_lstree_deletion_fallback(monkeypatch):
     find_removed_test_functions still follows whole-file-deletion logic
     (reporting all base functions as removed)."""
 
-    import coverage_context
 
     base_source = """\
 import XCTest
@@ -3637,7 +3593,6 @@ def test_base_oversize_blob_raises_analysis_error(monkeypatch):
     """When BASE blob exceeds COVERAGE_MAX_FILE_BYTES,
     find_removed_test_functions must raise AnalysisError."""
 
-    import coverage_context
 
     test_path = "Tests/FooTests.swift"
     diff = f"""\
@@ -3675,7 +3630,6 @@ def test_content_discovery_cap_counts_oversize_and_unreadable(monkeypatch):
     """Content-discovery budget must count every candidate attempted,
     including oversized and unreadable files, so bounded-work claim is literal."""
 
-    import coverage_context
 
     # Content-discovery budget = COVERAGE_GLOBAL_WORK_BUDGET - COVERAGE_PRIMARY_RESERVE.
     # Create more candidates than the budget. First N are oversized, rest normal.
@@ -3893,7 +3847,6 @@ struct Beta {
 def test_nul_delimited_tree_parsing(monkeypatch):
     """ls-tree output with NUL delimiters is parsed correctly, including
     paths with spaces and non-ASCII."""
-    import coverage_context
 
     # Simulate paths with spaces and unicode
     paths = [
@@ -3925,7 +3878,6 @@ def test_nul_delimited_tree_parsing(monkeypatch):
 
 def test_global_work_budget_limits_total_file_operations(monkeypatch):
     """Global work budget must cap total file operations across all routes."""
-    import coverage_context
 
     # Create more files than the budget allows
     num_files = COVERAGE_GLOBAL_WORK_BUDGET + 20
@@ -3973,7 +3925,6 @@ def test_build_coverage_evidence_rejects_excessive_changed_files():
 
 def test_enforce_changed_file_budget_rejects_count_before_iteration(monkeypatch):
     """Count overflow must reject before any per-path or Git work begins."""
-    import coverage_context
 
     class FailOnIterSequence:
         def __len__(self):
@@ -3996,7 +3947,6 @@ def test_enforce_changed_file_budget_rejects_count_before_iteration(monkeypatch)
 
 def test_enforce_changed_file_budget_stops_on_utf8_path_overflow():
     """Path-byte overflow must stop at the first overflowing entry within the bound."""
-    import coverage_context
 
     path_1 = "A" * 10
     path_2 = "é" * 40_001
@@ -4039,7 +3989,6 @@ def test_enforce_changed_file_budget_stops_on_utf8_path_overflow():
 
 def test_global_work_budget_shared_with_candidate_reads(monkeypatch):
     """find_related_tests_in_head respects remaining work budget from discovery."""
-    import coverage_context
 
     test_content = "import Testing\nstruct T {\n    @Test func testX() { MySvc() }\n}\n"
 
@@ -4073,7 +4022,6 @@ def test_global_work_budget_shared_with_candidate_reads(monkeypatch):
 def test_content_discovery_read_failure_raises_analysis_error(monkeypatch):
     """When content-discovery bounded read fails (not oversize), must raise
     AnalysisError instead of silently continuing."""
-    import coverage_context
 
     test_files = ["Tests/FooTests.swift", "Tests/BarTests.swift"]
 
@@ -4106,7 +4054,6 @@ def test_content_discovery_read_failure_raises_analysis_error(monkeypatch):
 def test_content_discovery_oversize_is_bounded_outcome_not_error(monkeypatch):
     """Oversized files in content discovery are a bounded outcome (skip),
     not an error — distinct from read failure."""
-    import coverage_context
 
     test_files = ["Tests/BigTests.swift", "Tests/SmallTests.swift"]
     small_content = "import Testing\nstruct T {\n    @Test func testX() { SomeType() }\n}\n"
@@ -4284,7 +4231,6 @@ def test_budget_starvation_primary_candidate_still_read(monkeypatch):
     5. Genuine coverage is surfaced despite >50 total test files.
     6. Output stays within COVERAGE_MAX_TOTAL_BYTES.
     """
-    import coverage_context
 
     # Create 60 test files: one is the changed test file (sibling pattern),
     # 59 others are generic names that only match via content discovery.
@@ -4404,7 +4350,6 @@ struct OldTests {
 def test_blob_cache_avoids_reread(monkeypatch):
     """find_related_tests_in_head uses blob_cache from discovery without
     consuming a work-budget operation for cached files."""
-    import coverage_context
 
     test_content = (
         "import Testing\n"

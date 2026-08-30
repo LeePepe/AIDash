@@ -133,6 +133,19 @@ cleanup_lingering_descendants() {
     done < <(ps -o pid= --ppid "$root_pid" 2>/dev/null || true)
 }
 
+cleanup_process_group() {
+    local group_pid="${1:-}"
+    [ -n "$group_pid" ] || return 0
+
+    if kill -0 "-$group_pid" 2>/dev/null; then
+        kill -TERM "-$group_pid" 2>/dev/null || kill -TERM "$group_pid" 2>/dev/null || true
+        sleep 1
+        if kill -0 "-$group_pid" 2>/dev/null; then
+            kill -KILL "-$group_pid" 2>/dev/null || kill -KILL "$group_pid" 2>/dev/null || true
+        fi
+    fi
+}
+
 run_with_timeout() {
     local seconds="$1"; shift
     local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file
@@ -158,10 +171,11 @@ run_with_timeout() {
         local waited=0
         while [ "$waited" -lt "$seconds" ]; do
             if ! kill -0 "$child_pid" 2>/dev/null || ps -o stat= -p "$child_pid" 2>/dev/null | grep -q 'Z'; then
+                cleanup_process_group "$child_pid"
+                cleanup_lingering_descendants "$child_pid"
                 # Give a just-started background job a brief window to emit its
                 # pidfile/descendants before the watchdog declares the run clean.
                 sleep 1
-                cleanup_lingering_descendants "$child_pid"
                 printf '%s\n' "clean" >"$state_file"
                 exit 0
             fi
@@ -639,12 +653,16 @@ review_coverage_rules() {
 '确实无其他测试。' \
 '' \
 '所以:' \
-'- 「改了源码却没有对应测试改动」的 blocker 条件 #4,其前提是**真的没有覆盖**,而不是' \
-'  「diff 里看不到覆盖」。如果 COVERAGE CONTEXT 列出了覆盖同一生产符号的 existing tests,' \
+'- blocker 条件 #4 的真实语义是: **只有在源码改动且没有相应测试改动时才成立**。' \
+'  也就是说,它要求的是 “source change → corresponding test change” 这一强联系,而不是' \
+'  “diff 里看不到覆盖”。如果 COVERAGE CONTEXT 列出了覆盖同一生产符号的 existing tests,' \
 '  那么覆盖并未丢失,该条件不满足,**不得**报 blocker。' \
 '- COVERAGE CONTEXT 中列出的候选测试基于符号共现检索,是 advisory candidates。' \
 '  Reviewer 必须验证候选测试确实测试了相同生产分支后,才能判定覆盖未丢失。' \
 '  但若无法确认,结论是降级为 note,**不是升级为 blocker**。' \
+'- 任何“source-only change 仍可通过 coverage context 兜底”的修改都违背条件 #4 的必然含义;' \
+'  coverage context 只能用于评估“是否存在同源/同分支覆盖”或“删除的测试是否被等价覆盖”,' \
+'  不能把“已有覆盖”改写成“source-only change 也算通过”。' \
 '- COVERAGE CONTEXT 包含 SEARCH SCOPE——实际搜索过的文件列表。' \
 '  要报「覆盖丢失」的 blocker,你**必须**在 SEARCH SCOPE 列出的文件中提供具体 file:line' \
 '  证据,证明该生产分支在已搜索范围内无任何 test 调用。' \
