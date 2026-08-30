@@ -175,7 +175,8 @@ def build_digest(report_date: str, use_llm: bool = False,
 
 
 def _push_to_aidash(md: str, report_date: str,
-                    sources: DigestSources) -> PushResult:
+                    sources: DigestSources,
+                    failure_sink=None) -> PushResult:
     """Transform the digest into a Briefing and push it (best-effort).
 
     Split out so tests can monkeypatch the whole push at the app boundary. This
@@ -195,7 +196,8 @@ def _push_to_aidash(md: str, report_date: str,
     delivery = load_delivery_state()
     briefing = build_briefing(report_date, sources, md, must_see_layer(md),
                               delivery=delivery)
-    result = push_briefing(briefing, bin_path=resolve_aidash_bin())
+    result = push_briefing(briefing, bin_path=resolve_aidash_bin(),
+                           failure_sink=failure_sink)
     try:
         save_delivery_state(result)
     except Exception:  # noqa: BLE001 - state persistence is non-fatal

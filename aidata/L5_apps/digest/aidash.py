@@ -1713,14 +1713,14 @@ def _publish_briefing(briefing: Briefing, bin_path: str,
     rc = runner([bin_path, "briefing", "put", "--date", briefing.date,
                  "--generated-by", briefing.generated_by])
     if rc != 0:
-        return PushResult(False, f"briefing put exit {rc}")
+        return PushResult(False, "xpc.connection_invalidated" if rc == 2 else f"briefing put exit {rc}")
     for container in briefing.containers:
         rc = runner([bin_path, "container", "put",
                      "--briefing-date", briefing.date, "--id", container.id,
                      "--title", container.title, "--order", str(container.order),
                      "--layout", container.layout, "--style", container.style])
         if rc != 0:
-            return PushResult(False, f"container put exit {rc}")
+            return PushResult(False, "xpc.connection_invalidated" if rc == 2 else f"container put exit {rc}")
         for card in container.cards:
             with tempfile.NamedTemporaryFile("w", suffix=".json",
                                              delete=False, encoding="utf-8") as fh:
@@ -1728,10 +1728,10 @@ def _publish_briefing(briefing: Briefing, bin_path: str,
                 payload_file = fh.name
             rc = runner(_card_argv(bin_path, container.id, card, payload_file))
             if rc != 0:
-                return PushResult(False, f"card put exit {rc}")
+                return PushResult(False, "xpc.connection_invalidated" if rc == 2 else f"card put exit {rc}")
     rc = runner([bin_path, "briefing", "publish", "--date", briefing.date])
     if rc != 0:
-        return PushResult(False, f"briefing publish exit {rc}")
+        return PushResult(False, "xpc.connection_invalidated" if rc == 2 else f"briefing publish exit {rc}")
     return PushResult(True, "", published=True)
 
 
@@ -1740,7 +1740,7 @@ def push_briefing(briefing: Briefing, *, bin_path: str | None,
                   opener: Opener = _default_opener,
                   pgrep: Pgrep = _default_pgrep,
                   probe: Probe = _default_probe,
-                  failure_sink: Callable[[str], None] = _record_push_failure,
+                  failure_sink: Callable[[str], None] | None = None,
                   poll_s: float = 0.5, attempts: int = 6,
                   xpc_attempts: int = 24) -> PushResult:
     """Push a briefing to AIDash, best-effort and NON-FATAL (ADR-16/17/23).
@@ -1768,31 +1768,31 @@ def push_briefing(briefing: Briefing, *, bin_path: str | None,
     the 必成 sink (written before push), so a stale mirror is recoverable — not
     data loss.
     """
+    sink = failure_sink or _record_push_failure
     if bin_path is None:
         log.warning("AIDash push skipped: aidash CLI not found (bin missing)")
-        failure_sink("aidash CLI not found in DerivedData (build the CLI?)")
+        sink("aidash CLI not found in DerivedData (build the CLI?)")
         return PushResult(False, "aidash cli/bin not found")
     try:
         if not ensure_app_running(opener=opener, pgrep=pgrep,
                                   poll_s=poll_s, attempts=attempts):
             log.warning("AIDash push skipped: app not running (asleep Mac?)")
-            failure_sink("AIDash app process never came up (asleep Mac?)")
+            sink("AIDash app process never came up (asleep Mac?)")
             return PushResult(False, "AIDash app not running")
         if not ensure_xpc_ready(bin_path, probe=probe,
                                 poll_s=poll_s, attempts=xpc_attempts):
             # Process is up but XPC never became reachable — the digest is
             # archived locally but the menubar mirror is stale. Make it loud.
-            log.warning("AIDash push skipped: XPC not reachable "
-                        "(app up, listener not serving)")
-            failure_sink("XPC not reachable — app process up but its listener "
-                         "never checked in (try relaunching AIDash)")
-            return PushResult(False, "AIDash XPC not reachable")
+            code = "xpc.app_unavailable"
+            log.warning("AIDash push skipped: %s (app up, listener not serving)", code)
+            sink(f"{code} — app process up but its listener never checked in (try relaunching AIDash)")
+            return PushResult(False, code)
         result = _publish_briefing(briefing, bin_path, runner)
         if not result.ok:
             log.warning("AIDash push failed: %s", result.reason)
-            failure_sink(result.reason)
+            sink(f"{result.reason} — push attempt returned a non-zero XPC/CLI status")
         return result
     except Exception as exc:  # noqa: BLE001 - best-effort: degrade, never crash
         log.warning("AIDash push errored (non-fatal): %s", exc)
-        failure_sink(f"unexpected push error: {type(exc).__name__}: {exc}")
+        sink(f"unexpected push error: {type(exc).__name__}: {exc}")
         return PushResult(False, f"push error: {type(exc).__name__}")
