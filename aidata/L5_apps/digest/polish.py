@@ -46,14 +46,14 @@ class PolishSlots:
 # Matches trend lines like "- 成本: 2699$ ↑(+24%) vs 昨 2180$"
 # Captures the label and the signed percentage inside parentheses.
 _TREND_PCT_RE = re.compile(
-    r"^- (成本|Token|请求数|浪费额|完成任务|已完成 issue|issues|tasks|会话数|开PR|完成 issue)"
+    r"^- (成本|Token|请求数|浪费额|完成任务|已完成 issue|issues|tasks|会话数|开PR|完成 issue|完成 issue\(近似\))"
     r".*?\(([+-]\d+)%\)"
 )
 
 # Labels whose percentage changes are relevant to efficiency claims.
 _COST_LABELS = frozenset({"成本"})
 _WASTE_LABELS = frozenset({"浪费额"})
-_OUTPUT_LABELS = frozenset({"Token", "请求数", "完成任务", "tasks", "issues", "已完成 issue", "完成 issue"})
+_OUTPUT_LABELS = frozenset({"Token", "请求数", "完成任务", "tasks", "issues", "已完成 issue", "完成 issue", "完成 issue(近似)"})
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,7 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
                 requests_pct = pct
             elif label in {"完成任务", "tasks"}:
                 tasks_pct = pct
-            elif label in {"issues", "已完成 issue", "完成 issue"}:
+            elif label in {"issues", "已完成 issue", "完成 issue", "完成 issue(近似)"}:
                 issues_pct = pct
     return EfficiencyEvidence(
         cost_pct=cost_pct,
@@ -162,16 +162,16 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # evidence and keep neutral/uncertain wording only when the counter-signal is still
 # present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好)"
+    r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下|生产力).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更高效了)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率更高|效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化)",
+    r"|(?:效率更高|效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|现在更高效了|生产力提升)",
     re.IGNORECASE,
 )
 
 _NEGATIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出).{0,12}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降)"
+    r"(?:效率|效能|投入产出|产出|生产力).{0,12}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:drop|declin|worsen|decreas|fall)"
-    r"|(?:效率明显下降|效率下降|效率变差)",
+    r"|(?:效率明显下降|效率下降|效率变差|生产力下降)",
     re.IGNORECASE,
 )
 
@@ -186,22 +186,66 @@ _COUNTER_SIGNAL_RE = re.compile(
 )
 
 _UNCERTAINTY_RE = re.compile(
-    r"(?:需关注|谨慎|仍需|待观察|不确定|可能|待确认|有待|需留意|整体平稳)",
+    r"(?:需关注|谨慎|仍需|待观察|不确定|可能|待确认|有待|需留意|整体平稳|整体保持活跃|活动明显增加)",
     re.IGNORECASE,
 )
+
+
+def _metric_direction_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
+    """True when a fact-style metric direction matches the extracted evidence."""
+    if evidence.cost_pct is not None:
+        if re.search(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
+            return evidence.cost_pct > 0
+        if re.search(r"(?:成本|开销|花费).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
+            return evidence.cost_pct < 0
+    if evidence.waste_pct is not None:
+        if re.search(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
+            return evidence.waste_pct > 0
+        if re.search(r"(?:浪费).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
+            return evidence.waste_pct < 0
+    if evidence.tasks_pct is not None:
+        if re.search(r"(?:任务|产出).{0,8}(?:下降|减少|回落|减弱)", tldr, re.IGNORECASE):
+            return evidence.tasks_pct < 0
+        if re.search(r"(?:任务|产出).{0,8}(?:上升|增加|增长|提升)", tldr, re.IGNORECASE):
+            return evidence.tasks_pct > 0
+    if evidence.issues_pct is not None:
+        if re.search(r"(?:问题|积压).{0,8}(?:增加|上升|增多|积压)", tldr, re.IGNORECASE):
+            return evidence.issues_pct > 0
+        if re.search(r"(?:问题|积压).{0,8}(?:下降|降低|减少|缓解)", tldr, re.IGNORECASE):
+            return evidence.issues_pct < 0
+    if evidence.requests_pct is not None:
+        if re.search(r"(?:请求|请求量).{0,8}(?:上升|增加|增长|上涨|增多)", tldr, re.IGNORECASE):
+            return evidence.requests_pct > 0
+        if re.search(r"(?:请求|请求量).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
+            return evidence.requests_pct < 0
+    if evidence.token_pct is not None:
+        if re.search(r"(?:Token|token).{0,8}(?:上升|增加|增长|上涨|增多)", tldr, re.IGNORECASE):
+            return evidence.token_pct > 0
+        if re.search(r"(?:Token|token).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
+            return evidence.token_pct < 0
+    return False
 
 
 def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
     """Require a named adverse metric and an adverse direction to justify a neutral claim."""
     if evidence.cost_pct is not None and evidence.cost_pct > 0 and re.search(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
         return True
-    if evidence.waste_pct is not None and evidence.waste_pct > 0 and re.search(r"(?:浪费).{0,8}(?:上升|增加|增加|上涨)", tldr, re.IGNORECASE):
+    if evidence.waste_pct is not None and evidence.waste_pct > 0 and re.search(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
         return True
     if evidence.tasks_pct is not None and evidence.tasks_pct < 0 and re.search(r"(?:任务|产出).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
         return True
-    if evidence.issues_pct is not None and evidence.issues_pct < 0 and re.search(r"(?:问题|积压).{0,8}(?:增加|上升|积压|增多)", tldr, re.IGNORECASE):
+    if evidence.issues_pct is not None and evidence.issues_pct > 0 and re.search(r"(?:问题|积压).{0,8}(?:增加|上升|积压|增多)", tldr, re.IGNORECASE):
         return True
     return False
+
+
+def _efficiency_assertion_kind(tldr: str) -> str | None:
+    """Return 'positive', 'negative', or None for the claim direction."""
+    if _POSITIVE_EFFICIENCY_RE.search(tldr):
+        return "positive"
+    if _NEGATIVE_EFFICIENCY_RE.search(tldr):
+        return "negative"
+    return None
 
 
 def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
@@ -209,34 +253,37 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
 
     Positive efficiency claims are only allowed when the template shows strict
     outcome improvement and no adverse cost/waste signal. Mixed or insufficient
-    evidence must fail closed: positive wording is rejected, while neutral or
-    fact-style wording is accepted only if it does not make an unsupported
-    efficiency claim and, when it does mention uncertainty, it names a material
-    adverse metric with the matching direction.
+    evidence must fail closed: positive or unsupported negative wording is rejected,
+    and neutral/fact-style wording is accepted only with a real metric-direction
+    match or an explicit material counter-signal.
     """
     if not tldr or not tldr.strip():
         return False
     if re.search(r"\d|[$%]", tldr):
         return False
 
+    assertion_kind = _efficiency_assertion_kind(tldr)
     if evidence.allows_positive_claim():
-        if _NEGATIVE_EFFICIENCY_RE.search(tldr):
+        if assertion_kind == "negative":
             return False
+        if assertion_kind == "positive":
+            return True
+        if _metric_direction_matches(tldr, evidence):
+            return True
         return True
 
-    if _POSITIVE_EFFICIENCY_RE.search(tldr):
+    if assertion_kind == "positive":
+        return False
+    if assertion_kind == "negative":
         return False
 
-    if _NEGATIVE_EFFICIENCY_RE.search(tldr):
-        return evidence.has_negative_signal() and _named_adverse_signal_matches(tldr, evidence)
-
-    if re.search(r"(?:成本|浪费|请求|token|调用|会话).{0,6}(?:回落|下滑|下降|减少|降低)", tldr, re.IGNORECASE):
+    if _metric_direction_matches(tldr, evidence):
         return True
-
+    if _named_adverse_signal_matches(tldr, evidence):
+        return True
     if _COUNTER_SIGNAL_RE.search(tldr) or _UNCERTAINTY_RE.search(tldr):
-        return _named_adverse_signal_matches(tldr, evidence)
-
-    return True
+        return _named_adverse_signal_matches(tldr, evidence) or _metric_direction_matches(tldr, evidence)
+    return False
 
 
 def neutral_fallback_tldr(evidence: EfficiencyEvidence) -> str:

@@ -60,12 +60,12 @@ def test_use_llm_false_equals_template(frozen):
 @pytest.mark.unit
 def test_happy_path_polishes_and_passes_guard(frozen):
     template = build_digest(REPORT_DATE, use_llm=False)
-    # Clean slots: qualitative TL;DR (no numbers) + a TODO rephrase that keeps
-    # the template's numbers verbatim.
-    client = FakeClient('{"tldr": "成本回落但请求下滑，关注会话骤降", "todos": []}')
+    # Keep the LLM path valid against the extracted evidence: it may describe a
+    # named adverse metric without claiming unsupported efficiency improvement.
+    client = FakeClient('{"tldr": "成本上升，需关注", "todos": []}')
     out = build_digest(REPORT_DATE, use_llm=True, client=client)
     assert out != template
-    assert "💡 点评: 成本回落" in out
+    assert "💡 点评: 成本上升，需关注" in out
 
 
 @pytest.mark.unit
