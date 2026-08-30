@@ -82,12 +82,22 @@ residual_sessions AS (
     SELECT count(DISTINCT sid) AS residual_sessions
     FROM (
         SELECT s.sid,
+               MAX(CASE
+                       WHEN EXISTS (
+                           SELECT 1
+                           FROM fact_turn t
+                           WHERE t.session_id = s.sid
+                             AND NULLIF(TRIM(t.project), '') IS NULL
+                       ) THEN 1
+                       ELSE 0
+                   END) AS has_unmapped_turn,
                COALESCE(sum(CASE WHEN w.project IS NOT NULL THEN w.weight ELSE 0 END), 0) AS valid_project_weight
         FROM session_cost s
         LEFT JOIN project_weight w ON w.sid = s.sid
         GROUP BY s.sid
     ) attributed_sessions
-    WHERE valid_project_weight < 1.0
+    WHERE has_unmapped_turn = 1
+       OR valid_project_weight < 1.0 - 1e-9
 ),
 day_summary AS (
     SELECT r.day_total,

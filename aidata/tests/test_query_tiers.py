@@ -185,20 +185,32 @@ def test_cost_by_project_counts_residual_sessions_at_session_grain(tmp_path):
             ("s1", "2026-08-02", 100.0, 500),
             ("s2", "2026-08-02", 200.0, 800),
             ("s3", "2026-08-02", 50.0, 200),
+            (None, "2026-08-02", 25.0, 100),
         ],
         [
             ("s1", "AIDash", "2026-08-02"),
             ("s1", "Atlas", "2026-08-02"),
             ("s2", "  ", "2026-08-02"),
             ("s3", "AIDash", "2026-08-02"),
+            ("s3", "Atlas", "2026-08-02"),
+            ("s3", "Core", "2026-08-02"),
+            ("s3", "Pilot", "2026-08-02"),
+            ("s3", "Northstar", "2026-08-02"),
+            ("s3", "Nexus", "2026-08-02"),
+            ("s3", "Harbor", "2026-08-02"),
+            ("s3", "Summit", "2026-08-02"),
+            ("s3", "Beacon", "2026-08-02"),
+            ("s3", "Vector", "2026-08-02"),
+            ("s3", "Orbit", "2026-08-02"),
         ],
     )
     rows, idx = _run_cost_by_project(db)
     by_project = {r[idx["project"]]: r for r in rows}
-    assert by_project["unattributed"][idx["cost_usd"]] == 200.0
+    assert by_project["unattributed"][idx["cost_usd"]] == 225.0
     assert by_project["unattributed"][idx["sessions"]] == 1
-    assert by_project["AIDash"][idx["cost_usd"]] == 100.0
-    assert by_project["Atlas"][idx["cost_usd"]] == 50.0
+    assert by_project["AIDash"][idx["cost_usd"]] == 54.55
+    assert by_project["Atlas"][idx["cost_usd"]] == 54.55
+    assert by_project["Core"][idx["cost_usd"]] == 4.55
 
 
 def test_cost_by_project_keeps_null_turns_unattributed_in_mixed_sessions(tmp_path):
