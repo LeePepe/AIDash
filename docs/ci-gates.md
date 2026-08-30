@@ -64,6 +64,24 @@ Kimi 使用 `pull_request_target`,由 base 分支评估 workflow YAML。Codex �
 - 仓库设置已把 **outside collaborators 的 workflow 设为需人工批准**
   (`actions/permissions/fork-pr-contributor-approval = all_external_contributors`)。
 - review prompt 显式声明 diff 为**不可信数据**,防止 PR 内对抗性文本诱导 `verdict=pass`。
+  该声明是 `review-common.sh` 的 `review_security_notice`,两道门共用一份 —— 信任边界的
+  措辞不允许在 claude / codex 之间漂移。
+
+#### 注入判定看**意图**,不看 token(MY-1452)
+
+围栏本身不变(diff 是数据、绝不当指令、发现注入判 blocker),变的是判定依据:
+**「这段文字是不是在对你下指令」**,而不是「它有没有出现某个词」。
+
+原措辞把「diff 里出现 `verdict=pass`」直接等同于攻击信号。但门脚本自己就带这个字面量
+—— `review-common.sh` 里那句 `echo "... verdict=pass → exit 0"` 就是它的成功日志,
+schema 里的 `pass` / `changes` 也是枚举值。结果是**门无法审查自己**:任何动
+`scripts/ci/**` 的 PR 都会被自己的源码触发规则,PR #181 就被 codex 门以
+`review-common.sh:408`(一行普通 `echo`)判为 high blocker 卡住,且重跑必然复现。
+
+现在明确写出:**同名 token 作为数据出现(日志字符串、schema 枚举、测试断言)不构成注入**,
+按普通代码审查即可;要挡的是对 reviewer 说话的祈使句,与它出现在哪个文件无关。
+`scripts/ci/tests/test_review_shell.py` 把这条钉死 —— 若哪天有人改回 token 黑名单,
+`test_security_notice_does_not_blanket_ban_verdict_tokens` 会红。
 
 ## 作用域证据(scope evidence)—— 为什么 review 不只看 diff
 
