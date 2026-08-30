@@ -13,8 +13,8 @@ scripts/context/contexts <changed-path>
 
 Expected implementation leaves are RepoInfra, AidataFoundation,
 AidataL1L2, AidataL3, AidataL4, AidataL5, AIDashCore, DesignKit, AIDashUI,
-and AIDashApp. CLI source, project wiring, aidata scripts/cron, generated data,
-and external audit sources are out of scope.
+AIDashApp, and aidashCLI. Unrelated CLI commands, `project.yml`, aidata
+scripts/cron, generated data, and external audit sources are out of scope.
 
 ## 2. Exercise the manual boundary with fixtures
 
@@ -53,12 +53,16 @@ through the hook signal; it is not part of the normal task acceptance path.
 - Baseline and incremental overview parts render different cohort/cursor
   sections and independent axes.
 - Replay and overlap records deduplicate by stable identity; hash collision
-  never overwrites and emits a separately keyed collision observation.
+  never overwrites and emits a separately keyed observation with accepted
+  parent snapshot ID/hash.
 - All six finding states and all locked verdicts round-trip.
 - Feedback lineage preserves problem/delivery/release/observation state, and
   repeat metrics preserve every role, cycle/cause, role-specific, subject, and
   event value.
-- Unsafe artifact/grill URLs are text; valid HTTPS URLs are actionable.
+- Missing/unsafe mandatory artifact URLs reject publication; unsafe optional
+  artifact/grill URLs are text; valid HTTPS URLs are actionable.
+- Finding subject/responsibility and exact artifact-sidecar ID/content hash
+  survive import, warehouse, query, payload, and rendering.
 - Final encoded payload boundary fixtures cover 262,144/262,145 bytes;
   mandatory P0/P1 links are never omitted or externalized, while oversized
   optional detail requires a typed full-report reference.

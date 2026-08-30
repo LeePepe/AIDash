@@ -70,6 +70,8 @@ Each core summary's positive + negative + insufficient-evidence counts equals
 | Field | Type | Rules |
 |---|---|---|
 | `fingerprint` | String | Stable, non-empty decision target |
+| `subjectID` | String | Explicit stable source subject; never parsed from fingerprint |
+| `responsibilityLayer` | String | Explicit source responsibility layer; never parsed from fingerprint |
 | `axis` | AuditAxis | Independent classification |
 | `priority` | FindingPriority | `P0 | P1 | P2 | info` |
 | `verdict` | String | Preserved source verdict; display only when not a locked core verdict |
@@ -164,7 +166,9 @@ accepted immutable fact:
 
 | Field | Type | Rules |
 |---|---|---|
-| `observationID` | String | `SHA256(sourceStableID, stableIdentity, acceptedSHA256, rejectedSHA256, observedAt)` minted once at L1 and preserved on re-normalize/merge |
+| `observationID` | String | `SHA256(sourceStableID, parentSnapshotID, stableIdentity, acceptedSHA256, rejectedSHA256, observedAt)` minted once at L1 and preserved on re-normalize/merge |
+| `parentSnapshotID` | String | Explicit accepted snapshot parent |
+| `parentSnapshotSHA256` | String | Immutable content hash of accepted snapshot parent |
 | `observedAt` | Date | UTC |
 | `source` | String | Portable source identity, never a local path |
 | `entityKind` | String | Snapshot or child-fact kind |
@@ -174,8 +178,10 @@ accepted immutable fact:
 | `disposition` | ImportObservationDisposition | Exactly `rejectedIdentityHashCollision` |
 | `limitation` | String | Redacted explanation surfaced to the Owner |
 
-L3 merges `observationID` idempotently. Distinct observation IDs remain
-append-only history. No collision row updates the accepted snapshot.
+L3 merges `(parentSnapshotID, observationID)` idempotently. Distinct
+observation IDs remain append-only history. The parent ID/hash is mandatory for
+snapshot- and child-fact collisions; no collision row updates the accepted
+snapshot.
 
 ### ArtifactManifestEntry
 
@@ -199,17 +205,35 @@ they are never converted into optional limitations or one full-report link.
 
 ### ArtifactSidecar, grill links, and publication coverage
 
-`ArtifactSidecar` contains `schemaVersion=1`, matching `snapshotID`,
-`artifacts: [ArtifactManifestEntry]`, and optional untrusted `grillMeURL` and
-`grillWithDocsURL` strings. Grill URLs have their own warehouse grain and are
-never inferred from an artifact title.
+`ArtifactSidecar` contains:
+
+| Field | Type | Rules |
+|---|---|---|
+| `sidecarID` | String | Stable `snapshotID:artifact-sidecar:v1` identity |
+| `contentSHA256` | String | Importer-computed SHA-256 of the exact immutable `artifacts.json` bytes; normalized field, not self-declared inside the raw file |
+| `schemaVersion` | Int | Exactly 1 |
+| `snapshotID` | String | Must match the snapshot parent |
+| `artifacts` | [ArtifactManifestEntry] | Every entry binds back to this sidecar and snapshot |
+| `grillMeURL` / `grillWithDocsURL` | String? | Optional untrusted strings |
+
+Sidecar identity/hash is preserved through normalized rows, warehouse facts,
+L4 bundles, every card's common provenance envelope, and collision detection.
+Artifact and grill facts carry `sidecarID`/`sidecarSHA256`; grill URLs are never
+inferred from an artifact title.
+The normalized `ArtifactSidecar.contentSHA256` maps without transformation to
+card-envelope `artifactSidecarSHA256`.
 
 `FullReportReference` is explicitly typed as `artifactID`, `title`,
 `contentSHA256`, and untrusted `url`. It may externalize optional detail only.
 Its `artifactID`, hash, and URL must resolve exactly to one sidecar entry whose
 kind is `fullReport`; otherwise the reference is invalid.
 
-`PublicationCoverage` travels in every overview:
+L4 emits `RequiredPublicationInputs`: the required entities and counts for the
+generic workflow, team/repository relationships, and P0/P1 findings/chains. It
+contains no `published*`, omitted, or externalized results.
+
+L5 computes `PublicationCoverage` only after final card packing and budget
+selection; it travels in every overview:
 
 | Field | Type |
 |---|---|
@@ -240,6 +264,8 @@ report never satisfies a missing required count.
 | `partIndex` | Int | Zero-based, non-negative |
 | `partCount` | Int | Positive; `partIndex < partCount` |
 | `contentSHA256` | String | Hash of the accepted immutable snapshot/bundle |
+| `artifactSidecarID` | String | Stable immutable sidecar identity |
+| `artifactSidecarSHA256` | String | Exact sidecar content hash retained as payload provenance |
 
 `TeamAuditSection` is
 `overview | findings | caseTimelines | individualMetrics | feedbackLineage |
@@ -263,7 +289,7 @@ envelope, must be at most 262,144 bytes.
 - `agentRepeatMetrics`: complete per-role common counts, cycle/cause maps,
   role-specific counters, and supporting subject/event IDs.
 - `importObservations`: independently keyed collision observations tied to the
-  accepted snapshot identity without changing its hash.
+  explicit accepted parent snapshot ID/hash without changing its content.
 - `artifacts`: direct artifact entries, typed full-report/externalized optional
   references, and optional grill URLs from `ArtifactSidecar`.
 
@@ -292,7 +318,8 @@ canonical state.
 - `fact_team_audit_case`: one row per snapshot + case identity.
 - `fact_team_audit_event`: one row per snapshot + source event identity.
 - `fact_team_audit_attempt`: one row per snapshot + attempt identity.
-- `fact_team_audit_finding`: one row per snapshot + finding fingerprint.
+- `fact_team_audit_finding`: one row per snapshot + finding fingerprint,
+  retaining explicit subject ID and responsibility layer.
 - `fact_team_audit_individual_metric`: one row per snapshot + metric identity.
 - `fact_team_audit_feedback_lineage`: one row per snapshot + lineage identity.
 - `bridge_team_audit_lineage_observation`: one row per snapshot + lineage + observation event ID.
@@ -303,9 +330,10 @@ canonical state.
 - `fact_team_audit_repeat_role_value`: one row per snapshot + actor role + allowed role-specific key.
 - `bridge_team_audit_repeat_subject`: one row per snapshot + actor role + subject ID.
 - `bridge_team_audit_repeat_event`: one row per snapshot + actor role + event ID.
-- `fact_team_audit_import_collision_observation`: one row per independent observation ID.
-- `fact_team_audit_artifact`: one row per snapshot + artifact identity.
-- `fact_team_audit_grill_link`: one row per snapshot + `grillMe|grillWithDocs`.
+- `fact_team_audit_import_collision_observation`: one row per parent snapshot + independent observation ID, retaining parent snapshot hash.
+- `fact_team_audit_artifact_sidecar`: one row per snapshot + sidecar identity/content hash.
+- `fact_team_audit_artifact`: one row per snapshot + sidecar + artifact identity/hash.
+- `fact_team_audit_grill_link`: one row per snapshot + sidecar + `grillMe|grillWithDocs`, retaining sidecar hash.
 
 Child facts reference the accepted snapshot hash. L3 never updates a row with
 a different hash. L4 queries are read-only and expose their grain explicitly.

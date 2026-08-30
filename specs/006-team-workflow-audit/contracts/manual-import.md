@@ -40,6 +40,7 @@ Each immutable bundle is a directory containing:
 {
   "schemaVersion": 1,
   "snapshotID": "audit-snapshot-001",
+  "sidecarID": "audit-snapshot-001:artifact-sidecar:v1",
   "artifacts": [],
   "grillMeURL": "https://example.com/grill-me",
   "grillWithDocsURL": "https://example.com/grill-with-docs"
@@ -52,12 +53,19 @@ the snapshot body or hash. A missing sidecar may be ingested as an import
 limitation, but the snapshot is not publishable until its mandatory generic,
 team/repository, and P0/P1 chain entries are present and valid.
 
+The importer computes normalized `ArtifactSidecar.contentSHA256` from the exact
+immutable `artifacts.json` bytes; the file does not self-declare its hash. The stable
+`sidecarID` plus computed hash is retained on normalized artifact/grill rows,
+warehouse facts, L4 bundles, payload provenance, and collision observations.
+
 ## Collection and normalization
 
 1. Read only configured bundle files; never modify or delete them.
 2. Reject symlink escapes and paths outside the configured import root.
 3. Apply the existing redaction policy before writing append-only raw records.
-4. Compute the snapshot and sidecar SHA-256 values.
+4. Compute the snapshot SHA-256 and exact sidecar-byte SHA-256; validate stable
+   sidecar identity and treat same sidecar ID/different hash as a collision
+   parented to the accepted snapshot ID/hash.
 5. Validate required stable identities, UTC timestamps, mode-specific
    cohort/cursors, core-axis reconciliation, Task Effectiveness separation,
    finding enums, and evidence references.
@@ -88,9 +96,15 @@ team/repository, and P0/P1 chain entries are present and valid.
 - Default collect/normalize source selection excludes the manual source.
 - Same bundle replay is idempotent; identity/hash conflict never overwrites.
 - Repeating the same collision observation ID merges once while distinct
-  import attempts remain separate append-only observations.
+  import attempts remain separate append-only observations; every observation
+  carries the accepted parent snapshot ID/hash.
 - A 24-hour overlap replay deduplicates stable source event IDs.
-- Sidecar fixtures cover absent/present grill URLs, unsafe URLs preserved as
-  non-actionable data, and every mandatory P0/P1 chain entry.
+- Sidecar fixtures cover absent/present grill URLs, unsafe optional URLs
+  preserved as non-actionable data, and every mandatory P0/P1 chain entry.
+- Exact sidecar bytes produce a stable sidecar ID/hash through normalize;
+  same ID/different bytes produces a parented collision observation.
+- Finding fixtures preserve explicit `subject_id` and `responsibility_layer`.
+- Missing/unsafe mandatory URLs reject publication input; unsafe optional
+  artifact/grill URLs remain non-actionable data.
 - Missing configuration returns zero without raising.
 - Test spies observe no subprocess, network, audit, dispatch, or mutation call.

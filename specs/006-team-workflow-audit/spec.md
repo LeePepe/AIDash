@@ -21,13 +21,14 @@ As the Owner, I can read the latest baseline or incremental Team Workflow Audit 
 
 **Why this priority**: A trustworthy read-only snapshot is the smallest useful outcome and the prerequisite for every finding or decision workflow.
 
-**Independent Test**: Publish one neutral baseline fixture and one incremental fixture. Each renders its scope, mode-specific cohort or cursor, provenance, limitations, evidence coverage, the three core axes, and the separate Task Effectiveness axis without invoking an audit or changing source data.
+**Independent Test**: Publish one neutral baseline fixture and one incremental fixture. Each renders its scope, mode-specific cohort or cursor, snapshot/sidecar provenance, limitations, evidence coverage, three core axes, separate Task Effectiveness, every P0/P1 finding, and all mandatory generic/team/P0/P1 artifact links without invoking an audit or changing source data.
 
 **Acceptance Scenarios**:
 
 1. **Given** an immutable baseline snapshot with a fixed cohort, **When** the briefing is opened, **Then** the Owner sees the scope, cohort identity and cases, instruction versions, evidence coverage, limitations, and independently reconciled Workflow Conformance, Workflow Fitness, Outcome Integrity, and Task Effectiveness summaries.
 2. **Given** an incremental snapshot, **When** the briefing is opened, **Then** the Owner sees each source cursor and overlap window and can distinguish the incremental evidence from the original baseline cohort.
 3. **Given** missing or redacted evidence, **When** the snapshot is rendered, **Then** the affected conclusion is shown as insufficient evidence and the UI does not infer a result from another axis.
+4. **Given** a publishable snapshot with mandatory findings and artifacts, **When** the final briefing parts are packed, **Then** publication coverage is computed from those final parts and the Owner can read every mandatory finding/link with matching required/published counts.
 
 ---
 
@@ -41,11 +42,11 @@ As the Owner, I can inspect stable findings, case timelines, full feedback linea
 
 **Acceptance Scenarios**:
 
-1. **Given** findings with stable fingerprints, **When** the Owner reads the audit card, **Then** each finding displays its independent axis, priority, lifecycle state, evidence references, and remediation owner without merging findings that share presentation text.
+1. **Given** findings with stable fingerprints, **When** the Owner reads the audit card, **Then** each finding displays its subject identity, responsibility layer, independent axis, priority, lifecycle state, evidence references, and remediation owner without parsing those identities from its fingerprint or merging findings that share presentation text.
 2. **Given** case and individual evidence, **When** the Owner expands the audit details, **Then** event IDs, timestamps, roles, attempts, complete per-role repeat/cause/role-specific metrics, problem-to-release observation lineage, and limitations remain attributable to their source identities.
 3. **Given** Archify artifacts, **When** the Owner follows the generic workflow, team/repository relationship, or P0/P1 event-chain link, **Then** the validated artifact opens outside AIDash and preserves the finding fingerprint, event IDs, and revision evidence relationship.
-4. **Given** a missing, malformed, non-HTTPS, or unverified artifact URL, **When** the card renders, **Then** AIDash shows the artifact label as unavailable text and does not create an actionable link.
-5. **Given** a rejected identity/hash collision, **When** the accepted snapshot is displayed, **Then** the Owner sees the independent collision observation and limitation while the accepted snapshot content/hash remains unchanged.
+4. **Given** a missing, malformed, non-HTTPS, or unverified mandatory workflow/relationship/P0/P1 artifact URL, **When** publication is attempted, **Then** the snapshot is rejected and no mandatory item is counted as published. For an optional artifact or grill URL, the label remains non-actionable text.
+5. **Given** a rejected identity/hash collision, **When** the accepted snapshot is displayed, **Then** the Owner sees the independent collision observation through its explicit accepted-snapshot ID/hash parent while the accepted snapshot content/hash remains unchanged.
 6. **Given** a mandatory overview, P0/P1 finding, or required artifact link cannot fit the card budget, **When** publication is attempted, **Then** the snapshot is rejected rather than truncated, omitted, or replaced by a full-report link.
 
 ---
@@ -81,24 +82,24 @@ As the Owner, I can acknowledge a finding or approve it for a separately governe
 ### Functional Requirements
 
 - **FR-001**: The system MUST accept only explicit Team Workflow Audit snapshot input supplied to the data pipeline; it MUST NOT schedule, discover, or invoke the audit.
-- **FR-002**: Snapshot ingestion MUST be append-only, redacted, and immutable, with stable snapshot and source identities, UTC timestamps, instruction-version hashes, provenance, and limitations retained through every data layer.
+- **FR-002**: Snapshot ingestion MUST be append-only, redacted, and immutable, with stable snapshot and source identities, UTC timestamps, instruction-version hashes, artifact-sidecar identity/content hash, provenance, and limitations retained through every data layer and published payload.
 - **FR-003**: Baseline snapshots MUST preserve the fixed cohort identity and cases; incremental snapshots MUST preserve a per-source `(timestamp, stable identity)` cursor and overlap window without merging incremental evidence into the baseline cohort.
-- **FR-004**: Replayed source records and snapshots MUST deduplicate by their stable identities; conflicting content for an existing immutable identity MUST NOT overwrite the accepted record and MUST produce an independently keyed, append-only collision observation that can be displayed with the accepted snapshot.
+- **FR-004**: Replayed source records and snapshots MUST deduplicate by their stable identities; conflicting content for an existing immutable identity MUST NOT overwrite the accepted record and MUST produce an independently keyed, append-only collision observation with explicit immutable accepted-snapshot ID/hash parentage.
 - **FR-005**: The briefing MUST display scope, mode, cohort or cursors, instruction versions, evidence coverage, provenance, and limitations.
 - **FR-006**: Workflow Conformance, Workflow Fitness, and Outcome Integrity MUST remain three independent core axes. Task Effectiveness MUST remain a separate fourth axis and MUST NOT be inferred from any core axis.
 - **FR-007**: Each core-axis summary MUST reconcile positive, negative, and insufficient-evidence counts to the total case count; Task Effectiveness MUST preserve effective, ineffective, regressed, pending, and insufficient-evidence counts.
 - **FR-008**: The system MUST support stable finding fingerprints and exactly these lifecycle states: open, acknowledged, approved for remediation, resolved, regressed, and superseded.
-- **FR-009**: Findings MUST retain their axis, priority, verdict, evidence references, affected cases, remediation owner, and current canonical lifecycle state.
+- **FR-009**: Findings MUST retain explicit `subjectID` and `responsibilityLayer` fields, plus axis, priority, verdict, evidence references, affected cases, remediation owner, and current canonical lifecycle state; consumers MUST NOT recover subject/responsibility by parsing the fingerprint.
 - **FR-010**: The briefing MUST display case timelines, full Task Effectiveness feedback lineage, and per-role repeat metrics. Feedback lineage MUST retain problem, origin issue, delivery issue, PR/merge, release/build, observation, related-feedback, and effectiveness state identities. Repeat metrics MUST retain actor role, cycle/cause breakdowns, role-specific counters, subject IDs, and event IDs without collapsing roles into one score.
 - **FR-011**: The briefing MUST expose a direct validated link for the generic operating workflow, every team/repository relationship artifact, and every P0/P1 current-state event chain supplied by the snapshot. Mandatory links MUST be reserved and published before optional details and MUST NOT be replaced by one full-report link.
-- **FR-012**: Archify artifact links MUST preserve the relationship between finding fingerprint, event IDs, revision evidence, content hash, and the generated artifact; missing or invalid links MUST degrade to non-actionable text. A typed full-report reference MAY externalize optional oversized details but MUST NOT substitute for any mandatory artifact or P0/P1 chain.
+- **FR-012**: Archify artifact links MUST preserve the relationship between finding fingerprint, event IDs, revision evidence, content hash, sidecar identity/hash, and the generated artifact. A missing or invalid mandatory workflow/relationship/P0/P1 URL MUST reject publication; only optional artifact/grill links degrade to non-actionable text. A typed full-report reference MAY externalize optional oversized details but MUST NOT substitute for any mandatory artifact or P0/P1 chain.
 - **FR-013**: The Owner MUST be able to append an acknowledgement event or an approval-for-remediation event for a finding, keyed by the card identity and stable finding fingerprint.
 - **FR-014**: Owner decision events MUST be append-only and idempotent per `(card identity, finding fingerprint, decision kind)` for repeated local actions.
 - **FR-015**: Recording a decision MUST NOT mutate a prior snapshot or claim a canonical lifecycle transition; canonical finding state changes only in a later immutable snapshot that incorporates the event.
 - **FR-016**: A remediation approval MUST mean only that approval was recorded. The system MUST NOT auto-remediate, mutate source issues or runs, create tasks, or dispatch agents.
-- **FR-017**: Optional grill-me and grill-with-docs entry points MUST be typed fields in the publisher-supplied hosted-artifact sidecar and preserved through every data layer as untrusted strings; AIDash MUST open only centrally validated HTTPS links and MUST NOT execute the workflow.
+- **FR-017**: Optional grill-me and grill-with-docs entry points MUST be typed fields in a publisher-supplied hosted-artifact sidecar with stable sidecar identity and exact sidecar content SHA-256; the sidecar identity/hash and untrusted link strings MUST persist through L1–L5 and payload provenance. AIDash MUST open only centrally validated HTTPS links and MUST NOT execute the workflow.
 - **FR-018**: Invalid, incomplete, future-incompatible, or oversized payloads MUST fail or externalize according to the published size contract and MUST NOT crash, truncate an entity, silently coerce evidence, or exceed the 262,144-byte encoded card limit. Mandatory overview/P0/P1/artifact records are non-externalizable; optional oversized details require a typed full-report reference.
-- **FR-019**: Automated tests MUST cover immutable ingestion, stable-identity deduplication, collision observations, overlap replay, feedback lineage, complete per-role repeat metrics, payload round trips and exact size boundaries, mandatory-link reservation, optional externalization, all finding states, baseline and incremental rendering, decision idempotency, manual-only invocation, and no-dispatch/no-remediation behavior.
+- **FR-019**: Automated tests MUST cover immutable ingestion, sidecar identity/hash preservation and collision, stable-identity deduplication, accepted-snapshot-parented collision observations, overlap replay, explicit finding subject/responsibility, feedback lineage, complete per-role repeat metrics, payload round trips and exact size boundaries, mandatory-link rejection/reservation, optional-link degradation/externalization, all finding states, baseline and incremental rendering, decision idempotency, manual-only invocation, and no-dispatch/no-remediation behavior.
 
 ### Key Entities
 
@@ -108,7 +109,8 @@ As the Owner, I can acknowledge a finding or approve it for a separately governe
 - **Audit Case Timeline**: Ordered redacted events and attempts tied to stable case, actor-role, cycle, delivery, release, and observation identities.
 - **Feedback Lineage**: Stable problem-to-delivery-to-release-to-observation chain with pending/effective/ineffective/regressed state.
 - **Agent Repeat Metric**: Per-role common counters, cycle/cause breakdowns, role-specific counters, and supporting subject/event identities.
-- **Import Collision Observation**: Independently keyed append-only record of an identity/hash conflict; references accepted and rejected hashes without retaining rejected content or mutating the accepted snapshot.
+- **Import Collision Observation**: Independently keyed append-only record of an identity/hash conflict; carries immutable accepted-snapshot ID/hash parentage and accepted/rejected entity hashes without retaining rejected content or mutating the accepted snapshot.
+- **Artifact Sidecar**: Immutable manifest envelope with stable sidecar identity, exact sidecar content hash, artifact bindings, and optional grill links.
 - **Archify Artifact**: Validated external representation of a generic workflow, team/repository relationship, or P0/P1 event chain with revision evidence.
 - **Publication Coverage**: Reconciled required-versus-published mandatory artifacts, optional omission/externalization counts, and an optional typed full-report reference.
 - **Owner Decision Event**: Append-only acknowledgement or remediation-approval receipt targeting a stable finding; it records intent but grants no execution authority.
@@ -118,11 +120,11 @@ As the Owner, I can acknowledge a finding or approve it for a separately governe
 ### Measurable Outcomes
 
 - **SC-001**: Every required field from valid baseline and incremental fixtures—including feedback lineage and complete per-role repeat metrics—is visible or reachable in the rendered briefing, with zero cross-axis or cross-role inference.
-- **SC-002**: Replaying identical snapshots and overlap records produces one accepted record per stable identity; each conflicting immutable identity produces zero overwrites and one idempotently merged collision observation per source observation ID.
+- **SC-002**: Replaying identical snapshots and overlap records produces one accepted record per stable identity; each conflicting immutable identity produces zero overwrites and one idempotently merged collision observation per source observation ID, joined to exactly one accepted snapshot ID/hash parent.
 - **SC-003**: All six finding states and every axis verdict round-trip through publication and render without free-form fallback.
 - **SC-004**: Repeating acknowledgement or approval on the same finding produces one displayed decision receipt per decision kind and leaves the original snapshot byte-for-byte unchanged.
 - **SC-005**: Automated boundary tests observe zero audit invocations, scheduled registrations, source mutations, issue/run mutations, agent dispatches, or remediation calls.
-- **SC-006**: Invalid evidence and artifact links remain non-actionable, while every valid HTTPS Archify and grill link opens through the central URL policy.
+- **SC-006**: Every missing/invalid mandatory artifact URL produces zero published snapshot/card output, every invalid optional artifact/grill URL remains non-actionable text, and every valid HTTPS Archify/grill URL opens through the central URL policy.
 - **SC-007**: Boundary fixtures prove an encoded card at 262,144 bytes is accepted, 262,145 bytes is rejected or externally referenced only when optional, and the number of published mandatory workflow/relationship/P0/P1 chain links exactly equals the required count.
 
 ## Assumptions
