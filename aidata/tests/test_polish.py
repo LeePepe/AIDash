@@ -233,6 +233,7 @@ def test_validate_rejects_positive_claim_when_cost_up():
     assert validate_efficiency_claim("效率上升", ev) is False
     assert validate_efficiency_claim("效率增长", ev) is False
     assert validate_efficiency_claim("成本上升，但效率大幅增长", ev) is False
+    assert validate_efficiency_claim("成本上升，但 efficiency improved", ev) is False
     assert validate_efficiency_claim("成本上升，但效率创出新高", ev) is False
     assert validate_efficiency_claim("效率不如昨天", ev) is False
     assert validate_efficiency_claim("工作更高效", ev) is False
@@ -240,6 +241,19 @@ def test_validate_rejects_positive_claim_when_cost_up():
     assert validate_efficiency_claim("效率回升", ev) is False
     assert validate_efficiency_claim("效率变好", ev) is False
     assert validate_efficiency_claim("效率明显下降", ev) is False
+
+
+@pytest.mark.unit
+def test_validate_rejects_negative_claim_without_input_evidence():
+    ev = EfficiencyEvidence(cost_pct=None, waste_pct=None, tasks_pct=-10, issues_pct=-12)
+    assert validate_efficiency_claim("效率下降", ev) is False
+    assert validate_efficiency_claim("production fell", ev) is False
+
+
+@pytest.mark.unit
+def test_validate_rejects_positive_activity_without_counter_signal():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, tasks_pct=256, issues_pct=0)
+    assert validate_efficiency_claim("完成任务上升", ev) is False
 
 
 @pytest.mark.unit
@@ -326,6 +340,19 @@ def test_polish_digest_rejects_explicit_rise_phrases_claims(claim):
     assert claim not in out
     assert "浪费上升" in out or "成本上升" in out
     assert "- P0: 优先排查浪费来源" in out
+
+
+@pytest.mark.unit
+def test_polish_digest_rejects_english_efficiency_claim_and_missing_input_negative():
+    client = FakeClient('{"tldr": "成本上升，但 efficiency improved", "todos": ["优先排查浪费来源"]}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    assert "efficiency improved" not in out.lower()
+    assert "浪费上升" in out or "成本上升" in out
+
+    negative_client = FakeClient('{"tldr": "效率下降", "todos": ["继续观察"]}')
+    negative_out = polish_digest("# AI 使用日报\n\n## ⚡ Trending\n- 完成任务: 11 ↓(-12%) vs 昨 12\n- 完成 issue: 8 ↓(-11%) vs 昨 9\n", negative_client)
+    assert "效率下降" not in negative_out
+    assert "整体趋势需关注" in negative_out or "数据不足" in negative_out
 
 
 @pytest.mark.unit

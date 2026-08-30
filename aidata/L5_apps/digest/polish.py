@@ -107,12 +107,16 @@ class EfficiencyEvidence:
         return True
 
     def allows_negative_claim(self) -> bool:
-        """Negative efficiency claims require an outcome decline that is not explained away by the input-to-outcome ratio.
+        """Negative efficiency claims require input evidence and a real outcome decline.
 
-        The rule is intentionally strict: a small output dip alongside a strong
-        cost/waste reduction does not prove lower efficiency, and a task/issue drop
-        alone is not enough evidence.
+        A task/issue drop alone is insufficient; the model must have a cost or
+        waste trend to anchor the efficiency definition before accepting a negative
+        efficiency claim.
         """
+        input_evidence = self.cost_pct is not None or self.waste_pct is not None
+        if not input_evidence:
+            return False
+
         output_declines = [v for v in (self.tasks_pct, self.issues_pct) if v is not None and v < 0]
         if not output_declines:
             return False
@@ -304,7 +308,7 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
     if re.search(r"\d|[$%]", tldr):
         return False
 
-    if re.search(r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出)", tldr, re.IGNORECASE):
+    if re.search(r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|efficiency|productivity|throughput)", tldr, re.IGNORECASE):
         assertion_kind = _efficiency_assertion_kind(tldr)
         if assertion_kind == "positive":
             return evidence.allows_positive_claim()
@@ -313,6 +317,8 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
         return False
 
     if _metric_direction_assertions(tldr):
+        if evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
+            return False
         return _metric_direction_matches(tldr, evidence)
     if _named_adverse_signal_matches(tldr, evidence):
         return True
