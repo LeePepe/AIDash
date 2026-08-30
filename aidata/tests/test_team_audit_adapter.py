@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import sqlite3
@@ -53,6 +54,15 @@ def test_manual_import_collects_and_normalizes_collision_safe(monkeypatch: pytes
     cleanio.CLEAN_DIR = tmp_path / "clean"
     cleanio.clean_path = lambda source: cleanio.CLEAN_DIR / f"{source}.db"
 
+    sidecar_payload = {
+        "sidecarID": "sidecar:team:weekly:2026-09-01",
+        "subjectID": "team:core-platform",
+        "responsibilityLayer": "AidataL1L2",
+        "artifacts": ["finding-brief.md"],
+        "grill": ["what-was-the-root-cause"],
+    }
+    sidecar_text = json.dumps(sidecar_payload, ensure_ascii=False)
+    sidecar_hash = hashlib.sha256(sidecar_text.encode("utf-8")).hexdigest()
     snapshot_payload = {
         "kind": "snapshot",
         "snapshotID": "audit:team:weekly:2026-09-01",
@@ -69,15 +79,8 @@ def test_manual_import_collects_and_normalizes_collision_safe(monkeypatch: pytes
         "artifacts": ["finding-brief.md"],
         "grill": ["what-was-the-root-cause"],
         "sidecarID": "sidecar:team:weekly:2026-09-01",
-        "sidecarHash": "sidecar-hash-v1",
+        "sidecarHash": sidecar_hash,
         "schemaVersion": "team-audit/v1",
-    }
-    sidecar_payload = {
-        "sidecarID": "sidecar:team:weekly:2026-09-01",
-        "subjectID": "team:core-platform",
-        "responsibilityLayer": "AidataL1L2",
-        "artifacts": ["finding-brief.md"],
-        "grill": ["what-was-the-root-cause"],
     }
     collision = {
         "kind": "snapshot",
@@ -94,15 +97,30 @@ def test_manual_import_collects_and_normalizes_collision_safe(monkeypatch: pytes
         "limitations": ["manual import only"],
         "artifacts": ["finding-brief.md"],
         "grill": ["what-was-the-root-cause"],
-        "sidecarID": "sidecar:team:weekly:2026-09-01",
-        "sidecarHash": "sidecar-hash-v2",
+        "sidecarID": "sidecar:team:weekly:2026-09-01-collision",
+        "sidecarHash": "placeholder",
+        "schemaVersion": "team-audit/v1",
     }
+    collision_sidecar = {
+        "sidecarID": "sidecar:team:weekly:2026-09-01-collision",
+        "subjectID": "team:core-platform",
+        "responsibilityLayer": "AidataL1L2",
+        "artifacts": ["finding-brief.md"],
+        "grill": ["what-was-the-root-cause"],
+    }
+    collision_sidecar_text = json.dumps(collision_sidecar, ensure_ascii=False)
+    collision_sidecar_hash = hashlib.sha256(collision_sidecar_text.encode("utf-8")).hexdigest()
+    collision["sidecarHash"] = collision_sidecar_hash
 
     bundle_dir = tmp_path / "audit-bundle"
     bundle_dir.mkdir()
     (bundle_dir / "snapshot.json").write_text(json.dumps(snapshot_payload, ensure_ascii=False), encoding="utf-8")
-    (bundle_dir / "artifacts.json").write_text(json.dumps(sidecar_payload, ensure_ascii=False), encoding="utf-8")
-    (bundle_dir / "collision.json").write_text(json.dumps(collision, ensure_ascii=False), encoding="utf-8")
+    (bundle_dir / "artifacts.json").write_text(sidecar_text, encoding="utf-8")
+
+    collision_dir = tmp_path / "audit-bundle-collision"
+    collision_dir.mkdir()
+    (collision_dir / "snapshot.json").write_text(json.dumps(collision, ensure_ascii=False), encoding="utf-8")
+    (collision_dir / "artifacts.json").write_text(collision_sidecar_text, encoding="utf-8")
 
     written = adapter.collect()
     assert written == 2
@@ -132,4 +150,4 @@ def test_manual_import_collects_and_normalizes_collision_safe(monkeypatch: pytes
     assert observation_rows[0][3] == "audit:team:weekly:2026-09-01"
     assert observation_rows[0][4] != ""
     assert sidecar_rows[0][0] == "sidecar:team:weekly:2026-09-01"
-    assert sidecar_rows[0][1] == "sidecar-hash-v1"
+    assert sidecar_rows[0][1] == sidecar_hash

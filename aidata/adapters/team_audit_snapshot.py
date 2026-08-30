@@ -127,39 +127,33 @@ def _is_contract_payload(payload: Any) -> bool:
     )
     if not any(key in payload for key in ids):
         return False
-    if "message" in payload and not any(key in payload for key in ids + ("sidecarID", "sidecar_id", "sidecarId")):
-        return False
     if _first_value(payload, "subjectID", "subject_id", "subjectId") in (None, ""):
         return False
     if _first_value(payload, "responsibilityLayer", "responsibility_layer", "responsibility") in (None, ""):
         return False
-    if _first_value(payload, "mode") not in (None, "baseline", "incremental", "replay", "collision"):
+    if _first_value(payload, "mode") not in (None, "baseline", "incremental"):
         return False
-    if _first_value(payload, "capturedAt", "captured_at") is not None and not _is_utc_timestamp(_first_value(payload, "capturedAt", "captured_at")):
+    if _first_value(payload, "capturedAt", "captured_at") is None:
+        return False
+    if not _is_utc_timestamp(_first_value(payload, "capturedAt", "captured_at")):
         return False
     if _first_value(payload, "cohort") is None:
         return False
     if _first_value(payload, "cursor") is None:
         return False
-    if "axes" in payload and not isinstance(payload.get("axes"), list):
+    if _first_value(payload, "schemaVersion", "schema_version") not in (None, "1", "team-audit/v1"):
         return False
-    if "feedbackLineage" in payload and not isinstance(payload.get("feedbackLineage"), list):
-        return False
-    if "agentRepeat" in payload and not isinstance(payload.get("agentRepeat"), list):
-        return False
-    if "limitations" in payload and not isinstance(payload.get("limitations"), list):
-        return False
-    if "artifacts" in payload and not isinstance(payload.get("artifacts"), list):
-        return False
-    if "grill" in payload and not isinstance(payload.get("grill"), list):
-        return False
+    for key in ("axes", "feedbackLineage", "agentRepeat", "limitations", "artifacts", "grill"):
+        value = payload.get(key)
+        if value is not None and not isinstance(value, list):
+            return False
     return True
 
 
 def _iter_import_files(root: Path) -> Iterable[Path]:
     root_resolved = root.resolve(strict=True)
-    for path in sorted(root_resolved.rglob("*"), key=lambda p: (0 if p.name == "snapshot.json" else 1 if p.name == "artifacts.json" else 2, p.name, str(p.relative_to(root_resolved)))):
-        if path.is_symlink() or not path.is_file():
+    for path in sorted(root_resolved.iterdir(), key=lambda p: p.name):
+        if path.is_symlink() or not path.is_dir():
             continue
         try:
             resolved = path.resolve(strict=True)
@@ -169,8 +163,22 @@ def _iter_import_files(root: Path) -> Iterable[Path]:
             resolved.relative_to(root_resolved)
         except ValueError:
             continue
-        if path.suffix.lower() in _JSON_SUFFIXES:
-            yield path
+
+        snapshot_path = path / "snapshot.json"
+        sidecar_path = path / "artifacts.json"
+        if not snapshot_path.is_file() or snapshot_path.is_symlink():
+            continue
+        if not sidecar_path.is_file() or sidecar_path.is_symlink():
+            continue
+
+        json_like = {
+            child.name
+            for child in path.iterdir()
+            if child.is_file() and not child.is_symlink() and child.name.endswith((".json", ".jsonl", ".ndjson"))
+        }
+        if json_like - {"snapshot.json", "artifacts.json"}:
+            continue
+        yield path
 
 
 def _read_json_text(path: Path) -> Any | None:
@@ -180,40 +188,79 @@ def _read_json_text(path: Path) -> Any | None:
         return None
 
 
-def _bundle_from_file(path: Path, root: Path) -> dict[str, Any] | None:
-    parsed = _read_json_text(path)
-    if parsed is None:
+def _bundle_from_file(bundle_dir: Path, root: Path) -> dict[str, Any] | None:
+    snapshot_path = bundle_dir / "snapshot.json"
+    sidecar_path = bundle_dir / "artifacts.json"
+    if not snapshot_path.exists() or not sidecar_path.exists():
         return None
-    if isinstance(parsed, list):
-        for item in parsed:
-            if isinstance(item, dict) and _is_contract_payload(item):
-                return dict(item)
-        return None
-    if not isinstance(parsed, dict):
+    if snapshot_path.is_symlink() or sidecar_path.is_symlink():
         return None
 
-    payload = dict(parsed)
-    if path.name.endswith("snapshot.json"):
-        sidecar_path = path.with_name("artifacts.json")
-        if sidecar_path.exists() and sidecar_path.is_file() and not sidecar_path.is_symlink():
-            sidecar_raw = _read_json_text(sidecar_path)
-            if isinstance(sidecar_raw, dict):
-                payload.setdefault("artifacts", sidecar_raw.get("artifacts") or sidecar_raw.get("items") or [])
-                payload.setdefault("grill", sidecar_raw.get("grill") or [])
-                payload.setdefault("sidecarID", _first_value(sidecar_raw, "sidecarID", "sidecar_id", "sidecarId"))
-                payload.setdefault("sidecarHash", _first_value(sidecar_raw, "sidecarHash", "sidecar_hash", "sidecarHash"))
-                payload.setdefault("subjectID", _first_value(sidecar_raw, "subjectID", "subject_id", "subjectId"))
-                payload.setdefault("responsibilityLayer", _first_value(sidecar_raw, "responsibilityLayer", "responsibility_layer", "responsibility"))
-                payload.setdefault("schemaVersion", sidecar_raw.get("schemaVersion") or sidecar_raw.get("schema_version") or "team-audit/v1")
-    elif path.name == "artifacts.json":
-        payload.setdefault("sidecarID", _first_value(payload, "sidecarID", "sidecar_id", "sidecarId"))
-        payload.setdefault("subjectID", _first_value(payload, "subjectID", "subject_id", "subjectId"))
+    json_like = {
+        child.name
+        for child in bundle_dir.iterdir()
+        if child.is_file() and not child.is_symlink() and child.name.endswith((".json", ".jsonl", ".ndjson"))
+    }
+    if json_like - {"snapshot.json", "artifacts.json"}:
+        return None
 
+    snapshot_raw = _read_json_text(snapshot_path)
+    sidecar_raw = _read_json_text(sidecar_path)
+    if not isinstance(snapshot_raw, dict) or not isinstance(sidecar_raw, dict):
+        return None
+
+    snapshot_id = _first_value(snapshot_raw, "snapshotID", "snapshot_id", "snapshotId", "identity")
+    sidecar_id = _first_value(sidecar_raw, "sidecarID", "sidecar_id", "sidecarId")
+    if snapshot_id in (None, "") or sidecar_id in (None, ""):
+        return None
+    if _first_value(snapshot_raw, "subjectID", "subject_id", "subjectId") != _first_value(sidecar_raw, "subjectID", "subject_id", "subjectId"):
+        return None
+    if _first_value(snapshot_raw, "responsibilityLayer", "responsibility_layer", "responsibility") != _first_value(sidecar_raw, "responsibilityLayer", "responsibility_layer", "responsibility"):
+        return None
+
+    snapshot_hash = _hash_bytes(snapshot_path.read_bytes())
+    sidecar_hash = _hash_bytes(sidecar_path.read_bytes())
+    declared_sidecar_hash = _first_value(snapshot_raw, "sidecarHash", "sidecar_hash")
+    if declared_sidecar_hash is not None and declared_sidecar_hash != sidecar_hash:
+        return None
+    if _first_value(sidecar_raw, "sidecarHash", "sidecar_hash") not in (None, sidecar_hash):
+        return None
+
+    payload = {**snapshot_raw}
+    payload["sidecarID"] = sidecar_id
+    payload["sidecarHash"] = sidecar_hash
+    payload["snapshotHash"] = snapshot_hash
+    payload["schemaVersion"] = _first_value(snapshot_raw, "schemaVersion", "schema_version") or "team-audit/v1"
     if not _is_contract_payload(payload):
         return None
     if not _contract_valid(payload):
         return None
-    return payload
+    return {
+        "kind": "snapshot",
+        "identity": snapshot_id,
+        "hash": snapshot_hash,
+        "source_path": str(snapshot_path),
+        "payload": payload,
+        "cohort": _first_value(payload, "cohort"),
+        "cursor": _first_value(payload, "cursor"),
+        "subject_id": _first_value(payload, "subjectID", "subject_id", "subjectId"),
+        "responsibility_layer": _first_value(payload, "responsibilityLayer", "responsibility_layer", "responsibility"),
+        "feedback_lineage": _normalize_value(payload.get("feedbackLineage", payload.get("feedback_lineage"))),
+        "agent_repeat": _normalize_value(payload.get("agentRepeat", payload.get("agent_repeat"))),
+        "limitations": _normalize_value(payload.get("limitations")),
+        "artifacts": _normalize_value(payload.get("artifacts")),
+        "grill": _normalize_value(payload.get("grill")),
+        "sidecar_id": sidecar_id,
+        "sidecar_hash": sidecar_hash,
+        "parent_snapshot_id": None,
+        "parent_snapshot_hash": None,
+        "observed_at": _first_value(payload, "capturedAt", "captured_at"),
+        "source": SOURCE,
+        "mode": _first_value(payload, "mode"),
+        "captured_at": _first_value(payload, "capturedAt", "captured_at"),
+        "schema_version": payload["schemaVersion"],
+        "detail": _first_value(payload, "detail", "message", "note"),
+    }
 
 
 def _contract_valid(payload: dict[str, Any]) -> bool:
@@ -228,20 +275,19 @@ def _contract_valid(payload: dict[str, Any]) -> bool:
     if captured_at is None or not _is_utc_timestamp(captured_at):
         return False
     mode = _first_value(payload, "mode")
-    if mode is None or mode not in {"baseline", "incremental", "replay", "collision"}:
+    if mode is None or mode not in {"baseline", "incremental"}:
         return False
     cohort = _first_value(payload, "cohort")
-    if cohort is None or not isinstance(cohort, str):
+    if not isinstance(cohort, str) or not cohort:
         return False
     cursor = _first_value(payload, "cursor")
-    if cursor is None or not isinstance(cursor, str):
+    if not isinstance(cursor, str) or not cursor:
+        return False
+    if _first_value(payload, "schemaVersion", "schema_version") not in (None, "1", "team-audit/v1"):
         return False
     axes = payload.get("axes")
-    if not isinstance(axes, list) or not axes:
+    if not isinstance(axes, list) or not axes or not all(isinstance(item, str) for item in axes):
         return False
-    for item in axes:
-        if not isinstance(item, str):
-            return False
     for key in ("feedbackLineage", "agentRepeat", "limitations", "artifacts", "grill"):
         value = payload.get(key)
         if value is not None and not isinstance(value, list):
@@ -314,81 +360,71 @@ def collect() -> int:
     if root is None:
         return 0
 
-    existing: set[tuple[str, str]] = {(r.get("identity"), r.get("hash")) for r in read_raw(SOURCE) if r.get("identity") and r.get("hash")}
+    raw_records = read_raw(SOURCE)
+    existing: set[tuple[str, str]] = {(r.get("identity"), r.get("hash")) for r in raw_records if r.get("identity") and r.get("hash")}
     accepted_by_identity: dict[str, str] = {}
+    for rec in raw_records:
+        if rec.get("kind") == "observation":
+            continue
+        identity = rec.get("identity")
+        digest = rec.get("hash")
+        if identity and digest:
+            accepted_by_identity[identity] = str(digest)
     batch: list[dict[str, Any]] = []
 
-    for path in _iter_import_files(root):
-        if path.suffix.lower() == ".jsonl" or path.suffix.lower() == ".ndjson":
-            try:
-                lines = path.read_text(encoding="utf-8").splitlines()
-            except (OSError, UnicodeDecodeError):
-                continue
-            for line in lines:
-                if not line.strip():
-                    continue
-                try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                bundle = payload if isinstance(payload, dict) and _is_contract_payload(payload) else None
-                if bundle is None:
-                    continue
-                record = _payload_record(bundle, file_path=str(path), file_bytes=line.encode("utf-8"))
-                rec_key = (record["identity"], record["hash"])
-                prev_hash = accepted_by_identity.get(record["identity"])
-                seen_batch = {(r.get("identity"), r.get("hash")) for r in batch if r.get("identity") and r.get("hash")}
-                if rec_key in existing or rec_key in seen_batch:
-                    continue
-                if prev_hash is None:
-                    accepted_by_identity[record["identity"]] = record["hash"]
-                    batch.append(record)
-                    existing.add(rec_key)
-                    continue
-                if prev_hash == record["hash"]:
-                    continue
-                obs = _observation_record(
-                    record["identity"],
-                    record["hash"],
-                    parent_snapshot_id=record["identity"],
-                    parent_snapshot_hash=prev_hash,
-                    detail="replayed snapshot differs from accepted parent",
-                )
-                seen_batch = {(r.get("identity"), r.get("hash")) for r in batch if r.get("identity") and r.get("hash")}
-                if (obs["identity"], obs["hash"]) not in existing and (obs["identity"], obs["hash"]) not in seen_batch:
-                    batch.append(obs)
-                    existing.add((obs["identity"], obs["hash"]))
-                continue
-
-        if path.suffix.lower() == ".json":
-            payload = _bundle_from_file(path, root)
-            if payload is None:
-                continue
-            snapshot_id = _record_identity(payload, f"snapshot:{path}")
-            file_bytes = path.read_bytes()
-            digest = _hash_bytes(file_bytes)
-            rec_key = (snapshot_id, digest)
-            if rec_key in existing:
-                continue
-            prev_hash = accepted_by_identity.get(snapshot_id)
-            if prev_hash is None:
-                record = _payload_record(payload, file_path=str(path), file_bytes=file_bytes)
-                accepted_by_identity[record["identity"]] = record["hash"]
-                batch.append(record)
-                existing.add((record["identity"], record["hash"]))
-                continue
-            if prev_hash != digest:
-                obs = _observation_record(
-                    snapshot_id,
-                    digest,
-                    parent_snapshot_id=snapshot_id,
-                    parent_snapshot_hash=prev_hash,
-                    detail="replayed snapshot differs from accepted parent",
-                )
-                seen_batch = {(r.get("identity"), r.get("hash")) for r in batch if r.get("identity") and r.get("hash")}
-                if (obs["identity"], obs["hash"]) not in existing and (obs["identity"], obs["hash"]) not in seen_batch:
-                    batch.append(obs)
-                    existing.add((obs["identity"], obs["hash"]))
+    for bundle_dir in _iter_import_files(root):
+        payload = _bundle_from_file(bundle_dir, root)
+        if payload is None:
+            continue
+        snapshot_id = payload["identity"]
+        digest = payload["hash"]
+        rec_key = (snapshot_id, digest)
+        if rec_key in existing:
+            continue
+        prev_hash = accepted_by_identity.get(snapshot_id)
+        if prev_hash is None:
+            batch.append({
+                "kind": "snapshot",
+                "identity": snapshot_id,
+                "hash": digest,
+                "source": SOURCE,
+                "source_path": payload["source_path"],
+                "payload": payload["payload"],
+                "cohort": payload["cohort"],
+                "cursor": payload["cursor"],
+                "subject_id": payload["subject_id"],
+                "responsibility_layer": payload["responsibility_layer"],
+                "feedback_lineage": payload["feedback_lineage"],
+                "agent_repeat": payload["agent_repeat"],
+                "limitations": payload["limitations"],
+                "artifacts": payload["artifacts"],
+                "grill": payload["grill"],
+                "sidecar_id": payload["sidecar_id"],
+                "sidecar_hash": payload["sidecar_hash"],
+                "parent_snapshot_id": None,
+                "parent_snapshot_hash": None,
+                "observed_at": payload["observed_at"],
+                "mode": payload["mode"],
+                "captured_at": payload["captured_at"],
+                "schema_version": payload["schema_version"],
+                "detail": payload["detail"],
+            })
+            accepted_by_identity[snapshot_id] = digest
+            existing.add(rec_key)
+            continue
+        if prev_hash == digest:
+            continue
+        obs = _observation_record(
+            snapshot_id,
+            digest,
+            parent_snapshot_id=snapshot_id,
+            parent_snapshot_hash=prev_hash,
+            detail="replayed snapshot differs from accepted parent",
+        )
+        obs_key = (obs["identity"], obs["hash"])
+        if obs_key not in existing:
+            batch.append(obs)
+            existing.add(obs_key)
 
     if not batch:
         return 0
@@ -552,19 +588,21 @@ def _snapshot_row(rec: dict[str, Any]) -> dict[str, Any]:
 
 
 def _observation_row(rec: dict[str, Any], *, parent_snapshot_id: str | None, parent_hash: str | None) -> dict[str, Any]:
+    identity = rec.get("identity") or parent_snapshot_id or "unknown"
+    digest = rec.get("hash") or ""
     return {
-        "observation_id": f"obs:{rec.get('identity')}:{rec.get('hash')}",
-        "snapshot_id": rec.get("identity"),
+        "observation_id": f"obs:{identity}:{digest}",
+        "snapshot_id": rec.get("identity") or parent_snapshot_id,
         "observation_kind": rec.get("observation_kind") or "collision",
         "detail": rec.get("detail") or "identity hash collision",
         "parent_snapshot_id": parent_snapshot_id,
         "parent_snapshot_hash": parent_hash,
-        "identity": rec.get("identity"),
-        "content_hash": rec.get("hash"),
-        "observed_at": rec.get("observed_at") or rec.get("captured_at"),
+        "identity": identity,
+        "content_hash": digest,
+        "observed_at": rec.get("observed_at") or rec.get("captured_at") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": rec.get("source") or SOURCE,
-        "disposition": "rejected",
-        "limitation": "same snapshot identity with different hash",
+        "disposition": rec.get("disposition") or "rejected",
+        "limitation": rec.get("limitation") or "same snapshot identity with different hash",
     }
 
 
@@ -572,14 +610,17 @@ def _sidecar_row(rec: dict[str, Any]) -> dict[str, Any] | None:
     sidecar_id = rec.get("sidecar_id")
     if not sidecar_id:
         return None
+    sidecar_hash = rec.get("sidecar_hash") or rec.get("hash")
+    if sidecar_hash is None:
+        return None
     return {
         "sidecar_id": sidecar_id,
         "snapshot_id": rec.get("identity"),
-        "sidecar_hash": rec.get("sidecar_hash") or rec.get("hash"),
+        "sidecar_hash": sidecar_hash,
         "kind": rec.get("kind") or "sidecar",
         "source_path": rec.get("source_path"),
-        "content_hash": rec.get("hash"),
-        "observed_at": rec.get("observed_at"),
+        "content_hash": sidecar_hash,
+        "observed_at": rec.get("observed_at") or rec.get("captured_at"),
         "source": rec.get("source") or SOURCE,
     }
 
@@ -597,6 +638,7 @@ def normalize() -> int:
     snapshot_rows: list[dict[str, Any]] = []
     observation_rows: list[dict[str, Any]] = []
     sidecar_rows: list[dict[str, Any]] = []
+    seen_observation_ids: set[str] = set()
 
     for rec in raw_records:
         rec = dict(rec)
@@ -606,7 +648,10 @@ def normalize() -> int:
         digest = str(rec.get("hash") or "")
 
         if rec.get("kind") == "observation":
-            observation_rows.append(_observation_row(rec, parent_snapshot_id=rec.get("parent_snapshot_id"), parent_hash=rec.get("parent_snapshot_hash")))
+            row = _observation_row(rec, parent_snapshot_id=rec.get("parent_snapshot_id"), parent_hash=rec.get("parent_snapshot_hash"))
+            if row["observation_id"] not in seen_observation_ids:
+                observation_rows.append(row)
+                seen_observation_ids.add(row["observation_id"])
             continue
 
         existing = accepted.get(identity)
@@ -621,7 +666,10 @@ def normalize() -> int:
         if existing.get("hash") == digest:
             continue
 
-        observation_rows.append(_observation_row(rec, parent_snapshot_id=identity, parent_hash=existing.get("hash")))
+        row = _observation_row(rec, parent_snapshot_id=identity, parent_hash=existing.get("hash"))
+        if row["observation_id"] not in seen_observation_ids:
+            observation_rows.append(row)
+            seen_observation_ids.add(row["observation_id"])
 
     if snapshot_rows:
         write_clean(SOURCE, "snapshot", _SNAPSHOT_DDL, snapshot_rows, _SNAPSHOT_COLS)
