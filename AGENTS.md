@@ -239,3 +239,9 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
 - If the spec is ambiguous, raise it as a question in the issue
   comments — do not guess and ship.
 - Constitution > spec > plan > task description > intuition.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+at specs/006-team-workflow-audit/plan.md
+<!-- SPECKIT END -->
