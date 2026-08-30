@@ -264,6 +264,13 @@ def test_validate_rejects_positive_activity_without_input_signal():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("claim", ["效率没下降", "效率没有下降"])
+def test_validate_rejects_negated_negative_efficiency_claims(claim):
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, tasks_pct=256, issues_pct=0)
+    assert validate_efficiency_claim(claim, ev) is False
+
+
+@pytest.mark.unit
 def test_validate_rejects_loose_efficiency_language_without_directional_claim():
     ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, issues_pct=4)
     assert validate_efficiency_claim("效率不错", ev) is False

@@ -199,9 +199,9 @@ _POSITIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
     r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
     r".{0,12}"
-    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|增加|增大)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本|工作提效|提效)"
+    r"|(?:效率上升|效率增长|效率回升|效率变好|效率增加|效能提升|投入产出更好|整体向好|整体改善|整体优化|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本|工作提效|提效)"
     r")",
     re.IGNORECASE,
 )
@@ -400,7 +400,7 @@ def _efficiency_clause_status(clause: str) -> str | None:
         return None
 
     positive_growth = (
-        r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)"
+        r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率|增加|增大)"
     )
     negative_growth = (
         r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)"
@@ -415,10 +415,16 @@ def _efficiency_clause_status(clause: str) -> str | None:
         rf"|{topic}.{{0,30}}{negator}.{{0,20}}{positive_growth}"
         rf"|(?:{negator}).{{0,16}}{topic}.{{0,16}}{positive_growth}"
     )
+    negated_negative = (
+        rf"(?:{negator}).{{0,20}}{negative_growth}"
+        rf"|{topic}.{{0,30}}{negator}.{{0,20}}{negative_growth}"
+        rf"|(?:{negator}).{{0,16}}{topic}.{{0,16}}{negative_growth}"
+    )
     positive_match = re.search(rf"(?:{topic}).{{0,18}}{positive_growth}", cleaned, re.IGNORECASE)
     negative_match = re.search(rf"(?:{topic}).{{0,18}}{negative_growth}", cleaned, re.IGNORECASE)
     bare_negative_match = re.search(negative_growth, cleaned, re.IGNORECASE)
     negated_positive_match = re.search(negated_positive, cleaned, re.IGNORECASE)
+    negated_negative_match = re.search(negated_negative, cleaned, re.IGNORECASE)
 
     if negated_positive_match:
         stripped = re.sub(negated_positive, " ", cleaned, flags=re.IGNORECASE)
@@ -429,6 +435,8 @@ def _efficiency_clause_status(clause: str) -> str | None:
     if positive_match and (negative_match or bare_negative_match):
         return "mixed"
     if negative_match or bare_negative_match:
+        if negated_negative_match:
+            return None
         return "negative"
     if positive_match:
         return "positive"
