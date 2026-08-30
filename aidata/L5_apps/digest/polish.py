@@ -207,16 +207,26 @@ _POSITIVE_EFFICIENCY_RE = re.compile(
 
 _NEGATED_POSITIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
-    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)"
+    r".{0,24}"
+    r"(?:不|未|没|没有|并未|并没有|非|并非)"
+    r".{0,18}"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)"
+    r"|(?:不|未|没|没有|并未|并没有|非|并非)"
+    r".{0,20}"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)"
+    r".{0,18}"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)"
+    r"|(?:不|未|没|没有|并未|并没有|非|并非)"
+    r".{0,12}"
+    r"(?:提效|工作提效)"
+    r"|(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
     r".{0,12}"
     r"(?:不|未|没|没有|并未|并没有|非|并非)"
-    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
-    r"|(?:(?:不|未|没|没有|并未|并没有|非|并非))"
-    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
     r".{0,12}"
-    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:not|no|without).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率未提升|效率没有提升|效率没提升|效率不提升|效率未增长|效率没有增长|效率不增长|没有提效|没提效|并未提效|并非提效|没有提升|效率未提高|没提高|没有效率提升|没有效率增长)"
+    r"|(?:效率未提升|效率没有提升|效率没提升|效率不提升|效率未增长|效率没有增长|效率不增长|没有提效|没提效|并未提效|并非提效|没有提升|效率未提高|没提高|没有效率提升|没有效率增长|效率没有明显提升|效率未明显提升|效率不增长|没有效率增长)"
     r")",
     re.IGNORECASE,
 )
@@ -317,6 +327,10 @@ def _metric_direction_assertions(tldr: str) -> list[tuple[str, str]]:
             hits.append("down")
         if neg_down_pat.search(tldr):
             hits.append("not_down")
+        if {"up", "not_up"} & set(hits) and len(set(hits) & {"up", "not_up"}) > 1:
+            return []
+        if {"down", "not_down"} & set(hits) and len(set(hits) & {"down", "not_down"}) > 1:
+            return []
         for direction in hits:
             assertions.append((metric, direction))
     return assertions
@@ -358,31 +372,85 @@ def _metric_direction_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
 
 def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
     """Require a named adverse metric and an adverse direction to justify a neutral claim."""
-    if evidence.cost_pct is not None and evidence.cost_pct > 0 and re.search(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
-        return True
-    if evidence.waste_pct is not None and evidence.waste_pct > 0 and re.search(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
-        return True
-    if evidence.tasks_pct is not None and evidence.tasks_pct < 0 and re.search(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
-        return True
+    if evidence.cost_pct is not None and evidence.cost_pct > 0:
+        if re.search(r"(?:成本|开销|花费).{0,8}(?:没有|没|未|并没有|并未|非|并非).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
+            return False
+        if re.search(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
+            return True
+    if evidence.waste_pct is not None and evidence.waste_pct > 0:
+        if re.search(r"(?:浪费).{0,8}(?:没有|没|未|并没有|并未|非|并非).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
+            return False
+        if re.search(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
+            return True
+    if evidence.tasks_pct is not None and evidence.tasks_pct < 0:
+        if re.search(r"(?:完成任务|任务|产出).{0,8}(?:没有|没|未|并没有|并未|非|并非).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
+            return False
+        if re.search(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
+            return True
     return False
+
+
+def _efficiency_clause_status(clause: str) -> str | None:
+    """Classify a single efficiency clause, rejecting negated positives before evidence."""
+    cleaned = clause.strip()
+    if not cleaned:
+        return None
+    if re.search(
+        r"(?:不|未|没|没有|并未|并没有|非|并非).{0,24}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)",
+        cleaned,
+        re.IGNORECASE,
+    ) or re.search(
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,18}(?:不|未|没|没有|并未|并没有|非|并非).{0,18}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        return "negative"
+
+    if re.search(
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,18}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)",
+        cleaned,
+        re.IGNORECASE,
+    ) or re.search(
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,18}(?:不|未|没|没有|并未|并没有|非|并非).{0,18}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        return "negative"
+
+    if re.search(
+        r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|效率|效能|投入产出|产出|生产力|工作效率|效益|提效|工作提效|efficiency|productivity|throughput).{0,16}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)",
+        cleaned,
+        re.IGNORECASE,
+    ) or re.search(
+        r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        return "positive"
+
+    if re.search(
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,24}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱)",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        return "negative"
+    return None
 
 
 def _efficiency_assertion_kind(tldr: str) -> str | None:
     """Return 'positive', 'negative', 'mixed', or None for the claim direction."""
-    negated_positive = _NEGATED_POSITIVE_EFFICIENCY_RE.search(tldr) is not None
-    if negated_positive:
-        cleaned = _NEGATED_POSITIVE_EFFICIENCY_RE.sub(" ", tldr)
-        positive = _POSITIVE_EFFICIENCY_RE.search(cleaned) is not None
-        negative = _NEGATIVE_EFFICIENCY_RE.search(tldr) is not None
-        if positive and negative:
-            return "mixed"
-        if positive or negative:
-            return "negative"
-        return "negative"
-
-    positive = _POSITIVE_EFFICIENCY_RE.search(tldr) is not None
-    negative = _NEGATIVE_EFFICIENCY_RE.search(tldr) is not None
-
+    clauses = [
+        part.strip() for part in re.split(r"[,，;；。!?！？]|但|然而|不过|尽管|虽然|不过|并且", tldr)
+        if part.strip()
+    ]
+    positive = 0
+    negative = 0
+    for clause in clauses:
+        status = _efficiency_clause_status(clause)
+        if status == "positive":
+            positive += 1
+        elif status == "negative":
+            negative += 1
     if positive and negative:
         return "mixed"
     if negative:
