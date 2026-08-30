@@ -119,17 +119,67 @@ emit_failure_metadata() {
 
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file
+    local child_pid child_pgid watchdog_pid child_status=0 watchdog_status=0 state_file
     state_file="$(mktemp)"
 
-    # Job control ON for the launch, so the child becomes a PROCESS GROUP
-    # LEADER (pgid == pid). Signalling `-$child_pid` then reaches the CLI *and
-    # everything it spawned*. Without this, killing the reviewer CLI leaves its
-    # helper processes alive on the maintainer's own machine — which is what
-    # the runner's "Terminate orphan process" lines were reporting.
+    process_is_exited() {
+        local pid="$1"
+        local state
+
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+
+        state="$(ps -o state= -p "$pid" 2>/dev/null | tr -d ' ' | head -n 1)"
+        case "$state" in
+            Z*) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+
+    process_group_alive() {
+        local root_pid="$1"
+        local root_pgid="${2:-}"
+
+        if [ -n "$root_pgid" ] && kill -0 "-$root_pgid" 2>/dev/null; then
+            return 0
+        fi
+
+        if [ -n "$root_pid" ] && ps -o pid= --ppid "$root_pid" 2>/dev/null | grep -q '[0-9]'; then
+            return 0
+        fi
+
+        return 1
+    }
+
+    cleanup_process_tree() {
+        local root_pid="$1"
+        local root_pgid="${2:-$(ps -o pgid= -p "$root_pid" 2>/dev/null | tr -d ' ' | head -n 1)}"
+        local child
+        local children
+
+        if [ -n "$root_pgid" ]; then
+            kill -TERM "-$root_pgid" 2>/dev/null || kill -TERM "$root_pid" 2>/dev/null || true
+        else
+            kill -TERM "$root_pid" 2>/dev/null || true
+        fi
+
+        children="$(ps -o pid= --ppid "$root_pid" 2>/dev/null || true)"
+        for child in $children; do
+            cleanup_process_tree "$child" "$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' ' | head -n 1)"
+        done
+    }
+
+    # Launch the child under a bash wrapper that enables job control before
+    # `exec`-replacing itself with the real command. The wrapper keeps the child
+    # and any helper jobs attached to one process group, so a later signal to
+    # `-$child_pid` reaches the whole tree. Bare `"$@" &` leaves a shell
+    # script's own background jobs in a different PGID, which is exactly how a
+    # grandchild survives the timeout cleanup.
     set -m
-    "$@" &
+    bash -c 'set -m; exec "$@"' _ "$@" &
     child_pid=$!
+    child_pgid="$(ps -o pgid= -p "$child_pid" 2>/dev/null | tr -d ' ' | head -n 1)"
     set +m
 
     # Watchdog: either the child is still active until the deadline, or it has
@@ -141,16 +191,21 @@ run_with_timeout() {
     (
         local waited=0
         while [ "$waited" -lt "$seconds" ]; do
-            if ! kill -0 "$child_pid" 2>/dev/null; then
-                if kill -0 "-$child_pid" 2>/dev/null; then
-                    kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+            if process_is_exited "$child_pid"; then
+                if process_group_alive "$child_pid" "$child_pgid"; then
+                    cleanup_process_tree "$child_pid" "$child_pgid"
                     local grace=0
                     while [ "$grace" -lt 10 ]; do
-                        kill -0 "-$child_pid" 2>/dev/null || break
+                        if ! process_group_alive "$child_pid" "$child_pgid"; then
+                            break
+                        fi
                         sleep 1
                         grace=$((grace + 1))
                     done
-                    kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+                    if [ -n "$child_pgid" ]; then
+                        kill -KILL "-$child_pgid" 2>/dev/null || true
+                    fi
+                    kill -KILL "$child_pid" 2>/dev/null || true
                 fi
                 printf '%s\n' "clean" >"$state_file"
                 exit 0
@@ -159,22 +214,27 @@ run_with_timeout() {
             waited=$((waited + 1))
         done
 
-        if ! kill -0 "-$child_pid" 2>/dev/null; then
+        if ! process_group_alive "$child_pid" "$child_pgid"; then
             printf '%s\n' "clean" >"$state_file"
             exit 0
         fi
 
-        kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+        cleanup_process_tree "$child_pid" "$child_pgid"
 
         local grace=0
         while [ "$grace" -lt 10 ]; do
-            kill -0 "-$child_pid" 2>/dev/null || break
+            if ! process_group_alive "$child_pid" "$child_pgid"; then
+                break
+            fi
             sleep 1
             grace=$((grace + 1))
         done
 
-        if kill -0 "-$child_pid" 2>/dev/null; then
-            kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+        if process_group_alive "$child_pid" "$child_pgid"; then
+            if [ -n "$child_pgid" ]; then
+                kill -KILL "-$child_pgid" 2>/dev/null || true
+            fi
+            kill -KILL "$child_pid" 2>/dev/null || true
         fi
 
         printf '%s\n' "timeout" >"$state_file"
