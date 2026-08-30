@@ -22,7 +22,7 @@
 - [x] Collision observations are append-only and independently keyed without mutating accepted snapshots.
 - [x] Exact payload-size, mandatory-link reservation, and optional externalization behavior are deterministic.
 - [x] Artifact sidecar grill fields and the aidashCLI action consumer are specified end to end.
-- [x] L4 exposes immutable required inputs only; L5 computes final publication coverage and US1 emits every mandatory finding/artifact.
+- [x] L4 exposes immutable required inputs only; L5 computes final publication coverage, reconciles independent P0/P1-finding and mandatory-link count pairs, and US1 emits every mandatory finding/artifact.
 - [x] Missing/invalid mandatory URLs reject publication; only optional artifact/grill links degrade to text.
 - [x] Collision observations carry explicit accepted parent snapshot ID/hash.
 - [x] Sidecar identity/exact byte hash persists through normalized, warehouse, query, payload, and collision contracts.

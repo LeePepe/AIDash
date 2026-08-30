@@ -239,12 +239,15 @@ selection; it travels in every overview:
 |---|---|
 | `requiredGenericWorkflowCount` / `publishedGenericWorkflowCount` | Int |
 | `requiredTeamRelationshipCount` / `publishedTeamRelationshipCount` | Int |
+| `requiredP0P1FindingCount` / `publishedP0P1FindingCount` | Int |
 | `requiredP0P1ChainCount` / `publishedP0P1ChainCount` | Int |
 | `omittedOptionalEntityCount` / `externalizedEntityCount` | Int |
 | `fullReport` | FullReportReference? |
 
 Each required/published pair must be equal for publication to succeed. A full
-report never satisfies a missing required count.
+report never satisfies a missing required count. The finding pair counts
+complete P0/P1 `AuditFinding` entities independently from their required event
+chain links; publishing a chain never increments the finding count.
 
 `ExternalizedEntityReference` contains `entityKind`, `stableID`,
 `encodedByteCount`, fixed reason `exceedsInlinePayloadLimit`, and a

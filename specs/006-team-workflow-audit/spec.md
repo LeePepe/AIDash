@@ -71,7 +71,7 @@ As the Owner, I can acknowledge a finding or approve it for a separately governe
 - Duplicate snapshots with the same stable snapshot identity are ingested once; a conflicting body for an existing identity is rejected, recorded as an independently identified append-only import observation, and surfaced as a provenance limitation without overwriting the accepted snapshot.
 - Incremental records replayed inside the overlap window deduplicate by stable source identity while retaining the source cursor and provenance.
 - Unknown future finding states or axis values fail payload validation and render the existing graceful card fallback rather than being mapped to a known state.
-- Empty cohorts, incomplete 20-case baselines, missing artifacts, and absent individual metrics remain renderable when accompanied by an explicit limitation; the UI never fabricates values.
+- Empty cohorts, incomplete 20-case baselines, missing optional artifacts, and absent individual metrics remain renderable when accompanied by an explicit limitation; the UI never fabricates values.
 - Decision-event persistence failure leaves the control unconfirmed and does not crash, optimistically claim success, or retry by dispatching work.
 - Multiple devices may append the same logical decision; the displayed receipt deduplicates by finding fingerprint and decision kind while the underlying event history remains append-only.
 - Evidence references and optional grill links are untrusted publisher content and follow the central HTTPS-only URL policy.
@@ -125,7 +125,7 @@ As the Owner, I can acknowledge a finding or approve it for a separately governe
 - **SC-004**: Repeating acknowledgement or approval on the same finding produces one displayed decision receipt per decision kind and leaves the original snapshot byte-for-byte unchanged.
 - **SC-005**: Automated boundary tests observe zero audit invocations, scheduled registrations, source mutations, issue/run mutations, agent dispatches, or remediation calls.
 - **SC-006**: Every missing/invalid mandatory artifact URL produces zero published snapshot/card output, every invalid optional artifact/grill URL remains non-actionable text, and every valid HTTPS Archify/grill URL opens through the central URL policy.
-- **SC-007**: Boundary fixtures prove an encoded card at 262,144 bytes is accepted, 262,145 bytes is rejected or externally referenced only when optional, and the number of published mandatory workflow/relationship/P0/P1 chain links exactly equals the required count.
+- **SC-007**: Boundary fixtures prove an encoded card at 262,144 bytes is accepted, 262,145 bytes is rejected or externally referenced only when optional, `publishedP0P1FindingCount` exactly equals `requiredP0P1FindingCount`, and each published mandatory workflow/relationship/P0/P1-chain count exactly equals its corresponding required count.
 
 ## Assumptions
 
