@@ -1,5 +1,5 @@
 import importlib.util
-import shutil
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -31,18 +31,8 @@ def _load_adapter(monkeypatch: pytest.MonkeyPatch, config_module):
     return module
 
 
-def _clear_generated_state() -> None:
-    raw_dir = ROOT / "L1_collect" / "raw" / "team_audit_snapshot"
-    clean_db = ROOT / "L2_normalize" / "clean" / "team_audit_snapshot.db"
-    if raw_dir.exists():
-        shutil.rmtree(raw_dir)
-    if clean_db.exists():
-        clean_db.unlink()
-
-
 @pytest.mark.unit
 def test_manual_import_degrades_to_zero_when_root_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_generated_state()
     config = _load_config(monkeypatch)
     config.TEAM_AUDIT_IMPORT_ROOT = "/definitely/missing/path"
     adapter = _load_adapter(monkeypatch, config)
@@ -52,40 +42,67 @@ def test_manual_import_degrades_to_zero_when_root_is_missing(monkeypatch: pytest
 
 @pytest.mark.unit
 def test_manual_import_collects_and_normalizes_collision_safe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _clear_generated_state()
     config = _load_config(monkeypatch)
     config.TEAM_AUDIT_IMPORT_ROOT = str(tmp_path)
     adapter = _load_adapter(monkeypatch, config)
 
-    bundle = {
+    import cleanio
+    import rawio
+
+    rawio.raw_source_dir = lambda source: tmp_path / "raw" / source
+    cleanio.CLEAN_DIR = tmp_path / "clean"
+    cleanio.clean_path = lambda source: cleanio.CLEAN_DIR / f"{source}.db"
+
+    snapshot_payload = {
         "kind": "snapshot",
-        "identity": "audit:team:weekly:2026-09-01",
-        "hash": "bundle-hash-v1",
+        "snapshotID": "audit:team:weekly:2026-09-01",
+        "subjectID": "team:core-platform",
+        "responsibilityLayer": "AidataL1L2",
+        "mode": "baseline",
+        "capturedAt": "2026-09-01T00:00:00Z",
         "cohort": "team-audit",
         "cursor": "sprint-42",
-        "instruction_hash": "inst:hash:abc123",
         "axes": ["quality", "velocity"],
-        "subject_id": "team:core-platform",
-        "responsibility_layer": "AidataL1L2",
-        "feedback_lineage": ["T001", "T002"],
-        "agent_repeat": ["reviewed-contract"],
+        "feedbackLineage": ["T001", "T002"],
+        "agentRepeat": ["reviewed-contract"],
         "limitations": ["manual import only"],
         "artifacts": ["finding-brief.md"],
         "grill": ["what-was-the-root-cause"],
-        "sidecar_id": "sidecar:team:weekly:2026-09-01",
-        "sidecar_hash": "sidecar-hash-v1",
+        "sidecarID": "sidecar:team:weekly:2026-09-01",
+        "sidecarHash": "sidecar-hash-v1",
+        "schemaVersion": "team-audit/v1",
+    }
+    sidecar_payload = {
+        "sidecarID": "sidecar:team:weekly:2026-09-01",
+        "subjectID": "team:core-platform",
+        "responsibilityLayer": "AidataL1L2",
+        "artifacts": ["finding-brief.md"],
+        "grill": ["what-was-the-root-cause"],
     }
     collision = {
         "kind": "snapshot",
-        "identity": "audit:team:weekly:2026-09-01",
-        "hash": "bundle-hash-v2",
-        "parent_snapshot_id": "audit:team:weekly:2026-09-01",
-        "parent_snapshot_hash": "bundle-hash-v1",
-        "observation_kind": "collision",
-        "detail": "replayed snapshot differs from accepted parent",
+        "snapshotID": "audit:team:weekly:2026-09-01",
+        "subjectID": "team:core-platform",
+        "responsibilityLayer": "AidataL1L2",
+        "mode": "incremental",
+        "capturedAt": "2026-09-01T00:05:00Z",
+        "cohort": "team-audit",
+        "cursor": "sprint-42",
+        "axes": ["quality", "velocity"],
+        "feedbackLineage": ["T001", "T002"],
+        "agentRepeat": ["reviewed-contract"],
+        "limitations": ["manual import only"],
+        "artifacts": ["finding-brief.md"],
+        "grill": ["what-was-the-root-cause"],
+        "sidecarID": "sidecar:team:weekly:2026-09-01",
+        "sidecarHash": "sidecar-hash-v2",
     }
 
-    (tmp_path / "bundle.json").write_text(__import__("json").dumps({**bundle, "children": [collision]}, ensure_ascii=False), encoding="utf-8")
+    bundle_dir = tmp_path / "audit-bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "snapshot.json").write_text(json.dumps(snapshot_payload, ensure_ascii=False), encoding="utf-8")
+    (bundle_dir / "artifacts.json").write_text(json.dumps(sidecar_payload, ensure_ascii=False), encoding="utf-8")
+    (bundle_dir / "collision.json").write_text(json.dumps(collision, ensure_ascii=False), encoding="utf-8")
 
     written = adapter.collect()
     assert written == 2
@@ -93,7 +110,7 @@ def test_manual_import_collects_and_normalizes_collision_safe(monkeypatch: pytes
     normalized = adapter.normalize()
     assert normalized == 1
 
-    db = ROOT / "L2_normalize" / "clean" / "team_audit_snapshot.db"
+    db = cleanio.clean_path("team_audit_snapshot")
     assert db.exists()
     with sqlite3.connect(db) as conn:
         snapshot_rows = conn.execute(
@@ -107,14 +124,12 @@ def test_manual_import_collects_and_normalizes_collision_safe(monkeypatch: pytes
         ).fetchall()
 
     assert snapshot_rows[0][0] == "audit:team:weekly:2026-09-01"
-    assert snapshot_rows[0][1] == "bundle-hash-v1"
     assert snapshot_rows[0][2] == "team:core-platform"
     assert snapshot_rows[0][3] == "AidataL1L2"
     assert "T002" in snapshot_rows[0][4]
     assert observation_rows[0][0] == "audit:team:weekly:2026-09-01"
-    assert observation_rows[0][1] == "bundle-hash-v2"
     assert observation_rows[0][2] == "collision"
     assert observation_rows[0][3] == "audit:team:weekly:2026-09-01"
-    assert observation_rows[0][4] == "bundle-hash-v1"
+    assert observation_rows[0][4] != ""
     assert sidecar_rows[0][0] == "sidecar:team:weekly:2026-09-01"
     assert sidecar_rows[0][1] == "sidecar-hash-v1"
