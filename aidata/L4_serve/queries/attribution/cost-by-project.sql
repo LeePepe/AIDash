@@ -29,7 +29,15 @@
 -- silently folded into an arbitrary project.
 --
 -- Bind :day as a CST date 'YYYY-MM-DD'; NULL falls back to the whole history.
-WITH session_cost AS (
+WITH request_totals AS (
+    SELECT sum(COALESCE(cost_usd, 0)) AS day_total,
+           sum(COALESCE(total_tokens, 0)) AS day_tokens,
+           count(*) AS day_requests,
+           count(DISTINCT CASE WHEN session_uuid IS NOT NULL THEN session_uuid END) AS day_sessions
+    FROM fact_request
+    WHERE (:day IS NULL OR cst_day = :day)
+),
+session_cost AS (
     SELECT session_uuid          AS sid,
            sum(COALESCE(cost_usd, 0)) AS cost,
            sum(COALESCE(total_tokens, 0)) AS tokens,
@@ -39,44 +47,64 @@ WITH session_cost AS (
       AND (:day IS NULL OR cst_day = :day)
     GROUP BY session_uuid
 ),
--- Each session's turn mix, as weights summing to 1.0 per session.
+-- Each session's turn mix, as weights summing to 1.0 per session. Blank/null
+-- project labels stay in the session's denominator so they remain visible as
+-- residual spend instead of being silently folded into a valid project.
 project_weight AS (
     SELECT session_id AS sid,
            NULLIF(TRIM(project), '') AS project,
            count(*) * 1.0
              / sum(count(*)) OVER (PARTITION BY session_id) AS weight
     FROM fact_turn
-    WHERE project IS NOT NULL
-      AND TRIM(project) != ''
-      AND (:day IS NULL OR cst_day = :day)
-    GROUP BY session_id, TRIM(project)
+    WHERE (:day IS NULL OR cst_day = :day)
+    GROUP BY session_id, NULLIF(TRIM(project), '')
 ),
 allocated AS (
     SELECT w.project,
+           'project' AS bucket,
            sum(c.cost * w.weight)     AS cost_usd,
            sum(c.tokens * w.weight)   AS tokens,
            sum(c.requests * w.weight) AS requests,
            count(DISTINCT c.sid)      AS sessions
     FROM session_cost c
     JOIN project_weight w ON w.sid = c.sid
+    WHERE w.project IS NOT NULL
     GROUP BY w.project
 ),
+allocated_totals AS (
+    SELECT sum(cost_usd) AS attributed_total,
+           sum(tokens) AS attributed_tokens,
+           sum(requests) AS attributed_requests,
+           sum(sessions) AS attributed_sessions
+    FROM allocated
+),
 day_summary AS (
-    SELECT sum(cost) AS day_total,
-           COALESCE((SELECT sum(cost_usd) FROM allocated), 0) AS attributed_total
-    FROM session_cost
+    SELECT r.day_total,
+           r.day_tokens,
+           r.day_requests,
+           r.day_sessions,
+           COALESCE(a.attributed_total, 0) AS attributed_total,
+           COALESCE(a.attributed_tokens, 0) AS attributed_tokens,
+           COALESCE(a.attributed_requests, 0) AS attributed_requests,
+           COALESCE(a.attributed_sessions, 0) AS attributed_sessions
+    FROM request_totals r
+    LEFT JOIN allocated_totals a ON 1 = 1
 ),
 unattributed AS (
     SELECT 'unattributed' AS project,
+           'residual' AS bucket,
            round((SELECT day_total FROM day_summary) -
                  (SELECT attributed_total FROM day_summary), 2) AS cost_usd,
            round(100.0 * (
                  (SELECT day_total FROM day_summary) -
                  (SELECT attributed_total FROM day_summary)
            ) / NULLIF((SELECT day_total FROM day_summary), 0), 1) AS cost_pct,
-           0 AS ktokens,
-           0 AS requests,
-           0 AS sessions,
+           round(((SELECT day_tokens FROM day_summary) -
+                  (SELECT attributed_tokens FROM day_summary)) / 1000.0, 1) AS ktokens,
+           round((SELECT day_requests FROM day_summary) -
+                 (SELECT attributed_requests FROM day_summary)) AS requests,
+           round((SELECT day_sessions FROM day_summary) -
+                 (SELECT attributed_sessions FROM day_summary)) AS sessions,
            round((SELECT day_total FROM day_summary), 2) AS day_total,
            round((SELECT attributed_total FROM day_summary), 2) AS attributed_total
     FROM day_summary
@@ -85,6 +113,7 @@ unattributed AS (
            (SELECT attributed_total FROM day_summary)) > 0
 )
 SELECT project,
+       bucket,
        round(cost_usd, 2) AS cost_usd,
        round(100.0 * cost_usd / NULLIF((SELECT day_total FROM day_summary), 0), 1) AS cost_pct,
        round(tokens / 1000.0, 1) AS ktokens,
@@ -95,6 +124,7 @@ SELECT project,
 FROM allocated
 UNION ALL
 SELECT project,
+       bucket,
        cost_usd,
        cost_pct,
        ktokens,

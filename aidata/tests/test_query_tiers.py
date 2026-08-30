@@ -163,18 +163,40 @@ def test_cost_by_project_tracks_day_total_and_unattributed_share(tmp_path):
         ],
         [
             ("s1", "AIDash", "2026-08-02"),
-            ("s1", " VitalStride ", "2026-08-02"),
+            ("s1", " Atlas ", "2026-08-02"),
             ("s2", "   ", "2026-08-02"),
         ],
     )
     rows, idx = _run_cost_by_project(db)
     by_project = {r[idx["project"]]: r for r in rows}
-    assert {"AIDash", "VitalStride", "unattributed"} <= set(by_project)
+    assert {"AIDash", "Atlas", "unattributed"} <= set(by_project)
     assert by_project["unattributed"][idx["cost_usd"]] == 200.0
     assert by_project["unattributed"][idx["day_total"]] == 300.0
     assert by_project["unattributed"][idx["attributed_total"]] == 100.0
     assert by_project["AIDash"][idx["cost_pct"]] == 16.7
-    assert by_project["VitalStride"][idx["cost_pct"]] == 16.7
+    assert by_project["Atlas"][idx["cost_pct"]] == 16.7
+
+
+def test_cost_by_project_keeps_null_turns_unattributed_in_mixed_sessions(tmp_path):
+    db = _cost_by_project_warehouse(
+        tmp_path,
+        [
+            ("s1", "2026-08-02", 100.0, 500),
+            ("s2", "2026-08-02", 50.0, 200),
+        ],
+        [
+            ("s1", "Atlas", "2026-08-02"),
+            ("s1", "   ", "2026-08-02"),
+            ("s2", None, "2026-08-02"),
+        ],
+    )
+    rows, idx = _run_cost_by_project(db)
+    by_project = {r[idx["project"]]: r for r in rows}
+    assert by_project["Atlas"][idx["cost_usd"]] == 50.0
+    assert by_project["unattributed"][idx["cost_usd"]] == 100.0
+    assert by_project["unattributed"][idx["day_total"]] == 150.0
+    assert by_project["unattributed"][idx["attributed_total"]] == 50.0
+    assert by_project["unattributed"][idx["bucket"]] == "residual"
 
 
 def test_cost_by_project_preserves_zero_valid_attribution(tmp_path):
@@ -195,6 +217,7 @@ def test_cost_by_project_preserves_zero_valid_attribution(tmp_path):
     assert rows[0][idx["day_total"]] == 50.0
     assert rows[0][idx["attributed_total"]] == 0.0
     assert rows[0][idx["cost_pct"]] == 100.0
+    assert rows[0][idx["bucket"]] == "residual"
 
 
 def test_cost_by_project_normalizes_blank_project_labels(tmp_path):
@@ -206,3 +229,4 @@ def test_cost_by_project_normalizes_blank_project_labels(tmp_path):
     rows, idx = _run_cost_by_project(db)
     assert rows[0][idx["project"]] == "AIDash"
     assert rows[0][idx["cost_usd"]] == 90.0
+    assert rows[0][idx["bucket"]] == "project"
