@@ -288,6 +288,29 @@ _CLAUSE_SPLIT_RE = r"[，,;；。!?！？]|(?:但|然而|不过|尽管|虽然|�
 def _canonicalize_clause_text(text: str) -> str:
     return re.sub(r"[\s\u3000]+", "", (text or "")).replace("，", ",").replace("；", ";").replace("。", "").replace("、", "")
 
+
+def _clause_has_exact_directional_match(clause: str) -> bool:
+    """True only when the whole clause is an approved canonical direction phrase."""
+    canonical = _canonicalize_clause_text(clause)
+    if not canonical:
+        return False
+    if _is_recognized_non_claim_qualitative(clause):
+        return True
+
+    exact_patterns = (
+        r"(?:成本|开销|花费)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|上调|上涨|下降|降低|减少|回落)",
+        r"(?:浪费)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|上涨|增多|下降|降低|减少|回落)",
+        r"(?:请求量|请求数|requests?)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:Token|token)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:会话数|会话|session)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:完成任务|任务|产出)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|回落|减弱)",
+        r"(?:已完成issue|完成issue|已完成issue\(近似\)|完成issue\(近似\))(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率|增加|增大|下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)",
+        r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)",
+    )
+    return any(re.fullmatch(pattern, canonical, re.IGNORECASE) for pattern in exact_patterns)
+
+
 _NEUTRAL_FOLLOWUP_RE = re.compile(
     r"(?:需关注|谨慎|待观察|需留意|波动|风险|不确定)",
     re.IGNORECASE,
@@ -315,6 +338,15 @@ def _clauses_are_fully_consumed(text: str, evidence: EfficiencyEvidence) -> bool
             if prior_metric_ok:
                 continue
             return False
+
+        if re.search(
+            r"(?:成本|开销|花费|浪费|效率|效能|投入产出|产出|生产力|工作效率|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput|请求量|请求数|Token|token|会话数|会话|session|任务|issue)",
+            clause,
+            re.IGNORECASE,
+        ):
+            if not _clause_has_exact_directional_match(clause):
+                return False
+
         if _metric_direction_matches(clause, evidence):
             prior_metric_ok = True
             continue

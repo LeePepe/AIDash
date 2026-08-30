@@ -472,6 +472,8 @@ def test_polish_digest_falls_back_for_unclassified_economic_comparatives(claim):
         "物超所值",
         "成本上升，物超所值",
         "成本上升且物超所值",
+        "成本上升而物超所值",
+        "效率提升而物超所值",
         "会话活跃，效率大幅改善",
         "会话活跃且物超所值",
     ],
