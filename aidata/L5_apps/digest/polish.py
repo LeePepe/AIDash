@@ -194,8 +194,9 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
-    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省).{0,12}"
-    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下)"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省)"
+    r".{0,12}"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
     r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本)"
     r")",
@@ -203,9 +204,13 @@ _POSITIVE_EFFICIENCY_RE = re.compile(
 )
 
 _NEGATIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出|生产力).{0,12}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱)"
+    r"(?:"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率)"
+    r".{0,12}"
+    r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:drop|declin|worsen|decreas|fall)"
-    r"|(?:效率明显下降|效率下降|效率变差|生产力下降|效率趋弱|工作效率变差)",
+    r"|(?:效率明显下降|效率下降|效率变差|生产力下降|效率趋弱|工作效率变差|效率不如昨天)"
+    r")",
     re.IGNORECASE,
 )
 
@@ -312,10 +317,18 @@ def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bo
 
 
 def _efficiency_assertion_kind(tldr: str) -> str | None:
-    """Return 'positive', 'negative', or None for the claim direction."""
-    if _NEGATIVE_EFFICIENCY_RE.search(tldr):
+    """Return 'positive', 'negative', 'mixed', or None for the claim direction."""
+    positive = _POSITIVE_EFFICIENCY_RE.search(tldr) is not None
+    negative = _NEGATIVE_EFFICIENCY_RE.search(tldr) is not None
+    metric_assertions = _metric_direction_assertions(tldr)
+
+    if positive and (negative or metric_assertions):
+        # Fails closed when a positive efficiency cue is paired with a contrary
+        # negative cue or a directional metric clause without a clean positive match.
+        return "mixed"
+    if negative:
         return "negative"
-    if _POSITIVE_EFFICIENCY_RE.search(tldr):
+    if positive:
         return "positive"
     return None
 
@@ -372,6 +385,8 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
         re.IGNORECASE,
     ):
         assertion_kind = _efficiency_assertion_kind(tldr)
+        if assertion_kind == "mixed":
+            return False
         if assertion_kind == "positive":
             return evidence.allows_positive_claim()
         if assertion_kind == "negative":
