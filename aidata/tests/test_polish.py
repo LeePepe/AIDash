@@ -233,11 +233,20 @@ def test_validate_rejects_positive_claim_when_cost_up():
     assert validate_efficiency_claim("效率上升", ev) is False
     assert validate_efficiency_claim("效率增长", ev) is False
     assert validate_efficiency_claim("成本上升，但效率大幅增长", ev) is False
+    assert validate_efficiency_claim("成本上升，但效率创出新高", ev) is False
+    assert validate_efficiency_claim("效率不如昨天", ev) is False
     assert validate_efficiency_claim("工作更高效", ev) is False
     assert validate_efficiency_claim("效率趋弱", ev) is False
     assert validate_efficiency_claim("效率回升", ev) is False
     assert validate_efficiency_claim("效率变好", ev) is False
     assert validate_efficiency_claim("效率明显下降", ev) is False
+
+
+@pytest.mark.unit
+def test_validate_rejects_partial_metric_evidence():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=None, issues_pct=0)
+    assert validate_efficiency_claim("成本上升，浪费下降", ev) is False
+    assert validate_efficiency_claim("成本上升，任务下降", ev) is False
 
 
 @pytest.mark.unit
@@ -256,7 +265,7 @@ def test_validate_allows_positive_claim_when_evidence_supports():
     assert validate_efficiency_claim("效率增长", ev) is True
     assert validate_efficiency_claim("效率回升", ev) is True
     assert validate_efficiency_claim("效率变好", ev) is True
-    assert validate_efficiency_claim("工作更高效", ev) is True
+    assert validate_efficiency_claim("工作更高效", ev) is False
     assert validate_efficiency_claim("效率明显下降", ev) is False
     assert validate_efficiency_claim("效率趋弱", ev) is False
 
@@ -306,10 +315,12 @@ def test_polish_digest_rejects_false_efficiency_claim():
         "效率上升，继续保持",
         "效率增长，继续保持",
         "成本上升，但效率大幅增长",
+        "成本上升，但工作更高效",
+        "效率不如昨天",
     ],
 )
 def test_polish_digest_rejects_explicit_rise_phrases_claims(claim):
-    """Explicit rise/growth wording must also be rejected under mixed evidence."""
+    """Explicit rise/growth wording and unclassified efficiency prose must be rejected under mixed evidence."""
     client = FakeClient(f'{{"tldr": "{claim}", "todos": ["优先排查浪费来源"]}}')
     out = polish_digest(TEMPLATE_COST_UP, client)
     assert claim not in out

@@ -107,10 +107,24 @@ class EfficiencyEvidence:
         return True
 
     def allows_negative_claim(self) -> bool:
-        """Negative efficiency claims need explicit output decline, not mere cost/waste rise."""
-        if self.tasks_pct is not None and self.tasks_pct < 0:
-            return True
-        if self.issues_pct is not None and self.issues_pct < 0:
+        """Negative efficiency claims require an outcome decline that is not explained away by the input-to-outcome ratio.
+
+        The rule is intentionally strict: a small output dip alongside a strong
+        cost/waste reduction does not prove lower efficiency, and a task/issue drop
+        alone is not enough evidence.
+        """
+        output_declines = [v for v in (self.tasks_pct, self.issues_pct) if v is not None and v < 0]
+        if not output_declines:
+            return False
+
+        worst_decline = max(abs(v) for v in output_declines)
+        strong_input_improvement = (
+            (self.cost_pct is not None and self.cost_pct <= -20)
+            or (self.waste_pct is not None and self.waste_pct <= -20)
+        )
+        if strong_input_improvement and worst_decline <= 5:
+            return False
+        if worst_decline >= 10 and not strong_input_improvement:
             return True
         return False
 
@@ -170,9 +184,9 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # evidence and keep neutral/uncertain wording only when the counter-signal is still
 # present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下|生产力).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更高效了)"
+    r"(?:效率|效能|投入产出|产出|用得更|更省|节省|省下|生产力).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率更高|效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|现在更高效了|生产力提升|工作更高效|更高效了)",
+    r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|现在更高效了|生产力提升|更高效了)",
     re.IGNORECASE,
 )
 
@@ -199,37 +213,61 @@ _UNCERTAINTY_RE = re.compile(
 )
 
 
+def _metric_direction_assertions(tldr: str) -> list[tuple[str, str]]:
+    """Return every metric-direction assertion in the TL;DR, if any."""
+    patterns = [
+        (
+            "cost",
+            re.compile(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", re.IGNORECASE),
+            re.compile(r"(?:成本|开销|花费).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
+        ),
+        (
+            "waste",
+            re.compile(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", re.IGNORECASE),
+            re.compile(r"(?:浪费).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
+        ),
+        (
+            "tasks",
+            re.compile(r"(?:完成任务|任务|产出).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|回落|减弱)", re.IGNORECASE),
+        ),
+        (
+            "issues",
+            re.compile(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:下降|减少|降低|回落)", re.IGNORECASE),
+        ),
+    ]
+
+    assertions: list[tuple[str, str]] = []
+    for metric, up_pat, down_pat in patterns:
+        if up_pat.search(tldr):
+            assertions.append((metric, "up"))
+        if down_pat.search(tldr):
+            assertions.append((metric, "down"))
+    return assertions
+
+
 def _metric_direction_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
-    """True when every metric-direction clause asserted in the text matches the evidence."""
-    checks: list[bool] = []
+    """Require every asserted metric-direction clause to match the extracted evidence."""
 
-    if evidence.cost_pct is not None:
-        if re.search(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
-            checks.append(evidence.cost_pct > 0)
-        if re.search(r"(?:成本|开销|花费).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
-            checks.append(evidence.cost_pct < 0)
+    def _value_for(metric: str) -> int | None:
+        return {
+            "cost": evidence.cost_pct,
+            "waste": evidence.waste_pct,
+            "tasks": evidence.tasks_pct,
+            "issues": evidence.issues_pct,
+        }[metric]
 
-    if evidence.waste_pct is not None:
-        if re.search(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
-            checks.append(evidence.waste_pct > 0)
-        if re.search(r"(?:浪费).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
-            checks.append(evidence.waste_pct < 0)
+    def _matches(metric: str, direction: str) -> bool:
+        value = _value_for(metric)
+        if value is None:
+            return False
+        return (direction == "up" and value > 0) or (direction == "down" and value < 0)
 
-    if evidence.tasks_pct is not None:
-        if re.search(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|回落|减弱)", tldr, re.IGNORECASE):
-            checks.append(evidence.tasks_pct < 0)
-        if re.search(r"(?:完成任务|任务|产出).{0,8}(?:上升|增加|增长|提升)", tldr, re.IGNORECASE):
-            checks.append(evidence.tasks_pct > 0)
-
-    if evidence.issues_pct is not None:
-        if re.search(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:上升|增加|增长|提升)", tldr, re.IGNORECASE):
-            checks.append(evidence.issues_pct > 0)
-        if re.search(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:下降|减少|降低|回落)", tldr, re.IGNORECASE):
-            checks.append(evidence.issues_pct < 0)
-
-    if not checks:
+    assertions = _metric_direction_assertions(tldr)
+    if not assertions:
         return False
-    return all(checks)
+    return all(_matches(metric, direction) for metric, direction in assertions)
 
 
 def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
@@ -255,25 +293,27 @@ def _efficiency_assertion_kind(tldr: str) -> str | None:
 def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
     """Return True if the TL;DR is consistent with the evidence.
 
-    Positive efficiency claims are only allowed when the template shows strict
-    outcome improvement and no adverse cost/waste signal. Mixed or insufficient
-    evidence must fail closed: positive or unsupported negative wording is rejected,
-    and neutral/fact-style wording is accepted only with a real metric-direction
-    match or an explicit material counter-signal.
+    Efficiency wording is fail-closed: any efficiency-related claim must be one of
+    the Classified-and-proven forms, and any metric-direction assertion must match
+    real extracted evidence. Mixed or insufficient evidence can only be published
+    as neutral fact-style prose when the named adverse metric and direction are
+    explicit.
     """
     if not tldr or not tldr.strip():
         return False
     if re.search(r"\d|[$%]", tldr):
         return False
 
-    assertion_kind = _efficiency_assertion_kind(tldr)
-    if assertion_kind == "positive":
-        return evidence.allows_positive_claim()
-    if assertion_kind == "negative":
-        return evidence.allows_negative_claim()
+    if re.search(r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出)", tldr, re.IGNORECASE):
+        assertion_kind = _efficiency_assertion_kind(tldr)
+        if assertion_kind == "positive":
+            return evidence.allows_positive_claim()
+        if assertion_kind == "negative":
+            return evidence.allows_negative_claim()
+        return False
 
-    if _metric_direction_matches(tldr, evidence):
-        return True
+    if _metric_direction_assertions(tldr):
+        return _metric_direction_matches(tldr, evidence)
     if _named_adverse_signal_matches(tldr, evidence):
         return True
     return False

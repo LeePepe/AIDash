@@ -69,6 +69,25 @@ def test_happy_path_polishes_and_passes_guard(frozen):
 
 
 @pytest.mark.unit
+def test_llm_rejects_unclassified_efficiency_assertion(frozen):
+    template = build_digest(REPORT_DATE, use_llm=False)
+    client = FakeClient('{"tldr": "成本上升，但工作更高效", "todos": []}')
+    out = build_digest(REPORT_DATE, use_llm=True, client=client)
+    assert "工作更高效" not in out
+    assert "成本上升" in out or "整体趋势需关注" in out
+    assert out != template
+
+
+@pytest.mark.unit
+def test_llm_rejects_negative_efficiency_without_threshold(frozen):
+    template = build_digest(REPORT_DATE, use_llm=False)
+    client = FakeClient('{"tldr": "效率趋弱", "todos": []}')
+    out = build_digest(REPORT_DATE, use_llm=True, client=client)
+    assert "效率趋弱" not in out
+    assert out != template
+
+
+@pytest.mark.unit
 def test_fallback_on_llm_error(frozen):
     template = build_digest(REPORT_DATE, use_llm=False)
     out = build_digest(REPORT_DATE, use_llm=True, client=RaisingClient())
