@@ -261,6 +261,23 @@ _UNCERTAINTY_RE = re.compile(
     re.IGNORECASE,
 )
 
+_NON_CLAIM_QUALITATIVE_RE = re.compile(
+    r"(?:会话活跃|整体趋势需关注|整体趋势需观察|需关注波动|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察)",
+    re.IGNORECASE,
+)
+
+_ECONOMIC_COMPARATIVE_RE = re.compile(
+    r"(?:"
+    r"更少(?:.*(?:钱|成本|费用|开销|支出))"
+    r"|更便宜|更划算|更省|花更少|省钱|省下(?:.*(?:钱|成本|费用|开销|支出))"
+    r"|(?:每次|单次).{0,12}(?:更便宜|更省|更划算)"
+    r"|(?:完成|产出).{0,12}(?:更多|更高).{0,12}(?:任务|issue|请求|结果)"
+    r"|(?:任务|issue|请求).{0,8}(?:更便宜|更省|更划算)"
+    r"|(?:花更少.*完成更多|更少.*钱.*完成更多|每次请求更便宜|每次请求更省)"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def _metric_direction_assertions(tldr: str) -> list[tuple[str, str]]:
     """Return every metric-direction assertion in the TL;DR, if any."""
@@ -469,9 +486,16 @@ def _efficiency_assertion_kind(tldr: str) -> str | None:
     return None
 
 
+def _is_recognized_non_claim_qualitative(tldr: str) -> bool:
+    """True only for explicitly approved non-claim qualitative prose."""
+    return bool(tldr and _NON_CLAIM_QUALITATIVE_RE.search(tldr.strip()) and not _ECONOMIC_COMPARATIVE_RE.search(tldr))
+
+
 def _needs_efficiency_validation(tldr: str) -> bool:
     """Whether the TL;DR is an efficiency claim or a tracked metric-direction statement."""
     if not tldr or not tldr.strip():
+        return False
+    if _is_recognized_non_claim_qualitative(tldr):
         return False
     if re.search(
         r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|提效|工作提效|efficiency|productivity|throughput)",
@@ -480,6 +504,8 @@ def _needs_efficiency_validation(tldr: str) -> bool:
     ):
         return True
     if _metric_direction_assertions(tldr):
+        return True
+    if _ECONOMIC_COMPARATIVE_RE.search(tldr):
         return True
     if re.search(r"(?:上升|增长|提升|提高|改善|优化|好转|更好|增强|回升|变好|下降|降低|减少|恶化|变差|回落|趋弱|下滑|走弱)", tldr, re.IGNORECASE):
         if re.search(r"(?:整体|趋势|成本|浪费|任务|issue|产出|效率|效能|生产力|请求|Token|会话|throughput|productivity|efficiency)", tldr, re.IGNORECASE):
@@ -490,16 +516,17 @@ def _needs_efficiency_validation(tldr: str) -> bool:
 def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
     """Return True if the TL;DR is consistent with the evidence.
 
-    Efficiency wording is fail-closed: any efficiency-related claim must be one of
-    the Classified-and-proven forms, and any metric-direction assertion must match
-    real extracted evidence. Mixed or insufficient evidence can only be published
-    as neutral fact-style prose when the named adverse metric and direction are
-    explicit.
+    Publication is only allowed for one of two closed classes: (1) a canonical
+    directional/metric assertion that matches the extracted evidence, or (2) an
+    explicitly recognized qualitative prose form with no efficiency/economic
+    comparison. Unknown or unproven economic phrasing deterministically falls back.
     """
     if not tldr or not tldr.strip():
         return False
     if re.search(r"\d|[$%]", tldr):
         return False
+    if _is_recognized_non_claim_qualitative(tldr):
+        return True
 
     metric_assertions = _metric_direction_assertions(tldr)
     if metric_assertions:
@@ -511,9 +538,6 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
         if evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
             return False
         if not evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
-            # Output-only activity growth is never enough to support a stronger
-            # directional claim; facts are valid only when the template also has
-            # a real input signal to anchor them.
             if evidence.cost_pct is None and evidence.waste_pct is None:
                 return False
 
@@ -529,6 +553,9 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
             return evidence.allows_positive_claim()
         if assertion_kind == "negative":
             return evidence.allows_negative_claim()
+        return False
+
+    if _ECONOMIC_COMPARATIVE_RE.search(tldr):
         return False
 
     if metric_assertions:

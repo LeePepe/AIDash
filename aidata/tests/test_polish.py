@@ -428,6 +428,37 @@ def test_polish_digest_rejects_english_efficiency_claim_and_missing_input_negati
     assert "efficiency improved" not in out.lower()
     assert "浪费上升" in out or "成本上升" in out
 
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "花更少的钱完成更多任务",
+        "每次请求更便宜",
+        "更少的钱完成更多任务",
+        "单次请求更省",
+    ],
+)
+def test_validate_rejects_unclassified_economic_comparatives(claim):
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, tasks_pct=256, issues_pct=0)
+    assert validate_efficiency_claim(claim, ev) is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "花更少的钱完成更多任务",
+        "每次请求更便宜",
+    ],
+)
+def test_polish_digest_falls_back_for_unclassified_economic_comparatives(claim):
+    client = FakeClient(f'{{"tldr": "{claim}", "todos": ["优先排查浪费来源"]}}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    assert claim not in out
+    assert "浪费上升" in out or "成本上升" in out
+    assert "- P0: 优先排查浪费来源" in out
+
     negative_client = FakeClient('{"tldr": "效率下降", "todos": ["继续观察"]}')
     negative_out = polish_digest("# AI 使用日报\n\n## ⚡ Trending\n- 完成任务: 11 ↓(-12%) vs 昨 12\n- 完成 issue: 8 ↓(-11%) vs 昨 9\n", negative_client)
     assert "效率下降" not in negative_out
