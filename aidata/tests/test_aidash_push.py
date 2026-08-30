@@ -297,7 +297,7 @@ def test_push_skipped_when_process_up_but_xpc_dead():
                         poll_s=0.0, attempts=2)
     assert not res.ok
     assert not res.published
-    assert "xpc" in res.reason.lower()
+    assert res.reason in {"xpc.app_unavailable", "xpc.connection_invalidated"}
     assert runner.calls == []          # never shelled out a mutating put
     assert sink.reasons                # loud: recorded to the failure sink
     assert any("xpc" in r.lower() for r in sink.reasons)
