@@ -53,7 +53,7 @@ _TREND_PCT_RE = re.compile(
 # Labels whose percentage changes are relevant to efficiency claims.
 _COST_LABELS = frozenset({"成本"})
 _WASTE_LABELS = frozenset({"浪费额"})
-_OUTPUT_LABELS = frozenset({"Token", "请求数", "完成任务", "tasks", "issues", "已完成 issue"})
+_OUTPUT_LABELS = frozenset({"Token", "请求数", "完成任务", "tasks", "issues", "已完成 issue", "完成 issue"})
 
 
 @dataclass(frozen=True)
@@ -70,24 +70,39 @@ class EfficiencyEvidence:
     tasks_pct: int | None = None
     issues_pct: int | None = None
 
+    def has_negative_signal(self) -> bool:
+        """True when the template is evidencing a materially worse operating state."""
+        if self.cost_pct is not None and self.cost_pct > 0:
+            return True
+        if self.waste_pct is not None and self.waste_pct > 0:
+            return True
+        if self.tasks_pct is not None and self.tasks_pct < 0:
+            return True
+        if self.issues_pct is not None and self.issues_pct < 0:
+            return True
+        return False
+
+    def has_strict_outcome_improvement(self) -> bool:
+        """True only when actual output/outcome evidence is strictly positive."""
+        outcome_values = [self.tasks_pct, self.issues_pct]
+        if not any(v is not None for v in outcome_values):
+            return False
+        if any(v is not None and v < 0 for v in outcome_values):
+            return False
+        return any(v is not None and v > 0 for v in outcome_values)
+
     def allows_positive_claim(self) -> bool:
         """Return True only when positive efficiency is auditable.
 
-        The evidence must show spending did not rise, waste did not rise, and at
-        least one output signal was present and not declining. This is a fail-closed
-        policy: missing or mixed evidence never authorizes a positive claim.
+        Token/request growth alone never authorizes efficiency language. The
+        evidence must show cost and waste did not rise, and at least one
+        task/issue outcome metric improved strictly.
         """
         if self.cost_pct is None or self.cost_pct > 0:
             return False
         if self.waste_pct is not None and self.waste_pct > 0:
             return False
-
-        output_values = [self.token_pct, self.requests_pct, self.tasks_pct, self.issues_pct]
-        if not any(v is not None for v in output_values):
-            return False
-        if any(v is not None and v < 0 for v in output_values):
-            return False
-        if all(v is not None and v <= 0 for v in output_values):
+        if not self.has_strict_outcome_improvement():
             return False
         return True
 
@@ -131,7 +146,7 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
                 requests_pct = pct
             elif label in {"完成任务", "tasks"}:
                 tasks_pct = pct
-            elif label in {"issues", "已完成 issue"}:
+            elif label in {"issues", "已完成 issue", "完成 issue"}:
                 issues_pct = pct
     return EfficiencyEvidence(
         cost_pct=cost_pct,
@@ -147,40 +162,81 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # evidence and keep neutral/uncertain wording only when the counter-signal is still
 # present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高)"
-    r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow)"
-    r"|(?:降低|减少).{0,6}(?:成本|开销|花费)"
-    r"|(?:效率更高|效率上升|效率增长|效能提升|投入产出更好|整体向好|整体改善|整体优化)",
+    r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好)"
+    r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
+    r"|(?:效率更高|效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化)",
+    re.IGNORECASE,
+)
+
+_NEGATIVE_EFFICIENCY_RE = re.compile(
+    r"(?:效率|效能|投入产出|产出).{0,12}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降)"
+    r"|(?:efficiency|productivity|throughput).{0,10}(?:drop|declin|worsen|decreas|fall)"
+    r"|(?:效率明显下降|效率下降|效率变差)",
+    re.IGNORECASE,
+)
+
+_MATERIAL_COUNTER_SIGNAL_RE = re.compile(
+    r"(?:成本上升|成本增加|浪费上升|浪费增加|任务下降|问题积压|问题增加|开销上升|花费上升)",
     re.IGNORECASE,
 )
 
 _COUNTER_SIGNAL_RE = re.compile(
-    r"(?:浪费|成本|需关注|谨慎|仍需|波动|不确定|风险|待观察|反向|上升|下降|压缩)",
+    r"(?:浪费|成本|任务|问题|需关注|谨慎|仍需|波动|不确定|风险|待观察|反向|上升|下降|压缩)",
     re.IGNORECASE,
 )
 
 _UNCERTAINTY_RE = re.compile(
-    r"(?:需关注|谨慎|仍需|待观察|不确定|可能|待确认|有待|需留意)",
+    r"(?:需关注|谨慎|仍需|待观察|不确定|可能|待确认|有待|需留意|整体平稳)",
     re.IGNORECASE,
 )
+
+
+def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
+    """Require a named adverse metric and an adverse direction to justify a neutral claim."""
+    if evidence.cost_pct is not None and evidence.cost_pct > 0 and re.search(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
+        return True
+    if evidence.waste_pct is not None and evidence.waste_pct > 0 and re.search(r"(?:浪费).{0,8}(?:上升|增加|增加|上涨)", tldr, re.IGNORECASE):
+        return True
+    if evidence.tasks_pct is not None and evidence.tasks_pct < 0 and re.search(r"(?:任务|产出).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
+        return True
+    if evidence.issues_pct is not None and evidence.issues_pct < 0 and re.search(r"(?:问题|积压).{0,8}(?:增加|上升|积压|增多)", tldr, re.IGNORECASE):
+        return True
+    return False
 
 
 def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
     """Return True if the TL;DR is consistent with the evidence.
 
-    Positive efficiency claims are allowed only when the evidence is sufficient.
-    Under mixed/insufficient evidence, the TL;DR must remain neutral or uncertain and
-    retain a material counter-signal. This is fail-closed by design.
+    Positive efficiency claims are only allowed when the template shows strict
+    outcome improvement and no adverse cost/waste signal. Mixed or insufficient
+    evidence must fail closed: positive wording is rejected, while neutral or
+    fact-style wording is accepted only if it does not make an unsupported
+    efficiency claim and, when it does mention uncertainty, it names a material
+    adverse metric with the matching direction.
     """
     if not tldr or not tldr.strip():
         return False
+    if re.search(r"\d|[$%]", tldr):
+        return False
 
     if evidence.allows_positive_claim():
+        if _NEGATIVE_EFFICIENCY_RE.search(tldr):
+            return False
         return True
 
     if _POSITIVE_EFFICIENCY_RE.search(tldr):
         return False
-    return bool(_COUNTER_SIGNAL_RE.search(tldr) or _UNCERTAINTY_RE.search(tldr))
+
+    if _NEGATIVE_EFFICIENCY_RE.search(tldr):
+        return evidence.has_negative_signal() and _named_adverse_signal_matches(tldr, evidence)
+
+    if re.search(r"(?:成本|浪费|请求|token|调用|会话).{0,6}(?:回落|下滑|下降|减少|降低)", tldr, re.IGNORECASE):
+        return True
+
+    if _COUNTER_SIGNAL_RE.search(tldr) or _UNCERTAINTY_RE.search(tldr):
+        return _named_adverse_signal_matches(tldr, evidence)
+
+    return True
 
 
 def neutral_fallback_tldr(evidence: EfficiencyEvidence) -> str:
@@ -414,6 +470,8 @@ def polish_digest(template_md: str, client: LLMClient) -> str:
     system, user = build_prompt(template_md)
     raw = client.complete(system, user)
     slots = parse_slots(raw)
+    if re.search(r"\d|[$%]", slots.tldr):
+        return template_md
     evidence = extract_efficiency_evidence(template_md)
     if not validate_efficiency_claim(slots.tldr, evidence):
         slots = PolishSlots(

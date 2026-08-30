@@ -115,7 +115,7 @@ def test_polish_digest_end_to_end_with_fake_client():
     client = FakeClient('{"tldr": "整体上升", '
                         '"todos": ["尽快排查 pipeline:15/47 取消(取消率32%)"]}')
     out = polish_digest(TEMPLATE, client)
-    assert "💡 点评: 整体上升" in out
+    assert "💡 点评: 整体趋势需关注，成本上升" in out
     assert "- P0: 尽快排查 pipeline" in out
     assert len(client.calls) == 1
 
@@ -124,7 +124,7 @@ def test_polish_digest_end_to_end_with_fake_client():
 # Efficiency-evidence gating tests (MY-1437/MY-1449)
 # ---------------------------------------------------------------------------
 
-# Template where cost rose +71% and waste rose +141%
+# Template where cost rose +71%, waste rose +141%, and issues stayed flat.
 TEMPLATE_COST_UP = """# AI 使用日报 2026-08-18
 
 > 数据源: raven✅
@@ -135,6 +135,7 @@ TEMPLATE_COST_UP = """# AI 使用日报 2026-08-18
 - 请求数: 950 ↑(+19%) vs 昨 800
 - 浪费额: 580$ ↑(+141%) vs 昨 240$
 - 完成任务: 128 ↑(+256%) vs 昨 36
+- 完成 issue(近似): 0 ↑(+0%) vs 昨 0
 
 ## 📅 今日 TODO
 - P0: 查浪费来源
@@ -169,6 +170,7 @@ def test_extract_evidence_cost_up():
     ev = extract_efficiency_evidence(TEMPLATE_COST_UP)
     assert ev.cost_pct == 71
     assert ev.waste_pct == 141
+    assert ev.issues_pct == 0
 
 
 @pytest.mark.unit
@@ -187,7 +189,7 @@ def test_extract_evidence_no_trend_lines():
 
 @pytest.mark.unit
 def test_allows_positive_claim_when_cost_down_waste_down_with_output_signal():
-    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, requests_pct=7)
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, issues_pct=4)
     assert ev.allows_positive_claim() is True
 
 
@@ -223,7 +225,7 @@ def test_disallows_positive_claim_when_output_signal_missing():
 
 @pytest.mark.unit
 def test_validate_rejects_positive_claim_when_cost_up():
-    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141)
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, issues_pct=0)
     assert validate_efficiency_claim("效率明显提升", ev) is False
     assert validate_efficiency_claim("效率更高", ev) is False
     assert validate_efficiency_claim("效能提升", ev) is False
@@ -231,20 +233,28 @@ def test_validate_rejects_positive_claim_when_cost_up():
     assert validate_efficiency_claim("效率上升", ev) is False
     assert validate_efficiency_claim("效率增长", ev) is False
     assert validate_efficiency_claim("成本上升，但效率大幅增长", ev) is False
+    assert validate_efficiency_claim("效率回升", ev) is False
+    assert validate_efficiency_claim("效率变好", ev) is False
+    assert validate_efficiency_claim("效率明显下降", ev) is False
 
 
 @pytest.mark.unit
-def test_validate_allows_neutral_wording_when_cost_up():
-    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141)
-    assert validate_efficiency_claim("整体上升，关注浪费", ev) is True
-    assert validate_efficiency_claim("成本和浪费均有波动", ev) is True
+def test_validate_neutral_requires_named_adverse_metric():
+    ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, issues_pct=0)
+    assert validate_efficiency_claim("整体平稳，需关注", ev) is False
+    assert validate_efficiency_claim("请求量上升", ev) is False
+    assert validate_efficiency_claim("成本上升，需关注", ev) is True
+    assert validate_efficiency_claim("浪费上升，需关注", ev) is True
 
 
 @pytest.mark.unit
 def test_validate_allows_positive_claim_when_evidence_supports():
-    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, requests_pct=7)
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, issues_pct=4)
     assert validate_efficiency_claim("效率明显提升", ev) is True
     assert validate_efficiency_claim("效率增长", ev) is True
+    assert validate_efficiency_claim("效率回升", ev) is True
+    assert validate_efficiency_claim("效率变好", ev) is True
+    assert validate_efficiency_claim("效率明显下降", ev) is False
 
 
 @pytest.mark.unit
@@ -314,6 +324,7 @@ def test_polish_digest_keeps_valid_positive_when_evidence_supports():
 - 成本: 1800$ ↓(-25%) vs 昨 2400$
 - 浪费额: 100$ ↓(-58%) vs 昨 240$
 - 完成任务: 128 ↑(+32%) vs 昨 96
+- 完成 issue(近似): 18 ↑(+29%) vs 昨 14
 - 请求数: 540 ↑(+12%) vs 昨 480
 
 ## 📅 今日 TODO
@@ -333,10 +344,10 @@ def test_polish_digest_keeps_valid_positive_when_evidence_supports():
 @pytest.mark.unit
 def test_polish_digest_keeps_valid_neutral_commentary():
     """LLM provides neutral commentary when cost is up — should be kept."""
-    client = FakeClient('{"tldr": "成本和浪费均有波动，需关注", '
+    client = FakeClient('{"tldr": "成本上升，需关注", '
                         '"todos": ["排查浪费来源"]}')
     out = polish_digest(TEMPLATE_COST_UP, client)
-    assert "成本和浪费均有波动" in out
+    assert "成本上升，需关注" in out
 
 
 @pytest.mark.unit
