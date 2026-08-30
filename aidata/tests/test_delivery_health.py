@@ -100,6 +100,22 @@ def test_no_delivery_card_when_delivery_ok():
 
 
 @pytest.mark.unit
+def test_delivery_card_when_delivery_is_stale():
+    """A stale delivery should still surface in the overview card even when OK."""
+    delivery = DeliveryState(ok=True, reason="", timestamp="2026-08-17T01:00:00Z")
+    briefing = build_briefing(
+        "2026-08-19", _minimal_raven_trends(), _minimal_full_md(),
+        must_see="", delivery=delivery,
+    )
+    overview = briefing.containers[0]
+    titles = [c.payload.get("title") for c in overview.cards]
+    assert "投递健康" in titles
+
+    delivery_card = next(c for c in overview.cards if c.payload.get("title") == "投递健康")
+    assert "stale" in delivery_card.payload["body"].lower()
+
+
+@pytest.mark.unit
 def test_no_delivery_card_when_delivery_none():
     """First run (no delivery state ever persisted) shows no delivery card."""
     briefing = build_briefing(

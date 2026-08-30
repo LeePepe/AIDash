@@ -515,9 +515,11 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
                           {"title": "数据源健康", "body": _strip_md(health)},
                           style="warning"))
     # Delivery/XPC health — separate from content-source health (MY-1450).
-    if delivery is not None and not delivery.ok:
+    # Show a delivery-health card when the last push failed OR the persisted
+    # delivery is stale, even if the most recent push reported OK.
+    if delivery is not None:
         d_line = delivery_health_line(report_date, delivery)
-        if d_line:
+        if d_line and (not delivery.ok or "stale" in d_line):
             cards.append(Card(_kuid(mmdd, 99), "insight", "wide",
                               {"title": "投递健康", "body": _strip_md(d_line)},
                               style="warning"))
