@@ -192,6 +192,8 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # Closed policy: reject explicit efficiency-positive wording under mixed/insufficient
 # evidence and keep neutral/uncertain wording only when the counter-signal is still
 # present.
+_NEGATION_RE = r"(?:不|未|没|没有|并未|并没有|非|并非)"
+
 _POSITIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
     r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
@@ -207,10 +209,14 @@ _NEGATED_POSITIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
     r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
     r".{0,12}"
-    r"(?:未|没有|没|并未|并没有)"
+    r"(?:不|未|没|没有|并未|并没有|非|并非)"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
+    r"|(?:(?:不|未|没|没有|并未|并没有|非|并非))"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
+    r".{0,12}"
     r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:not|no|without).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率未提升|效率没有提升|效率没提升|效率未增长|效率没有增长|没有提效|没提效|并未提效|没有提升|效率未提高|没提高)"
+    r"|(?:效率未提升|效率没有提升|效率没提升|效率不提升|效率未增长|效率没有增长|效率不增长|没有提效|没提效|并未提效|并非提效|没有提升|效率未提高|没提高|没有效率提升|没有效率增长)"
     r")",
     re.IGNORECASE,
 )
@@ -219,9 +225,12 @@ _NEGATIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
     r"(?:效率|效能|投入产出|产出|生产力|工作效率|提效|工作提效)"
     r".{0,12}"
-    r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱)"
+    r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)"
+    r"|(?:效率|效能|投入产出|产出|生产力|工作效率|提效|工作提效)"
+    r"(?:.{0,12})(?:不|未|没|没有|并未|并没有|非|并非)"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:drop|declin|worsen|decreas|fall|slip)"
-    r"|(?:效率明显下降|效率下降|效率变差|生产力下降|效率趋弱|工作效率变差|效率不如昨天|效率下滑|效率走弱|工作提效但效率下滑|工作提效但效率走弱|效率未提升|效率没提升|效率没有提升|效率未增长)"
+    r"|(?:效率明显下降|效率下降|效率变差|生产力下降|效率趋弱|工作效率变差|效率不如昨天|效率下滑|效率走弱|工作提效但效率下滑|工作提效但效率走弱|效率未提升|效率没提升|效率没有提升|效率不提升|效率未增长|效率不增长|没有效率提升|没有效率增长)"
     r")",
     re.IGNORECASE,
 )
@@ -244,7 +253,7 @@ _UNCERTAINTY_RE = re.compile(
 
 def _metric_direction_assertions(tldr: str) -> list[tuple[str, str]]:
     """Return every metric-direction assertion in the TL;DR, if any."""
-    negator = r"(?:没有|没|未|并没有|并未|(?:(?<!不)不))(?!但)"
+    negator = r"(?:没有|没|未|并没有|并未|非|并非|(?:(?<!不)不))(?!但)"
     patterns = [
         (
             "cost",
@@ -360,13 +369,23 @@ def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bo
 
 def _efficiency_assertion_kind(tldr: str) -> str | None:
     """Return 'positive', 'negative', 'mixed', or None for the claim direction."""
+    negated_positive = _NEGATED_POSITIVE_EFFICIENCY_RE.search(tldr) is not None
+    if negated_positive:
+        cleaned = _NEGATED_POSITIVE_EFFICIENCY_RE.sub(" ", tldr)
+        positive = _POSITIVE_EFFICIENCY_RE.search(cleaned) is not None
+        negative = _NEGATIVE_EFFICIENCY_RE.search(tldr) is not None
+        if positive and negative:
+            return "mixed"
+        if positive or negative:
+            return "negative"
+        return "negative"
+
     positive = _POSITIVE_EFFICIENCY_RE.search(tldr) is not None
     negative = _NEGATIVE_EFFICIENCY_RE.search(tldr) is not None
-    negated_positive = _NEGATED_POSITIVE_EFFICIENCY_RE.search(tldr) is not None
 
-    if positive and (negative or negated_positive):
+    if positive and negative:
         return "mixed"
-    if negated_positive or negative:
+    if negative:
         return "negative"
     if positive:
         return "positive"

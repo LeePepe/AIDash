@@ -276,6 +276,8 @@ def test_validate_rejects_loose_efficiency_language_without_directional_claim():
     "claim",
     [
         "效率未提升",
+        "效率不提升",
+        "没有效率提升",
         "没有提效",
         "效率提升，但没有提效",
         "效率增长，但效率下滑",
@@ -291,6 +293,7 @@ def test_validate_rejects_negated_and_mixed_efficiency_claims(claim):
 def test_validate_rejects_contradictory_metric_negation_per_clause():
     ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, issues_pct=4)
     assert validate_efficiency_claim("成本上升，但成本没有上升", ev) is False
+    assert validate_efficiency_claim("成本并非上升", ev) is False
     assert validate_efficiency_claim("成本不但上升", ev) is False
 
 

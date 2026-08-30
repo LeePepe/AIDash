@@ -106,6 +106,16 @@ def test_llm_rejects_negative_efficiency_without_threshold(frozen):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("claim", ["效率不提升", "没有效率提升"])
+def test_llm_rejects_negated_efficiency_claims(frozen, claim):
+    template = build_digest(REPORT_DATE, use_llm=False)
+    client = FakeClient(f'{{"tldr": "{claim}", "todos": []}}')
+    out = build_digest(REPORT_DATE, use_llm=True, client=client)
+    assert claim not in out
+    assert out != template
+
+
+@pytest.mark.unit
 def test_fallback_on_llm_error(frozen):
     template = build_digest(REPORT_DATE, use_llm=False)
     out = build_digest(REPORT_DATE, use_llm=True, client=RaisingClient())
