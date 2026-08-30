@@ -166,6 +166,9 @@ run_with_timeout() {
     # we must distinguish "leader exited cleanly" from "the deadline fired".
     while [ "$waited" -lt "$seconds" ]; do
         if ! kill -0 "$child_pid" 2>/dev/null || ps -o stat= -p "$child_pid" 2>/dev/null | grep -q 'Z'; then
+            # Give a just-started background job a brief window to emit its
+            # pidfile/descendants before the watchdog declares the run clean.
+            sleep 1
             cleanup_process_group "$child_pid"
             cleanup_lingering_descendants "$child_pid"
             if wait "$child_pid" 2>/dev/null; then
@@ -181,6 +184,7 @@ run_with_timeout() {
     done
 
     if ! kill -0 "-$child_pid" 2>/dev/null; then
+        sleep 1
         cleanup_process_group "$child_pid"
         cleanup_lingering_descendants "$child_pid"
         if wait "$child_pid" 2>/dev/null; then
