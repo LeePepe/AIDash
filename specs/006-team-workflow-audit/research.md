@@ -53,7 +53,9 @@ immutable snapshot and child facts keyed by stable source identities, L4
 exposes named read-only queries, and L5 maps only L4 output into card payloads.
 Same identity plus same hash is an idempotent replay; same identity plus a
 different hash appends an independently keyed collision observation and never
-overwrites or annotates the accepted snapshot fact.
+overwrites or annotates the accepted snapshot fact. Every observation carries
+the accepted parent snapshot ID and snapshot content hash, so snapshot-scoped
+child collisions join unambiguously.
 
 **Rationale**: This follows aidata's declared layer direction, retains
 provenance, and lets every UI value be traced back to an accepted immutable
@@ -114,12 +116,14 @@ and graceful-failure behavior behind the established interface. Constitution
 ## Decision 6: Use a hosted artifact sidecar and the central URL policy
 
 **Decision**: A publishable manually imported bundle contains a typed artifact
-sidecar envelope with schema version, snapshot identity, artifact entries, and
-optional `grillMeURL`/`grillWithDocsURL` strings. Import may retain a missing
-sidecar as a limitation, but publication waits for mandatory entries. Each artifact binds a stable identity
-and content hash to its snapshot, finding/case identities, evidence event IDs,
-revision evidence, and an HTTPS URL. Unsafe or missing URLs remain visible as
-unavailable labels and limitations; grill links only open a browser destination.
+sidecar envelope with schema version, stable sidecar identity, exact sidecar
+content SHA-256, snapshot identity, artifact entries, and optional
+`grillMeURL`/`grillWithDocsURL` strings. Import may retain a missing sidecar as
+a limitation, but publication waits for mandatory entries. Each artifact binds
+a stable identity and content hash to its snapshot, finding/case identities,
+evidence event IDs, revision evidence, and an HTTPS URL. An unsafe/missing
+mandatory artifact URL rejects publication; only optional artifact/grill URLs
+remain visible as unavailable text. Grill links only open a browser destination.
 
 **Rationale**: The upstream evidence schema mandates Archify outputs but does
 not define a portable URL field. The repository rejects `file:` and custom
@@ -136,14 +140,15 @@ snapshot and keeps dynamic team/P0/P1 artifacts viewable on every device.
 
 ## Decision 7: Publish the latest snapshot inside today's briefing
 
-**Decision**: L5 adds one audit container for the latest accepted snapshot to
-the normal daily briefing. It emits a compact overview first, then bounded
-detail parts. The overview, every P0/P1 finding, generic workflow, every team
-relationship, and every P0/P1 event-chain link are mandatory and reserved
-before optional details. If the budget cannot contain every mandatory part,
-publication is rejected. Optional oversized details may externalize only to a
-typed validated full-report reference; required records are never replaced by
-that report.
+**Decision**: L4 exposes immutable required entities and required-count inputs;
+it never computes published/omitted/externalized results. L5 adds one audit
+container for the latest accepted snapshot, packs the final cards, computes
+`PublicationCoverage`, and emits in US1 a compact overview plus every P0/P1
+finding, generic workflow, team relationship, and P0/P1 event-chain link.
+Those mandatory items are reserved before optional details. If the budget
+cannot contain every mandatory part, publication is rejected. Optional
+oversized details may externalize only to a typed validated full-report
+reference; required records are never replaced by that report.
 
 **Rationale**: This preserves the product's single-day, flat, five-minute
 reading model and avoids an unrequested history/navigation product. Stable

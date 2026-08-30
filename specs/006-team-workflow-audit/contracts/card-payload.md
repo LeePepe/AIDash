@@ -29,6 +29,8 @@ signals, never `CardStyle` or whole-card background changes.
   "partIndex": 0,
   "partCount": 1,
   "contentSHA256": "<64 lowercase hex characters>",
+  "artifactSidecarID": "audit-snapshot-001:artifact-sidecar:v1",
+  "artifactSidecarSHA256": "<64 lowercase hex characters>",
   "overview": {},
   "findings": [],
   "caseTimelines": [],
@@ -49,8 +51,10 @@ others are absent or empty. The detailed field types and invariants are in
 - `overview` shows scope, mode, cohort or cursors, evidence coverage,
   provenance, limitations, the three core axes side-by-side, and Task
   Effectiveness in its own group.
-- `findings` shows fingerprint, axis, priority, canonical state, evidence,
-  and remediation owner. It emits optional decision intents but never writes.
+- `findings` shows explicit subject ID and responsibility layer plus
+  fingerprint, axis, priority, canonical state, evidence, and remediation
+  owner. It never parses source identity from the fingerprint; it emits
+  optional decision intents but never writes.
 - `caseTimelines` shows ordered redacted events/attempts with stable IDs,
   roles, timestamps, revision SHA, and limitations.
 - `individualMetrics` shows definition, numerator/denominator, window, and
@@ -62,10 +66,12 @@ others are absent or empty. The detailed field types and invariants are in
   cycle/cause breakdowns, role-specific counters, and supporting subject/event
   identities. It never computes a cross-role efficiency score.
 - `importObservations` shows each collision observation identity, time, source,
-  entity identity, accepted/rejected hashes, disposition, and limitation while
-  keeping the accepted snapshot hash unchanged.
-- `artifacts` shows artifact identity/hash/evidence relationships. A URL is a
-  `Link` only when `URLPolicy.validate` accepts it; otherwise it is text.
+  explicit parent snapshot ID/hash, entity identity, accepted/rejected hashes,
+  disposition, and limitation while keeping accepted content unchanged.
+- `artifacts` shows artifact identity/hash/evidence relationships and the
+  sidecar identity/hash provenance. Mandatory artifact URLs have already passed
+  publication validation; optional artifact/grill URLs become a `Link` only
+  when `URLPolicy.validate` accepts them and otherwise remain text.
 - P0/P1 event-chain entries display finding fingerprint, event IDs, and
   revision evidence together.
 - Invalid payloads use the existing generic card fallback.
@@ -82,7 +88,9 @@ L5 uses deterministic two-pass packing:
 3. Set final `partIndex`/`partCount`, re-encode, and move the last entity to the
    next part until every final encoded payload is within the limit.
 
-The mandatory set is emitted before any discretionary detail budget:
+L4 supplies required entities/count inputs only. L5 computes final
+published/omitted/externalized counts after packing and emits the mandatory set
+before any discretionary detail budget:
 
 - the complete overview with `PublicationCoverage`;
 - every P0/P1 finding;

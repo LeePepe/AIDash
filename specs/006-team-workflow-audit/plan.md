@@ -147,32 +147,38 @@ persistence.
 
 **Outcome**: An explicitly imported snapshot appears in today's briefing with
 scope/provenance/limitations, baseline cohort or incremental cursors, three
-independent core axes, and separate Task Effectiveness.
+independent core axes, separate Task Effectiveness, every P0/P1 finding, and
+all mandatory generic/team/P0/P1 artifact links. L4 supplies immutable required
+inputs; L5 packs them and computes final publication coverage.
 
 **Layer path**:
 
 `AidataFoundation → AidataL1L2 → AidataL3 → AidataL4 → AidataL5 → AIDashCore → DesignKit → AIDashUI → AIDashApp schema advertisement`
 
 Core and aidata contract tasks may proceed in parallel after the planning
-contract; AidataL5 waits for L4 and Core; UI waits for Core and DesignKit; App
-schema advertisement waits for Core. The slice is independently demonstrated
-with baseline/incremental fixtures and no audit invocation.
+contract; AidataL5 waits for L4 and Core, computes published/omitted/externalized
+results after packing, and emits the mandatory set; UI waits for Core and
+DesignKit and renders it read-only; App schema advertisement waits for Core.
+The slice is independently demonstrated with baseline/incremental fixtures and
+no audit invocation.
 
 ### US2 — Inspect findings, timelines, metrics, and artifacts
 
-**Outcome**: The same typed publication exposes all six lifecycle states,
+**Outcome**: The same typed publication adds optional/detail views for all six lifecycle states,
 stable fingerprints, redacted case/attempt evidence, complete feedback
 lineage, per-role repeat/cause/role-specific metrics, collision observations,
-individual metrics, and every mandatory generic/team/P0/P1 Archify relationship.
+individual metrics, optional artifacts/grill links, and full-report
+externalization without changing US1's mandatory set.
 
 **Dependencies**: US1 publication seam and card registration. Detail-specific
 AidataL4 queries, L5 partitioning, and AIDashUI sections may land as separate
 layer tasks without changing the common Core contract.
 
 **Independent demonstration**: a neutral evidence fixture renders every typed
-detail section; unsafe URLs are text, valid HTTPS artifacts preserve
-fingerprint/event/hash/revision relationships, mandatory link counts reconcile,
-and exact payload-size boundary fixtures prove reject/externalize behavior.
+detail section; unsafe optional URLs are text, unsafe mandatory URLs reject
+publication, valid HTTPS artifacts preserve fingerprint/event/hash/revision
+relationships, mandatory link counts reconcile, and exact payload-size boundary
+fixtures prove reject/externalize behavior.
 
 ### US3 — Record acknowledgement or remediation approval safely
 
@@ -193,14 +199,14 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | Contract | Producer | Consumer | Blocking edges |
 |---|---|---|---|
 | Manual snapshot bundle | External explicit operator + AidataL1L2 | AidataL3 | Foundation registry before adapter; adapter before schema merge |
-| Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | Independently keyed observation never updates accepted snapshot; import before all downstream views |
+| Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | Independently keyed observation carries parent snapshot ID/hash and never updates accepted content |
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
-| Named audit query bundles | AidataL4 | AidataL5 | L4 before mapping/publication; lineage/repeat/collision grains remain typed |
-| `teamAudit` JSON payload | AIDashCore | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Core before mapping/render/schema; contract check after assembled changes |
+| Named audit query bundles | AidataL4 | AidataL5 | L4 exposes immutable required entities/counts and optional facts only; L5 alone computes final publication coverage after packing |
+| `teamAudit` JSON payload | AIDashCore | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash and explicit finding identity; Core before mapping/render/schema |
 | Classification tint | DesignKit | AIDashUI | DesignKit before final UI renderer |
 | Audit action intent | AIDashUI | AIDashApp | Core action enum before both; UI interface before App wiring |
 | `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
-| Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore payload + AIDashUI URLPolicy | typed grill/full-report fields and every mandatory chain before detail publication |
+| Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore payload + AIDashUI URLPolicy | stable sidecar ID/exact byte hash, typed grill/full-report fields, mandatory invalid-link rejection, optional invalid-link text |
 | Assembled contract checker | RepoInfra hook gate | Core/App/UI/AidataL5 revision | T018 waits for all adapters, resolves current worktree, and runs only through normal hook selection |
 
 ## Dependency Graph
