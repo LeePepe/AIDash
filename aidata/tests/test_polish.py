@@ -228,6 +228,9 @@ def test_validate_rejects_positive_claim_when_cost_up():
     assert validate_efficiency_claim("效率更高", ev) is False
     assert validate_efficiency_claim("效能提升", ev) is False
     assert validate_efficiency_claim("投入产出更好", ev) is False
+    assert validate_efficiency_claim("效率上升", ev) is False
+    assert validate_efficiency_claim("效率增长", ev) is False
+    assert validate_efficiency_claim("成本上升，但效率大幅增长", ev) is False
 
 
 @pytest.mark.unit
@@ -241,6 +244,7 @@ def test_validate_allows_neutral_wording_when_cost_up():
 def test_validate_allows_positive_claim_when_evidence_supports():
     ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, requests_pct=7)
     assert validate_efficiency_claim("效率明显提升", ev) is True
+    assert validate_efficiency_claim("效率增长", ev) is True
 
 
 @pytest.mark.unit
@@ -279,6 +283,51 @@ def test_polish_digest_rejects_false_efficiency_claim():
     assert "效率" not in out or "提升" not in out
     assert "浪费上升" in out or "成本上升" in out
     assert "- P0: 优先排查浪费来源" in out  # TODOs are kept
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "效率上升，继续保持",
+        "效率增长，继续保持",
+        "成本上升，但效率大幅增长",
+    ],
+)
+def test_polish_digest_rejects_explicit_rise_phrases_claims(claim):
+    """Explicit rise/growth wording must also be rejected under mixed evidence."""
+    client = FakeClient(f'{{"tldr": "{claim}", "todos": ["优先排查浪费来源"]}}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    assert claim not in out
+    assert "浪费上升" in out or "成本上升" in out
+    assert "- P0: 优先排查浪费来源" in out
+
+
+@pytest.mark.unit
+def test_polish_digest_keeps_valid_positive_when_evidence_supports():
+    """A sufficient evidence set should still permit a genuine positive claim."""
+    valid_template = """# AI 使用日报 2026-08-18
+
+> 数据源: raven✅
+
+## ⚡ Trending
+- 成本: 1800$ ↓(-25%) vs 昨 2400$
+- 浪费额: 100$ ↓(-58%) vs 昨 240$
+- 完成任务: 128 ↑(+32%) vs 昨 96
+- 请求数: 540 ↑(+12%) vs 昨 480
+
+## 📅 今日 TODO
+- P0: 继续优化
+
+## 🗂 昨日汇总
+- 昨日花费 $1800.00，请求 540 次
+
+## 🔍 可改良
+- 昨日无显著浪费信号"""
+    client = FakeClient('{"tldr": "效率增长，产出更高", "todos": ["继续优化"]}')
+    out = polish_digest(valid_template, client)
+    assert "效率增长" in out
+    assert "整体趋势需关注" not in out
 
 
 @pytest.mark.unit

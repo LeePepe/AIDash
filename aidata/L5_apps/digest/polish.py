@@ -147,10 +147,10 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # evidence and keep neutral/uncertain wording only when the counter-signal is still
 # present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步)"
-    r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain)"
+    r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高)"
+    r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow)"
     r"|(?:降低|减少).{0,6}(?:成本|开销|花费)"
-    r"|(?:效率更高|效能提升|投入产出更好|整体向好|整体改善|整体优化)",
+    r"|(?:效率更高|效率上升|效率增长|效能提升|投入产出更好|整体向好|整体改善|整体优化)",
     re.IGNORECASE,
 )
 
@@ -204,7 +204,7 @@ _SYSTEM = (
 )
 
 _EFFICIENCY_CONSTRAINT = (
-    "额外约束：模板中成本或浪费上升时，点评绝对不能说效率提升/改善/优化/好转。"
+    "额外约束：模板中成本或浪费上升时，点评绝对不能说效率提升/效率上升/效率增长/改善/优化/好转。"
     "此时用中性或谨慎措辞，并提及最突出的反向信号。"
 )
 
