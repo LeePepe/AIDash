@@ -272,6 +272,29 @@ def test_validate_rejects_loose_efficiency_language_without_directional_claim():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "效率未提升",
+        "没有提效",
+        "效率提升，但没有提效",
+        "效率增长，但效率下滑",
+        "效率下滑，但效率增长",
+    ],
+)
+def test_validate_rejects_negated_and_mixed_efficiency_claims(claim):
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, issues_pct=4)
+    assert validate_efficiency_claim(claim, ev) is False
+
+
+@pytest.mark.unit
+def test_validate_rejects_contradictory_metric_negation_per_clause():
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, issues_pct=4)
+    assert validate_efficiency_claim("成本上升，但成本没有上升", ev) is False
+    assert validate_efficiency_claim("成本不但上升", ev) is False
+
+
+@pytest.mark.unit
 def test_validate_rejects_partial_metric_evidence():
     ev = EfficiencyEvidence(cost_pct=71, waste_pct=None, issues_pct=0)
     assert validate_efficiency_claim("成本上升，浪费下降", ev) is False
@@ -439,6 +462,43 @@ def test_polish_digest_keeps_valid_positive_when_evidence_supports():
 )
 def test_polish_digest_rejects_mixed_direction_in_both_orders(claim):
     """Mixed positive/negative efficiency wording must fail closed even with otherwise positive evidence."""
+    valid_template = """# AI 使用日报 2026-08-18
+
+> 数据源: raven✅
+
+## ⚡ Trending
+- 成本: 1800$ ↓(-25%) vs 昨 2400$
+- 浪费额: 100$ ↓(-58%) vs 昨 240$
+- 完成任务: 128 ↑(+32%) vs 昨 96
+- 完成 issue(近似): 18 ↑(+29%) vs 昨 14
+- 请求数: 540 ↑(+12%) vs 昨 480
+
+## 📅 今日 TODO
+- P0: 继续优化
+
+## 🗂 昨日汇总
+- 昨日花费 $1800.00，请求 540 次
+
+## 🔍 可改良
+- 昨日无显著浪费信号"""
+    client = FakeClient(f'{{"tldr": "{claim}", "todos": ["继续优化"]}}')
+    out = polish_digest(valid_template, client)
+    assert claim not in out
+    assert "整体趋势需关注" in out or "数据不足以判断" in out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "效率提升，但效率下滑",
+        "效率下滑，但效率提升",
+        "工作提效，但效率走弱",
+        "提效，但效率下滑",
+    ],
+)
+def test_polish_digest_rejects_true_mixed_efficiency_pairs(claim):
+    """Actual positive/negative efficiency cue pairs must fail closed even when evidence is otherwise favorable."""
     valid_template = """# AI 使用日报 2026-08-18
 
 > 数据源: raven✅
