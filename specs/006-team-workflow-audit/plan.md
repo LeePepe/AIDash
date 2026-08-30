@@ -30,7 +30,7 @@ dispatches remediation.
 
 **Project Type**: multi-package Apple application + macOS CLI + layered Python data producer
 
-**Performance Goals**: each encoded card payload ≤256 KB; deterministic replay without duplicate facts/cards; today's briefing remains bounded and glanceable
+**Performance Goals**: each final serialized card payload ≤262,144 bytes; deterministic replay without duplicate facts/cards; today's briefing remains bounded and glanceable
 
 **Constraints**: audit is never scheduled/invoked; immutable redacted inputs; no raw logs; HTTPS-only links; flat Briefing → Container → Card hierarchy; no direct Python/CLI CloudKit access; no local host-based App tests
 
@@ -95,6 +95,8 @@ Packages/
 └── AIDashUI/                                         # card rendering + action intents
 
 Apps/AIDashApp/                                       # schema advertisement + append-only writer wiring
+CLI/aidash/                                           # audit UserEvent action filtering/help
+.claude/skills/aidash-content/ + scripts/             # revision-local assembled contract gate
 ```
 
 **Structure Decision**: Preserve the repository's existing resolver leaves.
@@ -106,13 +108,14 @@ added to the matching router `test_paths` in the same layer task.
 
 ### `TeamAuditPayload` module
 
-**Interface**: one common snapshot envelope plus five locked section variants
+**Interface**: one common snapshot envelope plus eight locked section variants
 and validation invariants defined by `contracts/card-payload.md`.
 
 **Implementation hidden behind it**: mode reconciliation, axis-count
-validation, typed finding states, bounded part semantics, evidence identity,
-and graceful URL presentation. Callers learn one CardType and section enum,
-not multiple audit card schemas.
+validation, typed finding states, complete lineage/repeat metrics, collision
+observations, bounded part/externalization semantics, mandatory artifact
+capacity, evidence identity, and graceful URL presentation. Callers learn one
+CardType and section enum, not multiple audit card schemas.
 
 **Test surface**: Core round trips/invariants and UI rendering through
 `CardType.decode`/`CardRouter`.
@@ -158,16 +161,18 @@ with baseline/incremental fixtures and no audit invocation.
 ### US2 — Inspect findings, timelines, metrics, and artifacts
 
 **Outcome**: The same typed publication exposes all six lifecycle states,
-stable fingerprints, redacted case/attempt evidence, individual metrics, and
-safe generic/team/P0/P1 Archify relationships.
+stable fingerprints, redacted case/attempt evidence, complete feedback
+lineage, per-role repeat/cause/role-specific metrics, collision observations,
+individual metrics, and every mandatory generic/team/P0/P1 Archify relationship.
 
 **Dependencies**: US1 publication seam and card registration. Detail-specific
 AidataL4 queries, L5 partitioning, and AIDashUI sections may land as separate
 layer tasks without changing the common Core contract.
 
-**Independent demonstration**: a neutral evidence fixture renders each detail
-section; unsafe URLs are text and valid HTTPS artifacts preserve fingerprint,
-event, hash, and revision relationships.
+**Independent demonstration**: a neutral evidence fixture renders every typed
+detail section; unsafe URLs are text, valid HTTPS artifacts preserve
+fingerprint/event/hash/revision relationships, mandatory link counts reconcile,
+and exact payload-size boundary fixtures prove reject/externalize behavior.
 
 ### US3 — Record acknowledgement or remediation approval safely
 
@@ -177,7 +182,7 @@ remediation. Optional HTTPS grill links only open a destination.
 
 **Layer path**:
 
-`AIDashCore event contract → AIDashUI intent interface → AIDashApp writer/wiring → AidataL1L2 event normalization`
+`AIDashCore event contract → AIDashUI intent interface → AIDashApp writer/wiring → aidashCLI filtering + AidataL1L2 event normalization`
 
 **Dependencies**: US2 findings renderer supplies the stable decision target.
 The slice is independently proven by intent spies, in-memory event persistence,
@@ -188,34 +193,35 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | Contract | Producer | Consumer | Blocking edges |
 |---|---|---|---|
 | Manual snapshot bundle | External explicit operator + AidataL1L2 | AidataL3 | Foundation registry before adapter; adapter before schema merge |
+| Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | Independently keyed observation never updates accepted snapshot; import before all downstream views |
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
-| Named audit query bundles | AidataL4 | AidataL5 | L4 before mapping/publication |
+| Named audit query bundles | AidataL4 | AidataL5 | L4 before mapping/publication; lineage/repeat/collision grains remain typed |
 | `teamAudit` JSON payload | AIDashCore | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Core before mapping/render/schema; contract check after assembled changes |
 | Classification tint | DesignKit | AIDashUI | DesignKit before final UI renderer |
 | Audit action intent | AIDashUI | AIDashApp | Core action enum before both; UI interface before App wiring |
-| `UserEvent` audit actions | AIDashApp | aidash events pull → AidataL1L2 | Core enum before App and adapter normalization |
-| Hosted artifact manifest | AidataL1L2/L3/L4/L5 | AIDashCore payload + AIDashUI URLPolicy | manual import contract before detail publication |
+| `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
+| Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore payload + AIDashUI URLPolicy | typed grill/full-report fields and every mandatory chain before detail publication |
+| Assembled contract checker | RepoInfra hook gate | Core/App/UI/AidataL5 revision | T018 waits for all adapters, resolves current worktree, and runs only through normal hook selection |
 
 ## Dependency Graph
 
 ```text
-T001 RepoInfra contracts/constitution
- ├─> T002 AidataFoundation manual registry
- │    └─> T003 AidataL1L2 import
- │         └─> T004 AidataL3 facts
- │              └─> T005 AidataL4 queries
- │                   └─> T009 AidataL5 publication
- ├─> T006 AIDashCore teamAudit payload ───────┬─> T009
- │                                            ├─> T010 AIDashUI renderer
- │                                            └─> T011 AIDashApp schema advertisement
- └─> T007 DesignKit classification ─────────────> T010
+US1 data: T001 → T002 → T003 → T004 → T007
+US1 app:  T005 ─┬→ T007
+                ├→ T008 ← T006
+                └→ T009
 
-T005 + T006 + T007 ─> T008 US1/US2 contract fixture proof
-T006 ─> T012 AIDashCore audit decision actions
-T010 + T012 ─> T013 AIDashApp writer/wiring
-T012 ─> T014 AidataL1L2 decision normalization
-T013 + T014 ─> T015 US3 no-dispatch integration proof
-all ─> T016 assembled contract/routing verification
+US2 data: T004 → T010 → T011 (T011 also waits for T007)
+US2 UI:   T008 → T012
+
+US3 core: T005 → T013
+US3 CLI:  T013 → T017
+US3 UI:   T012 + T013 → T014
+US3 App:  T009 + T014 → T015
+US3 data: T002 + T013 → T016
+
+Assembled RepoInfra gate:
+T007 + T008 + T009 + T011 + T012 + T015 + T016 + T017 → T018
 ```
 
 The graph is acyclic. Parallel markers are allowed only for tasks whose files
@@ -223,18 +229,19 @@ do not overlap and whose blocking contract has landed.
 
 ## Verification Strategy
 
-- Each task declares exactly one resolver layer and the exact
-  `scripts/context/run <layer> --mode local` command when that leaf has local
-  gates.
-- Any task changing `aidata/CONTEXT.md`, layer frontmatter, or test routing also
-  runs `scripts/context/audit`.
-- Cross-language payload assembly runs
-  `.claude/skills/aidash-content/scripts/contract_check.sh` in the integration
-  verification task.
-- Commit and push normally so repository hooks provide fresh selected-gate
-  evidence. Do not bypass hooks.
-- AIDashApp and aidash heavy build gates run only in CI. The host-based
-  AIDashApp test target is forbidden locally.
+- Every task commits and pushes normally with `core.hooksPath=scripts/hooks`.
+  The hooks run the routing audit, resolve changed paths, and execute affected
+  leaves' declared local gates; this hook result is the authoritative local
+  evidence.
+- Do not invoke suites or resolver gates proactively. After an observed hook
+  failure, one focused resolver rerun for the emitted layer is diagnostic-only;
+  the next normal commit/push must still supply the passing hook evidence.
+- T018 corrects the cross-language checker to use the current worktree and
+  current App/Aidata anchors, registers it as a RepoInfra lint gate, and runs
+  it once through normal hook selection on the assembled revision.
+- AIDashApp and aidashCLI heavy build gates run only in CI. The host-based
+  AIDashApp test target is forbidden locally; the hostless target is only a
+  focused diagnostic exception after a concrete failure.
 - Exact implementation SHA must match local HEAD, remote branch, and PR head
   before independent implementation review.
 
@@ -243,3 +250,7 @@ do not overlap and whose blocking contract has landed.
 No constitutional violation remains. Constitution 1.13.0 is an authorized
 planning amendment that narrows the new actions to append-only audit receipts
 and explicitly denies workflow execution authority.
+
+When the amendment-bearing PR is created, its title must use
+`constitution: <change>` and retain the 1.13.0 migration note, as required by
+Constitution Governance. Planning review does not substitute for that PR gate.

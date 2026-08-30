@@ -41,6 +41,15 @@ the exact published context in which the decision was made.
 - The aidata event adapter preserves both action raw values, `itemRef`, and
   `cardType` so a later explicitly run audit can observe the decision lineage.
 
+## aidashCLI consumer
+
+`aidash events pull --action` advertises and accepts every canonical
+`UserEventAction.rawValue`, including both camel-case audit values. Parsing is
+case-insensitive but must compare against the canonical cases; it must not
+lowercase the input and then attempt raw-value construction. Unknown-action
+errors derive their `allowed` array from `UserEventAction.allCases`, and JSONL
+output preserves the canonical camel-case raw value unchanged.
+
 ## Authority denial
 
 Neither action may invoke an audit, execute remediation, create or update an
@@ -57,3 +66,5 @@ that approval is recorded for a separate workflow.
   derivation without CloudKit/network access.
 - Boundary spies prove that decision actions call only the injected writer.
 - aidata adapter tests prove new actions do not normalize to null/unknown.
+- aidashCLI tests prove help/validation/filter/JSONL behavior for both audit
+  actions while preserving `done`, `undone`, and `star`.

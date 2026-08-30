@@ -31,37 +31,37 @@ The default commands without `--source team_audit_snapshot` must exclude this
 source. Missing configuration must report zero records without failure. No
 command in this flow invokes Team Workflow Audit.
 
-## 3. Verify layer-owned behavior
+## 3. Let repository hooks verify layer-owned behavior
 
-Use resolver-declared gates; do not manually run the repository's broad test
-suites:
+Commit and push normally. The configured pre-commit and pre-push hooks resolve
+the changed paths and run the owning leaves' declared local gates; their
+structured failure output is the verification signal. Do not run the resolver
+test gates proactively or repeat a suite that a hook already ran.
 
-```bash
-scripts/context/run AidataFoundation --mode local
-scripts/context/run AidataL1L2 --mode local
-scripts/context/run AidataL3 --mode local
-scripts/context/run AidataL4 --mode local
-scripts/context/run AidataL5 --mode local
-scripts/context/run AIDashCore --mode local
-scripts/context/run DesignKit --mode local
-scripts/context/run AIDashUI --mode local
-scripts/context/run RepoInfra --mode local
-scripts/context/audit
-```
+If a hook fails, use its emitted `{layer, path, kind, detail, red_lines}` to
+make a layer-local repair. A focused `scripts/context/run <emitted-layer>
+--mode local` rerun is permitted only as diagnosis after that failure and does
+not replace the next normal hook run.
 
-Normal commit and push hooks rerun affected local gates. AIDashApp and aidash
-heavy build gates are CI-only. Never run the host-based AIDashApp test target
-locally; use the hostless `AIDashAppLogicTests` target only when a focused App
-logic question cannot be answered by hooks.
+AIDashApp and aidash heavy build gates are CI-only. Never run the host-based
+AIDashApp test target locally. The hostless `AIDashAppLogicTests` target is a
+diagnostic exception only when a concrete App-layer failure cannot be isolated
+through the hook signal; it is not part of the normal task acceptance path.
 
 ## 4. Required neutral fixture proofs
 
 - Baseline and incremental overview parts render different cohort/cursor
   sections and independent axes.
 - Replay and overlap records deduplicate by stable identity; hash collision
-  never overwrites.
+  never overwrites and emits a separately keyed collision observation.
 - All six finding states and all locked verdicts round-trip.
+- Feedback lineage preserves problem/delivery/release/observation state, and
+  repeat metrics preserve every role, cycle/cause, role-specific, subject, and
+  event value.
 - Unsafe artifact/grill URLs are text; valid HTTPS URLs are actionable.
+- Final encoded payload boundary fixtures cover 262,144/262,145 bytes;
+  mandatory P0/P1 links are never omitted or externalized, while oversized
+  optional detail requires a typed full-report reference.
 - Acknowledgement and approval produce one append-only receipt each and leave
   the source snapshot unchanged.
 - No-op UI environments, write failure, missing source, and missing artifact
