@@ -117,6 +117,13 @@ reader, restartable index, and neutral fixtures through their interfaces;
 T026 closes only the public collector/normalizer wiring rows. All five tasks
 must obtain their own normal routing-audit and AidataL1L2 hook evidence.
 
+The T026→T003 data seam is `contracts/l1l2-normalized-output.md`: one
+`team_audit_record` table with 24 locked record types. Neutral tests prove its
+common columns/composite key, canonical JSON/hash, accepted
+snapshot/sidecar/parent linkage, optional
+`absent|actionableHTTPS|nonActionable` status, complete type set, and
+one-to-one L3 grain mapping.
+
 ## 5. CI evidence
 
 The implementation PR must obtain the repository-required CI checks, including

@@ -236,7 +236,17 @@ index is an injected git-ignored SQLite cache derived from append-only raw
 history; snapshot, every stable child, and sidecar identities are classified
 independently. Raw append precedes cache commit, so interruption can produce a
 repairable raw-ahead cache but never index-only acceptance. The final adapter
-only composes these interfaces and delegates existing redacted raw/clean I/O.
+only composes these interfaces and delegates existing redacted raw I/O. Its L2
+interface is one tagged `team_audit_record` table with fixed common columns,
+composite identity, 24 record types, canonical JSON/hash, and exact
+parent/snapshot/sidecar linkage; T003 maps those types one-to-one into named L3
+grains and consumes no raw/cache/private-model surface.
+
+Mandatory artifact URL/hash/reference failures reject before storage. Optional
+artifact/grill URL safety is data, not bundle validity: preserve the original
+untrusted string as `actionableHTTPS` only for HTTPS plus non-empty host and as
+`nonActionable` otherwise; an absent optional artifact URL is null/`absent`,
+and an absent grill field emits no link row.
 
 **Rationale**: Three exact-SHA implementation reviews found the same privacy,
 active-validator, atomic-byte, sidecar, collision, and test-matrix gaps. The

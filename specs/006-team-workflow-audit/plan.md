@@ -72,6 +72,7 @@ specs/006-team-workflow-audit/
 ├── quickstart.md
 ├── contracts/
 │   ├── manual-import.md
+│   ├── l1l2-normalized-output.md
 │   ├── card-payload.md
 │   ├── t002-acceptance-matrix.md
 │   ├── t005-acceptance-matrix.md
@@ -165,8 +166,12 @@ cache state. Snapshot, child, and sidecar identities are classified
 independently; no rejected body enters the index.
 
 **Final adapter wiring**: `team_audit_snapshot.py` composes reader → decoder →
-index before `write_raw`, and accepted/body-free rows → `write_clean` during
-normalize. It contains no schema fallback, file reread, or collector-local
+index before `write_raw`, and accepted/body-free rows → the single
+`team_audit_record` source-clean table during normalize. The table's common
+columns, composite key, record types, grains, parent/snapshot/sidecar linkage,
+canonical JSON, and optional URL status are locked by
+`contracts/l1l2-normalized-output.md`; T003 consumes no other adapter output.
+The wiring contains no schema fallback, file reread, or collector-local
 identity map. `contracts/t002-acceptance-matrix.md` is the interface-level test
 surface.
 
@@ -245,6 +250,7 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 |---|---|---|---|
 | Manual snapshot bundle | External explicit operator + AidataL1L2 | AidataL3 | T001 → T022 strict decode → T023 atomic read → T024 persisted decision → T025 matrix → T026 wiring → T003 |
 | Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | T024 independently indexes snapshot/child/sidecar identities; T026 emits only body-free observations carrying parent snapshot ID/hash and never updates accepted content |
+| `team_audit_record` source-clean rows | AidataL1L2 T026 | AidataL3 T003 | `contracts/l1l2-normalized-output.md` fixes one table, common columns/key, locked record types/grains, canonical JSON, optional URL status, and snapshot/sidecar/parent linkage; T003 reads no raw/cache/private-model surface |
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
 | Named audit query bundles | AidataL4 | AidataL5 | L4 exposes immutable required entities/counts and optional facts only; L5 alone computes final publication coverage after packing |
 | `teamAudit` JSON payload | AIDashCore | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash and explicit finding identity; Core before mapping/render/schema |

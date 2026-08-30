@@ -109,7 +109,7 @@ evidence requires a limitation and never borrows a verdict from another axis.
   identities, actor role, trigger cause, outcome, and evidence references.
   Actor role is locked to Planner Lead, Team Lead, Fullstack Engineer, AI
   Reviewer, or PR Manager.
-- `IndividualMetric` always includes metric definition, numerator,
+- `IndividualMetric` always includes a stable non-empty `metricID`, metric definition, numerator,
   denominator, observation window, and limitation; it is descriptive and must
   not be presented as causal or as a personnel score.
 
@@ -247,6 +247,7 @@ index. The full restart/collision proof is
 | `eventIDs` | [String] | Evidence relationship |
 | `revisionEvidence` | [String] | Verified revision/blob/line references |
 | `contentSHA256` | String | Generated artifact hash |
+| `encodedByteCount` | Int | Non-negative importer-computed UTF-8 byte count of the canonical manifest entry; used for individual bounded-entry rejection |
 | `url` | String? | Mandatory artifacts require a present HTTPS+host value or publication rejects; optional invalid values remain non-actionable text under central URL policy |
 | `requirement` | ArtifactRequirement | `mandatory` or `optional`; controls publication rejection versus non-actionable degradation |
 | `sidecarID` / `sidecarSHA256` | String | Must equal the payload envelope and owning sidecar |
@@ -384,10 +385,31 @@ displayed receipt sets collapse by `(itemRef, action)`. Neither action mutates
 `AuditFinding.state`. Only a later imported snapshot may publish a new
 canonical state.
 
+## Source-clean normalized seam
+
+T026 materializes one table, `team_audit_record`, in
+`clean_path("team_audit_snapshot")`. Its common columns, composite primary key,
+24 locked record types, parent/snapshot/sidecar linkage, canonical JSON/hash
+rules, optional URL status, and one-to-one T003 warehouse mapping are normative
+in `contracts/l1l2-normalized-output.md`. T003 consumes only this table; raw
+shards, the derived identity cache, and adapter-private decoded models are not
+part of the cross-layer interface.
+
+The snapshot record carries scope, mode, evidence coverage, and limitations.
+Instruction versions, the baseline cohort, incremental cursors, and every
+other stable child use independent record types so T024 collision decisions
+and T003 grains cannot be hidden inside opaque snapshot JSON. Rejected bodies
+produce no row; collision output is the body-free
+`importCollisionObservation` record type.
+
 ## Warehouse grains
 
 - `fact_team_audit_snapshot`: one row per snapshot identity.
+- `fact_team_audit_instruction_version`: one row per snapshot + instruction source identity.
+- `fact_team_audit_cohort`: one row per baseline snapshot + cohort identity, retaining ordered case IDs.
+- `fact_team_audit_cursor`: one row per incremental snapshot + cursor identity, retaining source/timestamp/overlap.
 - `fact_team_audit_axis_summary`: one row per snapshot + axis.
+- `fact_team_audit_task_effectiveness`: one row per snapshot, separate from the three core axes.
 - `fact_team_audit_case`: one row per snapshot + case identity.
 - `fact_team_audit_event`: one row per snapshot + source event identity.
 - `fact_team_audit_attempt`: one row per snapshot + attempt identity.

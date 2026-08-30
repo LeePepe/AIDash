@@ -44,7 +44,7 @@ in-memory-only replay map may exist on the active collector path.
 | D09 | T022/T025 | Five actor-role repeat records | Common, cycle, cause, role-specific, subject, and event fields survive; missing role, duplicate role, or tag/role mismatch rejects. |
 | D10 | T022/T025 | Valid sidecar bytes | Schema version 1, matching snapshot ID, stable sidecar ID, typed artifacts, optional grill strings, and exact byte SHA-256 survive. |
 | D11 | T022/T025 | Missing generic/team relationship or P0/P1 chain, unsafe mandatory URL, bad hash, bad parent, or oversized mandatory entry | Structured rejection before raw append. |
-| D12 | T022/T025 | Unsafe optional artifact/grill URL or absent sidecar | Optional URL remains explicitly non-actionable data; absent sidecar yields an unpublishable limitation rather than fabricated provenance. |
+| D12 | T022/T025 | Unsafe/absent optional artifact or grill URL, or absent sidecar | Original unsafe optional string survives with `nonActionable` status rather than rejecting the bundle; valid HTTPS plus host is `actionableHTTPS`; absent optional artifact URL is null/`absent`; absent grill field emits no link row; absent sidecar yields an unpublishable limitation rather than fabricated provenance. |
 | D13 | T022/T025 | Unknown/future field or enum at any typed level | Structured rejection; no silent drop, coercion, or generic payload preservation. |
 | D14 | T022/T025 | `payload`, `body`, `message`, `note`, daemon/session/raw-log field at any typed level | Structured privacy rejection before storage; rejected content is absent from every returned record/observation. |
 | D15 | T022/T025 | Invalid UTF-8, malformed JSON, non-object root, alias/snake-case key, non-contract filename content | Structured rejection; documented camel-case contract keys are the only accepted wire shape. |
@@ -58,7 +58,7 @@ in-memory-only replay map may exist on the active collector path.
 | I02 | T024/T025 | Same snapshot/children/sidecar identities and hashes after restart | Replay/no-op; no duplicate raw record or observation is planned. |
 | I03 | T024/T025 | Same snapshot ID, different snapshot hash | First hash remains accepted; one body-free parented collision observation is planned. |
 | I04 | T024/T025 | Same sidecar ID, different exact sidecar bytes/hash | Snapshot remains accepted; sidecar collision is independently observed and rejected bytes are absent. |
-| I05 | T024/T025 | Same case/event/attempt/finding/lineage/repeat/artifact identity, different hash | Each entity kind is independently indexed and produces its own body-free parented observation. |
+| I05 | T024/T025 | Same instruction/cohort/cursor/case/event/attempt/finding/metric/lineage/repeat/artifact identity, different hash | Each stable child kind is independently indexed and produces its own body-free parented observation. |
 | I06 | T024/T025 | Collision | Observation carries normative SHA-256 ID, UTC observed time, portable source, entity kind/stable identity, accepted/rejected hashes, exact accepted parent snapshot ID/hash, locked disposition, and limitation. |
 | I07 | T024/T025 | Same observation ID replay; later distinct observed-at attempt | Same ID is idempotent; distinct ID remains append-only history. |
 | I08 | T024/T025 | Index missing/corrupt/stale while raw history is complete | Index rebuilds from raw truth and reaches the same acceptance map without emitting a false collision or storing rejected content. |
@@ -69,11 +69,12 @@ in-memory-only replay map may exist on the active collector path.
 | F01 | T025 | Committed fixtures | Baseline/incremental directory bundles use invented neutral identities, valid 64-hex hashes, no account/workspace/machine identifiers, and no raw logs. |
 | F02 | T025 | Full module matrix | Tests cross only the three declared interfaces, assert returned outcomes instead of private helpers, and remain hermetic under `tmp_path`. |
 | F03 | T025/T026 | Subprocess, network, audit, agent, issue/run, source-mutation spies | Zero calls for valid, invalid, missing-config, replay, and collision paths. |
-| W01 | T026 | Valid baseline/incremental through public adapter | Reader → decoder → index classification occurs before append; `collect()` returns accepted raw count and `normalize()` preserves all contract facts. |
+| W01 | T026 | Valid baseline/incremental through public adapter | Reader → decoder → index classification occurs before append; `collect()` returns accepted raw count, `normalize()` returns accepted snapshot-row count, and all contract facts are preserved. |
 | W02 | T026 | Replay or any rejected/colliding body | `write_raw` receives no replay/rejected body; collision writes only the body-free observation. |
-| W03 | T026 | Accepted raw records plus observations | Existing redaction remains on accepted writes; normalization keys observations by `(parentSnapshotID, observationID)` and retains sidecar/child provenance. |
+| W03 | T026 | Accepted raw records plus observations | Existing redaction remains on accepted writes; normalization emits canonical `entity_sha256`, keys observations by `(parentSnapshotID, observationID)`, pins them to the accepted snapshot, and retains accepted sidecar/child provenance without rejected bodies. |
 | W04 | T026 | Missing/unreadable config/root/index or write/normalize I/O failure | Graceful zero/skip with pipeline progress preserved; tests restore every patched shared helper. |
 | W05 | T026 | Active adapter source inspection | Only the strict decoder validates; no duplicate validator, alias map, second file read, or collector-local identity map remains. |
+| W06 | T026/T003 | Complete accepted bundle normalized then merged | `team_audit_record` exposes every locked record type, common column, composite key, canonical JSON, parent/snapshot/sidecar link, and optional URL status; T003 maps each type to exactly its named L3 grain with no raw/cache/private-model dependency or invented mapping. |
 
 ## Gate contract
 

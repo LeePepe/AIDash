@@ -79,8 +79,10 @@ public `collect()`/`normalize()` adapter surface:
    for snapshot, child, and sidecar identities. Raw history—not the cache—is
    the acceptance authority.
 4. `team_audit_snapshot.collect()` and `normalize()` wire these interfaces to
-   `rawio.write_raw` and `cleanio.write_clean`. No schema, filesystem, or
-   identity fallback remains in this final wiring module.
+   `rawio.write_raw` and the single source-clean `team_audit_record` table in
+   `contracts/l1l2-normalized-output.md` through `cleanio.write_clean`. No
+   schema, filesystem, identity, or normalized-output fallback remains in this
+   final wiring module.
 
 The complete observable proof is locked in
 `contracts/t002-acceptance-matrix.md`.
@@ -145,8 +147,11 @@ The complete observable proof is locked in
   missing, duplicate, reordered, or foreign case/event/attempt references.
 - Repeat fixtures cover all five role-specific variants, tag/role mismatch,
   negative counts, and inconsistent attempt/repeat/cycle/cause totals.
-- Missing/unsafe mandatory URLs reject publication input; unsafe optional
-  artifact/grill URLs remain non-actionable data.
+- Missing/unsafe mandatory URLs, hashes, or required references reject
+  publication input; unsafe optional artifact/grill strings remain present
+  with `nonActionable` status, while valid HTTPS plus host is
+  `actionableHTTPS`. An absent optional artifact URL is null/`absent`; an
+  absent grill field emits no normalized grill-link row.
 - Missing configuration returns zero without raising.
 - Test spies observe no subprocess, network, audit, dispatch, or mutation call.
 - Atomic read tests prove parsing and hashing use one captured buffer per file,

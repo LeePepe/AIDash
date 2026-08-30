@@ -42,6 +42,7 @@
 - [x] Every story has a fixture- or spy-based independent test surface.
 - [x] Immutable ingestion and deduplication have observable pass/fail outcomes.
 - [x] `contracts/t002-acceptance-matrix.md` maps strict decode, atomic read, restart/crash recovery, collision, fixture, side-effect, and final wiring outcomes to T022–T026.
+- [x] `contracts/l1l2-normalized-output.md` fixes the exact T026 table/record/key/linkage seam and maps every locked record type to one T003 warehouse grain.
 - [x] Approval receipt behavior distinguishes recorded intent from canonical snapshot state.
 
 ## Readiness
@@ -50,5 +51,6 @@
 - [x] Constitution publication requires its own `constitution: <change>` PR and PR-body migration note; planning review is not a substitute.
 - [x] AIDashUI future-CardType compatibility precedes the Core-only T005 expansion, and watchdog work is an independent RepoInfra task/PR.
 - [x] The former monolithic T002 is coordination-only; T022–T026 are serial, layer-scoped, file-pinned, independently hook-gated tasks, with collector wiring last.
+- [x] T022 rejects invalid mandatory URL/hash/reference data while retaining unsafe optional artifact/grill strings with explicit non-actionable status.
 - [x] HTTPS-only artifact and grill entry-point behavior agrees with the repository URL policy.
 - [x] The specification is ready for Plan-stage architecture and contract design.
