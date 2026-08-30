@@ -297,17 +297,36 @@ def _clause_has_exact_directional_match(clause: str) -> bool:
     if _is_recognized_non_claim_qualitative(clause):
         return True
 
-    exact_patterns = (
-        r"(?:成本|开销|花费)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|上调|上涨|下降|降低|减少|回落)",
-        r"(?:浪费)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|上涨|增多|下降|降低|减少|回落)",
-        r"(?:请求量|请求数|requests?)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|降低|回落)",
-        r"(?:Token|token)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|降低|回落)",
-        r"(?:会话数|会话|session)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|降低|回落)",
-        r"(?:完成任务|任务|产出)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|回落|减弱)",
-        r"(?:已完成issue|完成issue|已完成issue\(近似\)|完成issue\(近似\))(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:上升|增加|增长|提升|下降|减少|降低|回落)",
-        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)(?:.{0,12})?(?:没有|没|未|并没有|并未|非|并非)?(?:.{0,12})?(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率|增加|增大|下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)",
+    modifier = r"(?:明显|显著|持续|稳步|大幅|进一步|整体|总体|迅速|同步|更)?"
+    negator = r"(?:没有|没|未|并没有|并未|非|并非)"
+    metrics = (
+        r"(?:成本|开销|花费)",
+        r"(?:浪费)",
+        r"(?:请求量|请求数|requests?)",
+        r"(?:Token|token)",
+        r"(?:会话数|会话|session)",
+        r"(?:完成任务|任务|产出)",
+        r"(?:已完成issue|完成issue|已完成issue\(近似\)|完成issue\(近似\))",
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)",
         r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)",
     )
+    directions = (
+        r"(?:上升|增加|上调|上涨|下降|降低|减少|回落)",
+        r"(?:上升|增加|上涨|增多|下降|降低|减少|回落)",
+        r"(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:上升|增加|增长|提升|下降|减少|回落|减弱)",
+        r"(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率|增加|增大|下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)",
+        r"(?:)",
+    )
+
+    exact_patterns = []
+    for idx, metric in enumerate(metrics[:-1]):
+        pattern = rf"(?:{metric})(?:{modifier})?(?:{negator})?(?:{directions[idx]})"
+        exact_patterns.append(pattern)
+    exact_patterns.append(r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)")
     return any(re.fullmatch(pattern, canonical, re.IGNORECASE) for pattern in exact_patterns)
 
 
@@ -525,6 +544,7 @@ def _efficiency_clause_status(clause: str) -> str | None:
     if not cleaned:
         return None
 
+    modifier = r"(?:明显|显著|持续|稳步|大幅|进一步|整体|总体|迅速|同步|更)?"
     positive_growth = (
         r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率|增加|增大)"
     )
@@ -536,25 +556,15 @@ def _efficiency_clause_status(clause: str) -> str | None:
         r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)"
     )
 
-    negated_positive = (
-        rf"(?:{negator}).{{0,20}}{positive_growth}"
-        rf"|{topic}.{{0,30}}{negator}.{{0,20}}{positive_growth}"
-        rf"|(?:{negator}).{{0,16}}{topic}.{{0,16}}{positive_growth}"
-    )
-    negated_negative = (
-        rf"(?:{negator}).{{0,20}}{negative_growth}"
-        rf"|{topic}.{{0,30}}{negator}.{{0,20}}{negative_growth}"
-        rf"|(?:{negator}).{{0,16}}{topic}.{{0,16}}{negative_growth}"
-    )
-    positive_match = re.search(rf"(?:{topic}).{{0,18}}{positive_growth}", cleaned, re.IGNORECASE)
-    negative_match = re.search(rf"(?:{topic}).{{0,18}}{negative_growth}", cleaned, re.IGNORECASE)
-    bare_negative_match = re.search(negative_growth, cleaned, re.IGNORECASE)
-    negated_positive_match = re.search(negated_positive, cleaned, re.IGNORECASE)
-    negated_negative_match = re.search(negated_negative, cleaned, re.IGNORECASE)
+    positive_match = re.search(rf"(?:{topic})(?:{modifier})?(?:{negator})?{positive_growth}", cleaned, re.IGNORECASE)
+    negative_match = re.search(rf"(?:{topic})(?:{modifier})?(?:{negator})?{negative_growth}", cleaned, re.IGNORECASE)
+    bare_negative_match = re.search(rf"(?:{negator})?(?:{modifier})?{negative_growth}", cleaned, re.IGNORECASE)
+    negated_positive_match = re.search(rf"(?:{negator})(?:{modifier})?(?:{topic})?(?:{modifier})?{positive_growth}", cleaned, re.IGNORECASE)
+    negated_negative_match = re.search(rf"(?:{negator})(?:{modifier})?(?:{topic})?(?:{modifier})?{negative_growth}", cleaned, re.IGNORECASE)
 
     if negated_positive_match:
-        stripped = re.sub(negated_positive, " ", cleaned, flags=re.IGNORECASE)
-        if re.search(rf"(?:{topic}).{{0,18}}{positive_growth}", stripped, re.IGNORECASE):
+        stripped = re.sub(rf"(?:{negator})(?:{modifier})?(?:{topic})?(?:{modifier})?{positive_growth}", " ", cleaned, flags=re.IGNORECASE)
+        if re.search(rf"(?:{topic})(?:{modifier})?(?:{negator})?{positive_growth}", stripped, re.IGNORECASE):
             return "mixed"
         return "negative"
 
