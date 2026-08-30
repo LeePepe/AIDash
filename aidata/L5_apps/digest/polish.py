@@ -193,6 +193,7 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # evidence and keep neutral/uncertain wording only when the counter-signal is still
 # present.
 _NEGATION_RE = r"(?:不|未|没|没有|并未|并没有|非|并非)"
+_CONTRADICTORY_METRIC_ASSERTION = ("__contradictory__", "__contradictory__")
 
 _POSITIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
@@ -328,9 +329,9 @@ def _metric_direction_assertions(tldr: str) -> list[tuple[str, str]]:
         if neg_down_pat.search(tldr):
             hits.append("not_down")
         if {"up", "not_up"} & set(hits) and len(set(hits) & {"up", "not_up"}) > 1:
-            return []
+            return [_CONTRADICTORY_METRIC_ASSERTION]
         if {"down", "not_down"} & set(hits) and len(set(hits) & {"down", "not_down"}) > 1:
-            return []
+            return [_CONTRADICTORY_METRIC_ASSERTION]
         for direction in hits:
             assertions.append((metric, direction))
     return assertions
@@ -366,6 +367,8 @@ def _metric_direction_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
 
     assertions = _metric_direction_assertions(tldr)
     if not assertions:
+        return False
+    if assertions == [_CONTRADICTORY_METRIC_ASSERTION]:
         return False
     return all(_matches(metric, direction) for metric, direction in assertions)
 
@@ -412,36 +415,33 @@ def _efficiency_clause_status(clause: str) -> str | None:
         rf"|{topic}.{{0,30}}{negator}.{{0,20}}{positive_growth}"
         rf"|(?:{negator}).{{0,16}}{topic}.{{0,16}}{positive_growth}"
     )
-    if re.search(negated_positive, cleaned, re.IGNORECASE):
+    positive_match = re.search(rf"(?:{topic}).{{0,18}}{positive_growth}", cleaned, re.IGNORECASE)
+    negative_match = re.search(rf"(?:{topic}).{{0,18}}{negative_growth}", cleaned, re.IGNORECASE)
+    bare_negative_match = re.search(negative_growth, cleaned, re.IGNORECASE)
+    negated_positive_match = re.search(negated_positive, cleaned, re.IGNORECASE)
+
+    if negated_positive_match:
+        stripped = re.sub(negated_positive, " ", cleaned, flags=re.IGNORECASE)
+        if re.search(rf"(?:{topic}).{{0,18}}{positive_growth}", stripped, re.IGNORECASE):
+            return "mixed"
         return "negative"
 
-    if re.search(rf"(?:{topic}).{{0,18}}{negative_growth}", cleaned, re.IGNORECASE):
+    if positive_match and (negative_match or bare_negative_match):
+        return "mixed"
+    if negative_match or bare_negative_match:
         return "negative"
-
-    if re.search(rf"(?:{topic}).{{0,18}}{positive_growth}", cleaned, re.IGNORECASE):
-        # Explicit positive wording is valid only when the same clause is not
-        # simultaneously denying the positive trend with a negation modifier.
-        if re.search(rf"(?:{negator}).{{0,24}}{positive_growth}", cleaned, re.IGNORECASE):
-            return "negative"
+    if positive_match:
         return "positive"
 
     if re.search(r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)", cleaned, re.IGNORECASE):
         return "positive"
     return None
 
-    if re.search(
-        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,24}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱)",
-        cleaned,
-        re.IGNORECASE,
-    ):
-        return "negative"
-    return None
-
 
 def _efficiency_assertion_kind(tldr: str) -> str | None:
     """Return 'positive', 'negative', 'mixed', or None for the claim direction."""
     clauses = [
-        part.strip() for part in re.split(r"[,，;；。!?！？]|但|然而|不过|尽管|虽然|不过|并且", tldr)
+        part.strip() for part in re.split(r"[,，;；。!?！？]|但|然而|不过|尽管|虽然|并且|却|同时|仍|反而", tldr)
         if part.strip()
     ]
     positive = 0
@@ -495,6 +495,8 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
 
     metric_assertions = _metric_direction_assertions(tldr)
     if metric_assertions:
+        if metric_assertions == [_CONTRADICTORY_METRIC_ASSERTION]:
+            return False
         fact_match = _metric_direction_matches(tldr, evidence)
         if not fact_match:
             return False
