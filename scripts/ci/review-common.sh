@@ -158,6 +158,9 @@ run_with_timeout() {
         local waited=0
         while [ "$waited" -lt "$seconds" ]; do
             if ! kill -0 "$child_pid" 2>/dev/null || ps -o stat= -p "$child_pid" 2>/dev/null | grep -q 'Z'; then
+                # Give a just-started background job a brief window to emit its
+                # pidfile/descendants before the watchdog declares the run clean.
+                sleep 1
                 cleanup_lingering_descendants "$child_pid"
                 printf '%s\n' "clean" >"$state_file"
                 exit 0
