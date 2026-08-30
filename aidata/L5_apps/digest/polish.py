@@ -106,6 +106,14 @@ class EfficiencyEvidence:
             return False
         return True
 
+    def allows_negative_claim(self) -> bool:
+        """Negative efficiency claims need explicit output decline, not mere cost/waste rise."""
+        if self.tasks_pct is not None and self.tasks_pct < 0:
+            return True
+        if self.issues_pct is not None and self.issues_pct < 0:
+            return True
+        return False
+
     def top_counter_signal(self) -> str:
         """Return the most material counter-signal for neutral fallback text."""
         signals: list[tuple[int, str]] = []
@@ -116,7 +124,7 @@ class EfficiencyEvidence:
         if self.tasks_pct is not None and self.tasks_pct < 0:
             signals.append((abs(self.tasks_pct), "任务下降"))
         if self.issues_pct is not None and self.issues_pct < 0:
-            signals.append((abs(self.issues_pct), "问题积压"))
+            signals.append((abs(self.issues_pct), "已完成 issue 下降"))
         if signals:
             signals.sort(reverse=True)
             return signals[0][1]
@@ -164,14 +172,14 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 _POSITIVE_EFFICIENCY_RE = re.compile(
     r"(?:效率|效能|投入产出|产出|用得更|更高效|更省|节省|省下|生产力).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更高效了)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率更高|效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|现在更高效了|生产力提升)",
+    r"|(?:效率更高|效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|现在更高效了|生产力提升|工作更高效|更高效了)",
     re.IGNORECASE,
 )
 
 _NEGATIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出|生产力).{0,12}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低)"
+    r"(?:效率|效能|投入产出|产出|生产力).{0,12}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:drop|declin|worsen|decreas|fall)"
-    r"|(?:效率明显下降|效率下降|效率变差|生产力下降)",
+    r"|(?:效率明显下降|效率下降|效率变差|生产力下降|效率趋弱|工作效率变差)",
     re.IGNORECASE,
 )
 
@@ -192,38 +200,36 @@ _UNCERTAINTY_RE = re.compile(
 
 
 def _metric_direction_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
-    """True when a fact-style metric direction matches the extracted evidence."""
+    """True when every metric-direction clause asserted in the text matches the evidence."""
+    checks: list[bool] = []
+
     if evidence.cost_pct is not None:
         if re.search(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
-            return evidence.cost_pct > 0
+            checks.append(evidence.cost_pct > 0)
         if re.search(r"(?:成本|开销|花费).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
-            return evidence.cost_pct < 0
+            checks.append(evidence.cost_pct < 0)
+
     if evidence.waste_pct is not None:
         if re.search(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
-            return evidence.waste_pct > 0
+            checks.append(evidence.waste_pct > 0)
         if re.search(r"(?:浪费).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
-            return evidence.waste_pct < 0
+            checks.append(evidence.waste_pct < 0)
+
     if evidence.tasks_pct is not None:
-        if re.search(r"(?:任务|产出).{0,8}(?:下降|减少|回落|减弱)", tldr, re.IGNORECASE):
-            return evidence.tasks_pct < 0
-        if re.search(r"(?:任务|产出).{0,8}(?:上升|增加|增长|提升)", tldr, re.IGNORECASE):
-            return evidence.tasks_pct > 0
+        if re.search(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|回落|减弱)", tldr, re.IGNORECASE):
+            checks.append(evidence.tasks_pct < 0)
+        if re.search(r"(?:完成任务|任务|产出).{0,8}(?:上升|增加|增长|提升)", tldr, re.IGNORECASE):
+            checks.append(evidence.tasks_pct > 0)
+
     if evidence.issues_pct is not None:
-        if re.search(r"(?:问题|积压).{0,8}(?:增加|上升|增多|积压)", tldr, re.IGNORECASE):
-            return evidence.issues_pct > 0
-        if re.search(r"(?:问题|积压).{0,8}(?:下降|降低|减少|缓解)", tldr, re.IGNORECASE):
-            return evidence.issues_pct < 0
-    if evidence.requests_pct is not None:
-        if re.search(r"(?:请求|请求量).{0,8}(?:上升|增加|增长|上涨|增多)", tldr, re.IGNORECASE):
-            return evidence.requests_pct > 0
-        if re.search(r"(?:请求|请求量).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
-            return evidence.requests_pct < 0
-    if evidence.token_pct is not None:
-        if re.search(r"(?:Token|token).{0,8}(?:上升|增加|增长|上涨|增多)", tldr, re.IGNORECASE):
-            return evidence.token_pct > 0
-        if re.search(r"(?:Token|token).{0,8}(?:下降|降低|减少|回落)", tldr, re.IGNORECASE):
-            return evidence.token_pct < 0
-    return False
+        if re.search(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:上升|增加|增长|提升)", tldr, re.IGNORECASE):
+            checks.append(evidence.issues_pct > 0)
+        if re.search(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:下降|减少|降低|回落)", tldr, re.IGNORECASE):
+            checks.append(evidence.issues_pct < 0)
+
+    if not checks:
+        return False
+    return all(checks)
 
 
 def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
@@ -232,9 +238,7 @@ def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bo
         return True
     if evidence.waste_pct is not None and evidence.waste_pct > 0 and re.search(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
         return True
-    if evidence.tasks_pct is not None and evidence.tasks_pct < 0 and re.search(r"(?:任务|产出).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
-        return True
-    if evidence.issues_pct is not None and evidence.issues_pct > 0 and re.search(r"(?:问题|积压).{0,8}(?:增加|上升|积压|增多)", tldr, re.IGNORECASE):
+    if evidence.tasks_pct is not None and evidence.tasks_pct < 0 and re.search(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
         return True
     return False
 
@@ -263,26 +267,15 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
         return False
 
     assertion_kind = _efficiency_assertion_kind(tldr)
-    if evidence.allows_positive_claim():
-        if assertion_kind == "negative":
-            return False
-        if assertion_kind == "positive":
-            return True
-        if _metric_direction_matches(tldr, evidence):
-            return True
-        return True
-
     if assertion_kind == "positive":
-        return False
+        return evidence.allows_positive_claim()
     if assertion_kind == "negative":
-        return False
+        return evidence.allows_negative_claim()
 
     if _metric_direction_matches(tldr, evidence):
         return True
     if _named_adverse_signal_matches(tldr, evidence):
         return True
-    if _COUNTER_SIGNAL_RE.search(tldr) or _UNCERTAINTY_RE.search(tldr):
-        return _named_adverse_signal_matches(tldr, evidence) or _metric_direction_matches(tldr, evidence)
     return False
 
 

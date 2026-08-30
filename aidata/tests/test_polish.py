@@ -233,6 +233,8 @@ def test_validate_rejects_positive_claim_when_cost_up():
     assert validate_efficiency_claim("效率上升", ev) is False
     assert validate_efficiency_claim("效率增长", ev) is False
     assert validate_efficiency_claim("成本上升，但效率大幅增长", ev) is False
+    assert validate_efficiency_claim("工作更高效", ev) is False
+    assert validate_efficiency_claim("效率趋弱", ev) is False
     assert validate_efficiency_claim("效率回升", ev) is False
     assert validate_efficiency_claim("效率变好", ev) is False
     assert validate_efficiency_claim("效率明显下降", ev) is False
@@ -254,7 +256,9 @@ def test_validate_allows_positive_claim_when_evidence_supports():
     assert validate_efficiency_claim("效率增长", ev) is True
     assert validate_efficiency_claim("效率回升", ev) is True
     assert validate_efficiency_claim("效率变好", ev) is True
+    assert validate_efficiency_claim("工作更高效", ev) is True
     assert validate_efficiency_claim("效率明显下降", ev) is False
+    assert validate_efficiency_claim("效率趋弱", ev) is False
 
 
 @pytest.mark.unit
