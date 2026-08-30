@@ -173,8 +173,32 @@ def test_cost_by_project_tracks_day_total_and_unattributed_share(tmp_path):
     assert by_project["unattributed"][idx["cost_usd"]] == 200.0
     assert by_project["unattributed"][idx["day_total"]] == 300.0
     assert by_project["unattributed"][idx["attributed_total"]] == 100.0
+    assert by_project["unattributed"][idx["sessions"]] == 1
     assert by_project["AIDash"][idx["cost_pct"]] == 16.7
     assert by_project["Atlas"][idx["cost_pct"]] == 16.7
+
+
+def test_cost_by_project_counts_residual_sessions_at_session_grain(tmp_path):
+    db = _cost_by_project_warehouse(
+        tmp_path,
+        [
+            ("s1", "2026-08-02", 100.0, 500),
+            ("s2", "2026-08-02", 200.0, 800),
+            ("s3", "2026-08-02", 50.0, 200),
+        ],
+        [
+            ("s1", "AIDash", "2026-08-02"),
+            ("s1", "Atlas", "2026-08-02"),
+            ("s2", "  ", "2026-08-02"),
+            ("s3", "AIDash", "2026-08-02"),
+        ],
+    )
+    rows, idx = _run_cost_by_project(db)
+    by_project = {r[idx["project"]]: r for r in rows}
+    assert by_project["unattributed"][idx["cost_usd"]] == 200.0
+    assert by_project["unattributed"][idx["sessions"]] == 1
+    assert by_project["AIDash"][idx["cost_usd"]] == 100.0
+    assert by_project["Atlas"][idx["cost_usd"]] == 50.0
 
 
 def test_cost_by_project_keeps_null_turns_unattributed_in_mixed_sessions(tmp_path):

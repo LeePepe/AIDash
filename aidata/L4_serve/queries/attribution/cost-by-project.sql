@@ -78,6 +78,17 @@ allocated_totals AS (
            sum(sessions) AS attributed_sessions
     FROM allocated
 ),
+residual_sessions AS (
+    SELECT count(DISTINCT sid) AS residual_sessions
+    FROM (
+        SELECT s.sid,
+               COALESCE(sum(CASE WHEN w.project IS NOT NULL THEN w.weight ELSE 0 END), 0) AS valid_project_weight
+        FROM session_cost s
+        LEFT JOIN project_weight w ON w.sid = s.sid
+        GROUP BY s.sid
+    ) attributed_sessions
+    WHERE valid_project_weight < 1.0
+),
 day_summary AS (
     SELECT r.day_total,
            r.day_tokens,
@@ -86,9 +97,11 @@ day_summary AS (
            COALESCE(a.attributed_total, 0) AS attributed_total,
            COALESCE(a.attributed_tokens, 0) AS attributed_tokens,
            COALESCE(a.attributed_requests, 0) AS attributed_requests,
-           COALESCE(a.attributed_sessions, 0) AS attributed_sessions
+           COALESCE(a.attributed_sessions, 0) AS attributed_sessions,
+           COALESCE(rs.residual_sessions, 0) AS residual_sessions
     FROM request_totals r
     LEFT JOIN allocated_totals a ON 1 = 1
+    LEFT JOIN residual_sessions rs ON 1 = 1
 ),
 unattributed AS (
     SELECT 'unattributed' AS project,
@@ -103,8 +116,7 @@ unattributed AS (
                   (SELECT attributed_tokens FROM day_summary)) / 1000.0, 1) AS ktokens,
            round((SELECT day_requests FROM day_summary) -
                  (SELECT attributed_requests FROM day_summary)) AS requests,
-           round((SELECT day_sessions FROM day_summary) -
-                 (SELECT attributed_sessions FROM day_summary)) AS sessions,
+           (SELECT residual_sessions FROM day_summary) AS sessions,
            round((SELECT day_total FROM day_summary), 2) AS day_total,
            round((SELECT attributed_total FROM day_summary), 2) AS attributed_total
     FROM day_summary
