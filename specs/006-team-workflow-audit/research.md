@@ -3,15 +3,16 @@
 ## Decision 1: Introduce one typed `teamAudit` card with bounded section variants
 
 **Decision**: Add one schema-locked `teamAudit` CardType. Its payload has a
-small common envelope and one of five section variants: `overview`, `findings`,
-`caseTimelines`, `individualMetrics`, or `artifacts`. A snapshot may publish
-multiple cards with deterministic IDs and `partIndex`/`partCount`.
+small common envelope and one of eight section variants: `overview`,
+`findings`, `caseTimelines`, `individualMetrics`, `feedbackLineage`,
+`agentRepeatMetrics`, `importObservations`, or `artifacts`. A snapshot may
+publish multiple cards with deterministic IDs and `partIndex`/`partCount`.
 
 **Rationale**: Existing generic cards cannot preserve finding fingerprints,
 six lifecycle states, four independent audit axes, event chains, and Owner
 decision targets without lossy text conventions. One variant-based module
 keeps the interface smaller than several audit-specific CardTypes, while
-bounded parts respect the existing 256 KB per-card payload limit and the flat
+bounded parts respect the exact 262,144-byte per-card payload limit and the flat
 Briefing → Container → Card hierarchy.
 
 **Alternatives rejected**:
@@ -51,7 +52,8 @@ audit.
 immutable snapshot and child facts keyed by stable source identities, L4
 exposes named read-only queries, and L5 maps only L4 output into card payloads.
 Same identity plus same hash is an idempotent replay; same identity plus a
-different hash is a collision recorded as a limitation and never overwrites.
+different hash appends an independently keyed collision observation and never
+overwrites or annotates the accepted snapshot fact.
 
 **Rationale**: This follows aidata's declared layer direction, retains
 provenance, and lets every UI value be traced back to an accepted immutable
@@ -64,7 +66,30 @@ record. It also keeps overlap-window deduplication at the stable-identity seam.
 - Parse directly in L5: creates an empty-shell card without L1–L4 provenance.
 - Update rows on replay: violates immutability.
 
-## Decision 4: Extend the existing append-only `UserEvent` interface
+## Decision 4: Preserve feedback lineage and repeat metrics as typed views
+
+**Decision**: Carry the source `feedback_lineage` and `agent_repeat_metrics`
+records through dedicated relational grains and dedicated payload sections.
+Feedback lineage retains problem, origin/delivery, PR/merge, release/build,
+observation/related-feedback, and pending/effectiveness identities. Repeat
+metrics remain per role with complete common counters, cycle/cause breakdowns,
+role-specific counters, and supporting subject/event identities.
+
+**Rationale**: Reducing either source record to generic numerator/denominator
+rows loses the identities needed to judge delivery trust and repeated workflow
+activity. A typed module hides storage joins while keeping the source contract
+intact at the card interface.
+
+**Alternatives rejected**:
+
+- Fold lineage into case timelines: loses problem-to-release grain and pending
+  effectiveness states.
+- Collapse repeat metrics across roles: turns descriptive evidence into an
+  unsupported personnel score and violates the source counting identity.
+- Preserve role-specific data as untyped display JSON: moves source-schema
+  interpretation into the view and weakens validation.
+
+## Decision 5: Extend the existing append-only `UserEvent` interface
 
 **Decision**: Add two locked action raw values:
 `auditFindingAcknowledged` and `auditFindingRemediationApproved`. Both target
@@ -86,14 +111,15 @@ and graceful-failure behavior behind the established interface. Constitution
   adds a shallow interface.
 - Encode approval as `done` or `star`: destroys action semantics.
 
-## Decision 5: Use a hosted artifact sidecar and the central URL policy
+## Decision 6: Use a hosted artifact sidecar and the central URL policy
 
-**Decision**: A manually imported bundle may include an artifact manifest
-sidecar. Each entry binds a stable artifact identity and content hash to its
-snapshot, finding/case identities, evidence event IDs, revision evidence, and
-an HTTPS URL. Unsafe or missing URLs remain visible as unavailable labels and
-limitations. Optional grill entry points use the same publisher-supplied HTTPS
-contract and only open a browser destination.
+**Decision**: A publishable manually imported bundle contains a typed artifact
+sidecar envelope with schema version, snapshot identity, artifact entries, and
+optional `grillMeURL`/`grillWithDocsURL` strings. Import may retain a missing
+sidecar as a limitation, but publication waits for mandatory entries. Each artifact binds a stable identity
+and content hash to its snapshot, finding/case identities, evidence event IDs,
+revision evidence, and an HTTPS URL. Unsafe or missing URLs remain visible as
+unavailable labels and limitations; grill links only open a browser destination.
 
 **Rationale**: The upstream evidence schema mandates Archify outputs but does
 not define a portable URL field. The repository rejects `file:` and custom
@@ -108,14 +134,16 @@ snapshot and keeps dynamic team/P0/P1 artifacts viewable on every device.
 - Custom skill-launch URLs: constitution permits HTTPS only and the app must
   not dispatch work.
 
-## Decision 6: Publish the latest snapshot inside today's briefing
+## Decision 7: Publish the latest snapshot inside today's briefing
 
 **Decision**: L5 adds one audit container for the latest accepted snapshot to
 the normal daily briefing. It emits a compact overview first, then bounded
-detail parts. The full set of required P0/P1 findings and artifact entries is
-never silently truncated; if the briefing budget cannot contain all remaining
-details, the overview states the omitted count and exposes the validated full
-artifact link as a limitation.
+detail parts. The overview, every P0/P1 finding, generic workflow, every team
+relationship, and every P0/P1 event-chain link are mandatory and reserved
+before optional details. If the budget cannot contain every mandatory part,
+publication is rejected. Optional oversized details may externalize only to a
+typed validated full-report reference; required records are never replaced by
+that report.
 
 **Rationale**: This preserves the product's single-day, flat, five-minute
 reading model and avoids an unrequested history/navigation product. Stable
@@ -128,17 +156,18 @@ snapshot identity and mode make baseline versus incremental state explicit.
 - Put the full raw evidence JSON in one card: breaches payload budget and
   redaction/locality goals.
 
-## Decision 7: Keep verification resolver- and hook-driven
+## Decision 8: Keep verification resolver- and hook-driven
 
-**Decision**: Every implementation task runs only its owning leaf through
-`scripts/context/run <layer> --mode local` where a local gate exists. Routing
-changes also run `scripts/context/audit`. Normal commit/push hooks provide the
-required local gate evidence; App and CLI heavy builds remain CI-only.
+**Decision**: Every implementation task commits and pushes normally with the
+configured hooks. The hooks audit routing, resolve changed paths, and run the
+affected leaves' declared local gates. A focused resolver rerun is used only to
+diagnose an observed hook failure; the authoritative local evidence is the next
+normal hook run. App and CLI heavy builds remain CI-only.
 
 **Rationale**: This is the repository-declared verification contract and
-avoids the forbidden host-based App tests. The optional hostless App logic
-target is used only for focused implementation feedback, never as a substitute
-for CI App builds.
+avoids the forbidden host-based App tests and duplicate proactive suite runs.
+The optional hostless App logic target is diagnostic-only after a concrete
+failure, never normal acceptance or a substitute for CI App builds.
 
 ## Resolved source ambiguities
 

@@ -33,6 +33,9 @@ signals, never `CardStyle` or whole-card background changes.
   "findings": [],
   "caseTimelines": [],
   "individualMetrics": [],
+  "feedbackLineage": [],
+  "agentRepeatMetrics": [],
+  "importObservations": [],
   "artifacts": []
 }
 ```
@@ -52,6 +55,15 @@ others are absent or empty. The detailed field types and invariants are in
   roles, timestamps, revision SHA, and limitations.
 - `individualMetrics` shows definition, numerator/denominator, window, and
   limitation. Copy is descriptive and never causal or evaluative of a person.
+- `feedbackLineage` shows problem, origin/delivery, PR/merge,
+  release/build/availability, observation/related-feedback identities, and the
+  exact pending/effectiveness state.
+- `agentRepeatMetrics` shows each role independently with common counters,
+  cycle/cause breakdowns, role-specific counters, and supporting subject/event
+  identities. It never computes a cross-role efficiency score.
+- `importObservations` shows each collision observation identity, time, source,
+  entity identity, accepted/rejected hashes, disposition, and limitation while
+  keeping the accepted snapshot hash unchanged.
 - `artifacts` shows artifact identity/hash/evidence relationships. A URL is a
   `Link` only when `URLPolicy.validate` accepts it; otherwise it is text.
 - P0/P1 event-chain entries display finding fingerprint, event IDs, and
@@ -60,15 +72,49 @@ others are absent or empty. The detailed field types and invariants are in
 
 ## Bounded publication
 
-- Each card payload is at most 256 KB encoded.
-- L5 partitions collections on whole entity boundaries and records
-  `partIndex`/`partCount`; it never splits or truncates an individual finding
-  or evidence reference.
-- The overview is always first. All P0/P1 finding and event-chain parts are
-  emitted before P2/info details.
-- If the daily briefing card budget prevents complete local detail, the
-  overview contains an explicit omitted count/limitation and a validated full
-  report artifact entry. No omission is silent.
+The hard limit is the actual serialized UTF-8 payload size, including the
+common envelope: **≤262,144 bytes**.
+
+L5 uses deterministic two-pass packing:
+
+1. Stable-sort entities by their contract identity.
+2. Pack whole entities without splitting or truncating fields/arrays.
+3. Set final `partIndex`/`partCount`, re-encode, and move the last entity to the
+   next part until every final encoded payload is within the limit.
+
+The mandatory set is emitted before any discretionary detail budget:
+
+- the complete overview with `PublicationCoverage`;
+- every P0/P1 finding;
+- the generic workflow artifact;
+- every team/repository relationship artifact;
+- every current P0/P1 `findingEventChain` entry.
+
+Every required chain retains its direct URL, artifact ID, finding fingerprint,
+event IDs, revision evidence, and content hash. Required/published counts in
+`PublicationCoverage` must reconcile exactly. If the briefing/card budget
+cannot contain every mandatory part, publication of that snapshot is rejected;
+a full-report link never substitutes for a mandatory item.
+Mandatory URLs must satisfy the same HTTPS+host rule at L5 publication and are
+revalidated by `URLPolicy` at render; an unsafe mandatory URL rejects
+publication rather than producing a false “published” count.
+
+Oversized behavior is deterministic:
+
+- An overview or individually oversized mandatory finding/artifact rejects the
+  snapshot's publication.
+- An individually oversized optional detail becomes an
+  `ExternalizedEntityReference` only when a typed, validated full-report
+  reference exists; without it, publication is rejected.
+- Optional detail parts may be omitted only with reconciled
+  `omittedOptionalEntityCount`/`externalizedEntityCount` and the typed full
+  report. No arbitrary string truncation or array clipping is permitted.
+
+Boundary fixtures encode the final payload and prove: 262,144 bytes accepted;
+262,145 bytes rejected or externalized only for optional detail; oversized
+overview rejected; optional detail with/without full report; oversized
+mandatory P0/P1 chain rejected; and every mandatory required/published count
+equal.
 
 ## Accessibility and localization
 

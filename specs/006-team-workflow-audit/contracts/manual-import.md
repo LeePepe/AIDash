@@ -30,13 +30,27 @@ Each immutable bundle is a directory containing:
 ```text
 <stable-snapshot-id>/
 ├── snapshot.json
-└── artifacts.json       # optional hosted-artifact sidecar
+└── artifacts.json       # required for publication; typed hosted-artifact sidecar
 ```
 
 `snapshot.json` follows the upstream Team Workflow Audit evidence schema.
-`artifacts.json` is an AIDash portability extension containing
-`ArtifactManifestEntry[]` as defined in `data-model.md`. It never changes the
-snapshot body or hash.
+`artifacts.json` is an AIDash portability extension with this typed envelope:
+
+```json
+{
+  "schemaVersion": 1,
+  "snapshotID": "audit-snapshot-001",
+  "artifacts": [],
+  "grillMeURL": "https://example.com/grill-me",
+  "grillWithDocsURL": "https://example.com/grill-with-docs"
+}
+```
+
+`artifacts` contains `ArtifactManifestEntry[]` as defined in `data-model.md`;
+both grill fields are optional untrusted strings. The sidecar never changes
+the snapshot body or hash. A missing sidecar may be ingested as an import
+limitation, but the snapshot is not publishable until its mandatory generic,
+team/repository, and P0/P1 chain entries are present and valid.
 
 ## Collection and normalization
 
@@ -49,8 +63,13 @@ snapshot body or hash.
    finding enums, and evidence references.
 6. Normalize into source-clean facts while preserving hashes and provenance.
 7. Treat same identity + same hash as replay. Treat same identity + different
-   hash as an immutable collision: retain the accepted fact, add a limitation,
-   and emit no overwrite.
+   hash as an immutable collision: retain the accepted fact, append an
+   independently keyed `ImportCollisionObservation`, add a limitation, and
+   emit no overwrite or rejected content.
+8. Validate that every mandatory generic workflow, team/repository
+   relationship, and P0/P1 finding-event-chain sidecar entry satisfies the
+   bounded direct-link contract. A malformed or individually oversized
+   mandatory entry rejects publication instead of being truncated.
 
 ## Prohibited behavior
 
@@ -68,6 +87,10 @@ snapshot body or hash.
   fixture.
 - Default collect/normalize source selection excludes the manual source.
 - Same bundle replay is idempotent; identity/hash conflict never overwrites.
+- Repeating the same collision observation ID merges once while distinct
+  import attempts remain separate append-only observations.
 - A 24-hour overlap replay deduplicates stable source event IDs.
+- Sidecar fixtures cover absent/present grill URLs, unsafe URLs preserved as
+  non-actionable data, and every mandatory P0/P1 chain entry.
 - Missing configuration returns zero without raising.
 - Test spies observe no subprocess, network, audit, dispatch, or mutation call.
