@@ -16,6 +16,11 @@ AidataL1L2, AidataL3, AidataL4, AidataL5, AIDashCore, DesignKit, AIDashUI,
 AIDashApp, and aidashCLI. Unrelated CLI commands, `project.yml`, aidata
 scripts/cron, generated data, and external audit sources are out of scope.
 
+Recovery uses separate branches/PRs in this order: T020 RepoInfra watchdog,
+the planning/constitution surface (T021), T019 AIDashUI compatibility, then the
+nine-file AIDashCore T005 surface. They must never be combined. PR #202 is
+evidence only.
+
 ## 2. Exercise the manual boundary with fixtures
 
 Configure the git-ignored Team Audit import directory to a neutral fixture
@@ -51,18 +56,25 @@ through the hook signal; it is not part of the normal task acceptance path.
 ## 4. Required neutral fixture proofs
 
 - Baseline and incremental overview parts render different cohort/cursor
-  sections and independent axes.
+  sections, typed evidence coverage, locked axis-specific verdicts, and
+  independent reconciled axes.
 - Replay and overlap records deduplicate by stable identity; hash collision
   never overwrites and emits a separately keyed observation with accepted
   parent snapshot ID/hash.
 - All six finding states and all locked verdicts round-trip.
 - Feedback lineage preserves problem/delivery/release/observation state, and
-  repeat metrics preserve every role, cycle/cause, role-specific, subject, and
-  event value.
+  repeat metrics preserve every role, cycle/cause, five-case tagged
+  role-specific, subject, and event value with reconciled non-negative totals.
+- Case timelines embed ordered events/attempts; their stable case/event/
+  attempt/role/cycle references resolve exactly and reject missing, duplicate,
+  reordered, or foreign identities.
 - Missing/unsafe mandatory artifact URLs reject publication; unsafe optional
   artifact/grill URLs are text; valid HTTPS URLs are actionable.
 - Finding subject/responsibility and exact artifact-sidecar ID/content hash
   survive import, warehouse, query, payload, and rendering.
+- Collision parent ID/hash/entity/disposition, artifact snapshot/sidecar
+  relationships, typed grill links, full-report resolution, and externalized
+  optional-entity bindings reject dangling or mismatched references.
 - Final encoded payload boundary fixtures cover 262,144/262,145 bytes;
   mandatory P0/P1 findings and links have independently reconciled
   required/published counts and are never omitted or externalized, while
@@ -74,6 +86,10 @@ through the hook signal; it is not part of the normal task acceptance path.
   publication without crashing.
 - Spies observe no audit invocation, cron registration, source mutation,
   issue/run mutation, agent dispatch, or remediation execution.
+
+The complete T005 proof-to-file mapping is
+`contracts/t005-acceptance-matrix.md`; every matrix row must have fresh evidence
+inside the original nine-file AIDashCore allowlist.
 
 ## 5. CI evidence
 

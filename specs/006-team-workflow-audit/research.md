@@ -176,6 +176,35 @@ avoids the forbidden host-based App tests and duplicate proactive suite runs.
 The optional hostless App logic target is diagnostic-only after a concrete
 failure, never normal acceptance or a substitute for CI App builds.
 
+## Decision 9: Recover through four non-overlapping PR contracts
+
+**Decision**: Recover from Team Lead's `main` baseline through a dedicated
+RepoInfra watchdog PR, a planning/constitution PR, an AIDashUI future-CardType
+compatibility PR, and a fresh AIDashCore-only T005 PR. The watchdog lands first
+because current main fails its three RepoInfra regression tests. The
+constitution PR uses the required `constitution: <change>` title and carries
+the in-flight migration note in its PR description. T005 retains its original
+nine-file allowlist and consumes `contracts/t005-acceptance-matrix.md`.
+
+**Rationale**: The invalidated branch combined planning, Core, and watchdog
+work and diverged before the current main. It also proved that adding the
+eleventh CardType in Core alone makes three existing AIDashUI switches
+non-exhaustive under repository-wide required CI. A small merge-first AIDashUI
+fallback is the expand step; T005 is the Core contract step; the explicit
+renderer/token work remains T008. This keeps every PR one-layer, reviewable,
+and independently buildable without weakening the CardType contract.
+
+**Alternatives rejected**:
+
+- Reuse or amend PR #202: preserves the invalid topology and stale ancestry.
+- Put AIDashUI changes into T005: violates its AIDashCore allowlist and the
+  one-layer PR rule.
+- Add `teamAudit` UI cases before the Core enum exists: does not compile.
+- Ignore repository-wide builds until T008: the protected-branch build gate is
+  required for every PR, so T005 would be unmergeable.
+- Transplant the failed watchdog patch: its lingering-descendant regression
+  still failed and requires a separately authorized RepoInfra diagnosis.
+
 ## Resolved source ambiguities
 
 - “Three independent axes” means Workflow Conformance, Workflow Fitness, and

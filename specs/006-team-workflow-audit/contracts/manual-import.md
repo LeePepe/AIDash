@@ -66,9 +66,11 @@ warehouse facts, L4 bundles, payload provenance, and collision observations.
 4. Compute the snapshot SHA-256 and exact sidecar-byte SHA-256; validate stable
    sidecar identity and treat same sidecar ID/different hash as a collision
    parented to the accepted snapshot ID/hash.
-5. Validate required stable identities, UTC timestamps, mode-specific
-   cohort/cursors, core-axis reconciliation, Task Effectiveness separation,
-   finding enums, and evidence references.
+5. Validate required stable identities, exact lowercase SHA-256 values, UTC
+   timestamps, typed mode-specific cohort/cases or cursors, evidence coverage,
+   axis-specific verdict reconciliation, Task Effectiveness separation,
+   ordered case/event/attempt/role/cycle references, five-role tagged repeat
+   metrics, locked release/collision/finding enums, and evidence references.
 6. Normalize into source-clean facts while preserving hashes and provenance.
 7. Treat same identity + same hash as replay. Treat same identity + different
    hash as an immutable collision: retain the accepted fact, append an
@@ -104,6 +106,10 @@ warehouse facts, L4 bundles, payload provenance, and collision observations.
 - Exact sidecar bytes produce a stable sidecar ID/hash through normalize;
   same ID/different bytes produces a parented collision observation.
 - Finding fixtures preserve explicit `subject_id` and `responsibility_layer`.
+- Timeline fixtures preserve ordered embedded events/attempts and reject
+  missing, duplicate, reordered, or foreign case/event/attempt references.
+- Repeat fixtures cover all five role-specific variants, tag/role mismatch,
+  negative counts, and inconsistent attempt/repeat/cycle/cause totals.
 - Missing/unsafe mandatory URLs reject publication input; unsafe optional
   artifact/grill URLs remain non-actionable data.
 - Missing configuration returns zero without raising.

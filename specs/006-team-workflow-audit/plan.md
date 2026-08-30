@@ -73,6 +73,7 @@ specs/006-team-workflow-audit/
 ├── contracts/
 │   ├── manual-import.md
 │   ├── card-payload.md
+│   ├── t005-acceptance-matrix.md
 │   └── owner-decision-events.md
 ├── checklists/
 │   └── requirements.md
@@ -109,13 +110,17 @@ added to the matching router `test_paths` in the same layer task.
 ### `TeamAuditPayload` module
 
 **Interface**: one common snapshot envelope plus eight locked section variants
-and validation invariants defined by `contracts/card-payload.md`.
+and validation invariants defined by `contracts/card-payload.md` and the
+complete Core proof table in `contracts/t005-acceptance-matrix.md`.
 
-**Implementation hidden behind it**: mode reconciliation, axis-count
-validation, typed finding states, complete lineage/repeat metrics, collision
-observations, bounded part/externalization semantics, mandatory artifact
-capacity, evidence identity, and graceful URL presentation. Callers learn one
-CardType and section enum, not multiple audit card schemas.
+**Implementation hidden behind it**: typed cohort/cases and evidence coverage;
+mode reconciliation; axis-specific verdict/count validation; typed finding,
+release, collision, and role-repeat enums; ordered case/event/attempt
+references; full lineage and five-role tagged repeats; collision and
+snapshot/sidecar/full-report referential integrity; bounded
+part/externalization semantics; mandatory artifact capacity; exact SHA-256 and
+received UTF-8 byte validation; and graceful unknown-enum/URL fallback. Callers
+learn one CardType and section enum, not multiple audit card schemas.
 
 **Test surface**: Core round trips/invariants and UI rendering through
 `CardType.decode`/`CardRouter`.
@@ -156,8 +161,10 @@ reconciled P0/P1-finding and mandatory-link count pairs.
 
 `AidataFoundation → AidataL1L2 → AidataL3 → AidataL4 → AidataL5 → AIDashCore → DesignKit → AIDashUI → AIDashApp schema advertisement`
 
-Core and aidata contract tasks may proceed in parallel after the planning
-contract; AidataL5 waits for L4 and Core, computes published/omitted/externalized
+Core follows the AIDashUI forward-compatibility preparation task so adding the
+eleventh CardType does not break required repository-wide CI. Aidata contract
+tasks may proceed in parallel after the planning contract; AidataL5 waits for
+L4 and Core, computes published/omitted/externalized
 results after packing, and emits the mandatory set; UI waits for Core and
 DesignKit and renders it read-only; App schema advertisement waits for Core.
 The slice is independently demonstrated with baseline/incremental fixtures and
@@ -204,6 +211,7 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
 | Named audit query bundles | AidataL4 | AidataL5 | L4 exposes immutable required entities/counts and optional facts only; L5 alone computes final publication coverage after packing |
 | `teamAudit` JSON payload | AIDashCore | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash and explicit finding identity; Core before mapping/render/schema |
+| Future CardType fallback | AIDashUI | AIDashCore CardType expansion | AIDashUI fallback preparation merges before T005; T008 later adds the explicit renderer/token mapping |
 | Classification tint | DesignKit | AIDashUI | DesignKit before final UI renderer |
 | Audit action intent | AIDashUI | AIDashApp | Core action enum before both; UI interface before App wiring |
 | `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
@@ -213,7 +221,9 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 ## Dependency Graph
 
 ```text
+Recovery gates: T020 → T021 → T019 → T005
 US1 data: T001 → T002 → T003 → T004 → T007
+US1 compatibility: T019 → T005
 US1 app:  T005 ─┬→ T007
                 ├→ T008 ← T006
                 └→ T009
@@ -229,6 +239,10 @@ US3 data: T002 + T013 → T016
 
 Assembled RepoInfra gate:
 T007 + T008 + T009 + T011 + T012 + T015 + T016 + T017 → T018
+
+Recovery-only RepoInfra prerequisite:
+T020 changes no product behavior and uses its own task, branch, and PR; it
+unblocks the normal RepoInfra hooks required by T021.
 ```
 
 The graph is acyclic. Parallel markers are allowed only for tasks whose files
@@ -251,6 +265,36 @@ do not overlap and whose blocking contract has landed.
   focused diagnostic exception after a concrete failure.
 - Exact implementation SHA must match local HEAD, remote branch, and PR head
   before independent implementation review.
+
+## Recovery publication topology
+
+All recovery branches start from Team Lead's approved `main` baseline
+`d8f156bf792c4d515a67bbbb6fc287f752622e12` or the then-current descendant of
+that baseline after a prerequisite merges. PR #202 and its workspace are
+evidence only and are never repointed, amended, cherry-picked as a combined
+surface, or reused.
+
+1. **RepoInfra watchdog PR (T020)**: starts independently from the approved
+   baseline and owns only the watchdog plus its same-layer regression test. It
+   lands first because current main fails the three watchdog regressions that
+   every RepoInfra planning commit selects. It contains no planning or product
+   files and does not transplant the failed PR #202 patch.
+2. **Planning/constitution PR (T021)**: starts from synchronized main after
+   T020 and contains only `.specify/feature.json`,
+   `.specify/memory/constitution.md`, the managed `AGENTS.md` Spec Kit marker,
+   and `specs/006-team-workflow-audit/**`. Its title is exactly
+   `constitution: authorize team audit decision receipts`. Its PR description
+   repeats the 1.13.0 in-flight migration note: existing events remain valid;
+   new actions are additive, consumers preserve or visibly ignore unknown
+   actions, and audit invocation/remediation stay outside AIDash. It contains
+   no product or watchdog implementation.
+3. **AIDashUI compatibility PR (T019)**: makes current CardType switches use a
+   tested future-case fallback without adding `teamAudit`. It merges before
+   T005 so the Core-only CardType expansion can pass required whole-repository
+   builds.
+4. **AIDashCore T005 PR**: starts fresh after T019 from synchronized `main`,
+   uses only the original nine-file allowlist, and proves every row in
+   `contracts/t005-acceptance-matrix.md`.
 
 ## Complexity Tracking
 

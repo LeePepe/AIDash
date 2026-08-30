@@ -19,8 +19,11 @@
 - [x] The three core axes and separate Task Effectiveness axis cannot be conflated.
 - [x] All six finding lifecycle states are explicit.
 - [x] Feedback lineage and per-role repeat metrics preserve every source-required identity and breakdown.
+- [x] Typed cohort/cases, evidence coverage, axis-specific verdicts, ordered timeline events/attempts, and five role-repeat variants are explicit.
+- [x] Release channel, collision disposition, grill/full-report/externalization, and all SHA-256/referential invariants are locked.
 - [x] Collision observations are append-only and independently keyed without mutating accepted snapshots.
 - [x] Exact payload-size, mandatory-link reservation, and optional externalization behavior are deterministic.
+- [x] T005 maps type, scalar, cross-field, referential, round-trip, public-API, fallback, and exact 262,144/262,145-byte proofs to its original nine-file allowlist.
 - [x] Artifact sidecar grill fields and the aidashCLI action consumer are specified end to end.
 - [x] L4 exposes immutable required inputs only; L5 computes final publication coverage, reconciles independent P0/P1-finding and mandatory-link count pairs, and US1 emits every mandatory finding/artifact.
 - [x] Missing/invalid mandatory URLs reject publication; only optional artifact/grill links degrade to text.
@@ -41,5 +44,7 @@
 ## Readiness
 
 - [x] Repository constitution conflict is resolved by constitution 1.13.0.
+- [x] Constitution publication requires its own `constitution: <change>` PR and PR-body migration note; planning review is not a substitute.
+- [x] AIDashUI future-CardType compatibility precedes the Core-only T005 expansion, and watchdog work is an independent RepoInfra task/PR.
 - [x] HTTPS-only artifact and grill entry-point behavior agrees with the repository URL policy.
 - [x] The specification is ready for Plan-stage architecture and contract design.
