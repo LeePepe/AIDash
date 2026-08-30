@@ -395,38 +395,39 @@ def _efficiency_clause_status(clause: str) -> str | None:
     cleaned = clause.strip()
     if not cleaned:
         return None
-    if re.search(
-        r"(?:不|未|没|没有|并未|并没有|非|并非).{0,24}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)",
-        cleaned,
-        re.IGNORECASE,
-    ) or re.search(
-        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,18}(?:不|未|没|没有|并未|并没有|非|并非).{0,18}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)",
-        cleaned,
-        re.IGNORECASE,
-    ):
+
+    positive_growth = (
+        r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)"
+    )
+    negative_growth = (
+        r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)"
+    )
+    negator = r"(?:不|未|没|没有|并未|并没有|并不|非|并非|从未|根本不)"
+    topic = (
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)"
+    )
+
+    negated_positive = (
+        rf"(?:{negator}).{{0,20}}{positive_growth}"
+        rf"|{topic}.{{0,30}}{negator}.{{0,20}}{positive_growth}"
+        rf"|(?:{negator}).{{0,16}}{topic}.{{0,16}}{positive_growth}"
+    )
+    if re.search(negated_positive, cleaned, re.IGNORECASE):
         return "negative"
 
-    if re.search(
-        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,18}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)",
-        cleaned,
-        re.IGNORECASE,
-    ) or re.search(
-        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,18}(?:不|未|没|没有|并未|并没有|非|并非).{0,18}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)",
-        cleaned,
-        re.IGNORECASE,
-    ):
+    if re.search(rf"(?:{topic}).{{0,18}}{negative_growth}", cleaned, re.IGNORECASE):
         return "negative"
 
-    if re.search(
-        r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|效率|效能|投入产出|产出|生产力|工作效率|效益|提效|工作提效|efficiency|productivity|throughput).{0,16}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)",
-        cleaned,
-        re.IGNORECASE,
-    ) or re.search(
-        r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)",
-        cleaned,
-        re.IGNORECASE,
-    ):
+    if re.search(rf"(?:{topic}).{{0,18}}{positive_growth}", cleaned, re.IGNORECASE):
+        # Explicit positive wording is valid only when the same clause is not
+        # simultaneously denying the positive trend with a negation modifier.
+        if re.search(rf"(?:{negator}).{{0,24}}{positive_growth}", cleaned, re.IGNORECASE):
+            return "negative"
         return "positive"
+
+    if re.search(r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)", cleaned, re.IGNORECASE):
+        return "positive"
+    return None
 
     if re.search(
         r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput).{0,24}(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱)",

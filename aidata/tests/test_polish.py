@@ -528,6 +528,41 @@ def test_polish_digest_rejects_true_mixed_efficiency_pairs(claim):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "效率没有明显提升",
+        "效率提升，但效率没有提升",
+    ],
+)
+def test_polish_digest_rejects_modified_negation_and_same_clause_contradiction(claim):
+    """Negated efficiency wording with modifiers must fail closed before evidence is accepted."""
+    valid_template = """# AI 使用日报 2026-08-18
+
+> 数据源: raven✅
+
+## ⚡ Trending
+- 成本: 1800$ ↓(-25%) vs 昨 2400$
+- 浪费额: 100$ ↓(-58%) vs 昨 240$
+- 完成任务: 128 ↑(+32%) vs 昨 96
+- 完成 issue(近似): 18 ↑(+29%) vs 昨 14
+- 请求数: 540 ↑(+12%) vs 昨 480
+
+## 📅 今日 TODO
+- P0: 继续优化
+
+## 🗂 昨日汇总
+- 昨日花费 $1800.00，请求 540 次
+
+## 🔍 可改良
+- 昨日无显著浪费信号"""
+    client = FakeClient(f'{{"tldr": "{claim}", "todos": ["继续优化"]}}')
+    out = polish_digest(valid_template, client)
+    assert claim not in out
+    assert "整体趋势需关注" in out or "数据不足以判断" in out
+
+
+@pytest.mark.unit
 def test_polish_digest_preserves_non_efficiency_qualitative_text():
     """Qualitative prose without an efficiency claim or tracked metric direction must survive unchanged."""
     client = FakeClient('{"tldr": "会话活跃，需关注波动", "todos": ["观察波动"]}')
