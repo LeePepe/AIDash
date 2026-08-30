@@ -122,6 +122,21 @@ process_group_alive() {
     kill -0 "-$pgid" 2>/dev/null
 }
 
+child_has_exited() {
+    local pid="$1"
+    local status
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    status="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    case "$status" in
+        Z*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 terminate_process_group() {
     local pgid="$1"
     kill -TERM "-$pgid" 2>/dev/null || kill -TERM "$pgid" 2>/dev/null || true
@@ -156,7 +171,7 @@ run_with_timeout() {
     (
         local waited=0
         while [ "$waited" -lt "$seconds" ]; do
-            if ! kill -0 "$child_pid" 2>/dev/null; then
+            if child_has_exited "$child_pid"; then
                 if process_group_alive "$child_pid"; then
                     terminate_process_group "$child_pid"
                     local grace=0
