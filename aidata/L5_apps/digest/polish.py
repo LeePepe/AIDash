@@ -294,6 +294,20 @@ def _efficiency_assertion_kind(tldr: str) -> str | None:
     return None
 
 
+def _needs_efficiency_validation(tldr: str) -> bool:
+    """Whether the TL;DR is an efficiency claim or a tracked metric-direction statement."""
+    if not tldr or not tldr.strip():
+        return False
+    if re.search(r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|efficiency|productivity|throughput)", tldr, re.IGNORECASE):
+        return True
+    if _metric_direction_assertions(tldr):
+        return True
+    if re.search(r"(?:上升|增长|提升|提高|改善|优化|好转|更好|增强|回升|变好|下降|降低|减少|恶化|变差|回落|趋弱|下滑|走弱)", tldr, re.IGNORECASE):
+        if re.search(r"(?:整体|趋势|成本|浪费|任务|issue|产出|效率|效能|生产力|throughput|productivity|efficiency)", tldr, re.IGNORECASE):
+            return True
+    return False
+
+
 def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
     """Return True if the TL;DR is consistent with the evidence.
 
@@ -559,11 +573,9 @@ def _refine_todos(lines: list[str], todo_iter) -> list[str]:
 def polish_digest(template_md: str, client: LLMClient) -> str:
     """Run the LLM polish pass. Propagates LLMError for the caller to catch.
 
-    After parsing the LLM's reply, validates the TL;DR against efficiency
-    evidence extracted from the template. If the LLM made an unsupported
-    positive efficiency claim, the TL;DR is replaced with a deterministic
-    neutral fallback (MY-1437/MY-1449). TODOs are kept as-is since they only
-    rephrase template-owned action items.
+    Only validate TL;DRs that look like an efficiency claim or a tracked
+    metric-direction statement. Neutral qualitative prose such as "会话活跃，需关注波动"
+    is preserved without being forced through the efficiency fallback path.
     """
     system, user = build_prompt(template_md)
     raw = client.complete(system, user)
@@ -571,9 +583,10 @@ def polish_digest(template_md: str, client: LLMClient) -> str:
     if re.search(r"\d|[$%]", slots.tldr):
         return template_md
     evidence = extract_efficiency_evidence(template_md)
-    if not validate_efficiency_claim(slots.tldr, evidence):
-        slots = PolishSlots(
-            tldr=neutral_fallback_tldr(evidence),
-            todos=slots.todos,
-        )
+    if _needs_efficiency_validation(slots.tldr):
+        if not validate_efficiency_claim(slots.tldr, evidence):
+            slots = PolishSlots(
+                tldr=neutral_fallback_tldr(evidence),
+                todos=slots.todos,
+            )
     return apply_slots(template_md, slots)

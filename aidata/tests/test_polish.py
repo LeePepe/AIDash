@@ -391,6 +391,16 @@ def test_polish_digest_keeps_valid_positive_when_evidence_supports():
 
 
 @pytest.mark.unit
+def test_polish_digest_preserves_non_efficiency_qualitative_text():
+    """Qualitative prose without an efficiency claim or tracked metric direction must survive unchanged."""
+    client = FakeClient('{"tldr": "会话活跃，需关注波动", "todos": ["观察波动"]}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    assert "会话活跃，需关注波动" in out
+    assert "整体趋势需关注" not in out
+    assert "观察波动" in out
+
+
+@pytest.mark.unit
 def test_polish_digest_keeps_valid_neutral_commentary():
     """LLM provides neutral commentary when cost is up — should be kept."""
     client = FakeClient('{"tldr": "成本上升，需关注", '
@@ -448,3 +458,12 @@ def test_polish_digest_rejects_positive_when_cost_down_but_evidence_is_insuffici
     out = polish_digest(TEMPLATE_COST_DOWN, client)
     assert "效率明显提升" not in out
     assert "整体趋势需" in out or "数据不足以判断" in out
+
+
+@pytest.mark.unit
+def test_polish_digest_keeps_non_efficiency_qualitative_text():
+    """Qualitative text that is not an efficiency claim must survive unchanged."""
+    client = FakeClient('{"tldr": "会话活跃，需关注波动", "todos": ["继续观察"]}')
+    out = polish_digest(TEMPLATE_COST_UP, client)
+    assert "会话活跃，需关注波动" in out
+    assert "整体趋势需关注" not in out

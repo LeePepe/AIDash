@@ -69,12 +69,30 @@ def test_happy_path_polishes_and_passes_guard(frozen):
 
 
 @pytest.mark.unit
+def test_llm_keeps_non_efficiency_qualitative_text(frozen):
+    template = build_digest(REPORT_DATE, use_llm=False)
+    client = FakeClient('{"tldr": "会话活跃，需关注波动", "todos": []}')
+    out = build_digest(REPORT_DATE, use_llm=True, client=client)
+    assert out != template
+    assert "💡 点评: 会话活跃，需关注波动" in out
+
+
+@pytest.mark.unit
 def test_llm_rejects_unclassified_efficiency_assertion(frozen):
     template = build_digest(REPORT_DATE, use_llm=False)
     client = FakeClient('{"tldr": "成本上升，但工作更高效", "todos": []}')
     out = build_digest(REPORT_DATE, use_llm=True, client=client)
     assert "工作更高效" not in out
     assert "成本上升" in out or "整体趋势需关注" in out
+    assert out != template
+
+
+@pytest.mark.unit
+def test_llm_preserves_non_efficiency_qualitative_text(frozen):
+    template = build_digest(REPORT_DATE, use_llm=False)
+    client = FakeClient('{"tldr": "会话活跃，需关注波动", "todos": []}')
+    out = build_digest(REPORT_DATE, use_llm=True, client=client)
+    assert "会话活跃，需关注波动" in out
     assert out != template
 
 
