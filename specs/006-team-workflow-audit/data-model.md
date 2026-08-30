@@ -206,6 +206,34 @@ observation IDs remain append-only history. The parent ID/hash is mandatory for
 snapshot- and child-fact collisions; no collision row updates the accepted
 snapshot.
 
+### TeamAuditIdentityIndex
+
+The AidataL1L2 collector maintains a derived SQLite cache at
+`raw_source_dir("team_audit_snapshot") / ".identity-index.sqlite"` (an
+injected `tmp_path` in tests) so immutable-identity decisions survive process
+restarts without rescanning every raw shard on the healthy path.
+
+| Indexed value | Key / rule |
+|---|---|
+| Accepted immutable entity | `(entityKind, stableIdentity)` → first accepted SHA-256, parent snapshot ID/hash |
+| Accepted sidecar | `(artifactSidecar, sidecarID)` → exact accepted sidecar-byte SHA-256, parent snapshot ID/hash |
+| Collision observation | `(parentSnapshotID, observationID)` → complete body-free observation fields |
+| Recovery marker | Raw-history fingerprint/checkpoint used only to detect stale cache state; never acceptance authority |
+
+The index stores no snapshot, child, sidecar, raw-log, or rejected body. Raw
+records and body-free observations remain authoritative. `open(index_path,
+raw_history)` atomically rebuilds a missing, corrupt, stale, or unverifiable
+cache from that history. A collector appends accepted raw records or body-free
+observations before `commit(import_plan)` updates the cache transaction; therefore
+a crash can leave raw ahead of the cache but never make an index-only identity
+accepted. Index-ahead rows unsupported by raw history are discarded.
+
+Classification is independent for the snapshot, every stable child kind, and
+the sidecar. A snapshot replay cannot hide a changed sidecar or child hash.
+Overlap-event deduplication uses the event stable identity through the same
+index. The full restart/collision proof is
+`contracts/t002-acceptance-matrix.md`.
+
 ### ArtifactManifestEntry
 
 | Field | Type | Rules |

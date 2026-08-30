@@ -58,24 +58,59 @@ immutable `artifacts.json` bytes; the file does not self-declare its hash. The s
 `sidecarID` plus computed hash is retained on normalized artifact/grill rows,
 warehouse facts, L4 bundles, payload provenance, and collision observations.
 
+## Contract-first internal seams
+
+The AidataL1L2 implementation has four ordered interfaces behind the existing
+public `collect()`/`normalize()` adapter surface:
+
+1. `decode_team_audit_bundle(snapshot_bytes, sidecar_bytes)` is the sole strict
+   decoder. It validates every documented nested model and reference, computes
+   both hashes from those buffers, and returns an immutable decoded bundle or
+   structured rejection without performing I/O.
+2. `read_bundle(root, bundle_dir)` is the filesystem adapter. It resolves and
+   contains an immediate bundle directory, reads each regular contract file at
+   most once, and returns those exact buffers or a typed skip/rejection.
+3. `TeamAuditIdentityIndex.open(index_path, raw_history)` reconstructs or opens
+   a derived SQLite identity cache at an injected git-ignored path. T026 uses
+   `raw_source_dir("team_audit_snapshot") / ".identity-index.sqlite"`;
+   hermetic tests use `tmp_path`. `classify(decoded_bundle, observed_at)`
+   returns an import plan; `commit(import_plan)` atomically updates the cache
+   only after the planned raw append succeeds. Classification is independent
+   for snapshot, child, and sidecar identities. Raw history—not the cache—is
+   the acceptance authority.
+4. `team_audit_snapshot.collect()` and `normalize()` wire these interfaces to
+   `rawio.write_raw` and `cleanio.write_clean`. No schema, filesystem, or
+   identity fallback remains in this final wiring module.
+
+The complete observable proof is locked in
+`contracts/t002-acceptance-matrix.md`.
+
 ## Collection and normalization
 
-1. Read only configured bundle files; never modify or delete them.
-2. Reject symlink escapes and paths outside the configured import root.
-3. Apply the existing redaction policy before writing append-only raw records.
-4. Compute the snapshot SHA-256 and exact sidecar-byte SHA-256; validate stable
-   sidecar identity and treat same sidecar ID/different hash as a collision
-   parented to the accepted snapshot ID/hash.
-5. Validate required stable identities, exact lowercase SHA-256 values, UTC
+1. Enumerate only immediate configured bundle directories; never modify or
+   delete them, accept loose JSON/JSONL/NDJSON, or recurse into unrelated paths.
+2. Reject symlink escapes and paths outside the configured import root; degrade
+   root/iteration/read races and permission failures to zero/skip.
+3. Read `snapshot.json` and `artifacts.json` once each. Decode and hash the same
+   captured buffers so replacement cannot split accepted content from its hash.
+4. Validate required stable identities, exact lowercase SHA-256 values, UTC
    timestamps, typed mode-specific cohort/cases or cursors, evidence coverage,
    axis-specific verdict reconciliation, Task Effectiveness separation,
    ordered case/event/attempt/role/cycle references, five-role tagged repeat
    metrics, locked release/collision/finding enums, and evidence references.
-6. Normalize into source-clean facts while preserving hashes and provenance.
-7. Treat same identity + same hash as replay. Treat same identity + different
+5. Classify snapshot, every child entity, and sidecar identity against the
+   restart-safe persisted index before any raw append. Treat same identity +
+   same hash as replay. Treat same identity + different
    hash as an immutable collision: retain the accepted fact, append an
    independently keyed `ImportCollisionObservation`, add a limitation, and
    emit no overwrite or rejected content.
+6. Apply the existing redaction policy only to accepted records and body-free
+   observations, then append raw records. Call `commit(import_plan)` only when
+   the append writes the expected count; on interruption or short/failed write,
+   the next open rebuilds from raw history. Cache rows not supported by raw
+   history are discarded.
+7. Normalize accepted/body-free records into source-clean facts while
+   preserving hashes, provenance, and `(parentSnapshotID, observationID)`.
 8. Validate that every mandatory generic workflow, team/repository
    relationship, and P0/P1 finding-event-chain sidecar entry satisfies the
    bounded direct-link contract. A malformed or individually oversized
@@ -114,3 +149,10 @@ warehouse facts, L4 bundles, payload provenance, and collision observations.
   artifact/grill URLs remain non-actionable data.
 - Missing configuration returns zero without raising.
 - Test spies observe no subprocess, network, audit, dispatch, or mutation call.
+- Atomic read tests prove parsing and hashing use one captured buffer per file,
+  including replacement/removal/permission races.
+- Restart tests cover missing/corrupt/stale index, raw-ahead/index-behind crash
+  recovery, unsupported index-ahead state, and independently keyed snapshot,
+  child, and sidecar conflicts without rejected bodies.
+- Every case in `contracts/t002-acceptance-matrix.md` names its implementation
+  and proof task and passes through the normal AidataL1L2 hook gate.

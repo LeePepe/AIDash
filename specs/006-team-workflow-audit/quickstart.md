@@ -27,6 +27,20 @@ Its candidate head must be different, must change
 `scripts/ci/tests/test_review_shell.py`. A base-equals-head submission is not a
 T020 delivery and cannot advance T021.
 
+The T002 repair is coordination-only and runs as five serial AidataL1L2 tasks:
+
+```text
+T001 → T022 strict decoder/model
+     → T023 atomic snapshot+sidecar reader
+     → T024 persisted identity/collision index
+     → T025 neutral fixtures + full matrix
+     → T026 collector/normalizer wiring
+     → T003
+```
+
+Do not modify `team_audit_snapshot.py` before T025 is complete. Every new
+adapter test path lands in both aidata context indexes with its owning task.
+
 ## 2. Exercise the manual boundary with fixtures
 
 Configure the git-ignored Team Audit import directory to a neutral fixture
@@ -96,6 +110,12 @@ through the hook signal; it is not part of the normal task acceptance path.
 The complete T005 proof-to-file mapping is
 `contracts/t005-acceptance-matrix.md`; every matrix row must have fresh evidence
 inside the original nine-file AIDashCore allowlist.
+
+The complete AidataL1L2 import proof is
+`contracts/t002-acceptance-matrix.md`. T022–T025 prove the decoder, atomic
+reader, restartable index, and neutral fixtures through their interfaces;
+T026 closes only the public collector/normalizer wiring rows. All five tasks
+must obtain their own normal routing-audit and AidataL1L2 hook evidence.
 
 ## 5. CI evidence
 

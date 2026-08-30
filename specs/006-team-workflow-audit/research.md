@@ -220,6 +220,48 @@ CardType contract.
 - Transplant the failed watchdog patch: its lingering-descendant regression
   still failed and requires a separately authorized RepoInfra diagnosis.
 
+## Decision 10: Replace monolithic T002 with contract-first internal seams
+
+**Decision**: Retire T002 as an executable implementation task and replace it
+with the serial T022–T026 graph: a pure strict decoder/model module, a
+read-once atomic filesystem adapter, a recoverable persisted identity/collision
+index, neutral contract-valid fixtures plus the complete acceptance matrix, and
+thin `collect()`/`normalize()` wiring last. The existing public adapter entry
+points remain unchanged.
+
+The decoder consumes exact snapshot/sidecar byte buffers and is the only owner
+of nested schema validation and content hashing. The filesystem adapter
+contains immediate bundle directories and reads each file once. The identity
+index is an injected git-ignored SQLite cache derived from append-only raw
+history; snapshot, every stable child, and sidecar identities are classified
+independently. Raw append precedes cache commit, so interruption can produce a
+repairable raw-ahead cache but never index-only acceptance. The final adapter
+only composes these interfaces and delegates existing redacted raw/clean I/O.
+
+**Rationale**: Three exact-SHA implementation reviews found the same privacy,
+active-validator, atomic-byte, sidecar, collision, and test-matrix gaps. The
+current large adapter mixes validation, filesystem races, identity decisions,
+raw writes, clean DDL, and normalization behind only `collect()`/`normalize()`.
+The new module interfaces concentrate each invariant, make the interface the
+test surface, and let the collector wiring stay shallow without duplicating
+policy. Persisting a recoverable identity cache avoids healthy-path full raw
+rescans while retaining append-only raw history as authority.
+
+**Alternatives rejected**:
+
+- Continue patching the single adapter: repeated reviews already showed that
+  duplicate inactive validators and generic fallbacks survive local fixes.
+- Parse a file and reread it for hashing: replacement races can bind accepted
+  content to another generation's hash.
+- Keep replay state only in memory or index snapshots only: process restarts
+  lose decisions, and snapshot replay can hide changed sidecar/child content.
+- Make the persisted index authoritative: a crash could accept a cache row
+  whose raw record never appended. Raw history remains the rebuild source.
+- Write the full matrix against private helpers: it would couple tests to the
+  implementation instead of the declared decoder/reader/index interfaces.
+- Wire the collector before fixtures pass: that recreates the repair loop and
+  makes active-path policy indistinguishable from untested helper code.
+
 ## Resolved source ambiguities
 
 - “Three independent axes” means Workflow Conformance, Workflow Fitness, and

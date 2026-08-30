@@ -28,6 +28,8 @@
 - [x] L4 exposes immutable required inputs only; L5 computes final publication coverage, reconciles independent P0/P1-finding and mandatory-link count pairs, and US1 emits every mandatory finding/artifact.
 - [x] Missing/invalid mandatory URLs reject publication; only optional artifact/grill links degrade to text.
 - [x] Collision observations carry explicit accepted parent snapshot ID/hash.
+- [x] Snapshot/sidecar parsing and hashing use the same captured bytes; path, symlink, replacement, deletion, permission, and partial-pair outcomes are deterministic.
+- [x] Snapshot, child, and sidecar identity decisions persist across restarts through a rebuildable cache whose only authority is append-only raw history.
 - [x] Sidecar identity/exact byte hash persists through normalized, warehouse, query, payload, and collision contracts.
 - [x] Finding subject ID and responsibility layer remain explicit through every layer.
 - [x] Manual invocation and no-dispatch/no-remediation boundaries are explicit.
@@ -39,6 +41,7 @@
 - [x] Success criteria are measurable without prescribing an implementation.
 - [x] Every story has a fixture- or spy-based independent test surface.
 - [x] Immutable ingestion and deduplication have observable pass/fail outcomes.
+- [x] `contracts/t002-acceptance-matrix.md` maps strict decode, atomic read, restart/crash recovery, collision, fixture, side-effect, and final wiring outcomes to T022–T026.
 - [x] Approval receipt behavior distinguishes recorded intent from canonical snapshot state.
 
 ## Readiness
@@ -46,5 +49,6 @@
 - [x] Repository constitution conflict is resolved by constitution 1.13.0.
 - [x] Constitution publication requires its own `constitution: <change>` PR and PR-body migration note; planning review is not a substitute.
 - [x] AIDashUI future-CardType compatibility precedes the Core-only T005 expansion, and watchdog work is an independent RepoInfra task/PR.
+- [x] The former monolithic T002 is coordination-only; T022–T026 are serial, layer-scoped, file-pinned, independently hook-gated tasks, with collector wiring last.
 - [x] HTTPS-only artifact and grill entry-point behavior agrees with the repository URL policy.
 - [x] The specification is ready for Plan-stage architecture and contract design.
