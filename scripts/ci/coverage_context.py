@@ -356,21 +356,24 @@ COVERAGE_MAX_CHANGED_PATH_BYTES = COVERAGE_MAX_TOTAL_BYTES
 def _enforce_changed_file_budget(changed_files: Sequence[str]) -> None:
     """Fail closed before expensive Git/blob analysis on oversized changed-file sets."""
     changed_file_count = len(changed_files)
-    changed_path_bytes = sum(
-        len(path.encode("utf-8", "replace")) for path in changed_files
-    )
     if changed_file_count > COVERAGE_MAX_CHANGED_FILES:
         raise AnalysisError(
             f"Changed-file analysis budget exhausted: {changed_file_count} files "
             f"exceeds {COVERAGE_MAX_CHANGED_FILES}; cannot analyze coverage "
             "reliably"
         )
-    if changed_path_bytes > COVERAGE_MAX_CHANGED_PATH_BYTES:
-        raise AnalysisError(
-            f"Changed-file analysis budget exhausted: {changed_path_bytes} bytes "
-            f"of changed-path metadata exceeds {COVERAGE_MAX_CHANGED_PATH_BYTES}; "
-            "cannot analyze coverage reliably"
-        )
+
+    changed_path_bytes = 0
+    for path_index, path in enumerate(changed_files):
+        if path_index >= COVERAGE_MAX_CHANGED_FILES:
+            break
+        changed_path_bytes += len(path.encode("utf-8", "replace"))
+        if changed_path_bytes > COVERAGE_MAX_CHANGED_PATH_BYTES:
+            raise AnalysisError(
+                f"Changed-file analysis budget exhausted: {changed_path_bytes} bytes "
+                f"of changed-path metadata exceeds {COVERAGE_MAX_CHANGED_PATH_BYTES}; "
+                "cannot analyze coverage reliably"
+            )
 
 
 class RemovedTest(NamedTuple):

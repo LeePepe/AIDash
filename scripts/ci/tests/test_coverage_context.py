@@ -19,6 +19,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from coverage_context import (  # noqa: E402
     AnalysisError,
     COVERAGE_GLOBAL_WORK_BUDGET,
+    COVERAGE_MAX_CHANGED_FILES,
+    COVERAGE_MAX_CHANGED_PATH_BYTES,
     COVERAGE_MAX_FILE_BYTES,
     COVERAGE_MAX_TOTAL_BYTES,
     COVERAGE_PRIMARY_RESERVE,
@@ -31,6 +33,7 @@ from coverage_context import (  # noqa: E402
     removed_line_numbers,
     render_coverage_evidence,
     sanitize_untrusted_content,
+    _enforce_changed_file_budget,
     _find_func_end,
     _find_all_test_functions,
     _find_containing_type,
@@ -3966,6 +3969,72 @@ def test_build_coverage_evidence_rejects_excessive_changed_files():
             diff_text="",
             changed_files=many_paths,
         )
+
+
+def test_enforce_changed_file_budget_rejects_count_before_iteration(monkeypatch):
+    """Count overflow must reject before any per-path or Git work begins."""
+    import coverage_context
+
+    class FailOnIterSequence:
+        def __len__(self):
+            return COVERAGE_MAX_CHANGED_FILES + 1
+
+        def __getitem__(self, index):
+            raise AssertionError("count overflow must fail before any path slicing or iteration")
+
+        def __iter__(self):
+            raise AssertionError("count overflow must fail before any path iteration")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("run_git must not be reached for count overflow")
+
+    monkeypatch.setattr(coverage_context, "run_git", boom, raising=True)
+
+    with pytest.raises(AnalysisError, match="Changed-file analysis budget exhausted"):
+        _enforce_changed_file_budget(FailOnIterSequence())
+
+
+def test_enforce_changed_file_budget_stops_on_utf8_path_overflow():
+    """Path-byte overflow must stop at the first overflowing entry within the bound."""
+    import coverage_context
+
+    path_1 = "A" * 10
+    path_2 = "é" * 40_001
+    path_3 = "Z" * 10
+    seen_paths = []
+
+    class TrackedSequence:
+        def __init__(self, paths):
+            self._paths = paths
+
+        def __len__(self):
+            return len(self._paths)
+
+        def _record(self, path):
+            seen_paths.append(path)
+            if len(seen_paths) > 2:
+                raise AssertionError("byte-budget overflow must stop before the third path")
+
+        def __getitem__(self, index):
+            if isinstance(index, slice):
+                values = self._paths[index]
+                for path in values:
+                    self._record(path)
+                return values
+            value = self._paths[index]
+            self._record(value)
+            return value
+
+        def __iter__(self):
+            for path in self._paths:
+                self._record(path)
+                yield path
+
+    with pytest.raises(AnalysisError, match="Changed-file analysis budget exhausted"):
+        _enforce_changed_file_budget(TrackedSequence([path_1, path_2, path_3]))
+
+    assert seen_paths == [path_1, path_2]
+    assert len(path_1.encode("utf-8")) + len(path_2.encode("utf-8")) > COVERAGE_MAX_CHANGED_PATH_BYTES
 
 
 def test_global_work_budget_shared_with_candidate_reads(monkeypatch):
