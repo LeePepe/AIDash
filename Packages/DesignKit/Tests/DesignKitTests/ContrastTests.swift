@@ -221,7 +221,8 @@ struct ClassificationBadgeContrastTests {
         for ground in Ground.every {
             let tint = Classification.teamAudit.tint(isDark: ground.isDark)
             for (name, bg) in ground.all {
-                let r = WCAG.ratio(tint, bg)
+                let fill = WCAG.composite(tint, over: bg, alpha: 0.15)
+                let r = WCAG.ratio(tint, fill)
                 #expect(r >= WCAG.largeText,
                         "\(ground.label) teamAudit on \(name) = \(r), needs >= \(WCAG.largeText)")
             }

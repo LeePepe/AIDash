@@ -195,7 +195,7 @@ struct ColorSystemTests {
         #expect(Classification.metric.tint(isDark: false) == Color(hex: "#007AFF"))
         #expect(Classification.insight.tint(isDark: false) == Color(hex: "#AF52DE"))
         #expect(Classification.trending.tint(isDark: false) == Color(hex: "#FF9500"))
-        #expect(Classification.teamAudit.tint(isDark: false) == Color(hex: "#FF2D55"))
+        #expect(Classification.teamAudit.tint(isDark: false) == Color(hex: "#E6294D"))
         #expect(Classification.teamAudit.tint(isDark: true) == Color(hex: "#FF375F"))
         // barList is a low-key brown (a neutral ranking must NOT alarm), NOT a
         // red/pink; stackedBar is a warm yellow, distinct from trending orange.

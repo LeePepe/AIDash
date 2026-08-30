@@ -338,7 +338,7 @@ public enum Classification: String, CaseIterable, Sendable {
         // teamAudit is the card classification for audit findings: a vivid pink
         // that is intentionally distinct from the neutral ranking browns and the
         // alarm semantics while staying legible in both schemes.
-        case .teamAudit:    return Color(hex: isDark ? "#FF375F" : "#FF2D55") // pink
+        case .teamAudit:    return Color(hex: isDark ? "#FF375F" : "#E6294D") // pink
         // relationship is a cross-data correlation (cost×outcome, rework
         // concentration): a cyan that reads as "two things measured against
         // each other". It sits between metric blue and digest teal on the
