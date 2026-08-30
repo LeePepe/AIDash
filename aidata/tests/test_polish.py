@@ -264,6 +264,14 @@ def test_validate_rejects_positive_activity_without_input_signal():
 
 
 @pytest.mark.unit
+def test_validate_rejects_loose_efficiency_language_without_directional_claim():
+    ev = EfficiencyEvidence(cost_pct=-25, waste_pct=-58, tasks_pct=12, issues_pct=4)
+    assert validate_efficiency_claim("效率不错", ev) is False
+    assert validate_efficiency_claim("效率可控", ev) is False
+    assert validate_efficiency_claim("效率稳定", ev) is False
+
+
+@pytest.mark.unit
 def test_validate_rejects_partial_metric_evidence():
     ev = EfficiencyEvidence(cost_pct=71, waste_pct=None, issues_pct=0)
     assert validate_efficiency_claim("成本上升，浪费下降", ev) is False
@@ -340,6 +348,11 @@ def test_polish_digest_rejects_false_efficiency_claim():
     assert "效率" not in out or "提升" not in out
     assert "浪费上升" in out or "成本上升" in out
     assert "- P0: 优先排查浪费来源" in out  # TODOs are kept
+
+    loose_client = FakeClient('{"tldr": "效率不错，继续保持", "todos": ["优先排查浪费来源"]}')
+    loose_out = polish_digest(TEMPLATE_COST_UP, loose_client)
+    assert "效率不错" not in loose_out
+    assert "浪费上升" in loose_out or "成本上升" in loose_out
 
 
 @pytest.mark.unit

@@ -193,10 +193,12 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # evidence and keep neutral/uncertain wording only when the counter-signal is still
 # present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
-    r"(?:效率|效能|投入产出|产出|用得更|更省|更划算|节省|省下|降本|省成本|节省成本|用得更省|生产力).{0,12}(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好)"
-    r"|(?:效益|效率|效能|投入产出|产出|用得更省|更省|更划算|节省成本|省成本|降本|省下成本).{0,18}"
+    r"(?:"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省).{0,12}"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|现在更高效了|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本)",
+    r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本)"
+    r")",
     re.IGNORECASE,
 )
 
