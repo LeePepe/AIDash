@@ -143,13 +143,9 @@ if [ "${#swift_paths[@]}" -gt 0 ] && [ -f "$REPO_ROOT/.swiftlint.yml" ]; then
         if ! swiftlint lint --strict --quiet --force-exclude \
                 --config "$REPO_ROOT/.swiftlint.yml" "${swift_paths[@]}" \
                 > /tmp/aidash-pre-push-lint.log 2>&1; then
-            if grep -q "No lintable files found" /tmp/aidash-pre-push-lint.log; then
-                echo "[pre-push] swiftlint: no lintable files after config exclusions; skipping."
-            else
-                echo "[pre-push] FAILED: swiftlint"
-                tail -40 /tmp/aidash-pre-push-lint.log
-                exit 1
-            fi
+            echo "[pre-push] FAILED: swiftlint"
+            tail -40 /tmp/aidash-pre-push-lint.log
+            exit 1
         fi
     else
         echo "[pre-push] WARNING: swiftlint not installed; skipping lint gate (CI enforces it)."
