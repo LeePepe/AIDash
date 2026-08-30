@@ -235,6 +235,31 @@ def test_cost_by_project_keeps_null_turns_unattributed_in_mixed_sessions(tmp_pat
     assert by_project["unattributed"][idx["bucket"]] == "residual"
 
 
+def test_cost_by_project_scopes_residual_session_detection_to_the_day(tmp_path):
+    db = _cost_by_project_warehouse(
+        tmp_path,
+        [
+            ("s1", "2026-08-02", 100.0, 400),
+            ("s2", "2026-08-02", 80.0, 300),
+            ("s3", "2026-08-02", 50.0, 200),
+        ],
+        [
+            ("s1", "Alpha", "2026-08-02"),
+            ("s1", "Beta", "2026-08-02"),
+            ("s1", "   ", "2026-08-03"),
+            ("s2", "   ", "2026-08-02"),
+            ("s3", "Gamma", "2026-08-02"),
+        ],
+    )
+    rows, idx = _run_cost_by_project(db)
+    by_project = {r[idx["project"]]: r for r in rows}
+    assert by_project["unattributed"][idx["cost_usd"]] == 80.0
+    assert by_project["unattributed"][idx["sessions"]] == 1
+    assert by_project["Alpha"][idx["cost_usd"]] == 50.0
+    assert by_project["Beta"][idx["cost_usd"]] == 50.0
+    assert by_project["Gamma"][idx["cost_usd"]] == 50.0
+
+
 def test_cost_by_project_preserves_zero_valid_attribution(tmp_path):
     db = _cost_by_project_warehouse(
         tmp_path,

@@ -87,6 +87,7 @@ residual_sessions AS (
                            SELECT 1
                            FROM fact_turn t
                            WHERE t.session_id = s.sid
+                             AND (:day IS NULL OR t.cst_day = :day)
                              AND NULLIF(TRIM(t.project), '') IS NULL
                        ) THEN 1
                        ELSE 0
