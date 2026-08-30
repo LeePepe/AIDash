@@ -66,8 +66,7 @@ allocated AS (
     FROM session_cost c
     JOIN project_weight w ON w.sid = c.sid
     GROUP BY w.project
-)
-WITH rows AS (
+), rows AS (
     SELECT project                                              AS project,
            round(cost_usd, 2)                                   AS cost_usd,
            round(100.0 * cost_usd

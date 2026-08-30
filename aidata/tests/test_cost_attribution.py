@@ -7,9 +7,31 @@ inflates every figure and still looks plausible on screen. These tests pin the
 weighting that prevents that, and the honest-coverage caveat around it.
 """
 
+import sqlite3
+from pathlib import Path
+
 import pytest
 
 from L5_apps.digest import sources as s
+
+
+def _execute_sql_query(sql_text: str, fact_request_rows, fact_turn_rows, day):
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE fact_request (session_uuid TEXT, cst_day TEXT, cost_usd REAL, total_tokens INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE fact_turn (session_id TEXT, project TEXT, cst_day TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO fact_request (session_uuid, cst_day, cost_usd, total_tokens) VALUES (?, ?, ?, ?)",
+        fact_request_rows,
+    )
+    conn.executemany(
+        "INSERT INTO fact_turn (session_id, project, cst_day) VALUES (?, ?, ?)",
+        fact_turn_rows,
+    )
+    return conn.execute(sql_text, {"day": day}).fetchall()
 
 
 class _FakeRows:
@@ -44,13 +66,13 @@ class _Missing:
 @pytest.mark.unit
 def test_cost_by_project_ranks_by_share(monkeypatch):
     monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [("AIDash", 1552.93, 41.4, 331680.5, 1492.0, 19, 3748.50, 3748.50),
-         ("VitalStride", 900.04, 24.0, 191641.8, 1807.0, 26, 3748.50, 3748.50)],
+        [("Nimbus", 1552.93, 41.4, 331680.5, 1492.0, 19, 3748.50, 3748.50),
+         ("Harbor", 900.04, 24.0, 191641.8, 1807.0, 26, 3748.50, 3748.50)],
         ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions",
          "day_total", "attributed_total"]))
     bundle = s.fetch_cost_by_project("2026-08-02")
     assert bundle.health.state == "ok"
-    assert [i.label for i in bundle.items] == ["AIDash", "VitalStride"]
+    assert [i.label for i in bundle.items] == ["Nimbus", "Harbor"]
     # The bar is drawn from the SHARE, so the card reads as "where the money
     # went" rather than an unanchored dollar figure.
     assert bundle.items[0].value_text == "41%"
@@ -94,9 +116,9 @@ def test_cost_by_project_partial_coverage_regression(monkeypatch):
     """
     # Simulate 3 projects summing to $2107.23, against a day total of $2858.35.
     monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [("AIDash", 1200.00, 41.97, 200000.0, 800.0, 12, 2858.35, 2107.23),
-         ("VitalStride", 600.00, 20.99, 100000.0, 400.0, 8, 2858.35, 2107.23),
-         ("Multica", 307.23, 10.75, 50000.0, 200.0, 5, 2858.35, 2107.23)],
+        [("Nimbus", 1200.00, 41.97, 200000.0, 800.0, 12, 2858.35, 2107.23),
+         ("Harbor", 600.00, 20.99, 100000.0, 400.0, 8, 2858.35, 2107.23),
+         ("Summit", 307.23, 10.75, 50000.0, 200.0, 5, 2858.35, 2107.23)],
         ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions",
          "day_total", "attributed_total"]))
     bundle = s.fetch_cost_by_project("2026-08-15")
@@ -112,7 +134,7 @@ def test_cost_by_project_partial_coverage_regression(monkeypatch):
     assert "未归因" in labels, (
         "partial coverage must append an explicit unattributed row"
     )
-    assert labels == ["AIDash", "未归因", "VitalStride", "Multica"], (
+    assert labels == ["Nimbus", "未归因", "Harbor", "Summit"], (
         "gap rows must be sorted by descending value, not appended at the end"
     )
     gap_item = next(i for i in bundle.items if i.label == "未归因")
@@ -151,7 +173,7 @@ def test_attribution_container_shows_coverage_subtitle(monkeypatch):
     from L5_apps.digest.aidash import _attribution_container
 
     bundle = s.CostByProjectBundle(
-        items=[s.RankItem("AIDash", 41.4, "42%")],
+        items=[s.RankItem("Nimbus", 41.4, "42%")],
         headline_total=2858.35,
         attributed_total=2107.23,
         coverage_pct=73.7,
@@ -175,7 +197,7 @@ def test_attribution_container_no_warning_at_full_coverage():
     from L5_apps.digest.aidash import _attribution_container
 
     bundle = s.CostByProjectBundle(
-        items=[s.RankItem("AIDash", 99.8, "100%")],
+        items=[s.RankItem("Nimbus", 99.8, "100%")],
         headline_total=3000.0,
         attributed_total=2998.50,
         coverage_pct=99.95,
@@ -195,12 +217,45 @@ def test_attribution_container_no_warning_at_full_coverage():
 @pytest.mark.unit
 def test_model_by_project_labels_pair_and_shows_dollars(monkeypatch):
     monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [("AIDash", "claude-opus-5", 1292.91, 83.3, 390.9),
-         ("VitalStride", "claude-opus-4-7", 186.97, 20.8, 306.4)],
+        [("Nimbus", "claude-opus-5", 1292.91, 83.3, 390.9),
+         ("Harbor", "claude-opus-4-7", 186.97, 20.8, 306.4)],
         ["project", "model", "cost_usd", "pct_of_project", "out_ktok"]))
     bundle = s.fetch_model_by_project("2026-08-02")
-    assert bundle.items[0].label == "AIDash · claude-opus-5"
+    assert bundle.items[0].label == "Nimbus · claude-opus-5"
     assert bundle.items[0].value_text == "$1293"
+
+
+@pytest.mark.unit
+def test_cost_by_project_sql_query_executes_for_partial_and_zero_attribution():
+    sql_path = Path(__file__).resolve().parents[1] / "L4_serve" / "queries" / "attribution" / "cost-by-project.sql"
+    sql_text = sql_path.read_text(encoding="utf-8")
+
+    partial_rows = _execute_sql_query(
+        sql_text,
+        [
+            ("session-1", "2026-08-15", 1200.00, 1000),
+            ("session-2", "2026-08-15", 907.23, 500),
+            ("session-3", "2026-08-15", 751.12, 200),
+        ],
+        [
+            ("session-1", "Nimbus", "2026-08-15"),
+            ("session-2", "Harbor", "2026-08-15"),
+        ],
+        "2026-08-15",
+    )
+    assert partial_rows[0][6] == 2858.35
+    assert partial_rows[0][7] == 2107.23
+    assert any(row[0] == "Nimbus" for row in partial_rows)
+    assert any(row[0] == "Harbor" for row in partial_rows)
+
+    zero_rows = _execute_sql_query(
+        sql_text,
+        [("session-1", "2026-08-15", 2858.35, 1000)],
+        [],
+        "2026-08-15",
+    )
+    assert zero_rows[0][6] == 2858.35
+    assert zero_rows[0][7] == 0.0
 
 
 @pytest.mark.unit
@@ -220,7 +275,7 @@ def test_attribution_container_sits_below_the_trends_it_explains():
     from L5_apps.digest.aidash import _attribution_container
 
     bundle = s.CostByProjectBundle(
-        [s.RankItem("AIDash", 41.4, "41%")],
+        [s.RankItem("Nimbus", 41.4, "41%")],
         3748.50, 3748.50, 100.0,
         s.SourceHealth("attribution", "ok"))
     model_bundle = s.RankBundle(
