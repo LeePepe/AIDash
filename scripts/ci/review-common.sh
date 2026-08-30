@@ -148,8 +148,7 @@ cleanup_process_group() {
 
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file
-    state_file="$(mktemp)"
+    local child_pid child_status=0 waited=0 grace=0
 
     # Job control ON for the launch, so the child becomes a PROCESS GROUP
     # LEADER (pgid == pid). Signalling `-$child_pid` then reaches the CLI *and
@@ -161,82 +160,52 @@ run_with_timeout() {
     child_pid=$!
     set +m
 
-    # Watchdog: either the child is still active until the deadline, or it has
-    # already exited but left descendants in the original PGID. In the latter
-    # case we still do a bounded TERM→KILL cleanup, but we must not erroneously
-    # treat that as a timeout. We record the watchdog's explicit state so the
-    # caller can prefer an actual timeout even when the leader handles TERM and
-    # exits 0 on its own.
-    (
-        local waited=0
-        while [ "$waited" -lt "$seconds" ]; do
-            if ! kill -0 "$child_pid" 2>/dev/null || ps -o stat= -p "$child_pid" 2>/dev/null | grep -q 'Z'; then
-                cleanup_process_group "$child_pid"
-                cleanup_lingering_descendants "$child_pid"
-                # Give a just-started background job a brief window to emit its
-                # pidfile/descendants before the watchdog declares the run clean.
-                sleep 1
-                printf '%s\n' "clean" >"$state_file"
-                exit 0
+    # Watch the leader directly rather than blocking on `wait` before we know
+    # whether the deadline fired. A shell that exits 0 while spawning a
+    # grandchild can still leave that grandchild in the same process group, so
+    # we must distinguish "leader exited cleanly" from "the deadline fired".
+    while [ "$waited" -lt "$seconds" ]; do
+        if ! kill -0 "$child_pid" 2>/dev/null || ps -o stat= -p "$child_pid" 2>/dev/null | grep -q 'Z'; then
+            cleanup_process_group "$child_pid"
+            cleanup_lingering_descendants "$child_pid"
+            if wait "$child_pid" 2>/dev/null; then
+                child_status=0
+            else
+                child_status=$?
             fi
-            sleep 1
-            waited=$((waited + 1))
-        done
-
-        if ! kill -0 "-$child_pid" 2>/dev/null; then
-            printf '%s\n' "clean" >"$state_file"
-            exit 0
+            return "$child_status"
         fi
 
-        kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+        sleep 1
+        waited=$((waited + 1))
+    done
 
-        local grace=0
-        while [ "$grace" -lt 10 ]; do
-            kill -0 "-$child_pid" 2>/dev/null || break
-            sleep 1
-            grace=$((grace + 1))
-        done
-
-        if kill -0 "-$child_pid" 2>/dev/null; then
-            kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+    if ! kill -0 "-$child_pid" 2>/dev/null; then
+        cleanup_process_group "$child_pid"
+        cleanup_lingering_descendants "$child_pid"
+        if wait "$child_pid" 2>/dev/null; then
+            child_status=0
+        else
+            child_status=$?
         fi
-
-        printf '%s\n' "timeout" >"$state_file"
-        exit "$REVIEW_TIMEOUT_RC"
-    ) &
-    watchdog_pid=$!
-
-    # `|| status=$?`, never a bare `wait`: these scripts run under the
-    # workflow's `bash -e {0}`, where a bare `wait` on a killed child exits the
-    # WHOLE SCRIPT with 143 — before the timeout branch below can post its
-    # sticky comment. The gate would still be red, but for an unexplained
-    # reason, which is the failure mode MY-1404 is about.
-    if wait "$child_pid"; then
-        child_status=0
-    else
-        child_status=$?
+        return "$child_status"
     fi
 
-    # The watchdog's exit status is the authoritative timeout signal. We must
-    # wait for its cleanup to finish rather than killing it early; otherwise a
-    # TERM-resistant descendant can remain alive in the original PGID.
-    if wait "$watchdog_pid"; then
-        watchdog_status=0
-    else
-        watchdog_status=$?
+    # A real timeout is authoritative even when the leader traps TERM and exits 0
+    # immediately afterward: the deadline fired, so the timeout must win.
+    kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+
+    while [ "$grace" -lt 10 ]; do
+        kill -0 "-$child_pid" 2>/dev/null || break
+        sleep 1
+        grace=$((grace + 1))
+    done
+
+    if kill -0 "-$child_pid" 2>/dev/null; then
+        kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
     fi
 
-    local watchdog_state="$(cat "$state_file" 2>/dev/null || printf 'clean')"
-    rm -f "$state_file"
-
-    # Prefer a real watchdog timeout over the child status. The child may exit
-    # 0 after handling TERM, but the watchdog state is the truth for whether the
-    # deadline itself fired.
-    if [ "$watchdog_state" = "timeout" ] || [ "$watchdog_status" -eq "$REVIEW_TIMEOUT_RC" ]; then
-        return "$REVIEW_TIMEOUT_RC"
-    fi
-
-    return "$child_status"
+    return "$REVIEW_TIMEOUT_RC"
 }
 
 # build_scope_evidence <head_sha> <diff_file> <changed_paths_nul_file>
@@ -657,12 +626,11 @@ review_coverage_rules() {
 '  也就是说,它要求的是 “source change → corresponding test change” 这一强联系,而不是' \
 '  “diff 里看不到覆盖”。如果 COVERAGE CONTEXT 列出了覆盖同一生产符号的 existing tests,' \
 '  那么覆盖并未丢失,该条件不满足,**不得**报 blocker。' \
-'- COVERAGE CONTEXT 中列出的候选测试基于符号共现检索,是 advisory candidates。' \
-'  Reviewer 必须验证候选测试确实测试了相同生产分支后,才能判定覆盖未丢失。' \
-'  但若无法确认,结论是降级为 note,**不是升级为 blocker**。' \
-'- 任何“source-only change 仍可通过 coverage context 兜底”的修改都违背条件 #4 的必然含义;' \
-'  coverage context 只能用于评估“是否存在同源/同分支覆盖”或“删除的测试是否被等价覆盖”,' \
-'  不能把“已有覆盖”改写成“source-only change 也算通过”。' \
+'- COVERAGE CONTEXT 中列出的候选测试基于符号共现检索,是 advisory candidates,只能用于' \
+'  评估“被删除测试是否已被等价覆盖”或“是否存在同源/同分支覆盖”,不能让一个' \
+'  source-only change 通过 coverage context 兜底来满足或重写条件 #4。' \
+'  也就是说,existing coverage 不能满足 condition #4；它只能帮助说明“覆盖是否可能已被' \
+'  其他测试接管”,并且一旦无法确认,结论必须降级为 note,**不能**升级为 blocker。' \
 '- COVERAGE CONTEXT 包含 SEARCH SCOPE——实际搜索过的文件列表。' \
 '  要报「覆盖丢失」的 blocker,你**必须**在 SEARCH SCOPE 列出的文件中提供具体 file:line' \
 '  证据,证明该生产分支在已搜索范围内无任何 test 调用。' \
