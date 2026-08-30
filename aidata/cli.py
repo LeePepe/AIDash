@@ -23,7 +23,9 @@ import argparse
 import importlib
 import sys
 
-from config import SOURCES, MERGE_SOURCES
+from config import SOURCES, MANUAL_SOURCES, MERGE_SOURCES
+
+ALL_SOURCES = tuple(SOURCES) + tuple(MANUAL_SOURCES)
 
 
 def _load_adapter(source: str):
@@ -104,11 +106,11 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_collect = sub.add_parser("collect", help="L1: fetch raw data")
-    p_collect.add_argument("--source", choices=SOURCES)
+    p_collect.add_argument("--source", choices=ALL_SOURCES)
     p_collect.set_defaults(func=cmd_collect)
 
     p_norm = sub.add_parser("normalize", help="L2: clean each source")
-    p_norm.add_argument("--source", choices=SOURCES)
+    p_norm.add_argument("--source", choices=ALL_SOURCES)
     p_norm.set_defaults(func=cmd_normalize)
 
     p_merge = sub.add_parser("merge", help="L3: build warehouse")
