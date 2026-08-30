@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -27,6 +27,79 @@ from rawio import read_raw, write_raw
 
 SOURCE = "team_audit_snapshot"
 _JSON_SUFFIXES = {".json", ".jsonl", ".ndjson"}
+_ALLOWED_SNAPSHOT_KEYS = {
+    "kind",
+    "snapshotID",
+    "snapshot_id",
+    "snapshotId",
+    "identity",
+    "subjectID",
+    "subject_id",
+    "subjectId",
+    "responsibilityLayer",
+    "responsibility_layer",
+    "responsibility",
+    "mode",
+    "capturedAt",
+    "captured_at",
+    "cohort",
+    "cursor",
+    "cursors",
+    "schemaVersion",
+    "schema_version",
+    "instructionVersions",
+    "instruction_versions",
+    "axes",
+    "feedbackLineage",
+    "feedback_lineage",
+    "agentRepeat",
+    "agent_repeat",
+    "limitations",
+    "artifacts",
+    "grill",
+    "grillMeURL",
+    "grillWithDocsURL",
+    "sidecarID",
+    "sidecar_id",
+    "sidecarId",
+    "sidecarHash",
+    "sidecar_hash",
+    "snapshotHash",
+    "snapshot_hash",
+    "source",
+    "payload",
+    "detail",
+    "message",
+    "note",
+    "status",
+    "acceptedParentSnapshotId",
+    "accepted_parent_snapshot_id",
+    "acceptedParentSnapshotHash",
+    "accepted_parent_snapshot_hash",
+}
+_ALLOWED_SIDECAR_KEYS = {
+    "sidecarID",
+    "sidecar_id",
+    "sidecarId",
+    "snapshotID",
+    "snapshot_id",
+    "snapshotId",
+    "subjectID",
+    "subject_id",
+    "subjectId",
+    "responsibilityLayer",
+    "responsibility_layer",
+    "responsibility",
+    "schemaVersion",
+    "schema_version",
+    "artifacts",
+    "grill",
+    "grillMeURL",
+    "grillWithDocsURL",
+    "kind",
+    "source",
+    "detail",
+}
 
 
 def _manual_root() -> Path | None:
@@ -58,13 +131,123 @@ def _hash_payload(value: Any) -> str:
     return _hash_bytes(_canonical_json(value).encode("utf-8"))
 
 
+def _safe_read_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _safe_iterdir(path: Path) -> list[Path] | None:
+    try:
+        return list(path.iterdir())
+    except OSError:
+        return None
+
+
 def _is_utc_timestamp(value: Any) -> bool:
     if not isinstance(value, str) or not value:
         return False
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return False
+    if parsed.tzinfo is None:
+        return False
+    return parsed.utcoffset() == timedelta(0)
+
+
+def _is_https_url(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = __import__("urllib.parse").parse.urlparse(value)
+    except Exception:
+        return False
+    return parsed.scheme == "https" and bool(parsed.netloc)
+
+
+def _is_hex_hash(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in value)
+
+
+def _is_string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) and item for item in value)
+
+
+def _validate_artifact_list(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    for item in value:
+        if isinstance(item, str):
+            if not item:
+                return False
+            continue
+        if not isinstance(item, dict):
+            return False
+        if not all(key in item for key in ("id", "kind", "hash")):
+            return False
+        if not _is_hex_hash(item.get("hash")):
+            return False
+        if not isinstance(item.get("id"), str) or not item["id"]:
+            return False
+        if not isinstance(item.get("kind"), str) or not item["kind"]:
+            return False
+        if "url" in item and not _is_https_url(item["url"]):
+            return False
+    return True
+
+
+def _validate_bundle_shape(payload: dict[str, Any]) -> bool:
+    allowed = set(_ALLOWED_SNAPSHOT_KEYS)
+    unknown = set(payload) - allowed
+    if unknown:
+        return False
+    mode = _first_value(payload, "mode")
+    if mode not in ("baseline", "incremental"):
+        return False
+    captured_at = _first_value(payload, "capturedAt", "captured_at")
+    if not _is_utc_timestamp(captured_at):
+        return False
+    if not _record_identity(payload, ""):
+        return False
+    if _first_value(payload, "subjectID", "subject_id", "subjectId") in (None, ""):
+        return False
+    if _first_value(payload, "responsibilityLayer", "responsibility_layer", "responsibility") in (None, ""):
+        return False
+    if "schemaVersion" in payload and not (payload["schemaVersion"] in (1, "1", "team-audit/v1")):
+        return False
+    if "schema_version" in payload and not (payload["schema_version"] in (1, "1", "team-audit/v1")):
+        return False
+    if not _is_string_list(payload.get("axes", [])) and payload.get("axes") is not None:
+        return False
+    for key in ("feedbackLineage", "feedback_lineage", "agentRepeat", "agent_repeat", "limitations"):
+        if key in payload and not _is_string_list(payload[key]):
+            return False
+    if "grill" in payload and not _is_string_list(payload["grill"]):
+        return False
+    if "grillMeURL" in payload and not _is_https_url(payload["grillMeURL"]):
+        return False
+    if "grillWithDocsURL" in payload and not _is_https_url(payload["grillWithDocsURL"]):
+        return False
+    if "artifacts" in payload and not _validate_artifact_list(payload["artifacts"]):
+        return False
+    if mode == "baseline":
+        cohort = _first_value(payload, "cohort")
+        if cohort in (None, ""):
+            return False
+        cursor = _first_value(payload, "cursor", "cursorId", "cursor_id")
+        if cursor not in (None, "") and not isinstance(cursor, str):
+            return False
+        cursors = payload.get("cursors")
+        if cursors is not None and not (isinstance(cursors, list) and all(isinstance(x, str) and x for x in cursors)):
+            return False
+    else:
+        cursors = payload.get("cursors")
+        if cursors is None or not isinstance(cursors, list) or not cursors or not all(isinstance(x, str) and x for x in cursors):
+            return False
+        if "cursor" in payload and payload.get("cursor") not in (None, ""):
+            return False
     return True
 
 
@@ -116,16 +299,10 @@ def _parent_from_payload(payload: dict[str, Any]) -> tuple[str | None, str | Non
 def _is_contract_payload(payload: Any) -> bool:
     if not isinstance(payload, dict):
         return False
-    ids = (
-        "snapshotID",
-        "snapshot_id",
-        "snapshotId",
-        "identity",
-        "bundleID",
-        "bundle_id",
-        "bundleId",
-    )
-    if not any(key in payload for key in ids):
+    disallowed = set(payload) - _ALLOWED_SNAPSHOT_KEYS
+    if disallowed:
+        return False
+    if not _record_identity(payload, ""):
         return False
     if _first_value(payload, "subjectID", "subject_id", "subjectId") in (None, ""):
         return False
@@ -133,47 +310,74 @@ def _is_contract_payload(payload: Any) -> bool:
         return False
     if _first_value(payload, "mode") not in (None, "baseline", "incremental"):
         return False
-    if _first_value(payload, "capturedAt", "captured_at") is None:
+    captured_at = _first_value(payload, "capturedAt", "captured_at")
+    if captured_at is None or not _is_utc_timestamp(captured_at):
         return False
-    if not _is_utc_timestamp(_first_value(payload, "capturedAt", "captured_at")):
-        return False
-    if _first_value(payload, "cohort") is None:
-        return False
-    if _first_value(payload, "cursor") is None:
-        return False
-    if _first_value(payload, "schemaVersion", "schema_version") not in (None, "1", "team-audit/v1"):
-        return False
-    for key in ("axes", "feedbackLineage", "agentRepeat", "limitations", "artifacts", "grill"):
-        value = payload.get(key)
-        if value is not None and not isinstance(value, list):
+    mode = _first_value(payload, "mode")
+    if mode in (None, "baseline"):
+        cohort = _first_value(payload, "cohort")
+        if cohort in (None, ""):
             return False
+    if mode == "incremental":
+        cursor = _first_value(payload, "cursor", "cursorId", "cursor_id")
+        if cursor in (None, ""):
+            return False
+    version = _first_value(payload, "schemaVersion", "schema_version")
+    if version not in (None, 1, "1", "team-audit/v1"):
+        return False
+    for key in ("axes", "feedbackLineage", "feedback_lineage", "agentRepeat", "agent_repeat", "limitations"):
+        value = payload.get(key)
+        if value is not None:
+            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                return False
+    for key in ("artifacts", "grill"):
+        value = payload.get(key)
+        if value is not None:
+            if isinstance(value, list):
+                if not all(isinstance(item, (str, dict)) for item in value):
+                    return False
+                if any(isinstance(item, dict) and not all(k in item for k in ("id", "kind", "hash")) for item in value if isinstance(item, dict)):
+                    return False
+            else:
+                return False
+    if "sidecarHash" in payload and payload["sidecarHash"] not in (None, "") and not _is_hex_hash(payload["sidecarHash"]):
+        return False
+    if "grillMeURL" in payload and not _is_https_url(payload["grillMeURL"]):
+        return False
+    if "grillWithDocsURL" in payload and not _is_https_url(payload["grillWithDocsURL"]):
+        return False
     return True
 
 
 def _iter_import_files(root: Path) -> Iterable[Path]:
-    root_resolved = root.resolve(strict=True)
-    for path in sorted(root_resolved.iterdir(), key=lambda p: p.name):
+    try:
+        root_resolved = root.resolve(strict=True)
+    except OSError:
+        return
+    try:
+        children = sorted(root_resolved.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return
+    for path in children:
         if path.is_symlink() or not path.is_dir():
             continue
         try:
             resolved = path.resolve(strict=True)
-        except OSError:
-            continue
-        try:
             resolved.relative_to(root_resolved)
-        except ValueError:
+        except (OSError, ValueError):
             continue
-
         snapshot_path = path / "snapshot.json"
         sidecar_path = path / "artifacts.json"
         if not snapshot_path.is_file() or snapshot_path.is_symlink():
             continue
         if not sidecar_path.is_file() or sidecar_path.is_symlink():
             continue
-
+        entries = _safe_iterdir(path)
+        if entries is None:
+            continue
         json_like = {
             child.name
-            for child in path.iterdir()
+            for child in entries
             if child.is_file() and not child.is_symlink() and child.name.endswith((".json", ".jsonl", ".ndjson"))
         }
         if json_like - {"snapshot.json", "artifacts.json"}:
@@ -182,9 +386,12 @@ def _iter_import_files(root: Path) -> Iterable[Path]:
 
 
 def _read_json_text(path: Path) -> Any | None:
+    raw = _safe_read_bytes(path)
+    if raw is None:
+        return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None
 
 
@@ -218,8 +425,12 @@ def _bundle_from_file(bundle_dir: Path, root: Path) -> dict[str, Any] | None:
     if _first_value(snapshot_raw, "responsibilityLayer", "responsibility_layer", "responsibility") != _first_value(sidecar_raw, "responsibilityLayer", "responsibility_layer", "responsibility"):
         return None
 
-    snapshot_hash = _hash_bytes(snapshot_path.read_bytes())
-    sidecar_hash = _hash_bytes(sidecar_path.read_bytes())
+    snapshot_bytes = _safe_read_bytes(snapshot_path)
+    sidecar_bytes = _safe_read_bytes(sidecar_path)
+    if snapshot_bytes is None or sidecar_bytes is None:
+        return None
+    snapshot_hash = _hash_bytes(snapshot_bytes)
+    sidecar_hash = _hash_bytes(sidecar_bytes)
     declared_sidecar_hash = _first_value(snapshot_raw, "sidecarHash", "sidecar_hash")
     if declared_sidecar_hash is not None and declared_sidecar_hash != sidecar_hash:
         return None
@@ -278,20 +489,44 @@ def _contract_valid(payload: dict[str, Any]) -> bool:
     if mode is None or mode not in {"baseline", "incremental"}:
         return False
     cohort = _first_value(payload, "cohort")
-    if not isinstance(cohort, str) or not cohort:
+    if cohort in (None, ""):
         return False
-    cursor = _first_value(payload, "cursor")
-    if not isinstance(cursor, str) or not cursor:
+    cursor = _first_value(payload, "cursor", "cursorId", "cursor_id")
+    if mode == "incremental" and cursor in (None, ""):
         return False
-    if _first_value(payload, "schemaVersion", "schema_version") not in (None, "1", "team-audit/v1"):
+    if _first_value(payload, "schemaVersion", "schema_version") not in (None, 1, "1", "team-audit/v1"):
         return False
     axes = payload.get("axes")
-    if not isinstance(axes, list) or not axes or not all(isinstance(item, str) for item in axes):
+    if axes is not None and (not isinstance(axes, list) or not all(isinstance(item, str) for item in axes)):
         return False
-    for key in ("feedbackLineage", "agentRepeat", "limitations", "artifacts", "grill"):
+    for key in ("feedbackLineage", "feedback_lineage", "agentRepeat", "agent_repeat", "limitations"):
         value = payload.get(key)
-        if value is not None and not isinstance(value, list):
+        if value is not None and (not isinstance(value, list) or not all(isinstance(item, str) for item in value)):
             return False
+    artifacts = payload.get("artifacts")
+    if artifacts is not None:
+        if not isinstance(artifacts, list):
+            return False
+        for item in artifacts:
+            if isinstance(item, str):
+                if not item:
+                    return False
+            elif isinstance(item, dict):
+                if not all(k in item for k in ("id", "kind", "hash")):
+                    return False
+                if not isinstance(item["id"], str) or not item["id"]:
+                    return False
+                if not isinstance(item["kind"], str) or not item["kind"]:
+                    return False
+                if not _is_hex_hash(item["hash"]):
+                    return False
+            else:
+                return False
+    grill = payload.get("grill")
+    if grill is not None and (not isinstance(grill, list) or not all(isinstance(item, str) for item in grill)):
+        return False
+    if "sidecarHash" in payload and payload["sidecarHash"] not in (None, "") and not _is_hex_hash(payload["sidecarHash"]):
+        return False
     return True
 
 
