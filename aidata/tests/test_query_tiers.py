@@ -27,11 +27,13 @@ Hermetic — reads only the repo's .sql and .py files, never the warehouse.
 """
 
 import re
+import sqlite3
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 QUERIES = ROOT / "L4_serve" / "queries"
 DIGEST = ROOT / "L5_apps" / "digest"
+QUERY = QUERIES / "attribution" / "cost-by-project.sql"
 
 TIER_DIRECTIVE = re.compile(r"^\s*--\s*aidata-tier:\s*(\S+)\s*$", re.MULTILINE)
 VALID_TIERS = {"explore"}
@@ -118,3 +120,89 @@ def test_explore_tier_is_documented():
     """The convention must be discoverable, or the markers rot into noise."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "aidata-tier" in readme, "README does not explain the aidata-tier marker"
+
+
+def _cost_by_project_warehouse(tmp_path: Path, requests, turns) -> Path:
+    db = tmp_path / "warehouse.db"
+    con = sqlite3.connect(db)
+    con.execute(
+        "CREATE TABLE fact_request (session_uuid TEXT, cst_day TEXT, "
+        "cost_usd REAL, total_tokens INTEGER)"
+    )
+    con.execute(
+        "CREATE TABLE fact_turn (session_id TEXT, project TEXT, cst_day TEXT)"
+    )
+    con.executemany(
+        "INSERT INTO fact_request VALUES (?, ?, ?, ?)", requests
+    )
+    con.executemany(
+        "INSERT INTO fact_turn VALUES (?, ?, ?)", turns
+    )
+    con.commit()
+    con.close()
+    return db
+
+
+def _run_cost_by_project(db: Path, day="2026-08-02"):
+    con = sqlite3.connect(db)
+    try:
+        cur = con.execute(QUERY.read_text(encoding="utf-8"), {"day": day})
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return rows, {c: i for i, c in enumerate(cols)}
+    finally:
+        con.close()
+
+
+def test_cost_by_project_tracks_day_total_and_unattributed_share(tmp_path):
+    db = _cost_by_project_warehouse(
+        tmp_path,
+        [
+            ("s1", "2026-08-02", 100.0, 600),
+            ("s2", "2026-08-02", 200.0, 400),
+        ],
+        [
+            ("s1", "AIDash", "2026-08-02"),
+            ("s1", " VitalStride ", "2026-08-02"),
+            ("s2", "   ", "2026-08-02"),
+        ],
+    )
+    rows, idx = _run_cost_by_project(db)
+    by_project = {r[idx["project"]]: r for r in rows}
+    assert {"AIDash", "VitalStride", "unattributed"} <= set(by_project)
+    assert by_project["unattributed"][idx["cost_usd"]] == 200.0
+    assert by_project["unattributed"][idx["day_total"]] == 300.0
+    assert by_project["unattributed"][idx["attributed_total"]] == 100.0
+    assert by_project["AIDash"][idx["cost_pct"]] == 16.7
+    assert by_project["VitalStride"][idx["cost_pct"]] == 16.7
+
+
+def test_cost_by_project_preserves_zero_valid_attribution(tmp_path):
+    db = _cost_by_project_warehouse(
+        tmp_path,
+        [
+            ("s1", "2026-08-02", 30.0, 120),
+            ("s2", "2026-08-02", 20.0, 80),
+        ],
+        [
+            ("s1", "   ", "2026-08-02"),
+            ("s2", None, "2026-08-02"),
+        ],
+    )
+    rows, idx = _run_cost_by_project(db)
+    assert len(rows) == 1
+    assert rows[0][idx["project"]] == "unattributed"
+    assert rows[0][idx["day_total"]] == 50.0
+    assert rows[0][idx["attributed_total"]] == 0.0
+    assert rows[0][idx["cost_pct"]] == 100.0
+
+
+def test_cost_by_project_normalizes_blank_project_labels(tmp_path):
+    db = _cost_by_project_warehouse(
+        tmp_path,
+        [("s1", "2026-08-02", 90.0, 300)],
+        [("s1", "   AIDash   ", "2026-08-02")],
+    )
+    rows, idx = _run_cost_by_project(db)
+    assert rows[0][idx["project"]] == "AIDash"
+    assert rows[0][idx["cost_usd"]] == 90.0

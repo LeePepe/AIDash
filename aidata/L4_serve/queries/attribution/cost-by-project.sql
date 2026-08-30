@@ -1,3 +1,4 @@
+-- aidata-tier: production
 -- attribution/cost-by-project — WHERE the day's spend actually went.
 --
 -- This answers the question the dashboard could not: "cost is up 968%" tells
@@ -41,13 +42,14 @@ WITH session_cost AS (
 -- Each session's turn mix, as weights summing to 1.0 per session.
 project_weight AS (
     SELECT session_id AS sid,
-           project,
+           NULLIF(TRIM(project), '') AS project,
            count(*) * 1.0
              / sum(count(*)) OVER (PARTITION BY session_id) AS weight
     FROM fact_turn
-    WHERE project IS NOT NULL AND project != ''
+    WHERE project IS NOT NULL
+      AND TRIM(project) != ''
       AND (:day IS NULL OR cst_day = :day)
-    GROUP BY session_id, project
+    GROUP BY session_id, TRIM(project)
 ),
 allocated AS (
     SELECT w.project,
@@ -58,13 +60,47 @@ allocated AS (
     FROM session_cost c
     JOIN project_weight w ON w.sid = c.sid
     GROUP BY w.project
+),
+day_summary AS (
+    SELECT sum(cost) AS day_total,
+           COALESCE((SELECT sum(cost_usd) FROM allocated), 0) AS attributed_total
+    FROM session_cost
+),
+unattributed AS (
+    SELECT 'unattributed' AS project,
+           round((SELECT day_total FROM day_summary) -
+                 (SELECT attributed_total FROM day_summary), 2) AS cost_usd,
+           round(100.0 * (
+                 (SELECT day_total FROM day_summary) -
+                 (SELECT attributed_total FROM day_summary)
+           ) / NULLIF((SELECT day_total FROM day_summary), 0), 1) AS cost_pct,
+           0 AS ktokens,
+           0 AS requests,
+           0 AS sessions,
+           round((SELECT day_total FROM day_summary), 2) AS day_total,
+           round((SELECT attributed_total FROM day_summary), 2) AS attributed_total
+    FROM day_summary
+    WHERE (SELECT day_total FROM day_summary) > 0
+      AND ((SELECT day_total FROM day_summary) -
+           (SELECT attributed_total FROM day_summary)) > 0
 )
-SELECT project                                              AS project,
-       round(cost_usd, 2)                                   AS cost_usd,
-       round(100.0 * cost_usd
-             / NULLIF((SELECT sum(cost_usd) FROM allocated), 0), 1) AS cost_pct,
-       round(tokens / 1000.0, 1)                            AS ktokens,
-       round(requests)                                      AS requests,
-       sessions                                             AS sessions
+SELECT project,
+       round(cost_usd, 2) AS cost_usd,
+       round(100.0 * cost_usd / NULLIF((SELECT day_total FROM day_summary), 0), 1) AS cost_pct,
+       round(tokens / 1000.0, 1) AS ktokens,
+       round(requests) AS requests,
+       sessions,
+       round((SELECT day_total FROM day_summary), 2) AS day_total,
+       round((SELECT attributed_total FROM day_summary), 2) AS attributed_total
 FROM allocated
+UNION ALL
+SELECT project,
+       cost_usd,
+       cost_pct,
+       ktokens,
+       requests,
+       sessions,
+       day_total,
+       attributed_total
+FROM unattributed
 ORDER BY cost_usd DESC;
