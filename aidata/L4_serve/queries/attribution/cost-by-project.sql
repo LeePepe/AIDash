@@ -67,14 +67,39 @@ allocated AS (
     JOIN project_weight w ON w.sid = c.sid
     GROUP BY w.project
 )
-SELECT project                                              AS project,
-       round(cost_usd, 2)                                   AS cost_usd,
-       round(100.0 * cost_usd
-             / NULLIF((SELECT total FROM day_total), 0), 1) AS cost_pct,
-       round(tokens / 1000.0, 1)                            AS ktokens,
-       round(requests)                                      AS requests,
-       sessions                                             AS sessions,
-       round((SELECT total FROM day_total), 2)              AS day_total,
-       round((SELECT sum(cost_usd) FROM allocated), 2)      AS attributed_total
-FROM allocated
+WITH rows AS (
+    SELECT project                                              AS project,
+           round(cost_usd, 2)                                   AS cost_usd,
+           round(100.0 * cost_usd
+                 / NULLIF((SELECT total FROM day_total), 0), 1) AS cost_pct,
+           round(tokens / 1000.0, 1)                            AS ktokens,
+           round(requests)                                      AS requests,
+           sessions                                             AS sessions,
+           round((SELECT total FROM day_total), 2)              AS day_total,
+           round((SELECT sum(cost_usd) FROM allocated), 2)      AS attributed_total
+    FROM allocated
+
+    UNION ALL
+
+    SELECT NULL AS project,
+           0.0 AS cost_usd,
+           0.0 AS cost_pct,
+           0.0 AS ktokens,
+           0 AS requests,
+           0 AS sessions,
+           round((SELECT total FROM day_total), 2) AS day_total,
+           0.0 AS attributed_total
+    FROM day_total
+    WHERE NOT EXISTS (SELECT 1 FROM allocated)
+)
+SELECT project,
+       cost_usd,
+       cost_pct,
+       ktokens,
+       requests,
+       sessions,
+       day_total,
+       attributed_total
+FROM rows
+WHERE project IS NOT NULL OR (SELECT total FROM day_total) > 0
 ORDER BY cost_usd DESC;

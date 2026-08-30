@@ -829,25 +829,33 @@ def fetch_cost_by_project(day: str | None, top_n: int = 6) -> "CostByProjectBund
                 [], 0.0, 0.0, 100.0, SourceHealth("attribution", "ok"))
         pi, ci, pci = idx["project"], idx["cost_usd"], idx["cost_pct"]
         dti, ati = idx["day_total"], idx["attributed_total"]
-        # day_total and attributed_total are constant across rows.
+        # day_total and attributed_total are constant across rows; rows may be a
+        # synthetic zero-coverage frame when the warehouse has a day total but no
+        # attributable project rows.
         headline = float(rows[0][dti] or 0)
         attributed = float(rows[0][ati] or 0)
         coverage = (100.0 * attributed / headline) if headline > 0 else 100.0
 
-        ranked = [(str(r[pi]), float(r[ci] or 0), float(r[pci] or 0))
-                  for r in rows]
+        ranked = [
+            (str(r[pi]), float(r[ci] or 0), float(r[pci] or 0))
+            for r in rows if r[pi] not in (None, "")
+        ]
         items = _fold_top_n(
             ranked, top_n,
             value_text=lambda pct: f"{pct:.0f}%",
             semantic=lambda _label: None,
         )
         # When coverage is incomplete, add an explicit "未归因" row so the
-        # gap is visible and arithmetic reconciliation is possible.
+        # gap is visible and arithmetic reconciliation is possible. Keep the
+        # unattributed row in descending value order to match the renderer's
+        # barList contract.
         if coverage < _COVERAGE_THRESHOLD_PCT and headline > 0:
             gap = headline - attributed
             gap_pct = 100.0 - coverage
-            items.append(RankItem(
-                "未归因", gap, f"{gap_pct:.0f}%", semantic="muted"))
+            if not any(item.label == "未归因" for item in items):
+                items.append(RankItem(
+                    "未归因", gap, f"{gap_pct:.0f}%", semantic="warning"))
+            items = sorted(items, key=lambda item: item.value, reverse=True)
         return CostByProjectBundle(
             items, headline, attributed, coverage,
             SourceHealth("attribution", "ok"))

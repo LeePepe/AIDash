@@ -107,20 +107,42 @@ def test_cost_by_project_partial_coverage_regression(monkeypatch):
     assert bundle.coverage_pct < 99.5, "partial coverage must be flagged"
     assert abs(bundle.coverage_pct - 100.0 * 2107.23 / 2858.35) < 0.1
 
-    # The unattributed portion is visible as a row.
+    # The unattributed portion is visible as a row and kept in value order.
     labels = [i.label for i in bundle.items]
     assert "未归因" in labels, (
         "partial coverage must append an explicit unattributed row"
     )
+    assert labels == ["AIDash", "未归因", "VitalStride", "Multica"], (
+        "gap rows must be sorted by descending value, not appended at the end"
+    )
     gap_item = next(i for i in bundle.items if i.label == "未归因")
     expected_gap = 2858.35 - 2107.23
     assert abs(gap_item.value - expected_gap) < 0.01
+    assert gap_item.semantic == "warning", "renderer-supported semantic only"
     # Gap percentage is relative to headline, not attributed total.
     assert gap_item.value_text == "26%"
 
     # Arithmetic reconciliation: headline = attributed + gap.
     assert abs(bundle.headline_total
                - bundle.attributed_total - gap_item.value) < 0.01
+
+
+@pytest.mark.unit
+def test_cost_by_project_zero_attributable_keeps_headline_total(monkeypatch):
+    """A day with spend but zero attributable rows still reports a truthful gap."""
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [(None, 0.0, 0.0, 0.0, 0, 0, 2858.35, 0.0)],
+        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions",
+         "day_total", "attributed_total"]))
+    bundle = s.fetch_cost_by_project("2026-08-15")
+
+    assert bundle.headline_total == 2858.35
+    assert bundle.attributed_total == 0.0
+    assert bundle.coverage_pct == 0.0
+    assert [i.label for i in bundle.items] == ["未归因"]
+    assert bundle.items[0].value == 2858.35
+    assert bundle.items[0].value_text == "100%"
+    assert bundle.items[0].semantic == "warning"
 
 
 @pytest.mark.unit
