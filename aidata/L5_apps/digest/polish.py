@@ -194,22 +194,22 @@ def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
 # present.
 _POSITIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
-    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省)"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
     r".{0,12}"
     r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
     r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
-    r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本)"
+    r"|(?:效率上升|效率增长|效率回升|效率变好|效能提升|投入产出更好|整体向好|整体改善|整体优化|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本|工作提效|提效)"
     r")",
     re.IGNORECASE,
 )
 
 _NEGATIVE_EFFICIENCY_RE = re.compile(
     r"(?:"
-    r"(?:效率|效能|投入产出|产出|生产力|工作效率)"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|提效|工作提效)"
     r".{0,12}"
-    r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如)"
-    r"|(?:efficiency|productivity|throughput).{0,10}(?:drop|declin|worsen|decreas|fall)"
-    r"|(?:效率明显下降|效率下降|效率变差|生产力下降|效率趋弱|工作效率变差|效率不如昨天)"
+    r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱)"
+    r"|(?:efficiency|productivity|throughput).{0,10}(?:drop|declin|worsen|decreas|fall|slip)"
+    r"|(?:效率明显下降|效率下降|效率变差|生产力下降|效率趋弱|工作效率变差|效率不如昨天|效率下滑|效率走弱|工作提效但效率下滑|工作提效但效率走弱)"
     r")",
     re.IGNORECASE,
 )
@@ -237,45 +237,63 @@ def _metric_direction_assertions(tldr: str) -> list[tuple[str, str]]:
             "cost",
             re.compile(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", re.IGNORECASE),
             re.compile(r"(?:成本|开销|花费).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
+            re.compile(r"(?:成本|开销|花费).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:上升|增加|上调|上涨)", re.IGNORECASE),
+            re.compile(r"(?:成本|开销|花费).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
         ),
         (
             "waste",
             re.compile(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", re.IGNORECASE),
             re.compile(r"(?:浪费).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
+            re.compile(r"(?:浪费).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:上升|增加|上涨|增多)", re.IGNORECASE),
+            re.compile(r"(?:浪费).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
         ),
         (
             "requests",
             re.compile(r"(?:请求量|请求数|requests?).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
             re.compile(r"(?:请求量|请求数|requests?).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+            re.compile(r"(?:请求量|请求数|requests?).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:请求量|请求数|requests?).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
         ),
         (
             "token",
             re.compile(r"(?:Token|token).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
             re.compile(r"(?:Token|token).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+            re.compile(r"(?:Token|token).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:Token|token).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
         ),
         (
             "sessions",
             re.compile(r"(?:会话数|会话|session).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
             re.compile(r"(?:会话数|会话|session).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+            re.compile(r"(?:会话数|会话|session).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:会话数|会话|session).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
         ),
         (
             "tasks",
             re.compile(r"(?:完成任务|任务|产出).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
             re.compile(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|回落|减弱)", re.IGNORECASE),
+            re.compile(r"(?:完成任务|任务|产出).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:完成任务|任务|产出).{0,8}(?:没有|没|不|未|并没有|并未).{0,8}(?:下降|减少|回落|减弱)", re.IGNORECASE),
         ),
         (
             "issues",
             re.compile(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:上升|增加|增长|提升)", re.IGNORECASE),
             re.compile(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:下降|减少|降低|回落)", re.IGNORECASE),
+            re.compile(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:没有|没|不|未|并没有|并未).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:没有|没|不|未|并没有|并未).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
         ),
     ]
 
     assertions: list[tuple[str, str]] = []
-    for metric, up_pat, down_pat in patterns:
-        if up_pat.search(tldr):
+    for metric, up_pat, down_pat, neg_up_pat, neg_down_pat in patterns:
+        if up_pat.search(tldr) and not neg_up_pat.search(tldr):
             assertions.append((metric, "up"))
-        if down_pat.search(tldr):
+        elif neg_up_pat.search(tldr):
+            assertions.append((metric, "not_up"))
+        if down_pat.search(tldr) and not neg_down_pat.search(tldr):
             assertions.append((metric, "down"))
+        elif neg_down_pat.search(tldr):
+            assertions.append((metric, "not_down"))
     return assertions
 
 
@@ -297,7 +315,15 @@ def _metric_direction_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
         value = _value_for(metric)
         if value is None:
             return False
-        return (direction == "up" and value > 0) or (direction == "down" and value < 0)
+        if direction == "up":
+            return value > 0
+        if direction == "down":
+            return value < 0
+        if direction == "not_up":
+            return value <= 0
+        if direction == "not_down":
+            return value >= 0
+        return False
 
     assertions = _metric_direction_assertions(tldr)
     if not assertions:
@@ -320,11 +346,8 @@ def _efficiency_assertion_kind(tldr: str) -> str | None:
     """Return 'positive', 'negative', 'mixed', or None for the claim direction."""
     positive = _POSITIVE_EFFICIENCY_RE.search(tldr) is not None
     negative = _NEGATIVE_EFFICIENCY_RE.search(tldr) is not None
-    metric_assertions = _metric_direction_assertions(tldr)
 
-    if positive and (negative or metric_assertions):
-        # Fails closed when a positive efficiency cue is paired with a contrary
-        # negative cue or a directional metric clause without a clean positive match.
+    if positive and negative:
         return "mixed"
     if negative:
         return "negative"
@@ -338,7 +361,7 @@ def _needs_efficiency_validation(tldr: str) -> bool:
     if not tldr or not tldr.strip():
         return False
     if re.search(
-        r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|efficiency|productivity|throughput)",
+        r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|提效|工作提效|efficiency|productivity|throughput)",
         tldr,
         re.IGNORECASE,
     ):
@@ -380,7 +403,7 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
                 return False
 
     if re.search(
-        r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|efficiency|productivity|throughput)",
+        r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|提效|工作提效|efficiency|productivity|throughput)",
         tldr,
         re.IGNORECASE,
     ):
