@@ -14,6 +14,7 @@ After the fix:
 from __future__ import annotations
 
 import pytest
+import state
 
 from L5_apps.digest.aidash import (
     DeliveryState, PushResult,
@@ -191,7 +192,7 @@ def test_render_digest_no_delivery_line_when_none():
 def test_save_and_load_delivery_state(tmp_path, monkeypatch):
     """Round-trip: save then load produces equivalent DeliveryState."""
     state_file = tmp_path / "state.json"
-    monkeypatch.setattr("config.STATE_FILE", state_file)
+    monkeypatch.setattr(state, "STATE_FILE", state_file)
 
     result = PushResult(ok=False, reason="xpc.app_unavailable")
     saved = save_delivery_state(result, now=lambda: "2026-08-19T04:01:00Z")
@@ -211,7 +212,7 @@ def test_save_and_load_delivery_state(tmp_path, monkeypatch):
 def test_load_delivery_state_returns_none_when_empty(tmp_path, monkeypatch):
     """No state file → None."""
     state_file = tmp_path / "state.json"
-    monkeypatch.setattr("config.STATE_FILE", state_file)
+    monkeypatch.setattr(state, "STATE_FILE", state_file)
     assert load_delivery_state() is None
 
 
@@ -241,7 +242,7 @@ def test_push_wrapper_persists_xpc_failure_and_next_digest_keeps_sources_healthy
     from L5_apps.digest import app
     import L5_apps.digest.aidash as aidash
 
-    monkeypatch.setattr("config.STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(state, "STATE_FILE", tmp_path / "state.json")
     monkeypatch.setattr(aidash, "resolve_aidash_bin", lambda: "/x/aidash")
     monkeypatch.setattr(aidash, "ensure_app_running",
                         lambda **kwargs: True)

@@ -10,16 +10,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import config
+from config import STATE_FILE
 
 
 def load_state() -> dict[str, Any]:
     """Return the full state dict (empty if none yet)."""
-    state_file = config.STATE_FILE
-    if not state_file.exists():
+    if not STATE_FILE.exists():
         return {}
     try:
-        with state_file.open("r", encoding="utf-8") as fh:
+        with STATE_FILE.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
         return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
@@ -37,10 +36,9 @@ def set_watermark(source: str, value: Any) -> None:
 
     Builds a new dict rather than mutating the loaded one, then writes atomically.
     """
-    state_file = config.STATE_FILE
     current = load_state()
     updated = {**current, source: value}
-    tmp = state_file.with_suffix(".json.tmp")
+    tmp = STATE_FILE.with_suffix(".json.tmp")
     with tmp.open("w", encoding="utf-8") as fh:
         json.dump(updated, fh, indent=2, ensure_ascii=False)
-    tmp.replace(state_file)
+    tmp.replace(STATE_FILE)
