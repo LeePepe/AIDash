@@ -271,12 +271,70 @@ _QUALITATIVE_PROSE_VALUES = frozenset({
     "整体保持活跃",
     "活动明显增加",
     "趋势需观察",
+    "需关注",
+    "谨慎",
+    "待观察",
 })
 
 _NON_CLAIM_QUALITATIVE_RE = re.compile(
-    r"(?:会话活跃|整体趋势需关注|整体趋势需观察|需关注波动|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察)",
+    r"(?:会话活跃|整体趋势需关注|整体趋势需观察|需关注波动|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察|需关注|谨慎|待观察)",
     re.IGNORECASE,
 )
+
+_NEUTRAL_FOLLOWUP_RE = re.compile(
+    r"(?:需关注|谨慎|待观察|需留意|波动|风险|不确定)",
+    re.IGNORECASE,
+)
+
+
+def _split_tldr_clauses(text: str) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    clauses = re.split(r"[，,;；。!?！？]|(?:但|然而|不过|尽管|虽然|并且|却|同时|仍|反而)", cleaned)
+    return [clause.strip() for clause in clauses if clause and clause.strip()]
+
+
+def _clauses_are_fully_consumed(text: str, evidence: EfficiencyEvidence) -> bool:
+    clauses = _split_tldr_clauses(text)
+    if not clauses:
+        return False
+
+    prior_metric_ok = False
+    for clause in clauses:
+        if _is_recognized_non_claim_qualitative(clause):
+            continue
+        if _NEUTRAL_FOLLOWUP_RE.fullmatch(clause):
+            if prior_metric_ok:
+                continue
+            return False
+        if _metric_direction_matches(clause, evidence):
+            prior_metric_ok = True
+            continue
+        if _named_adverse_signal_matches(clause, evidence):
+            prior_metric_ok = True
+            continue
+        if re.search(
+            r"(?:效率|效能|投入产出|产出|生产力|工作效率|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)",
+            clause,
+            re.IGNORECASE,
+        ):
+            kind = _efficiency_assertion_kind(clause)
+            if kind == "mixed":
+                return False
+            if kind == "positive":
+                if evidence.allows_positive_claim():
+                    continue
+                return False
+            if kind == "negative":
+                if evidence.allows_negative_claim():
+                    continue
+                return False
+            return False
+        if _ECONOMIC_COMPARATIVE_RE.search(clause):
+            return False
+        return False
+    return True
 
 _ECONOMIC_COMPARATIVE_RE = re.compile(
     r"(?:"
@@ -504,20 +562,13 @@ def _is_recognized_non_claim_qualitative(tldr: str) -> bool:
     if not text:
         return False
     canonical = text.replace(" ", "")
-    return canonical in _QUALITATIVE_PROSE_VALUES or any(
-        re.fullmatch(pattern, canonical)
-        for pattern in (
-            r"会话活跃",
-            r"需关注波动",
-            r"整体趋势需关注",
-            r"整体趋势需观察",
-            r"数据不足以判断",
-            r"整体保持活跃",
-            r"活动明显增加",
-            r"趋势需观察",
-            r"会话活跃，需关注波动",
-        )
-    )
+    if canonical in _QUALITATIVE_PROSE_VALUES:
+        return True
+    if canonical.startswith("会话活跃") and "效率" not in canonical and "成本" not in canonical:
+        return True
+    if canonical.endswith("需关注波动") or canonical in {"整体趋势需关注", "整体趋势需观察", "趋势需观察", "数据不足以判断", "整体保持活跃", "活动明显增加"}:
+        return True
+    return bool(re.fullmatch(r"(?:会话活跃|需关注波动|整体趋势需关注|整体趋势需观察|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察|需关注|谨慎|待观察)", canonical))
 
 
 def _needs_efficiency_validation(tldr: str) -> bool:
@@ -556,6 +607,9 @@ def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
         return False
     if _is_recognized_non_claim_qualitative(tldr):
         return True
+
+    if not _clauses_are_fully_consumed(tldr, evidence):
+        return False
 
     metric_assertions = _metric_direction_assertions(tldr)
     if metric_assertions:

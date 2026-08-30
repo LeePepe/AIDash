@@ -466,7 +466,7 @@ def test_polish_digest_falls_back_for_unclassified_economic_comparatives(claim):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("claim", ["物超所值", "会话活跃，效率大幅改善"])
+@pytest.mark.parametrize("claim", ["物超所值", "成本上升，物超所值", "会话活跃，效率大幅改善"])
 def test_validate_rejects_unknown_or_composite_qualitative_claims(claim):
     ev = EfficiencyEvidence(cost_pct=71, waste_pct=141, tasks_pct=256, issues_pct=0)
     assert validate_efficiency_claim(claim, ev) is False
