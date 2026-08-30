@@ -176,6 +176,34 @@ avoids the forbidden host-based App tests and duplicate proactive suite runs.
 The optional hostless App logic target is diagnostic-only after a concrete
 failure, never normal acceptance or a substitute for CI App builds.
 
+## Decision 9: Calibrate the `teamAudit` light classification token
+
+**Decision**: Keep the shared 32×32 badge recipe unchanged: the glyph uses the
+full classification tint and the container uses the same tint source-over
+composited at `0.15` alpha. Calibrate only `Classification.teamAudit`'s light
+token from `#FF2D55` to `#E6294D`; keep dark `#FF375F`. The acceptance measure
+is `ratio(tint, composite(tint, ground, 0.15)) >= 3.0` across both DesignKit
+neutral palettes, both schemes, and the `card`, `inner`, and `bg` grounds.
+
+**Rationale**: The original light system pink reaches only 2.58:1 in the worst
+rendered badge case. `#E6294D` preserves its hue, remains visually distinct
+from the fixed danger semantic, and clears the worst approved ground at 3.06:1;
+the unchanged dark value clears at least 3.35:1. Keeping the correction inside
+the DesignKit token source preserves the existing small classification
+interface and localizes implementation and verification to one resolver leaf.
+
+**Alternatives rejected**:
+
+- Use the least-dark passing stop `#E8294D`: it clears the worst ground at only
+  3.02:1; the visually negligible two-channel-unit difference does not justify
+  the narrower calibration margin.
+- Reduce the shared badge-fill opacity: retaining `#FF2D55` requires about
+  3.6% or less on the worst ground, materially weakening every badge and
+  changing the constitution-owned AIDashUI recipe.
+- Add a `teamAudit`-specific badge recipe or separate on-subtle glyph token:
+  expands the DesignKit-to-AIDashUI interface and creates a per-type special
+  case when one calibrated classification value satisfies the contract.
+
 ## Resolved source ambiguities
 
 - “Three independent axes” means Workflow Conformance, Workflow Fitness, and

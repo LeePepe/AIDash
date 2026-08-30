@@ -49,7 +49,7 @@ dispatches remediation.
 | Scope Discipline | PASS | each implementation task owns one resolver leaf and exact files; sibling exclusions are explicit |
 | URL policy | PASS | only central-policy HTTPS links become actionable; local/custom schemes remain text |
 | Error handling | PASS | invalid/missing evidence and write failure degrade visibly, never trap |
-| Accessibility/i18n/test coverage | PASS by plan | UI task includes semantic copy, hit targets, previews, action/round-trip tests |
+| Accessibility/i18n/test coverage | PASS by plan | DesignKit measures the `teamAudit` glyph against its actual 15%-tint composited badge fill on every supported neutral ground; UI tasks include semantic copy, hit targets, previews, and action/round-trip tests |
 | Public-repo identity | PASS | contracts use neutral references and configurable ignored local import root; no account/workspace/machine IDs |
 | Hook-driven verification | PASS | tasks use resolver gates; App/CLI builds stay CI-only |
 
@@ -204,7 +204,7 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
 | Named audit query bundles | AidataL4 | AidataL5 | L4 exposes immutable required entities/counts and optional facts only; L5 alone computes final publication coverage after packing |
 | `teamAudit` JSON payload | AIDashCore | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash and explicit finding identity; Core before mapping/render/schema |
-| Classification tint | DesignKit | AIDashUI | DesignKit before final UI renderer |
+| Classification tint | DesignKit | AIDashUI | T006 supplies calibrated light `#E6294D` / dark `#FF375F`; AIDashUI consumes the unchanged shared full-tint-glyph / 15%-fill badge recipe; DesignKit before final UI renderer |
 | Audit action intent | AIDashUI | AIDashApp | Core action enum before both; UI interface before App wiring |
 | `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
 | Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore payload + AIDashUI URLPolicy | stable sidecar ID/exact byte hash, typed grill/full-report fields, mandatory invalid-link rejection, optional invalid-link text |

@@ -77,15 +77,15 @@ overview renderer; default collection performs no audit import or invocation.
 | Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected AIDashCore Swift build/test gates must exit 0. A focused resolver rerun is diagnostic only after an emitted hook failure. |
 | Dependencies / slice | None; parallel contract foundation for US1/US2 |
 
-- [ ] T006 [P] [US1] Add `Classification.teamAudit` in `Packages/DesignKit/Sources/DesignKit/Color/ColorSystem.swift`.
+- [ ] T006 [P] [US1] Add the contrast-calibrated `Classification.teamAudit` in `Packages/DesignKit/Sources/DesignKit/Color/ColorSystem.swift`.
 
 | Metadata | T006 |
 |---|---|
 | Owning layer / context | **DesignKit** — `CONTEXT.md` → `Packages/CONTEXT.md` → `Packages/DesignKit/CONTEXT.md`; `Packages/DesignKit/tech-context.md` |
 | Files in scope | `Packages/DesignKit/Sources/DesignKit/Color/ColorSystem.swift`; `Packages/DesignKit/Tests/DesignKitTests/ColorSystemTests.swift`; `Packages/DesignKit/Tests/DesignKitTests/ContrastTests.swift` |
-| Files NOT to touch | `Packages/AIDashUI/**`; `Packages/AIDashCore/**`; `Theme` seed generation; semantic success/warning/danger tokens |
-| Interface / contract | `contracts/card-payload.md`: `teamAudit` classification uses light `#FF2D55`, dark `#FF375F`; product layout/copy remains in AIDashUI |
-| Functional acceptance | Enum/tint golden values are locked; badge contrast is measured on supported neutral tiers; no second palette, feature layout, or raw color outside the token source is introduced |
+| Files NOT to touch | `Packages/AIDashUI/**`, including the shared `CardTypeBadge` 15%-fill recipe; `Packages/AIDashCore/**`; `Theme` seed generation; semantic success/warning/danger tokens |
+| Interface / contract | `contracts/card-payload.md`: `teamAudit` classification uses light `#E6294D`, dark `#FF375F`; the glyph remains full tint over the same tint source-over composited at `0.15` alpha; product layout/copy remains in AIDashUI |
+| Functional acceptance | Golden values lock the exact pair; a measured test asserts `ratio(tint, composite(tint, ground, 0.15)) >= 3.0` for `Neutral.allCases` × both schemes × `card`/`inner`/`bg`; no second palette, badge-recipe special case, feature layout, semantic-token change, or raw color outside the token source is introduced |
 | Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected DesignKit Swift build/test gates must exit 0. A focused resolver rerun is diagnostic only after an emitted hook failure. |
 | Dependencies / slice | None; parallel visual-token foundation for US1/US2 |
 

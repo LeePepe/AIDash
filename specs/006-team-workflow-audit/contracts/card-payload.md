@@ -4,8 +4,12 @@
 
 - `CardType.rawValue`: `teamAudit`
 - Design classification token: `Classification.teamAudit`
-- Badge tint: system-pink pair, light `#FF2D55`, dark `#FF375F`
+- Badge tint: calibrated system-pink-hue pair, light `#E6294D`, dark `#FF375F`
 - Badge symbol: `checkmark.shield.fill`
+- Badge recipe: unchanged shared recipe — a full-tint glyph over the same tint
+  source-over composited at `0.15` alpha onto the active neutral ground
+- Badge contrast: `ratio(tint, composite(tint, ground, 0.15)) >= 3.0` for
+  `slate | neutral` × `light | dark` × `card | inner | bg`
 - Effective size: authored size is preserved; no content-derived downgrade
   until a future spec defines per-section richness thresholds.
 
