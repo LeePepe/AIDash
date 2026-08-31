@@ -444,7 +444,7 @@ run_with_timeout() {
         return 0
     fi
 
-    if [ "$child_status" -eq 0 ] && [ "$child_exit_ns" -gt "$deadline_ns" ]; then
+    if [ "$child_exit_ns" -gt "$deadline_ns" ]; then
         return "$REVIEW_TIMEOUT_RC"
     fi
 
