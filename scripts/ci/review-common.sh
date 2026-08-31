@@ -122,19 +122,63 @@ process_group_alive() {
     kill -0 "-$pgid" 2>/dev/null
 }
 
+collect_process_tree() {
+    local root="$1"
+    local current pid ppid seen_pid
+    local -a seen=()
+    local -a queue=("$root")
+    local -a descendants=()
+
+    while [ "${#queue[@]}" -gt 0 ]; do
+        current="${queue[0]}"
+        queue=("${queue[@]:1}")
+
+        for seen_pid in "${seen[@]}"; do
+            if [ "$seen_pid" = "$current" ]; then
+                continue 2
+            fi
+        done
+
+        seen+=("$current")
+        descendants+=("$current")
+
+        while IFS=' ' read -r pid ppid; do
+            [ -n "$pid" ] || continue
+            if [ "$ppid" = "$current" ]; then
+                local already=0
+                for seen_pid in "${seen[@]}"; do
+                    if [ "$seen_pid" = "$pid" ]; then
+                        already=1
+                        break
+                    fi
+                done
+                if [ "$already" -eq 0 ]; then
+                    queue+=("$pid")
+                fi
+            fi
+        done < <(ps -axo pid=,ppid= 2>/dev/null || true)
+    done
+
+    for current in "${descendants[@]}"; do
+        printf '%s\n' "$current"
+    done
+}
+
 process_tree_alive() {
     local root="$1"
-    local child
+    local pid
 
     if kill -0 "$root" 2>/dev/null; then
         return 0
     fi
 
-    for child in $(ps -o pid= --ppid "$root" 2>/dev/null | awk 'NF { print $1 }' || true); do
-        if process_tree_alive "$child"; then
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        [ "$pid" = "$root" ] && continue
+        if kill -0 "$pid" 2>/dev/null; then
             return 0
         fi
-    done
+    done < <(collect_process_tree "$root" 2>/dev/null || true)
 
     return 1
 }
@@ -154,6 +198,49 @@ child_has_exited() {
     esac
 }
 
+cleanup_process_tree() {
+    local root="$1"
+    shift
+    local pid
+    local -a targets=("$@")
+
+    if [ "${#targets[@]}" -eq 0 ]; then
+        while IFS= read -r pid; do
+            [ -n "$pid" ] && targets+=("$pid")
+        done < <(collect_process_tree "$root" 2>/dev/null || true)
+    fi
+
+    if [ "${#targets[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    for pid in "${targets[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+
+    local grace=0
+    while [ "$grace" -lt 10 ]; do
+        local still_alive=0
+        for pid in "${targets[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                still_alive=1
+                break
+            fi
+        done
+        if [ "$still_alive" -eq 0 ]; then
+            return 0
+        fi
+        sleep 1
+        grace=$((grace + 1))
+    done
+
+    for pid in "${targets[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    done
+}
+
 terminate_process_group() {
     local pgid="$1"
     kill -TERM "-$pgid" 2>/dev/null || kill -TERM "$pgid" 2>/dev/null || true
@@ -161,13 +248,19 @@ terminate_process_group() {
 
 terminate_process_tree() {
     local root="$1"
-    local child
+    shift
+    local pid
+    local -a targets=("$@")
 
-    for child in $(ps -o pid= --ppid "$root" 2>/dev/null | awk 'NF { print $1 }' || true); do
-        terminate_process_tree "$child"
+    if [ "${#targets[@]}" -eq 0 ]; then
+        while IFS= read -r pid; do
+            [ -n "$pid" ] && targets+=("$pid")
+        done < <(collect_process_tree "$root" 2>/dev/null || true)
+    fi
+
+    for pid in "${targets[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
     done
-
-    kill -TERM "$root" 2>/dev/null || true
 }
 
 kill_process_group() {
@@ -177,13 +270,19 @@ kill_process_group() {
 
 kill_process_tree() {
     local root="$1"
-    local child
+    shift
+    local pid
+    local -a targets=("$@")
 
-    for child in $(ps -o pid= --ppid "$root" 2>/dev/null | awk 'NF { print $1 }' || true); do
-        kill_process_tree "$child"
+    if [ "${#targets[@]}" -eq 0 ]; then
+        while IFS= read -r pid; do
+            [ -n "$pid" ] && targets+=("$pid")
+        done < <(collect_process_tree "$root" 2>/dev/null || true)
+    fi
+
+    for pid in "${targets[@]}"; do
+        kill -KILL "$pid" 2>/dev/null || true
     done
-
-    kill -KILL "$root" 2>/dev/null || true
 }
 
 run_with_timeout() {
@@ -209,30 +308,63 @@ run_with_timeout() {
     # exits 0 on its own.
     (
         local waited=0
-        while [ "$waited" -lt "$seconds" ]; do
+        local poll_steps=$((seconds * 5))
+        local -a last_tree=()
+
+        while [ "$waited" -lt "$poll_steps" ]; do
+            last_tree=()
+            while IFS= read -r pid; do
+                [ -n "$pid" ] && last_tree+=("$pid")
+            done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
+
             if child_has_exited "$child_pid"; then
                 if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
                     terminate_process_group "$child_pid"
-                    terminate_process_tree "$child_pid"
+                    terminate_process_tree "$child_pid" "${last_tree[@]}"
+
                     local grace=0
                     while [ "$grace" -lt 10 ]; do
                         if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
                             break
                         fi
-                        sleep 1
+                        sleep 0.2
                         grace=$((grace + 1))
                     done
+
                     if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
                         kill_process_group "$child_pid"
-                        kill_process_tree "$child_pid"
+                        kill_process_tree "$child_pid" "${last_tree[@]}"
                     fi
                 fi
                 printf '%s\n' "clean" >"$state_file"
                 exit 0
             fi
-            sleep 1
+            sleep 0.2
             waited=$((waited + 1))
         done
+
+        if child_has_exited "$child_pid"; then
+            if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
+                terminate_process_group "$child_pid"
+                terminate_process_tree "$child_pid" "${last_tree[@]}"
+
+                local grace=0
+                while [ "$grace" -lt 10 ]; do
+                    if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
+                        break
+                    fi
+                    sleep 1
+                    grace=$((grace + 1))
+                done
+
+                if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
+                    kill_process_group "$child_pid"
+                    kill_process_tree "$child_pid" "${last_tree[@]}"
+                fi
+            fi
+            printf '%s\n' "clean" >"$state_file"
+            exit 0
+        fi
 
         if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
             printf '%s\n' "clean" >"$state_file"
@@ -240,7 +372,7 @@ run_with_timeout() {
         fi
 
         terminate_process_group "$child_pid"
-        terminate_process_tree "$child_pid"
+        terminate_process_tree "$child_pid" "${last_tree[@]}"
 
         local grace=0
         while [ "$grace" -lt 10 ]; do
@@ -253,7 +385,7 @@ run_with_timeout() {
 
         if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
             kill_process_group "$child_pid"
-            kill_process_tree "$child_pid"
+            kill_process_tree "$child_pid" "${last_tree[@]}"
         fi
 
         printf '%s\n' "timeout" >"$state_file"
