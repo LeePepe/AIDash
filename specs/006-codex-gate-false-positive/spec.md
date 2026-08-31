@@ -26,11 +26,12 @@ failures, so the repair has to improve evidence discipline without weakening
 the merge policy.
 
 **Independent Test**: A hermetic RepoInfra regression renders the exact shared
-trusted prompt clause used by the live gate and proves that it requires the
-whole rejecting expression—including unions, defaults, normalization, and
-negation—before an invalid-value blocker is allowed. The PR #199 shape,
-`VALID_TIERS = {"explore"}` combined with
-`tier not in VALID_TIERS | {"production"}`, is pinned as the regression.
+trusted prompt clause used by the live gate and pins its abstention contract:
+an isolated allowlist from a partial hunk cannot support a value-rejection
+blocker. The PR #199 shape—`VALID_TIERS = {"explore"}` in the hunk while the
+unchanged predicate is `tier not in VALID_TIERS | {"production"}`—is the
+regression example. The deterministic test verifies prompt policy and shared
+helper consumption; it does not assert a nondeterministic model verdict.
 
 **Acceptance Scenarios**:
 
@@ -66,8 +67,8 @@ negation—before an invalid-value blocker is allowed. The PR #199 shape,
 ### Functional Requirements
 
 - **FR-001**: The shared trusted evidence discipline MUST require a blocker
-  alleging an invalid value, failing test, or CI failure to cite and evaluate
-  the complete deciding predicate.
+  alleging that a value is invalid or rejected to cite and evaluate the
+  complete deciding predicate.
 - **FR-002**: Complete-predicate evaluation MUST account for unions, defaults,
   normalization, negation, and other same-expression qualifiers that can alter
   whether the value is accepted.
@@ -75,8 +76,9 @@ negation—before an invalid-value blocker is allowed. The PR #199 shape,
   treated as sufficient proof that a value is rejected.
 - **FR-004**: Missing complete-predicate evidence MUST prevent this class of
   blocker; it MAY be reported as a non-blocking note when uncertainty remains.
-- **FR-005**: Directly proven critical/high defects and all tool/schema/timeout
-  failures MUST continue to fail closed.
+- **FR-005**: Directly proven critical/high defects—including failures shown by
+  direct test or CI output—and all tool/schema/timeout failures MUST continue
+  to fail closed.
 - **FR-006**: The live Codex required gate MUST consume the shared evidence
   discipline; the repair MUST NOT add a gate-specific copy that can drift.
 - **FR-007**: Hermetic RepoInfra regression coverage MUST pin the PR #199
@@ -107,16 +109,16 @@ negation—before an invalid-value blocker is allowed. The PR #199 shape,
 
 ### Measurable Outcomes
 
-- **SC-001**: Removing or weakening the complete-predicate instruction causes
-  the new RepoInfra regression to fail.
+- **SC-001**: Removing or weakening the incomplete-evidence abstention
+  instruction causes the new RepoInfra regression to fail.
 - **SC-002**: The complete RepoInfra local gate exits 0 for the repair revision.
 - **SC-003**: Existing regressions for direct blockers and fail-closed tool,
   timeout, parse, and schema failures remain green.
 - **SC-004**: No workflow, ruleset, Aidata, PR #198, or PR #199 file is present
   in the gate-repair implementation diff.
 - **SC-005**: After the repair reaches `main`, PR #199 is refreshed and its new
-  exact HEAD has all required checks green and a fresh Multica AI Reviewer PASS
-  before PR Manager merge.
+  exact HEAD has all checks green and a fresh Multica AI Reviewer PASS before
+  PR Manager merge.
 
 ## Constraints and Non-Goals
 

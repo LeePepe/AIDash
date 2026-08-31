@@ -14,7 +14,7 @@
 ## 2. Review and land the repair
 
 - Pin local HEAD, pushed branch OID, and repair-PR `headRefOid` to one SHA.
-- Obtain all required checks green and an exact-SHA Multica AI Reviewer PASS.
+- Obtain all checks green and an exact-SHA Multica AI Reviewer PASS.
 - PR Manager merges the repair to `main`; no bypass is permitted.
 
 ## 3. Refresh PR #199 only after the repair is on main
@@ -29,7 +29,7 @@
 ## 4. Re-establish exact-HEAD evidence
 
 - Confirm local HEAD, remote branch OID, and PR #199 `headRefOid` match.
-- Require every required check, including `codex-review-target`, to be green.
+- Require every check, including `codex-review-target`, to be green.
 - Obtain a fresh Multica AI Reviewer PASS for that same refreshed HEAD.
 - Hand the exact evidence to PR Manager for merge.
 

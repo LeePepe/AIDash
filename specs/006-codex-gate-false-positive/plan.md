@@ -11,8 +11,8 @@ fresh Multica AI Reviewer PASS.
 ## Summary
 
 Extend the existing shared trusted prompt interface in
-`scripts/ci/review-common.sh` so invalid-value/test-failure blockers require the
-complete deciding predicate, not an isolated declaration from a partial hunk.
+`scripts/ci/review-common.sh` so value-rejection blockers require the complete
+deciding predicate, not an isolated declaration from a partial hunk.
 Pin the PR #199 `VALID_TIERS | {"production"}` shape in the existing hermetic
 shell regression suite and document the invariant. The implementation is one
 RepoInfra task and does not change workflows, rulesets, Aidata, or either
@@ -96,19 +96,21 @@ unchanged union that admits `production`.
 
 Add a complete-predicate clause to `review_evidence_rules()`:
 
-1. An invalid-value, test-failure, or CI-failure blocker must cite the entire
+1. A blocker claiming that a value is invalid or rejected must cite the entire
    deciding expression available in diff/evidence.
 2. Unions, defaults, normalization, negation, and helper qualifiers must be
    evaluated before classifying the value.
 3. A partial constant or omitted predicate is missing evidence; it cannot
    support a blocker in this class.
 4. A complete predicate that directly proves rejection remains eligible for a
-   critical/high blocker.
+   critical/high blocker. Direct test/CI failure output also remains independent
+   blocking evidence and is not subject to this partial-predicate abstention.
 
 The rule remains in the trusted pre-fence prompt. The PR-shaped regression
-renders the real helper and pins the accepted `production` case. It also
-asserts that the live gate continues to call the shared helper instead of an
-inline copy.
+renders the real helper and pins abstention when the hunk shows only the
+isolated set while the complete union is outside the hunk. It also asserts that
+the live gate continues to call the shared helper instead of an inline copy.
+It deliberately tests the deterministic prompt contract, not a model verdict.
 
 ### Alternatives rejected
 
@@ -171,14 +173,14 @@ reviewed, merged, and visible in `main`.
 2. Team Lead schedules T001 on a fresh RepoInfra branch/worktree from current
    `main`; PR #198 and PR #199 remain untouched.
 3. Fullstack implements only T001, normal hooks run the RepoInfra local gate,
-   and the implementation receives exact-SHA AI Reviewer PASS plus all required
-   checks green.
+   and the implementation receives exact-SHA AI Reviewer PASS plus all checks
+   green.
 4. PR Manager merges the RepoInfra repair to `main` without bypass.
 5. Team Lead refreshes PR #199 from the resulting current `main`. The new HEAD
    may contain only the existing two-file AidataL4 candidate plus the merged
    base history; MY-1495's allowlist is not expanded.
-6. The refreshed PR #199 exact HEAD must have every required check green and a
-   fresh Multica AI Reviewer PASS on that same HEAD before PR Manager merge.
+6. The refreshed PR #199 exact HEAD must have every check green and a fresh
+   Multica AI Reviewer PASS on that same HEAD before PR Manager merge.
 7. Only after MY-1495 is proven on `main` may Team Lead promote MY-1496.
 
 ## Risks and Controls
