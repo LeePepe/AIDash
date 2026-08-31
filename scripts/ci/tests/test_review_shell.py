@@ -212,6 +212,34 @@ def test_review_evidence_rules_emits_full_text_without_hanging() -> None:
     assert "fail-closed" in result.stdout
 
 
+def test_review_evidence_rules_requires_complete_deciding_predicate() -> None:
+    """A rejected/invalid value claim must cite the whole predicate, not a fragment.
+
+    Regression guard for the PR #199 false-positive hunk: a local `VALID_TIERS =
+    {"explore"}` constant does not by itself prove a later `tier not in
+    VALID_TIERS | {"production"}` rejection. The prompt must explicitly require
+    the full complete deciding predicate, including unions, defaults,
+    normalization, negation, and material helper qualifiers.
+    """
+    result = _run(f". {COMMON}\nreview_evidence_rules\n", timeout=30)
+    assert result.returncode == 0, result.stderr
+    text = result.stdout
+
+    for needle in (
+        "complete deciding predicate",
+        "union",
+        "default",
+        "normalization",
+        "negation",
+        "material helper qualifier",
+        "VALID_TIERS",
+    ):
+        assert needle in text, (
+            "review_evidence_rules no longer names the complete deciding "
+            f"predicate requirement for {needle!r}"
+        )
+
+
 # --------------------------------------------------------------------------
 # 2b. The shared security notice: one source, and reviewable-by-itself.
 # --------------------------------------------------------------------------

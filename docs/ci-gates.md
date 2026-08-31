@@ -93,6 +93,20 @@ PR #171 上两道门(claude / codex)因此同时误判:`private var labelLine` �
 `.padding(.trailing, trailingInset)` 被说成挂在 `BarListRow.body` 的外层 `VStack` 上,
 各自开出一条高危 blocker,卡住了一个本该通过的 PR(MY-1402)。
 
+### 完整谓词证据(invariant: complete deciding predicate)
+
+**“这个值无效 / 被拒绝 / 不应接受”这类 blocker 不能只凭局部 hunk 或一个常量**。
+它必须引用实际决定结论的完整谓词（complete deciding predicate）——包括并集 / union、
+默认值 / default、规范化 / normalization、否定 / negation，以及 material helper
+qualifier / helper 语义。单独一个 `VALID_TIERS = {"explore"}` 常量不能证明后面的
+`tier not in VALID_TIERS | {"production"}` 是错误；如果完整谓词本身未变、只是共享 helper
+被消费,那是可信策略/已存在基础谓词的证据,不是新的 blocker。
+
+这条不只是“更严一点”:它防止 PR #199 这类假阳性,把“孤立常量 + 抽离 hunk”当成对完整
+拒绝条件的证据,而它其实只是看到了一个被 helper 拼接的前半句。**不完整的证据只能写
+成 note**, 不能升级成 blocker。遵守这条 invariant 之后,仅当完整谓词和它最终的拒绝/接受
+结论都被实际引用时,才允许判定值无效。
+
 现在归属由**可信脚本**先算好再交给模型:
 
 | 组件 | 职责 |

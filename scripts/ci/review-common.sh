@@ -310,6 +310,13 @@ review_evidence_rules() {
 '- 任何关于「这个 modifier 作用在哪个视图 / 影响哪块布局」的 **blocker**,必须引用' \
 '  下方 SCOPE EVIDENCE 里该行的 receiver + 所在声明,或引用 SCOPE EXCERPTS 里的具体' \
 '  行。给不出这种具体证据,就**不能**判 blocker。' \
+'- 任何关于「这个值无效 / 被拒绝 / 不应接受」的 **blocker**,都必须引用完整决定谓词' \
+'  （complete deciding predicate）以及它的实际条件: 并集 / union、默认值 / default、' \
+'  规范化 / normalization、否定 / negation，以及 material helper qualifier / helper 语义。' \
+'  只给单个常量、局部 hunk 或半截条件,不能支撑此类 blocker;不确定时最多写 note。' \
+'  特别地,像 `VALID_TIERS = {"explore"}` 这类孤立常量,不能单独支持 `tier not in VALID_TIERS | {"production"}`' \
+'  的拒绝结论;若完整谓词仍保持未变、只是共享 helper 被消费,这是可信策略/基础谓词' \
+'  的已存在证据,不得把它误判成新的阻塞事实。' \
 '- SCOPE EVIDENCE 里标为 `unresolved` 的行 = 没有证据,不是有问题的证据。此时最多写' \
 '  成 note(说明无法确定归属),**不得**升级为 blocker。' \
 '- 若某文件因超出字节上限未包含在 SCOPE EVIDENCE 中,对该文件的 modifier 归属同样' \
