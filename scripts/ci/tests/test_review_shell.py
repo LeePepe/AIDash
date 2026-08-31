@@ -538,7 +538,7 @@ def test_run_with_timeout_exits_clean_on_leader_exit_before_deadline_boundary(
     inner.write_text(
         '#!/bin/sh\n'
         f"sh -c 'echo $$ > \"{pidfile}\"; exec sleep 120' &\n"
-        'sleep 1.3\n'
+        'sleep 1.5\n'
         'exit 0\n',
         encoding="utf-8",
     )

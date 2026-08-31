@@ -307,8 +307,9 @@ kill_process_tree() {
 
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file deadline_ns child_exit_ns
+    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file deadline_ns child_exit_ns child_exit_file
     state_file="$(mktemp)"
+    child_exit_file="$(mktemp)"
     deadline_ns="$(python3 -c 'import sys, time; print(int(time.monotonic_ns()) + int(sys.argv[1]) * 1000000000)' "$seconds")"
 
     # Job control ON for the launch, so the child becomes a PROCESS GROUP
@@ -320,6 +321,18 @@ run_with_timeout() {
     "$@" &
     child_pid=$!
     set +m
+
+    (
+        while kill -0 "$child_pid" 2>/dev/null; do
+            local status
+            status="$(ps -o stat= -p "$child_pid" 2>/dev/null | tr -d ' ' || true)"
+            case "$status" in
+                Z*) break ;;
+                *) sleep 0.01 ;;
+            esac
+        done
+        python3 -c 'import time; print(int(time.monotonic_ns()))' >"$child_exit_file"
+    ) &
 
     # Watchdog: if the process survives to the absolute deadline, do bounded
     # TERM→KILL cleanup and classify that as a timeout. If the child exits early,
@@ -335,15 +348,33 @@ run_with_timeout() {
             done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
 
             if [ "${#tree[@]}" -gt 0 ]; then
-                local -a preserved_tree=()
+                local -a observed=()
                 for pid in "${tree[@]}"; do
-                    if [ -n "$pid" ] && { [ "$pid" != "$child_pid" ] || kill -0 "$pid" 2>/dev/null; }; then
-                        preserved_tree+=("$pid")
+                    [ -n "$pid" ] || continue
+                    [ "$pid" = "$child_pid" ] && continue
+                    if ! kill -0 "$pid" 2>/dev/null; then
+                        continue
+                    fi
+                    local status
+                    status="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+                    case "$status" in
+                        Z*) continue ;;
+                    esac
+                    local seen=0
+                    for existing in "${last_tree[@]}" "${observed[@]}"; do
+                        [ -n "$existing" ] || continue
+                        if [ "$existing" = "$pid" ]; then
+                            seen=1
+                            break
+                        fi
+                    done
+                    if [ "$seen" -eq 0 ]; then
+                        observed+=("$pid")
                     fi
                 done
-                if [ "${#preserved_tree[@]}" -gt 0 ]; then
-                    last_tree=("${preserved_tree[@]}")
-                fi
+                for pid in "${observed[@]}"; do
+                    last_tree+=("$pid")
+                done
             fi
 
             if child_has_exited "$child_pid"; then
@@ -430,7 +461,8 @@ run_with_timeout() {
     else
         child_status=$?
     fi
-    child_exit_ns="$(python3 -c 'import time; print(int(time.monotonic_ns()))')"
+    child_exit_ns="$(cat "$child_exit_file" 2>/dev/null || python3 -c 'import time; print(int(time.monotonic_ns()))')"
+    rm -f "$child_exit_file"
 
     # The watchdog's exit status is the authoritative timeout signal. We must
     # wait for its cleanup to finish rather than killing it early; otherwise a
