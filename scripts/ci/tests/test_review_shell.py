@@ -489,12 +489,12 @@ def test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero(
 def test_run_with_timeout_cleans_nested_descendant_tree_after_leader_exits_zero(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A nested descendant tree is cleaned before the leader is reported as done."""
+    """A nested descendant tree leaves the original PGID and must still be cleaned."""
     pidfile = tmp_path / "grandchild.pid"
     inner = tmp_path / "inner.sh"
     inner.write_text(
         '#!/bin/sh\n'
-        f"sh -c 'echo $$ > \"{pidfile}\"; exec sleep 120' &\n"
+        f'python3 -c "import os, pathlib; p = pathlib.Path(\'{pidfile}\'); os.setsid(); p.write_text(str(os.getpid())); os.execvp(\'sleep\', [\'sleep\', \'120\'])" &\n'
         'sleep 0.2\n'
         'exit 0\n',
         encoding="utf-8",
