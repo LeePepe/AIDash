@@ -554,6 +554,20 @@ def test_run_with_timeout_exits_clean_on_leader_exit_before_deadline_boundary(
     assert "NO-PID" not in result.stdout, result.stdout
 
 
+def test_run_with_timeout_returns_124_for_late_nonzero_exit_after_deadline() -> None:
+    """A late nonzero exit after the wall-clock deadline is fail-closed as timeout."""
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        "run_with_timeout 1 /bin/sh -c 'sleep 2; exit 3' || rc=$?\n"
+        'echo "rc=$rc"\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=124" in result.stdout, result.stdout
+
+
 def test_run_with_timeout_prefers_watchdog_when_term_trap_exits_zero(
     tmp_path: pathlib.Path,
 ) -> None:
