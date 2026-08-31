@@ -466,6 +466,7 @@ def test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero(
         'sh -c \'echo $$ > "'
         f"{pidfile}"
         '"; exec sleep 120\' &\n'
+        'sleep 0.05\n'
         'exit 0\n',
         encoding="utf-8",
     )
@@ -477,24 +478,27 @@ def test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero(
         f"run_with_timeout 2 {inner} || rc=$?\n"
         'echo "rc=$rc"\n'
         f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
-        'if [ -n "$GRANDCHILD" ] && kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
         timeout=30,
     )
 
     assert result.returncode == 0, result.stderr
     assert "rc=0" in result.stdout, result.stdout
     assert "CLEAN" in result.stdout, result.stdout
+    assert "NO-PID" not in result.stdout, result.stdout
 
 
 def test_run_with_timeout_cleans_nested_descendant_tree_after_leader_exits_zero(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A nested descendant tree leaves the original PGID and must still be cleaned."""
+    """A nested descendant tree is cleaned before the leader is reported as done."""
     pidfile = tmp_path / "grandchild.pid"
     inner = tmp_path / "inner.sh"
     inner.write_text(
         '#!/bin/sh\n'
-        f'python3 -c "import os, pathlib; p = pathlib.Path(\'{pidfile}\'); os.setsid(); p.write_text(str(os.getpid())); os.execvp(\'sleep\', [\'sleep\', \'120\'])" &\n'
+        f"sh -c 'echo $$ > \"{pidfile}\"; exec sleep 120' &\n"
+        'sleep 0.05\n'
         'sleep 0.2\n'
         'exit 0\n',
         encoding="utf-8",
@@ -591,6 +595,7 @@ def test_run_with_timeout_kills_nested_wrapper_descendants(tmp_path: pathlib.Pat
         'env FOO=bar bash -c \'echo $$ > "'
         f"{pidfile}"
         '"; exec sleep 120\' &\n'
+        'sleep 0.05\n'
         'exit 0\n',
         encoding="utf-8",
     )
@@ -602,13 +607,15 @@ def test_run_with_timeout_kills_nested_wrapper_descendants(tmp_path: pathlib.Pat
         f"run_with_timeout 2 {inner} || rc=$?\n"
         'echo "rc=$rc"\n'
         f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
-        'if [ -n "$GRANDCHILD" ] && kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
         timeout=30,
     )
 
     assert result.returncode == 0, result.stderr
     assert "rc=0" in result.stdout, result.stdout
     assert "CLEAN" in result.stdout, result.stdout
+    assert "NO-PID" not in result.stdout, result.stdout
 
 
 def test_emit_failure_metadata_rejects_untrusted_payloads() -> None:
