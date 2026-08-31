@@ -368,9 +368,8 @@ kill_process_tree() {
 
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file deadline_ns child_exit_ns child_exit_file
+    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file deadline_ns child_exit_ns
     state_file="$(mktemp)"
-    child_exit_file="$(mktemp)"
 
     # Ensure the launched CLI is in its own process group even when the parent
     # shell is non-interactive (`bash -e -c ...` in CI). `set -m` is not enough
@@ -513,19 +512,6 @@ run_with_timeout() {
     ) &
     watchdog_pid=$!
 
-    # Record the completion timestamp in a dedicated watcher that observes the
-    # child disappearing rather than waiting for the parent to resume after the
-    # `wait`. That makes the deadline comparison authoritative and avoids the
-    # empty-file race where the parent can read the temp before the recorder has
-    # written a value.
-    (
-        while kill -0 "$child_pid" 2>/dev/null; do
-            sleep 0.01
-        done
-        printf '%s\n' "$(python3 -c 'import time; print(int(time.monotonic_ns()))')" >"$child_exit_file"
-    ) &
-    local completion_recorder_pid=$!
-
     # `|| status=$?`, never a bare `wait`: these scripts run under the
     # workflow's `bash -e {0}`, where a bare `wait` on a killed child exits the
     # WHOLE SCRIPT with 143 — before the timeout branch below can post its
@@ -537,21 +523,11 @@ run_with_timeout() {
         child_status=$?
     fi
 
-    # Wait for the recorder to publish its timestamp before reading the file; the
-    # recorder is the authoritative completion observer, and the parent must not
-    # treat an empty or stale file as proof of a successful exit.
-    wait "$completion_recorder_pid" 2>/dev/null || true
-    if [ -s "$child_exit_file" ]; then
-        child_exit_ns="$(tr -d '\r\n' < "$child_exit_file" 2>/dev/null || true)"
-        if [[ "$child_exit_ns" =~ ^[0-9]+$ ]]; then
-            :
-        else
-            child_exit_ns=""
-        fi
-    else
-        child_exit_ns=""
-    fi
-    rm -f "$child_exit_file"
+    # The parent sees the child's actual exit event when `wait` returns. Record
+    # the monotonic timestamp immediately then, not after a later `kill -0` poll,
+    # so a completion just before the deadline is classified against the real
+    # completion time instead of a stale watchdog observation.
+    child_exit_ns="$(python3 -c 'import time; print(int(time.monotonic_ns()))')"
 
     # The watchdog's exit status is the authoritative timeout signal. We must
     # wait for its cleanup to finish rather than killing it early; otherwise a
