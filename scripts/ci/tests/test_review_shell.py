@@ -497,7 +497,14 @@ def test_run_with_timeout_cleans_nested_descendant_tree_after_leader_exits_zero(
     inner = tmp_path / "inner.sh"
     inner.write_text(
         '#!/bin/sh\n'
-        f"sh -c 'echo $$ > \"{pidfile}\"; exec sleep 120' &\n"
+        f'python3 - "{pidfile}" <<\'PY\' &\n'
+        'import os, sys\n'
+        'pidfile = sys.argv[1]\n'
+        'with open(pidfile, "w", encoding="utf-8") as fh:\n'
+        '    fh.write(str(os.getpid()))\n'
+        'os.setsid()\n'
+        'os.execvp("sleep", ["sleep", "120"])\n'
+        'PY\n'
         'sleep 0.05\n'
         'sleep 0.2\n'
         'exit 0\n',
@@ -531,7 +538,7 @@ def test_run_with_timeout_exits_clean_on_leader_exit_before_deadline_boundary(
     inner.write_text(
         '#!/bin/sh\n'
         f"sh -c 'echo $$ > \"{pidfile}\"; exec sleep 120' &\n"
-        'sleep 1.9\n'
+        'sleep 1.3\n'
         'exit 0\n',
         encoding="utf-8",
     )
@@ -559,7 +566,7 @@ def test_run_with_timeout_returns_124_for_late_nonzero_exit_after_deadline() -> 
     result = _run(
         f". {COMMON}\n"
         "rc=0\n"
-        "run_with_timeout 1 /bin/sh -c 'sleep 2; exit 3' || rc=$?\n"
+        "run_with_timeout 1 /bin/sh -c 'sleep 1.2; exit 3' || rc=$?\n"
         'echo "rc=$rc"\n',
         timeout=30,
     )
