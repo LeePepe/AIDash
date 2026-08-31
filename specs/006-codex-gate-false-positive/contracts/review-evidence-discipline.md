@@ -55,3 +55,14 @@ hermetic assertion.
 - Evidence generation, timeout, model, parse, and schema failures still exit
   non-zero.
 - No admin bypass path is added.
+
+## Delivery precondition and red line
+
+Before implementation, Team Lead pins the exact T001 base and verifies that the
+same commit has a successful `review-gate (pytest)` check. If the base changes,
+the evidence is refreshed.
+
+T001 does not own `run_with_timeout`, its existing process-group tests, or
+`scripts/hooks/check-tasks-fresh`. Recurrence of either named timeout test
+failure or the Homebrew-Bash task-freshness hang stops T001 and returns the
+blocker to Team Lead for a separately planned RepoInfra prerequisite.

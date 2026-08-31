@@ -36,10 +36,14 @@ review.
   the repository hook contract.
 - [x] CHK012 PR #199 refresh, same-HEAD checks/review, and MY-1496 promotion order
   are acyclic and explicit.
+- [x] CHK013 B000 requires a successful `review-gate (pytest)` check on T001's
+  exact base before dispatch and refreshes evidence if `main` advances.
+- [x] CHK014 T001 names the two observed timeout failures and the Homebrew-Bash
+  task-freshness hang as stop-and-return red lines outside its scope.
 
 ## Readiness
 
-- [x] CHK013 No unresolved clarification marker remains.
-- [x] CHK014 No product, content, or authority decision remains open.
-- [x] CHK015 Spec, plan, research, contract, quickstart, tasks, and data-model
+- [x] CHK015 No unresolved clarification marker remains.
+- [x] CHK016 No product, content, or authority decision remains open.
+- [x] CHK017 Spec, plan, research, contract, quickstart, tasks, and data-model
   statement agree on scope and terminology.
