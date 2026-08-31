@@ -256,6 +256,20 @@ def test_review_evidence_rules_requires_complete_deciding_predicate() -> None:
             f"{path.name} still duplicates the PR #199 hunk text inline instead of using the shared helper"
         )
 
+    codex_source = CODEX.read_text(encoding="utf-8")
+    assert "-s read-only" in codex_source, (
+        "codex-review.sh no longer uses the supported read-only sandbox flag"
+    )
+    assert "--dangerously-bypass-approvals-and-sandbox" in codex_source, (
+        "codex-review.sh no longer passes the supported approval bypass flag"
+    )
+    assert "-c sandbox_mode=read-only" not in codex_source, (
+        "codex-review.sh still uses the legacy config-style sandbox flag"
+    )
+    assert "-c approval_policy=never" not in codex_source, (
+        "codex-review.sh still uses the legacy config-style approval flag"
+    )
+
 
 # --------------------------------------------------------------------------
 # 2b. The shared security notice: one source, and reviewable-by-itself.
