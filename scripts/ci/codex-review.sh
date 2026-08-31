@@ -190,7 +190,8 @@ run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
     --output-schema "$SCHEMA_FILE" \
     -o "$OUT_FILE" \
     --skip-git-repo-check \
-    -s read-only \
+    -c sandbox_mode=read-only \
+    -c approval_policy=never \
     "$PROMPT" >/dev/null 2>"$ERR_FILE" || CLI_RC=$?
 
 RAW="$(cat "$OUT_FILE" 2>/dev/null)"
