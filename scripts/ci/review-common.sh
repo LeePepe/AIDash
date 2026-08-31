@@ -122,6 +122,23 @@ process_group_alive() {
     kill -0 "-$pgid" 2>/dev/null
 }
 
+process_tree_alive() {
+    local root="$1"
+    local child
+
+    if kill -0 "$root" 2>/dev/null; then
+        return 0
+    fi
+
+    for child in $(ps -o pid= --ppid "$root" 2>/dev/null | awk 'NF { print $1 }' || true); do
+        if process_tree_alive "$child"; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 child_has_exited() {
     local pid="$1"
     local status
@@ -142,9 +159,31 @@ terminate_process_group() {
     kill -TERM "-$pgid" 2>/dev/null || kill -TERM "$pgid" 2>/dev/null || true
 }
 
+terminate_process_tree() {
+    local root="$1"
+    local child
+
+    for child in $(ps -o pid= --ppid "$root" 2>/dev/null | awk 'NF { print $1 }' || true); do
+        terminate_process_tree "$child"
+    done
+
+    kill -TERM "$root" 2>/dev/null || true
+}
+
 kill_process_group() {
     local pgid="$1"
     kill -KILL "-$pgid" 2>/dev/null || kill -KILL "$pgid" 2>/dev/null || true
+}
+
+kill_process_tree() {
+    local root="$1"
+    local child
+
+    for child in $(ps -o pid= --ppid "$root" 2>/dev/null | awk 'NF { print $1 }' || true); do
+        kill_process_tree "$child"
+    done
+
+    kill -KILL "$root" 2>/dev/null || true
 }
 
 run_with_timeout() {
@@ -172,15 +211,21 @@ run_with_timeout() {
         local waited=0
         while [ "$waited" -lt "$seconds" ]; do
             if child_has_exited "$child_pid"; then
-                if process_group_alive "$child_pid"; then
+                if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
                     terminate_process_group "$child_pid"
+                    terminate_process_tree "$child_pid"
                     local grace=0
                     while [ "$grace" -lt 10 ]; do
-                        process_group_alive "$child_pid" || break
+                        if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
+                            break
+                        fi
                         sleep 1
                         grace=$((grace + 1))
                     done
-                    kill_process_group "$child_pid"
+                    if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
+                        kill_process_group "$child_pid"
+                        kill_process_tree "$child_pid"
+                    fi
                 fi
                 printf '%s\n' "clean" >"$state_file"
                 exit 0
@@ -189,22 +234,26 @@ run_with_timeout() {
             waited=$((waited + 1))
         done
 
-        if ! process_group_alive "$child_pid"; then
+        if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
             printf '%s\n' "clean" >"$state_file"
             exit 0
         fi
 
         terminate_process_group "$child_pid"
+        terminate_process_tree "$child_pid"
 
         local grace=0
         while [ "$grace" -lt 10 ]; do
-            process_group_alive "$child_pid" || break
+            if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
+                break
+            fi
             sleep 1
             grace=$((grace + 1))
         done
 
-        if process_group_alive "$child_pid"; then
+        if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
             kill_process_group "$child_pid"
+            kill_process_tree "$child_pid"
         fi
 
         printf '%s\n' "timeout" >"$state_file"
