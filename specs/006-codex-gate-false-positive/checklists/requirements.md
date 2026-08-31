@@ -28,8 +28,9 @@ review.
 
 - [x] CHK008 Every functional requirement maps to US1/T001 or an explicit
   downstream delivery dependency.
-- [x] CHK009 The PR-shaped accepted-`production` regression is deterministic and
-  tied to the real shared prompt helper.
+- [x] CHK009 The PR-shaped incomplete-hunk abstention regression is
+  deterministic and tied to the real shared prompt helper without claiming a
+  deterministic model verdict.
 - [x] CHK010 Direct blockers and fail-closed failures remain covered.
 - [x] CHK011 The exact RepoInfra local verification command is declared through
   the repository hook contract.

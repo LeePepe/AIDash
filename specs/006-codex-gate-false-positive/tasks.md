@@ -20,12 +20,13 @@ delivery dependency, not a hidden cross-layer Fullstack task.
 is invalid from a partial hunk, while direct defects and tool failures remain
 fail closed.
 
-**Independent Test**: The real shared trusted prompt helper renders a
-complete-predicate rule that correctly interprets the pinned
-`VALID_TIERS | {"production"}` shape, and the live Codex gate continues to
-consume that helper.
+**Independent Test**: The real shared trusted prompt helper renders an
+abstention rule for a hunk that shows only `VALID_TIERS = {"explore"}` without
+the complete `VALID_TIERS | {"production"}` predicate, and the live Codex gate
+continues to consume that helper. This pins deterministic prompt policy, not a
+model verdict.
 
-- [ ] T001 [US1] Extend the complete-predicate evidence contract in `scripts/ci/review-common.sh`, add the PR-shaped regression to `scripts/ci/tests/test_review_shell.py`, and document the invariant in `docs/ci-gates.md`.
+- [ ] **T001 [US1]** Extend the complete-predicate evidence contract in `scripts/ci/review-common.sh`, add the PR-shaped regression to `scripts/ci/tests/test_review_shell.py`, and document the invariant in `docs/ci-gates.md`.
 
 ### T001 Metadata
 
@@ -35,7 +36,7 @@ consume that helper.
 | Files in scope | `scripts/ci/review-common.sh`; `scripts/ci/tests/test_review_shell.py`; `docs/ci-gates.md` |
 | Files/layers out of scope | `.github/workflows/**`; `scripts/ci/codex-review.sh`; `scripts/rulesets/**`; all `aidata/**`; PR #198; PR #199; every Swift/App/CLI package |
 | Interface impact | Extends the existing internal trusted prompt interface `review_evidence_rules()`; no public product or data contract change |
-| Task-local acceptance | Invalid-value/test/CI-failure blockers require the complete deciding predicate; unions/defaults/normalization/negation are evaluated; a partial constant cannot prove rejection; the pinned `production` value is recognized as accepted by the full union; directly proven critical/high defects and all fail-closed tool paths remain intact; both live gate consumption and single-source wording are regression-pinned |
+| Task-local acceptance | A blocker claiming a value is invalid/rejected requires the complete deciding predicate; unions/defaults/normalization/negation are evaluated; a partial constant cannot prove rejection; the regression pins abstention for the incomplete PR #199 hunk and shared-helper consumption, not a model verdict; directly proven critical/high defects, direct test/CI failure output, and all fail-closed tool paths remain intact |
 | Exact verification | Normal hooks invoke `scripts/context/run RepoInfra --mode local`; implementation handoff records its exit 0. CI later invokes the RepoInfra CI gate and ruff. Do not manually add App, Swift, or Aidata suites. |
 | Blocking edges | Reviewed exact planning revision; no implementation task dependency |
 | Vertical slice | US1 |
@@ -53,17 +54,17 @@ Workflow apply automatically.
 | FR-008–FR-009 | US1 | T001 | Three-file diff allowlist plus exact-SHA review |
 | FR-010–FR-011 | Downstream delivery dependency | T001 blocks refresh | Quickstart sequence and Team Lead scheduling gate |
 | SC-001–SC-004 | US1 | T001 | RepoInfra local/CI gates and diff inspection |
-| SC-005 | Downstream MY-1495 shipping | T001 must reach main first | Refreshed PR #199 required checks and fresh same-HEAD AI Reviewer PASS |
+| SC-005 | Downstream MY-1495 shipping | T001 must reach main first | Refreshed PR #199 all checks green and fresh same-HEAD AI Reviewer PASS |
 
 ## Dependency Graph
 
 ```text
 reviewed planning revision
   -> T001 RepoInfra repair
-  -> repair PR exact-SHA PASS + required checks green
+  -> repair PR exact-SHA PASS + all checks green
   -> repair merged to main
   -> Team Lead refreshes PR #199 from repaired main
-  -> PR #199 required checks green + fresh same-HEAD AI Reviewer PASS
+  -> PR #199 all checks green + fresh same-HEAD AI Reviewer PASS
   -> PR Manager merges PR #199 / MY-1495 reaches main
   -> Team Lead may promote MY-1496
 ```
