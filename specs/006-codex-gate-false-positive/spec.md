@@ -40,10 +40,12 @@ evidence module through its public interface with:
   fallback; and
 - a mutation that removes `production` from the allowed union.
 
-The first fixture emits a complete, typed predicate record whose resolved
-allowed domain includes `production`. The mutation emits a different resolved
-domain that excludes it. The test exercises structural behavior, not keyword
-presence or a nondeterministic model verdict.
+The first fixture emits a typed predicate record with complete
+`predicate_structure` and `allowed_domain` claims (including
+`production`), while its dynamic subject/helper claim remains unresolved.
+The mutation emits a different complete allowed-domain claim that excludes
+`production`. The test exercises structural behavior, not keyword presence
+or a nondeterministic model verdict.
 
 **Acceptance Scenarios**:
 
@@ -58,10 +60,12 @@ presence or a nondeterministic model verdict.
    is serialized as evidence, **then** every PR-authored byte remains inside
    the existing untrusted-data fence and cannot alter the trusted instruction
    region.
-4. **Given** a diff changes `review_evidence_rules()`,
-   `review_security_notice()`, or the live Codex `PROMPT` assembly, **when**
-   the trusted preflight runs, **then** the gate stops before model invocation
-   with a protected-instruction-surface failure.
+4. **Given** a later diff changes reviewer instructions, the preflight
+   implementation itself, its mandatory invocation/non-zero propagation, the
+   evidence-to-prompt/fence consumption path, the trusted-base workflow
+   invocation, or the required ruleset entry, **when** the landed trusted
+   preflight runs, **then** the gate stops before model invocation with a
+   protected-enforcement-surface failure.
 5. **Given** exact-HEAD blob loading, parsing, evidence validation, or the
    analyzer itself fails, **when** the gate runs, **then** it exits non-zero
    before model invocation.
@@ -87,6 +91,13 @@ presence or a nondeterministic model verdict.
   ordering and omissions remain deterministic and explicit.
 - A candidate moves or rewrites a protected instruction-producing region;
   inability to prove it is unchanged fails closed.
+- A candidate changes, deletes, duplicates, shadows, bypasses, or moves the
+  detector, its manifest, its entrypoint, its non-zero propagation branch, or
+  the evidence/fence consumer; the already-landed base rejects it before the
+  model.
+- The bootstrap T001 PR necessarily introduces the detector before it can be
+  active from `main`; only the owner-reviewed exact T001 publication contract
+  authorizes that one initial landing.
 - Existing Swift receiver evidence remains behavior-compatible.
 
 ## Requirements
@@ -109,33 +120,43 @@ presence or a nondeterministic model verdict.
 - **FR-005**: Python analysis MUST seed from bindings visible anywhere in the
   changed hunk, including context lines, then find relevant exact-HEAD uses
   outside the hunk.
-- **FR-006**: For the supported static subset, a Python predicate record MUST
-  include the complete decision expression, set unions, membership or
-  non-membership, negation, literal defaults/fallbacks, and referenced
-  same-file constants/helpers that materially affect the result.
+- **FR-006**: A Python predicate record MUST separate independently provable
+  claims. The complete decision-expression structure and a safely evaluated
+  RHS allowed domain MAY be `complete` even when LHS subject/helper semantics
+  are `unresolved`; syntactic literal fallbacks are observations only unless
+  their runtime selection is also proven.
 - **FR-007**: Static evaluation MUST be restricted to safe syntax such as
   literal collections, local names bound to those literals, union, boolean
   operators, negation, and comparisons. It MUST NOT execute PR code.
-- **FR-008**: A fact MUST be marked `complete` only when its material
-  same-file dependency closure is available within the supported bounded
-  analysis. Unsupported semantics MUST be explicit `unresolved` evidence, not
-  a guessed conclusion.
+- **FR-008**: Completion MUST be recorded per claim, never once for the entire
+  fact. A claim is `complete` only when its own material same-file dependency
+  closure is available within the supported bounded analysis. Unsupported
+  semantics MUST make only the affected claim `unresolved`, with no guessed
+  conclusion and no contamination of independent complete claims.
 - **FR-009**: Evidence MUST use a versioned, deterministic typed record with
-  stable ordering, exact path/span, derivation, resolution, and content-trust
-  fields. Byte caps MUST omit whole facts and append explicit omissions; they
-  MUST NOT silently slice a record.
+  stable ordering, exact path/span, derivation, content-trust, and a
+  canonically ordered set of claim-completion records. Byte caps MUST omit
+  whole facts and append explicit omissions; they MUST NOT silently slice a
+  record.
 - **FR-010**: Trusted headings, schema labels, and omission notices MUST come
   only from the base-owned implementation. Exact-HEAD source remains
   `untrusted_pr` data and MUST be rendered only below the existing fence.
-- **FR-011**: Before model invocation, the evidence module MUST detect changes
-  intersecting the trusted instruction-producing regions:
-  `review_evidence_rules()`, `review_security_notice()`, and the live Codex
-  `PROMPT` assembly. Such a change MUST fail closed as
-  `protected_instruction_change`.
-- **FR-012**: Legitimate future reviewer-policy changes MUST use a separately
-  reviewed owner contract and trusted-base publication/loading path. T001 MUST
-  NOT create a bypass, exemption token, PR-controlled allowlist, or
-  self-attestation.
+- **FR-011**: Before model invocation, the landed evidence module MUST protect
+  the complete enforcement chain as whole-file base/head identities:
+  `review_context.py`, `review-common.sh`, `codex-review.sh`,
+  `codex-review-target.yml`, and `main-protection.json`. This includes the
+  detector/manifest/entrypoint, shell invocation/non-zero propagation,
+  reviewer instructions, evidence/fence consumer, trusted workflow/job, and
+  required ruleset. Any changed, missing, replaced, duplicated, shadowed,
+  bypassed, moved, or ambiguous protected file/link MUST fail closed as
+  `protected_enforcement_change`.
+- **FR-012**: T001 is the one owner-reviewed bootstrap publication that adds
+  this self-protecting chain from a base that does not yet enforce it. Its
+  exact implementation SHA MUST match the reviewed bootstrap allowlist, pass
+  all gates, and receive exact-SHA Multica AI Reviewer PASS before merge.
+  Every later protected-chain or reviewer-policy change MUST use a new
+  separately reviewed owner publication contract. T001 MUST NOT create a
+  bypass, exemption token, PR-controlled allowlist, or self-attestation.
 - **FR-013**: `review_evidence_rules()`, `review_security_notice()`, the Codex
   prompt skeleton, model invocation, verdict schema/parser, severity
   threshold, timeout/process-group behavior, required status, workflow, and
@@ -146,10 +167,12 @@ presence or a nondeterministic model verdict.
   Legitimate deletions, unsupported semantic forms, and bounded omissions MAY
   return a valid bundle only when explicitly represented without a fabricated
   result.
-- **FR-015**: Hermetic RepoInfra tests MUST prove the PR #199 behavior,
-  mutation behavior, helper/default closure, protected-instruction preflight,
-  untrusted-data placement, stable output/caps, existing Swift evidence, and
-  live shell consumption/fail-closed behavior.
+- **FR-015**: Hermetic RepoInfra tests MUST prove the PR #199 claim-scoped
+  behavior, mutation behavior, unresolved dynamic helper semantics,
+  protected-enforcement preflight (including self-modification, invocation,
+  propagation, workflow, ruleset, and fence-consumer mutations), untrusted-data
+  placement, stable output/caps, existing Swift evidence, and live shell
+  consumption/fail-closed behavior.
 - **FR-016**: The implementation MUST stay in the `RepoInfra` layer and MUST
   NOT modify Aidata product/data files, Swift/App/CLI packages, PR #199, or the
   PR #205 branch/candidate.
@@ -173,12 +196,17 @@ presence or a nondeterministic model verdict.
   byte caps supplied to the base-owned module.
 - **Evidence fact**: A typed, source-addressed structural claim derived by a
   trusted adapter from untrusted exact-HEAD source.
-- **Predicate closure**: The complete supported decision expression plus
-  material same-file bindings/helpers needed to interpret it.
+- **Claim completion**: The independent `complete` or `unresolved` status
+  and proof/diagnostic for one fact assertion, such as predicate structure,
+  allowed domain, receiver attachment, or subject/helper semantics.
+- **Predicate claim closure**: The supported AST and same-file bindings needed
+  for one specific claim, without certifying separate dynamic subject/helper
+  semantics.
 - **Evidence bundle**: Canonically ordered facts and explicit omissions for one
   exact HEAD and diff digest.
-- **Protected instruction surface**: Base-owned source regions that produce
-  reviewer instructions rather than review data.
+- **Protected enforcement surface**: The self-protecting, base-owned chain
+  from trusted workflow/ruleset through detector/entrypoint/propagation to
+  reviewer instructions and fenced evidence consumption.
 - **Required review result**: The fail-closed `codex-review-target` status for
   one exact PR HEAD.
 
@@ -186,18 +214,23 @@ presence or a nondeterministic model verdict.
 
 ### Measurable Outcomes
 
-- **SC-001**: The PR #199 fixture produces a complete predicate record whose
-  allowed domain includes `production` even though the deciding use is outside
-  the diff hunk.
+- **SC-001**: The PR #199 fixture produces a predicate record with complete
+  `predicate_structure` and `allowed_domain` claims, including
+  `production`, even though the deciding use is outside the diff hunk.
 - **SC-002**: Removing `| {"production"}` from the exact-HEAD fixture changes
   the structural result so `production` is excluded; a keyword-only test
   cannot satisfy this criterion.
-- **SC-003**: The exact PR #205 protected-instruction change is rejected before
-  a stub model can run, while PR #205 remains unchanged and unmerged.
+- **SC-003**: After bootstrap, fixtures that independently mutate each of
+  `review_context.py`, `review-common.sh`, `codex-review.sh`,
+  `codex-review-target.yml`, and `main-protection.json` all fail before a
+  stub model can run. PR #205 is the `review-common.sh` fixture and remains
+  unchanged/unmerged.
 - **SC-004**: Existing PR #171 Swift receiver regressions and direct
   fail-closed fetch/evidence/model/timeout/parse/schema paths remain green.
 - **SC-005**: Repeated runs for the same request and fixture produce
-  byte-identical fact ordering and explicit whole-record cap behavior.
+  byte-identical fact/claim ordering and explicit whole-record cap behavior;
+  the PR #199 fixture reports complete predicate structure and allowed domain
+  while its regex/group-based subject/helper semantics remain unresolved.
 - **SC-006**: The exact T001 implementation base has a successful
   `review-gate (pytest)` check before dispatch.
 - **SC-007**: Normal hooks complete the `RepoInfra` local gate for the repair
@@ -216,7 +249,9 @@ presence or a nondeterministic model verdict.
 - It does not change reviewer wording, the prompt skeleton, workflows,
   rulesets, severity, verdict schema, or product/data behavior.
 - It does not define the future trusted-base publication mechanism for
-  legitimate policy edits; that requires a separate reviewed contract.
+  legitimate later policy/enforcement edits; it defines only the exact
+  owner-reviewed T001 bootstrap and requires a separate reviewed contract for
+  every later protected change.
 - It does not refresh or mutate PR #199 during planning or implementation.
 - It does not repair timeout/process-group behavior or task-freshness
   transport.

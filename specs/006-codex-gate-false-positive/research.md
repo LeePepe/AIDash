@@ -81,8 +81,8 @@ trusted policy. This is a seam failure, not a fourth wording problem.
 Keep the existing shell/CLI seam and add Python decision facts behind
 `review_context.py`.
 
-- **Depth**: high; one call yields existing Swift facts plus complete Python
-  predicate context.
+- **Depth**: high; one call yields existing Swift facts plus claim-scoped
+  Python predicate context.
 - **Locality**: evidence discovery, blob reads, caps, and rendering remain in
   one module.
 - **Weakness**: without an added preflight, a future PR can still propose
@@ -117,31 +117,52 @@ instruction discovery and transports all PR data separately through stdin.
 
 ## Decision
 
-Select a hybrid of A and B, plus a fail-closed protected-instruction preflight:
+Select a hybrid of A and B, plus a fail-closed self-protecting enforcement
+preflight:
 
 1. Preserve the existing external shell/CLI evidence seam.
 2. Move all language selection behind `review_context.py`.
 3. Keep Swift and Python analyzers as private adapters.
-4. Emit versioned typed Python predicate facts with bounded dependency closure.
-5. Detect edits to `review_evidence_rules()`,
-   `review_security_notice()`, and the live Codex `PROMPT` assignment before
-   model invocation.
+4. Emit versioned typed Python predicate facts with completion scoped to each
+   claim rather than the whole fact.
+5. Protect the entire `review_context.py`, `review-common.sh`,
+   `codex-review.sh`, `codex-review-target.yml`, and
+   `main-protection.json` blobs before model invocation.
 6. Leave all reviewer instructions and model invocation byte-unchanged.
 
 This gives the current repair structural evidence and prevents another
-self-authorizing wording candidate. Design C remains a separately planned
-option if the owner later authorizes a general trusted-policy publication
-mechanism.
+self-authorizing wording candidate or a later unprotected edit to the guard
+itself. T001 is the one owner-reviewed bootstrap that publishes the protected
+chain; its authority is consumed on merge. Design C remains a separately
+planned option if the owner later authorizes a general trusted-policy
+publication mechanism.
+
+## Exact-revision review findings and resolution
+
+The first structural planning review at
+`9b81224c8fd2464d0b435faf60fbe446ea1c2fe2` found two P1 gaps:
+
+1. protecting only prompt-rule functions and the `PROMPT` assignment left
+   the detector and its enforcement path model-dependent; and
+2. one fact-wide `complete` flag overclaimed the dynamic
+   `TIER_DIRECTIVE.search` / `match.group` helper semantics.
+
+The repaired design protects the entire enforcement chain after a one-time
+owner-reviewed T001 bootstrap. It also replaces fact-wide resolution with
+independent claim completion: the predicate AST and safe RHS allowed domain
+can complete, while subject/helper semantics remain unresolved and the
+literal fallback is only a syntactic observation.
 
 ## Error and completeness decision
 
 - Operational failures—invalid request/ref, required blob read failure,
   selected Python syntax error, adapter exception, invalid typed output, or
   serialization failure—return non-zero before the model.
-- Protected instruction changes, missing/ambiguous protected regions, or
-  competing definitions return `protected_instruction_change` non-zero.
-- Unsupported dynamic/cross-file/cyclic semantics return explicit
-  `unresolved` facts. They do not become guessed `complete` conclusions.
+- Any changed, missing, replaced, or ambiguous protected enforcement blob
+  returns `protected_enforcement_change` non-zero.
+- Unsupported dynamic/cross-file/cyclic semantics make only the affected
+  claim `unresolved`. They do not contaminate an independent safe claim or
+  become guessed `complete` conclusions.
 - Legitimate deletions and cap omissions are explicit.
 - Caps omit whole facts and append deterministic notices; no JSON record is
   silently byte-sliced.
@@ -150,16 +171,17 @@ mechanism.
 
 The public module interface is the test surface:
 
-- PR #199 fixture: partial hunk seed resolves the full out-of-hunk predicate,
-  allowed literals, and helper fallback.
+- PR #199 fixture: partial hunk seed yields complete predicate-structure and
+  RHS allowed-domain claims, unresolved regex/group helper semantics, and an
+  observation-only literal fallback.
 - Rejecting mutation: removal of `| {"production"}` changes the structural
   result.
-- Safe-subset coverage: union, default/fallback, normalization, negation,
-  helper closure, unresolved/cycle behavior.
+- Safe-subset coverage: union, normalization, negation, per-claim closure,
+  observation-only fallback, and unresolved/cycle behavior.
 - Trust coverage: PR-authored imperative text remains serialized data below
   the fence.
-- PR #205 fixture: a protected instruction change returns non-zero before a
-  model stub can run.
+- Enforcement fixtures: PR #205 plus one independent blob mutation for every
+  other protected file each return non-zero before a model stub can run.
 - Stability: exact refs/input/caps produce canonical ordering and explicit
   whole-record omissions.
 - Compatibility: PR #171 Swift receiver behavior remains covered.

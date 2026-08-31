@@ -20,8 +20,10 @@
 - [x] CHK004 Trusted-base execution and exact-HEAD blob-only reads are
   explicit.
 - [x] CHK005 PR-authored bytes stay below the existing untrusted-data fence.
-- [x] CHK006 Protected instruction-producing regions fail before model
-  invocation; no PR-controlled exception exists.
+- [x] CHK006 The entire landed enforcement chain—including detector module,
+  entrypoint, invocation/propagation, Codex fence consumer, trusted-base
+  workflow invocation, ruleset entry, and instruction regions—fails before
+  model invocation when changed; no PR-controlled exception exists.
 - [x] CHK007 The external evidence seam remains one call; Swift/Python adapters
   and git fixture/production adapters remain internal.
 - [x] CHK008 Prompt helpers, Codex prompt/caller, workflow, ruleset, severity,
@@ -31,14 +33,18 @@
 
 - [x] CHK009 Hunk context is a seed and exact-HEAD AST use discovery supplies
   the complete out-of-hunk predicate.
-- [x] CHK010 The supported static subset, material local dependency closure,
-  completion rule, and unresolved rule are deterministic.
+- [x] CHK010 Completion is per claim: predicate structure and safe RHS domain
+  can complete while dynamic subject/helper semantics remain unresolved and a
+  literal fallback remains observation-only.
 - [x] CHK011 The typed bundle defines schema/provenance/trust, stable ordering,
   evidence ids, diff digest, and whole-record caps.
 - [x] CHK012 The PR #199 accepting fixture and genuinely rejecting mutation
   test behavior rather than vocabulary.
 - [x] CHK013 PR #171 Swift behavior and existing fail-closed paths remain
   required coverage.
+- [x] CHK028 The one-time T001 bootstrap evidence and the consumed-on-merge
+  authority rule are explicit; every later protected change needs a new
+  owner-reviewed publication contract.
 
 ## Scope and tasks
 
@@ -63,7 +69,8 @@
 - [x] CHK021 Named timeout/process-group and task-freshness failures are
   stop-and-return red lines, not scope expansion.
 - [x] CHK022 Exact local/remote/PR HEAD equality, all required checks, and
-  fresh same-SHA AI Reviewer PASS remain implementation delivery gates.
+  fresh same-SHA AI Reviewer PASS authorize only the exact T001 bootstrap
+  implementation revision.
 - [x] CHK023 PR #199 refresh is ordered after the structural repair reaches
   `main`.
 

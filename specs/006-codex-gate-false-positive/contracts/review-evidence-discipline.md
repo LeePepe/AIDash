@@ -16,8 +16,8 @@ This contract supersedes the wording-only prompt contract reviewed at
 2. PR-head source is read only as git blobs through
    `git show <HEAD_SHA>:<path>`.
 3. PR code is never checked out, imported, evaluated, or executed.
-4. Base-owned code supplies schema labels, headings, provenance, resolution
-   state, ordering, hashes, and omission notices.
+4. Base-owned code supplies schema labels, headings, provenance, per-claim
+   completion state, ordering, hashes, and omission notices.
 5. PR-authored source/excerpts remain tagged `untrusted_pr` and are rendered
    only below the existing untrusted-data fence.
 6. No PR-controlled allowlist, exemption token, expected hash, plugin path, or
@@ -45,25 +45,53 @@ The shell forwards every changed path. Adapter selection is private to
 `review_context.py`. The interface returns canonical evidence on stdout and
 zero, or a diagnostic on stderr and non-zero.
 
-## Protected instruction contract
+## Self-protecting enforcement contract
 
-Before model invocation, the base-owned implementation identifies:
+After T001 lands, before model invocation, the base-owned implementation
+protects every link that makes the check unavoidable as a whole tracked file:
 
-- `review_evidence_rules()` in `scripts/ci/review-common.sh`;
-- `review_security_notice()` in `scripts/ci/review-common.sh`; and
-- the live Codex `PROMPT` assignment in `scripts/ci/codex-review.sh`.
+1. `scripts/ci/review_context.py`;
+2. `scripts/ci/review-common.sh`;
+3. `scripts/ci/codex-review.sh`;
+4. `.github/workflows/codex-review-target.yml`; and
+5. `scripts/rulesets/main-protection.json`.
 
-A changed line intersecting one of these regions, a missing/duplicated region,
-or an ambiguous region boundary returns
-`protected_instruction_change` non-zero. The model is not invoked.
+This set contains the detector/manifest/entrypoint, evidence invocation and
+non-zero propagation, reviewer instructions, prompt/fence/model/verdict
+control flow, workflow event/job/checkout/invocation, and required merge
+policy. The trusted base compares base/head blob identity and requires each
+path to remain one regular tracked blob. Any changed, missing, replaced, or
+ambiguous protected file returns `protected_enforcement_change` non-zero.
+The model is not invoked.
 
-PR #205 at `f16e5d503304b7951f995286cdbb0727b6d2472e` is the mandatory
+Whole-file protection prevents escape through an unlisted helper, alternate
+definition/source, early return, workflow condition, or ruleset field. The
+preflight reads no allowlist, exemption, attestation, expected hash, or plugin
+path from PR data.
+
+PR #205 at `f16e5d503304b7951f995286cdbb0727b6d2472e` is a mandatory
 regression fixture: its `review_evidence_rules()` change must be rejected by
-the preflight without amending or executing the candidate.
+the landed preflight without amending or executing the candidate. Independent
+fixtures must also mutate each of the other four protected files; each must
+fail before a model stub runs.
 
-A legitimate future policy change requires a separately reviewed owner
-contract and trusted-base publication/loading mechanism. This contract defines
-no bypass.
+### One-time T001 bootstrap
+
+T001 is the only bootstrap publication authorized by this contract. Its base
+does not yet contain the detector, so bootstrap acceptance comes from all of:
+
+- this exact planning revision and owner option B;
+- B000 on the exact implementation base;
+- a new branch/worktree distinct from PR #205;
+- an implementation diff confined to the reviewed T001 file/region allowlist;
+- local HEAD = remote branch OID = PR `headRefOid`;
+- all required checks green; and
+- fresh exact-SHA Multica AI Reviewer PASS before PR Manager merge.
+
+Once that exact T001 revision reaches `main`, this bootstrap authority is
+consumed. A legitimate later policy or enforcement change requires a new
+owner decision and separately reviewed trusted-base publication/loading
+contract. This contract defines no persistent bypass.
 
 ## Python decision-evidence contract
 
@@ -76,12 +104,14 @@ The private Python adapter:
 4. Finds uses of seeded bindings in membership/non-membership and supported
    decision expressions anywhere in the same file.
 5. Captures the full enclosing decision expression plus material same-file
-   bindings/helpers.
+   bindings/helpers as separately scoped claims and observations.
 6. Evaluates only literal collections, local names bound to them, set union,
    boolean operators, negation, supported comparisons, and literal
    defaults/fallbacks.
-7. Emits `complete` only when the bounded supported dependency closure is
-   present. Otherwise it emits `unresolved` without a guessed result.
+7. Records completion per claim. Predicate structure and safely evaluated RHS
+   allowed domain may be complete independently; dynamic subject/helper
+   semantics are unresolved. A literal fallback is a syntactic observation,
+   not proof of runtime selection.
 8. Never imports, evaluates, compiles for execution, or runs PR code.
 
 ## Required PR #199 interpretation
@@ -102,14 +132,18 @@ bad = [
 ]
 ```
 
-Required structural output:
+Required claim-scoped output:
 
 - `VALID_TIERS` is the hunk-visible anchor.
 - The complete predicate is the out-of-hunk
   `_tier_of(name) not in VALID_TIERS | {"production"}` expression.
-- The resolved allowed literals include `explore` and `production`.
-- The local helper and its `production` fallback are attached as material
-  dependencies.
+- The `predicate_structure` claim is complete.
+- The independently evaluated RHS `allowed_domain` claim is complete and
+  includes `explore` and `production`.
+- The `subject_helper_semantics` claim is unresolved because
+  `TIER_DIRECTIVE.search` and `match.group` are outside the safe subset.
+- The helper's literal `production` fallback is recorded as a syntactic
+  observation with unresolved runtime selection, not complete helper meaning.
 - Removing `| {"production"}` changes the resolved allowed domain and proves
   that the test checks behavior rather than prompt vocabulary.
 
@@ -122,11 +156,14 @@ The bundle contains:
 - canonically ordered/deduplicated facts;
 - stable path/spans and evidence ids;
 - derivation and `content_trust`;
-- `complete` or `unresolved` resolution; and
+- an ordered set of independently `complete` or `unresolved` claim records
+  plus non-semantic observations; and
 - explicit omissions.
 
-Same request bytes and caps produce byte-identical ordering. Caps omit whole
-facts and add an explicit omission; typed records are never silently sliced.
+There is no fact-wide completion flag. One unresolved claim neither downgrades
+nor certifies an independent claim. Same request bytes and caps produce
+byte-identical fact/claim ordering. Caps omit whole facts and add an explicit
+omission; typed records are never silently sliced.
 
 ## Adapter and module contract
 
@@ -143,7 +180,8 @@ facts and add an explicit omission; typed records are never silently sliced.
 The gate stops before the model and returns non-zero for:
 
 - invalid request/ref/path/cap or unreadable diff;
-- protected instruction change/missing/duplicate/ambiguity;
+- protected enforcement link change/missing/duplicate/shadow/move/bypass/
+  ambiguity;
 - unreadable required non-deleted exact-HEAD blob;
 - syntax error in a selected changed Python file;
 - adapter exception;
@@ -161,7 +199,7 @@ consistency, severity, and required-status failure paths remain fail closed.
 
 T001 may change:
 
-- `scripts/ci/review_context.py`;
+- `scripts/ci/review_context.py` for the one-time bootstrap implementation;
 - `scripts/ci/review-common.sh` only inside `build_scope_evidence()` and its
   adjacent evidence-caller explanation;
 - `scripts/ci/tests/test_review_context.py`;
@@ -179,6 +217,9 @@ T001 must not change:
 - `scripts/ci/swift_scope.py`;
 - any `aidata/**`, Swift/App/CLI path, PR #199, or PR #205 branch/candidate.
 
+The workflow, Codex consumer, and ruleset paths are protected verification
+targets but remain byte-unchanged and out of T001 implementation scope.
+
 ## Delivery precondition
 
 Before implementation, Team Lead pins the exact T001 base and verifies a
@@ -186,4 +227,6 @@ successful same-SHA `review-gate (pytest)` result. A changed base requires new
 evidence.
 
 PR #205 remains Draft with auto-merge disabled. T001 starts from a new clean
-current-main branch and produces a separate repair PR.
+current-main branch and produces a separate one-time bootstrap PR. After that
+exact reviewed revision lands, later protected-chain changes require a new
+owner-reviewed publication contract.

@@ -39,9 +39,14 @@ Required behavior:
 
 - forward every changed path to the deep evidence module;
 - keep Swift receiver behavior;
-- generate typed Python predicate closure from exact-HEAD blobs;
+- generate claim-scoped Python evidence from exact-HEAD blobs: complete
+  predicate structure and safe RHS domain, unresolved dynamic subject/helper
+  semantics, and observation-only literal fallback;
 - keep all PR-authored bytes below the untrusted-data fence;
-- reject protected instruction changes before the model; and
+- after bootstrap, reject any blob change to `review_context.py`,
+  `review-common.sh`, `codex-review.sh`,
+  `codex-review-target.yml`, or `main-protection.json` before the model;
+  and
 - preserve all existing fail-closed paths.
 
 ## 5. Respect the red lines
@@ -55,6 +60,9 @@ Do not edit:
 - hooks or `scripts/hooks/check-tasks-fresh`;
 - any Aidata, Swift/App/CLI, PR #199, or PR #205 path/branch.
 
+The unchanged Codex consumer, workflow, and ruleset are protected verification
+targets even though they are not implementation files.
+
 If either named `test_run_with_timeout_*` failure or the Homebrew-Bash
 `check-tasks-fresh` hang recurs, stop and return the evidence to Team Lead.
 Do not retry around or repair it inside T001.
@@ -63,10 +71,13 @@ Do not retry around or repair it inside T001.
 
 Interface regressions must cover:
 
-- PR #199 accepted-domain evidence and the genuinely rejecting mutation;
-- local helpers/defaults, normalization, negation, unresolved/cycle behavior;
-- PR #205 `protected_instruction_change` before a model stub runs;
-- canonical ordering, whole-fact caps, and explicit omissions;
+- PR #199 complete predicate/RHS-domain claims and the genuinely rejecting
+  mutation;
+- dynamic regex/group helper semantics remaining unresolved while the literal
+  fallback remains observation-only;
+- an independent mutation fixture for each of the five protected files
+  returning `protected_enforcement_change` before a model stub runs;
+- canonical fact/claim ordering, whole-fact caps, and explicit omissions;
 - untrusted evidence placement;
 - unchanged PR #171 Swift behavior; and
 - live shell forwarding plus fail-closed analyzer status.
@@ -77,12 +88,16 @@ Let normal pre-commit/pre-push hooks invoke:
 
 Do not add App, Swift-package, or Aidata suites manually.
 
-## 7. Review and land the new repair
+## 7. Review and land the one-time bootstrap
 
 - Prove clean local HEAD = pushed branch OID = new PR `headRefOid`.
 - Obtain all required checks green.
 - Obtain a fresh exact-SHA Multica AI Reviewer PASS.
-- PR Manager merges the new structural repair to `main` without bypass.
+- PR Manager merges only that exact reviewed structural bootstrap to `main`
+  without bypass.
+- Once merged, T001's bootstrap authority is consumed. Any later change to a
+  protected enforcement link requires a new owner decision and separately
+  reviewed trusted-base publication contract.
 
 ## 8. Refresh PR #199 only after repaired main
 

@@ -13,13 +13,16 @@ reviewer instructions.
 Deepen the existing `scripts/ci/review_context.py` module behind its current
 base-owned evidence-building seam. The shell helper will forward every changed
 path; the module will keep the existing Swift receiver adapter and add a
-private Python AST adapter that finds complete same-file decision context from
-exact-HEAD blobs without checking out or executing PR code.
+  private Python AST adapter that emits claim-scoped same-file decision context
+  from exact-HEAD blobs without checking out or executing PR code.
 
-The same trusted preflight will detect changes to instruction-producing
-regions and fail before model invocation. The live prompt text, Codex caller,
-workflow, ruleset, severity, schema, and timeout behavior remain unchanged.
-PR #205 stays Draft with auto-merge disabled as incident evidence.
+The same trusted preflight will protect its own complete enforcement chain as
+well as instruction-producing regions and fail before model invocation. T001
+is the one owner-reviewed bootstrap that publishes this chain; after it lands,
+any later protected change requires a new reviewed publication contract. The
+live prompt text, Codex caller, workflow, ruleset, severity, schema, and timeout
+behavior remain unchanged. PR #205 stays Draft with auto-merge disabled as
+incident evidence.
 
 ## Technical Context
 
@@ -75,8 +78,8 @@ implementation task
   local-substitutable internal seam.
 - **Security / fail-closed posture**: PASS. Trusted-base execution, the
   untrusted-data fence, required status, severity, and all current tool-error
-  paths are preserved. Protected instruction edits add an earlier non-zero
-  preflight.
+  paths are preserved. Protected enforcement-chain edits add an earlier
+  non-zero preflight after bootstrap.
 
 ### After Phase 1 design
 
@@ -88,9 +91,11 @@ implementation task
   Python predicate analyzer are private in-process adapters. Git blob access
   has production `git show` and fixture-map test adapters; no new external
   port is exposed.
-- **Regression coverage**: PASS. Tests compare structural results for the
-  accepting and rejecting predicate variants, prove the PR #205 preflight,
-  preserve PR #171 Swift behavior, and exercise live shell forwarding/failure.
+- **Regression coverage**: PASS. Tests compare claim-scoped structural results
+  for the accepting and rejecting predicate variants, prove that dynamic
+  helper semantics remain unresolved, exercise every protected enforcement
+  link, preserve PR #171 Swift behavior, and exercise live shell
+  forwarding/failure.
 - **Cross-layer behavior**: PASS. The downstream AidataL4 PR is a delivery
   dependency only. No cross-layer implementation task is created.
 - **Durable context**: PASS without `CONTEXT.md` or ADR changes. Layer
@@ -160,7 +165,7 @@ The module order is:
 1. Validate request, exact SHA, diff file, changed paths, and caps.
 2. Parse the unified diff once into base/head hunk coordinates, including
    context lines.
-3. Run the protected-instruction preflight before any model call.
+3. Run the protected-enforcement preflight before any model call.
 4. Read eligible exact-HEAD blobs through `git show HEAD:path` without
    checkout or execution.
 5. Dispatch internally to the existing Swift receiver adapter or the new
@@ -180,13 +185,14 @@ The adapter is intentionally conservative:
 3. Find membership/non-membership or related comparison uses of those bindings
    anywhere in the same file.
 4. Capture the complete enclosing decision expression and material same-file
-   constant/helper definitions.
+   constant/helper definitions as independently scoped claims/observations.
 5. Evaluate only a safe static subset: literal collections, names bound to
    them, set union, boolean operators, negation, comparisons, and literal
    defaults/fallbacks.
-6. Mark a fact `complete` only when the supported dependency closure is
-   available. Dynamic imports, reflection, cross-file state, cycles, or other
-   unsupported semantics produce explicit `unresolved` facts.
+6. Record completion per claim. The predicate AST structure and safely
+   evaluated RHS domain may be `complete`; dynamic imports, calls,
+   reflection, cross-file state, cycles, or other unsupported semantics make
+   only the affected subject/helper claim `unresolved`.
 
 The PR #199 target record is structurally equivalent to:
 
@@ -201,47 +207,92 @@ The PR #199 target record is structurally equivalent to:
     "operator": "not_in",
     "source": "_tier_of(name) not in VALID_TIERS | {\"production\"}"
   },
-  "allowed_literals": ["explore", "production"],
-  "dependencies": [
-    {"kind": "binding", "symbol": "VALID_TIERS"},
-    {"kind": "helper", "symbol": "_tier_of", "literal_fallback": "production"}
+  "claims": [
+    {
+      "claim": "predicate_structure",
+      "status": "complete",
+      "operator": "not_in"
+    },
+    {
+      "claim": "allowed_domain",
+      "status": "complete",
+      "values": ["explore", "production"]
+    },
+    {
+      "claim": "subject_helper_semantics",
+      "status": "unresolved",
+      "reason": "dynamic_calls:TIER_DIRECTIVE.search,match.group"
+    }
   ],
-  "resolution": "complete",
+  "observations": [
+    {
+      "kind": "literal_fallback",
+      "symbol": "_tier_of",
+      "value": "production",
+      "runtime_selection": "unresolved"
+    }
+  ],
   "derivation": "trusted_base_python_ast",
   "content_trust": "untrusted_pr"
 }
 ```
 
-The trusted facts are the path/span relationships, AST structure, closure
-status, and canonical ordering. Quoted source strings remain untrusted PR
-content and never move above the fence.
+The trusted facts are the path/span relationships, AST structure, per-claim
+completion, observations, and canonical ordering. The safe RHS proof admits
+`production` without claiming that the dynamic regex/group helper is fully
+understood. Quoted source strings remain untrusted PR content and never move
+above the fence.
 
-### Protected instruction preflight
+### Self-protecting enforcement preflight
 
-The base-owned analyzer locates the instruction-producing regions in both the
-trusted base source and exact-HEAD source:
+After T001 lands, the base-owned analyzer protects the complete path that makes
+the preflight unavoidable:
 
-- `review_evidence_rules()` in `scripts/ci/review-common.sh`;
-- `review_security_notice()` in `scripts/ci/review-common.sh`; and
-- the live `PROMPT` assignment in `scripts/ci/codex-review.sh`.
+| Protected surface | Protection scope |
+|---|---|
+| `scripts/ci/review_context.py` | Entire file: protected-surface manifest, detector, diff/blob dependencies, CLI entrypoint, validation, and exit behavior |
+| `scripts/ci/review-common.sh` | Entire file: evidence invocation/propagation, reviewer instructions, and shared failure utilities |
+| `scripts/ci/codex-review.sh` | Entire file: helper source, evidence/failure path, prompt/fences, model invocation, verdict enforcement, and all control flow |
+| `.github/workflows/codex-review-target.yml` | Entire file: event/job conditions, trusted-base checkout, permissions, and gate invocation |
+| `scripts/rulesets/main-protection.json` | Entire file: required-status identity and merge policy |
 
-If changed lines intersect one of these regions, a required region is missing
-or ambiguous, or a second competing definition appears, the analyzer returns
-`protected_instruction_change` non-zero before the model runs. The preflight
-does not read an allowlist, exemption, attestation, or expected hash from the
-PR head.
+The trusted implementation compares each protected base/head blob identity,
+rejects any protected path change before the model, and validates that all
+five protected files exist as regular tracked blobs. Whole-file protection
+also closes early-exit, alternate-source, trigger/condition, and ruleset
+bypasses outside a narrower region map. A changed, missing, replaced, or
+ambiguous protected file returns `protected_enforcement_change` non-zero.
+The preflight reads no allowlist, exemption, attestation, or expected hash from
+the PR head.
 
-This is intentionally a fail-closed publication barrier. A legitimate future
-policy change requires a separately reviewed owner contract and trusted-base
-loading/publication mechanism; it cannot self-authorize through the PR being
-reviewed. T001 does not design that mechanism.
+Protecting the five entire enforcement files avoids a shallow region manifest
+that could be bypassed through an unlisted helper, early return, workflow
+condition, or ruleset change. It intentionally freezes their later maintenance
+behind a separate reviewed publication contract.
+
+#### One-time bootstrap publication
+
+T001 is the single owner-reviewed bootstrap from a base that lacks this
+preflight. Its implementation PR may add the detector and change only the
+reviewed evidence-call region because:
+
+1. this exact planning revision authorizes the bootstrap surface;
+2. B000 pins a green exact base and a new branch distinct from PR #205;
+3. local/remote/PR OIDs must match the exact implementation SHA;
+4. all required CI checks and a fresh exact-SHA Multica AI Reviewer PASS are
+   mandatory; and
+5. PR Manager may merge only that exact reviewed bootstrap revision.
+
+Once T001 is on `main`, no later protected change is authorized by T001.
+Every such change requires a new owner decision and separately reviewed
+trusted-base publication/loading contract; no PR-controlled bypass exists.
 
 ### Error contract
 
 | Condition | Result |
 |---|---|
 | Usage, invalid SHA/path/cap, or unreadable diff request | non-zero; no model |
-| Protected instruction region changed, missing, duplicated, or ambiguous | `protected_instruction_change`; non-zero; no model |
+| Protected enforcement file blob changed, missing, replaced, or ambiguous | `protected_enforcement_change`; non-zero; no model |
 | Required non-deleted exact-HEAD blob unreadable | non-zero; no model |
 | Selected changed Python source has a syntax error | non-zero; no model |
 | Adapter exception, invalid fact schema, serialization failure | non-zero; no model |
@@ -280,11 +331,12 @@ supply the missing PR #199 predicate.
 
 ### Recommendation
 
-Use a hybrid of A and B plus the protected-surface preflight:
+Use a hybrid of A and B plus the self-protecting enforcement preflight:
 
 - one unchanged caller seam;
 - typed evidence behind private adapters;
-- deterministic rejection of policy-surface edits before the model; and
+- deterministic rejection of every enforcement-chain edit after the
+  owner-reviewed bootstrap, before the model; and
 - no prompt, workflow, ruleset, or model-invocation change.
 
 This has the best depth and locality for the proven incident while keeping the
@@ -327,7 +379,7 @@ is colocated and private.
 
 | Slice | Outcome | Layer task | Upstream dependency |
 |---|---|---|---|
-| US1 | Required reviewer receives complete exact-HEAD predicate evidence, while policy edits stop before model invocation | T001 · RepoInfra | Exact planning PASS + B000 exact-base green baseline |
+| US1 | Required reviewer receives claim-scoped exact-HEAD predicate evidence, while any protected enforcement-file edit stops before model invocation | T001 · RepoInfra | Exact planning PASS + B000 exact-base green baseline |
 
 T001 is one atomic RepoInfra implementation task because the module behavior,
 shared-call forwarding, interface regression, shell integration, and operator
@@ -355,8 +407,9 @@ is the implementation base.
 1. AI Reviewer passes this exact structural planning revision.
 2. Team Lead establishes B000 on the actual current-main base and prepares a
    new delivery branch. PR #205 stays Draft/no-auto-merge and unchanged.
-3. Fullstack implements only T001's reviewed RepoInfra allowlist and
-   region-level contract.
+3. Fullstack implements only T001's one-time bootstrap allowlist and
+   reviewed file/region contract; this planning authority expires for protected
+   changes after the bootstrap reaches `main`.
 4. Normal hooks run the RepoInfra local gate. Any named timeout/process-group
    failure or task-freshness hang stops the task without expanding scope.
 5. The new repair PR proves local HEAD = remote branch OID = PR `headRefOid`,
@@ -373,13 +426,14 @@ is the implementation base.
 
 | Risk | Control |
 |---|---|
-| Candidate prompt wording self-authorizes | Protected instruction edits fail before model; T001 does not edit prompt text |
-| AST output overclaims arbitrary Python semantics | Restricted evaluator; bounded same-file closure; unsupported forms are explicit `unresolved` |
+| Candidate prompt wording self-authorizes | The landed base protects instructions plus the full enforcement chain; T001 does not edit prompt text |
+| Guard later edits its own blind spot | All five enforcement files are protected by base/head blob identity; later change needs a new publication contract |
+| AST output overclaims arbitrary Python semantics | Completion is per claim; the safe RHS domain may complete while dynamic subject/helper semantics remain `unresolved` |
 | PR source escapes the trust fence | Trusted renderer owns labels; source is tagged `untrusted_pr` and shell placement is regression-tested |
 | Analyzer silently loses context | Exact-head reads, typed facts, stable spans/digest, whole-record caps, explicit omissions |
 | New language evidence spreads through callers | Shell forwards all paths; adapter selection stays private inside the deep module |
 | Existing Swift repair regresses | PR #171 interface fixture remains in the required regression set |
-| Gate fails open on tool error | Pre-model non-zero on operational/schema/protected-surface failure; existing downstream failures unchanged |
+| Gate fails open on tool error | Pre-model non-zero on operational/schema/protected-file failure; existing downstream failures unchanged |
 | PR #205 is accidentally shipped or reused | Explicit hold/non-reuse contract and separate delivery branch requirement |
 | Known baseline flake is absorbed into T001 | B000 and stop-and-return red lines preserve separate planning ownership |
 

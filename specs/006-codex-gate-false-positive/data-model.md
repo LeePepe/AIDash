@@ -25,7 +25,7 @@ out, imported, evaluated, or executed.
 | `schema_version` | integer | Starts at `1`; rejects unknown internal output shapes |
 | `head_sha` | commit id | Matches the request exactly |
 | `diff_sha256` | digest | Matches the full diff used for coordinate parsing |
-| `facts` | ordered `EvidenceFact[]` | Canonically sorted and deduplicated |
+| `facts` | ordered `EvidenceFact[]` | Canonically sorted and deduplicated; each fact owns ordered claim records |
 | `omissions` | ordered `EvidenceOmission[]` | Every deletion, cap, or unsupported coverage gap that must be visible |
 
 For identical request bytes and caps, serialization is byte-identical.
@@ -39,15 +39,29 @@ For identical request bytes and caps, serialization is byte-identical.
 | `span` | start/end lines | Complete source span used for the structural fact |
 | `anchor` | symbol + line | Hunk-visible seed that led to the fact |
 | `structure` | typed object | Receiver relationship or predicate AST relationship |
-| `dependencies` | ordered dependency list | Material same-file bindings/helpers and literal fallbacks |
-| `resolution` | `complete` or `unresolved` | `complete` only after supported bounded closure |
+| `claims` | ordered `ClaimCompletion[]` | Independent provable assertions; no fact-wide completion flag |
+| `observations` | ordered observation list | Syntactic facts such as a literal fallback, without claiming runtime selection |
+| `dependencies` | ordered dependency list | Material same-file bindings/helpers referenced by one or more claims |
 | `derivation` | closed enum | Base-owned adapter that derived the structure |
 | `content_trust` | constant | Always `untrusted_pr` for exact-HEAD source |
 | `evidence_id` | stable digest | Derived from kind/path/span/head/blob digest |
 
 Source excerpts may be quoted as JSON strings, but their trust remains
 `untrusted_pr`. Only the base-owned labels, spans, AST relationships,
-resolution state, ordering, and hashes are trusted derivation.
+claim status, ordering, and hashes are trusted derivation.
+
+## ClaimCompletion
+
+| Field | Type | Contract |
+|---|---|---|
+| `claim` | closed enum | For example `predicate_structure`, `allowed_domain`, `subject_helper_semantics`, or `receiver_attachment` |
+| `status` | `complete` or `unresolved` | Applies only to this claim |
+| `value` | optional typed value | Present only when the supported proof closes |
+| `proof_spans` | ordered source spans | Exact AST/source inputs used by the claim |
+| `reason` | optional closed diagnostic | Required when `status=unresolved` |
+
+One unresolved claim does not downgrade or certify another. There is no
+fact-level `resolution` or `closure_complete` shortcut.
 
 ## Python predicate structure
 
@@ -59,12 +73,20 @@ For the supported subset:
 | `expression_source` | Exact complete expression, quoted as untrusted data |
 | `allowed_literals` | Canonically sorted literals resolved from safe local collection expressions |
 | `negated` | Whether supported negation changes interpretation |
-| `literal_fallbacks` | Literal defaults/fallbacks found in material local helpers |
-| `closure_complete` | True only if every material supported same-file name/helper closes |
+| `literal_fallbacks` | Syntactic observations of literal branches; runtime selection remains separately scoped |
+| `claims` | Independent completion for predicate structure, allowed domain, and subject/helper semantics |
+
+For PR #199, `predicate_structure` and `allowed_domain` are complete
+because the comparison and RHS union are inside the safe subset.
+`subject_helper_semantics` is unresolved because
+`TIER_DIRECTIVE.search(name)` and `match.group(1)` are dynamic calls. The
+literal `production` fallback is recorded only as an observation with
+unresolved runtime selection.
 
 Dynamic imports, reflection, cross-file dependencies, recursion/cycles, or
-unsupported nodes never produce a fabricated allowed domain. They produce an
-`unresolved` fact or explicit omission according to the error contract.
+unsupported nodes never produce a fabricated claim value. They make the
+affected claim unresolved or create an explicit omission according to the
+error contract.
 
 ## EvidenceOmission
 
@@ -77,19 +99,25 @@ unsupported nodes never produce a fabricated allowed domain. They produce an
 
 Caps omit whole facts and add an omission. They never byte-slice a typed record.
 
-## ProtectedInstructionChange
+## ProtectedEnforcementChange
 
 This is a pre-model failure record, not review evidence:
 
 | Field | Contract |
 |---|---|
-| `path` | `scripts/ci/review-common.sh` or `scripts/ci/codex-review.sh` |
-| `region` | `review_evidence_rules`, `review_security_notice`, or `codex_prompt` |
-| `reason` | changed, missing, duplicated, or ambiguous |
-| `result` | `protected_instruction_change` with non-zero exit |
+| `path` | One of the five protected enforcement files |
+| `base_blob_oid` | Trusted-base blob identity |
+| `head_blob_oid` | Exact-head blob identity or missing marker |
+| `reason` | changed, missing, replaced, or ambiguous |
+| `result` | `protected_enforcement_change` with non-zero exit |
 
-No exception/allowlist field exists in PR-controlled input. Legitimate policy
-publication requires a separate owner-reviewed contract.
+The protected set is the complete `review_context.py`,
+`review-common.sh`, `codex-review.sh`, `codex-review-target.yml`, and
+`main-protection.json` files.
+
+No exception/allowlist field exists in PR-controlled input. T001 is the one
+owner-reviewed bootstrap publication; legitimate later enforcement/policy
+publication requires a new separately reviewed contract.
 
 ## Lifetime and compatibility
 
