@@ -11,6 +11,11 @@ Slots are hard length-capped (ADR-14). `apply_slots` never touches a
 number-bearing line other than swapping a TODO's prose (whose numbers the
 downstream guard re-verifies). `polish_digest` is the only function that calls
 the injected client; everything else is pure.
+
+Efficiency-evidence gating (MY-1437/MY-1449): the TL;DR must not claim
+efficiency improved unless auditable evidence supports it. When cost or waste
+rose, positive efficiency language is rejected and replaced with a deterministic
+neutral fallback that retains the most material counter-signal.
 """
 
 from __future__ import annotations
@@ -34,6 +39,674 @@ class PolishSlots:
     todos: tuple[str, ...]
 
 
+# ---------------------------------------------------------------------------
+# Efficiency-evidence extraction and gating (MY-1437/MY-1449)
+# ---------------------------------------------------------------------------
+
+# Matches trend lines like "- 成本: 2699$ ↑(+24%) vs 昨 2180$"
+# Captures the label and the signed percentage inside parentheses.
+_TREND_PCT_RE = re.compile(
+    r"^- (成本|Token|请求数|请求量|浪费额|完成任务|已完成 issue|issues|tasks|会话数|会话|开PR|完成 issue|完成 issue\(近似\))"
+    r".*?\(([+-]\d+)%\)"
+)
+
+# Labels whose percentage changes are relevant to efficiency claims.
+_COST_LABELS = frozenset({"成本"})
+_WASTE_LABELS = frozenset({"浪费额"})
+_OUTPUT_LABELS = frozenset({"Token", "请求数", "请求量", "完成任务", "tasks", "issues", "已完成 issue", "完成 issue", "完成 issue(近似)", "会话数", "会话"})
+
+
+@dataclass(frozen=True)
+class EfficiencyEvidence:
+    """Auditable evidence extracted from the template's trend percentages.
+
+    `cost_pct` / `waste_pct`: the day-over-day % change from the template,
+    or None when the trend line is missing or has insufficient data.
+    """
+    cost_pct: int | None
+    waste_pct: int | None
+    token_pct: int | None = None
+    requests_pct: int | None = None
+    sessions_pct: int | None = None
+    tasks_pct: int | None = None
+    issues_pct: int | None = None
+
+    def has_negative_signal(self) -> bool:
+        """True when the template is evidencing a materially worse operating state."""
+        if self.cost_pct is not None and self.cost_pct > 0:
+            return True
+        if self.waste_pct is not None and self.waste_pct > 0:
+            return True
+        if self.tasks_pct is not None and self.tasks_pct < 0:
+            return True
+        if self.issues_pct is not None and self.issues_pct < 0:
+            return True
+        return False
+
+    def has_strict_outcome_improvement(self) -> bool:
+        """True only when actual output/outcome evidence is strictly positive."""
+        outcome_values = [self.tasks_pct, self.issues_pct]
+        if not any(v is not None for v in outcome_values):
+            return False
+        if any(v is not None and v < 0 for v in outcome_values):
+            return False
+        return any(v is not None and v > 0 for v in outcome_values)
+
+    def allows_positive_claim(self) -> bool:
+        """Return True only when positive efficiency is auditable.
+
+        Token/request growth alone never authorizes efficiency language. The
+        evidence must show cost and waste did not rise, and at least one
+        task/issue outcome metric improved strictly.
+        """
+        if self.cost_pct is None or self.cost_pct > 0:
+            return False
+        if self.waste_pct is not None and self.waste_pct > 0:
+            return False
+        if not self.has_strict_outcome_improvement():
+            return False
+        return True
+
+    def allows_negative_claim(self) -> bool:
+        """Negative efficiency claims require input evidence and a real outcome decline.
+
+        A task/issue drop alone is insufficient; the model must have a cost or
+        waste trend to anchor the efficiency definition before accepting a negative
+        efficiency claim.
+        """
+        input_evidence = self.cost_pct is not None or self.waste_pct is not None
+        if not input_evidence:
+            return False
+
+        output_declines = [v for v in (self.tasks_pct, self.issues_pct) if v is not None and v < 0]
+        if not output_declines:
+            return False
+
+        worst_decline = max(abs(v) for v in output_declines)
+        strong_input_improvement = (
+            (self.cost_pct is not None and self.cost_pct <= -20)
+            or (self.waste_pct is not None and self.waste_pct <= -20)
+        )
+        if strong_input_improvement and worst_decline <= 5:
+            return False
+        if worst_decline >= 10 and not strong_input_improvement:
+            return True
+        return False
+
+    def top_counter_signal(self) -> str:
+        """Return the most material counter-signal for neutral fallback text."""
+        signals: list[tuple[int, str]] = []
+        if self.waste_pct is not None and self.waste_pct > 0:
+            signals.append((self.waste_pct, "浪费上升"))
+        if self.cost_pct is not None and self.cost_pct > 0:
+            signals.append((self.cost_pct, "成本上升"))
+        if self.tasks_pct is not None and self.tasks_pct < 0:
+            signals.append((abs(self.tasks_pct), "任务下降"))
+        if self.issues_pct is not None and self.issues_pct < 0:
+            signals.append((abs(self.issues_pct), "已完成 issue 下降"))
+        if signals:
+            signals.sort(reverse=True)
+            return signals[0][1]
+        return "数据不足以判断"
+
+
+def extract_efficiency_evidence(template_md: str) -> EfficiencyEvidence:
+    """Parse trend percentages from the template to build auditable evidence."""
+    cost_pct: int | None = None
+    waste_pct: int | None = None
+    token_pct: int | None = None
+    requests_pct: int | None = None
+    sessions_pct: int | None = None
+    tasks_pct: int | None = None
+    issues_pct: int | None = None
+    for line in template_md.splitlines():
+        m = _TREND_PCT_RE.match(line)
+        if m:
+            label, pct_str = m.group(1), m.group(2)
+            pct = int(pct_str)
+            if label in _COST_LABELS:
+                cost_pct = pct
+            elif label in _WASTE_LABELS:
+                waste_pct = pct
+            elif label == "Token":
+                token_pct = pct
+            elif label in {"请求数", "请求量"}:
+                requests_pct = pct
+            elif label in {"会话数", "会话"}:
+                sessions_pct = pct
+            elif label in {"完成任务", "tasks"}:
+                tasks_pct = pct
+            elif label in {"issues", "已完成 issue", "完成 issue", "完成 issue(近似)"}:
+                issues_pct = pct
+    return EfficiencyEvidence(
+        cost_pct=cost_pct,
+        waste_pct=waste_pct,
+        token_pct=token_pct,
+        requests_pct=requests_pct,
+        sessions_pct=sessions_pct,
+        tasks_pct=tasks_pct,
+        issues_pct=issues_pct,
+    )
+
+
+# Closed policy: reject explicit efficiency-positive wording under mixed/insufficient
+# evidence and keep neutral/uncertain wording only when the counter-signal is still
+# present.
+_NEGATION_RE = r"(?:不|未|没|没有|并未|并没有|非|并非)"
+_CONTRADICTORY_METRIC_ASSERTION = ("__contradictory__", "__contradictory__")
+
+_POSITIVE_EFFICIENCY_RE = re.compile(
+    r"(?:"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
+    r".{0,12}"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|增加|增大)"
+    r"|(?:efficiency|productivity|throughput).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
+    r"|(?:效率上升|效率增长|效率回升|效率变好|效率增加|效能提升|投入产出更好|整体向好|整体改善|整体优化|生产力提升|更高效了|用得更省|节省成本|省成本|更划算|降本|工作提效|提效)"
+    r")",
+    re.IGNORECASE,
+)
+
+_NEGATED_POSITIVE_EFFICIENCY_RE = re.compile(
+    r"(?:"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)"
+    r".{0,24}"
+    r"(?:不|未|没|没有|并未|并没有|非|并非)"
+    r".{0,18}"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)"
+    r"|(?:不|未|没|没有|并未|并没有|非|并非)"
+    r".{0,20}"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)"
+    r".{0,18}"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)"
+    r"|(?:不|未|没|没有|并未|并没有|非|并非)"
+    r".{0,12}"
+    r"(?:提效|工作提效)"
+    r"|(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效)"
+    r".{0,12}"
+    r"(?:不|未|没|没有|并未|并没有|非|并非)"
+    r".{0,12}"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率)"
+    r"|(?:efficiency|productivity|throughput).{0,10}(?:not|no|without).{0,10}(?:improv|increas|better|optim|gain|rise|grow|boost)"
+    r"|(?:效率未提升|效率没有提升|效率没提升|效率不提升|效率未增长|效率没有增长|效率不增长|没有提效|没提效|并未提效|并非提效|没有提升|效率未提高|没提高|没有效率提升|没有效率增长|效率没有明显提升|效率未明显提升|效率不增长|没有效率增长)"
+    r")",
+    re.IGNORECASE,
+)
+
+_NEGATIVE_EFFICIENCY_RE = re.compile(
+    r"(?:"
+    r"(?:效率|效能|投入产出|产出|生产力|工作效率|提效|工作提效)"
+    r".{0,12}"
+    r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)"
+    r"|(?:效率|效能|投入产出|产出|生产力|工作效率|提效|工作提效)"
+    r"(?:.{0,12})(?:不|未|没|没有|并未|并没有|非|并非)"
+    r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效)"
+    r"|(?:efficiency|productivity|throughput).{0,10}(?:drop|declin|worsen|decreas|fall|slip)"
+    r"|(?:效率明显下降|效率下降|效率变差|生产力下降|效率趋弱|工作效率变差|效率不如昨天|效率下滑|效率走弱|工作提效但效率下滑|工作提效但效率走弱|效率未提升|效率没提升|效率没有提升|效率不提升|效率未增长|效率不增长|没有效率提升|没有效率增长)"
+    r")",
+    re.IGNORECASE,
+)
+
+_MATERIAL_COUNTER_SIGNAL_RE = re.compile(
+    r"(?:成本上升|成本增加|浪费上升|浪费增加|任务下降|问题积压|问题增加|开销上升|花费上升)",
+    re.IGNORECASE,
+)
+
+_COUNTER_SIGNAL_RE = re.compile(
+    r"(?:浪费|成本|任务|问题|需关注|谨慎|仍需|波动|不确定|风险|待观察|反向|上升|下降|压缩)",
+    re.IGNORECASE,
+)
+
+_UNCERTAINTY_RE = re.compile(
+    r"(?:需关注|谨慎|仍需|待观察|不确定|可能|待确认|有待|需留意|整体平稳|整体保持活跃|活动明显增加)",
+    re.IGNORECASE,
+)
+
+_QUALITATIVE_PROSE_VALUES = frozenset({
+    "会话活跃",
+    "需关注波动",
+    "会话活跃，需关注波动",
+    "会话活跃,需关注波动",
+    "整体趋势需关注",
+    "整体趋势需观察",
+    "数据不足以判断",
+    "整体保持活跃",
+    "活动明显增加",
+    "趋势需观察",
+    "需关注",
+    "谨慎",
+    "待观察",
+})
+
+_NON_CLAIM_QUALITATIVE_RE = re.compile(
+    r"(?:会话活跃|整体趋势需关注|整体趋势需观察|需关注波动|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察|需关注|谨慎|待观察)",
+    re.IGNORECASE,
+)
+
+_CLAUSE_SPLIT_RE = r"[，,;；。!?！？]|(?:但|然而|不过|尽管|虽然|并且|且|却|同时|仍|反而)"
+
+
+def _canonicalize_clause_text(text: str) -> str:
+    return re.sub(r"[\s\u3000]+", "", (text or "")).replace("，", ",").replace("；", ";").replace("。", "").replace("、", "")
+
+
+def _clause_has_exact_directional_match(clause: str) -> bool:
+    """True only when the whole clause is an approved canonical direction phrase."""
+    canonical = _canonicalize_clause_text(clause)
+    if not canonical:
+        return False
+    if _is_recognized_non_claim_qualitative(clause):
+        return True
+
+    modifier = r"(?:明显|显著|持续|稳步|大幅|进一步|整体|总体|迅速|同步|更)?"
+    negator = r"(?:没有|没|未|并没有|并未|非|并非)"
+    metrics = (
+        r"(?:成本|开销|花费)",
+        r"(?:浪费)",
+        r"(?:请求量|请求数|requests?)",
+        r"(?:Token|token)",
+        r"(?:会话数|会话|session)",
+        r"(?:完成任务|任务|产出)",
+        r"(?:已完成issue|完成issue|已完成issue\(近似\)|完成issue\(近似\))",
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)",
+        r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)",
+    )
+    directions = (
+        r"(?:上升|增加|上调|上涨|下降|降低|减少|回落)",
+        r"(?:上升|增加|上涨|增多|下降|降低|减少|回落)",
+        r"(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:上升|增加|增长|提升|下降|减少|回落|减弱)",
+        r"(?:上升|增加|增长|提升|下降|减少|降低|回落)",
+        r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率|增加|增大|下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)",
+        r"(?:)",
+    )
+
+    exact_patterns = []
+    for idx, metric in enumerate(metrics[:-1]):
+        pattern = rf"(?:{metric})(?:{modifier})?(?:{negator})?(?:{directions[idx]})"
+        exact_patterns.append(pattern)
+    exact_patterns.append(r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)")
+    return any(re.fullmatch(pattern, canonical, re.IGNORECASE) for pattern in exact_patterns)
+
+
+_NEUTRAL_FOLLOWUP_RE = re.compile(
+    r"(?:需关注|谨慎|待观察|需留意|波动|风险|不确定)",
+    re.IGNORECASE,
+)
+
+
+def _split_tldr_clauses(text: str) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    clauses = re.split(_CLAUSE_SPLIT_RE, cleaned)
+    return [clause.strip() for clause in clauses if clause and clause.strip()]
+
+
+def _clauses_are_fully_consumed(text: str, evidence: EfficiencyEvidence) -> bool:
+    clauses = _split_tldr_clauses(text)
+    if not clauses:
+        return False
+
+    prior_metric_ok = False
+    for clause in clauses:
+        if _is_recognized_non_claim_qualitative(clause):
+            continue
+        if _NEUTRAL_FOLLOWUP_RE.fullmatch(clause):
+            if prior_metric_ok:
+                continue
+            return False
+
+        if re.search(
+            r"(?:成本|开销|花费|浪费|效率|效能|投入产出|产出|生产力|工作效率|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput|请求量|请求数|Token|token|会话数|会话|session|任务|issue)",
+            clause,
+            re.IGNORECASE,
+        ):
+            if not _clause_has_exact_directional_match(clause):
+                return False
+
+        if _metric_direction_matches(clause, evidence):
+            prior_metric_ok = True
+            continue
+        if _named_adverse_signal_matches(clause, evidence):
+            prior_metric_ok = True
+            continue
+        if re.search(
+            r"(?:效率|效能|投入产出|产出|生产力|工作效率|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)",
+            clause,
+            re.IGNORECASE,
+        ):
+            kind = _efficiency_assertion_kind(clause)
+            if kind == "mixed":
+                return False
+            if kind == "positive":
+                if evidence.allows_positive_claim():
+                    continue
+                return False
+            if kind == "negative":
+                if evidence.allows_negative_claim():
+                    continue
+                return False
+            return False
+        if _ECONOMIC_COMPARATIVE_RE.search(clause):
+            return False
+        return False
+    return True
+
+_ECONOMIC_COMPARATIVE_RE = re.compile(
+    r"(?:"
+    r"更少(?:.*(?:钱|成本|费用|开销|支出))"
+    r"|更便宜|更划算|更省|花更少|省钱|省下(?:.*(?:钱|成本|费用|开销|支出))"
+    r"|(?:每次|单次).{0,12}(?:更便宜|更省|更划算)"
+    r"|(?:完成|产出).{0,12}(?:更多|更高).{0,12}(?:任务|issue|请求|结果)"
+    r"|(?:任务|issue|请求).{0,8}(?:更便宜|更省|更划算)"
+    r"|(?:花更少.*完成更多|更少.*钱.*完成更多|每次请求更便宜|每次请求更省)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _metric_direction_assertions(tldr: str) -> list[tuple[str, str]]:
+    """Return every metric-direction assertion in the TL;DR, if any."""
+    negator = r"(?:没有|没|未|并没有|并未|非|并非|(?:(?<!不)不))(?!但)"
+    patterns = [
+        (
+            "cost",
+            re.compile(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", re.IGNORECASE),
+            re.compile(r"(?:成本|开销|花费).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
+            re.compile(rf"(?:成本|开销|花费).{{0,8}}{negator}.{{0,8}}(?:上升|增加|上调|上涨)", re.IGNORECASE),
+            re.compile(rf"(?:成本|开销|花费).{{0,8}}{negator}.{{0,8}}(?:下降|降低|减少|回落)", re.IGNORECASE),
+        ),
+        (
+            "waste",
+            re.compile(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", re.IGNORECASE),
+            re.compile(r"(?:浪费).{0,8}(?:下降|降低|减少|回落)", re.IGNORECASE),
+            re.compile(rf"(?:浪费).{{0,8}}{negator}.{{0,8}}(?:上升|增加|上涨|增多)", re.IGNORECASE),
+            re.compile(rf"(?:浪费).{{0,8}}{negator}.{{0,8}}(?:下降|降低|减少|回落)", re.IGNORECASE),
+        ),
+        (
+            "requests",
+            re.compile(r"(?:请求量|请求数|requests?).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:请求量|请求数|requests?).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+            re.compile(rf"(?:请求量|请求数|requests?).{{0,8}}{negator}.{{0,8}}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(rf"(?:请求量|请求数|requests?).{{0,8}}{negator}.{{0,8}}(?:下降|减少|降低|回落)", re.IGNORECASE),
+        ),
+        (
+            "token",
+            re.compile(r"(?:Token|token).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:Token|token).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+            re.compile(rf"(?:Token|token).{{0,8}}{negator}.{{0,8}}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(rf"(?:Token|token).{{0,8}}{negator}.{{0,8}}(?:下降|减少|降低|回落)", re.IGNORECASE),
+        ),
+        (
+            "sessions",
+            re.compile(r"(?:会话数|会话|session).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:会话数|会话|session).{0,8}(?:下降|减少|降低|回落)", re.IGNORECASE),
+            re.compile(rf"(?:会话数|会话|session).{{0,8}}{negator}.{{0,8}}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(rf"(?:会话数|会话|session).{{0,8}}{negator}.{{0,8}}(?:下降|减少|降低|回落)", re.IGNORECASE),
+        ),
+        (
+            "tasks",
+            re.compile(r"(?:完成任务|任务|产出).{0,8}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|回落|减弱)", re.IGNORECASE),
+            re.compile(rf"(?:完成任务|任务|产出).{{0,8}}{negator}.{{0,8}}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(rf"(?:完成任务|任务|产出).{{0,8}}{negator}.{{0,8}}(?:下降|减少|回落|减弱)", re.IGNORECASE),
+        ),
+        (
+            "issues",
+            re.compile(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(r"(?:已完成 issue|完成 issue(?:\(近似\))?).{0,10}(?:下降|减少|降低|回落)", re.IGNORECASE),
+            re.compile(rf"(?:已完成 issue|完成 issue(?:\(近似\))?).{{0,10}}{negator}.{{0,8}}(?:上升|增加|增长|提升)", re.IGNORECASE),
+            re.compile(rf"(?:已完成 issue|完成 issue(?:\(近似\))?).{{0,10}}{negator}.{{0,8}}(?:下降|减少|降低|回落)", re.IGNORECASE),
+        ),
+    ]
+
+    assertions: list[tuple[str, str]] = []
+    for metric, up_pat, down_pat, neg_up_pat, neg_down_pat in patterns:
+        hits = []
+        if up_pat.search(tldr):
+            hits.append("up")
+        if neg_up_pat.search(tldr):
+            hits.append("not_up")
+        if down_pat.search(tldr):
+            hits.append("down")
+        if neg_down_pat.search(tldr):
+            hits.append("not_down")
+        if {"up", "not_up"} & set(hits) and len(set(hits) & {"up", "not_up"}) > 1:
+            return [_CONTRADICTORY_METRIC_ASSERTION]
+        if {"down", "not_down"} & set(hits) and len(set(hits) & {"down", "not_down"}) > 1:
+            return [_CONTRADICTORY_METRIC_ASSERTION]
+        for direction in hits:
+            assertions.append((metric, direction))
+    return assertions
+
+
+def _metric_direction_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
+    """Require every asserted metric-direction clause to match the extracted evidence."""
+
+    def _value_for(metric: str) -> int | None:
+        return {
+            "cost": evidence.cost_pct,
+            "waste": evidence.waste_pct,
+            "requests": evidence.requests_pct,
+            "token": evidence.token_pct,
+            "sessions": evidence.sessions_pct,
+            "tasks": evidence.tasks_pct,
+            "issues": evidence.issues_pct,
+        }[metric]
+
+    def _matches(metric: str, direction: str) -> bool:
+        value = _value_for(metric)
+        if value is None:
+            return False
+        if direction == "up":
+            return value > 0
+        if direction == "down":
+            return value < 0
+        if direction == "not_up":
+            return value <= 0
+        if direction == "not_down":
+            return value >= 0
+        return False
+
+    assertions = _metric_direction_assertions(tldr)
+    if not assertions:
+        return False
+    if assertions == [_CONTRADICTORY_METRIC_ASSERTION]:
+        return False
+    return all(_matches(metric, direction) for metric, direction in assertions)
+
+
+def _named_adverse_signal_matches(tldr: str, evidence: EfficiencyEvidence) -> bool:
+    """Require a named adverse metric and an adverse direction to justify a neutral claim."""
+    if evidence.cost_pct is not None and evidence.cost_pct > 0:
+        if re.search(r"(?:成本|开销|花费).{0,8}(?:没有|没|未|并没有|并未|非|并非).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
+            return False
+        if re.search(r"(?:成本|开销|花费).{0,8}(?:上升|增加|上调|上涨)", tldr, re.IGNORECASE):
+            return True
+    if evidence.waste_pct is not None and evidence.waste_pct > 0:
+        if re.search(r"(?:浪费).{0,8}(?:没有|没|未|并没有|并未|非|并非).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
+            return False
+        if re.search(r"(?:浪费).{0,8}(?:上升|增加|上涨|增多)", tldr, re.IGNORECASE):
+            return True
+    if evidence.tasks_pct is not None and evidence.tasks_pct < 0:
+        if re.search(r"(?:完成任务|任务|产出).{0,8}(?:没有|没|未|并没有|并未|非|并非).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
+            return False
+        if re.search(r"(?:完成任务|任务|产出).{0,8}(?:下降|减少|减|回落)", tldr, re.IGNORECASE):
+            return True
+    return False
+
+
+def _efficiency_clause_status(clause: str) -> str | None:
+    """Classify a single efficiency clause, rejecting negated positives before evidence."""
+    cleaned = clause.strip()
+    if not cleaned:
+        return None
+
+    modifier = r"(?:明显|显著|持续|稳步|大幅|进一步|整体|总体|迅速|同步|更)?"
+    positive_growth = (
+        r"(?:提升|提高|改善|优化|好转|增强|更好|更高|增效|进步|上升|增长|增幅|升高|回升|变好|更省|更划算|节省|降本|省下|提效|提高效率|增加|增大)"
+    )
+    negative_growth = (
+        r"(?:下降|降低|恶化|变差|回落|减弱|走低|明显下降|明显降低|趋弱|不如昨天|不如|下滑|走弱|不提升|不增长|不提高|不改善|不优化)"
+    )
+    negator = r"(?:不|未|没|没有|并未|并没有|并不|非|并非|从未|根本不)"
+    topic = (
+        r"(?:效率|效能|投入产出|产出|生产力|工作效率|效益|更高效|高效|用得更省|更省|更划算|节省成本|省成本|降本|省下成本|节省|提效|工作提效|efficiency|productivity|throughput)"
+    )
+
+    positive_match = re.search(rf"(?:{topic})(?:{modifier})?(?:{negator})?{positive_growth}", cleaned, re.IGNORECASE)
+    negative_match = re.search(rf"(?:{topic})(?:{modifier})?(?:{negator})?{negative_growth}", cleaned, re.IGNORECASE)
+    bare_negative_match = re.search(rf"(?:{negator})?(?:{modifier})?{negative_growth}", cleaned, re.IGNORECASE)
+    negated_positive_match = re.search(rf"(?:{negator})(?:{modifier})?(?:{topic})?(?:{modifier})?{positive_growth}", cleaned, re.IGNORECASE)
+    negated_negative_match = re.search(rf"(?:{negator})(?:{modifier})?(?:{topic})?(?:{modifier})?{negative_growth}", cleaned, re.IGNORECASE)
+
+    if negated_positive_match:
+        stripped = re.sub(rf"(?:{negator})(?:{modifier})?(?:{topic})?(?:{modifier})?{positive_growth}", " ", cleaned, flags=re.IGNORECASE)
+        if re.search(rf"(?:{topic})(?:{modifier})?(?:{negator})?{positive_growth}", stripped, re.IGNORECASE):
+            return "mixed"
+        return "negative"
+
+    if positive_match and (negative_match or bare_negative_match):
+        return "mixed"
+    if negative_match or bare_negative_match:
+        if negated_negative_match:
+            return None
+        return "negative"
+    if positive_match:
+        return "positive"
+
+    if re.search(r"(?:节省成本|省成本|降本|省下成本|更划算|更省|用得更省|提效|工作提效|efficiency improved|productivity improved|throughput improved)", cleaned, re.IGNORECASE):
+        return "positive"
+    return None
+
+
+def _efficiency_assertion_kind(tldr: str) -> str | None:
+    """Return 'positive', 'negative', 'mixed', or None for the claim direction."""
+    clauses = _split_tldr_clauses(tldr)
+    positive = 0
+    negative = 0
+    for clause in clauses:
+        status = _efficiency_clause_status(clause)
+        if status == "positive":
+            positive += 1
+        elif status == "negative":
+            negative += 1
+    if positive and negative:
+        return "mixed"
+    if negative:
+        return "negative"
+    if positive:
+        return "positive"
+    return None
+
+
+def _is_recognized_non_claim_qualitative(tldr: str) -> bool:
+    """True only for explicitly approved non-claim qualitative prose."""
+    text = (tldr or "").strip()
+    if not text:
+        return False
+    canonical = _canonicalize_clause_text(text)
+    if canonical in frozenset(_canonicalize_clause_text(v) for v in _QUALITATIVE_PROSE_VALUES):
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:会话活跃|需关注波动|整体趋势需关注|整体趋势需观察|数据不足以判断|整体保持活跃|活动明显增加|趋势需观察|需关注|谨慎|待观察|会话活跃,需关注波动)",
+            canonical,
+        )
+    )
+
+
+def _needs_efficiency_validation(tldr: str) -> bool:
+    """Whether the TL;DR is an efficiency claim or a tracked metric-direction statement."""
+    if not tldr or not tldr.strip():
+        return False
+    if _is_recognized_non_claim_qualitative(tldr):
+        return False
+    if re.search(
+        r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|提效|工作提效|efficiency|productivity|throughput)",
+        tldr,
+        re.IGNORECASE,
+    ):
+        return True
+    if _metric_direction_assertions(tldr):
+        return True
+    if _ECONOMIC_COMPARATIVE_RE.search(tldr):
+        return True
+    if re.search(r"(?:上升|增长|提升|提高|改善|优化|好转|更好|增强|回升|变好|下降|降低|减少|恶化|变差|回落|趋弱|下滑|走弱)", tldr, re.IGNORECASE):
+        if re.search(r"(?:整体|趋势|成本|浪费|任务|issue|产出|效率|效能|生产力|请求|Token|会话|throughput|productivity|efficiency)", tldr, re.IGNORECASE):
+            return True
+    return False
+
+
+def validate_efficiency_claim(tldr: str, evidence: EfficiencyEvidence) -> bool:
+    """Return True if the TL;DR is consistent with the evidence.
+
+    Publication is only allowed for one of two closed classes: (1) a canonical
+    directional/metric assertion that matches the extracted evidence, or (2) an
+    explicitly recognized qualitative prose form with no efficiency/economic
+    comparison. Unknown or unproven economic phrasing deterministically falls back.
+    """
+    if not tldr or not tldr.strip():
+        return False
+    if re.search(r"\d|[$%]", tldr):
+        return False
+    if _is_recognized_non_claim_qualitative(tldr):
+        return True
+
+    if not _clauses_are_fully_consumed(tldr, evidence):
+        return False
+
+    metric_assertions = _metric_direction_assertions(tldr)
+    if metric_assertions:
+        if metric_assertions == [_CONTRADICTORY_METRIC_ASSERTION]:
+            return False
+        fact_match = _metric_direction_matches(tldr, evidence)
+        if not fact_match:
+            return False
+        if evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
+            return False
+        if not evidence.has_negative_signal() and not _named_adverse_signal_matches(tldr, evidence):
+            if evidence.cost_pct is None and evidence.waste_pct is None:
+                return False
+
+    if re.search(
+        r"(?:效率|效能|投入产出|生产力|工作效率|更高效|高效|产出|更省|用得更省|节省成本|省成本|降本|更划算|成本节省|降低成本|节省|提效|工作提效|efficiency|productivity|throughput)",
+        tldr,
+        re.IGNORECASE,
+    ):
+        assertion_kind = _efficiency_assertion_kind(tldr)
+        if assertion_kind == "mixed":
+            return False
+        if assertion_kind == "positive":
+            return evidence.allows_positive_claim()
+        if assertion_kind == "negative":
+            return evidence.allows_negative_claim()
+        return False
+
+    if _ECONOMIC_COMPARATIVE_RE.search(tldr):
+        return False
+
+    if metric_assertions:
+        return True
+    if _named_adverse_signal_matches(tldr, evidence):
+        return True
+    return False
+
+
+def neutral_fallback_tldr(evidence: EfficiencyEvidence) -> str:
+    """Deterministic neutral TL;DR when the LLM's claim is rejected."""
+    counter = evidence.top_counter_signal()
+    if counter == "数据不足以判断":
+        return "整体趋势需观察，数据不足以判断效率变化"
+    return f"整体趋势需关注，{counter}"
+
+
+# ---------------------------------------------------------------------------
+# Prompt and slot assembly
+# ---------------------------------------------------------------------------
+
 _SYSTEM = (
     "你是 AI 使用日报的文字润色助手。给你一份已经算好数字的日报模板。"
     "严格规则：绝对不要发明、改动、或复述任何数字/百分比/金额——数字全部由模板拥有。"
@@ -42,11 +715,24 @@ _SYSTEM = (
     "只返回严格 JSON：{\"tldr\": \"...\", \"todos\": [\"...\", ...]}，不要解释、不要代码块外的文字。"
 )
 
+_EFFICIENCY_CONSTRAINT = (
+    "额外约束：模板中成本或浪费上升时，点评绝对不能说效率提升/效率上升/效率增长/改善/优化/好转。"
+    "此时用中性或谨慎措辞，并提及最突出的反向信号。"
+)
+
 
 def build_prompt(template_md: str) -> tuple[str, str]:
-    """Return (system, user) prompts for the polish pass."""
+    """Return (system, user) prompts for the polish pass.
+
+    When evidence shows cost/waste rose, an extra constraint is injected into the
+    system prompt forbidding positive efficiency claims.
+    """
+    evidence = extract_efficiency_evidence(template_md)
+    system = _SYSTEM
+    if not evidence.allows_positive_claim():
+        system = system + _EFFICIENCY_CONSTRAINT
     user = ("这是今天的日报模板，请按规则返回 JSON：\n\n" + template_md)
-    return _SYSTEM, user
+    return system, user
 
 
 def _strip_fence(raw: str) -> str:
@@ -229,8 +915,21 @@ def _refine_todos(lines: list[str], todo_iter) -> list[str]:
 
 
 def polish_digest(template_md: str, client: LLMClient) -> str:
-    """Run the LLM polish pass. Propagates LLMError for the caller to catch."""
+    """Run the LLM polish pass. Propagates LLMError for the caller to catch.
+
+    Every non-empty TL;DR must be classified into the closed allowlist before
+    publication: either a proven directional metric assertion or an exact
+    qualitative non-claim phrase. Anything else deterministically falls back.
+    """
     system, user = build_prompt(template_md)
     raw = client.complete(system, user)
     slots = parse_slots(raw)
+    if re.search(r"\d|[$%]", slots.tldr):
+        return template_md
+    evidence = extract_efficiency_evidence(template_md)
+    if slots.tldr.strip() and not validate_efficiency_claim(slots.tldr, evidence):
+        slots = PolishSlots(
+            tldr=neutral_fallback_tldr(evidence),
+            todos=slots.todos,
+        )
     return apply_slots(template_md, slots)

@@ -117,6 +117,36 @@ emit_failure_metadata() {
         "$phase" "$rc" "$stderr_bytes" "$stdout_bytes" "$safe_reason" "$safe_subtype" "$safe_turns" >&2
 }
 
+process_group_alive() {
+    local pgid="$1"
+    kill -0 "-$pgid" 2>/dev/null
+}
+
+child_has_exited() {
+    local pid="$1"
+    local status
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    status="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    case "$status" in
+        Z*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+terminate_process_group() {
+    local pgid="$1"
+    kill -TERM "-$pgid" 2>/dev/null || kill -TERM "$pgid" 2>/dev/null || true
+}
+
+kill_process_group() {
+    local pgid="$1"
+    kill -KILL "-$pgid" 2>/dev/null || kill -KILL "$pgid" 2>/dev/null || true
+}
+
 run_with_timeout() {
     local seconds="$1"; shift
     local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file
@@ -141,16 +171,16 @@ run_with_timeout() {
     (
         local waited=0
         while [ "$waited" -lt "$seconds" ]; do
-            if ! kill -0 "$child_pid" 2>/dev/null; then
-                if kill -0 "-$child_pid" 2>/dev/null; then
-                    kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+            if child_has_exited "$child_pid"; then
+                if process_group_alive "$child_pid"; then
+                    terminate_process_group "$child_pid"
                     local grace=0
                     while [ "$grace" -lt 10 ]; do
-                        kill -0 "-$child_pid" 2>/dev/null || break
+                        process_group_alive "$child_pid" || break
                         sleep 1
                         grace=$((grace + 1))
                     done
-                    kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+                    kill_process_group "$child_pid"
                 fi
                 printf '%s\n' "clean" >"$state_file"
                 exit 0
@@ -159,22 +189,22 @@ run_with_timeout() {
             waited=$((waited + 1))
         done
 
-        if ! kill -0 "-$child_pid" 2>/dev/null; then
+        if ! process_group_alive "$child_pid"; then
             printf '%s\n' "clean" >"$state_file"
             exit 0
         fi
 
-        kill -TERM "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+        terminate_process_group "$child_pid"
 
         local grace=0
         while [ "$grace" -lt 10 ]; do
-            kill -0 "-$child_pid" 2>/dev/null || break
+            process_group_alive "$child_pid" || break
             sleep 1
             grace=$((grace + 1))
         done
 
-        if kill -0 "-$child_pid" 2>/dev/null; then
-            kill -KILL "-$child_pid" 2>/dev/null || kill -KILL "$child_pid" 2>/dev/null
+        if process_group_alive "$child_pid"; then
+            kill_process_group "$child_pid"
         fi
 
         printf '%s\n' "timeout" >"$state_file"
