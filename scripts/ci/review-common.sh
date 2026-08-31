@@ -166,19 +166,28 @@ collect_process_tree() {
 
 process_tree_alive() {
     local root="$1"
+    shift
     local pid
+    local -a targets=("$@")
 
     if kill -0 "$root" 2>/dev/null; then
         return 0
     fi
 
-    while IFS= read -r pid; do
+    if [ "${#targets[@]}" -eq 0 ]; then
+        while IFS= read -r pid; do
+            [ -n "$pid" ] || continue
+            targets+=("$pid")
+        done < <(collect_process_tree "$root" 2>/dev/null || true)
+    fi
+
+    for pid in "${targets[@]}"; do
         [ -n "$pid" ] || continue
         [ "$pid" = "$root" ] && continue
         if kill -0 "$pid" 2>/dev/null; then
             return 0
         fi
-    done < <(collect_process_tree "$root" 2>/dev/null || true)
+    done
 
     return 1
 }
@@ -287,7 +296,8 @@ kill_process_tree() {
 
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file
+    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file deadline_ns now_ns
+    deadline_ns=$(python3 -c 'import sys, time; print(time.monotonic_ns() + int(sys.argv[1]) * 1000000000)' "$seconds")
     state_file="$(mktemp)"
 
     # Job control ON for the launch, so the child becomes a PROCESS GROUP
@@ -301,72 +311,88 @@ run_with_timeout() {
     set +m
 
     # Watchdog: either the child is still active until the deadline, or it has
-    # already exited but left descendants in the original PGID. In the latter
-    # case we still do a bounded TERM→KILL cleanup, but we must not erroneously
-    # treat that as a timeout. We record the watchdog's explicit state so the
-    # caller can prefer an actual timeout even when the leader handles TERM and
-    # exits 0 on its own.
+    # already exited but left descendants. The deadline is absolute and
+    # monotonic, so the watchdog cannot extend the nominal wall-clock budget by
+    # paying for extra polling work. We also keep the descendant snapshot for the
+    # full TERM→KILL path; once the leader exits, reparented survivors are still
+    # visible through that saved tree.
     (
-        local waited=0
-        local poll_steps=$((seconds * 5))
         local -a last_tree=()
+        local poll_interval=0.1
 
-        while [ "$waited" -lt "$poll_steps" ]; do
+        while :; do
             last_tree=()
             while IFS= read -r pid; do
                 [ -n "$pid" ] && last_tree+=("$pid")
             done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
 
             if child_has_exited "$child_pid"; then
-                if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
-                    terminate_process_group "$child_pid"
-                    terminate_process_tree "$child_pid" "${last_tree[@]}"
-
-                    local grace=0
-                    while [ "$grace" -lt 10 ]; do
-                        if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
-                            break
-                        fi
-                        sleep 0.2
-                        grace=$((grace + 1))
-                    done
-
-                    if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
-                        kill_process_group "$child_pid"
-                        kill_process_tree "$child_pid" "${last_tree[@]}"
-                    fi
+                if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid" "${last_tree[@]}"; then
+                    printf '%s\n' "clean" >"$state_file"
+                    exit 0
                 fi
-                printf '%s\n' "clean" >"$state_file"
-                exit 0
-            fi
-            sleep 0.2
-            waited=$((waited + 1))
-        done
 
-        if child_has_exited "$child_pid"; then
-            if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
                 terminate_process_group "$child_pid"
                 terminate_process_tree "$child_pid" "${last_tree[@]}"
 
                 local grace=0
                 while [ "$grace" -lt 10 ]; do
-                    if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
+                    if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid" "${last_tree[@]}"; then
                         break
                     fi
-                    sleep 1
+                    sleep 0.1
                     grace=$((grace + 1))
                 done
 
-                if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
+                if process_group_alive "$child_pid" || process_tree_alive "$child_pid" "${last_tree[@]}"; then
                     kill_process_group "$child_pid"
                     kill_process_tree "$child_pid" "${last_tree[@]}"
                 fi
+
+                printf '%s\n' "clean" >"$state_file"
+                exit 0
             fi
+
+            now_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
+            if [ "$now_ns" -ge "$deadline_ns" ]; then
+                break
+            fi
+            sleep "$poll_interval"
+        done
+
+        last_tree=()
+        while IFS= read -r pid; do
+            [ -n "$pid" ] && last_tree+=("$pid")
+        done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
+
+        if child_has_exited "$child_pid"; then
+            if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid" "${last_tree[@]}"; then
+                printf '%s\n' "clean" >"$state_file"
+                exit 0
+            fi
+
+            terminate_process_group "$child_pid"
+            terminate_process_tree "$child_pid" "${last_tree[@]}"
+
+            local grace=0
+            while [ "$grace" -lt 10 ]; do
+                if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid" "${last_tree[@]}"; then
+                    break
+                fi
+                sleep 1
+                grace=$((grace + 1))
+            done
+
+            if process_group_alive "$child_pid" || process_tree_alive "$child_pid" "${last_tree[@]}"; then
+                kill_process_group "$child_pid"
+                kill_process_tree "$child_pid" "${last_tree[@]}"
+            fi
+
             printf '%s\n' "clean" >"$state_file"
             exit 0
         fi
 
-        if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
+        if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid" "${last_tree[@]}"; then
             printf '%s\n' "clean" >"$state_file"
             exit 0
         fi
@@ -376,14 +402,14 @@ run_with_timeout() {
 
         local grace=0
         while [ "$grace" -lt 10 ]; do
-            if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid"; then
+            if ! process_group_alive "$child_pid" && ! process_tree_alive "$child_pid" "${last_tree[@]}"; then
                 break
             fi
             sleep 1
             grace=$((grace + 1))
         done
 
-        if process_group_alive "$child_pid" || process_tree_alive "$child_pid"; then
+        if process_group_alive "$child_pid" || process_tree_alive "$child_pid" "${last_tree[@]}"; then
             kill_process_group "$child_pid"
             kill_process_tree "$child_pid" "${last_tree[@]}"
         fi
