@@ -1,7 +1,6 @@
-# Requirements Checklist: Complete-Predicate Evidence for Required Review
+# Requirements Checklist: Trusted Exact-HEAD Decision Evidence
 
-**Purpose**: Validate specification and planning readiness before independent
-review.
+**Purpose**: Validate structural redesign readiness before independent review.
 
 **Created**: 2026-08-31
 
@@ -9,41 +8,70 @@ review.
 
 ## Outcome and authority
 
-- [x] CHK001 Owner decision B is explicit: fail closed and no admin bypass.
-- [x] CHK002 The repeated PR #199 false blocker and contradicting full predicate
-  are recorded.
-- [x] CHK003 PR #198 preservation, MY-1495 allowlist, and MY-1496 dependency are
+- [x] CHK001 Owner option B is explicit: stop wording-only repair, no merge or
+  bypass of PR #205, preserve fail-closed behavior.
+- [x] CHK002 PR #205 exact SHA, Multica PASS, same-SHA required-gate failure,
+  Draft/no-auto-merge hold, and superseded handoff are recorded.
+- [x] CHK003 PR #199 and MY-1496 remain downstream dependencies rather than
+  hidden cross-layer work.
+
+## Trust and architecture
+
+- [x] CHK004 Trusted-base execution and exact-HEAD blob-only reads are
   explicit.
+- [x] CHK005 PR-authored bytes stay below the existing untrusted-data fence.
+- [x] CHK006 Protected instruction-producing regions fail before model
+  invocation; no PR-controlled exception exists.
+- [x] CHK007 The external evidence seam remains one call; Swift/Python adapters
+  and git fixture/production adapters remain internal.
+- [x] CHK008 Prompt helpers, Codex prompt/caller, workflow, ruleset, severity,
+  schema/parser, timeouts, and product/data behavior are preserved.
 
-## Scope and architecture
+## Structural evidence
 
-- [x] CHK004 The implementation is one RepoInfra layer task.
-- [x] CHK005 Every implementation file and high-risk exclusion is named.
-- [x] CHK006 Trusted-base, untrusted-data fence, severity threshold, required
-  status, and tool-error behavior are preserved.
-- [x] CHK007 No new analyzer, workflow, ruleset, dependency, schema, or product
-  behavior is introduced.
+- [x] CHK009 Hunk context is a seed and exact-HEAD AST use discovery supplies
+  the complete out-of-hunk predicate.
+- [x] CHK010 The supported static subset, material local dependency closure,
+  completion rule, and unresolved rule are deterministic.
+- [x] CHK011 The typed bundle defines schema/provenance/trust, stable ordering,
+  evidence ids, diff digest, and whole-record caps.
+- [x] CHK012 The PR #199 accepting fixture and genuinely rejecting mutation
+  test behavior rather than vocabulary.
+- [x] CHK013 PR #171 Swift behavior and existing fail-closed paths remain
+  required coverage.
 
-## Acceptance and traceability
+## Scope and tasks
 
-- [x] CHK008 Every functional requirement maps to US1/T001 or an explicit
-  downstream delivery dependency.
-- [x] CHK009 The PR-shaped incomplete-hunk abstention regression is
-  deterministic and tied to the real shared prompt helper without claiming a
-  deterministic model verdict.
-- [x] CHK010 Direct blockers and fail-closed failures remain covered.
-- [x] CHK011 The exact RepoInfra local verification command is declared through
-  the repository hook contract.
-- [x] CHK012 PR #199 refresh, same-HEAD checks/review, and MY-1496 promotion order
-  are acyclic and explicit.
-- [x] CHK013 B000 requires a successful `review-gate (pytest)` check on T001's
-  exact base before dispatch and refreshes evidence if `main` advances.
-- [x] CHK014 T001 names the two observed timeout failures and the Homebrew-Bash
-  task-freshness hang as stop-and-return red lines outside its scope.
+- [x] CHK014 The implementation is one atomic `RepoInfra` task with concrete
+  paths and region-level exclusions.
+- [x] CHK015 T001 excludes every workflow, ruleset, prompt function, timeout,
+  hook, Swift/App/CLI, Aidata, and preserved PR branch outside its contract.
+- [x] CHK016 Every functional requirement maps to US1/T001, B000, or an
+  explicit downstream delivery edge.
+- [x] CHK017 Every executable task has one owning layer, exact files,
+  interface impact, acceptance, dependencies, and an exact verification
+  command.
+- [x] CHK018 The graph is acyclic and contains no hidden cross-layer Fullstack
+  task.
+
+## Verification and delivery
+
+- [x] CHK019 The exact hook-driven RepoInfra local command and CI/ruff evidence
+  are declared.
+- [x] CHK020 B000 requires successful same-SHA `review-gate (pytest)` evidence
+  on the actual implementation base and a new branch distinct from PR #205.
+- [x] CHK021 Named timeout/process-group and task-freshness failures are
+  stop-and-return red lines, not scope expansion.
+- [x] CHK022 Exact local/remote/PR HEAD equality, all required checks, and
+  fresh same-SHA AI Reviewer PASS remain implementation delivery gates.
+- [x] CHK023 PR #199 refresh is ordered after the structural repair reaches
+  `main`.
 
 ## Readiness
 
-- [x] CHK015 No unresolved clarification marker remains.
-- [x] CHK016 No product, content, or authority decision remains open.
-- [x] CHK017 Spec, plan, research, contract, quickstart, tasks, and data-model
-  statement agree on scope and terminology.
+- [x] CHK024 No `NEEDS CLARIFICATION` marker remains.
+- [x] CHK025 No unresolved product, content, or authority decision remains.
+- [x] CHK026 Spec, plan, research, data model, contract, quickstart, tasks, and
+  checklist agree on terminology, scope, trust, and verification.
+- [x] CHK027 The larger trusted Codex instruction-loader design is explicitly
+  deferred to a separate owner-reviewed contract.

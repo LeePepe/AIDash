@@ -1,156 +1,294 @@
-# Implementation Plan: Complete-Predicate Evidence for Required Review
+# Implementation Plan: Trusted Exact-HEAD Decision Evidence
 
 **Feature**: `006-codex-gate-false-positive` | **Date**: 2026-08-31 |
 **Spec**: `specs/006-codex-gate-false-positive/spec.md`
 
-**Input**: Owner decision B: preserve the required fail-closed Codex gate,
-repair the repeatable invalid-tier false inference with regression coverage,
-land the repair, then refresh PR #199 and obtain same-HEAD green checks plus a
-fresh Multica AI Reviewer PASS.
+**Input**: Owner decision option B: stop PR #205 and all wording-only retries,
+preserve fail-closed behavior, structurally supply the complete predicate from
+trusted-base code, and prevent PR-controlled edits from changing active
+reviewer instructions.
 
 ## Summary
 
-Extend the existing shared trusted prompt interface in
-`scripts/ci/review-common.sh` so value-rejection blockers require the complete
-deciding predicate, not an isolated declaration from a partial hunk.
-Pin the PR #199 `VALID_TIERS | {"production"}` shape in the existing hermetic
-shell regression suite and document the invariant. The implementation is one
-RepoInfra task and does not change workflows, rulesets, Aidata, or either
-preserved PR branch.
+Deepen the existing `scripts/ci/review_context.py` module behind its current
+base-owned evidence-building seam. The shell helper will forward every changed
+path; the module will keep the existing Swift receiver adapter and add a
+private Python AST adapter that finds complete same-file decision context from
+exact-HEAD blobs without checking out or executing PR code.
+
+The same trusted preflight will detect changes to instruction-producing
+regions and fail before model invocation. The live prompt text, Codex caller,
+workflow, ruleset, severity, schema, and timeout behavior remain unchanged.
+PR #205 stays Draft with auto-merge disabled as incident evidence.
 
 ## Technical Context
 
-**Language/Version**: Bash 3.2-compatible shell for prompt helpers; Python 3
-with pytest for regression coverage
+**Language/Version**: Python 3 standard library (`ast`, `hashlib`, `json`,
+`pathlib`, `subprocess`); Bash 3.2-compatible shell only for the existing
+caller
 
-**Primary Dependencies**: Repository-owned shell helpers, Python standard
-library, pytest; no new dependency
+**Primary Dependencies**: Existing `review_context.py`, `swift_scope.py`,
+`review-common.sh`, Python standard library, pytest; no new dependency
 
-**Storage**: N/A
+**Storage**: No persisted product data; one transient evidence bundle per gate
+run
 
-**Testing**: Resolver-declared RepoInfra pytest and hook-syntax gates, invoked
-through normal repository hooks; CI additionally runs ruff
+**Testing**: Module-interface pytest fixtures plus the existing shell
+integration suite; normal hooks invoke the resolver-declared RepoInfra gate;
+CI additionally runs RepoInfra in CI mode and ruff
 
 **Target Platform**: GitHub Actions `pull_request_target` on the trusted base,
-with the `aidash-mac` self-hosted runner for the Codex CLI
+using the `aidash-mac` self-hosted runner
 
-**Project Type**: Repository automation / merge gate
+**Project Type**: Repository automation / required merge gate
 
-**Performance Goals**: No additional model call or analyzer pass; only a small
-bounded trusted prompt-text increase
+**Performance Goals**: One parse of the full diff; one bounded `git show` blob
+read per eligible file; deterministic bounded traversal; no additional model
+call
 
-**Constraints**: Fail closed; preserve trusted-base checkout and untrusted-data
-fence; no admin bypass; no workflow/ruleset change; no PR #198/#199 mutation;
-T001 dispatch requires an exact-base green `review-gate (pytest)` baseline;
-known timeout/process-group failures and the `check-tasks-fresh` Bash hang are
-out of scope and stop the task if they recur
+**Constraints**: Fail closed on operational or protected-surface failure; no
+PR-head checkout/import/eval/execution; no admin bypass; no prompt/workflow/
+ruleset/model/verdict change; PR #205 and PR #199 remain untouched; known
+timeout/process-group and task-freshness failures remain outside T001
 
-**Scale/Scope**: One shared prompt helper, one existing regression module, one
-operator document; one RepoInfra implementation task
+**Scale/Scope**: One deep RepoInfra evidence module, one shared shell-call
+region, two existing regression modules, one operator document, one
+implementation task
 
 ## Constitution Check
 
 ### Before Phase 0 research
 
-- **Scope Discipline**: PASS. The repair is uniquely owned by RepoInfra and has
-  an explicit three-file allowlist plus explicit exclusions.
-- **Testing / hook ownership**: PASS with an explicit entry gate. Exact current
-  `main` `40a920526ebf69c07dfa85a109ad2c585c5cb70a` passed the full RepoInfra CI
-  gate in Actions run `33342454411`, job `99340425368`. Team Lead must refresh
-  that same-SHA evidence if the implementation base changes. Local recurrence
-  of the named baseline failures stops T001 instead of expanding its scope.
-- **Identity hygiene**: PASS. The regression uses language tokens and neutral
-  values only; it introduces no account, employer, or machine identifier.
-- **Dependency direction**: PASS. RepoInfra has no declared dependencies and
-  the repair introduces none.
-- **Security / fail-closed posture**: PASS. Trusted-base execution,
-  untrusted-data fencing, tool-error failure, required ruleset membership, and
-  blocker thresholds remain unchanged.
+- **Scope Discipline**: PASS. Every implementation path resolves uniquely to
+  `RepoInfra` through `CONTEXT.md` → `scripts/CONTEXT.md`. T001 has a
+  five-file allowlist plus region-level exclusions inside shared files.
+- **Testing / hook ownership**: PASS with B000. Team Lead previously proved
+  `review-gate (pytest)` green on exact base
+  `8716846ac42b48bfd89b9a09d5dd05fc4819025d` in Actions run
+  `33350742892`, job `99363478423`. Dispatch must refresh this evidence if the
+  implementation base changes.
+- **Identity hygiene**: PASS. Fixtures use repository-public incident tokens
+  and neutral values; no account, employer, workspace, or machine identity is
+  introduced.
+- **Dependency direction**: PASS. RepoInfra declares no dependencies. Python
+  AST/diff logic is in-process; git blob access is the existing
+  local-substitutable internal seam.
+- **Security / fail-closed posture**: PASS. Trusted-base execution, the
+  untrusted-data fence, required status, severity, and all current tool-error
+  paths are preserved. Protected instruction edits add an earlier non-zero
+  preflight.
 
 ### After Phase 1 design
 
-- **Interface depth**: PASS. The change extends the existing shared
-  `review_evidence_rules()` seam consumed by the live gate rather than adding a
-  second prompt copy or a new analyzer.
-- **Regression coverage**: PASS. The contract test pins the incomplete-hunk
-  abstention policy, records the complete predicate as the contradicted
-  evidence, and verifies consumption of the shared helper without claiming a
-  deterministic model verdict.
-- **Cross-layer behavior**: PASS. The only downstream relationship is a
-  delivery dependency: the independent AidataL4 candidate is refreshed after
-  the RepoInfra repair lands; no cross-layer implementation task is created.
+- **Interface depth**: PASS. Callers retain one evidence-building interface;
+  adapter selection, diff mapping, blob reads, AST traversal, dependency
+  closure, caps, canonical rendering, and protected-surface detection remain
+  behind it.
+- **Adapter discipline**: PASS. The existing Swift receiver analyzer and new
+  Python predicate analyzer are private in-process adapters. Git blob access
+  has production `git show` and fixture-map test adapters; no new external
+  port is exposed.
+- **Regression coverage**: PASS. Tests compare structural results for the
+  accepting and rejecting predicate variants, prove the PR #205 preflight,
+  preserve PR #171 Swift behavior, and exercise live shell forwarding/failure.
+- **Cross-layer behavior**: PASS. The downstream AidataL4 PR is a delivery
+  dependency only. No cross-layer implementation task is created.
+- **Durable context**: PASS without `CONTEXT.md` or ADR changes. Layer
+  ownership and dependency direction do not change; the feature contract
+  records the new internal module behavior.
 - **No constitutional exception**: PASS. Complexity Tracking is not required.
 
 ## Design
 
-### Existing control path
+### Existing trusted control path
 
 ```text
 .github/workflows/codex-review-target.yml (trusted base)
-  -> scripts/ci/codex-review.sh
-       -> review_evidence_rules() in scripts/ci/review-common.sh
-       -> PR diff + optional scope evidence inside untrusted-data fence
+  -> scripts/ci/codex-review.sh (trusted base)
+       -> build_scope_evidence() in scripts/ci/review-common.sh
+            -> scripts/ci/review_context.py
+                 -> exact-HEAD blobs through git show (untrusted data)
+       -> trusted prompt rules
+       -> PR diff + generated evidence inside untrusted-data fence
        -> fail-closed structured verdict
 ```
 
-The current evidence rule handles Swift modifier receiver ambiguity and
-injection-token intent, but it does not explicitly forbid validation claims
-made from an incomplete predicate. Python diffs receive no Swift scope
-evidence, so the PR #199 hunk exposed `VALID_TIERS = {"explore"}` without the
-unchanged union that admits `production`.
+The workflow checkout is already the correct trusted execution source. The
+defect is inside the evidence shape and the bootstrap path:
 
-### Pre-dispatch readiness gate B000
+1. `review_context.py` currently selects only Swift and supplies no Python
+   decision context.
+2. PR #199 therefore exposed `VALID_TIERS = {"explore"}` in hunk context
+   without the out-of-hunk union that also admits `production`.
+3. Planning revision `8240167` tried to repair the result by editing trusted
+   prompt wording.
+4. During PR #205's own review, those proposed instructions are PR-controlled
+   diff data. Its exact-SHA Multica PASS cannot make them active trusted
+   policy, and `codex-review-target` correctly remains fail closed.
 
-B000 is a Team Lead-owned scheduling gate, not a Fullstack implementation task:
+### Selected deep module and seam
 
-1. Pin the proposed T001 `delivery_base_sha` to the then-current `main`.
-2. Verify that exact commit has a successful GitHub
-   `review-gate (pytest)` check. A green check on another SHA is not evidence.
-3. Only then prepare T001's delivery workspace and dispatch Fullstack.
-4. If the check is missing or failing, keep T001 blocked and obtain a separate
-   RepoInfra prerequisite plan; do not fold baseline repair into T001.
+The external seam remains the existing base-owned evidence invocation:
 
-Current evidence satisfies B000 only while the implementation base remains
-`40a920526ebf69c07dfa85a109ad2c585c5cb70a`: Actions run `33342454411`, job
-`99340425368` ran `scripts/context/run RepoInfra --mode ci` and completed all
-pytest, hook-syntax, and ruff gates successfully. If `main` advances before
-dispatch, Team Lead must re-establish B000 for the replacement exact SHA.
+```text
+build_scope_evidence <head_sha> <full_diff_file> <changed_paths>
+```
 
-### Selected repair
+The Python CLI remains:
 
-Add a complete-predicate clause to `review_evidence_rules()`:
+```text
+review_context.py --head-sha <sha> --diff-file <path>
+                  --changed-file <path>...
+                  --max-file-bytes <n>
+                  --max-excerpt-bytes <n>
+                  --max-total-bytes <n>
+```
 
-1. A blocker claiming that a value is invalid or rejected must cite the entire
-   deciding expression available in diff/evidence.
-2. Unions, defaults, normalization, negation, and helper qualifiers must be
-   evaluated before classifying the value.
-3. A partial constant or omitted predicate is missing evidence; it cannot
-   support a blocker in this class.
-4. A complete predicate that directly proves rejection remains eligible for a
-   critical/high blocker. Direct test/CI failure output also remains independent
-   blocking evidence and is not subject to this partial-predicate abstention.
+Conceptually, the module implements:
 
-The rule remains in the trusted pre-fence prompt. The PR-shaped regression
-renders the real helper and pins abstention when the hunk shows only the
-isolated set while the complete union is outside the hunk. It also asserts that
-the live gate continues to call the shared helper instead of an inline copy.
-It deliberately tests the deterministic prompt contract, not a model verdict.
+```text
+build_review_evidence(EvidenceRequest, BlobReader) -> EvidenceBundle
+```
 
-### Alternatives rejected
+`EvidenceRequest` contains the exact HEAD, full diff text, changed paths, and
+caps. `EvidenceBundle` contains versioned facts, exact provenance, explicit
+omissions, and a diff digest. These conceptual types remain internal; callers
+do not learn language adapters or evaluator details.
 
-- **Admin bypass**: rejected by the owner; it leaves the recurring defect and
-  violates the selected fail-closed delivery posture.
-- **Change the Aidata allowlist or tier marker**: rejected because the exact
-  predicate already accepts `production`; changing L4 would hide the reviewer
-  defect and expand MY-1495 scope.
-- **New Python semantic analyzer/full-file evidence generator**: rejected for
-  this repair because the prompt already has enough information to require
-  evidence before blocking. A new analyzer broadens scope, attack surface,
-  prompt size, and failure modes without being necessary.
-- **Edit `codex-review.sh` directly**: rejected because it already consumes the
-  shared helper. A second copy would create drift.
-- **Change workflow or ruleset**: rejected; required status and trusted-base
-  execution are correct and must remain intact.
+The module order is:
+
+1. Validate request, exact SHA, diff file, changed paths, and caps.
+2. Parse the unified diff once into base/head hunk coordinates, including
+   context lines.
+3. Run the protected-instruction preflight before any model call.
+4. Read eligible exact-HEAD blobs through `git show HEAD:path` without
+   checkout or execution.
+5. Dispatch internally to the existing Swift receiver adapter or the new
+   Python predicate adapter.
+6. Close bounded same-file dependencies, validate typed facts, sort/dedupe,
+   apply whole-record caps, and render canonical evidence.
+7. Return zero only for a schema-valid bundle; the existing shell caller puts
+   it below the untrusted-data fence.
+
+### Python decision-context adapter
+
+The adapter is intentionally conservative:
+
+1. Inspect all HEAD-side lines represented in changed hunks, including context
+   lines, and identify module-level bindings used as decision inputs.
+2. Parse the exact-HEAD Python blob with `ast`.
+3. Find membership/non-membership or related comparison uses of those bindings
+   anywhere in the same file.
+4. Capture the complete enclosing decision expression and material same-file
+   constant/helper definitions.
+5. Evaluate only a safe static subset: literal collections, names bound to
+   them, set union, boolean operators, negation, comparisons, and literal
+   defaults/fallbacks.
+6. Mark a fact `complete` only when the supported dependency closure is
+   available. Dynamic imports, reflection, cross-file state, cycles, or other
+   unsupported semantics produce explicit `unresolved` facts.
+
+The PR #199 target record is structurally equivalent to:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "python_validation_predicate",
+  "path": "aidata/tests/test_query_tiers.py",
+  "anchor": {"symbol": "VALID_TIERS", "line": 37},
+  "predicate": {
+    "start_line": 81,
+    "operator": "not_in",
+    "source": "_tier_of(name) not in VALID_TIERS | {\"production\"}"
+  },
+  "allowed_literals": ["explore", "production"],
+  "dependencies": [
+    {"kind": "binding", "symbol": "VALID_TIERS"},
+    {"kind": "helper", "symbol": "_tier_of", "literal_fallback": "production"}
+  ],
+  "resolution": "complete",
+  "derivation": "trusted_base_python_ast",
+  "content_trust": "untrusted_pr"
+}
+```
+
+The trusted facts are the path/span relationships, AST structure, closure
+status, and canonical ordering. Quoted source strings remain untrusted PR
+content and never move above the fence.
+
+### Protected instruction preflight
+
+The base-owned analyzer locates the instruction-producing regions in both the
+trusted base source and exact-HEAD source:
+
+- `review_evidence_rules()` in `scripts/ci/review-common.sh`;
+- `review_security_notice()` in `scripts/ci/review-common.sh`; and
+- the live `PROMPT` assignment in `scripts/ci/codex-review.sh`.
+
+If changed lines intersect one of these regions, a required region is missing
+or ambiguous, or a second competing definition appears, the analyzer returns
+`protected_instruction_change` non-zero before the model runs. The preflight
+does not read an allowlist, exemption, attestation, or expected hash from the
+PR head.
+
+This is intentionally a fail-closed publication barrier. A legitimate future
+policy change requires a separately reviewed owner contract and trusted-base
+loading/publication mechanism; it cannot self-authorize through the PR being
+reviewed. T001 does not design that mechanism.
+
+### Error contract
+
+| Condition | Result |
+|---|---|
+| Usage, invalid SHA/path/cap, or unreadable diff request | non-zero; no model |
+| Protected instruction region changed, missing, duplicated, or ambiguous | `protected_instruction_change`; non-zero; no model |
+| Required non-deleted exact-HEAD blob unreadable | non-zero; no model |
+| Selected changed Python source has a syntax error | non-zero; no model |
+| Adapter exception, invalid fact schema, serialization failure | non-zero; no model |
+| Legitimate deletion | explicit omission; bundle may succeed |
+| Unsupported/dynamic/cyclic semantic form | explicit `unresolved`; no guessed conclusion |
+| Per-file/excerpt/total cap | omit whole fact, append explicit omission; never silently slice a record |
+| No supported evidence pattern | valid empty bundle |
+
+All existing downstream fetch, model, timeout, parse, verdict-schema, and
+pass/blocker-consistency failures remain unchanged and non-zero.
+
+## Design It Twice Comparison
+
+### Design A — Minimal deep evidence module
+
+Keep the shell/CLI seam and deepen `review_context.py` with exact-HEAD Python
+predicate facts. This maximizes leverage per entry point and concentrates
+semantic evidence in one locality. By itself, it does not deterministically
+stop future edits to prompt-producing regions.
+
+### Design B — Extensible typed evidence adapters
+
+Introduce a versioned bundle and private adapter registry for Swift and Python.
+This supports future repeated evidence classes without gate-specific caller
+changes. A public plugin interface would be shallow and unsafe, so the selected
+design keeps the registry and adapters private.
+
+### Design C — Separate trusted Codex instruction loader
+
+Move reviewer policy into a base-owned instruction directory discovered by a
+new gate runner and transport all PR data separately through stdin. This gives
+the strongest instruction/data separation, but changes `codex-review.sh`,
+Codex invocation semantics, schema/result orchestration, and the external CLI
+dependency. It is a larger independently valuable migration, not necessary to
+supply the missing PR #199 predicate.
+
+### Recommendation
+
+Use a hybrid of A and B plus the protected-surface preflight:
+
+- one unchanged caller seam;
+- typed evidence behind private adapters;
+- deterministic rejection of policy-surface edits before the model; and
+- no prompt, workflow, ruleset, or model-invocation change.
+
+This has the best depth and locality for the proven incident while keeping the
+larger trusted-loader migration available as a separate future contract.
 
 ## Project Structure
 
@@ -170,60 +308,80 @@ specs/006-codex-gate-false-positive/
 └── tasks.md
 ```
 
-### Source code (implementation revision)
+### Authorized implementation revision
 
 ```text
+scripts/ci/review_context.py
 scripts/ci/review-common.sh
+scripts/ci/tests/test_review_context.py
 scripts/ci/tests/test_review_shell.py
 docs/ci-gates.md
 ```
 
-**Structure Decision**: Extend the existing RepoInfra prompt-contract seam and
-its colocated regression suite. No new module or directory is introduced.
+**Structure Decision**: No new public module, directory, dependency, workflow,
+or route. `review_context.py` becomes the deep evidence module. The existing
+Swift analyzer remains an internal implementation dependency; Python AST logic
+is colocated and private.
 
 ## Vertical Slice and Layer Graph
 
 | Slice | Outcome | Layer task | Upstream dependency |
 |---|---|---|---|
-| US1 | Required reviewer evaluates validation claims from complete predicates while preserving fail-closed behavior | T001 · RepoInfra | Reviewed planning revision + B000 exact-base green baseline |
+| US1 | Required reviewer receives complete exact-HEAD predicate evidence, while policy edits stop before model invocation | T001 · RepoInfra | Exact planning PASS + B000 exact-base green baseline |
 
-T001 is the only implementation task. The PR #199 refresh is not hidden inside
-it; it is a downstream Team Lead/PR Manager delivery dependency on T001 being
-reviewed, merged, and visible in `main`.
+T001 is one atomic RepoInfra implementation task because the module behavior,
+shared-call forwarding, interface regression, shell integration, and operator
+contract must agree in one revision. PR #199 refresh remains a downstream
+delivery dependency, not a hidden Aidata task.
+
+## Pre-Dispatch Readiness Gate B000
+
+B000 is Team Lead-owned scheduling evidence, not a Fullstack checkbox:
+
+1. Pin T001's actual `delivery_base_sha` to then-current `main`.
+2. Verify that exact commit has a successful GitHub
+   `review-gate (pytest)` check.
+3. Prepare a new clean RepoInfra delivery branch/worktree; do not reuse
+   PR #205 or its branch.
+4. If the check is missing/failing, keep T001 blocked and obtain a separate
+   RepoInfra prerequisite plan.
+
+The earlier proof for `8716846ac42b48bfd89b9a09d5dd05fc4819025d` is Actions
+run `33350742892`, job `99363478423`. It remains usable only if that exact SHA
+is the implementation base.
 
 ## Delivery Dependency Sequence
 
-1. AI Reviewer passes this exact planning revision.
-2. Team Lead establishes B000: pin T001's exact current-`main` base and verify
-   that same SHA has a successful `review-gate (pytest)` check. A newer base
-   requires new evidence; missing/failing evidence keeps T001 blocked.
-3. Only after B000, Team Lead schedules T001 on a fresh RepoInfra
-   branch/worktree; PR #198 and PR #199 remain untouched.
-4. Fullstack implements only the complete-predicate prompt contract. If either
-   named `run_with_timeout` failure or the Homebrew-Bash `check-tasks-fresh`
-   hang recurs, Fullstack stops without changing that behavior and returns the
-   blocker to Team Lead for a separate RepoInfra prerequisite.
-5. Normal hooks run the RepoInfra local gate; the implementation then receives
-   exact-SHA AI Reviewer PASS plus all checks green.
-6. PR Manager merges the RepoInfra repair to `main` without bypass.
-7. Team Lead refreshes PR #199 from the resulting current `main`. The new HEAD
-   may contain only the existing two-file AidataL4 candidate plus the merged
-   base history; MY-1495's allowlist is not expanded.
-8. The refreshed PR #199 exact HEAD must have every check green and a fresh
-   Multica AI Reviewer PASS on that same HEAD before PR Manager merge.
-9. Only after MY-1495 is proven on `main` may Team Lead promote MY-1496.
+1. AI Reviewer passes this exact structural planning revision.
+2. Team Lead establishes B000 on the actual current-main base and prepares a
+   new delivery branch. PR #205 stays Draft/no-auto-merge and unchanged.
+3. Fullstack implements only T001's reviewed RepoInfra allowlist and
+   region-level contract.
+4. Normal hooks run the RepoInfra local gate. Any named timeout/process-group
+   failure or task-freshness hang stops the task without expanding scope.
+5. The new repair PR proves local HEAD = remote branch OID = PR `headRefOid`,
+   receives all required checks green, and receives exact-SHA Multica AI
+   Reviewer PASS.
+6. PR Manager merges the structural repair to `main` without bypass.
+7. Team Lead refreshes PR #199 from repaired `main` while preserving its
+   existing AidataL4 allowlist.
+8. PR #199's new exact HEAD receives all checks green and a fresh Multica AI
+   Reviewer PASS before PR Manager merge.
+9. MY-1496 remains blocked until MY-1495 is proven on `main`.
 
 ## Risks and Controls
 
 | Risk | Control |
 |---|---|
-| Prompt wording becomes a broad “never block” exception | Contract limits the downgrade to missing complete-predicate evidence and explicitly preserves direct blockers |
-| Codex and another gate drift | Existing shared helper remains the single source; regression asserts live consumption |
-| Repair accidentally changes product/data behavior | Three-file RepoInfra allowlist and explicit Aidata/workflow/ruleset exclusions |
-| Gate fails open on tool error | Existing non-zero timeout, evidence, parse, schema, and tool paths remain covered and unchanged |
-| Known baseline flake is accidentally absorbed into T001 | B000 requires same-SHA green CI before dispatch; T001 red lines forbid timeout/process-group and task-freshness transport repair and require immediate return to Team Lead on recurrence |
-| Old base keeps using old prompt | Repair must reach `main` before PR #199 refresh because `pull_request_target` reads the trusted base |
-| Review evidence becomes stale after refresh | Exact local/remote/PR HEAD pin and fresh same-HEAD AI Reviewer PASS are required |
+| Candidate prompt wording self-authorizes | Protected instruction edits fail before model; T001 does not edit prompt text |
+| AST output overclaims arbitrary Python semantics | Restricted evaluator; bounded same-file closure; unsupported forms are explicit `unresolved` |
+| PR source escapes the trust fence | Trusted renderer owns labels; source is tagged `untrusted_pr` and shell placement is regression-tested |
+| Analyzer silently loses context | Exact-head reads, typed facts, stable spans/digest, whole-record caps, explicit omissions |
+| New language evidence spreads through callers | Shell forwards all paths; adapter selection stays private inside the deep module |
+| Existing Swift repair regresses | PR #171 interface fixture remains in the required regression set |
+| Gate fails open on tool error | Pre-model non-zero on operational/schema/protected-surface failure; existing downstream failures unchanged |
+| PR #205 is accidentally shipped or reused | Explicit hold/non-reuse contract and separate delivery branch requirement |
+| Known baseline flake is absorbed into T001 | B000 and stop-and-return red lines preserve separate planning ownership |
 
 ## Complexity Tracking
 
