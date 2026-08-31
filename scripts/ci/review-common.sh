@@ -309,7 +309,7 @@ run_with_timeout() {
     local seconds="$1"; shift
     local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file deadline_ns child_exit_ns
     state_file="$(mktemp)"
-    deadline_ns="$(python3 -c 'import sys, time; print(int(time.monotonic_ns()) + int(sys.argv[1]) * 1000000000 + 500000000)' "$seconds")"
+    deadline_ns="$(python3 -c 'import sys, time; print(int(time.monotonic_ns()) + int(sys.argv[1]) * 1000000000)' "$seconds")"
 
     # Job control ON for the launch, so the child becomes a PROCESS GROUP
     # LEADER (pgid == pid). Signalling `-$child_pid` then reaches the CLI *and
@@ -335,7 +335,15 @@ run_with_timeout() {
             done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
 
             if [ "${#tree[@]}" -gt 0 ]; then
-                last_tree=("${tree[@]}")
+                local -a preserved_tree=()
+                for pid in "${tree[@]}"; do
+                    if [ -n "$pid" ] && { [ "$pid" != "$child_pid" ] || kill -0 "$pid" 2>/dev/null; }; then
+                        preserved_tree+=("$pid")
+                    fi
+                done
+                if [ "${#preserved_tree[@]}" -gt 0 ]; then
+                    last_tree=("${preserved_tree[@]}")
+                fi
             fi
 
             if child_has_exited "$child_pid"; then
@@ -440,12 +448,12 @@ run_with_timeout() {
         return "$REVIEW_TIMEOUT_RC"
     fi
 
-    if [ "$child_status" -eq 0 ] && [ "$child_exit_ns" -le "$deadline_ns" ]; then
-        return 0
-    fi
-
     if [ "$child_exit_ns" -gt "$deadline_ns" ]; then
         return "$REVIEW_TIMEOUT_RC"
+    fi
+
+    if [ "$child_status" -eq 0 ]; then
+        return 0
     fi
 
     return "$child_status"
