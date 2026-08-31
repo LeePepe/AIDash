@@ -45,6 +45,25 @@ The shell forwards every changed path. Adapter selection is private to
 `review_context.py`. The interface returns canonical evidence on stdout and
 zero, or a diagnostic on stderr and non-zero.
 
+## Exact-base non-conformance
+
+Exact base `8716846ac42b48bfd89b9a09d5dd05fc4819025d` contains this
+interface but not this contract:
+
+- the shell forwards only `*.swift` and returns before the analyzer for all
+  other changed-path sets;
+- the analyzer ignores non-Swift paths and has no Python AST/claim bundle;
+- PR #199 and PR #205 both return exit 0 with zero evidence bytes;
+- total rendering byte-slices text rather than omitting whole typed facts; and
+- no protected-file manifest/result or required structural regression exists.
+
+Existing files and green tests are baseline prerequisites. They are not
+contract satisfaction. T001 must produce a non-empty implementation delta and
+the mandatory named regressions must transition red→green without changing
+their assertions. The red state must exercise the existing public CLI/shell
+seam and fail on the required return code/output, not on collection, import, or
+missing-new-symbol errors.
+
 ## Self-protecting enforcement contract
 
 After T001 lands, before model invocation, the base-owned implementation
@@ -199,13 +218,19 @@ consistency, severity, and required-status failure paths remain fail closed.
 
 T001 may change:
 
-- `scripts/ci/review_context.py` for the one-time bootstrap implementation;
+- `scripts/ci/review_context.py` for the one-time bootstrap implementation,
+  including the five-path protected manifest, claim/bundle types, context-line
+  mapping, Python adapter, blob comparison, whole-record renderer, and
+  preflight-first CLI entrypoint;
 - `scripts/ci/review-common.sh` only inside `build_scope_evidence()` and its
-  adjacent evidence-caller explanation;
-- `scripts/ci/tests/test_review_context.py`;
+  adjacent evidence-caller explanation, removing the Swift-only filter/early
+  return and forwarding every changed path;
+- `scripts/ci/tests/test_review_context.py` for the named claim/bundle/
+  protected-file regressions;
 - `scripts/ci/tests/test_review_shell.py` only for evidence forwarding,
-  preflight, fence placement, and fail-closed integration; and
-- `docs/ci-gates.md` only for this structural evidence/preflight incident.
+  preflight, fence placement, and fail-closed no-model integration; and
+- `docs/ci-gates.md` only for the exact-base gap and structural
+  evidence/bootstrap invariant.
 
 T001 must not change:
 
@@ -224,9 +249,11 @@ targets but remain byte-unchanged and out of T001 implementation scope.
 
 Before implementation, Team Lead pins the exact T001 base and verifies a
 successful same-SHA `review-gate (pytest)` result. A changed base requires new
-evidence.
+evidence. This proves starting health only.
 
 PR #205 remains Draft with auto-merge disabled. T001 starts from a new clean
-current-main branch and produces a separate one-time bootstrap PR. After that
-exact reviewed revision lands, later protected-chain changes require a new
-owner-reviewed publication contract.
+current-main branch whose initial empty diff is expected. Fullstack adds the
+named tests first, records the target selectors red, implements the normative
+delta, records the same selectors green, and produces a separate non-empty
+one-time bootstrap PR. After that exact reviewed revision lands, later
+protected-chain changes require a new owner-reviewed publication contract.

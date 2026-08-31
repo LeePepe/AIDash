@@ -45,6 +45,10 @@
 - [x] CHK028 The one-time T001 bootstrap evidence and the consumed-on-merge
   authority rule are explicit; every later protected change needs a new
   owner-reviewed publication contract.
+- [x] CHK029 Every FR-001–FR-020 item has an exact-base status and concrete
+  proof/delta in `research.md`.
+- [x] CHK030 Exact-base probes reproduce both missing core outcomes: PR #199
+  emits zero evidence and PR #205 is not rejected by protected enforcement.
 
 ## Scope and tasks
 
@@ -59,6 +63,9 @@
   command.
 - [x] CHK018 The graph is acyclic and contains no hidden cross-layer Fullstack
   task.
+- [x] CHK031 T001 names the mandatory new production symbols/transformations
+  and seven exact regression selectors, so existing file presence cannot be
+  mistaken for completion.
 
 ## Verification and delivery
 
@@ -73,6 +80,9 @@
   implementation revision.
 - [x] CHK023 PR #199 refresh is ordered after the structural repair reaches
   `main`.
+- [x] CHK032 B000 is explicitly baseline-health evidence only; an empty clean
+  branch is expected preparation, while delivery requires the named selectors
+  red→green and a non-empty in-scope implementation diff.
 
 ## Readiness
 

@@ -22,8 +22,24 @@
 - Use a new clean RepoInfra worktree/branch from the B000 base.
 - Do not use the PR #205 delivery directory or branch as the new repair.
 - Read the constitution and `CONTEXT.md` → `scripts/CONTEXT.md` chain.
+- Confirm `HEAD == delivery_base_sha` and the initial base-to-HEAD diff is
+  empty. This is expected preparation, not task completion.
 
-## 4. Implement only the reviewed structural contract
+## 4. Prove the base gap before implementation
+
+Exact base `8716846` forwards only Swift paths, skips non-Swift files in the
+analyzer, emits zero bytes for the PR #199 Python fixture, returns zero for the
+PR #205 protected-file fixture, and contains no claim bundle/Python
+adapter/protected-file regressions.
+
+Add the seven named tests from `tasks.md` first and run their exact selectors.
+The PR #199 and protected-file selectors must fail against base behavior.
+The failure must be a return-code/output assertion through the existing
+CLI/shell seam, not test collection, ImportError, or missing-symbol failure.
+Existing green tests prove B000 health only. A green new selector before
+production edits is not red-capable and must be corrected.
+
+## 5. Implement only the reviewed structural contract
 
 Allowed paths:
 
@@ -37,7 +53,10 @@ Allowed paths:
 
 Required behavior:
 
-- forward every changed path to the deep evidence module;
+- add the normative production symbols/transformations listed in `plan.md`,
+  producing a non-empty implementation diff;
+- forward every changed path to the deep evidence module instead of retaining
+  the base's Swift-only filter and early return;
 - keep Swift receiver behavior;
 - generate claim-scoped Python evidence from exact-HEAD blobs: complete
   predicate structure and safe RHS domain, unresolved dynamic subject/helper
@@ -49,7 +68,7 @@ Required behavior:
   and
 - preserve all existing fail-closed paths.
 
-## 5. Respect the red lines
+## 6. Respect the red lines
 
 Do not edit:
 
@@ -67,7 +86,11 @@ If either named `test_run_with_timeout_*` failure or the Homebrew-Bash
 `check-tasks-fresh` hang recurs, stop and return the evidence to Team Lead.
 Do not retry around or repair it inside T001.
 
-## 6. Verify through repository-owned gates
+An empty clean branch is not a hard red line. Do not stop merely because the
+planned files exist or the existing suite passes; those are baseline facts
+already accounted for by the reviewed delta.
+
+## 7. Verify through repository-owned gates
 
 Interface regressions must cover:
 
@@ -82,13 +105,17 @@ Interface regressions must cover:
 - unchanged PR #171 Swift behavior; and
 - live shell forwarding plus fail-closed analyzer status.
 
+First record the named selectors red against base behavior, then run the
+identical command green after implementation. The final exact base-to-HEAD diff
+must be non-empty and remain inside the five-file/region allowlist.
+
 Let normal pre-commit/pre-push hooks invoke:
 
 `scripts/context/run RepoInfra --mode local`
 
 Do not add App, Swift-package, or Aidata suites manually.
 
-## 7. Review and land the one-time bootstrap
+## 8. Review and land the one-time bootstrap
 
 - Prove clean local HEAD = pushed branch OID = new PR `headRefOid`.
 - Obtain all required checks green.
@@ -99,7 +126,7 @@ Do not add App, Swift-package, or Aidata suites manually.
   protected enforcement link requires a new owner decision and separately
   reviewed trusted-base publication contract.
 
-## 8. Refresh PR #199 only after repaired main
+## 9. Refresh PR #199 only after repaired main
 
 - Team Lead refreshes the existing AidataL4 candidate from the new `main`.
 - Preserve its two-file AidataL4 allowlist.
@@ -108,6 +135,6 @@ Do not add App, Swift-package, or Aidata suites manually.
   refreshed exact HEAD.
 - Obtain a fresh Multica AI Reviewer PASS for that same HEAD before merge.
 
-## 9. Release the downstream dependency
+## 10. Release the downstream dependency
 
 MY-1496 remains blocked until PR #199 / MY-1495 is proven merged to `main`.

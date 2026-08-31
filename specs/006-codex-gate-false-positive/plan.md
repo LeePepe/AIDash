@@ -38,7 +38,9 @@ run
 
 **Testing**: Module-interface pytest fixtures plus the existing shell
 integration suite; normal hooks invoke the resolver-declared RepoInfra gate;
-CI additionally runs RepoInfra in CI mode and ruff
+CI additionally runs RepoInfra in CI mode and ruff. The named new selectors
+must first fail against pinned-base behavior and then pass after implementation;
+an all-green pre-existing suite is only B000 evidence.
 
 **Target Platform**: GitHub Actions `pull_request_target` on the trusted base,
 using the `aidash-mac` self-hosted runner
@@ -102,6 +104,33 @@ implementation task
   ownership and dependency direction do not change; the feature contract
   records the new internal module behavior.
 - **No constitutional exception**: PASS. Complexity Tracking is not required.
+
+## Exact-Base Gap Audit
+
+Exact base `8716846ac42b48bfd89b9a09d5dd05fc4819025d` does not implement
+T001. The full FR-001–FR-020 matrix is in `research.md`; decisive code facts
+are:
+
+- `review-common.sh:266-285` forwards only `*.swift` and returns without
+  invoking the analyzer for Python/protected-file-only changes;
+- `review_context.py:100-142` tracks only added lines,
+  `:145-236` builds only Swift receiver evidence, and `:322-336` skips
+  non-Swift paths;
+- `review_context.py:283-290` slices rendered bytes instead of omitting
+  whole typed facts;
+- the base contains no Python predicate adapter, claim-completion bundle,
+  protected-file manifest/comparison, or structural regressions.
+
+The behavioral probe is red on the exact base:
+
+| Input | Base result | Required result |
+|---|---|---|
+| PR #199 Python diff | exit 0, zero evidence bytes | claim-scoped predicate record; `allowed_domain` includes `production` |
+| PR #205 `review-common.sh` diff | exit 0, zero evidence bytes | non-zero `protected_enforcement_change`; no model |
+
+The clean delivery branch at `HEAD == base` is therefore the expected start.
+It is not already satisfied and is not a hard red line. Completion requires a
+non-empty implementation diff that turns both probes green.
 
 ## Design
 
@@ -174,6 +203,78 @@ The module order is:
    apply whole-record caps, and render canonical evidence.
 7. Return zero only for a schema-valid bundle; the existing shell caller puts
    it below the untrusted-data fence.
+
+### Normative implementation delta from exact base
+
+T001 is not “confirm these files exist.” It must introduce the following
+observable code changes behind the existing seam.
+
+#### `scripts/ci/review_context.py`
+
+- Add standard-library AST/JSON/hash support and a closed
+  `PROTECTED_ENFORCEMENT_PATHS` tuple for the five reviewed paths.
+- Add typed `ClaimCompletion`, predicate-evidence, omission, and
+  `EvidenceBundle` records. No fact-wide resolution field is permitted.
+- Add a HEAD-side hunk-coordinate parser that includes context lines, distinct
+  from the existing added-line-only Swift helper.
+- Add a private Python predicate adapter that discovers out-of-hunk uses,
+  evaluates only the safe RHS subset, and records dynamic subject/helper
+  semantics as unresolved.
+- Add base/head protected-blob identity checks using the trusted checkout's
+  `HEAD:<path>` and supplied `head_sha:<path>`; any changed/missing protected
+  blob returns `protected_enforcement_change` before evidence/model work.
+- Replace total-output byte slicing for typed evidence with canonical
+  whole-record omission plus explicit notices, stable ordering, ids, and diff
+  digest.
+- Update the CLI entrypoint to run the protected-file preflight first, select
+  Swift/Python adapters internally, validate the bundle, and preserve non-zero
+  operational failure.
+
+#### `scripts/ci/review-common.sh`
+
+- Inside `build_scope_evidence()`, remove the `*.swift` case filter and the
+  “no Swift files” early return.
+- Forward every non-empty changed path and always invoke
+  `review_context.py`, so Python evidence and protected-file enforcement run
+  on non-Swift PRs.
+- Preserve the current argument/cap interface and non-zero return propagation.
+  Do not edit prompt functions or timeout code.
+
+#### Regression files
+
+`test_review_context.py` must add behavior tests named for:
+
+- PR #199 claim-scoped evidence from hunk context and out-of-hunk use;
+- dynamic regex/group helper remaining unresolved with fallback
+  observation-only;
+- removal of the `production` union changing the allowed domain;
+- deterministic bundle ordering/digest and whole-fact caps; and
+- one parameterized protected-file mutation across all five protected paths.
+
+`test_review_shell.py` must add behavior tests named for:
+
+- forwarding Swift, Python, workflow, and ruleset paths through the shared
+  shell seam; and
+- protected-file failure propagating before a captured Codex/model stub can
+  run.
+
+`docs/ci-gates.md` must document the base gap, claim-scoped evidence,
+one-time bootstrap, five whole protected files, and consumed authority.
+
+### Mandatory red→green execution order
+
+1. Start from the clean pinned base; record `HEAD == delivery_base_sha` and
+   empty diff as expected preparation evidence.
+2. Add only the named new regressions and run their exact selectors. They must
+   fail because the base emits no Python evidence and no protected-file error.
+   The red signal must be a behavioral assertion on the existing CLI/shell
+   seam's return code or output, not collection failure, ImportError, or a
+   missing-new-symbol error. A green result before source implementation means
+   the test is not exercising T001 and Fullstack must stop.
+3. Implement only the normative production delta above.
+4. Re-run the identical selectors and record them passing.
+5. Let normal hooks run the complete RepoInfra local gate; then inspect the
+   non-empty five-file/region diff and byte-identical protected targets.
 
 ### Python decision-context adapter
 
@@ -398,6 +499,10 @@ B000 is Team Lead-owned scheduling evidence, not a Fullstack checkbox:
 4. If the check is missing/failing, keep T001 blocked and obtain a separate
    RepoInfra prerequisite plan.
 
+B000 proves the starting repository is healthy. It does not prove any T001
+functional acceptance item and must never be used to justify an empty
+implementation handoff.
+
 The earlier proof for `8716846ac42b48bfd89b9a09d5dd05fc4819025d` is Actions
 run `33350742892`, job `99363478423`. It remains usable only if that exact SHA
 is the implementation base.
@@ -408,8 +513,10 @@ is the implementation base.
 2. Team Lead establishes B000 on the actual current-main base and prepares a
    new delivery branch. PR #205 stays Draft/no-auto-merge and unchanged.
 3. Fullstack implements only T001's one-time bootstrap allowlist and
-   reviewed file/region contract; this planning authority expires for protected
-   changes after the bootstrap reaches `main`.
+   reviewed file/region contract through the mandatory red→green order; an
+   empty base-to-HEAD diff is pre-implementation state, not a deliverable. This
+   planning authority expires for protected changes after the bootstrap
+   reaches `main`.
 4. Normal hooks run the RepoInfra local gate. Any named timeout/process-group
    failure or task-freshness hang stops the task without expanding scope.
 5. The new repair PR proves local HEAD = remote branch OID = PR `headRefOid`,

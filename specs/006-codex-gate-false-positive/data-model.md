@@ -6,6 +6,14 @@ data and requires no migration.
 The internal evidence module uses transient typed concepts for one required
 review run.
 
+## Exact-base type gap
+
+Exact base `8716846` defines only the Swift-oriented `FileEvidence`
+tuple and renders free-form receiver text. It has no `EvidenceRequest`,
+`EvidenceBundle`, `ClaimCompletion`, Python predicate fact, stable evidence
+id/diff digest, or `ProtectedEnforcementChange`. The types below are mandatory
+new implementation, not names for existing base structures.
+
 ## EvidenceRequest
 
 | Field | Type | Contract |

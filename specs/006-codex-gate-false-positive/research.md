@@ -65,6 +65,93 @@ the proposed instructions appear only as untrusted diff text. A string-
 presence regression cannot prove instruction provenance or activate a new
 trusted policy. This is a seam failure, not a fourth wording problem.
 
+## Exact-base reconciliation — 2026-08-31
+
+Two Fullstack runs stopped on a clean delivery branch because the five planned
+paths already existed and the pre-existing tests passed. Read-only
+reconciliation proved that this interpreted file presence as behavior:
+
+- delivery workspace HEAD and `delivery_base_sha` are both
+  `8716846ac42b48bfd89b9a09d5dd05fc4819025d`;
+- base-to-HEAD diff is empty, the delivery branch is not pushed, and no PR
+  exists;
+- `review-common.sh:266-285` forwards only `*.swift` and returns success
+  without invoking the analyzer when no Swift file changed;
+- `review_context.py:100-142` maps only added lines,
+  `:145-236` derives only Swift receiver evidence, and `:322-336` skips
+  every non-Swift path;
+- `review_context.py:283-290` byte-slices the rendered body at the total cap,
+  rather than omitting whole typed facts;
+- no base source/test outside `aidata/**` contains
+  `protected_enforcement_change`, `allowed_domain`,
+  `subject_helper_semantics`, `ClaimCompletion`, or `EvidenceBundle`.
+
+The deterministic base probe exercised the real analyzer with PR #199 and
+PR #205 inputs:
+
+```text
+pr199: rc=0 stdout_bytes=0 stderr=''
+pr205: rc=0 stdout_bytes=0 stderr=''
+FAILURES:
+- PR199 claim-scoped allowed-domain evidence missing
+- PR205 protected-enforcement preflight missing
+```
+
+This is a tight red-capable acceptance signal. The empty branch is the correct
+pre-implementation state; it is not a hard red line and must not be converted
+into a synthetic no-op patch.
+
+### Functional-requirement matrix against exact base
+
+| Requirement | Base status | Concrete proof / remaining delta |
+|---|---|---|
+| FR-001 trusted-base execution / no PR-code execution | Satisfied baseline invariant | Workflow lines 7-39 use `pull_request_target`, checkout base SHA, and run the base script; analyzer lines 5-7 read HEAD through `git show` |
+| FR-002 one deep evidence module behind existing seam | Partial | One shell/CLI seam exists, but its implementation is Swift-only and not a typed multi-evidence module |
+| FR-003 forward all changed paths; select language internally | Missing | `review-common.sh:266-285` filters `*.swift` and returns before the analyzer for all other PRs |
+| FR-004 preserve Swift + add private Python AST adapter | Partial / missing delta | Swift receiver adapter exists; no `ast` import or Python adapter exists |
+| FR-005 hunk-context seed and out-of-hunk Python use discovery | Missing | Only `added_line_numbers()` exists; context lines and Python uses are never analyzed |
+| FR-006 claim-scoped predicate/allowed-domain/helper evidence | Missing | No typed Python evidence or claim vocabulary exists |
+| FR-007 restricted static evaluator without PR execution | Partial / missing delta | No-execution invariant exists; restricted evaluator does not |
+| FR-008 per-claim completion | Missing | No `ClaimCompletion` or claim status exists |
+| FR-009 versioned canonical bundle and whole-fact caps | Missing / contradicted | No bundle schema/digest/id exists; total cap byte-slices text at `review_context.py:283-290` |
+| FR-010 trusted labels and untrusted fenced source | Satisfied baseline invariant | Analyzer lines 27-28 label source untrusted; Codex lines 165-174 place diff/evidence inside the fence |
+| FR-011 protect five enforcement-file blob identities | Missing | No protected path manifest, blob comparison, or `protected_enforcement_change` result exists |
+| FR-012 one-time bootstrap and consumed authority | Pending implementation/delivery | Process contract exists only in planning; no bootstrap candidate exists |
+| FR-013 preserve prompt/caller/workflow/ruleset/timeout behavior | Satisfied starting invariant | Exact base supplies the byte source; T001 must leave the three protected verification targets and excluded regions unchanged |
+| FR-014 new analyzer/protected/schema failure taxonomy | Partial | Existing diff-read/top-level failures are non-zero; new adapter/schema/protected-file paths do not exist |
+| FR-015 new hermetic structural regressions and red→green proof | Missing | Exact-base test search finds none of the PR #199/claim/protected symbols; existing green tests exercise old behavior |
+| FR-016 one RepoInfra layer and no product/data mutation | Satisfied scope precondition only | Empty diff is in scope but delivers no behavior; non-empty delta must remain in reviewed five files |
+| FR-017 preserve PR #205 Draft/no-auto-merge evidence | Satisfied external disposition | Owner/Team Lead/PR Manager comments hold PR #205; no branch mutation occurred |
+| FR-018 refresh PR #199 only after repair on main | Blocked downstream | Structural repair is not on `main`; refresh is correctly unavailable |
+| FR-019 B000 same-base green check | Satisfied scheduling precondition | Actions run `33350742892`, job `99363478423`; proves baseline health, not T001 completion |
+| FR-020 named timeout/task-freshness stop rules | Satisfied scope guard | Base behavior remains unchanged; any named recurrence still returns to Team Lead |
+
+### Task-local acceptance summary
+
+Of the eight acceptance bullets persisted on MY-1530, only three are already
+baseline invariants: trusted blob-only reading/no execution, existing
+Swift/fail-closed coverage, and current untrusted-fence placement. The five
+core delivery outcomes are missing: all-path/internal selection, claim-scoped
+PR #199 evidence, rejecting mutation behavior, five-file self-protection, and
+the no-exemption protected enforcement result.
+
+### Root cause
+
+The implementation delta is real but was misexpressed operationally:
+
+1. T001 said “deepen” existing files without naming mandatory new production
+   symbols or exact source transformations.
+2. B000 and the exact verification section emphasized green existing tests,
+   so a passing baseline looked like delivery evidence.
+3. No mandatory test-first selectors had to fail against the base behavior.
+4. No sentence said an empty freshly prepared branch is expected and must
+   receive a non-empty behavioral delta.
+
+The repair is to retain one RepoInfra task but add exact base-gap proof,
+normative production/test deltas, and a mandatory red→green sequence. Splitting
+tests into a separate issue would create an unmergeable red commit and is not a
+valid vertical slice.
+
 ## Dependency classification
 
 | Dependency | Category | Design |

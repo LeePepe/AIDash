@@ -14,7 +14,10 @@ PR #205 at `f16e5d503304b7951f995286cdbb0727b6d2472e`.
 wording-only repair after three candidates; do not merge or bypass PR #205;
 keep it Draft with auto-merge disabled; preserve fail-closed behavior; retain
 the three-file candidate as evidence; redesign the repair so PR-controlled
-content cannot change reviewer instructions.
+content cannot change reviewer instructions. Reconciliation on 2026-08-31
+proved exact base `8716846` has the existing files and green tests but not
+the reviewed structural behavior; an empty new delivery branch is the expected
+starting state, not proof of completion.
 
 ## User Scenarios & Testing
 
@@ -75,6 +78,11 @@ or a nondeterministic model verdict.
 7. **Given** T001 is ready to dispatch, **when** Team Lead pins its actual
    implementation base, **then** that exact commit has a successful
    `review-gate (pytest)` check before Fullstack starts.
+8. **Given** a clean T001 branch starts at exact base `8716846`, **when** the
+   PR #199 and PR #205 acceptance probes run against the base implementation,
+   **then** PR #199 produces no claim-scoped evidence and PR #205 is not
+   rejected by a protected-file preflight, proving a non-empty implementation
+   delta is required.
 
 ### Edge Cases
 
@@ -99,6 +107,9 @@ or a nondeterministic model verdict.
   active from `main`; only the owner-reviewed exact T001 publication contract
   authorizes that one initial landing.
 - Existing Swift receiver evidence remains behavior-compatible.
+- Existing source filenames and a green pre-existing RepoInfra suite are not
+  completion evidence; the new claim/preflight regressions must first fail
+  against the pinned base and then pass after the implementation delta.
 
 ## Requirements
 
@@ -110,7 +121,8 @@ or a nondeterministic model verdict.
 - **FR-002**: The existing exact-HEAD evidence module MUST become the single
   deep module for review evidence. Its external shell/CLI seam MUST remain one
   base-owned call accepting the exact HEAD, full diff, changed paths, and byte
-  caps.
+  caps. The base module's current Swift-only implementation is a prerequisite,
+  not satisfaction of this requirement.
 - **FR-003**: The shell caller MUST forward all changed paths to the evidence
   module. Language selection MUST live behind the module interface, not in
   each gate caller.
@@ -172,7 +184,10 @@ or a nondeterministic model verdict.
   protected-enforcement preflight (including self-modification, invocation,
   propagation, workflow, ruleset, and fence-consumer mutations), untrusted-data
   placement, stable output/caps, existing Swift evidence, and live shell
-  consumption/fail-closed behavior.
+  consumption/fail-closed behavior. Fullstack MUST add the named new
+  regressions first, record them failing against the pinned base behavior, then
+  implement and record the same selectors passing. Running only the existing
+  base suite is not acceptance evidence.
 - **FR-016**: The implementation MUST stay in the `RepoInfra` layer and MUST
   NOT modify Aidata product/data files, Swift/App/CLI packages, PR #199, or the
   PR #205 branch/candidate.
@@ -185,7 +200,8 @@ or a nondeterministic model verdict.
   MY-1495 reaches `main`.
 - **FR-019**: Before T001 dispatch, Team Lead MUST pin the exact implementation
   base and verify a successful `review-gate (pytest)` check for that same
-  commit. A newer base requires fresh evidence.
+  commit. A newer base requires fresh evidence. This B000 result proves
+  baseline health only; it does not satisfy any missing T001 behavior.
 - **FR-020**: The existing timeout/process-group behavior and Homebrew-Bash
   `check-tasks-fresh` hang remain outside T001. Recurrence of the named
   baseline failures stops the task and returns it to Team Lead.
@@ -239,6 +255,10 @@ or a nondeterministic model verdict.
 - **SC-008**: After the structural repair reaches `main`, PR #199 is refreshed
   and its new exact HEAD has every required check green plus a fresh Multica AI
   Reviewer PASS before merge.
+- **SC-009**: The documented exact-base acceptance probe is red on
+  `8716846`: PR #199 produces zero predicate-evidence bytes and PR #205 exits
+  zero without `protected_enforcement_change`. The same behavioral selectors
+  are green only after a non-empty T001 implementation delta.
 
 ## Constraints and Non-Goals
 
@@ -264,3 +284,7 @@ or a nondeterministic model verdict.
   runner; no dependency is added.
 - Current `main` at planning start is
   `8716846ac42b48bfd89b9a09d5dd05fc4819025d`.
+- Exact-base reconciliation confirms no equivalent implementation exists
+  elsewhere: the base's shell caller forwards only `*.swift`, the analyzer
+  skips non-Swift files, and no protected-enforcement or claim-bundle symbols
+  exist.
