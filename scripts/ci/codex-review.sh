@@ -191,7 +191,6 @@ run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
     -o "$OUT_FILE" \
     --skip-git-repo-check \
     -s read-only \
-    --dangerously-bypass-approvals-and-sandbox \
     "$PROMPT" >/dev/null 2>"$ERR_FILE" || CLI_RC=$?
 
 RAW="$(cat "$OUT_FILE" 2>/dev/null)"
