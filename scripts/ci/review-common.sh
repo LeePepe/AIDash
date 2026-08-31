@@ -306,27 +306,27 @@ review_evidence_rules() {
 '更常见的是内层闭包(HStack / ForEach / GeometryReader …)的收尾。因此仅凭 hunk' \
 '无法判断一个新增的 `.modifier(...)` 挂在谁身上。' \
 '' \
-'所以:' \
-'- 任何关于「这个 modifier 作用在哪个视图 / 影响哪块布局」的 **blocker**,必须引用' \
-'  下方 SCOPE EVIDENCE 里该行的 receiver + 所在声明,或引用 SCOPE EXCERPTS 里的具体' \
-'  行。给不出这种具体证据,就**不能**判 blocker。' \
-'- 任何关于「这个值无效 / 被拒绝 / 不应接受」的 **blocker**,都必须引用完整决定谓词' \
-'  （complete deciding predicate）以及它的实际条件: 并集 / union、默认值 / default、' \
-'  规范化 / normalization、否定 / negation，以及 material helper qualifier / helper 语义。' \
-'  只给单个常量、局部 hunk 或半截条件,不能支撑此类 blocker;不确定时最多写 note。' \
-'  特别地,像 `VALID_TIERS = {"explore"}` 这类孤立常量,不能单独支持 `tier not in VALID_TIERS | {"production"}`' \
-'  的拒绝结论;如果完整谓词仍保持未变、只是共享 helper 被消费,那是可信策略/基础谓词' \
-'  的已存在证据,不是新的 blocker。孤立常量 + 半截谓词只能写成 note,不能升级为 blocker。' \
-'- 直接证明的 critical/high defect、直接测试 / CI 失败输出、可信基线与不可信数据边界、' \
-'  严重阈值、required status 与 fail-closed 工具路径,都仍然是**独立的 blocker 证据**；' \
-'  它们不得因为部分谓词未被完全展开或某个 helper 语义未在该条目里逐项重述而被抹除。' \
-'- SCOPE EVIDENCE 里标为 `unresolved` 的行 = 没有证据,不是有问题的证据。此时最多写' \
-'  成 note(说明无法确定归属),**不得**升级为 blocker。' \
-'- 若某文件因超出字节上限未包含在 SCOPE EVIDENCE 中,对该文件的 modifier 归属同样' \
-'  不得下 blocker 结论。' \
-'- 不确定一律降级为 note。这条只放宽「归属靠猜」与「半截谓词」这一类错误;' \
-'  直接证明的 critical/high defect、直接测试 / CI 失败输出、可信边界、fail-closed 语义' \
-'  以及 required status 判定标准都不变,照旧 fail-closed。仅当完整谓词和最终结论都被' \
+'对「这个 modifier 作用在哪个视图 / 影响哪块布局」这一类结论,有效证据来自下方' \
+' SCOPE EVIDENCE 里该行的 receiver + 所在声明,或来自 SCOPE EXCERPTS 里的具体行。' \
+'没有这种具体证据时,该结论不构成 blocker。' \
+'对「这个值无效 / 被拒绝 / 不应接受」这一类结论,有效证据应包含完整决定谓词' \
+'（complete deciding predicate）以及它的实际条件: 并集 / union、默认值 / default、' \
+'规范化 / normalization、否定 / negation，以及 material helper qualifier / helper 语义。' \
+'只给单个常量、局部 hunk 或半截条件,不能支撑此类 blocker;不确定时记为 note。' \
+'特别地,像 `VALID_TIERS = {"explore"}` 这类孤立常量,不能单独支持 `tier not in VALID_TIERS | {"production"}`' \
+'的拒绝结论;如果完整谓词仍保持未变、只是共享 helper 被消费,那是可信策略/基础谓词' \
+'的已存在证据,不是新的 blocker。孤立常量 + 半截谓词归档为 note,不升级为 blocker。' \
+'直接证明的 critical/high defect、直接测试 / CI 失败输出、可信基线与不可信数据边界、' \
+'严重阈值、required status 与 fail-closed 工具路径,都仍然是**独立的 blocker 证据**；' \
+'它们不因部分谓词未被完全展开或某个 helper 语义未在该条目里逐项重述而被抹除。' \
+'孤立常量 + 半截谓词只能写成 note,不升级为 blocker；最多写 note。' \
+'SCOPE EVIDENCE 里标为 `unresolved` 的行 = 没有证据,不作为 blocker。此时仅记 note' \
+'(说明无法确定归属),不升级为 blocker。' \
+'若某文件因超出字节上限未包含在 SCOPE EVIDENCE 中,该文件对 modifier 归属的结论也不构成 blocker。' \
+'不确定时记为 note。这条只放宽「归属靠猜」与「半截谓词」这一类错误;' \
+'直接证明的 critical/high defect、直接测试 / CI 失败输出、可信边界、fail-closed 语义' \
+'以及 required status 判定标准都不变。仅当完整谓词和最终结论都被实际引用时,才允许形成' \
+'“值无效或被拒绝”的结论。' \
 '  实际引用时,才允许判定值无效或被拒绝。'
 }
 
