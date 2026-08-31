@@ -489,6 +489,44 @@ def test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero(
     assert "NO-PID" not in result.stdout, result.stdout
 
 
+def test_run_with_timeout_captures_fast_out_of_pgid_descendants_before_first_snapshot(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A fast leader that exits before the first poll still leaves no leaked descendant."""
+    pidfile = tmp_path / "grandchild.pid"
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        '#!/bin/sh\n'
+        f'python3 - "{pidfile}" <<\'PY\' &\n'
+        'import os, sys\n'
+        'pidfile = sys.argv[1]\n'
+        'with open(pidfile, "w", encoding="utf-8") as fh:\n'
+        '    fh.write(str(os.getpid()))\n'
+        'os.setsid()\n'
+        'os.execvp("sleep", ["sleep", "120"])\n'
+        'PY\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f"run_with_timeout 2 {inner} || rc=$?\n"
+        'echo "rc=$rc"\n'
+        f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=0" in result.stdout, result.stdout
+    assert "CLEAN" in result.stdout, result.stdout
+    assert "NO-PID" not in result.stdout, result.stdout
+
+
 def test_run_with_timeout_cleans_nested_descendant_tree_after_leader_exits_zero(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -566,7 +604,7 @@ def test_run_with_timeout_returns_124_for_late_nonzero_exit_after_deadline() -> 
     result = _run(
         f". {COMMON}\n"
         "rc=0\n"
-        "run_with_timeout 1 /bin/sh -c 'sleep 1.2; exit 3' || rc=$?\n"
+        "run_with_timeout 1 /bin/sh -c 'sleep 2; exit 3' || rc=$?\n"
         'echo "rc=$rc"\n',
         timeout=30,
     )
