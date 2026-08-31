@@ -102,10 +102,20 @@ qualifier / helper 语义。单独一个 `VALID_TIERS = {"explore"}` 常量不�
 `tier not in VALID_TIERS | {"production"}` 是错误；如果完整谓词本身未变、只是共享 helper
 被消费,那是可信策略/已存在基础谓词的证据,不是新的 blocker。
 
+同时,**直接证明的 critical/high defect、直接测试 / CI 失败输出、可信基线与不可信数据边界、
+required status 和 fail-closed 工具路径**仍然是独立的 blocker 证据,不能因为“未逐项展开部分谓词”
+或“某个 helper 语义没在该条目里重述”而被抹掉。也就是说,这条规约放宽的是“归属靠猜”与
+“半截谓词”导致的假阳性,不是直接证据型 blocker 的安全门槛。
+
 这条不只是“更严一点”:它防止 PR #199 这类假阳性,把“孤立常量 + 抽离 hunk”当成对完整
 拒绝条件的证据,而它其实只是看到了一个被 helper 拼接的前半句。**不完整的证据只能写
 成 note**, 不能升级成 blocker。遵守这条 invariant 之后,仅当完整谓词和它最终的拒绝/接受
 结论都被实际引用时,才允许判定值无效。
+
+这条只放宽“receiver-ownership guessing”和“incomplete-predicate inference”这两类错误;
+直接证据型 blocker（critical/high defect、直接测试 / CI 失败输出、required status、
+fail-closed 工具路径、可信边界）保持不变。其间未被完整引用的证据仍然只能记为 note,
+不能被升级为 blocker。
 
 现在归属由**可信脚本**先算好再交给模型:
 

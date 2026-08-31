@@ -315,14 +315,19 @@ review_evidence_rules() {
 '  规范化 / normalization、否定 / negation，以及 material helper qualifier / helper 语义。' \
 '  只给单个常量、局部 hunk 或半截条件,不能支撑此类 blocker;不确定时最多写 note。' \
 '  特别地,像 `VALID_TIERS = {"explore"}` 这类孤立常量,不能单独支持 `tier not in VALID_TIERS | {"production"}`' \
-'  的拒绝结论;若完整谓词仍保持未变、只是共享 helper 被消费,这是可信策略/基础谓词' \
-'  的已存在证据,不得把它误判成新的阻塞事实。' \
+'  的拒绝结论;如果完整谓词仍保持未变、只是共享 helper 被消费,那是可信策略/基础谓词' \
+'  的已存在证据,不是新的 blocker。孤立常量 + 半截谓词只能写成 note,不能升级为 blocker。' \
+'- 直接证明的 critical/high defect、直接测试 / CI 失败输出、可信基线与不可信数据边界、' \
+'  严重阈值、required status 与 fail-closed 工具路径,都仍然是**独立的 blocker 证据**；' \
+'  它们不得因为部分谓词未被完全展开或某个 helper 语义未在该条目里逐项重述而被抹除。' \
 '- SCOPE EVIDENCE 里标为 `unresolved` 的行 = 没有证据,不是有问题的证据。此时最多写' \
 '  成 note(说明无法确定归属),**不得**升级为 blocker。' \
 '- 若某文件因超出字节上限未包含在 SCOPE EVIDENCE 中,对该文件的 modifier 归属同样' \
 '  不得下 blocker 结论。' \
-'- 不确定一律降级为 note。这条只放宽「归属靠猜」的这一类判断;分层越界、崩溃、数据' \
-'  破坏、安全问题等有直接 diff 证据的 blocker,判定标准不变,照旧 fail-closed。'
+'- 不确定一律降级为 note。这条只放宽「归属靠猜」与「半截谓词」这一类错误;' \
+'  直接证明的 critical/high defect、直接测试 / CI 失败输出、可信边界、fail-closed 语义' \
+'  以及 required status 判定标准都不变,照旧 fail-closed。仅当完整谓词和最终结论都被' \
+'  实际引用时,才允许判定值无效或被拒绝。'
 }
 
 # The security notice both prompts share: the untrusted-data fence declaration.
