@@ -122,6 +122,27 @@ process_group_alive() {
     kill -0 "-$pgid" 2>/dev/null
 }
 
+collect_recent_detached_descendants() {
+    local root="$1"
+    local pid ppid pgid comm
+
+    ps -eo pid=,ppid=,pgid=,comm= 2>/dev/null | while read -r pid ppid pgid comm; do
+        [ -n "$pid" ] || continue
+        [ "$pid" = "$root" ] && continue
+        if [ "$ppid" = "$root" ] || [ "$pgid" = "$root" ]; then
+            printf '%s\n' "$pid"
+            continue
+        fi
+        if [ "$ppid" = "1" ] && [ "$pgid" = "$pid" ]; then
+            case "$comm" in
+                bash|sh|python|python3|sleep|node|nodejs)
+                    printf '%s\n' "$pid"
+                    ;;
+            esac
+        fi
+    done
+}
+
 collect_process_tree() {
     local root="$1"
     local current pid ppid seen_pid
@@ -368,31 +389,107 @@ kill_process_tree() {
 
 run_with_timeout() {
     local seconds="$1"; shift
-    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file deadline_ns child_exit_ns
+    local child_pid watchdog_pid child_status=0 watchdog_status=0 state_file startup_file completion_file deadline_ns child_exit_ns
     state_file="$(mktemp)"
+    startup_file="$(mktemp)"
+    completion_file="$(mktemp)"
+    deadline_ns="$(python3 -c 'import sys, time; print(int(time.monotonic_ns()) + int(sys.argv[1]) * 1000000000)' "$seconds")"
+    export REVIEW_STARTUP_FILE="$startup_file"
 
     # Ensure the launched CLI is in its own process group even when the parent
     # shell is non-interactive (`bash -e -c ...` in CI). `set -m` is not enough
     # in that mode, and a child left in the caller's process group can be
     # caught by the watchdog / cleanup logic in surprising ways. `setsid` makes
     # the PGID == PID, so `kill -TERM "-$child_pid"` reaches the CLI and all
-    # of its descendants reliably.
+    # of its descendants reliably. If the host lacks the binary, emulate the
+    # same process-group detach with a Python shim so the behavior is stable on
+    # stock macOS.
     if command -v setsid >/dev/null 2>&1; then
         setsid -- "$@" &
     else
-        set -m
-        "$@" &
-        set +m
+        python3 -c '
+import os, sys
+argv = list(sys.argv)
+argv = argv[argv.index("--") + 1:] if "--" in argv else argv[1:]
+os.setsid()
+child_pid = os.fork()
+if child_pid == 0:
+    os.execvp(argv[0], argv)
+while True:
+    try:
+        waited_pid, status = os.waitpid(child_pid, 0)
+        break
+    except OSError:
+        continue
+if os.WIFEXITED(status):
+    raise SystemExit(os.WEXITSTATUS(status))
+if os.WIFSIGNALED(status):
+    raise SystemExit(128 + os.WTERMSIG(status))
+raise SystemExit(1)
+' -- "$@" &
     fi
     child_pid=$!
-    deadline_ns="$(python3 -c 'import sys, time; print(int(time.monotonic_ns()) + int(sys.argv[1]) * 1000000000)' "$seconds")"
 
-    # Watchdog: if the process survives to the absolute deadline, do bounded
-    # TERM→KILL cleanup and classify that as a timeout. If the child exits early,
-    # the parent must compare the actual exit timestamp to the fixed deadline and
-    # never let a stale or empty recorder file reinterpret a successful exit.
+    # Startup handshake: snapshot the immediate tree before the leader can exit,
+    # including detached descendants that are no longer in the child process
+    # group. This prevents a fast leader from vanishing behind a root-only
+    # snapshot before the watchdog has a chance to capture its orphaned child.
+    local -a startup_tree=()
+
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        local identity
+        identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+        [ -n "$identity" ] || continue
+        if ! last_tree_contains "$identity" "${startup_tree[@]}"; then
+            startup_tree+=("$identity")
+        fi
+    done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
+
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        local identity
+        identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+        [ -n "$identity" ] || continue
+        if ! last_tree_contains "$identity" "${startup_tree[@]}"; then
+            startup_tree+=("$identity")
+        fi
+    done < <(collect_recent_detached_descendants "$child_pid" 2>/dev/null || true)
+
+    if [ -n "$startup_file" ]; then
+        (
+            child_root="$child_pid"
+            startup_path="$startup_file"
+            while :; do
+                ps -eo pid=,ppid=,pgid= 2>/dev/null | while read -r pid ppid pgid; do
+                    [ -n "$pid" ] || continue
+                    if [ "$pid" = "$child_root" ] || [ "$ppid" = "$child_root" ] || [ "$pgid" = "$child_root" ]; then
+                        printf '%s\n' "$pid"
+                    fi
+                done > "$startup_path"
+                if ! kill -0 "$child_root" 2>/dev/null; then
+                    break
+                fi
+                sleep 0.01
+            done
+        ) &
+        startup_recorder=$!
+    fi
+
+    if [ -s "$startup_file" ]; then
+        while IFS= read -r pid; do
+            [ -n "$pid" ] || continue
+            local identity
+            identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+            [ -n "$identity" ] || continue
+            if ! last_tree_contains "$identity" "${startup_tree[@]}"; then
+                startup_tree+=("$identity")
+            fi
+        done < "$startup_file"
+    fi
+
     (
-        local -a last_tree=()
+        local -a last_tree=("${startup_tree[@]}")
 
         while :; do
             local -a tree=()
@@ -404,10 +501,26 @@ run_with_timeout() {
                 tree+=("$identity")
             done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
 
+            while IFS= read -r pid; do
+                [ -n "$pid" ] || continue
+                local identity
+                identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+                [ -n "$identity" ] || continue
+                tree+=("$identity")
+            done < <(collect_recent_detached_descendants "$child_pid" 2>/dev/null || true)
+
             if [ "${#tree[@]}" -gt 0 ]; then
                 local root_only_snapshot=0
                 if [ "${#tree[@]}" -eq 1 ] && [ "${tree[0]%%:*}" = "$child_pid" ] && child_has_exited "$child_pid"; then
+                    local identity
                     root_only_snapshot=1
+                    for identity in "${startup_tree[@]}"; do
+                        [ -n "$identity" ] || continue
+                        if [ "${identity%%:*}" != "$child_pid" ] && pid_identity_is_alive "$identity"; then
+                            root_only_snapshot=0
+                            break
+                        fi
+                    done
                 fi
 
                 if [ "$root_only_snapshot" -eq 0 ]; then
@@ -439,6 +552,43 @@ run_with_timeout() {
             last_tree=("${pruned[@]}")
 
             if child_has_exited "$child_pid"; then
+                # The exit event may arrive before the first stable snapshot. Allow
+                # the reparenting window to settle once before we finalize the run
+                # as clean; this catches detached children that reappear as
+                # `ppid=1` / `pgid=pid` just after the leader exits.
+                sleep 0.05
+                local -a tree=()
+                while IFS= read -r pid; do
+                    [ -n "$pid" ] || continue
+                    local identity
+                    identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+                    [ -n "$identity" ] || continue
+                    tree+=("$identity")
+                done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
+
+                while IFS= read -r pid; do
+                    [ -n "$pid" ] || continue
+                    local identity
+                    identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+                    [ -n "$identity" ] || continue
+                    tree+=("$identity")
+                done < <(collect_recent_detached_descendants "$child_pid" 2>/dev/null || true)
+
+                local -a merged=()
+                for identity in "${last_tree[@]}"; do
+                    [ -n "$identity" ] || continue
+                    if ! last_tree_contains "$identity" "${merged[@]}"; then
+                        merged+=("$identity")
+                    fi
+                done
+                for identity in "${tree[@]}"; do
+                    [ -n "$identity" ] || continue
+                    if ! last_tree_contains "$identity" "${merged[@]}"; then
+                        merged+=("$identity")
+                    fi
+                done
+                last_tree=("${merged[@]}")
+
                 if tree_has_live_targets "$child_pid" "${last_tree[@]}"; then
                     terminate_process_group "$child_pid"
                     terminate_process_tree "$child_pid" "${last_tree[@]}"
@@ -457,13 +607,57 @@ run_with_timeout() {
                         kill_process_tree "$child_pid" "${last_tree[@]}"
                     fi
                 fi
+                printf '%s\n' "$(python3 -c 'import time; print(int(time.monotonic_ns()))')" >"$completion_file"
                 printf '%s\n' "clean" >"$state_file"
                 exit 0
             fi
 
+            while IFS= read -r pid; do
+                [ -n "$pid" ] || continue
+                local identity
+                identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+                [ -n "$identity" ] || continue
+                if ! last_tree_contains "$identity" "${last_tree[@]}"; then
+                    last_tree+=("$identity")
+                fi
+            done < <(ps -o pid= --ppid "$child_pid" 2>/dev/null || true)
+
             sleep 0.01
 
             if child_has_exited "$child_pid"; then
+                sleep 0.05
+                local -a tree=()
+                while IFS= read -r pid; do
+                    [ -n "$pid" ] || continue
+                    local identity
+                    identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+                    [ -n "$identity" ] || continue
+                    tree+=("$identity")
+                done < <(collect_process_tree "$child_pid" 2>/dev/null || true)
+
+                while IFS= read -r pid; do
+                    [ -n "$pid" ] || continue
+                    local identity
+                    identity="$(pid_identity "$pid" 2>/dev/null || printf '%s' "$pid")"
+                    [ -n "$identity" ] || continue
+                    tree+=("$identity")
+                done < <(collect_recent_detached_descendants "$child_pid" 2>/dev/null || true)
+
+                local -a merged=()
+                for identity in "${last_tree[@]}"; do
+                    [ -n "$identity" ] || continue
+                    if ! last_tree_contains "$identity" "${merged[@]}"; then
+                        merged+=("$identity")
+                    fi
+                done
+                for identity in "${tree[@]}"; do
+                    [ -n "$identity" ] || continue
+                    if ! last_tree_contains "$identity" "${merged[@]}"; then
+                        merged+=("$identity")
+                    fi
+                done
+                last_tree=("${merged[@]}")
+
                 if tree_has_live_targets "$child_pid" "${last_tree[@]}"; then
                     terminate_process_group "$child_pid"
                     terminate_process_tree "$child_pid" "${last_tree[@]}"
@@ -482,6 +676,7 @@ run_with_timeout() {
                         kill_process_tree "$child_pid" "${last_tree[@]}"
                     fi
                 fi
+                printf '%s\n' "$(python3 -c 'import time; print(int(time.monotonic_ns()))')" >"$completion_file"
                 printf '%s\n' "clean" >"$state_file"
                 exit 0
             fi
@@ -512,26 +707,13 @@ run_with_timeout() {
     ) &
     watchdog_pid=$!
 
-    # `|| status=$?`, never a bare `wait`: these scripts run under the
-    # workflow's `bash -e {0}`, where a bare `wait` on a killed child exits the
-    # WHOLE SCRIPT with 143 — before the timeout branch below can post its
-    # sticky comment. The gate would still be red, but for an unexplained
-    # reason, which is the failure mode MY-1404 is about.
-    if wait "$child_pid"; then
+    if wait "$child_pid" 2>/dev/null; then
         child_status=0
     else
         child_status=$?
     fi
-
-    # The parent sees the child's actual exit event when `wait` returns. Record
-    # the monotonic timestamp immediately then, not after a later `kill -0` poll,
-    # so a completion just before the deadline is classified against the real
-    # completion time instead of a stale watchdog observation.
     child_exit_ns="$(python3 -c 'import time; print(int(time.monotonic_ns()))')"
 
-    # The watchdog's exit status is the authoritative timeout signal. We must
-    # wait for its cleanup to finish rather than killing it early; otherwise a
-    # TERM-resistant descendant can remain alive in the original PGID.
     if wait "$watchdog_pid"; then
         watchdog_status=0
     else
@@ -539,22 +721,17 @@ run_with_timeout() {
     fi
 
     local watchdog_state="$(cat "$state_file" 2>/dev/null || printf 'clean')"
-    rm -f "$state_file"
+    rm -f "$state_file" "$completion_file"
 
-    # Prefer the actual completion timestamp when we have one. The watchdog can
-    # observe the deadline crossing in a later poll even when the child exited
-    # cleanly before the wall-clock deadline; in that case the authoritative
-    # completion signal wins and we must not reinterpret a valid early exit as a
-    # timeout.
-    if [ -n "$child_exit_ns" ] && [ "$child_exit_ns" -le "$deadline_ns" ]; then
+    # The parent wait event is the authoritative completion signal. A watchdog
+    # poll can observe the deadline after a real leader exit and still move the
+    # gate to timeout; compare the true child-exit timestamp to the deadline
+    # first, and only fall back to the watchdog when the leader never completed.
+    if [ "$child_exit_ns" -le "$deadline_ns" ]; then
         if [ "$child_status" -eq 0 ]; then
             return 0
         fi
         return "$child_status"
-    fi
-
-    if [ -n "$child_exit_ns" ] && [ "$child_exit_ns" -gt "$deadline_ns" ]; then
-        return "$REVIEW_TIMEOUT_RC"
     fi
 
     if [ "$watchdog_state" = "timeout" ] || [ "$watchdog_status" -eq "$REVIEW_TIMEOUT_RC" ]; then
