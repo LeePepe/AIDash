@@ -49,6 +49,10 @@ helper consumption; it does not assert a nondeterministic model verdict.
 4. **Given** the review tool, evidence builder, parser, schema validation, or
    timeout path fails, **when** the gate completes, **then** it still exits
    non-zero and does not permit merge.
+5. **Given** T001 is ready to dispatch, **when** Team Lead pins its exact
+   implementation base, **then** that same commit has a successful
+   `review-gate (pytest)` check before Fullstack starts; a missing or failing
+   baseline keeps T001 blocked.
 
 ### Edge Cases
 
@@ -81,8 +85,9 @@ helper consumption; it does not assert a nondeterministic model verdict.
   to fail closed.
 - **FR-006**: The live Codex required gate MUST consume the shared evidence
   discipline; the repair MUST NOT add a gate-specific copy that can drift.
-- **FR-007**: Hermetic RepoInfra regression coverage MUST pin the PR #199
-  accepted-`production` predicate and shared-helper consumption.
+- **FR-007**: Hermetic RepoInfra regression coverage MUST pin abstention for the
+  incomplete PR #199 hunk, record the complete predicate that accepts
+  `production`, and verify shared-helper consumption.
 - **FR-008**: The repair MUST preserve the trusted-base checkout, the untrusted
   PR-data fence, the required ruleset entry, and the existing severity
   threshold.
@@ -93,6 +98,15 @@ helper consumption; it does not assert a nondeterministic model verdict.
   and obtain all-green checks plus a fresh Multica AI Reviewer PASS on the same
   resulting HEAD before shipping.
 - **FR-011**: MY-1496 MUST remain blocked until MY-1495 is delivered to `main`.
+- **FR-012**: Before T001 dispatch, Team Lead MUST pin the exact implementation
+  base and verify a successful `review-gate (pytest)` check for that same
+  commit. If `main` advances, the evidence MUST be refreshed for the new base.
+- **FR-013**: The existing timeout/process-group behavior and the Homebrew-Bash
+  `check-tasks-fresh` hang are outside T001. If
+  `test_run_with_timeout_kills_nested_wrapper_descendants`,
+  `test_run_with_timeout_kills_the_whole_process_group`, or that hang recurs,
+  Fullstack MUST stop without repairing or retrying around it and return the
+  blocker to Team Lead for a separately planned RepoInfra prerequisite.
 
 ### Key Entities
 
@@ -111,12 +125,18 @@ helper consumption; it does not assert a nondeterministic model verdict.
 
 - **SC-001**: Removing or weakening the incomplete-evidence abstention
   instruction causes the new RepoInfra regression to fail.
-- **SC-002**: The complete RepoInfra local gate exits 0 for the repair revision.
-- **SC-003**: Existing regressions for direct blockers and fail-closed tool,
+- **SC-002**: Before dispatch, the exact T001 implementation base has a
+  successful `review-gate (pytest)` check. At planning time,
+  `40a920526ebf69c07dfa85a109ad2c585c5cb70a` satisfies this through Actions run
+  `33342454411`, job `99340425368`.
+- **SC-003**: The complete RepoInfra local gate exits 0 for the T001 repair
+  revision without changing timeout/process-group behavior; recurrence of a
+  named baseline failure blocks T001 and returns it to Team Lead.
+- **SC-004**: Existing regressions for direct blockers and fail-closed tool,
   timeout, parse, and schema failures remain green.
-- **SC-004**: No workflow, ruleset, Aidata, PR #198, or PR #199 file is present
+- **SC-005**: No workflow, ruleset, Aidata, PR #198, or PR #199 file is present
   in the gate-repair implementation diff.
-- **SC-005**: After the repair reaches `main`, PR #199 is refreshed and its new
+- **SC-006**: After the repair reaches `main`, PR #199 is refreshed and its new
   exact HEAD has all checks green and a fresh Multica AI Reviewer PASS before
   PR Manager merge.
 
@@ -129,6 +149,9 @@ helper consumption; it does not assert a nondeterministic model verdict.
   change severity thresholds, or alter ruleset membership.
 - It does not refresh, rebase, amend, or otherwise mutate PR #199 as part of
   planning or of the RepoInfra repair task.
+- It does not repair existing timeout/process-group tests or the
+  `check-tasks-fresh` Bash transport. Those require a separate RepoInfra plan if
+  the exact-base readiness gate or T001 hook exposes them again.
 
 ## Assumptions
 

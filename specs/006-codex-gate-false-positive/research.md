@@ -56,6 +56,21 @@ the proven failure without changing product code or merge policy.
 
 ## Verification decision
 
+### Exact-base baseline evidence
+
+The planning base `40a920526ebf69c07dfa85a109ad2c585c5cb70a` has a successful
+GitHub `review-gate (pytest)` check in Actions run `33342454411`, job
+`99340425368`. The job checked out that exact SHA and ran
+`scripts/context/run RepoInfra --mode ci`; 100% of the RepoInfra pytest suite,
+hook syntax, and ruff checks completed successfully.
+
+This provides the dispatch baseline only if T001 uses that exact base. If
+`main` advances, Team Lead must verify the same check on the new exact base.
+A missing or failing check creates a separate prerequisite; it is not authority
+for T001 to repair timeout/process-group or task-freshness behavior.
+
+### Task verification
+
 The implementation is proven by the resolver-declared RepoInfra local gate
 through normal hooks:
 
@@ -64,3 +79,8 @@ through normal hooks:
 The gate expands to the repository CI/context pytest suite and hook syntax.
 CI runs the corresponding RepoInfra CI gate and ruff. No App or Aidata suite is
 manually added to this layer task.
+
+Two planning-time local attempts failed on different unchanged
+`run_with_timeout` process cleanup tests, and direct Homebrew-Bash execution of
+`check-tasks-fresh` hung. These are explicit T001 red lines: recurrence stops
+the task and returns it to Team Lead for a separate RepoInfra prerequisite.

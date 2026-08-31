@@ -40,8 +40,10 @@ with the `aidash-mac` self-hosted runner for the Codex CLI
 bounded trusted prompt-text increase
 
 **Constraints**: Fail closed; preserve trusted-base checkout and untrusted-data
-fence; no admin bypass; no workflow/ruleset change; no PR #198/#199 mutation
-during planning or repair
+fence; no admin bypass; no workflow/ruleset change; no PR #198/#199 mutation;
+T001 dispatch requires an exact-base green `review-gate (pytest)` baseline;
+known timeout/process-group failures and the `check-tasks-fresh` Bash hang are
+out of scope and stop the task if they recur
 
 **Scale/Scope**: One shared prompt helper, one existing regression module, one
 operator document; one RepoInfra implementation task
@@ -52,8 +54,11 @@ operator document; one RepoInfra implementation task
 
 - **Scope Discipline**: PASS. The repair is uniquely owned by RepoInfra and has
   an explicit three-file allowlist plus explicit exclusions.
-- **Testing / hook ownership**: PASS. Verification uses the resolver-declared
-  RepoInfra gate through normal hooks; no host-based app test is involved.
+- **Testing / hook ownership**: PASS with an explicit entry gate. Exact current
+  `main` `40a920526ebf69c07dfa85a109ad2c585c5cb70a` passed the full RepoInfra CI
+  gate in Actions run `33342454411`, job `99340425368`. Team Lead must refresh
+  that same-SHA evidence if the implementation base changes. Local recurrence
+  of the named baseline failures stops T001 instead of expanding its scope.
 - **Identity hygiene**: PASS. The regression uses language tokens and neutral
   values only; it introduces no account, employer, or machine identifier.
 - **Dependency direction**: PASS. RepoInfra has no declared dependencies and
@@ -67,8 +72,10 @@ operator document; one RepoInfra implementation task
 - **Interface depth**: PASS. The change extends the existing shared
   `review_evidence_rules()` seam consumed by the live gate rather than adding a
   second prompt copy or a new analyzer.
-- **Regression coverage**: PASS. The contract test pins both the complete
-  predicate semantics and consumption of the shared helper.
+- **Regression coverage**: PASS. The contract test pins the incomplete-hunk
+  abstention policy, records the complete predicate as the contradicted
+  evidence, and verifies consumption of the shared helper without claiming a
+  deterministic model verdict.
 - **Cross-layer behavior**: PASS. The only downstream relationship is a
   delivery dependency: the independent AidataL4 candidate is refreshed after
   the RepoInfra repair lands; no cross-layer implementation task is created.
@@ -91,6 +98,23 @@ injection-token intent, but it does not explicitly forbid validation claims
 made from an incomplete predicate. Python diffs receive no Swift scope
 evidence, so the PR #199 hunk exposed `VALID_TIERS = {"explore"}` without the
 unchanged union that admits `production`.
+
+### Pre-dispatch readiness gate B000
+
+B000 is a Team Lead-owned scheduling gate, not a Fullstack implementation task:
+
+1. Pin the proposed T001 `delivery_base_sha` to the then-current `main`.
+2. Verify that exact commit has a successful GitHub
+   `review-gate (pytest)` check. A green check on another SHA is not evidence.
+3. Only then prepare T001's delivery workspace and dispatch Fullstack.
+4. If the check is missing or failing, keep T001 blocked and obtain a separate
+   RepoInfra prerequisite plan; do not fold baseline repair into T001.
+
+Current evidence satisfies B000 only while the implementation base remains
+`40a920526ebf69c07dfa85a109ad2c585c5cb70a`: Actions run `33342454411`, job
+`99340425368` ran `scripts/context/run RepoInfra --mode ci` and completed all
+pytest, hook-syntax, and ruff gates successfully. If `main` advances before
+dispatch, Team Lead must re-establish B000 for the replacement exact SHA.
 
 ### Selected repair
 
@@ -161,7 +185,7 @@ its colocated regression suite. No new module or directory is introduced.
 
 | Slice | Outcome | Layer task | Upstream dependency |
 |---|---|---|---|
-| US1 | Required reviewer evaluates validation claims from complete predicates while preserving fail-closed behavior | T001 · RepoInfra | Reviewed planning revision |
+| US1 | Required reviewer evaluates validation claims from complete predicates while preserving fail-closed behavior | T001 · RepoInfra | Reviewed planning revision + B000 exact-base green baseline |
 
 T001 is the only implementation task. The PR #199 refresh is not hidden inside
 it; it is a downstream Team Lead/PR Manager delivery dependency on T001 being
@@ -170,18 +194,24 @@ reviewed, merged, and visible in `main`.
 ## Delivery Dependency Sequence
 
 1. AI Reviewer passes this exact planning revision.
-2. Team Lead schedules T001 on a fresh RepoInfra branch/worktree from current
-   `main`; PR #198 and PR #199 remain untouched.
-3. Fullstack implements only T001, normal hooks run the RepoInfra local gate,
-   and the implementation receives exact-SHA AI Reviewer PASS plus all checks
-   green.
-4. PR Manager merges the RepoInfra repair to `main` without bypass.
-5. Team Lead refreshes PR #199 from the resulting current `main`. The new HEAD
+2. Team Lead establishes B000: pin T001's exact current-`main` base and verify
+   that same SHA has a successful `review-gate (pytest)` check. A newer base
+   requires new evidence; missing/failing evidence keeps T001 blocked.
+3. Only after B000, Team Lead schedules T001 on a fresh RepoInfra
+   branch/worktree; PR #198 and PR #199 remain untouched.
+4. Fullstack implements only the complete-predicate prompt contract. If either
+   named `run_with_timeout` failure or the Homebrew-Bash `check-tasks-fresh`
+   hang recurs, Fullstack stops without changing that behavior and returns the
+   blocker to Team Lead for a separate RepoInfra prerequisite.
+5. Normal hooks run the RepoInfra local gate; the implementation then receives
+   exact-SHA AI Reviewer PASS plus all checks green.
+6. PR Manager merges the RepoInfra repair to `main` without bypass.
+7. Team Lead refreshes PR #199 from the resulting current `main`. The new HEAD
    may contain only the existing two-file AidataL4 candidate plus the merged
    base history; MY-1495's allowlist is not expanded.
-6. The refreshed PR #199 exact HEAD must have every check green and a fresh
+8. The refreshed PR #199 exact HEAD must have every check green and a fresh
    Multica AI Reviewer PASS on that same HEAD before PR Manager merge.
-7. Only after MY-1495 is proven on `main` may Team Lead promote MY-1496.
+9. Only after MY-1495 is proven on `main` may Team Lead promote MY-1496.
 
 ## Risks and Controls
 
@@ -191,6 +221,7 @@ reviewed, merged, and visible in `main`.
 | Codex and another gate drift | Existing shared helper remains the single source; regression asserts live consumption |
 | Repair accidentally changes product/data behavior | Three-file RepoInfra allowlist and explicit Aidata/workflow/ruleset exclusions |
 | Gate fails open on tool error | Existing non-zero timeout, evidence, parse, schema, and tool paths remain covered and unchanged |
+| Known baseline flake is accidentally absorbed into T001 | B000 requires same-SHA green CI before dispatch; T001 red lines forbid timeout/process-group and task-freshness transport repair and require immediate return to Team Lead on recurrence |
 | Old base keeps using old prompt | Repair must reach `main` before PR #199 refresh because `pull_request_target` reads the trusted base |
 | Review evidence becomes stale after refresh | Exact local/remote/PR HEAD pin and fresh same-HEAD AI Reviewer PASS are required |
 
