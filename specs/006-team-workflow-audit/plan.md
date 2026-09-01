@@ -73,6 +73,7 @@ specs/006-team-workflow-audit/
 ├── contracts/
 │   ├── manual-import.md
 │   ├── card-payload.md
+│   ├── t020-process-supervisor.md
 │   ├── t005-acceptance-matrix.md
 │   └── owner-decision-events.md
 ├── checklists/
@@ -98,6 +99,7 @@ Packages/
 Apps/AIDashApp/                                       # schema advertisement + append-only writer wiring
 CLI/aidash/                                           # audit UserEvent action filtering/help
 .claude/skills/aidash-content/ + scripts/             # revision-local assembled contract gate
+scripts/ci/review_process_supervisor.py                # T020 invocation-scoped timeout supervision
 ```
 
 **Structure Decision**: Preserve the repository's existing resolver leaves.
@@ -145,6 +147,30 @@ findingFingerprint)` plus two persisted receipt sets.
 **Adapters**: AIDashApp's SwiftData/CloudKit-backed writer and the UI's nil/spy
 test adapters. The App writer owns append-only idempotency; the UI never sees
 persistence.
+
+### Review process supervisor module
+
+**Interface**: the existing
+`run_with_timeout <seconds> <command...> -> shell status` function in
+`review-common.sh`. The shell remains a thin Bash 3.2 adapter; launch barriers,
+membership, identity, deadline arbitration, TERM-to-KILL cleanup, relay EOF,
+and Darwin/Linux differences are hidden in
+`scripts/ci/review_process_supervisor.py` under
+`contracts/t020-process-supervisor.md`.
+
+**Internal seams**: real Darwin and Linux process-membership adapters plus a
+scripted deterministic adapter, all private to the Python module. A process is
+owned only through an exact root/parent identity, verified root PGID, or the
+target-only invocation capability injected before the release barrier. A
+same-user process inventory may resolve that exact capability; PPID-1,
+name/age, and recent-orphan heuristics are forbidden.
+
+**Depth and locality**: callers still learn one function while the supervisor
+owns startup ordering, stable `(pid,birthMarker)` identity through reparenting,
+one absolute monotonic deadline, fail-closed cleanup, and output-pipe closure.
+Keeping this implementation as quoted Python inside the shell was rejected
+because it would bypass Python lint/import locality and recreate the quoting
+risks that `review-common.sh` exists to prevent.
 
 ## Vertical Delivery Slices
 
@@ -242,12 +268,14 @@ T007 + T008 + T009 + T011 + T012 + T015 + T016 + T017 → T018
 
 Recovery-only RepoInfra prerequisite:
 T020 changes no product behavior and uses its own task, published branch, and
-PR from exact implementation base
-`2c75188c010ded876e9f3bb62412f011c7b9da14`. Its candidate head must differ
-from that base and its three-dot surface must include
-`scripts/ci/review-common.sh`, with only
-`scripts/ci/tests/test_review_shell.py` additionally permitted. It unblocks the
-normal RepoInfra hooks required by T021.
+existing Draft PR #204 from exact implementation base
+`8716846ac42b48bfd89b9a09d5dd05fc4819025d`. The rejected head
+`b4aa5e51bdf381d71a6ab77fa2342349a6a5dedb` is evidence only and MUST NOT be
+re-reviewed. A replacement head must differ from both revisions; its three-dot
+surface from the base is limited to `scripts/ci/review-common.sh`,
+`scripts/ci/review_process_supervisor.py`, and
+`scripts/ci/tests/test_review_shell.py`. It unblocks the normal RepoInfra hooks
+required by T021.
 ```
 
 The graph is acyclic. Parallel markers are allowed only for tasks whose files
@@ -270,26 +298,29 @@ do not overlap and whose blocking contract has landed.
   focused diagnostic exception after a concrete failure.
 - Exact implementation SHA must match local HEAD, remote branch, and PR head
   before independent implementation review.
+- T020 proves the supervisor contract through the unchanged `run_with_timeout`
+  interface, including a zero-sleep fast-leader/out-of-PGID fixture and an
+  unrelated orphan-shaped process that must survive. No acceptance may depend
+  on name-based or PPID-1 discovery.
 
 ## Recovery publication topology
 
-T020 starts from exact synchronized-main base
-`2c75188c010ded876e9f3bb62412f011c7b9da14`; later recovery branches start
+T020 retains exact synchronized-main base
+`8716846ac42b48bfd89b9a09d5dd05fc4819025d`; later recovery branches start
 from the then-current descendant after their prerequisite merges. The existing
-persisted T020 workspace remains at that base until Team Lead redispatches the
-reviewed task. PR #202 and its workspace are evidence only and are never
-repointed, amended, cherry-picked as a combined surface, or reused.
+persisted T020 workspace and Draft PR #204 are preserved for Team Lead's next
+scheduled implementation. Rejected head `b4aa5e51...` is evidence only and is
+never re-reviewed or treated as a delivery.
 
-1. **RepoInfra watchdog PR (T020)**: starts from exact base `2c75188c...` and
-   owns only the watchdog plus its same-layer regression test. The candidate
-   head must differ from the base; `review-common.sh` must change, and the
-   three-dot surface may otherwise contain only `test_review_shell.py`. It
-   lands first because a fresh macOS pre-commit gate on the unchanged baseline
-   returns 124 instead of 0 for the leader-exits-zero case. A published task
-   branch, PR, exact local/remote/PR head equality, independent implementation
-   review PASS, and merge are required; an empty current-main candidate is not
-   reviewable. It contains no planning or product files and does not transplant
-   the failed PR #202 patch.
+1. **RepoInfra watchdog PR (T020)**: retains exact base `8716846ac...` and owns
+   the unchanged `run_with_timeout` shell seam, one new same-layer Python
+   supervisor, and the existing shell regression test. The next head must be a
+   genuine successor to rejected `b4aa5e51...`; its three-dot surface from the
+   base is limited to those three files. Capability/identity tracking must
+   replace global orphan discovery and make fast-leader/out-of-PGID cleanup
+   deterministic. Draft PR #204 remains no-auto-merge until required checks,
+   exact local/remote/PR head equality, and exact-SHA implementation review all
+   pass. No planning or product file appears in that implementation surface.
 2. **Planning/constitution PR (T021)**: starts from synchronized main after
    T020 and contains only `.specify/feature.json`,
    `.specify/memory/constitution.md`, the managed `AGENTS.md` Spec Kit marker,

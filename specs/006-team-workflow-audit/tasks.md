@@ -14,27 +14,27 @@ PR contract, first repair the baseline RepoInfra gate in its own PR, and make
 the existing AIDashUI CardType consumers forward-compatible before AIDashCore
 introduces the eleventh case.
 
-- [ ] **T020 [POLISH]** Repair timeout process-tree cleanup in `scripts/ci/review-common.sh`.
+- [ ] **T020 [POLISH]** Repair timeout process supervision in `scripts/ci/review_process_supervisor.py`.
 
 | Metadata | T020 |
 |---|---|
 | Owning layer / context | **RepoInfra** — CONTEXT.md → scripts/CONTEXT.md; root tech-context.md |
-| Files in scope | `scripts/ci/review-common.sh`; `scripts/ci/tests/test_review_shell.py` |
-| Files NOT to touch | .specify/**; specs/**; AGENTS.md; Packages/**; Apps/**; CLI/**; aidata/**; .github/workflows/**; rulesets; context routing; reviewer trust/verdict semantics; timeout budget |
-| Authorized base / review surface | Base is exact synchronized main `2c75188c010ded876e9f3bb62412f011c7b9da14`. Candidate HEAD MUST differ from the base; its committed three-dot surface MUST include `scripts/ci/review-common.sh` and MAY additionally include only `scripts/ci/tests/test_review_shell.py`. Base-equals-head, local-only, or unpublished candidates are not deliveries. |
-| Interface / contract | Preserve `run_with_timeout`'s leader exit status and fail-closed deadline semantics while terminating the complete descendant process tree and closing inherited output pipes |
-| Baseline failure evidence | The T020 blobs are unchanged from planning fixed point `d8f156bf...`. A fresh normal macOS pre-commit gate reproduced `test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero`: descendant cleanup completed but `run_with_timeout` returned 124 instead of the leader's 0, and the nested RepoInfra gate failed. The prior current-main no-change implementation review was INCONCLUSIVE because its surface was empty. |
-| Functional acceptance | Fast success and ordinary failure return their real status; deadline returns 124; `bash -e` callers emit the fail-closed diagnostic; TERM→KILL removes `env → bash → child` descendants; leader-exits-zero with lingering descendants cleans promptly and returns 0 on both macOS and Linux; TERM-trapping leaders cannot hide a timeout; no PID or stdout/stderr pipe leaks; existing sticky-comment/security/900-second semantics are unchanged |
+| Files in scope | `scripts/ci/review-common.sh`; `scripts/ci/review_process_supervisor.py`; `scripts/ci/tests/test_review_shell.py` |
+| Files NOT to touch | Other `scripts/ci/**`, including reviewer callers and `review_context.py`; `.specify/**`; `specs/**`; `AGENTS.md`; `Packages/**`; `Apps/**`; `CLI/**`; `aidata/**`; `.github/workflows/**`; rulesets; context routing; reviewer trust/verdict semantics; timeout budget |
+| Authorized base / review surface | Exact base is `8716846ac42b48bfd89b9a09d5dd05fc4819025d` in the preserved workspace and Draft PR #204. Rejected head `b4aa5e51bdf381d71a6ab77fa2342349a6a5dedb` MUST NOT be re-reviewed. The replacement HEAD MUST differ from both; its committed three-dot surface from the base is limited exactly to the three Files in scope. Local-only, unpublished, or unchanged candidates are not deliveries. |
+| Interface / contract | `contracts/t020-process-supervisor.md`: keep `run_with_timeout <seconds> <command...>` unchanged while a target-only capability, stable process identity, one absolute deadline, output relays, and Darwin/Linux adapters terminate the complete invocation descendant tree and close inherited pipes without global orphan discovery; internal supervision/cleanup-proof failure is reserved status 125 |
+| Baseline failure evidence | Exact review of `b4aa5e51...` found a destructive P0: `PPID=1` plus broad executable-name matching could import unrelated system orphans into TERM/KILL. Removing it leaves a startup gap because the recorder starts after launch and sampled Bash/`ps` ancestry cannot deterministically retain a fast out-of-PGID child through reparenting. No implementation or review of that unchanged SHA is authorized. |
+| Functional acceptance | Fast success and ordinary failure return their real status only after proven cleanup; an absolute deadline returns 124 and TERM-trapping leaders cannot hide it; the target is not released before root identity/tracking readiness; zero-sleep leader-exits-zero plus PID-confirmed `setsid` descendant cleanup returns 0 on macOS and Linux; TERM→KILL removes `env → bash → child`, TERM-resistant, and cleanup-spawned descendants; stable `(pid,birthMarker)` identities survive reparenting and reject PID reuse; unrelated simultaneous orphan-shaped shell/Python/Node/sleep processes remain untouched; tracking or cleanup uncertainty returns 125; no PID or stdout/stderr pipe leaks; existing caller, sticky-comment, security/trust, no-heredoc, and 900-second semantics are unchanged |
 | Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected RepoInfra syntax plus `/usr/bin/python3 -m pytest scripts/ci/tests scripts/context/tests -q` must exit 0; CI `review-gate (pytest)` must pass; local HEAD, remote task ref, and PR `headRefOid` must be equal; exact-SHA implementation review must PASS before merge |
-| Dependencies / slice | None; first recovery gate and hard prerequisite for T021. Preserve the existing T020 workspace and PR #202; do not transplant PR #202 or unrelated historical patches. Team Lead owns redispatch, merge acceptance, Stage 1 closure, and Stage 2 promotion. |
+| Dependencies / slice | None; first recovery gate and hard prerequisite for T021. Preserve the existing T020 workspace and Draft PR #204; do not reset it, re-review rejected `b4aa5e51...`, or transplant unrelated historical patches. Team Lead owns scheduling, merge acceptance, Stage 1 closure, and Stage 2 promotion. |
 
 - [ ] **T021 [POLISH]** Publish the exact reviewed planning and constitution amendment.
 
 | Metadata | T021 |
 |---|---|
 | Owning layer / context | **RepoInfra planning-only** — CONTEXT.md → scripts/CONTEXT.md; .specify/memory/constitution.md Governance |
-| Files in scope | `.specify/feature.json`; `.specify/memory/constitution.md`; `AGENTS.md` (managed Spec Kit marker only); `specs/006-team-workflow-audit/spec.md`; `specs/006-team-workflow-audit/plan.md`; `specs/006-team-workflow-audit/research.md`; `specs/006-team-workflow-audit/data-model.md`; `specs/006-team-workflow-audit/quickstart.md`; `specs/006-team-workflow-audit/tasks.md`; `specs/006-team-workflow-audit/checklists/requirements.md`; `specs/006-team-workflow-audit/contracts/card-payload.md`; `specs/006-team-workflow-audit/contracts/manual-import.md`; `specs/006-team-workflow-audit/contracts/owner-decision-events.md`; `specs/006-team-workflow-audit/contracts/t005-acceptance-matrix.md` |
-| Files NOT to touch | Packages/**; Apps/**; CLI/**; aidata/**; scripts/ci/review-common.sh; any PR #202 branch/workspace file |
+| Files in scope | `.specify/feature.json`; `.specify/memory/constitution.md`; `AGENTS.md` (managed Spec Kit marker only); `specs/006-team-workflow-audit/spec.md`; `specs/006-team-workflow-audit/plan.md`; `specs/006-team-workflow-audit/research.md`; `specs/006-team-workflow-audit/data-model.md`; `specs/006-team-workflow-audit/quickstart.md`; `specs/006-team-workflow-audit/tasks.md`; `specs/006-team-workflow-audit/checklists/requirements.md`; `specs/006-team-workflow-audit/contracts/card-payload.md`; `specs/006-team-workflow-audit/contracts/manual-import.md`; `specs/006-team-workflow-audit/contracts/owner-decision-events.md`; `specs/006-team-workflow-audit/contracts/t005-acceptance-matrix.md`; `specs/006-team-workflow-audit/contracts/t020-process-supervisor.md` |
+| Files NOT to touch | Packages/**; Apps/**; CLI/**; aidata/**; `scripts/ci/review-common.sh`; `scripts/ci/review_process_supervisor.py`; `scripts/ci/tests/test_review_shell.py`; any PR #204 branch/workspace file |
 | Interface / contract | Planning/constitution-only PR from Team Lead's approved main lineage; title exactly `constitution: authorize team audit decision receipts`; PR body repeats the 1.13.0 in-flight migration note |
 | Functional acceptance | PR surface is exactly the reviewed planning artifact set; constitution is 1.13.0; body states existing events remain valid, new actions are additive, unknown consumers preserve or visibly ignore them, and audit invocation/remediation remain outside AIDash; local/remote/PR SHA pin is exact; no product/watchdog implementation appears |
 | Exact verification | Normal `git commit` and `git push` with configured hooks; Spec Kit prerequisites, routing/frontmatter/task-freshness checks selected by RepoInfra must exit 0; constitution PR metadata is part of acceptance |
@@ -346,10 +346,11 @@ T007 + T008 + T009 + T011 + T012 + T015 + T016 + T017 → T018
 Parallel tasks marked `[P]` have non-conflicting files. T012 may run in
 parallel with T010/T011 after T008 because both consume the locked Core
 contract. T016 and T017 may run in parallel with UI/App work after T013.
-T020 changes no product behavior but must land first because a fresh macOS
-RepoInfra hook run on current main reproduces the leader-exits-zero status
-failure before T021 can publish normally. Its exact base is `2c75188c...` and
-its implementation candidate must be published and non-empty as defined above.
+T020 changes no product behavior but must land first because the current
+implementation cannot safely reconcile leader-exits-zero cleanup with the P0
+ban on global orphan discovery. Its exact base is `8716846ac...`; rejected
+`b4aa5e51...` is evidence only, and the replacement implementation candidate
+must be genuinely new, published, and limited to the three-file surface above.
 T019 is the merge-first expand step that keeps T005 AIDashCore-only and
 repository-buildable.
 
@@ -404,8 +405,9 @@ repository-buildable.
 - T019 is merged before provisioning T005; T005 then changes only its original
   nine AIDashCore files and satisfies every row of
   `contracts/t005-acceptance-matrix.md`.
-- T020 uses its own issue, persisted workspace, published task branch, PR, and
-  RepoInfra evidence. Its head differs from exact base `2c75188c...`, its
-  three-dot surface is limited to the two authorized files and includes
-  `review-common.sh`, and local/remote/PR heads match before a PASS review. PR
-  #202 and its workspace remain untouched evidence.
+- T020 uses its own issue, persisted workspace, published task branch, Draft
+  PR #204, and RepoInfra evidence. Its replacement head differs from exact base
+  `8716846ac...` and rejected `b4aa5e51...`; its three-dot surface is limited
+  to the three authorized files and includes `review-common.sh` plus the new
+  supervisor. Local/remote/PR heads match, all required checks pass, and an
+  exact-SHA implementation review passes before PR Manager may merge.

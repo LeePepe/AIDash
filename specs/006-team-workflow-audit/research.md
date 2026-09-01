@@ -179,24 +179,28 @@ failure, never normal acceptance or a substitute for CI App builds.
 ## Decision 9: Recover through four non-overlapping PR contracts
 
 **Decision**: Recover from exact synchronized-main implementation base
-`2c75188c010ded876e9f3bb62412f011c7b9da14` through a dedicated RepoInfra
+`8716846ac42b48bfd89b9a09d5dd05fc4819025d` through the existing dedicated RepoInfra
 watchdog PR, a planning/constitution PR, an AIDashUI future-CardType
 compatibility PR, and a fresh AIDashCore-only T005 PR. T020 must publish a
-non-empty three-dot implementation surface: its head differs from the base,
-`scripts/ci/review-common.sh` changes, and the only other permitted path is
+genuinely new three-dot implementation surface: its head differs from the base
+and rejected `b4aa5e51bdf381d71a6ab77fa2342349a6a5dedb`, and its only permitted
+paths are `scripts/ci/review-common.sh`,
+`scripts/ci/review_process_supervisor.py`, and
 `scripts/ci/tests/test_review_shell.py`. The constitution PR uses the required
 `constitution: <change>` title and carries the in-flight migration note in its
 PR description. T005 retains its original nine-file allowlist and consumes
 `contracts/t005-acceptance-matrix.md`.
 
-**Rationale**: Current main's two T020 paths are byte-identical to the earlier
-`d8f156bf792c4d515a67bbbb6fc287f752622e12` planning fixed point, so the
-advance to `2c75188` contains no watchdog repair. A fresh normal pre-commit
-gate on macOS reproduced the contract failure: the leader-exits-zero case
-cleaned its descendant but returned timeout status 124 instead of 0, which
-caused the nested RepoInfra gate to fail. A passing Linux CI run and an empty
-base-equals-head review candidate do not satisfy the required macOS/Linux
-portability or provide a content-review surface. The invalidated branch also
+**Rationale**: Exact implementation review of `b4aa5e51...` found a destructive
+P0: its `PPID=1` plus executable-name heuristic could import and TERM/KILL
+unrelated system shells, Python/Node processes, or sleeps. Removing that
+heuristic exposed the unresolved startup race: sampled Bash/`ps` discovery
+cannot deterministically capture a fast child that leaves the root PGID and is
+reparented before the first snapshot. `scripts/CONTEXT.md` already owns every
+`scripts/**` path and gates Python with pytest/ruff, so one stdlib-only helper
+is the smallest explicit scope correction that provides a testable platform
+adapter and state-machine seam without adding a layer, dependency, workflow,
+ruleset, or timeout change. The invalidated branch also
 proved that adding the eleventh CardType in Core alone makes three existing
 AIDashUI switches non-exhaustive under repository-wide required CI. A small
 merge-first AIDashUI fallback is the expand step; T005 is the Core contract
@@ -206,12 +210,15 @@ CardType contract.
 
 **Alternatives rejected**:
 
-- Reuse or amend PR #202: preserves the invalid topology and stale ancestry.
-- Treat current main as satisfying T020 because one gate run passes: the
-  contract is cross-platform and the fresh macOS hook reproduces the wrong
-  leader-exit status on the same blobs.
-- Submit current main as a no-change implementation candidate: exact-revision
-  review has no diff to inspect and is necessarily inconclusive.
+- Re-review rejected head `b4aa5e51...`: it contains the destructive P0 and is
+  explicitly frozen as evidence.
+- Keep the original two-file allowlist by embedding a Python supervisor in a
+  quoted shell string: this destroys locality, avoids normal Python lint/import
+  review, and recreates the gate's historical quoting risk.
+- Use process group or sampled ancestry alone: neither retains a fast
+  `setsid` descendant after reparenting.
+- Import recent PPID-1/name-matching orphans: ancestry is unproven and the
+  signal can destroy unrelated work.
 - Put AIDashUI changes into T005: violates its AIDashCore allowlist and the
   one-layer PR rule.
 - Add `teamAudit` UI cases before the Core enum exists: does not compile.
@@ -219,6 +226,34 @@ CardType contract.
   required for every PR, so T005 would be unmergeable.
 - Transplant the failed watchdog patch: its lingering-descendant regression
   still failed and requires a separately authorized RepoInfra diagnosis.
+
+## Decision 10: Put invocation-scoped supervision behind the existing shell seam
+
+**Decision**: Keep `run_with_timeout` as the only caller-facing interface and
+make `review-common.sh` a thin Bash 3.2 adapter to a new stdlib-only
+`scripts/ci/review_process_supervisor.py` deep module. The module owns a
+pre-release launch barrier, target-only unguessable capability, stable
+`(pid,birthMarker)` ledger, one monotonic deadline, output relays, and bounded
+TERM-to-KILL cleanup. Its private membership seam has Darwin, Linux, and
+scripted deterministic adapters. The complete interface and failure ordering
+are locked in `contracts/t020-process-supervisor.md`.
+
+**Rationale**: The external interface stays small while lifecycle complexity
+gains locality and direct fake-adapter coverage. Injecting capability ownership
+before target release makes membership survive normal fork/exec/`setsid` and
+reparenting without guessing from an orphan's name. Birth-marker revalidation
+prevents PID reuse from turning retained identities into unrelated targets.
+The parent-observed completion timestamp and fixed deadline resolve both the
+original false-124 race and the late-exit fail-open race.
+
+**Alternatives rejected**:
+
+- Continue growing private Bash helpers: Bash 3.2 lacks the process identity,
+  event, and test-adapter primitives needed for a coherent state machine.
+- Poll the whole process table every 10 ms: expensive across a 900-second run
+  and still not ownership proof.
+- Add a new package, service, privileged tracer, or third-party dependency:
+  unnecessary for trusted reviewer CLI descendants and outside RepoInfra.
 
 ## Resolved source ambiguities
 

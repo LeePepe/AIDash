@@ -18,14 +18,23 @@ scripts/cron, generated data, and external audit sources are out of scope.
 
 Recovery uses separate branches/PRs in this order: T020 RepoInfra watchdog,
 the planning/constitution surface (T021), T019 AIDashUI compatibility, then the
-nine-file AIDashCore T005 surface. They must never be combined. PR #202 is
-evidence only.
+nine-file AIDashCore T005 surface. They must never be combined.
 
-T020 starts at exact base `2c75188c010ded876e9f3bb62412f011c7b9da14`.
-Its candidate head must be different, must change
-`scripts/ci/review-common.sh`, and may otherwise change only
-`scripts/ci/tests/test_review_shell.py`. A base-equals-head submission is not a
-T020 delivery and cannot advance T021.
+T020 retains exact base `8716846ac42b48bfd89b9a09d5dd05fc4819025d` in the
+preserved workspace and Draft PR #204. Rejected head
+`b4aa5e51bdf381d71a6ab77fa2342349a6a5dedb` is evidence only and must not be
+re-reviewed. The replacement head must be genuinely new; its three-dot surface
+from the base is limited to `scripts/ci/review-common.sh`,
+`scripts/ci/review_process_supervisor.py`, and
+`scripts/ci/tests/test_review_shell.py`. No other implementation, planning,
+workflow, ruleset, timeout-budget, or product path is authorized.
+
+The public proof crosses only `run_with_timeout`: a zero-sleep leader releases
+a PID-confirmed out-of-PGID descendant and exits 0; the wrapper returns 0 only
+after the descendant and inherited pipes are gone. A simultaneous unrelated
+orphan-shaped process without the invocation capability must remain alive.
+Tests use readiness handshakes or a scripted adapter rather than sleeps to
+manufacture the startup ordering.
 
 ## 2. Exercise the manual boundary with fixtures
 
