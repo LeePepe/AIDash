@@ -30,6 +30,7 @@ before doing anything material.** It governs every decision below.
 | **aidata 数据层**(Python,上游内容生产) | `aidata/tech-context.md` |
 | **Design system / seed color source** (canonical) | `Packages/DesignKit/tech-context.md` |
 | CI / quality gates 说明 | `docs/ci-gates.md` |
+| TestFlight 手动发布（自动发布已暂停） | `docs/testflight-handoff.md`；仅在用户明确要求后触发 |
 | Daily digest + aidash push-chain 运维 | `docs/daily-digest-and-aidash-push-chain.md` |
 | Agent-ops redo backlog | `docs/agent-ops-redo-backlog.md` |
 | ADR: nonisolated(unsafe) XPC reply | `docs/adr/001-nonisolated-unsafe-xpc-reply.md` |
