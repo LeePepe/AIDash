@@ -15,9 +15,12 @@ repository. It is intentionally short. When in doubt, re-read it.
 
 The app contains **no input fields, no chat, no compose surface**. Agents are
 the sole authors of all displayed content. The user's only outbound channel is
-a small set of UI events (done / star / hide) that are append-only and consumed
-by agents on their own schedule. The app never modifies or interprets briefing
-content — it only renders what agents have published.
+a small set of structured UI events (done / undone / star / hide, plus Team
+Workflow Audit finding acknowledgement and remediation-approval receipts) that
+are append-only and consumed by agents on their own schedule. An audit approval
+records Owner intent only: it never authorizes AIDash to remediate, mutate a
+source issue or run, create work, or dispatch an agent. The app never modifies
+or interprets briefing content — it only renders what agents have published.
 
 This principle constrains every design decision downstream. If a feature
 requires the user to type content, it does not belong in this app.
@@ -922,7 +925,24 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.12.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-24
+**Version**: 1.13.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-30
+
+<!--
+1.13.0 — MINOR (material expansion of Principle I's structured feedback
+allowlist; no core principle removed or inverted). Adds append-only Team
+Workflow Audit finding acknowledgement and remediation-approval receipts.
+Approval records Owner intent only and grants no authority to remediate,
+mutate source issues/runs, create work, or dispatch agents. Also records the
+already-shipped `undone` counterpart to `done` so the allowlist matches the
+current append-only latest-wins event model.
+
+Migration note: no stored-data migration. Existing event records remain valid.
+The new audit actions are additive enum cases targeting a stable finding
+fingerprint; consumers that do not understand them must preserve or visibly
+ignore them rather than treating them as `done`/`star`. Implementation is
+governed by `specs/006-team-workflow-audit/` and must keep audit invocation and
+remediation outside AIDash.
+-->
 
 <!--
 1.12.0 — MINOR (material quality-gate execution change; no core principle
