@@ -416,6 +416,18 @@ def test_run_with_timeout_reports_timeout_rc() -> None:
     assert "rc=124 expected=124" in result.stdout
 
 
+def test_review_cli_timeout_seconds_defaults_to_900() -> None:
+    """REVIEW_CLI_TIMEOUT_SECONDS defaults to 900 seconds when unset."""
+    result = _run(
+        f"unset REVIEW_CLI_TIMEOUT_SECONDS\n"
+        f". {COMMON}\n"
+        'echo "timeout=$REVIEW_CLI_TIMEOUT_SECONDS"\n',
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "timeout=900" in result.stdout
+
+
 def test_run_with_timeout_kills_the_whole_process_group(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -432,7 +444,7 @@ def test_run_with_timeout_kills_the_whole_process_group(
     pidfile = tmp_path / "grandchild.pid"
     inner = tmp_path / "inner.sh"
     inner.write_text(
-        f'#!/bin/sh\nsh -c \'echo $$ > "{pidfile}"; exec sleep 120\' &\nwait\n',
+        f'#!/bin/sh\nsh -c \'echo $$ > "{pidfile}"; exec sleep 120\' &\nwhile [ ! -s "{pidfile}" ]; do :; done\nwait\n',
         encoding="utf-8",
     )
     inner.chmod(0o755)
@@ -441,7 +453,6 @@ def test_run_with_timeout_kills_the_whole_process_group(
         f". {COMMON}\n"
         "rc=0\n"
         f"run_with_timeout 2 {inner} || rc=$?\n"
-        "sleep 3\n"
         f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
         'if [ -z "$GRANDCHILD" ]; then echo NO-PID; \n'
         'elif kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; \n'
@@ -463,9 +474,8 @@ def test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero(
     inner = tmp_path / "inner.sh"
     inner.write_text(
         f'#!/bin/sh\n'
-        'sh -c \'echo $$ > "'
-        f"{pidfile}"
-        '"; exec sleep 120\' &\n'
+        f'python3 -c \'import os, sys, time; open(sys.argv[1], "w").write(str(os.getpid())); time.sleep(120)\' "{pidfile}" &\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'exit 0\n',
         encoding="utf-8",
     )
@@ -477,13 +487,172 @@ def test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero(
         f"run_with_timeout 2 {inner} || rc=$?\n"
         'echo "rc=$rc"\n'
         f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
-        'if [ -n "$GRANDCHILD" ] && kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
         timeout=30,
     )
 
     assert result.returncode == 0, result.stderr
     assert "rc=0" in result.stdout, result.stdout
     assert "CLEAN" in result.stdout, result.stdout
+    assert "NO-PID" not in result.stdout, result.stdout
+
+
+def test_run_with_timeout_captures_fast_out_of_pgid_descendants_before_first_snapshot(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A fast leader that exits before the first poll still leaves no leaked descendant."""
+    pidfile = tmp_path / "grandchild.pid"
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        '#!/bin/sh\n'
+        f'python3 -c \'import os, sys, time; pidfile = sys.argv[1]; os.setsid(); open(pidfile, "w").write(str(os.getpid())); time.sleep(120)\' "{pidfile}" &\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f"run_with_timeout 2 {inner} || rc=$?\n"
+        'echo "rc=$rc"\n'
+        f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=0" in result.stdout, result.stdout
+    assert "CLEAN" in result.stdout, result.stdout
+    assert "NO-PID" not in result.stdout, result.stdout
+
+
+def test_run_with_timeout_cleans_nested_descendant_tree_after_leader_exits_zero(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A nested descendant tree is cleaned before the leader is reported as done."""
+    pidfile = tmp_path / "grandchild.pid"
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        '#!/bin/sh\n'
+        f'python3 - "{pidfile}" <<\'PY\' &\n'
+        'import os, sys, time\n'
+        'pidfile = sys.argv[1]\n'
+        'os.setsid()\n'
+        'with open(pidfile, "w", encoding="utf-8") as fh:\n'
+        '    fh.write(str(os.getpid()))\n'
+        'time.sleep(120)\n'
+        'PY\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f"run_with_timeout 2 {inner} || rc=$?\n"
+        'echo "rc=$rc"\n'
+        f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=0" in result.stdout, result.stdout
+    assert "CLEAN" in result.stdout, result.stdout
+    assert "NO-PID" not in result.stdout, result.stdout
+
+
+def test_run_with_timeout_does_not_kill_unrelated_orphan_processes(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Cleanup only targets identities already observed in the launched tree."""
+    pidfile = tmp_path / "unrelated.pid"
+    unrelated = tmp_path / "unrelated.sh"
+    unrelated.write_text(
+        '#!/bin/sh\n'
+        'exec sleep 120\n',
+        encoding="utf-8",
+    )
+    unrelated.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        f'python3 - "{unrelated}" "{pidfile}" <<\'PY\'\n'
+        'import os, subprocess, sys\n'
+        'script = sys.argv[1]\n'
+        'pid_file = sys.argv[2]\n'
+        'proc = subprocess.Popen([script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)\n'
+        'with open(pid_file, "w", encoding="utf-8") as fh:\n'
+        '    fh.write(str(proc.pid))\n'
+        'PY\n'
+        "rc=0\n"
+        "run_with_timeout 2 /bin/sh -c 'exit 0' || rc=$?\n"
+        'echo "rc=$rc"\n'
+        f'UNRELATED="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -z "$UNRELATED" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$UNRELATED" 2>/dev/null; then echo SAFE; else echo KILLED; fi\n'
+        'kill -TERM "$UNRELATED" 2>/dev/null || true\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=0" in result.stdout, result.stdout
+    assert "SAFE" in result.stdout, result.stdout
+    assert "KILLED" not in result.stdout, result.stdout
+
+
+def test_run_with_timeout_exits_clean_on_leader_exit_before_deadline_boundary(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A leader that exits on the final interval must not be misclassified as timeout."""
+    pidfile = tmp_path / "grandchild.pid"
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        '#!/bin/sh\n'
+        f"sh -c 'echo $$ > \"{pidfile}\"; exec sleep 120' &\n"
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
+        'sleep 0.8\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    inner.chmod(0o755)
+
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        f"run_with_timeout 2 {inner} || rc=$?\n"
+        'echo "rc=$rc"\n'
+        f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=0" in result.stdout, result.stdout
+    assert "CLEAN" in result.stdout, result.stdout
+    assert "NO-PID" not in result.stdout, result.stdout
+
+
+def test_run_with_timeout_returns_124_for_late_nonzero_exit_after_deadline() -> None:
+    """A late nonzero exit after the wall-clock deadline is fail-closed as timeout."""
+    result = _run(
+        f". {COMMON}\n"
+        "rc=0\n"
+        "run_with_timeout 1 /bin/sh -c 'sleep 2; exit 3' || rc=$?\n"
+        'echo "rc=$rc"\n',
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=124" in result.stdout, result.stdout
 
 
 def test_run_with_timeout_prefers_watchdog_when_term_trap_exits_zero(
@@ -497,6 +666,7 @@ def test_run_with_timeout_prefers_watchdog_when_term_trap_exits_zero(
         'sh -c \'trap "" TERM; echo $$ > "'
         f"{pidfile}"
         '"; exec sleep 120\' &\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'trap "exit 0" TERM\n'
         'sleep 120\n',
         encoding="utf-8",
@@ -524,9 +694,8 @@ def test_run_with_timeout_kills_nested_wrapper_descendants(tmp_path: pathlib.Pat
     inner = tmp_path / "inner.sh"
     inner.write_text(
         f'#!/bin/sh\n'
-        'env FOO=bar bash -c \'echo $$ > "'
-        f"{pidfile}"
-        '"; exec sleep 120\' &\n'
+        f'env FOO=bar python3 -c \'import os, sys, time; open(sys.argv[1], "w").write(str(os.getpid())); time.sleep(120)\' "{pidfile}" &\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'exit 0\n',
         encoding="utf-8",
     )
@@ -538,13 +707,15 @@ def test_run_with_timeout_kills_nested_wrapper_descendants(tmp_path: pathlib.Pat
         f"run_with_timeout 2 {inner} || rc=$?\n"
         'echo "rc=$rc"\n'
         f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
-        'if [ -n "$GRANDCHILD" ] && kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
+        'if [ -z "$GRANDCHILD" ]; then echo NO-PID; exit 1; fi\n'
+        'if kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; else echo CLEAN; fi\n',
         timeout=30,
     )
 
     assert result.returncode == 0, result.stderr
     assert "rc=0" in result.stdout, result.stdout
     assert "CLEAN" in result.stdout, result.stdout
+    assert "NO-PID" not in result.stdout, result.stdout
 
 
 def test_emit_failure_metadata_rejects_untrusted_payloads() -> None:
@@ -1500,3 +1671,1470 @@ class TestRealGateContract:
         assert result.returncode == 1
         sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
         assert "暂不放行" in sticky
+
+
+class TestProcessSupervisorContract:
+    """Deterministic contract tests for the T020 Process Supervisor state machine."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_path(self) -> None:
+        import sys
+        sys_path = str(CI_DIR)
+        if sys_path not in sys.path:
+            sys.path.insert(0, sys_path)
+
+    def test_scripted_ordering_pre_deadline_retains_status(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter, ScriptedClock,
+        )
+        clock = ScriptedClock(start=1000.0)
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["echo", "hi"], adapter=adapter, clock=clock)
+
+        sup.root_identity = adapter.register_process(100, 1, 100, "1000.0", has_capability=True)
+        sup.root_pgid = 100
+        sup.ledger[sup.root_identity] = sup.root_identity
+        sup.start_time = 1000.0
+        sup.deadline = 1002.0
+
+        clock.advance(1.5)  # leader completes at 1001.5 <= 1002.0
+        leader_completion = clock.monotonic()
+        adapter.alive.discard(100)
+        cleanup_ok = sup._cleanup()
+        assert cleanup_ok is True
+        rc = sup.classify_outcome(
+            leader_completion_time=leader_completion,
+            child_status=42,
+            timed_out=False,
+            cleanup_ok=cleanup_ok,
+        )
+        assert rc == 42
+
+    def test_scripted_ordering_exact_tie_returns_real_status(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter, ScriptedClock,
+        )
+        clock = ScriptedClock(start=1000.0)
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["echo", "hi"], adapter=adapter, clock=clock)
+
+        sup.root_identity = adapter.register_process(100, 1, 100, "1000.0", has_capability=True)
+        sup.root_pgid = 100
+        sup.ledger[sup.root_identity] = sup.root_identity
+        sup.start_time = 1000.0
+        sup.deadline = 1002.0
+
+        clock.advance(2.0)  # leader completes exactly at deadline 1002.0 == 1002.0
+        leader_completion_time = clock.monotonic()
+        adapter.alive.discard(100)
+        cleanup_ok = sup._cleanup()
+        assert cleanup_ok is True
+        rc = sup.classify_outcome(
+            leader_completion_time=leader_completion_time,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=cleanup_ok,
+        )
+        assert rc == 0
+
+    def test_scripted_ordering_post_deadline_returns_124(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter, ScriptedClock,
+        )
+        clock = ScriptedClock(start=1000.0)
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["sleep", "10"], adapter=adapter, clock=clock)
+
+        sup.root_identity = adapter.register_process(100, 1, 100, "1000.0", has_capability=True)
+        sup.root_pgid = 100
+        sup.ledger[sup.root_identity] = sup.root_identity
+        sup.start_time = 1000.0
+        sup.deadline = 1002.0
+
+        clock.advance(2.001)  # past deadline
+        leader_completion_time = clock.monotonic()
+        cleanup_ok = sup._cleanup()
+        rc = sup.classify_outcome(
+            leader_completion_time=leader_completion_time,
+            child_status=0,
+            timed_out=True,
+            cleanup_ok=cleanup_ok,
+        )
+        assert rc == 124
+
+    def test_pid_birth_marker_reuse_is_never_signalled(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        import signal
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["echo", "hi"], adapter=adapter)
+
+        orig_ident = adapter.register_process(200, 1, 200, "1000.0", has_capability=True)
+        sup.ledger[orig_ident] = orig_ident
+
+        # Process dies and PID 200 is reused by an unrelated process with a newer birth marker
+        adapter.alive.discard(200)
+        adapter.register_process(200, 1, 1, "2000.0", has_capability=False)
+
+        # Attempt to signal the original identity
+        signalled = adapter.signal_identity(orig_ident, signal.SIGTERM)
+        assert signalled is False
+        assert ("pid", 200, signal.SIGTERM) in adapter.signal_log
+        assert 200 in adapter.alive  # The new process is NOT killed
+
+    def test_concurrent_supervisors_never_cross_signal(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        adapter = ScriptedAdapter()
+        sup1 = ProcessSupervisor(timeout_seconds=2.0, command=["cmd1"], adapter=adapter)
+        sup2 = ProcessSupervisor(timeout_seconds=2.0, command=["cmd2"], adapter=adapter)
+
+        # Sup1 spawns 101, Sup2 spawns 201
+        p1 = adapter.register_process(101, 1, 101, "1000.0", has_capability=False)
+        p2 = adapter.register_process(201, 1, 201, "1000.0", has_capability=False)
+        sup1.root_identity = p1
+        sup1.root_pgid = 101
+        sup1.ledger[p1] = p1
+
+        sup2.root_identity = p2
+        sup2.root_pgid = 201
+        sup2.ledger[p2] = p2
+
+        # Sup1 spawns child 102 carrying sup1 capability; Sup2 spawns child 202 carrying sup2 capability
+        p1_child = adapter.register_process(102, 101, 101, "1000.1", has_capability=False)
+        p2_child = adapter.register_process(202, 201, 201, "1000.1", has_capability=False)
+
+        sup1._refresh_ledger()
+        sup2._refresh_ledger()
+
+        assert p1_child in sup1.ledger
+        assert p2_child not in sup1.ledger
+        assert p2_child in sup2.ledger
+        assert p1_child not in sup2.ledger
+
+        sup1._cleanup()
+        assert adapter.is_alive(p1) is False
+        assert adapter.is_alive(p1_child) is False
+        assert adapter.is_alive(p2) is True
+        assert adapter.is_alive(p2_child) is True
+
+    def test_reparented_ledger_identities_retained_through_cleanup(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        root = adapter.register_process(300, 1, 300, "1000.0", has_capability=True)
+        sup.root_identity = root
+        sup.root_pgid = 300
+        sup.ledger[root] = root
+
+        # Child 301 is created by root, is TERM-resistant, reparents to PPID 1 and sets own PGID 301
+        child = adapter.register_process(
+            301, 300, 301, "1000.1", has_capability=True, term_resistant=True
+        )
+        sup._refresh_ledger()
+        assert child in sup.ledger
+
+        # Now simulate root dying and child having ppid=1
+        adapter.alive.discard(300)
+        adapter.processes[301] = adapter.processes[301]._replace(ppid=1)
+
+        # Child is retained in ledger and killed on KILL phase of cleanup
+        assert sup.ledger[child] == child
+        cleanup_ok = sup._cleanup()
+        assert cleanup_ok is True
+        assert adapter.is_alive(child) is False
+        rc = sup.classify_outcome(
+            leader_completion_time=1001.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=cleanup_ok,
+        )
+        assert rc == 0
+
+    def test_cleanup_proof_failure_returns_fail_closed(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        adapter = ScriptedAdapter()
+        adapter.fail_cleanup_proof = True  # simulate unkillable process
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        root = adapter.register_process(400, 1, 400, "1000.0", has_capability=True)
+        sup.root_identity = root
+        sup.root_pgid = 400
+        sup.ledger[root] = root
+
+        cleanup_ok = sup._cleanup()
+        assert cleanup_ok is False
+        rc = sup.classify_outcome(
+            leader_completion_time=1001.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=cleanup_ok,
+        )
+        assert rc == 125
+
+    def test_membership_failure_sets_supervision_error_and_fails_closed(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        adapter = ScriptedAdapter()
+        adapter.fail_membership = True
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        root = adapter.register_process(500, 1, 500, "1000.0", has_capability=True)
+        sup.root_identity = root
+        sup.root_pgid = 500
+        sup.ledger[root] = root
+
+        sup._refresh_ledger()
+        assert sup.supervision_error is True
+        cleanup_ok = sup._cleanup()
+        assert cleanup_ok is False
+        rc = sup.classify_outcome(
+            leader_completion_time=1001.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=cleanup_ok,
+        )
+        assert rc == 125
+
+    def test_spawn_during_cleanup_is_discovered_and_cleaned(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        import signal
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        root = adapter.register_process(600, 1, 600, "1000.0", has_capability=True)
+        sup.root_identity = root
+        sup.root_pgid = 600
+        sup.ledger[root] = root
+
+        # Hook: when root 600 receives SIGTERM during cleanup, it dynamically spawns child 601
+        child_ref = []
+        def spawn_child_on_term():
+            if not child_ref:
+                c = adapter.register_process(601, 600, 601, "1000.5", has_capability=True)
+                child_ref.append(c)
+
+        adapter.signal_hooks.append((600, signal.SIGTERM, spawn_child_on_term))
+
+        cleanup_ok = sup._cleanup()
+        assert cleanup_ok is True
+        assert len(child_ref) == 1
+        assert adapter.is_alive(root) is False
+        assert adapter.is_alive(child_ref[0]) is False
+        rc = sup.classify_outcome(
+            leader_completion_time=1001.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=cleanup_ok,
+        )
+        assert rc == 0
+
+    def test_unrelated_simultaneous_processes_survive_untouched(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        root = adapter.register_process(700, 1, 700, "1000.0", has_capability=True)
+        sup.root_identity = root
+        sup.root_pgid = 700
+        sup.ledger[root] = root
+
+        # Unrelated processes with ppid=1, distinct PGIDs, no capability
+        p_sleep = adapter.register_process(801, 1, 801, "900.0", has_capability=False)
+        p_node = adapter.register_process(802, 1, 802, "950.0", has_capability=False)
+        p_python = adapter.register_process(803, 1, 803, "960.0", has_capability=False)
+
+        sup._refresh_ledger()
+        assert p_sleep not in sup.ledger
+        assert p_node not in sup.ledger
+        assert p_python not in sup.ledger
+
+        cleanup_ok = sup._cleanup()
+        assert cleanup_ok is True
+        assert adapter.is_alive(p_sleep) is True
+        assert adapter.is_alive(p_node) is True
+        assert adapter.is_alive(p_python) is True
+
+    def test_parent_revalidation_rejects_reused_ppid(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        root = adapter.register_process(900, 1, 900, "1000.0", has_capability=True)
+        sup.root_identity = root
+        sup.root_pgid = 900
+        sup.ledger[root] = root
+
+        # Root dies and PID 900 is reused by an unrelated process with a newer birth marker
+        adapter.alive.discard(900)
+        reused_root = adapter.register_process(900, 1, 1, "2000.0", has_capability=False)
+        assert reused_root.birth_marker == "2000.0"
+
+        # A new process claims ppid=900, but its parent is the reused 900 (not original root)
+        fake_child = adapter.register_process(901, 900, 901, "2000.1", has_capability=False)
+        assert adapter.processes[fake_child.pid].ppid == 900
+
+        sup._refresh_ledger()
+        # fake_child should NOT be admitted to ledger
+        assert fake_child not in sup.ledger
+
+    def test_pgid_reuse_never_signalled_as_group(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        orig_root = adapter.register_process(950, 1, 950, "1000.0", has_capability=True)
+        sup.root_identity = orig_root
+        sup.root_pgid = 950
+        sup.ledger[orig_root] = orig_root
+
+        # Root dies and unrelated process takes PGID 950
+        adapter.alive.discard(950)
+        reused_pgid = adapter.register_process(950, 1, 950, "3000.0", has_capability=False)
+        # Unrelated candidate claiming PGID 950
+        cand_951 = adapter.register_process(951, 1, 950, "3000.1", has_capability=False)
+
+        # 1. Refresh ledger must NOT admit candidate in reused PGID
+        sup._refresh_ledger()
+        assert cand_951 not in sup.ledger
+
+        # 2. Cleanup must NOT signal the reused PGID 950
+        cleanup_ok = sup._cleanup(leader_pid=0)
+        assert cleanup_ok is True
+        assert adapter.is_alive(reused_pgid) is True
+        assert adapter.is_alive(cand_951) is True
+        # Verify signal_log has no signals to pgid 950
+        pgid_signals = [item for item in adapter.signal_log if item[0] == "pgid" and item[1] == 950]
+        assert len(pgid_signals) == 0
+
+    def test_stale_snapshot_disappeared_parent_or_root_never_admitted_nor_signalled(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter, ProcessIdentity,
+        )
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        # Record parent 800 and root 800 in ledger
+        ident_800 = ProcessIdentity(800, "1000.0")
+        sup.root_identity = ident_800
+        sup.root_pgid = 800
+        sup.ledger[ident_800] = ident_800
+
+        # Candidate 801 claiming ppid=800, candidate 802 claiming pgid=800
+        cand_801 = adapter.register_process(801, 800, 801, "1500.0", has_capability=False)
+        cand_802 = adapter.register_process(802, 1, 800, "1500.0", has_capability=False)
+
+        # But parent/root 800 is not in adapter (disappeared before revalidation)
+        assert adapter.get_identity(800) is None
+
+        sup._refresh_ledger()
+        # Neither candidate should be admitted because positive identity lookup failed
+        assert cand_801 not in sup.ledger
+        assert cand_802 not in sup.ledger
+
+        # Cleanup should not signal them
+        sup._cleanup(leader_pid=0)
+        assert adapter.is_alive(cand_801) is True
+        assert adapter.is_alive(cand_802) is True
+
+    def test_signalling_failure_returns_125(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor, ScriptedAdapter,
+        )
+        adapter = ScriptedAdapter()
+        adapter.fail_signalling = True
+        sup = ProcessSupervisor(timeout_seconds=2.0, command=["cmd"], adapter=adapter)
+
+        root = adapter.register_process(700, 1, 700, "1000.0", has_capability=True)
+        sup.root_identity = root
+        sup.root_pgid = 700
+        sup.ledger[root] = root
+
+        cleanup_ok = sup._cleanup(leader_pid=700)
+        assert cleanup_ok is False
+        assert sup.supervision_error is True
+
+        rc = sup.classify_outcome(
+            leader_completion_time=1001.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=cleanup_ok,
+        )
+        assert rc == 125
+
+    def test_relay_error_and_eof_failure_returns_125(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import errno
+        import os
+        import sys
+        from review_process_supervisor import ProcessSupervisor
+
+        # Normal execution to baseline
+        sup = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=[sys.executable, "-c", "import sys; sys.stdout.write('hello'); sys.stdout.flush(); sys.exit(0)"],
+        )
+        rc = sup.run()
+        assert rc == 0
+
+        # Inject relay write failure during run()
+        orig_write = os.write
+        def broken_write(fd, data):
+            if fd in (1, 2):
+                raise OSError(errno.EIO, "Simulated I/O error on relay dest")
+            return orig_write(fd, data)
+
+        monkeypatch.setattr(os, "write", broken_write)
+        sup2 = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=[sys.executable, "-c", "import sys; sys.stdout.write('data'); sys.stdout.flush(); sys.exit(0)"],
+        )
+        rc2 = sup2.run()
+        assert rc2 == 125
+        assert sup2.supervision_error is True
+
+    def test_barrier_readiness_failure_aborts_without_releasing_target(self, tmp_path: pathlib.Path) -> None:
+        import sys
+        marker_file = tmp_path / "executed.marker"
+
+        # End-to-end execution of ProcessSupervisor.run() with a mock child readiness failure
+        from review_process_supervisor import ProcessSupervisor, SUPERVISOR_ERROR_RC, ScriptedAdapter
+        adapter = ScriptedAdapter()
+        # If adapter returns None for identity at barrier, run() aborts with SUPERVISOR_ERROR_RC (125)
+        # without releasing the target barrier.
+        sup = ProcessSupervisor(
+            timeout_seconds=2.0,
+            command=[
+                sys.executable,
+                "-c",
+                f"import pathlib; pathlib.Path('{marker_file}').write_text('ran');",
+            ],
+            adapter=adapter,
+        )
+        # In adapter, pid lookup returns None initially -> ready verification fails closed
+        rc = sup.run()
+        assert rc == SUPERVISOR_ERROR_RC
+        assert not marker_file.exists()
+
+    def test_cleanup_continues_for_all_members_after_single_inspection_error(self) -> None:
+        import signal
+        from review_process_supervisor import ProcessSupervisor, ScriptedAdapter
+
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["cmd"], adapter=adapter)
+
+        # Register root (100) and two children (101, 102), all term_resistant to verify signal delivery
+        r_ident = adapter.register_process(100, 1, 100, "100.000000", term_resistant=True)
+        c1_ident = adapter.register_process(101, 100, 100, "101.000000", term_resistant=True)
+        c2_ident = adapter.register_process(102, 100, 100, "102.000000", term_resistant=True)
+
+        sup.root_identity = r_ident
+        sup.root_pgid = 100
+        sup.ledger[r_ident] = r_ident
+        sup.ledger[c1_ident] = c1_ident
+        sup.ledger[c2_ident] = c2_ident
+
+        # Inject inspection uncertainty on PID 101
+        adapter.fail_inspection_pids.add(101)
+
+        # Run cleanup
+        cleanup_res = sup._cleanup(leader_pid=100)
+
+        # 1. Cleanup must fail closed and record supervision error
+        assert cleanup_res is False
+        assert sup.supervision_error is True
+        assert sup.classify_outcome(
+            leader_completion_time=1.0, child_status=0, timed_out=False, cleanup_ok=cleanup_res
+        ) == 125
+
+        # 2. Cleanup must have continued and sent signals to remaining members (100, 102)
+        signalled_pids_term = [pid for kind, pid, sig in adapter.signal_log if kind == "pid" and sig == signal.SIGTERM]
+        signalled_pgid_term = [pgid for kind, pgid, sig in adapter.signal_log if kind == "pgid" and sig == signal.SIGTERM]
+        signalled_pgid_kill = [pgid for kind, pgid, sig in adapter.signal_log if kind == "pgid" and sig == signal.SIGKILL]
+
+        assert 100 in signalled_pgid_term
+        assert 100 in signalled_pgid_kill
+        assert 100 in signalled_pids_term
+        assert 102 in signalled_pids_term
+
+    def test_candidate_capability_inspection_failure_sets_supervision_error_returns_125(self) -> None:
+        from review_process_supervisor import ProcessSupervisor, ScriptedAdapter, SUPERVISOR_ERROR_RC
+
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["cmd"], adapter=adapter)
+
+        # Register root (100) and a descendant candidate (101)
+        r_ident = adapter.register_process(100, 1, 100, "100.000000")
+        adapter.register_process(101, 100, 100, "101.000000", has_capability=True)
+
+        sup.root_identity = r_ident
+        sup.root_pgid = 100
+        sup.ledger[r_ident] = r_ident
+
+        # Inject capability inspection uncertainty on PID 101 during candidate discovery
+        adapter.fail_capability_pids.add(101)
+
+        # Refresh ledger must catch InspectionError, set supervision_error = True
+        sup._refresh_ledger()
+
+        assert sup.supervision_error is True
+        rc = sup.classify_outcome(
+            leader_completion_time=1.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=True,
+        )
+        assert rc == SUPERVISOR_ERROR_RC
+
+    def test_terminal_event_before_deadline_polled_after_deadline_returns_success(self) -> None:
+        from review_process_supervisor import ProcessSupervisor, ScriptedClock, ScriptedAdapter
+
+        clock = ScriptedClock(start=100.0)
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["cmd"], adapter=adapter, clock=clock)
+        sup.start_time = 100.0
+        sup.deadline = 105.0
+
+        # Terminal event arrived at 104.0 (before deadline 105.0), polled/classified after deadline at 106.0
+        rc = sup.classify_outcome(
+            leader_completion_time=104.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=True,
+        )
+        assert rc == 0
+
+    def test_stop_continue_before_deadline_terminal_exit_after_deadline_returns_124(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor,
+            ScriptedClock,
+            ScriptedAdapter,
+            REVIEW_TIMEOUT_RC,
+        )
+
+        clock = ScriptedClock(start=100.0)
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=["mock_cmd"],
+            adapter=adapter,
+            clock=clock,
+        )
+        sup.start_time = 100.0
+        sup.deadline = 105.0
+
+        # Outcome classification logic with deadline arbitration:
+        # Stop at 101.0, Continue at 102.0, Terminal Exit at 106.0 (after deadline 105.0)
+        rc_classified = sup.classify_outcome(
+            leader_completion_time=106.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=True,
+        )
+        assert rc_classified == REVIEW_TIMEOUT_RC
+
+    def test_darwin_adapter_non_definitive_inspection_results(self, monkeypatch) -> None:
+        import sys
+        if sys.platform != "darwin":
+            pytest.skip("Darwin-specific test requires Darwin platform")
+        import ctypes
+        import errno
+        import os
+        from review_process_supervisor import DarwinMembershipAdapter, InspectionError
+
+        adapter = DarwinMembershipAdapter()
+        cap_bytes = b"CAP_KEY=test_cap"
+
+        # 1. Direct _get_bsdinfo testing on living vs dead vs other-user process
+        def mock_pidinfo_fail(pid, flavor, arg, ptr, sz):
+            ctypes.set_errno(errno.EPERM)
+            return 0
+
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_pidinfo_fail)
+
+        # Other user verified by proc_bsdshortinfo (effective UID != my_uid) -> returns None
+        def mock_pidinfo_shortinfo_other_user(pid, flavor, arg, ptr, sz):
+            if flavor == adapter.PROC_PIDT_BSHORTINFO and ptr:
+                sinfo = ctypes.cast(ptr, ctypes.POINTER(adapter.proc_bsdshortinfo)).contents
+                sinfo.pbsi_status = 2  # Alive
+                sinfo.pbsi_uid = os.getuid() + 1000  # Provably different UID
+                return sz
+            ctypes.set_errno(errno.EPERM)
+            return 0
+
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_pidinfo_shortinfo_other_user)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+        assert adapter._get_bsdinfo(99999) is None
+
+        # Zombie verified by proc_bsdshortinfo (pbsi_status == 5) -> returns None
+        def mock_pidinfo_shortinfo_zombie(pid, flavor, arg, ptr, sz):
+            if flavor == adapter.PROC_PIDT_BSHORTINFO and ptr:
+                sinfo = ctypes.cast(ptr, ctypes.POINTER(adapter.proc_bsdshortinfo)).contents
+                sinfo.pbsi_status = 5  # SZOMB
+                sinfo.pbsi_uid = os.getuid()
+                return sz
+            ctypes.set_errno(errno.EPERM)
+            return 0
+
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_pidinfo_shortinfo_zombie)
+        assert adapter._get_bsdinfo(99999) is None
+
+        # Same-UID living process with indeterminate permission failure (UID not proven different) -> raises InspectionError
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_pidinfo_fail)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)  # Living process
+        with pytest.raises(InspectionError):
+            adapter._get_bsdinfo(99999)
+
+        # Unresolved kill PermissionError without UID proof -> raises InspectionError
+        def mock_kill_perm_error(pid, sig):
+            raise PermissionError("Indeterminate permission error")
+
+        monkeypatch.setattr(os, "kill", mock_kill_perm_error)
+        with pytest.raises(InspectionError):
+            adapter._get_bsdinfo(99999)
+
+        # When dead (kill raises ProcessLookupError), _get_bsdinfo returns None
+        monkeypatch.setattr(os, "kill", lambda pid, sig: (_ for _ in ()).throw(ProcessLookupError()))
+        assert adapter._get_bsdinfo(99999) is None
+
+        # 2. Direct enumerate_candidates testing
+        def mock_listpids(buf, bufsz):
+            if buf is None:
+                return 2
+            buf[0] = 101  # other user
+            buf[1] = 102  # same UID but inspection failure
+            return 2
+
+        monkeypatch.setattr(adapter.libproc, "proc_listallpids", mock_listpids)
+
+        def mock_pidinfo_multi(pid, flavor, arg, ptr, sz):
+            if flavor == adapter.PROC_PIDT_BSHORTINFO and ptr:
+                sinfo = ctypes.cast(ptr, ctypes.POINTER(adapter.proc_bsdshortinfo)).contents
+                if pid == 101:
+                    sinfo.pbsi_status = 2
+                    sinfo.pbsi_uid = os.getuid() + 1000  # Provably other user
+                    return sz
+            ctypes.set_errno(errno.EPERM)
+            return 0
+
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_pidinfo_multi)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+
+        with pytest.raises(InspectionError):
+            adapter.enumerate_candidates("test_cap")
+
+        # 3. sysctl KERN_PROCARGS2 capability probing
+        class MockBsdInfo:
+            pbi_status = 2  # Alive
+            pbi_start_tvsec = 1000
+            pbi_start_tvusec = 0
+            pbi_uid = os.getuid()
+            pbi_ruid = os.getuid()
+            pbi_ppid = 1
+            pbi_pgid = 99999
+
+        monkeypatch.setattr(adapter, "_get_bsdinfo", lambda pid: MockBsdInfo() if pid == 99999 else None)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)  # Living process
+
+        # Non-definitive sysctl errnos (EINVAL, EIO, 14/EFAULT, EPERM) must raise InspectionError on living candidate
+        for err in (errno.EINVAL, errno.EIO, 14, errno.EPERM):
+            def mock_sysctl_fail(mib, miblen, buf, bufp, newp, newlen, _err=err):
+                ctypes.set_errno(_err)
+                return -1
+
+            monkeypatch.setattr(adapter.libc, "sysctl", mock_sysctl_fail)
+            with pytest.raises(InspectionError):
+                adapter._has_capability(99999, cap_bytes, birth_marker="1000.000000")
+
+        # Zombie process (pbi_status == 5) returns False
+        class MockZombieInfo:
+            pbi_status = 5
+            pbi_start_tvsec = 1000
+            pbi_start_tvusec = 0
+
+        monkeypatch.setattr(adapter, "_get_bsdinfo", lambda pid: MockZombieInfo())
+        assert adapter._has_capability(99999, cap_bytes, birth_marker="1000.000000") is False
+
+        # Birth marker mismatch (recycled PID) returns False
+        monkeypatch.setattr(adapter, "_get_bsdinfo", lambda pid: MockBsdInfo())
+        assert adapter._has_capability(99999, cap_bytes, birth_marker="2000.000000") is False
+
+        # Dead process via kill raising ProcessLookupError returns False
+        def mock_kill_dead(pid, sig):
+            raise ProcessLookupError()
+
+        monkeypatch.setattr(os, "kill", mock_kill_dead)
+        assert adapter._has_capability(99999, cap_bytes, birth_marker="1000.000000") is False
+
+    def test_linux_adapter_inspection_fail_closed(self, monkeypatch, tmp_path) -> None:
+        import os
+        from review_process_supervisor import LinuxMembershipAdapter, InspectionError
+
+        adapter = LinuxMembershipAdapter()
+
+        # 1. Malformed /proc/<pid>/stat without paren
+        proc_dir = tmp_path / "proc"
+        proc_dir.mkdir()
+        pid_dir = proc_dir / "123"
+        pid_dir.mkdir()
+        (pid_dir / "stat").write_text("invalid stat format without paren")
+
+        class MockStat:
+            st_uid = os.getuid()
+
+        orig_open = open
+        monkeypatch.setattr("os.listdir", lambda path: ["123"] if path == "/proc" else [])
+        monkeypatch.setattr("os.stat", lambda p: MockStat())
+        monkeypatch.setattr("builtins.open", lambda p, *args, **kwargs: orig_open(str(p).replace("/proc", str(proc_dir)), *args, **kwargs))
+
+        # Linux get_identity fails closed on malformed stat
+        with pytest.raises(InspectionError):
+            adapter.get_identity(123)
+
+        # 2. Malformed non-integer starttime field
+        (pid_dir / "stat").write_text("123 (mock) S 1 123 123 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 not_an_int 0 0 0 0")
+        with pytest.raises(InspectionError):
+            adapter.get_identity(123)
+
+        with pytest.raises(InspectionError):
+            adapter.enumerate_candidates("cap")
+
+        # 3. Linux enumerate_candidates fail closed on permission uncertainty on same UID
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)  # Same UID living process
+
+        def perm_error_stat(p):
+            raise PermissionError("restricted proc")
+        monkeypatch.setattr(os, "stat", perm_error_stat)
+
+        with pytest.raises(InspectionError):
+            adapter.enumerate_candidates("cap")
+
+    def test_birth_marker_numeric_comparison_across_digit_boundaries(self) -> None:
+        from review_process_supervisor import (
+            parse_birth_marker,
+            compare_birth_markers,
+            ProcessSupervisor,
+            ScriptedAdapter,
+            ProcessIdentity,
+            CandidateInfo,
+            InspectionError,
+        )
+
+        # 1. Numeric vs lexicographical ordering: 100 > 99
+        assert compare_birth_markers("100", "99") > 0
+        assert compare_birth_markers("100.000000", "99.999999") > 0
+        assert compare_birth_markers("100.000001", "100.000000") > 0
+        assert compare_birth_markers("100.000000", "100.000000") == 0
+        assert compare_birth_markers("99.999999", "100.000000") < 0
+
+        # Malformed birth markers fail closed
+        with pytest.raises(InspectionError):
+            parse_birth_marker("not_an_int")
+        with pytest.raises(InspectionError):
+            parse_birth_marker("")
+
+        # 2. Ledger admittance across numeric digit boundary
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["mock"], adapter=adapter)
+
+        # Root has birth "99", child has birth "100" (born after launch)
+        root_ident = adapter.register_process(100, 1, 100, "99", has_capability=True)
+        adapter.processes[101] = CandidateInfo(
+            pid=101,
+            ppid=100,
+            pgid=100,
+            birth_marker="100",
+            is_zombie=False,
+            has_capability=False,  # relies on parent ancestry proof
+        )
+        adapter.identities[101] = ProcessIdentity(101, "100")
+        adapter.alive.add(101)
+
+        sup.root_identity = root_ident
+        sup.root_pgid = 100
+        sup.ledger[root_ident] = root_ident
+
+        sup._refresh_ledger()
+
+        child_ident = ProcessIdentity(101, "100")
+        assert child_ident in sup.ledger  # Successfully admitted because 100 >= 99 numerically
+
+    def test_process_identity_pid_reuse_tracking_in_ledger(self) -> None:
+        from review_process_supervisor import (
+            ProcessSupervisor,
+            ScriptedAdapter,
+            ProcessIdentity,
+            CandidateInfo,
+        )
+
+        adapter = ScriptedAdapter()
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["mock"], adapter=adapter)
+
+        # Register initial root (100) and child (101, birth="1000.0")
+        root_ident = adapter.register_process(100, 1, 100, "100.0", has_capability=True)
+        child1_ident = adapter.register_process(101, 100, 100, "1000.0", has_capability=True)
+
+        sup.root_identity = root_ident
+        sup.root_pgid = 100
+        sup.ledger[root_ident] = root_ident
+        sup.ledger[child1_ident] = child1_ident
+
+        assert child1_ident in sup.ledger
+
+        # Now simulate child1 exiting, and a new process (child2) recycling PID 101 with birth="2000.0"
+        adapter.alive.remove(101)  # child1 is dead
+        adapter.identities[101] = ProcessIdentity(101, "2000.0")
+        adapter.processes[101] = CandidateInfo(
+            pid=101,
+            ppid=100,
+            pgid=100,
+            birth_marker="2000.0",
+            is_zombie=False,
+            has_capability=True,
+        )
+        adapter.alive.add(101)  # child2 is alive
+
+        # Refresh ledger: should retire old (101, "1000.0") and admit new (101, "2000.0")
+        sup._refresh_ledger()
+
+        child2_ident = ProcessIdentity(101, "2000.0")
+        assert child1_ident not in sup.ledger
+        assert child2_ident in sup.ledger
+        assert sup.ledger[child2_ident] == child2_ident
+
+    def test_production_sigchld_poll_leader_deadline_arbitration(self, monkeypatch) -> None:
+        import os
+        from review_process_supervisor import ProcessSupervisor, ScriptedClock
+
+        clock = ScriptedClock(start=100.0)
+        sup = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=["mock_cmd"],
+            clock=clock,
+            wait_event_fn=None,  # Exercise real production _poll_leader
+        )
+        sup.start_time = 100.0
+        sup.deadline = 105.0
+
+        # 1. SIGCHLD arrived at 104.0 (before deadline 105.0), queuing (status=0, event_time=104.0)
+        sup.observed_events.append((0, 104.0))
+        clock._now = 106.0  # Poll executed after deadline
+        waited_pid, status, event_time = sup._poll_leader(1234, os.WNOHANG)
+        assert waited_pid == 1234
+        assert event_time == 104.0  # Uses exact observed timestamp!
+
+        rc = sup.classify_outcome(
+            leader_completion_time=event_time,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=True,
+        )
+        assert rc == 0  # Not 124 timeout!
+
+        # 2. When observed_events is empty, _poll_leader calls _drain_wait_events directly
+        def mock_waitpid_single(pid, flags):
+            return (pid, 0)
+        monkeypatch.setattr(os, "waitpid", mock_waitpid_single)
+        clock._now = 104.5
+        waited_pid, status, event_time = sup._poll_leader(1234, os.WNOHANG)
+        assert waited_pid == 1234
+        assert status == 0
+        assert event_time == 104.5
+
+    def test_coalesced_sigchld_notification_draining_and_pairing(self, monkeypatch) -> None:
+        import os
+        from review_process_supervisor import ProcessSupervisor, ScriptedClock
+
+        clock = ScriptedClock(start=100.0)
+        sup = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=["mock_cmd"],
+            clock=clock,
+            wait_event_fn=None,
+        )
+        sup.start_time = 100.0
+        sup.deadline = 105.0
+
+        # Simulate waitpid sequence where multiple state changes occurred across distinct timestamps:
+        # Event 1: STOP (0x7F) at clock 101.0
+        # Event 2: CONT (0xFFFF) at clock 102.0
+        # Event 3: EXIT 0 (0) at clock 103.5
+        # Event 4: 0 (no more events)
+        statuses_and_times = [(1234, 0x7F, 101.0), (1234, 0xFFFF, 102.0), (1234, 0, 103.5), (0, 0, 103.5)]
+        call_idx = 0
+
+        def mock_waitpid_coalesced(pid, flags):
+            nonlocal call_idx
+            wpid, st, t = statuses_and_times[call_idx]
+            call_idx += 1
+            clock._now = t
+            return (wpid, st)
+
+        monkeypatch.setattr(os, "waitpid", mock_waitpid_coalesced)
+
+        # Call production _drain_wait_events
+        sup._drain_wait_events(1234, os.WNOHANG)
+
+        assert len(sup.observed_events) == 3
+        # Each reaped status has its exact reaped observation timestamp
+        assert sup.observed_events[0] == (0x7F, 101.0)
+        assert sup.observed_events[1] == (0xFFFF, 102.0)
+        assert sup.observed_events[2] == (0, 103.5)
+
+        # Now simulate polling loop executing later, past the deadline at 107.0
+        clock._now = 107.0
+
+        # Poll 1: STOP
+        wpid, st1, t1 = sup._poll_leader(1234, os.WNOHANG)
+        assert os.WIFSTOPPED(st1)
+        assert t1 == 101.0
+
+        # Poll 2: CONT
+        wpid, st2, t2 = sup._poll_leader(1234, os.WNOHANG)
+        assert st2 == 0xFFFF
+        assert t2 == 102.0
+
+        # Poll 3: EXIT 0
+        wpid, st3, t3 = sup._poll_leader(1234, os.WNOHANG)
+        assert os.WIFEXITED(st3)
+        assert t3 == 103.5  # Paired with exact observation 103.5, NOT 107.0!
+
+        # Classify outcome: completion was at 103.5 <= deadline 105.0 -> Exit status 0
+        rc = sup.classify_outcome(
+            leader_completion_time=t3,
+            child_status=os.WEXITSTATUS(st3),
+            timed_out=False,
+            cleanup_ok=True,
+        )
+        assert rc == 0
+
+    def test_coalesced_wait_pre_deadline_terminal_event_consumed_post_deadline_in_run(self, monkeypatch) -> None:
+        import os
+        import sys
+        from review_process_supervisor import ProcessSupervisor, ScriptedClock
+
+        clock = ScriptedClock(start=100.0)
+        sup = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=[sys.executable, "-c", "import sys; sys.exit(0)"],
+            clock=clock,
+        )
+
+        # Preload observed_events with:
+        # 1. Non-terminal STOP (0x7F at 101.0)
+        # 2. Terminal EXIT 0 (0 at 104.0, observed before deadline 105.0)
+        # and mark terminal_reaped = True.
+        sup.observed_events.append((0x7F, 101.0))
+        sup.observed_events.append((0, 104.0))
+        sup.terminal_reaped = True
+
+        post_deadline_drain_called = False
+
+        def mock_waitpid_post_deadline(pid_arg, flags):
+            nonlocal post_deadline_drain_called
+            post_deadline_drain_called = True
+            # Subprocess already exited/reaped earlier, so post-deadline waitpid raises ChildProcessError / ECHILD
+            raise ChildProcessError("No child processes")
+
+        monkeypatch.setattr(os, "waitpid", mock_waitpid_post_deadline)
+        monkeypatch.setattr(sup, "_cleanup", lambda leader_pid=None: True)
+
+        # In run(), first poll consumes STOP at 101.0.
+        # After consuming STOP, advance monotonic clock past deadline to 108.0.
+        original_poll_leader = sup._poll_leader
+
+        def mock_poll_leader(pid, flags):
+            wpid, st, t = original_poll_leader(pid, flags)
+            if os.WIFSTOPPED(st):
+                clock._now = 108.0  # Monotonically advance to 108.0 past 105.0 deadline
+            return wpid, st, t
+
+        monkeypatch.setattr(sup, "_poll_leader", mock_poll_leader)
+
+        rc = sup.run()
+        assert post_deadline_drain_called is True
+        assert clock.monotonic() >= 108.0
+        assert sup.supervision_error is False
+        # Leader completed at pre-deadline timestamp 104.0 <= 105.0 -> Retains exit code 0!
+        assert rc == 0
+
+    def test_empty_queue_echild_sets_supervision_error_returns_125(self, monkeypatch) -> None:
+        import os
+        import sys
+        from review_process_supervisor import (
+            ProcessSupervisor,
+            ScriptedClock,
+            SUPERVISOR_ERROR_RC,
+        )
+
+        clock = ScriptedClock(start=100.0)
+        sup = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=[sys.executable, "-c", "import sys; sys.exit(0)"],
+            clock=clock,
+        )
+
+        def mock_waitpid_echild(pid_arg, flags):
+            raise ChildProcessError("No child processes")
+
+        monkeypatch.setattr(os, "waitpid", mock_waitpid_echild)
+        monkeypatch.setattr(sup, "_cleanup", lambda leader_pid=None: True)
+
+        rc = sup.run()
+        assert sup.supervision_error is True
+        assert rc == SUPERVISOR_ERROR_RC  # Returns 125, not 124!
+
+    def test_child_process_error_recovery_with_queued_terminal_event(self, monkeypatch) -> None:
+        import os
+        import sys
+        from review_process_supervisor import ProcessSupervisor, ScriptedClock
+
+        clock = ScriptedClock(start=100.0)
+        sup = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=[sys.executable, "-c", "import sys; sys.exit(0)"],
+            clock=clock,
+        )
+
+        # Drive run() into a state where:
+        # 1. Non-terminal STOP (0x7F at 101.0) and pre-deadline terminal EXIT 0 (0 at 102.0) are queued in observed_events.
+        # 2. In run(), first _poll_leader consumes STOP.
+        # 3. Before next poll, waitpid raises ChildProcessError (e.g. process wait ownership lost).
+        # 4. _poll_leader raises ChildProcessError on the second poll.
+        # 5. run()'s except ChildProcessError recovers and drains observed_events, finding the queued EXIT 0.
+        # 6. run() returns child exit status 0, and supervision_error remains False!
+        sup.observed_events.append((0x7F, 101.0))  # STOP
+        sup.observed_events.append((0, 102.0))     # EXIT 0
+        sup.terminal_reaped = True
+
+        echild_reached = False
+
+        def mock_waitpid_raise(pid_arg, flags):
+            nonlocal echild_reached
+            echild_reached = True
+            raise ChildProcessError("No child processes")
+
+        monkeypatch.setattr(os, "waitpid", mock_waitpid_raise)
+        monkeypatch.setattr(sup, "_cleanup", lambda leader_pid=None: True)
+
+        # When STOP is polled, queue still has EXIT 0. On next poll, force ChildProcessError from _poll_leader
+        poll_count = 0
+        original_poll_leader = sup._poll_leader
+
+        def mock_poll_leader_with_echild(pid, flags):
+            nonlocal poll_count, echild_reached
+            poll_count += 1
+            if poll_count == 1:
+                return original_poll_leader(pid, flags)  # returns STOP
+            echild_reached = True
+            raise ChildProcessError("Lost wait ownership")
+
+        monkeypatch.setattr(sup, "_poll_leader", mock_poll_leader_with_echild)
+
+        rc = sup.run()
+        assert echild_reached is True
+        # Queued terminal event reaped before ECHILD -> Returns child status 0, not 125
+        assert sup.supervision_error is False
+        assert rc == 0
+
+    def test_state_machine_with_scripted_wait_events(self) -> None:
+        import os
+        import sys
+        from review_process_supervisor import (
+            ProcessSupervisor,
+            ScriptedClock,
+            REVIEW_TIMEOUT_RC,
+        )
+
+        # Case A: Stop at 101.0, Continue at 102.0, Exit 0 at 104.0 (before deadline 105.0)
+        # Polled at 106.0 -> Retains success 0!
+        clock_a = ScriptedClock(start=100.0)
+        events_a = [
+            (None, os.WNOHANG | os.WUNTRACED, 101.0, lambda pid: (pid, 0x7F | (19 << 8))),  # STOP (SIGSTOP=19)
+            (None, os.WNOHANG | os.WUNTRACED, 102.0, lambda pid: (pid, 0xFFFF)),  # CONT
+            (None, os.WNOHANG | os.WUNTRACED, 104.0, lambda pid: (pid, 0)),  # Exit 0
+        ]
+
+        def wait_event_fn_a(pid: int, flags: int) -> tuple[int, int, float]:
+            if events_a:
+                _, _, t, fn = events_a.pop(0)
+                clock_a._now = max(clock_a._now, t)
+                wpid, st = fn(pid)
+                return wpid, st, t
+            return 0, 0, clock_a.monotonic()
+
+        sup_a = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=[sys.executable, "-c", "import sys; sys.exit(0)"],
+            clock=clock_a,
+            wait_event_fn=wait_event_fn_a,
+        )
+        rc_a = sup_a.run()
+        assert rc_a == 0
+
+        # Case B: Stop at 101.0, Continue at 102.0, Exit 0 at 106.0 (after deadline 105.0)
+        # -> Returns 124 timeout!
+        clock_b = ScriptedClock(start=100.0)
+        events_b = [
+            (None, os.WNOHANG | os.WUNTRACED, 101.0, lambda pid: (pid, 0x7F | (19 << 8))),  # STOP
+            (None, os.WNOHANG | os.WUNTRACED, 102.0, lambda pid: (pid, 0xFFFF)),  # CONT
+            (None, os.WNOHANG | os.WUNTRACED, 106.0, lambda pid: (pid, 0)),  # Exit 0 at 106.0
+        ]
+
+        def wait_event_fn_b(pid: int, flags: int) -> tuple[int, int, float]:
+            if events_b:
+                _, _, t, fn = events_b.pop(0)
+                clock_b._now = max(clock_b._now, t)
+                wpid, st = fn(pid)
+                return wpid, st, t
+            clock_b._now += 1.0
+            return 0, 0, clock_b.monotonic()
+
+        sup_b = ProcessSupervisor(
+            timeout_seconds=5.0,
+            command=[sys.executable, "-c", "import sys; sys.exit(0)"],
+            clock=clock_b,
+            wait_event_fn=wait_event_fn_b,
+        )
+        rc_b = sup_b.run()
+        assert rc_b == REVIEW_TIMEOUT_RC
+
+    def test_sigchld_stop_continue_terminal_sequence(self) -> None:
+        import os
+        import signal
+        import sys
+        import time
+        from review_process_supervisor import ProcessSupervisor
+
+        cmd = [
+            sys.executable,
+            "-c",
+            "import os, signal, sys; os.kill(os.getpid(), signal.SIGSTOP); sys.exit(0)",
+        ]
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=cmd)
+
+        import threading
+        def wake_child():
+            for _ in range(500):
+                time.sleep(0.01)
+                if sup.root_identity is not None:
+                    pid = sup.root_identity.pid
+                    for _ in range(200):
+                        time.sleep(0.02)
+                        try:
+                            os.kill(pid, signal.SIGCONT)
+                        except OSError:
+                            break
+                    break
+
+        t = threading.Thread(target=wake_child, daemon=True)
+        t.start()
+        rc = sup.run()
+        t.join(timeout=2.0)
+        assert rc == 0
+
+        # Outcome classification logic with deadline arbitration
+        sup_class = ProcessSupervisor(timeout_seconds=10.0, command=["cmd"])
+        sup_class.start_time = 100.0
+        sup_class.deadline = 110.0
+
+        # 1. Normal completion before deadline
+        rc = sup_class.classify_outcome(
+            leader_completion_time=105.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=True,
+        )
+        assert rc == 0
+
+        # 2. Leader completion after deadline returns 124
+        rc_timeout = sup_class.classify_outcome(
+            leader_completion_time=115.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=True,
+        )
+        assert rc_timeout == 124
+
+        # 3. Timeout without leader completion returns 124
+        rc_timed_out = sup_class.classify_outcome(
+            leader_completion_time=None,
+            child_status=None,
+            timed_out=True,
+            cleanup_ok=True,
+        )
+        assert rc_timed_out == 124
+
+    def test_darwin_proc_listallpids_nonpositive_raises_inspection_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import sys
+        if sys.platform != "darwin":
+            pytest.skip("Darwin-specific test")
+        from review_process_supervisor import DarwinMembershipAdapter, InspectionError
+        adapter = DarwinMembershipAdapter()
+
+        # Mock proc_listallpids returning 0 with errno 0 (must raise InspectionError, not return [])
+        def mock_proc_listallpids_zero(buf, bufsz):
+            import ctypes
+            ctypes.set_errno(0)
+            return 0
+
+        monkeypatch.setattr(adapter.libproc, "proc_listallpids", mock_proc_listallpids_zero)
+        with pytest.raises(InspectionError, match="proc_listallpids count failed"):
+            adapter.enumerate_candidates("test_cap")
+
+    def test_scripted_adapter_docstrings_and_throwing_contracts(self) -> None:
+        from review_process_supervisor import ScriptedAdapter, InspectionError, ProcessIdentity
+        adapter = ScriptedAdapter()
+
+        # Check docstrings on all methods
+        for method_name in ["register_process", "get_identity", "enumerate_candidates", "is_alive", "is_pgid_alive", "signal_identity", "signal_pgid"]:
+            method = getattr(adapter, method_name)
+            assert method.__doc__ is not None, f"Missing docstring on {method_name}"
+            assert "Returns:" in method.__doc__, f"Missing Returns: section in {method_name}"
+
+        # Check throwing contracts
+        adapter.fail_inspection_pids.add(100)
+        with pytest.raises(InspectionError):
+            adapter.get_identity(100)
+
+        with pytest.raises(InspectionError):
+            adapter.is_alive(ProcessIdentity(100, "1.0"))
+
+        with pytest.raises(InspectionError):
+            adapter.signal_identity(ProcessIdentity(100, "1.0"), 15)
+
+        adapter.fail_candidate_discovery = True
+        with pytest.raises(InspectionError):
+            adapter.enumerate_candidates("cap")
+
+    def test_drain_wait_events_reentrancy_and_indeterminate_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import errno
+        import os
+        from review_process_supervisor import ProcessSupervisor, ScriptedClock
+
+        clock = ScriptedClock(start=100.0)
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["mock"], clock=clock)
+
+        # Test re-entrancy guard
+        sup._in_drain = True
+        sup._drain_wait_events(1234, 0)
+        assert len(sup.observed_events) == 0
+        sup._in_drain = False
+
+        # Test unexpected OSError (e.g. EINVAL) sets supervision_error
+        def mock_waitpid_error(pid, flags):
+            raise OSError(errno.EINVAL, "Invalid argument")
+
+        monkeypatch.setattr(os, "waitpid", mock_waitpid_error)
+        sup._drain_wait_events(1234, 0)
+        assert sup.supervision_error is True
+
+    def test_darwin_procargs_zero_length_on_living_candidate_raises_inspection_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import os
+        import sys
+        if sys.platform != "darwin":
+            pytest.skip("Darwin-specific test")
+        import ctypes
+        from review_process_supervisor import DarwinMembershipAdapter, InspectionError, ProcessSupervisor, SUPERVISOR_ERROR_RC
+
+        adapter = DarwinMembershipAdapter()
+        # Mock sysctl returning 0 with size 0 repeatedly
+        def mock_sysctl_zero(mib, mib_len, oldp, oldlenp, newp, newlen):
+            if oldlenp:
+                sz = ctypes.cast(oldlenp, ctypes.POINTER(ctypes.c_size_t))
+                sz.contents.value = 0
+            return 0
+
+        monkeypatch.setattr(adapter.libc, "sysctl", mock_sysctl_zero)
+        # Mock living process
+        class MockBsdInfo:
+            pbi_status = 2  # Non-zombie
+            pbi_start_tvsec = 1000
+            pbi_start_tvusec = 500000
+
+        monkeypatch.setattr(adapter, "_get_bsdinfo", lambda pid: MockBsdInfo())
+        monkeypatch.setattr(adapter, "_is_other_user_or_zombie", lambda pid, my_uid: False)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+
+        with pytest.raises(InspectionError, match="returned zero-length buffer for living candidate"):
+            adapter._has_capability(1234, b"CAP=123")
+
+        # Verify supervisor cleanup / run outcome with InspectionError returns 125
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["mock"], adapter=adapter)
+        sup.capability = "mock_token"
+        cleanup_ok = sup._cleanup(leader_pid=1234)
+        assert cleanup_ok is False
+        assert sup.supervision_error is True
+        rc = sup.classify_outcome(
+            leader_completion_time=100.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=False,
+        )
+        assert rc == SUPERVISOR_ERROR_RC
+
+    def test_linux_proc_stat_permission_error_without_uid_proof_raises_inspection_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import os
+        from review_process_supervisor import LinuxMembershipAdapter, InspectionError, ProcessSupervisor, SUPERVISOR_ERROR_RC
+
+        adapter = LinuxMembershipAdapter()
+        monkeypatch.setattr(os, "listdir", lambda path: ["1234"] if path == "/proc" else [])
+
+        def mock_stat_perm(path):
+            if path == "/proc/1234":
+                raise PermissionError("Permission denied")
+            raise FileNotFoundError()
+
+        monkeypatch.setattr(os, "stat", mock_stat_perm)
+        # kill(1234, 0) does not raise ProcessLookupError (process is alive)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+
+        with pytest.raises(InspectionError, match="permission denied on /proc/1234 without definitive UID proof"):
+            adapter.enumerate_candidates("test_cap")
+
+        # Supervisor cleanup with this failure returns cleanup_ok = False and rc = 125
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["mock"], adapter=adapter)
+        sup.capability = "test_cap"
+        cleanup_ok = sup._cleanup(leader_pid=1234)
+        assert cleanup_ok is False
+        assert sup.supervision_error is True
+        rc = sup.classify_outcome(
+            leader_completion_time=100.0,
+            child_status=0,
+            timed_out=False,
+            cleanup_ok=False,
+        )
+        assert rc == SUPERVISOR_ERROR_RC
+
+    def test_drain_wait_events_nested_reentrancy_order_pairing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import os
+        from review_process_supervisor import ProcessSupervisor, ScriptedClock
+
+        clock = ScriptedClock(start=100.0)
+        sup = ProcessSupervisor(timeout_seconds=5.0, command=["mock"], clock=clock)
+
+        drain_calls = 0
+        def mock_waitpid_nested(pid, flags):
+            nonlocal drain_calls
+            drain_calls += 1
+            if drain_calls == 1:
+                # Trigger a nested drain call (e.g. from signal handler or hook)
+                sup._drain_wait_events(pid, flags)
+                clock._now = 101.0
+                return (pid, 0x7F)  # STOP
+            elif drain_calls == 2:
+                clock._now = 102.0
+                return (pid, 0xFFFF)  # CONT
+            elif drain_calls == 3:
+                clock._now = 103.0
+                return (pid, 0)  # EXIT 0
+            return (0, 0)
+
+        monkeypatch.setattr(os, "waitpid", mock_waitpid_nested)
+        sup._drain_wait_events(1234, 0)
+
+        # Ensure ordered 1-to-1 status/timestamp pairing without duplicates or loss
+        assert len(sup.observed_events) == 3
+        assert sup.observed_events[0] == (0x7F, 101.0)
+        assert sup.observed_events[1] == (0xFFFF, 102.0)
+        assert sup.observed_events[2] == (0, 103.0)
+
+    def test_timeout_validation_rejects_non_finite_and_non_positive(self) -> None:
+        from review_process_supervisor import ProcessSupervisor, SUPERVISOR_ERROR_RC
+        import subprocess
+        import sys
+
+        for bad_val in (float("nan"), float("inf"), float("-inf"), 0.0, -1.0, -100.0):
+            with pytest.raises(ValueError, match="timeout_seconds must be a positive finite number"):
+                ProcessSupervisor(timeout_seconds=bad_val, command=["echo", "hi"])
+
+        # Also test CLI rejection
+        for bad_cli in ("nan", "inf", "-inf", "0", "-5", "abc"):
+            res = subprocess.run(
+                [sys.executable, str(CI_DIR / "review_process_supervisor.py"), "run", bad_cli, "echo", "hi"],
+                capture_output=True,
+                text=True,
+            )
+            assert res.returncode == SUPERVISOR_ERROR_RC
+
+    def test_darwin_adapter_rejects_partial_identity_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import os
+        import sys
+        if sys.platform != "darwin":
+            pytest.skip("Darwin-specific test")
+        from review_process_supervisor import DarwinMembershipAdapter, InspectionError
+
+        adapter = DarwinMembershipAdapter()
+
+        # Mock proc_pidinfo returning partial size for BSDINFO (less than sizeof(proc_bsdinfo))
+        def mock_partial_bsdinfo(pid, flavor, arg, ptr, sz):
+            if flavor == adapter.PROC_PIDT_BSDINFO:
+                return sz - 10  # Partial record
+            return sz
+
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_partial_bsdinfo)
+        with pytest.raises(InspectionError, match="returned partial size"):
+            adapter._get_bsdinfo(1234)
+
+        # Mock proc_pidinfo returning partial size for BSHORTINFO
+        def mock_partial_bshortinfo(pid, flavor, arg, ptr, sz):
+            if flavor == adapter.PROC_PIDT_BSHORTINFO:
+                return sz - 5  # Partial record
+            return 0
+
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_partial_bshortinfo)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+        with pytest.raises(InspectionError, match="returned partial size"):
+            adapter._is_other_user_or_zombie(1234, 501)
+
+    def test_linux_adapter_pidfd_signaling_production_coverage(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import os
+        import signal
+        from review_process_supervisor import LinuxMembershipAdapter, InspectionError, ProcessIdentity
+
+        adapter = LinuxMembershipAdapter()
+        target = ProcessIdentity(1234, "100.000000")
+
+        # 1. When pidfd APIs are unavailable -> raises InspectionError
+        monkeypatch.delattr(os, "pidfd_open", raising=False)
+        with pytest.raises(InspectionError, match="Linux atomic pidfd signaling is unavailable"):
+            adapter.signal_identity(target, signal.SIGTERM)
+
+        # Restore simulated pidfd APIs
+        monkeypatch.setattr(os, "pidfd_open", lambda pid, flags: 99, raising=False)
+        monkeypatch.setattr(os, "close", lambda fd: None)
+
+        signalled = []
+        monkeypatch.setattr(signal, "pidfd_send_signal", lambda fd, sig: signalled.append((fd, sig)), raising=False)
+
+        # 2. Post-open get_identity returns None (process dead) -> returns True without signaling
+        monkeypatch.setattr(adapter, "get_identity", lambda pid: None)
+        assert adapter.signal_identity(target, signal.SIGTERM) is True
+        assert len(signalled) == 0
+
+        # 3. Post-open get_identity returns mismatched identity (recycled PID) -> returns True without signaling
+        recycled = ProcessIdentity(1234, "200.000000")
+        monkeypatch.setattr(adapter, "get_identity", lambda pid: recycled)
+        assert adapter.signal_identity(target, signal.SIGTERM) is True
+        assert len(signalled) == 0
+
+        # 4. Post-open get_identity returns matching identity -> signals via pidfd_send_signal
+        monkeypatch.setattr(adapter, "get_identity", lambda pid: target)
+        assert adapter.signal_identity(target, signal.SIGTERM) is True
+        assert signalled == [(99, signal.SIGTERM)]
+
