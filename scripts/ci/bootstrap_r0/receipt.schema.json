@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bootstrap receipt v1: consistency only",
+  "description": "Structural contract only; matching claims do not authenticate provenance, prove execution, authorize publication or certify R0. Binding comparisons require independent trusted expected/current inputs to validate_receipt.",
+  "$comment": "Wire decoding additionally rejects duplicate object keys and nonstandard numeric constants, and requires integer JSON tokens (no decimal/exponent tokens or booleans) for integer fields. JSON Schema operates on decoded values and cannot express these lexical constraints. All OIDs in v1 are full lowercase Git SHA-1. Source identities pin whole repository snapshots. Cross-field bindings, ordered PR merge parents, unique check IDs, exact required membership and current drift are enforced by validate_receipt, not inferred from this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "roles", "candidates", "pr", "execution", "policy", "expectation_source", "checks", "exceptions"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "roles": {"$ref": "#/$defs/roles"},
+    "candidates": {"$ref": "#/$defs/candidates"},
+    "pr": {"$ref": "#/$defs/pr"},
+    "execution": {"$ref": "#/$defs/execution"},
+    "policy": {"$ref": "#/$defs/source"},
+    "expectation_source": {"$ref": "#/$defs/source"},
+    "checks": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/check"}
+    },
+    "exceptions": {"type": "array", "maxItems": 0}
+  },
+  "$defs": {
+    "positive_integer": {"type": "integer", "minimum": 1},
+    "oid": {
+      "type": "string", "minLength": 40, "maxLength": 40,
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "check_id": {
+      "type": "string", "minLength": 1, "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?![\\s\\S])"
+    },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository_id", "source_sha", "source_tree"],
+      "properties": {
+        "repository_id": {"$ref": "#/$defs/positive_integer"},
+        "source_sha": {"$ref": "#/$defs/oid"},
+        "source_tree": {"$ref": "#/$defs/oid"}
+      }
+    },
+    "roles": {
+      "type": "object", "additionalProperties": false,
+      "required": ["r0", "c1", "p1"],
+      "properties": {
+        "r0": {"$ref": "#/$defs/source"},
+        "c1": {"$ref": "#/$defs/source"},
+        "p1": {"$ref": "#/$defs/source"}
+      }
+    },
+    "candidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tested_sha", "tested_tree", "mode", "merge_parents"],
+      "properties": {
+        "tested_sha": {"$ref": "#/$defs/oid"},
+        "tested_tree": {"$ref": "#/$defs/oid"},
+        "mode": {"type": "string", "enum": ["head", "merge"]},
+        "merge_parents": {"type": "array", "items": {"$ref": "#/$defs/oid"}}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "mode": {"const": "head"},
+            "merge_parents": {"maxItems": 0}
+          }
+        },
+        {
+          "properties": {
+            "mode": {"const": "merge"},
+            "merge_parents": {"minItems": 2, "maxItems": 2}
+          }
+        }
+      ]
+    },
+    "candidates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["c1", "p1"],
+      "properties": {
+        "c1": {"$ref": "#/$defs/candidate"},
+        "p1": {"$ref": "#/$defs/candidate"}
+      }
+    },
+    "pr": {
+      "type": "object", "additionalProperties": false,
+      "required": ["base_repository_id", "head_repository_id", "number", "head_sha", "base_sha"],
+      "properties": {
+        "base_repository_id": {"$ref": "#/$defs/positive_integer"},
+        "head_repository_id": {"$ref": "#/$defs/positive_integer"},
+        "number": {"$ref": "#/$defs/positive_integer"},
+        "head_sha": {"$ref": "#/$defs/oid"},
+        "base_sha": {"$ref": "#/$defs/oid"}
+      }
+    },
+    "execution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository_id", "run_id", "run_attempt"],
+      "properties": {
+        "repository_id": {"$ref": "#/$defs/positive_integer"},
+        "run_id": {"$ref": "#/$defs/positive_integer"},
+        "run_attempt": {"$ref": "#/$defs/positive_integer"}
+      }
+    },
+    "check": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "status", "conclusion"],
+      "properties": {
+        "id": {"$ref": "#/$defs/check_id"},
+        "status": {"type": "string", "const": "completed"},
+        "conclusion": {"type": "string", "const": "success"}
+      }
+    },
+    "expected": {
+      "description": "Separate caller-supplied trusted authority, never filled from receipt or environment. Candidate head SHA/tree must equal its role's source; merge parents must be ordered [pr.base_sha, pr.head_sha]. Tested merge SHA/tree are independently pinned, never inferred from source/head SHA.",
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "roles", "candidates", "pr", "execution", "policy", "expectation_source", "required_checks"],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "roles": {"$ref": "#/$defs/roles"},
+        "candidates": {"$ref": "#/$defs/candidates"},
+        "pr": {"$ref": "#/$defs/pr"},
+        "execution": {"$ref": "#/$defs/execution"},
+        "policy": {"$ref": "#/$defs/source"},
+        "expectation_source": {"$ref": "#/$defs/source"},
+        "required_checks": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/check_id"}
+        }
+      }
+    },
+    "current": {
+      "description": "Separate caller-supplied observed PR/run snapshot. Freshness cannot be established here; a future publisher must re-observe before publication.",
+      "type": "object", "additionalProperties": false,
+      "required": ["pr", "execution"],
+      "properties": {
+        "pr": {"$ref": "#/$defs/pr"},
+        "execution": {"$ref": "#/$defs/execution"}
+      }
+    }
+  }
+}
