@@ -14,6 +14,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import util
 import errno
+import math
 import os
 import secrets
 import signal
@@ -220,8 +221,9 @@ class DarwinMembershipAdapter(BaseMembershipAdapter):
             ("pbi_nfiles", ctypes.c_uint32),
             ("pbi_pgid", ctypes.c_uint32),
             ("pbi_pjobc", ctypes.c_uint32),
-            ("pbi_e_unum", ctypes.c_uint32),
-            ("pbi_e_pnum", ctypes.c_uint32),
+            ("e_tdev", ctypes.c_uint32),
+            ("e_tpgid", ctypes.c_uint32),
+            ("pbi_nice", ctypes.c_int32),
             ("pbi_start_tvsec", ctypes.c_uint64),
             ("pbi_start_tvusec", ctypes.c_uint64),
         ]
@@ -261,27 +263,17 @@ class DarwinMembershipAdapter(BaseMembershipAdapter):
         sz = self.libproc.proc_pidinfo(
             pid, self.PROC_PIDT_BSHORTINFO, 0, ctypes.byref(sinfo), ctypes.sizeof(sinfo)
         )
-        if sz > 0:
+        if sz == ctypes.sizeof(sinfo):
             if sinfo.pbsi_status == 5:  # SZOMB
                 return True
             if int(sinfo.pbsi_uid) != my_uid:  # Effective UID is provably another user
                 return True
             return False
+        elif sz > 0:
+            raise InspectionError(
+                f"proc_pidinfo({pid}, BSHORTINFO) returned partial size {sz} != {ctypes.sizeof(sinfo)}"
+            )
 
-        # If BSHORTINFO failed, check sysctl KERN_PROC_PID
-        CTL_KERN = 1
-        KERN_PROC = 14
-        KERN_PROC_PID = 1
-        mib = (ctypes.c_int * 4)(CTL_KERN, KERN_PROC, KERN_PROC_PID, pid)
-        kproc_buf = ctypes.create_string_buffer(2048)
-        kproc_sz = ctypes.c_size_t(ctypes.sizeof(kproc_buf))
-        ctypes.set_errno(0)
-        res = self.libc.sysctl(mib, 4, kproc_buf, ctypes.byref(kproc_sz), None, 0)
-        if res == 0 and kproc_sz.value >= 72:
-            # Check p_stat at offset 32 (5=SZOMB, 6=SDEAD, 0=inactive)
-            p_stat = kproc_buf.raw[32]
-            if p_stat in (0, 5, 6):
-                return True
         return False
 
     def _get_bsdinfo(self, pid: int) -> Optional[proc_bsdinfo]:
@@ -291,7 +283,8 @@ class DarwinMembershipAdapter(BaseMembershipAdapter):
             proc_bsdinfo structure if successful, None if process is definitively absent.
 
         Raises:
-            InspectionError: If proc_pidinfo fails with non-absence error on a living process.
+            InspectionError: If proc_pidinfo fails with non-absence error on a living process
+                or returns a partial record.
         """
         if pid <= 0:
             return None
@@ -316,6 +309,10 @@ class DarwinMembershipAdapter(BaseMembershipAdapter):
             if self._is_other_user_or_zombie(pid, os.getuid()):
                 return None
             raise InspectionError(f"proc_pidinfo({pid}) failed with errno {err} on living candidate")
+        elif size != ctypes.sizeof(info):
+            raise InspectionError(
+                f"proc_pidinfo({pid}, BSDINFO) returned partial size {size} != {ctypes.sizeof(info)}"
+            )
         return info
 
     def get_identity(self, pid: int) -> Optional[ProcessIdentity]:
@@ -459,6 +456,10 @@ class DarwinMembershipAdapter(BaseMembershipAdapter):
                 if self._is_other_user_or_zombie(pid, my_uid):
                     continue
                 raise InspectionError(f"proc_pidinfo({pid}) failed with errno {err} for living same-UID process")
+            elif size != ctypes.sizeof(info):
+                raise InspectionError(
+                    f"proc_pidinfo({pid}, BSDINFO) returned partial size {size} != {ctypes.sizeof(info)}"
+                )
             if int(info.pbi_uid) != my_uid and int(info.pbi_ruid) != my_uid:
                 continue
 
@@ -526,7 +527,7 @@ class DarwinMembershipAdapter(BaseMembershipAdapter):
             return False
         if root_identity is not None:
             curr_ident = self.get_identity(root_identity.pid)
-            if curr_ident != root_identity or not self.is_alive(root_identity):
+            if curr_ident != root_identity:
                 return False
         try:
             os.kill(-pgid, 0)
@@ -576,7 +577,7 @@ class DarwinMembershipAdapter(BaseMembershipAdapter):
             return False
         if root_identity is not None:
             curr_ident = self.get_identity(root_identity.pid)
-            if curr_ident != root_identity or not self.is_alive(root_identity):
+            if curr_ident != root_identity:
                 return False
         try:
             os.kill(-pgid, sig)
@@ -785,8 +786,10 @@ class LinuxMembershipAdapter(BaseMembershipAdapter):
         """
         if pgid <= 0:
             return False
-        if root_identity is not None and not self.is_alive(root_identity):
-            return False
+        if root_identity is not None:
+            curr_ident = self.get_identity(root_identity.pid)
+            if curr_ident != root_identity:
+                return False
         try:
             os.kill(-pgid, 0)
             return True
@@ -800,27 +803,44 @@ class LinuxMembershipAdapter(BaseMembershipAdapter):
             raise InspectionError(f"kill(-{pgid}, 0) failed: {e}") from e
 
     def signal_identity(self, identity: ProcessIdentity, sig: int) -> bool:
-        """Signals specific process identity on Linux.
+        """Signals specific process identity on Linux using atomic pidfd.
 
         Returns:
             True if signal delivered or process already dead.
 
         Raises:
-            InspectionError: If kill fails unexpectedly on a living process.
+            InspectionError: If pidfd signaling is unavailable or fails unexpectedly on a living process.
         """
-        if not self.is_alive(identity):
-            return True
+        if not (hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal")):
+            raise InspectionError("Linux atomic pidfd signaling is unavailable")
+
         try:
-            os.kill(identity.pid, sig)
+            fd = os.pidfd_open(identity.pid, 0)
+        except ProcessLookupError:
+            return True
+        except OSError as e:
+            if e.errno in (errno.ESRCH, errno.ENOENT):
+                return True
+            raise InspectionError(f"pidfd_open({identity.pid}) failed: {e}") from e
+        try:
+            current = self.get_identity(identity.pid)
+            if current != identity:
+                return True
+            signal.pidfd_send_signal(fd, sig)
             return True
         except ProcessLookupError:
             return True
         except PermissionError as e:
-            raise InspectionError(f"signal_identity({identity.pid}, {sig}) permission denied: {e}") from e
+            raise InspectionError(f"pidfd_send_signal({identity.pid}, {sig}) permission denied: {e}") from e
         except OSError as e:
             if e.errno in (errno.ESRCH, errno.ENOENT):
                 return True
-            raise InspectionError(f"signal_identity({identity.pid}, {sig}) failed: {e}") from e
+            raise InspectionError(f"pidfd_send_signal({identity.pid}, {sig}) failed: {e}") from e
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     def signal_pgid(self, pgid: int, sig: int, root_identity: Optional[ProcessIdentity] = None) -> bool:
         """Signals process group on Linux.
@@ -835,7 +855,7 @@ class LinuxMembershipAdapter(BaseMembershipAdapter):
             return False
         if root_identity is not None:
             curr_ident = self.get_identity(root_identity.pid)
-            if curr_ident != root_identity or not self.is_alive(root_identity):
+            if curr_ident != root_identity:
                 return False
         try:
             os.kill(-pgid, sig)
@@ -960,7 +980,7 @@ class ScriptedAdapter(BaseMembershipAdapter):
             return False
         if root_identity is not None:
             curr_ident = self.get_identity(root_identity.pid)
-            if curr_ident != root_identity or not self.is_alive(root_identity):
+            if curr_ident != root_identity:
                 return False
         pids = self.pgids.get(pgid, set())
         return any(pid in self.alive for pid in pids)
@@ -1004,7 +1024,7 @@ class ScriptedAdapter(BaseMembershipAdapter):
             return False
         if root_identity is not None:
             curr_ident = self.get_identity(root_identity.pid)
-            if curr_ident != root_identity or not self.is_alive(root_identity):
+            if curr_ident != root_identity:
                 return False
         self.signal_log.append(("pgid", pgid, sig))
         if self.fail_signalling:
@@ -1040,7 +1060,10 @@ class ProcessSupervisor:
         clock: Optional[Clock] = None,
         wait_event_fn: Optional[Any] = None,
     ) -> None:
-        self.timeout_seconds = float(timeout_seconds)
+        t_val = float(timeout_seconds)
+        if not math.isfinite(t_val) or t_val <= 0:
+            raise ValueError("timeout_seconds must be a positive finite number")
+        self.timeout_seconds = t_val
         self.command = list(command)
         self.adapter = adapter or get_default_adapter()
         self.clock = clock or Clock()
@@ -1226,7 +1249,7 @@ class ProcessSupervisor:
         # 1. Initial grace phase signal
         if self.root_pgid > 0 and self.root_identity is not None:
             try:
-                if self.adapter.get_identity(self.root_identity.pid) == self.root_identity and self.adapter.is_alive(self.root_identity):
+                if self.adapter.is_pgid_alive(self.root_pgid, self.root_identity):
                     if not self.adapter.signal_pgid(self.root_pgid, signal.SIGTERM, self.root_identity):
                         self.supervision_error = True
             except Exception:
@@ -1283,7 +1306,7 @@ class ProcessSupervisor:
         if not all_dead:
             if self.root_pgid > 0 and self.root_identity is not None:
                 try:
-                    if self.adapter.get_identity(self.root_identity.pid) == self.root_identity and self.adapter.is_alive(self.root_identity):
+                    if self.adapter.is_pgid_alive(self.root_pgid, self.root_identity):
                         if not self.adapter.signal_pgid(self.root_pgid, signal.SIGKILL, self.root_identity):
                             self.supervision_error = True
                 except Exception:
@@ -1707,8 +1730,8 @@ def main() -> int:
 
     try:
         timeout_sec = float(sys.argv[2])
-        if timeout_sec <= 0:
-            sys.stderr.write("Error: timeout_seconds must be positive\n")
+        if not math.isfinite(timeout_sec) or timeout_sec <= 0:
+            sys.stderr.write("Error: timeout_seconds must be positive and finite\n")
             return SUPERVISOR_ERROR_RC
     except ValueError:
         sys.stderr.write("Error: invalid timeout_seconds\n")

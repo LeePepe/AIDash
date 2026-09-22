@@ -416,6 +416,18 @@ def test_run_with_timeout_reports_timeout_rc() -> None:
     assert "rc=124 expected=124" in result.stdout
 
 
+def test_review_cli_timeout_seconds_defaults_to_900() -> None:
+    """REVIEW_CLI_TIMEOUT_SECONDS defaults to 900 seconds when unset."""
+    result = _run(
+        f"unset REVIEW_CLI_TIMEOUT_SECONDS\n"
+        f". {COMMON}\n"
+        'echo "timeout=$REVIEW_CLI_TIMEOUT_SECONDS"\n',
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "timeout=900" in result.stdout
+
+
 def test_run_with_timeout_kills_the_whole_process_group(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -432,7 +444,7 @@ def test_run_with_timeout_kills_the_whole_process_group(
     pidfile = tmp_path / "grandchild.pid"
     inner = tmp_path / "inner.sh"
     inner.write_text(
-        f'#!/bin/sh\nsh -c \'echo $$ > "{pidfile}"; exec sleep 120\' &\nwait\n',
+        f'#!/bin/sh\nsh -c \'echo $$ > "{pidfile}"; exec sleep 120\' &\nwhile [ ! -s "{pidfile}" ]; do :; done\nwait\n',
         encoding="utf-8",
     )
     inner.chmod(0o755)
@@ -441,7 +453,6 @@ def test_run_with_timeout_kills_the_whole_process_group(
         f". {COMMON}\n"
         "rc=0\n"
         f"run_with_timeout 2 {inner} || rc=$?\n"
-        "sleep 3\n"
         f'GRANDCHILD="$(cat "{pidfile}" 2>/dev/null)"\n'
         'if [ -z "$GRANDCHILD" ]; then echo NO-PID; \n'
         'elif kill -0 "$GRANDCHILD" 2>/dev/null; then echo LEAKED; \n'
@@ -463,10 +474,8 @@ def test_run_with_timeout_cleans_up_descendants_after_leader_exits_zero(
     inner = tmp_path / "inner.sh"
     inner.write_text(
         f'#!/bin/sh\n'
-        'sh -c \'echo $$ > "'
-        f"{pidfile}"
-        '"; exec sleep 120\' &\n'
-        'sleep 0.3\n'
+        f'python3 -c \'import os, sys, time; open(sys.argv[1], "w").write(str(os.getpid())); time.sleep(120)\' "{pidfile}" &\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'exit 0\n',
         encoding="utf-8",
     )
@@ -497,7 +506,7 @@ def test_run_with_timeout_captures_fast_out_of_pgid_descendants_before_first_sna
     inner = tmp_path / "inner.sh"
     inner.write_text(
         '#!/bin/sh\n'
-        f'python3 -c \'import os, sys, time; pidfile = sys.argv[1]; open(pidfile, "w").write(str(os.getpid())); os.setsid(); time.sleep(120)\' "{pidfile}" &\n'
+        f'python3 -c \'import os, sys, time; pidfile = sys.argv[1]; os.setsid(); open(pidfile, "w").write(str(os.getpid())); time.sleep(120)\' "{pidfile}" &\n'
         f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'exit 0\n',
         encoding="utf-8",
@@ -530,15 +539,14 @@ def test_run_with_timeout_cleans_nested_descendant_tree_after_leader_exits_zero(
     inner.write_text(
         '#!/bin/sh\n'
         f'python3 - "{pidfile}" <<\'PY\' &\n'
-        'import os, sys\n'
+        'import os, sys, time\n'
         'pidfile = sys.argv[1]\n'
+        'os.setsid()\n'
         'with open(pidfile, "w", encoding="utf-8") as fh:\n'
         '    fh.write(str(os.getpid()))\n'
-        'os.setsid()\n'
-        'os.execvp("sleep", ["sleep", "120"])\n'
+        'time.sleep(120)\n'
         'PY\n'
-        'sleep 0.05\n'
-        'sleep 0.2\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'exit 0\n',
         encoding="utf-8",
     )
@@ -609,6 +617,7 @@ def test_run_with_timeout_exits_clean_on_leader_exit_before_deadline_boundary(
     inner.write_text(
         '#!/bin/sh\n'
         f"sh -c 'echo $$ > \"{pidfile}\"; exec sleep 120' &\n"
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'sleep 0.8\n'
         'exit 0\n',
         encoding="utf-8",
@@ -657,6 +666,7 @@ def test_run_with_timeout_prefers_watchdog_when_term_trap_exits_zero(
         'sh -c \'trap "" TERM; echo $$ > "'
         f"{pidfile}"
         '"; exec sleep 120\' &\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'trap "exit 0" TERM\n'
         'sleep 120\n',
         encoding="utf-8",
@@ -684,10 +694,8 @@ def test_run_with_timeout_kills_nested_wrapper_descendants(tmp_path: pathlib.Pat
     inner = tmp_path / "inner.sh"
     inner.write_text(
         f'#!/bin/sh\n'
-        'env FOO=bar bash -c \'echo $$ > "'
-        f"{pidfile}"
-        '"; exec sleep 120\' &\n'
-        'sleep 0.05\n'
+        f'env FOO=bar python3 -c \'import os, sys, time; open(sys.argv[1], "w").write(str(os.getpid())); time.sleep(120)\' "{pidfile}" &\n'
+        f'while [ ! -s "{pidfile}" ]; do :; done\n'
         'exit 0\n',
         encoding="utf-8",
     )
@@ -2241,6 +2249,9 @@ class TestProcessSupervisorContract:
         assert rc_classified == REVIEW_TIMEOUT_RC
 
     def test_darwin_adapter_non_definitive_inspection_results(self, monkeypatch) -> None:
+        import sys
+        if sys.platform != "darwin":
+            pytest.skip("Darwin-specific test requires Darwin platform")
         import ctypes
         import errno
         import os
@@ -3042,4 +3053,88 @@ class TestProcessSupervisorContract:
         assert sup.observed_events[0] == (0x7F, 101.0)
         assert sup.observed_events[1] == (0xFFFF, 102.0)
         assert sup.observed_events[2] == (0, 103.0)
+
+    def test_timeout_validation_rejects_non_finite_and_non_positive(self) -> None:
+        from review_process_supervisor import ProcessSupervisor, SUPERVISOR_ERROR_RC
+        import subprocess
+        import sys
+
+        for bad_val in (float("nan"), float("inf"), float("-inf"), 0.0, -1.0, -100.0):
+            with pytest.raises(ValueError, match="timeout_seconds must be a positive finite number"):
+                ProcessSupervisor(timeout_seconds=bad_val, command=["echo", "hi"])
+
+        # Also test CLI rejection
+        for bad_cli in ("nan", "inf", "-inf", "0", "-5", "abc"):
+            res = subprocess.run(
+                [sys.executable, str(CI_DIR / "review_process_supervisor.py"), "run", bad_cli, "echo", "hi"],
+                capture_output=True,
+                text=True,
+            )
+            assert res.returncode == SUPERVISOR_ERROR_RC
+
+    def test_darwin_adapter_rejects_partial_identity_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import os
+        import sys
+        if sys.platform != "darwin":
+            pytest.skip("Darwin-specific test")
+        from review_process_supervisor import DarwinMembershipAdapter, InspectionError
+
+        adapter = DarwinMembershipAdapter()
+
+        # Mock proc_pidinfo returning partial size for BSDINFO (less than sizeof(proc_bsdinfo))
+        def mock_partial_bsdinfo(pid, flavor, arg, ptr, sz):
+            if flavor == adapter.PROC_PIDT_BSDINFO:
+                return sz - 10  # Partial record
+            return sz
+
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_partial_bsdinfo)
+        with pytest.raises(InspectionError, match="returned partial size"):
+            adapter._get_bsdinfo(1234)
+
+        # Mock proc_pidinfo returning partial size for BSHORTINFO
+        def mock_partial_bshortinfo(pid, flavor, arg, ptr, sz):
+            if flavor == adapter.PROC_PIDT_BSHORTINFO:
+                return sz - 5  # Partial record
+            return 0
+
+        monkeypatch.setattr(adapter.libproc, "proc_pidinfo", mock_partial_bshortinfo)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+        with pytest.raises(InspectionError, match="returned partial size"):
+            adapter._is_other_user_or_zombie(1234, 501)
+
+    def test_linux_adapter_pidfd_signaling_production_coverage(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import os
+        import signal
+        from review_process_supervisor import LinuxMembershipAdapter, InspectionError, ProcessIdentity
+
+        adapter = LinuxMembershipAdapter()
+        target = ProcessIdentity(1234, "100.000000")
+
+        # 1. When pidfd APIs are unavailable -> raises InspectionError
+        monkeypatch.delattr(os, "pidfd_open", raising=False)
+        with pytest.raises(InspectionError, match="Linux atomic pidfd signaling is unavailable"):
+            adapter.signal_identity(target, signal.SIGTERM)
+
+        # Restore simulated pidfd APIs
+        monkeypatch.setattr(os, "pidfd_open", lambda pid, flags: 99, raising=False)
+        monkeypatch.setattr(os, "close", lambda fd: None)
+
+        signalled = []
+        monkeypatch.setattr(signal, "pidfd_send_signal", lambda fd, sig: signalled.append((fd, sig)), raising=False)
+
+        # 2. Post-open get_identity returns None (process dead) -> returns True without signaling
+        monkeypatch.setattr(adapter, "get_identity", lambda pid: None)
+        assert adapter.signal_identity(target, signal.SIGTERM) is True
+        assert len(signalled) == 0
+
+        # 3. Post-open get_identity returns mismatched identity (recycled PID) -> returns True without signaling
+        recycled = ProcessIdentity(1234, "200.000000")
+        monkeypatch.setattr(adapter, "get_identity", lambda pid: recycled)
+        assert adapter.signal_identity(target, signal.SIGTERM) is True
+        assert len(signalled) == 0
+
+        # 4. Post-open get_identity returns matching identity -> signals via pidfd_send_signal
+        monkeypatch.setattr(adapter, "get_identity", lambda pid: target)
+        assert adapter.signal_identity(target, signal.SIGTERM) is True
+        assert signalled == [(99, signal.SIGTERM)]
 
