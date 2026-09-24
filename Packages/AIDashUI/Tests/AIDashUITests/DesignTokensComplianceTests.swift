@@ -46,7 +46,6 @@ struct DesignTokensComplianceTests {
         // enum grows. The sectionHeader branch documents the
         // "structural variant" contract from §Card Chrome so we cannot
         // silently regress to "6 chromed cards + 1 forgotten".
-        let renderer = try Self.rendererSource(for: type)
         let recipe = AIDashTypography.detail(for: type)
 
         if type == .sectionHeader {
@@ -54,6 +53,7 @@ struct DesignTokensComplianceTests {
             // only, no chrome, no badge. Detailed assertions live in
             // sectionHeaderHasNoChrome / sectionHeaderHasNoBadge — the
             // matrix entry just pins the high-level contract.
+            let renderer = try Self.rendererSource(for: type)
             #expect(type.iconSymbol == nil,
                     "sectionHeader must NOT declare an SF Symbol")
             #expect(type.classification == nil,
@@ -66,7 +66,7 @@ struct DesignTokensComplianceTests {
                     "sectionHeader renderer must NOT apply cardChrome — it is chrome-less by contract")
             #expect(!renderer.contains("CardTypeBadge("),
                     "sectionHeader renderer must NOT render a CardTypeBadge")
-        } else {
+        } else if let renderer = try? Self.rendererSource(for: type) {
             // 1. Every content type has both a symbol and a classification
             //    token — the icon badge is mandatory per §Per-Type Visual
             //    Recipes; the tint color resolves from that token via Theme.
@@ -88,6 +88,14 @@ struct DesignTokensComplianceTests {
                     "\(type) renderer must apply the shared cardChrome modifier")
             #expect(renderer.contains("CardTypeBadge(type: .\(type.rawValue))"),
                     "\(type) renderer must render the shared 32x32 type badge")
+        } else {
+            // Future imported CardType without a dedicated renderer yet.
+            // Compiles through documented fallback until explicit renderer is added.
+            #expect(type.iconSymbol == nil, "\(type) future fallback must not declare an icon symbol")
+            #expect(type.classification == nil, "\(type) future fallback must not declare a classification")
+            #expect(!type.hasIconBadge, "\(type) future fallback must not render an icon badge")
+            #expect(recipe.primary != AIDashTypography.section,
+                    "\(type) must use detail-tier primary font, not overview-tier section font")
         }
     }
 
@@ -393,7 +401,9 @@ struct DesignTokensComplianceTests {
 
     // MARK: - Fixtures
 
-    nonisolated static let contentCardTypes: [CardType] = CardType.allCases.filter { $0 != .sectionHeader }
+    nonisolated static let contentCardTypes: [CardType] = CardType.allCases.filter {
+        $0 != .sectionHeader && $0.hasIconBadge
+    }
 
     // MARK: - Source loaders
     //
@@ -416,6 +426,8 @@ struct DesignTokensComplianceTests {
         case .barList:       name = "BarListCardView"
         case .stackedBar:    name = "StackedBarCardView"
         case .relationship:  name = "RelationshipCardView"
+        @unknown default:
+            throw ComplianceSourceLookupError.noRendererForType(type.rawValue)
         }
         return try cardViewSource(named: name)
     }
@@ -520,6 +532,7 @@ struct DesignTokensComplianceTests {
     enum ComplianceSourceLookupError: Error {
         case testsRootNotFound
         case fileNotFound(String, String)
+        case noRendererForType(String)
     }
 }
 

@@ -255,12 +255,40 @@ struct CardRouterTests {
                 data = encode(StackedBarPayload(segments: [.init(label: "S", value: 1)]))
             case .relationship:
                 data = encode(RelationshipCardViewTests.scatter(points: 1))
+            @unknown default:
+                data = Data()
             }
 
             let card = makeCard(type: cardType, payloadJSON: data)
-            // Verify decode succeeds for every type
-            let decoded = try card.type.decode(card.payloadJSON)
-            #expect(decoded is CardPayloadProtocol)
+            // Verify decode succeeds for known types; future unknown types fall back
+            // gracefully through CardRouter without crashing.
+            let decoded = try? card.type.decode(card.payloadJSON)
+            #expect(decoded != nil, "Known CardType \(cardType) must decode its test payload successfully")
+            _ = CardRouter(card: card).body
+        }
+    }
+
+    @Test("all ten current CardType mappings are exact")
+    func currentTenCardTypeMappingsAreExact() {
+        let expected: [(CardType, String, String?, String?)] = [
+            (.metric, "metric", "chart.bar.fill", "metric"),
+            (.insight, "insight", "sparkles", "insight"),
+            (.agentSummary, "agentSummary", "bubble.left.and.bubble.right.fill", "agentSummary"),
+            (.todoList, "todoList", "checklist", "todoList"),
+            (.trending, "trending", "chart.line.uptrend.xyaxis", "trending"),
+            (.digest, "digest", "doc.text.fill", "digest"),
+            (.sectionHeader, "sectionHeader", nil, nil),
+            (.barList, "barList", "chart.bar.xaxis", "barList"),
+            (.stackedBar, "stackedBar", "chart.bar.doc.horizontal", "stackedBar"),
+            (.relationship, "relationship", "point.3.connected.trianglepath.dotted", "relationship"),
+        ]
+
+        #expect(CardType.allCases.count >= 10)
+        for (type, rawValue, symbol, classification) in expected {
+            #expect(type.rawValue == rawValue)
+            #expect(type.iconSymbol == symbol)
+            #expect(type.classification?.rawValue == classification)
+            #expect(type.hasIconBadge == (symbol != nil && classification != nil))
         }
     }
 
@@ -315,6 +343,8 @@ struct CardRouterTests {
             return encode(StackedBarPayload(segments: [.init(label: "S", value: 1)]))
         case .relationship:
             return encode(RelationshipCardViewTests.scatter(points: 1))
+        @unknown default:
+            return Data()
         }
     }
 

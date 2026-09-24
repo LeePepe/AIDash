@@ -87,69 +87,34 @@ public enum AIDashTypography {
                 secondaryColor: .secondary
             )
         case .insight:
-            return DetailRecipe(
-                primary: .title3.weight(.semibold),
-                secondary: .body,
-                secondaryColor: .primary
-            )
+            return DetailRecipe(primary: .title3.weight(.semibold), secondary: .body)
         case .digest:
-            return DetailRecipe(
-                primary: .headline,
-                secondary: .body,
-                secondaryLineSpacing: 4,
-                secondaryColor: .primary
-            )
+            return DetailRecipe(primary: .headline, secondary: .body, secondaryLineSpacing: 4)
         case .agentSummary:
-            return DetailRecipe(
-                primary: .headline,
-                secondary: .callout,
-                secondaryColor: .primary
-            )
+            return DetailRecipe(primary: .headline, secondary: .callout)
         case .todoList:
-            return DetailRecipe(
-                primary: .body,
-                secondary: .caption2,
-                secondaryColor: .secondary
-            )
+            return DetailRecipe(primary: .body, secondary: .caption2, secondaryColor: .secondary)
         case .trending:
-            return DetailRecipe(
-                primary: .callout.monospaced(),
-                secondary: .body,
-                secondaryColor: .primary
-            )
+            return DetailRecipe(primary: .callout.monospaced(), secondary: .body)
         case .sectionHeader:
-            return DetailRecipe(
-                primary: .title3.weight(.semibold),
-                secondary: .subheadline,
-                secondaryColor: .secondary
-            )
+            return DetailRecipe(primary: .title3.weight(.semibold), secondary: .subheadline, secondaryColor: .secondary)
         case .barList:
             // Row label reads as the primary scan target; the value + bar are
             // the payoff. Monospaced label keeps a column of rankings aligned.
-            return DetailRecipe(
-                primary: .callout,
-                secondary: .caption.monospacedDigit(),
-                secondaryColor: .primary
-            )
+            return DetailRecipe(primary: .callout, secondary: .caption.monospacedDigit())
         case .stackedBar:
             // Legend labels are compact; the bar itself is the headline, so the
             // legend stays quiet (caption / secondary color).
-            return DetailRecipe(
-                primary: .subheadline.weight(.medium),
-                secondary: .caption2,
-                secondaryColor: .secondary
-            )
+            return DetailRecipe(primary: .subheadline.weight(.medium), secondary: .caption2, secondaryColor: .secondary)
         case .relationship:
             // §Per-Type Visual Recipes: `.headline` carries the conclusion (the
             // observed association, which is the card's actual claim), and the
             // axes / sample / window read as instrument metadata in
             // `.caption.monospaced()` — tabular so `n=34` and a numeric axis
             // label stay aligned against the chart edge.
-            return DetailRecipe(
-                primary: .headline,
-                secondary: .caption.monospaced(),
-                secondaryColor: .secondary
-            )
+            return DetailRecipe(primary: .headline, secondary: .caption.monospaced(), secondaryColor: .secondary)
+        @unknown default:
+            return DetailRecipe(primary: .headline, secondary: .caption, secondaryColor: .secondary)
         }
     }
 }
@@ -175,6 +140,7 @@ extension CardType {
         case .barList:       return "chart.bar.xaxis"
         case .stackedBar:    return "chart.bar.doc.horizontal"
         case .relationship:  return "point.3.connected.trianglepath.dotted"
+        @unknown default:    return nil
         }
     }
 
@@ -194,6 +160,7 @@ extension CardType {
         case .barList:       return .barList
         case .stackedBar:    return .stackedBar
         case .relationship:  return .relationship
+        @unknown default:    return nil
         }
     }
 
