@@ -176,58 +176,33 @@ avoids the forbidden host-based App tests and duplicate proactive suite runs.
 The optional hostless App logic target is diagnostic-only after a concrete
 failure, never normal acceptance or a substitute for CI App builds.
 
-## Decision 9: Recover through four non-overlapping PR contracts
+## Decision 9: Treat prior recovery gates as history and pin the reviewed plan as base
 
-**Decision**: Recover from exact synchronized-main implementation base
-`8716846ac42b48bfd89b9a09d5dd05fc4819025d` through the existing dedicated RepoInfra
-watchdog PR, a planning/constitution PR, an AIDashUI future-CardType
-compatibility PR, and an AIDashCore-only T005 successor in its preserved
-registered delivery workspace. T020 must publish a
-genuinely new three-dot implementation surface: its head differs from the base
-and rejected `b4aa5e51bdf381d71a6ab77fa2342349a6a5dedb`, and its only permitted
-paths are `scripts/ci/review-common.sh`,
-`scripts/ci/review_process_supervisor.py`, and
-`scripts/ci/tests/test_review_shell.py`. The constitution PR uses the required
-`constitution: <change>` title and carries the in-flight migration note in its
-PR description. T005 remains one AIDashCore layer task and consumes
-`contracts/t005-acceptance-matrix.md`; its stale nine-file boundary is replaced
-by the exact eleven-file Types+Service surface in Decision 11.
+**Decision**: T020, T021, and T019 are completed history in parent
+`fdace13d20ee0b28759c4853c82445fd4d913dcc` through merged PRs #204, #210, and
+#215. They are not schedulable dependencies. The only active recovery edge is
+`exact revised-plan PASS + published planning-base pin → Team Lead handoff →
+T005`. The implementation base is the exact reviewed planning commit named by
+the PASS verdict, or an explicitly approved descendant containing byte-identical
+copies of all nine artifact blobs.
 
-**Rationale**: Exact implementation review of `b4aa5e51...` found a destructive
-P0: its `PPID=1` plus executable-name heuristic could import and TERM/KILL
-unrelated system shells, Python/Node processes, or sleeps. Removing that
-heuristic exposed the unresolved startup race: sampled Bash/`ps` discovery
-cannot deterministically capture a fast child that leaves the root PGID and is
-reparented before the first snapshot. `scripts/CONTEXT.md` already owns every
-`scripts/**` path and gates Python with pytest/ruff, so one stdlib-only helper
-is the smallest explicit scope correction that provides a testable platform
-adapter and state-machine seam without adding a layer, dependency, workflow,
-ruleset, or timeout change. The invalidated branch also
-proved that adding the eleventh CardType in Core alone makes three existing
-AIDashUI switches non-exhaustive under repository-wide required CI. A small
-merge-first AIDashUI fallback is the expand step; T005 is the Core contract
-step; the explicit renderer/token work remains T008. This keeps every PR
-one-layer, reviewable, and independently buildable without weakening the
-CardType contract.
+**Rationale**: The parent contains the completed compatibility and process
+work, but it does not contain FR-020–FR-025. Using the parent alone would omit
+the reviewed contract; including a later planning commit while diffing from the
+parent would contaminate the eleven-file implementation surface. The delivery
+protocol explicitly permits an unmerged reviewed planning commit as the base.
+Team Lead can therefore reconcile the preserved workspace and candidate only
+after pinning that exact reviewed revision in the handoff and delivery metadata.
 
 **Alternatives rejected**:
 
-- Re-review rejected head `b4aa5e51...`: it contains the destructive P0 and is
-  explicitly frozen as evidence.
-- Keep the original two-file allowlist by embedding a Python supervisor in a
-  quoted shell string: this destroys locality, avoids normal Python lint/import
-  review, and recreates the gate's historical quoting risk.
-- Use process group or sampled ancestry alone: neither retains a fast
-  `setsid` descendant after reparenting.
-- Import recent PPID-1/name-matching orphans: ancestry is unproven and the
-  signal can destroy unrelated work.
-- Put AIDashUI changes into T005: violates its AIDashCore allowlist and the
-  one-layer PR rule.
-- Add `teamAudit` UI cases before the Core enum exists: does not compile.
-- Ignore repository-wide builds until T008: the protected-branch build gate is
-  required for every PR, so T005 would be unmergeable.
-- Transplant the failed watchdog patch: its lingering-descendant regression
-  still failed and requires a separately authorized RepoInfra diagnosis.
+- Dispatch T020/T021/T019 again: duplicates already-merged work and risks stale
+  recovery branches.
+- Keep `fdace13d…` as the T005 base: it lacks the reviewed recovery artifacts.
+- Count planning files in the T005 implementation diff: violates the exact
+  AIDashCore eleven-file surface.
+- Re-review candidate `12577b03…` under the new plan: the prior verdict is
+  revision-specific and the two-round implementation budget is exhausted.
 
 ## Decision 10: Put invocation-scoped supervision behind the existing shell seam
 
@@ -277,7 +252,7 @@ protocol instead: Service depends on the decoded Types value, Models never
 name Service, and the existing single-decode/error interface remains deep and
 stable. The exact T005 implementation surface is eleven files—the original
 nine plus the Service implementation and its proof. `SchemaValidator.swift`,
-`URLPolicy.swift`, every other layer, approved base
+`URLPolicy.swift`, every other layer, parent
 `fdace13d20ee0b28759c4853c82445fd4d913dcc`, and candidate
 `12577b03c866c73c53fa23d236d2005a68790358` stay unchanged.
 
@@ -297,18 +272,22 @@ nine plus the Service implementation and its proof. `SchemaValidator.swift`,
 
 **Decision**: FR-020 through FR-025 and the T005 matrix lock the six remaining
 correctness/test-proof findings: enclosing-axis verdict decode; unique and
-catalog-resolved finding references; canonical feedback-lineage/merge hashes;
+catalog-resolved finding references; canonical feedback-lineage hash plus the
+repository's 40-hex Git SHA-1 merge OID;
 role-round and supporting-evidence reconciliation; unique, priority-aware,
 exact artifact/full-report/externalization bindings; and exact production-path
-proofs for all sections, fallback, optional unsafe strings, and byte limits.
+proofs for all sections, Core structured error propagation, AIDashUI rendered
+fallback, optional unsafe strings, and byte limits.
 
 **Rationale**: The previous broad matrix language permitted spot checks and
 left cross-part reference resolution implicit. A common typed reference
 catalog makes each independently decoded card part self-validating without
-embedding raw evidence. Typed optional-only externalization and
+embedding raw evidence. Typed artifact catalog entries make an overview full
+report independently resolvable by kind/ID/hash/URL/sidecar. Typed optional-only externalization and
 priority-resolved finding chains preserve P2/info flexibility while making
-P0/P1 non-externalizability unrepresentable. Exact equality and exact byte
-fixtures distinguish normative proof from approximate coverage.
+P0/P1 non-externalizability unrepresentable. The proof split follows ownership:
+T005 proves Core failures and T008 proves `CardRouter` fallback. Exact equality
+and exact byte fixtures distinguish normative proof from approximate coverage.
 
 **Alternatives rejected**:
 

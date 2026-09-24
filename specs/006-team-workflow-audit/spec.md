@@ -15,7 +15,7 @@ execution surface.
 
 ## Existing behavior
 
-- At approved recovery base `fdace13d20ee0b28759c4853c82445fd4d913dcc`,
+- At recovery parent `fdace13d20ee0b28759c4853c82445fd4d913dcc`,
   AIDashCore exposes ten card types; `teamAudit` has not shipped.
 - Agent-authored URL safety is centralized in the AIDashCore Validation
   Service role. Model types retain untrusted strings, while the Service entry
@@ -23,6 +23,9 @@ execution surface.
 - The preserved implementation candidate
   `12577b03c866c73c53fa23d236d2005a68790358` is review evidence only. It is
   not published behavior and this planning revision does not mutate it.
+- The exact published planning commit that receives AI Reviewer `PASS` is the
+  next T005 implementation base. The older parent is not an implementation
+  base unless it later contains byte-identical reviewed artifacts.
 
 ## Compatibility
 
@@ -131,15 +134,15 @@ As the Owner, I can acknowledge a finding or approve it for a separately governe
 - **FR-019**: Automated tests MUST cover immutable ingestion, sidecar identity/hash preservation and collision, stable-identity deduplication, accepted-snapshot-parented collision observations, overlap replay, explicit finding subject/responsibility, feedback lineage, complete per-role repeat metrics, payload round trips and exact size boundaries, mandatory-link rejection/reservation, optional-link degradation/externalization, all finding states, baseline and incremental rendering, decision idempotency, manual-only invocation, and no-dispatch/no-remediation behavior.
 - **FR-020**: Each core-axis verdict MUST decode in the context of its enclosing axis. The shared `insufficientEvidence` wire value MUST round-trip independently for Workflow Conformance, Workflow Fitness, and Outcome Integrity.
 - **FR-021**: Every finding case/event/evidence reference MUST be non-empty and unique within the finding and MUST resolve exactly once through the payload's typed snapshot reference catalog. Duplicate or unresolved references MUST reject the payload.
-- **FR-022**: Feedback-lineage identity MUST equal the lowercase SHA-256 of its canonical problem/origin/delivery tuple. A supplied merge revision MUST be exactly 64 lowercase hexadecimal characters; malformed lineage or merge identities MUST reject the payload.
+- **FR-022**: Feedback-lineage identity MUST equal the lowercase SHA-256 of its canonical problem/origin/delivery tuple. A supplied merge revision MUST be exactly one lowercase 40-hex Git SHA-1 object ID, matching this repository's object format; malformed lineage or merge identities MUST reject the payload.
 - **FR-023**: Every role-specific primary round total MUST be no greater than `attemptsTotal`; each supporting subject/event list MUST be non-empty, unique, and exactly resolvable through the snapshot reference catalog; all existing common, breakdown, and repeat-counter reconciliation rules remain mandatory.
-- **FR-024**: Artifact IDs MUST be unique. Finding-chain fingerprints, events, and revision evidence MUST be non-empty, unique, and exactly resolvable. Externalization MUST use a typed optional-entity kind that cannot represent mandatory overview or P0/P1 content. A referenced full report MUST match artifact ID, content hash, URL, and sidecar identity/hash exactly. P2/info chains MAY remain optional; P0/P1 chains MUST remain mandatory.
-- **FR-025**: Normative automated proof MUST compare exact decoded equality for all eight section variants; cover all three axis-scoped `insufficientEvidence` values; exercise unknown locked values through the production structured-error/generic-fallback path; preserve unsafe optional strings without constructing actionable URLs; and use exact valid 262,144-byte and mandatory 262,145-byte serialized payload fixtures.
+- **FR-024**: Artifact IDs MUST be unique. Finding-chain fingerprints, events, and revision evidence MUST be non-empty, unique, and exactly resolvable. Externalization MUST use a typed optional-entity kind that cannot represent mandatory overview or P0/P1 content. Every overview or artifact-section full-report reference MUST match exactly one typed catalog artifact by kind, artifact ID, content hash, URL, and sidecar identity/hash. P2/info chains MAY remain optional; P0/P1 chains MUST remain mandatory.
+- **FR-025**: Normative automated proof MUST compare exact decoded equality for all eight section variants; cover all three axis-scoped `insufficientEvidence` values; exercise unknown locked values through the Core production structured-error path and the AIDashUI rendered generic-fallback path in their owning layers; preserve unsafe optional strings without constructing actionable URLs; and use exact valid 262,144-byte and mandatory 262,145-byte serialized payload fixtures.
 
 ### Key Entities
 
 - **Team Audit Snapshot**: Immutable, redacted audit publication with stable identity, scope, mode, instruction versions, baseline cohort or incremental cursors, summaries, evidence, findings, artifacts, and limitations.
-- **Snapshot Reference Catalog**: Typed identity-only index repeated with each independently decoded card part so case, event, evidence, subject, finding, and revision references resolve exactly once without embedding raw logs or duplicate display bodies.
+- **Snapshot Reference Catalog**: Typed identity-only index repeated with each independently decoded card part so case, event, evidence, subject, finding, revision, and artifact/full-report references resolve exactly once without embedding raw logs or duplicate display bodies.
 - **Audit Axis Summary**: Reconciled counts and verdict for one independent core axis or the separate Task Effectiveness axis.
 - **Audit Finding**: Stable fingerprint, axis, priority, verdict, affected evidence and cases, lifecycle state, and remediation owner.
 - **Audit Case Timeline**: Ordered redacted events and attempts tied to stable case, actor-role, cycle, delivery, release, and observation identities.

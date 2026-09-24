@@ -37,7 +37,8 @@ signals, never `CardStyle` or whole-card background changes.
     "evidenceRefs": [],
     "subjectIDs": [],
     "revisionEvidenceRefs": [],
-    "findings": []
+    "findings": [],
+    "artifacts": []
   },
   "overview": {},
   "findings": [],
@@ -57,10 +58,12 @@ public-API, and byte-boundary proof is normative in
 `t005-acceptance-matrix.md`.
 
 The common `SnapshotReferenceCatalog` supplies typed cross-part identity
-resolution. Every case, event, evidence, subject, finding, or revision value
-used by the populated section is unique and resolves exactly once through that
-catalog. Catalog entries contain identities and finding priority only, never
-raw evidence or duplicated display bodies.
+resolution. Every case, event, evidence, subject, finding, revision, or
+artifact/full-report value used by the populated section is unique and
+resolves exactly once through that catalog. Typed artifact catalog entries
+carry kind, ID, hash, raw URL, and sidecar binding so an overview full report
+is self-resolving. Catalog entries never carry raw evidence or duplicated
+display bodies.
 
 The overview is not a bag of display strings. Baseline uses a typed cohort
 with stable case IDs and no cursors; incremental uses typed per-source cursors
@@ -96,7 +99,7 @@ semantic case.
   release/build/availability, observation/related-feedback identities, and the
   exact pending/effectiveness state. Its identity is the lowercase SHA-256 of
   the canonical U+001F-delimited problem/origin/delivery tuple; any supplied
-  merge revision is also exact lowercase SHA-256.
+  merge revision is one lowercase 40-hex Git SHA-1 object ID.
 - `agentRepeatMetrics` shows each role independently with common counters,
   cycle/cause breakdowns, one of five role-specific tagged counter sets, and
   supporting subject/event identities. The tag matches `actorRole`; every
@@ -112,9 +115,10 @@ semantic case.
   references. Artifact IDs are unique; chain finding/event/revision references
   are unique and catalog-resolved. Every value binds to the envelope sidecar
   ID/hash. The full report resolves to exactly one matching `fullReport`
-  artifact by ID, hash, URL, and sidecar binding. Externalization uses the
-  locked optional-only entity-kind enum. P0/P1 chains are mandatory; P2/info
-  chains may be optional. Mandatory artifact URLs pass `URLPolicy`; optional
+  catalog artifact by ID, hash, URL, kind, and sidecar binding, including when
+  the reference is carried by an overview part. Externalization uses the locked
+  optional-only entity-kind enum. P0/P1 chains are mandatory; P2/info chains
+  may be optional. Mandatory artifact URLs pass `URLPolicy`; optional
   artifact/grill strings remain untrusted and become a `Link` only when
   `URLPolicy.validate` accepts them.
 - P0/P1 event-chain entries display finding fingerprint, event IDs, and
@@ -198,9 +202,10 @@ equal independently.
 
 Normative proof also compares exact decoded equality for all eight section
 variants, covers `insufficientEvidence` independently on all three enclosing
-axes, sends unknown locked values through the production structured-error and
-generic-fallback path, and round-trips an unsafe optional URL string without
-constructing an actionable URL.
+axes, sends unknown locked values through the Core production structured-error
+path, and round-trips an unsafe optional URL string without constructing an
+actionable URL. The rendered generic-card fallback is proved separately by the
+AIDashUI T008 `CardRouterTests` task.
 
 ## Accessibility and localization
 

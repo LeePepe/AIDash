@@ -14,8 +14,8 @@
   not create duplicate cards.
 - Every card part carries a typed `SnapshotReferenceCatalog` derived from the
   accepted snapshot. Section-local case, event, evidence, subject, finding,
-  and revision references resolve through that catalog exactly once; the
-  catalog is not a display-label bag.
+  revision, and artifact/full-report references resolve through that catalog
+  exactly once; the catalog is not a display-label bag.
 
 ## Import bundle
 
@@ -146,7 +146,7 @@ release state:
 | `originIssueID` | String | Stable feedback-origin identity |
 | `deliveryIssueID` | String | Stable delivery identity |
 | `prURL` | String? | Untrusted source value; display policy applies |
-| `mergeSHA` | String? | Exact delivery revision when known |
+| `mergeSHA` | String? | Exact lowercase 40-hex Git SHA-1 object ID when known |
 | `releaseChannel` | ReleaseChannel? | `testflight | appStore | production | internal` |
 | `firstVersion` / `firstBuild` | String? | First containing release identity |
 | `availableAt` | Date? | UTC availability time |
@@ -158,7 +158,8 @@ The canonical lineage preimage is the UTF-8 byte sequence
 `problemFingerprint + U+001F + originIssueID + U+001F + deliveryIssueID`.
 `lineageID` is its 64-character lowercase SHA-256. Each tuple member is
 trimmed and non-empty before hashing. When present, `mergeSHA` is also exactly
-64 lowercase hexadecimal characters. Observation and related-feedback arrays
+40 lowercase hexadecimal characters, matching this repository's Git SHA-1
+object format. Observation and related-feedback arrays
 contain trimmed unique stable identities; malformed identities reject rather
 than degrading to display text.
 
@@ -297,6 +298,15 @@ externalize optional detail only. Its ID, hash, URL, and sidecar binding must
 resolve exactly to one sidecar entry whose kind is `fullReport`; otherwise the
 reference is invalid.
 
+`ArtifactReference` is the identity-only catalog form of an artifact:
+`artifactID`, `kind`, `contentSHA256`, raw `url`, `sidecarID`, and
+`sidecarSHA256`. It carries no display body. Every
+`PublicationCoverage.fullReport`, including one in an independently decoded
+overview part, resolves to exactly one catalog `ArtifactReference` whose kind
+is `fullReport` and whose ID, hash, URL, and sidecar binding all match. An
+artifacts part applies the same catalog resolution in addition to resolving its
+complete manifest entry.
+
 L4 emits `RequiredPublicationInputs`: the required entities and counts for the
 generic workflow, team/repository relationships, and P0/P1 findings/chains. It
 contains no `published*`, omitted, or externalized results.
@@ -349,11 +359,14 @@ sidecar ID/hash—not by artifact ID alone.
 
 `SnapshotReferenceCatalog` contains unique, trimmed `caseIDs`, `eventIDs`,
 `evidenceRefs`, `subjectIDs`, and `revisionEvidenceRefs`, plus unique
-`FindingReference(fingerprint, priority)` values. Each section may carry the
+`FindingReference(fingerprint, priority)` and `ArtifactReference` values.
+Artifact IDs are unique in the catalog. Each section may carry the
 snapshot-wide catalog or a deterministic complete subset for the entities in
 that part, but every reference present in the part must resolve exactly once.
-Catalog entries carry identity only; they never duplicate raw logs, event
-bodies, or finding presentation text.
+An overview carrying a full report always includes its matching artifact
+reference. Catalog entries carry identity/binding data only; they never
+duplicate raw logs, event bodies, finding presentation text, or artifact
+display bodies.
 
 `TeamAuditSection` is
 `overview | findings | caseTimelines | individualMetrics | feedbackLineage |

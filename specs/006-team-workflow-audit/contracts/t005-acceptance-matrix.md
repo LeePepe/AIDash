@@ -9,6 +9,12 @@ App, CLI, aidata, or RepoInfra changes. The existing
 `Validation/SchemaValidator.swift` and `Validation/URLPolicy.swift` are
 consumed unchanged and are not in scope.
 
+The implementation base is the exact published planning commit that receives
+AI Reviewer `PASS`, as pinned in Team Lead's fresh handoff. Parent
+`fdace13d20ee0b28759c4853c82445fd4d913dcc` alone is not an implementation
+base because it does not contain FR-020–FR-025. A later approved descendant is
+valid only when these nine planning artifact blobs are byte-identical.
+
 ## Intra-layer architecture seam
 
 The existing interfaces remain `CardType.validate(_:)` and its production
@@ -53,7 +59,7 @@ The public nested surface includes, at minimum:
 - immutable artifacts: `ImportCollisionObservation`,
   `ImportObservationDisposition`, `ArtifactManifestEntry`,
   `ArtifactRequirement`, `ArtifactSection`, `GrillLinks`,
-  `FullReportReference`, `ExternalizableEntityKind`, and
+  `ArtifactReference`, `FullReportReference`, `ExternalizableEntityKind`, and
   `ExternalizedEntityReference`.
 
 All public structs, enums, properties required to construct a valid fixture,
@@ -80,7 +86,8 @@ without `@testable import`.
 Unknown locked raw values must produce the existing structured payload decode
 failure and caller-level generic card fallback; they are never coerced to a
 known semantic case. The explicit `RepeatTriggerCause.unknown` wire value is
-source data and round-trips unchanged.
+source data and round-trips unchanged. T005 proves structured Core failure;
+T008 proves the resulting rendered generic-card fallback in AIDashUI.
 
 ## Semantic and referential invariants
 
@@ -122,8 +129,8 @@ source data and round-trips unchanged.
    arrays are non-empty and unique; every value resolves exactly once through
    the catalog. Feedback-lineage identity equals the lowercase SHA-256 of the
    canonical U+001F-delimited problem/origin/delivery tuple, a supplied merge
-   revision is exact lowercase SHA-256, and observation/related-feedback IDs
-   are non-empty and unique.
+   revision is one lowercase 40-hex Git SHA-1 object ID, and
+   observation/related-feedback IDs are non-empty and unique.
 10. A repeat metric carries the tagged role-specific variant matching
     `actorRole`. Common, cycle-kind, trigger-cause, and role-specific counters
     are all present and non-negative. `repeatCycles <= attemptsTotal`,
@@ -147,7 +154,8 @@ source data and round-trips unchanged.
     stay untrusted and round-trip without constructing a `URL`.
 13. `GrillLinks`, `FullReportReference`, and every externalized entity carry
     the envelope sidecar ID/hash. A full report resolves to exactly one
-    `fullReport` artifact with the same ID, hash, and validated URL.
+    catalog `fullReport` artifact with the same ID, hash, URL, kind, and sidecar
+    binding, including from an independently decoded overview.
     Externalized references target optional detail only, use reason
     `exceedsInlinePayloadLimit`, use a locked optional-only entity-kind enum,
     have a positive encoded byte count, and bind to that resolved full report
@@ -164,19 +172,19 @@ source data and round-trips unchanged.
 |---|---|---|---|---|
 | Registration | `CardType.teamAudit`; count 10→11 | decode/validate dispatches only to `TeamAuditPayload` | raw value is `teamAudit` | `CardTypeDecodeTests.swift`, `EnumRoundtripTests.swift` |
 | Size | `teamAudit` is pass-through for authored size | payload richness never downgrades size | data and decoded-payload resolver overloads agree | `SchemaValidatorTests.swift` |
-| Envelope/section | part bounds, SHA-256, typed reference catalog, exactly one of eight sections | wrong discriminator, empty/multiple sections and duplicate/unresolved catalog values reject | exact decoded equality for every common field in all eight variants | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Envelope/section | part bounds, SHA-256, typed identity/finding/artifact reference catalog, exactly one of eight sections | wrong discriminator, empty/multiple sections and duplicate/unresolved catalog values reject | exact decoded equality for every common field in all eight variants | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Overview mode | typed cohort/case IDs vs typed cursors | baseline-without-cohort, baseline-with-cursor, incremental-with-cohort, incremental-without-cursor reject | baseline and incremental fixtures round-trip | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Axes/effectiveness | locked axis verdicts and reconciled counts | duplicate/missing axis, Task Effectiveness as core, negative or unequal totals reject | all verdicts/raw values round-trip, including three axis-scoped `insufficientEvidence` cases | `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Coverage | four independent required/published equalities | unequal finding counts reject even when chain counts match; full report cannot substitute | all count fields survive | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Findings | identity, subject, responsibility, priority/state, evidence | duplicate/unresolved case/event/evidence IDs and missing identity reject through the catalog | exact finding equality plus all six states and `P0/P1/P2/info` round-trip | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Case timelines | ordered embedded events/attempts with role/cycle identity | missing, duplicate, reordered, or foreign case/event/attempt IDs reject | complete timeline fields survive | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Feedback lineage | typed release channel and effectiveness state; canonical tuple-derived lineage ID | mismatched lineage hash, malformed merge SHA, duplicate/blank observation or related-feedback reference, and unknown channel reject/fallback | exact problem→release→observation equality | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Feedback lineage | typed release channel and effectiveness state; canonical tuple-derived lineage ID | mismatched lineage hash, malformed 40-hex Git SHA-1 merge OID, duplicate/blank observation or related-feedback reference, and unknown channel reject/fallback | exact problem→release→observation equality | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Repeat metrics | five role-specific variants and common counters | mismatched role tag, primary rounds greater than attempts, empty/duplicate/unresolved subject/event evidence, and negative/inconsistent totals/breakdowns reject | exact equality for every role-specific field, cause, subject, and event | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Collisions | locked disposition, parent/entity/hash identity | foreign parent, equal/malformed hashes, missing entity reject | accepted/rejected identity fields survive | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Artifacts/grill | unique artifact IDs, typed requirements, grill/sidecar binding, P0/P1 mandatory vs P2/info optional chains | duplicate artifact/chain refs, foreign snapshot/sidecar, unsafe mandatory URL, dangling finding/event/revision refs reject; unsafe optional string remains exact data | exact artifact, grill, priority, event, and revision equality | `CardPayloadRoundTripTests.swift`, `SchemaValidatorTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Full report/externalization | typed full report and optional-only externalized collection | dangling/mismatched ID/hash/URL/sidecar report, mandatory-kind externalization, invalid reason/count reject | exact reference equality | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Full report/externalization | typed catalog artifact, full report, and optional-only externalized collection | overview/artifact full report without exactly one matching kind/ID/hash/URL/sidecar catalog entry, mandatory-kind externalization, invalid reason/count reject | exact reference equality | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | URL policy seam | Service-role extension supplies the `validateInvariants()` witness and delegates to internal `TeamAuditPayloadURLValidator`; `CardType`, `SchemaValidator`, and `URLPolicy` interfaces stay unchanged | Models contain no `URLPolicy`/Validation dependency; unsafe mandatory/full-report/present-lineage URL rejects while unsafe optional artifact/grill strings remain accepted data | structured error field/code and optional raw string survive both `CardType.validate` and production `SchemaValidator` paths | `TeamAuditPayloadValidationTests.swift`, `SchemaValidatorTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Unknown enums | structured decode failure reaches existing generic fallback through `SchemaValidator`/CardType | no unknown value is coerced to a known semantic case | explicit `RepeatTriggerCause.unknown` survives | `CardTypeDecodeTests.swift`, `EnumRoundtripTests.swift`, `SchemaValidatorTests.swift` |
+| Unknown enums | structured decode failure propagates through `CardType`/`SchemaValidator`; rendered fallback is T008-owned | no unknown value is coerced to a known semantic case | explicit `RepeatTriggerCause.unknown` survives; Core error field/code is exact | `CardTypeDecodeTests.swift`, `EnumRoundtripTests.swift`, `SchemaValidatorTests.swift` |
 | Public API | every fixture type has a public initializer | no `@testable` import required | construct eight individually valid variants from the external target | `AIDashCorePublicAPITests/PublicInitTests.swift` |
 | Wire-size boundary | validation measures the exact received serialized UTF-8 `Data.count` | an otherwise valid mandatory payload of exactly 262,145 bytes rejects with structured field/error; whitespace-only or merely “greater than” fixtures do not satisfy proof | an otherwise valid payload of exactly 262,144 bytes accepts | `SchemaValidatorTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 

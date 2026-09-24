@@ -227,20 +227,22 @@ scope/provenance/limitations, baseline cohort or incremental cursors, three
 independent core axes, separate Task Effectiveness, every P0/P1 finding, and
 all mandatory generic/team/P0/P1 artifact links. L4 supplies immutable required
 inputs; L5 packs them and computes final publication coverage with independently
-reconciled P0/P1-finding and mandatory-link count pairs.
+reconciled P0/P1-finding and mandatory-link count pairs. Every independently
+decoded part carries a complete typed reference catalog; an overview full
+report resolves through its artifact catalog entry without another card.
 
 **Layer path**:
 
 `AidataFoundation → AidataL1L2 → AidataL3 → AidataL4 → AidataL5 → AIDashCore → DesignKit → AIDashUI → AIDashApp schema advertisement`
 
-Core follows the AIDashUI forward-compatibility preparation task so adding the
-eleventh CardType does not break required repository-wide CI. Aidata contract
-tasks may proceed in parallel after the planning contract; AidataL5 waits for
-L4 and Core, computes published/omitted/externalized
-results after packing, and emits the mandatory set; UI waits for Core and
-DesignKit and renders it read-only; App schema advertisement waits for Core.
-The slice is independently demonstrated with baseline/incremental fixtures and
-no audit invocation.
+AIDashUI forward compatibility is already present in parent `fdace13d…`.
+AidataL1L2 validates canonical lineage and source identities; L3 preserves
+catalog facts; L4 emits required catalog inputs; L5 waits for L4 and Core,
+constructs each part's catalog, computes published/omitted/externalized results
+after packing, and emits the mandatory set. UI waits for Core and DesignKit,
+renders read-only, and proves unknown locked audit values use the generic
+fallback; App schema advertisement waits for Core. The slice is independently
+demonstrated with baseline/incremental fixtures and no audit invocation.
 
 ### US2 — Inspect findings, timelines, metrics, and artifacts
 
@@ -251,8 +253,10 @@ individual metrics, optional artifacts/grill links, and full-report
 externalization without changing US1's mandatory set.
 
 **Dependencies**: US1 publication seam and card registration. Detail-specific
-AidataL4 queries, L5 partitioning, and AIDashUI sections may land as separate
-layer tasks without changing the common Core contract.
+AidataL4 queries emit detail catalog inputs; L5 partitioning constructs each
+detail catalog and priority-aware optional artifact binding; AIDashUI consumes
+those validated parts. These land as separate layer tasks without changing the
+common Core contract.
 
 **Independent demonstration**: a neutral evidence fixture renders every typed
 detail section; unsafe optional URLs are text, unsafe mandatory URLs reject
@@ -282,8 +286,9 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | Independently keyed observation carries parent snapshot ID/hash and never updates accepted content |
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
 | Named audit query bundles | AidataL4 | AidataL5 | L4 exposes immutable required entities/counts and optional facts only; L5 alone computes final publication coverage after packing |
+| Snapshot reference catalog | AidataL1L2/L3 identity facts → AidataL4 catalog inputs → AidataL5 per-part catalog | AIDashCore validation + AIDashUI rendering | T002/T003 preserve identity/priority/artifact bindings; T004/T010 query them; T007/T011 pack them; T005 validates; T008/T012 consume rendered results |
 | `teamAudit` JSON payload | AIDashCore Types + Validation Service | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash, reference catalog, and explicit finding identity; Service-role protocol witness applies central URL policy without an upward Types dependency; Core before mapping/render/schema |
-| Future CardType fallback | AIDashUI | AIDashCore CardType expansion | AIDashUI fallback preparation merges before T005; T008 later adds the explicit renderer/token mapping |
+| Future CardType fallback | AIDashUI | AIDashCore CardType expansion | T019 compatibility is completed in `fdace13d…`; T008 adds explicit rendering and proves an unknown locked Team Audit value reaches the generic `CardRouter` fallback |
 | Classification tint | DesignKit | AIDashUI | DesignKit before final UI renderer |
 | Audit action intent | AIDashUI | AIDashApp | Core action enum before both; UI interface before App wiring |
 | `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
@@ -293,9 +298,9 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 ## Dependency Graph
 
 ```text
-Recovery gates: T020 → T021 → T019 → T005
+Completed history: T020 ✓ → T021 ✓ → T019 ✓ (all in fdace13d…)
+Active recovery: exact revised-plan PASS + published base pin → Team Lead handoff → T005
 US1 data: T001 → T002 → T003 → T004 → T007
-US1 compatibility: T019 → T005
 US1 app:  T005 ─┬→ T007
                 ├→ T008 ← T006
                 └→ T009
@@ -311,17 +316,6 @@ US3 data: T002 + T013 → T016
 
 Assembled RepoInfra gate:
 T007 + T008 + T009 + T011 + T012 + T015 + T016 + T017 → T018
-
-Recovery-only RepoInfra prerequisite:
-T020 changes no product behavior and uses its own task, published branch, and
-existing Draft PR #204 from exact implementation base
-`8716846ac42b48bfd89b9a09d5dd05fc4819025d`. The rejected head
-`b4aa5e51bdf381d71a6ab77fa2342349a6a5dedb` is evidence only and MUST NOT be
-re-reviewed. A replacement head must differ from both revisions; its three-dot
-surface from the base is limited to `scripts/ci/review-common.sh`,
-`scripts/ci/review_process_supervisor.py`, and
-`scripts/ci/tests/test_review_shell.py`. It unblocks the normal RepoInfra hooks
-required by T021.
 ```
 
 The graph is acyclic. Parallel markers are allowed only for tasks whose files
@@ -350,58 +344,36 @@ do not overlap and whose blocking contract has landed.
   through the Service-role protocol witness. Required fixtures include exact
   equality for all eight sections, three axis-scoped insufficient-evidence
   values, duplicate/unresolved catalog references, canonical lineage hashes,
-  role-round bounds, optional P2/info artifact behavior, structured unknown
-  fallback, unsafe optional-string preservation, and exact 262,144/262,145
-  valid mandatory payload bytes.
-- T020 proves the supervisor contract through the unchanged `run_with_timeout`
-  interface, including a zero-sleep fast-leader/out-of-PGID fixture and an
-  unrelated orphan-shaped process that must survive. No acceptance may depend
-  on name-based or PPID-1 discovery.
+  40-hex Git SHA-1 merge OIDs, role-round bounds, optional P2/info artifact
+  behavior, overview/artifact full-report catalog resolution, structured Core
+  unknown-value propagation, unsafe optional-string preservation, and exact
+  262,144/262,145 valid mandatory payload bytes.
+- T008 proves the AIDashUI-owned half of FR-025: the same unknown locked Team
+  Audit value renders the existing generic `CardRouter` fallback.
 
-## Recovery publication topology
+## Completed history and active T005 recovery
 
-T020 retains exact synchronized-main base
-`8716846ac42b48bfd89b9a09d5dd05fc4819025d`; later recovery branches start
-from the then-current descendant after their prerequisite merges. The existing
-persisted T020 workspace and Draft PR #204 are preserved for Team Lead's next
-scheduled implementation. Rejected head `b4aa5e51...` is evidence only and is
-never re-reviewed or treated as a delivery.
+T020, T021, and T019 are complete historical prerequisites: PR #204 delivered
+the RepoInfra supervisor, PR #210 delivered the planning/constitution package,
+and PR #215 delivered AIDashUI compatibility. All are present in parent
+`fdace13d20ee0b28759c4853c82445fd4d913dcc` and MUST NOT be dispatched again.
+Rejected historical heads remain evidence only.
 
-1. **RepoInfra watchdog PR (T020)**: retains exact base `8716846ac...` and owns
-   the unchanged `run_with_timeout` shell seam, one new same-layer Python
-   supervisor, and the existing shell regression test. The next head must be a
-   genuine successor to rejected `b4aa5e51...`; its three-dot surface from the
-   base is limited to those three files. Capability/identity tracking must
-   replace global orphan discovery and make fast-leader/out-of-PGID cleanup
-   deterministic. Draft PR #204 remains no-auto-merge until required checks,
-   exact local/remote/PR head equality, and exact-SHA implementation review all
-   pass. No planning or product file appears in that implementation surface.
-2. **Planning/constitution PR (T021)**: starts from synchronized main after
-   T020 and contains only `.specify/feature.json`,
-   `.specify/memory/constitution.md`, the managed `AGENTS.md` Spec Kit marker,
-   and `specs/006-team-workflow-audit/**`. Its title is exactly
-   `constitution: authorize team audit decision receipts`. Its PR description
-   repeats the 1.13.0 in-flight migration note: existing events remain valid;
-   new actions are additive, consumers preserve or visibly ignore unknown
-   actions, and audit invocation/remediation stay outside AIDash. It contains
-   no product or watchdog implementation.
-3. **AIDashUI compatibility PR (T019)**: makes current CardType switches use a
-   tested future-case fallback without adding `teamAudit`. It merges before
-   T005 so the Core-only CardType expansion can pass required whole-repository
-   builds.
-4. **AIDashCore T005 recovery PR**: the registered delivery workspace and
-   approved base `fdace13d20ee0b28759c4853c82445fd4d913dcc` and rejected
-   candidate `12577b03c866c73c53fa23d236d2005a68790358` are preserved as
-   evidence and are not mutated, published, or re-reviewed under the stale
-   planning revision. No new implementation begins until the exact revised
-   planning revision passes the spec/plan gate and Team Lead issues a new
-   implementation handoff for the preserved workspace. That later recovery
-   remains one AIDashCore layer task and uses the exact eleven-file allowlist:
-   the original nine paths
-   plus `Validation/TeamAuditPayloadValidation.swift` and
-   `TeamAuditPayloadValidationTests.swift`. It proves every row in
-   `contracts/t005-acceptance-matrix.md`; `SchemaValidator.swift` and
-   `URLPolicy.swift` remain unchanged.
+The active edge is:
+
+1. Publish the revised planning commit and obtain AI Reviewer `PASS` on that
+   exact SHA and its nine artifact blobs.
+2. Team Lead pins that reviewed commit as the T005 implementation base—or an
+   explicitly approved descendant with byte-identical artifact blobs—in the
+   handoff and delivery metadata, then reconciles the preserved workspace
+   without discarding candidate evidence.
+3. T005 proceeds as one AIDashCore layer task with the exact eleven-file
+   allowlist. `SchemaValidator.swift` and `URLPolicy.swift` remain unchanged.
+
+Parent `fdace13d…` alone is not a valid T005 implementation base because it
+does not contain FR-020–FR-025. Candidate
+`12577b03c866c73c53fa23d236d2005a68790358` remains unmutated/unpublished until
+the fresh handoff; it is never re-reviewed under the stale planning revision.
 
 ## Complexity Tracking
 
@@ -415,6 +387,6 @@ architecture-compliant correction: one Service implementation file and its
 same-layer proof file, with no package/layer expansion and no change to
 `SchemaValidator` or `URLPolicy`.
 
-When the amendment-bearing PR is created, its title must use
-`constitution: <change>` and retain the 1.13.0 migration note, as required by
-Constitution Governance. Planning review does not substitute for that PR gate.
+The constitution amendment was already published through PR #210. This
+revision changes planning contracts only; exact planning review and base
+pinning do not substitute for implementation review of a later T005 SHA.
