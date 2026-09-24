@@ -115,12 +115,14 @@ overview renderer; default collection performs no audit import or invocation.
 | Metadata | T005 |
 |---|---|
 | Owning layer / context | **AIDashCore** — CONTEXT.md → Packages/CONTEXT.md → Packages/AIDashCore/CONTEXT.md; Packages/AIDashCore/tech-context.md |
-| Files in scope | `Packages/AIDashCore/Sources/AIDashCore/Models/Payloads/TeamAuditPayload.swift`; `Packages/AIDashCore/Sources/AIDashCore/Models/CardType.swift`; `Packages/AIDashCore/Sources/AIDashCore/Models/EffectiveCardSize.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/CardPayloadRoundTripTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/CardTypeDecodeTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/EnumRoundtripTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/SchemaValidatorTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadInvariantTests.swift`; `Packages/AIDashCore/Tests/AIDashCorePublicAPITests/PublicInitTests.swift` |
-| Files NOT to touch | Packages/AIDashCore/Sources/AIDashCore/Models/UserEvent*.swift (T013); Packages/AIDashUI/**; Apps/**; CLI/** |
-| Interface / contract | `contracts/card-payload.md`, `data-model.md`, and `contracts/t005-acceptance-matrix.md`: one `teamAudit` type, eight variants, complete public type surface, exact locked wire vocabulary, and semantic/referential/wire-byte validation |
-| Functional acceptance | Every row of the T005 acceptance matrix passes: typed cohort/cases and evidence coverage; three locked axis verdicts plus separate reconciled Task Effectiveness; ordered embedded timeline events/attempts with case/role/cycle integrity; five-role tagged repeat metrics with non-negative/reconciled counters; exact `P0/P1/P2/info`, release-channel, and collision-disposition enums; typed grill/full-report/externalized artifacts bound to snapshot+sidecar; exact SHA-256 and collision/artifact/full-report references; independent coverage equality including unequal findings rejected when chains match; all eight exact source-field round trips; public initializers; structured unknown-enum fallback; CardType 10→11; no size downgrade; received UTF-8 262,144 accepts and 262,145 mandatory rejects |
-| Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected AIDashCore Swift build/test gates must exit 0. A focused resolver rerun is diagnostic only after an emitted hook failure. |
-| Dependencies / slice | T021, T019; T019 must merge first so the AIDashCore-only PR passes required repository-wide builds; US1/US2 contract foundation |
+| Files in scope | `Packages/AIDashCore/Sources/AIDashCore/Models/Payloads/TeamAuditPayload.swift`; `Packages/AIDashCore/Sources/AIDashCore/Models/CardType.swift`; `Packages/AIDashCore/Sources/AIDashCore/Models/EffectiveCardSize.swift`; `Packages/AIDashCore/Sources/AIDashCore/Validation/TeamAuditPayloadValidation.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/CardPayloadRoundTripTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/CardTypeDecodeTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/EnumRoundtripTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/SchemaValidatorTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadInvariantTests.swift`; `Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadValidationTests.swift`; `Packages/AIDashCore/Tests/AIDashCorePublicAPITests/PublicInitTests.swift` |
+| Files NOT to touch | `Packages/AIDashCore/Sources/AIDashCore/Validation/SchemaValidator.swift`; `Packages/AIDashCore/Sources/AIDashCore/Validation/URLPolicy.swift`; Packages/AIDashCore/Sources/AIDashCore/Models/UserEvent*.swift (T013); every other AIDashCore source/test; Packages/AIDashUI/**; Apps/**; CLI/**; aidata/**; specs/**; .specify/** |
+| Interface / contract | `contracts/card-payload.md`, `data-model.md`, and `contracts/t005-acceptance-matrix.md`: one `teamAudit` type, eight variants, typed reference catalog, complete public type surface, exact locked wire vocabulary, Types-owned structural/referential validation, and a Service-role `validateInvariants()` witness that applies unchanged central `URLPolicy` without Models→Validation dependency |
+| Functional acceptance | FR-020–FR-025 and every row of the T005 acceptance matrix pass: axis-context decoding including all three `insufficientEvidence` cases; unique/catalog-resolved finding/case/event/evidence/subject/revision references; canonical lineage and merge hashes; five-role primary-round, repeat, breakdown, and supporting-evidence reconciliation; unique priority-aware artifacts; exact ID/hash/URL/sidecar full-report binding; optional-only typed externalization with P2/info chains preserved; exact equality for all eight variants; public initializers; structured production-path unknown-enum fallback; unsafe optional URL-string preservation; CardType 10→11; no size downgrade; exact received valid UTF-8 262,144 acceptance and mandatory 262,145 rejection |
+| Architecture acceptance | `TeamAuditPayload.swift` contains no `URLPolicy` or other Validation-role reference. It exposes an internal structural helper; `Validation/TeamAuditPayloadValidation.swift` supplies the public protocol witness and internal URL traversal. Existing `CardType.validate`, `SchemaValidator.validateCardPut`, `SchemaValidator.swift`, and `URLPolicy.swift` behavior/interface remain unchanged. |
+| Recovery evidence / gate | Approved base is `fdace13d20ee0b28759c4853c82445fd4d913dcc`. Preserve the registered delivery workspace and candidate `12577b03c866c73c53fa23d236d2005a68790358` as immutable review evidence; do not mutate, publish, or re-review it under the stale plan. No implementation starts until this exact revised planning revision receives AI Reviewer PASS and Team Lead issues a fresh handoff. |
+| Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected AIDashCore Swift build/test gates must exit 0. Diff surface must equal the eleven listed paths; focused architecture proof finds no Models→Validation reference; Service tests exercise `CardType.validate` and production `SchemaValidator` error fields. A focused resolver rerun is diagnostic only after an emitted hook failure. |
+| Dependencies / slice | Exact revised planning PASS, T021, T019; T019 must already be merged so the one-layer AIDashCore PR passes required repository-wide builds; US1/US2 contract foundation |
 
 - [ ] **T006 [P] [US1]** Add `Classification.teamAudit` in `Packages/DesignKit/Sources/DesignKit/Color/ColorSystem.swift`.
 
@@ -358,6 +360,13 @@ repository-buildable.
 
 | Spec requirement / criterion | Slice / tasks |
 |---|---|
+| US1/AC1–US1/AC4 trustworthy baseline/incremental snapshot, insufficient evidence, mandatory coverage | US1: T002–T009 |
+| US1/AC5 enclosing-axis insufficient-evidence round trip | US1 Core contract: T005 |
+| US2/AC1–US2/AC2 findings, timelines, lineage, and repeat evidence | US2: T002–T005, T010–T012 |
+| US2/AC3–US2/AC4 exact safe artifact binding and mandatory/optional URL behavior | US1/US2: T002–T005, T007–T012 |
+| US2/AC5 parented immutable collision observation | US1/US2: T002–T005, T007–T008, T010–T012 |
+| US2/AC6 mandatory content never truncates/externalizes | US1/US2: T005, T007–T012 |
+| US3/AC1–US3/AC4 acknowledgement, approval, immutable history, open-only grill links | US3: T013–T017 |
 | Constitution amendment publication contract and migration note | Recovery gate: T021 |
 | Future CardType consumer compatibility before Core expansion | US1: T019 → T005 |
 | FR-001 manual-only source | US1: T001–T002 |
@@ -379,6 +388,12 @@ repository-buildable.
 | FR-017 typed sidecar identity/hash and HTTPS-only grill entry points | US1: T002–T005, T007–T008; US2: T010–T012; US3: T014 |
 | FR-018 exact size, mandatory rejection, optional externalization, and graceful invalid/future behavior | US1: T005, T007–T008; US2: T011–T012; US3: T014–T015 |
 | FR-019 automated contract/boundary coverage | US1: T001–T009; US2: T010–T012; US3: T013–T017; assembled T018 |
+| FR-020 enclosing-axis verdict decode and three insufficient-evidence round trips | US1: T005 |
+| FR-021 unique/catalog-resolved finding references | US1/US2 contract: T005; producer/consumer population: T002–T003, T007, T010–T012 |
+| FR-022 canonical lineage identity and merge SHA | US2 contract: T005; source preservation: T002–T003, T010–T012 |
+| FR-023 complete role-round/evidence reconciliation | US2 contract: T005; source preservation: T002–T003, T010–T012 |
+| FR-024 exact priority-aware artifact/report/externalization resolution | US1/US2 contract: T005; publication/rendering: T007–T012 |
+| FR-025 exact eight-section/fallback/optional-string/byte proofs | US1/US2 Core proof: T005 |
 | SC-001/SC-003 complete fixture render and enum round-trip | US1: T005, T007–T009; US2: T010–T012 |
 | SC-002 one record per identity, zero overwrites, parented collision observation | US1: T002–T005, T007–T008; US2: T010–T012 |
 | SC-004 one receipt per decision kind, immutable source bytes | US3: T013–T015 |
@@ -402,9 +417,15 @@ repository-buildable.
 - T021's PR title is `constitution: authorize team audit decision receipts`,
   its body contains the in-flight migration note, and its exact surface is
   planning/constitution-only.
-- T019 is merged before provisioning T005; T005 then changes only its original
-  nine AIDashCore files and satisfies every row of
+- T019 is merged before provisioning T005. The stale nine-file T005 boundary
+  is superseded: recovery changes exactly the eleven listed AIDashCore paths,
+  keeps `SchemaValidator.swift`/`URLPolicy.swift` unchanged, contains no
+  Models→Validation reference, and satisfies FR-020–FR-025 plus every row of
   `contracts/t005-acceptance-matrix.md`.
+- The registered MY-1522 delivery workspace and candidate
+  `12577b03c866c73c53fa23d236d2005a68790358` remain preserved evidence until
+  exact revised-planning PASS and a fresh Team Lead implementation handoff;
+  this planning task neither mutates nor publishes that candidate.
 - T020 uses its own issue, persisted workspace, published task branch, Draft
   PR #204, and RepoInfra evidence. Its replacement head differs from exact base
   `8716846ac...` and rejected `b4aa5e51...`; its three-dot surface is limited

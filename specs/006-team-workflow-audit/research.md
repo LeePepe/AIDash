@@ -181,15 +181,17 @@ failure, never normal acceptance or a substitute for CI App builds.
 **Decision**: Recover from exact synchronized-main implementation base
 `8716846ac42b48bfd89b9a09d5dd05fc4819025d` through the existing dedicated RepoInfra
 watchdog PR, a planning/constitution PR, an AIDashUI future-CardType
-compatibility PR, and a fresh AIDashCore-only T005 PR. T020 must publish a
+compatibility PR, and an AIDashCore-only T005 successor in its preserved
+registered delivery workspace. T020 must publish a
 genuinely new three-dot implementation surface: its head differs from the base
 and rejected `b4aa5e51bdf381d71a6ab77fa2342349a6a5dedb`, and its only permitted
 paths are `scripts/ci/review-common.sh`,
 `scripts/ci/review_process_supervisor.py`, and
 `scripts/ci/tests/test_review_shell.py`. The constitution PR uses the required
 `constitution: <change>` title and carries the in-flight migration note in its
-PR description. T005 retains its original nine-file allowlist and consumes
-`contracts/t005-acceptance-matrix.md`.
+PR description. T005 remains one AIDashCore layer task and consumes
+`contracts/t005-acceptance-matrix.md`; its stale nine-file boundary is replaced
+by the exact eleven-file Types+Service surface in Decision 11.
 
 **Rationale**: Exact implementation review of `b4aa5e51...` found a destructive
 P0: its `PPID=1` plus executable-name heuristic could import and TERM/KILL
@@ -254,6 +256,70 @@ original false-124 race and the late-exit fail-open race.
   and still not ownership proof.
 - Add a new package, service, privileged tracer, or third-party dependency:
   unnecessary for trusted reviewer CLI descendants and outside RepoInfra.
+
+## Decision 11: Implement Team Audit URL policy as a Service-role protocol witness
+
+**Decision**: Keep the existing `CardPayloadProtocol.validateInvariants()`,
+`CardType.validate(_:)`, and `SchemaValidator.validateCardPut` interfaces.
+`TeamAuditPayload.swift` owns an internal structural/reference helper but no
+public witness body. New Service file
+`Packages/AIDashCore/Sources/AIDashCore/Validation/TeamAuditPayloadValidation.swift`
+supplies the public witness, runs the structural helper, and applies the
+unchanged `URLPolicy` through an internal `TeamAuditPayloadURLValidator`.
+Dedicated proof lives in
+`Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadValidationTests.swift`.
+
+**Rationale**: Models/XPC are the AIDashCore Types role; Validation is Service.
+The preserved candidate called `URLPolicy` from Models for full reports,
+feedback-lineage PR URLs, and mandatory artifacts, reversing the declared
+Types → Service direction. A Service extension implements a Types-owned
+protocol instead: Service depends on the decoded Types value, Models never
+name Service, and the existing single-decode/error interface remains deep and
+stable. The exact T005 implementation surface is eleven files—the original
+nine plus the Service implementation and its proof. `SchemaValidator.swift`,
+`URLPolicy.swift`, every other layer, approved base
+`fdace13d20ee0b28759c4853c82445fd4d913dcc`, and candidate
+`12577b03c866c73c53fa23d236d2005a68790358` stay unchanged.
+
+**Alternatives rejected**:
+
+- Keep `URLPolicy` calls in `TeamAuditPayload.swift`: violates the canonical
+  intra-layer role direction.
+- Copy `https`/host checks into Models: creates a second policy source and
+  violates constitution §C centralization.
+- Add a second decode in `SchemaValidator`: widens orchestration and changes
+  `CardType.validate` behavior when the existing protocol seam can carry the
+  implementation without upward dependency.
+- Modify `URLPolicy` or `SchemaValidator`: no policy/interface defect was
+  identified; expanding their scope adds risk without enabling the seam.
+
+## Decision 12: Turn every Round 2 correctness gap into stable acceptance
+
+**Decision**: FR-020 through FR-025 and the T005 matrix lock the six remaining
+correctness/test-proof findings: enclosing-axis verdict decode; unique and
+catalog-resolved finding references; canonical feedback-lineage/merge hashes;
+role-round and supporting-evidence reconciliation; unique, priority-aware,
+exact artifact/full-report/externalization bindings; and exact production-path
+proofs for all sections, fallback, optional unsafe strings, and byte limits.
+
+**Rationale**: The previous broad matrix language permitted spot checks and
+left cross-part reference resolution implicit. A common typed reference
+catalog makes each independently decoded card part self-validating without
+embedding raw evidence. Typed optional-only externalization and
+priority-resolved finding chains preserve P2/info flexibility while making
+P0/P1 non-externalizability unrepresentable. Exact equality and exact byte
+fixtures distinguish normative proof from approximate coverage.
+
+**Alternatives rejected**:
+
+- Leave the six items as reviewer prose: later implementation would have no
+  stable acceptance IDs or schedulable test mapping.
+- Make every finding chain mandatory: incorrectly removes optional P2/info
+  behavior.
+- Treat a self-declared full-report artifact ID as sufficient: permits hash,
+  URL, or sidecar substitution and breaks immutable provenance.
+- Accept whitespace-only or merely over-limit fixtures: does not prove that an
+  otherwise valid mandatory 262,145-byte payload fails at the wire boundary.
 
 ## Resolved source ambiguities
 

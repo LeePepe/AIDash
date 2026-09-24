@@ -18,7 +18,11 @@ scripts/cron, generated data, and external audit sources are out of scope.
 
 Recovery uses separate branches/PRs in this order: T020 RepoInfra watchdog,
 the planning/constitution surface (T021), T019 AIDashUI compatibility, then the
-nine-file AIDashCore T005 surface. They must never be combined.
+eleven-file AIDashCore T005 Types+Service surface. They must never be combined.
+The registered MY-1522 delivery workspace and candidate
+`12577b03c866c73c53fa23d236d2005a68790358` remain untouched evidence; no new
+implementation starts before the exact revised planning revision passes review
+and Team Lead issues a fresh handoff.
 
 T020 retains exact base `8716846ac42b48bfd89b9a09d5dd05fc4819025d` in the
 preserved workspace and Draft PR #204. Rejected head
@@ -73,13 +77,23 @@ through the hook signal; it is not part of the normal task acceptance path.
 - Baseline and incremental overview parts render different cohort/cursor
   sections, typed evidence coverage, locked axis-specific verdicts, and
   independent reconciled axes.
+- Workflow Conformance, Workflow Fitness, and Outcome Integrity each
+  round-trip their own `insufficientEvidence` value using the enclosing axis.
 - Replay and overlap records deduplicate by stable identity; hash collision
   never overwrites and emits a separately keyed observation with accepted
   parent snapshot ID/hash.
 - All six finding states and all locked verdicts round-trip.
 - Feedback lineage preserves problem/delivery/release/observation state, and
-  repeat metrics preserve every role, cycle/cause, five-case tagged
-  role-specific, subject, and event value with reconciled non-negative totals.
+  rejects a lineage ID not equal to the canonical U+001F-delimited tuple hash
+  or a supplied merge revision that is not lowercase SHA-256. Repeat metrics
+  preserve every role, cycle/cause, five-case tagged role-specific, subject,
+  and event value, bound every primary role-round total to attempts, and
+  require unique catalog-resolved supporting subjects/events; otherwise they
+  reject.
+- Artifact IDs and finding-chain references are unique and catalog-resolved;
+  P0/P1 chains are mandatory while P2/info chains may remain optional. A full
+  report and each externalized optional entity match ID, hash, URL, and sidecar
+  exactly, and the externalized entity kind cannot represent mandatory content.
 - Case timelines embed ordered events/attempts; their stable case/event/
   attempt/role/cycle references resolve exactly and reject missing, duplicate,
   reordered, or foreign identities.
@@ -90,7 +104,12 @@ through the hook signal; it is not part of the normal task acceptance path.
 - Collision parent ID/hash/entity/disposition, artifact snapshot/sidecar
   relationships, typed grill links, full-report resolution, and externalized
   optional-entity bindings reject dangling or mismatched references.
-- Final encoded payload boundary fixtures cover 262,144/262,145 bytes;
+- Exact decoded equality covers all eight section variants. Unknown locked
+  enum values traverse the production structured-error/generic-fallback path,
+  and unsafe optional strings round-trip without becoming actionable URLs.
+- Final otherwise-valid encoded payload fixtures cover exactly 262,144 bytes
+  accepted and exactly 262,145 mandatory bytes rejected; whitespace-only or
+  merely “greater than limit” fixtures are not proof. The
   mandatory P0/P1 findings and links have independently reconciled
   required/published counts and are never omitted or externalized, while
   oversized optional detail requires a typed full-report reference.
@@ -104,7 +123,12 @@ through the hook signal; it is not part of the normal task acceptance path.
 
 The complete T005 proof-to-file mapping is
 `contracts/t005-acceptance-matrix.md`; every matrix row must have fresh evidence
-inside the original nine-file AIDashCore allowlist.
+inside the exact eleven-file AIDashCore allowlist. Models contain no
+`URLPolicy`/Validation reference; the Service-role extension in
+`Validation/TeamAuditPayloadValidation.swift` supplies the existing protocol
+witness and is exercised through both `CardType.validate` and
+`SchemaValidator.validateCardPut`. Existing `SchemaValidator.swift` and
+`URLPolicy.swift` remain unchanged.
 
 ## 5. CI evidence
 

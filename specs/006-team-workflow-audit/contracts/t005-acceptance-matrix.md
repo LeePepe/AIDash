@@ -1,9 +1,32 @@
 # Contract: T005 AIDashCore Acceptance Matrix
 
 This contract is the complete implementation boundary for T005. The task is
-one AIDashCore-only PR. It may modify only the nine files listed in the T005
-row of `tasks.md`; it does not carry planning, AIDashUI, App, CLI, aidata, or
-RepoInfra changes.
+one AIDashCore-only PR. It may modify only the eleven files listed in the T005
+row of `tasks.md`: the original nine Types/test paths plus
+`Validation/TeamAuditPayloadValidation.swift` and
+`TeamAuditPayloadValidationTests.swift`. It does not carry planning, AIDashUI,
+App, CLI, aidata, or RepoInfra changes. The existing
+`Validation/SchemaValidator.swift` and `Validation/URLPolicy.swift` are
+consumed unchanged and are not in scope.
+
+## Intra-layer architecture seam
+
+The existing interfaces remain `CardType.validate(_:)` and its production
+caller `SchemaValidator.validateCardPut`. The Types file exposes only an
+internal `validateStructuralInvariants()` helper. A Service-role extension in
+`TeamAuditPayloadValidation.swift` supplies the public
+`validateInvariants()` protocol witness, calls the structural helper, and then
+passes the decoded audit payload to an internal
+`TeamAuditPayloadURLValidator`. Only that Validation-role module calls
+`URLPolicy`. `Models/**` never imports or calls a Validation-role type, and the
+single decode/structured-error path remains unchanged.
+
+The internal URL validator rejects an invalid present feedback-lineage PR URL,
+an invalid full-report URL, and a missing/invalid mandatory artifact URL using
+the existing structured payload error. Optional artifact/grill strings remain
+opaque and round-trip unchanged; render-time actionability remains a separate
+consumer of the same central policy. No URL scheme/host logic is duplicated in
+Models and `URLPolicy` itself is unchanged.
 
 ## Public type surface
 
@@ -17,8 +40,9 @@ section discriminator.
 The public nested surface includes, at minimum:
 
 - envelope and overview: `AuditScope`, `AuditMode`, `AuditCohort`,
-  `AuditCursor`, `InstructionVersion`, `EvidenceCoverage`, three locked
-  axis-specific verdict types, `CoreAxisSummary`,
+  `AuditCursor`, `InstructionVersion`, `EvidenceCoverage`,
+  `SnapshotReferenceCatalog`, `FindingReference`, three locked axis-specific
+  verdict types, axis-tagged `CoreAxisVerdict`, `CoreAxisSummary`,
   `TaskEffectivenessSummary`, and `PublicationCoverage`;
 - evidence: `AuditFinding`, `FindingPriority`, `FindingState`,
   `RemediationOwner`, `AuditCaseTimeline`, `AuditEvent`, `AuditAttempt`,
@@ -29,7 +53,8 @@ The public nested surface includes, at minimum:
 - immutable artifacts: `ImportCollisionObservation`,
   `ImportObservationDisposition`, `ArtifactManifestEntry`,
   `ArtifactRequirement`, `ArtifactSection`, `GrillLinks`,
-  `FullReportReference`, and `ExternalizedEntityReference`.
+  `FullReportReference`, `ExternalizableEntityKind`, and
+  `ExternalizedEntityReference`.
 
 All public structs, enums, properties required to construct a valid fixture,
 and memberwise initializers are callable from `AIDashCorePublicAPITests`
@@ -73,7 +98,10 @@ source data and round-trips unchanged.
 5. Overview has exactly one summary for each of the three core axes, no
    duplicate or missing axis, and no Task Effectiveness member. Each
    axis-specific verdict belongs to its axis and
-   `positive + negative + insufficientEvidence == totalCases`.
+   `positive + negative + insufficientEvidence == totalCases`. Verdict decode
+   is owned by `CoreAxisSummary`, decodes the enclosing axis first, and then
+   constructs the typed verdict; each axis's `insufficientEvidence` therefore
+   round-trips without being coerced to Workflow Conformance.
 6. Task Effectiveness remains separate; its five non-negative state counts
    sum to `totalEvaluated`.
 7. Every required/published pair in `PublicationCoverage` is equal and checked
@@ -86,11 +114,16 @@ source data and round-trips unchanged.
    order; every embedded record points back to the timeline case. Events have
    source, subject, actor role, timestamp, revision evidence, and evidence
    reference. Attempts have attempt, actor-role, cycle, cause, outcome, and
-   evidence identities.
+   evidence identities. Every case/event/evidence/subject/revision reference
+   resolves exactly once through the common `SnapshotReferenceCatalog`.
 9. Finding fingerprints, case IDs, and event IDs are unique within their
    section. Findings retain explicit subject and responsibility; no consumer
-   parses either from the fingerprint. Every locally supplied finding/case/
-   event reference resolves exactly once.
+   parses either from the fingerprint. Each finding's case/event/evidence
+   arrays are non-empty and unique; every value resolves exactly once through
+   the catalog. Feedback-lineage identity equals the lowercase SHA-256 of the
+   canonical U+001F-delimited problem/origin/delivery tuple, a supplied merge
+   revision is exact lowercase SHA-256, and observation/related-feedback IDs
+   are non-empty and unique.
 10. A repeat metric carries the tagged role-specific variant matching
     `actorRole`. Common, cycle-kind, trigger-cause, and role-specific counters
     are all present and non-negative. `repeatCycles <= attemptsTotal`,
@@ -98,23 +131,32 @@ source data and round-trips unchanged.
     `sameArtifactRepeatCycles + changedArtifactRepeatCycles == repeatCycles`,
     and each complete cycle/cause breakdown sums to `repeatCycles`. Each
     role's repeat counters do not exceed its corresponding total/round count;
-    zero attempts require zero repeat/maximum counters.
+    every primary role-round total is no greater than `attemptsTotal`; zero
+    attempts require zero repeat/maximum counters. Supporting subject/event
+    arrays are required, unique, and catalog-resolved.
 11. A collision observation has a unique observation ID, non-empty entity
     kind/identity, unequal accepted/rejected SHA-256 values, the one locked
     disposition, `parentSnapshotID == payload.snapshotID`, and
     `parentSnapshotSHA256 == payload.contentSHA256`. It cannot mutate or embed
     rejected content.
 12. Every artifact has the envelope snapshot ID and artifact-sidecar ID/hash.
-    Finding chains retain a finding fingerprint, event IDs, revision evidence,
-    and content SHA-256. Mandatory URLs pass `URLPolicy`'s HTTPS+host rule;
-    optional URL strings stay untrusted and round-trip without constructing a
-    `URL`.
+    Artifact IDs are unique. Finding chains retain unique catalog-resolved
+    finding fingerprints, event IDs, revision evidence, and content SHA-256.
+    P0/P1 chains are mandatory; P2/info chains may be optional. Mandatory URLs
+    pass the Service-side `URLPolicy` HTTPS+host rule; optional URL strings
+    stay untrusted and round-trip without constructing a `URL`.
 13. `GrillLinks`, `FullReportReference`, and every externalized entity carry
     the envelope sidecar ID/hash. A full report resolves to exactly one
     `fullReport` artifact with the same ID, hash, and validated URL.
     Externalized references target optional detail only, use reason
-    `exceedsInlinePayloadLimit`, have a positive encoded byte count, and bind
-    to that resolved full report.
+    `exceedsInlinePayloadLimit`, use a locked optional-only entity-kind enum,
+    have a positive encoded byte count, and bind to that resolved full report
+    by ID, hash, URL, and sidecar ID/hash.
+14. Types-owned models call no Validation-role symbol. The Service-role
+    extension supplies the public protocol witness, invokes the internal
+    structural helper followed by `TeamAuditPayloadURLValidator`, and preserves
+    the unchanged `CardType.validate`/`SchemaValidator.validateCardPut`
+    single-decode structured schema error/fallback contract.
 
 ## Exact acceptance matrix
 
@@ -122,20 +164,21 @@ source data and round-trips unchanged.
 |---|---|---|---|---|
 | Registration | `CardType.teamAudit`; count 10→11 | decode/validate dispatches only to `TeamAuditPayload` | raw value is `teamAudit` | `CardTypeDecodeTests.swift`, `EnumRoundtripTests.swift` |
 | Size | `teamAudit` is pass-through for authored size | payload richness never downgrades size | data and decoded-payload resolver overloads agree | `SchemaValidatorTests.swift` |
-| Envelope/section | part bounds, SHA-256, exactly one of eight sections | wrong discriminator, empty/multiple sections reject | every common source field survives | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Envelope/section | part bounds, SHA-256, typed reference catalog, exactly one of eight sections | wrong discriminator, empty/multiple sections and duplicate/unresolved catalog values reject | exact decoded equality for every common field in all eight variants | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Overview mode | typed cohort/case IDs vs typed cursors | baseline-without-cohort, baseline-with-cursor, incremental-with-cohort, incremental-without-cursor reject | baseline and incremental fixtures round-trip | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Axes/effectiveness | locked axis verdicts and reconciled counts | duplicate/missing axis, Task Effectiveness as core, negative or unequal totals reject | all verdicts/raw values round-trip | `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Axes/effectiveness | locked axis verdicts and reconciled counts | duplicate/missing axis, Task Effectiveness as core, negative or unequal totals reject | all verdicts/raw values round-trip, including three axis-scoped `insufficientEvidence` cases | `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Coverage | four independent required/published equalities | unequal finding counts reject even when chain counts match; full report cannot substitute | all count fields survive | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Findings | identity, subject, responsibility, priority/state, evidence | duplicate/unresolved local IDs and missing identity reject | all six states and `P0/P1/P2/info` round-trip | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Findings | identity, subject, responsibility, priority/state, evidence | duplicate/unresolved case/event/evidence IDs and missing identity reject through the catalog | exact finding equality plus all six states and `P0/P1/P2/info` round-trip | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Case timelines | ordered embedded events/attempts with role/cycle identity | missing, duplicate, reordered, or foreign case/event/attempt IDs reject | complete timeline fields survive | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Feedback lineage | typed release channel and effectiveness state | invalid SHA/reference/channel rejects or uses generic fallback | problem→release→observation fields survive | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift` |
-| Repeat metrics | five role-specific variants and common counters | mismatched role tag, negative/inconsistent totals/breakdowns reject | every role-specific field and cause survives | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Feedback lineage | typed release channel and effectiveness state; canonical tuple-derived lineage ID | mismatched lineage hash, malformed merge SHA, duplicate/blank observation or related-feedback reference, and unknown channel reject/fallback | exact problem→release→observation equality | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Repeat metrics | five role-specific variants and common counters | mismatched role tag, primary rounds greater than attempts, empty/duplicate/unresolved subject/event evidence, and negative/inconsistent totals/breakdowns reject | exact equality for every role-specific field, cause, subject, and event | `CardPayloadRoundTripTests.swift`, `EnumRoundtripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 | Collisions | locked disposition, parent/entity/hash identity | foreign parent, equal/malformed hashes, missing entity reject | accepted/rejected identity fields survive | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Artifacts/grill | typed artifact requirement, grill and sidecar binding | foreign snapshot/sidecar, unsafe mandatory URL, dangling finding/event refs reject; unsafe optional string remains data | direct artifact and grill fields survive | `CardPayloadRoundTripTests.swift`, `SchemaValidatorTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Full report/externalization | typed full report and externalized collection | dangling/mismatched report, mandatory externalization, invalid reason/count reject | reference fields survive | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
-| Unknown enums | structured decode failure reaches existing generic fallback | no unknown value is coerced to a known semantic case | explicit `RepeatTriggerCause.unknown` survives | `CardTypeDecodeTests.swift`, `EnumRoundtripTests.swift`, `SchemaValidatorTests.swift` |
-| Public API | every fixture type has a public initializer | no `@testable` import required | construct all eight variants from external target | `AIDashCorePublicAPITests/PublicInitTests.swift` |
-| Wire-size boundary | validation measures the received serialized UTF-8 `Data.count` | 262,145-byte mandatory payload rejects with structured field/error; optional externalization remains typed | 262,144-byte valid payload accepts | `SchemaValidatorTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Artifacts/grill | unique artifact IDs, typed requirements, grill/sidecar binding, P0/P1 mandatory vs P2/info optional chains | duplicate artifact/chain refs, foreign snapshot/sidecar, unsafe mandatory URL, dangling finding/event/revision refs reject; unsafe optional string remains exact data | exact artifact, grill, priority, event, and revision equality | `CardPayloadRoundTripTests.swift`, `SchemaValidatorTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Full report/externalization | typed full report and optional-only externalized collection | dangling/mismatched ID/hash/URL/sidecar report, mandatory-kind externalization, invalid reason/count reject | exact reference equality | `CardPayloadRoundTripTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| URL policy seam | Service-role extension supplies the `validateInvariants()` witness and delegates to internal `TeamAuditPayloadURLValidator`; `CardType`, `SchemaValidator`, and `URLPolicy` interfaces stay unchanged | Models contain no `URLPolicy`/Validation dependency; unsafe mandatory/full-report/present-lineage URL rejects while unsafe optional artifact/grill strings remain accepted data | structured error field/code and optional raw string survive both `CardType.validate` and production `SchemaValidator` paths | `TeamAuditPayloadValidationTests.swift`, `SchemaValidatorTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
+| Unknown enums | structured decode failure reaches existing generic fallback through `SchemaValidator`/CardType | no unknown value is coerced to a known semantic case | explicit `RepeatTriggerCause.unknown` survives | `CardTypeDecodeTests.swift`, `EnumRoundtripTests.swift`, `SchemaValidatorTests.swift` |
+| Public API | every fixture type has a public initializer | no `@testable` import required | construct eight individually valid variants from the external target | `AIDashCorePublicAPITests/PublicInitTests.swift` |
+| Wire-size boundary | validation measures the exact received serialized UTF-8 `Data.count` | an otherwise valid mandatory payload of exactly 262,145 bytes rejects with structured field/error; whitespace-only or merely “greater than” fixtures do not satisfy proof | an otherwise valid payload of exactly 262,144 bytes accepts | `SchemaValidatorTests.swift`, `TeamAuditPayloadInvariantTests.swift` |
 
 The byte gate applies to the received final JSON bytes in
 `CardType.teamAudit.validate(_:)`, not to an assumed or re-encoded semantic

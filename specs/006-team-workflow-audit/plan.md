@@ -14,7 +14,9 @@ separate Task Effectiveness axis, findings, evidence timelines, individual
 metrics, limitations, and hosted Archify relationships. Owner acknowledgement
 and remediation approval reuse the existing append-only UserEvent seam and
 record receipts only; no layer invokes an audit, changes source state, or
-dispatches remediation.
+dispatches remediation. T005 keeps Models as pure Types and implements Team
+Audit URL-policy orchestration in the AIDashCore Validation Service role behind
+the existing `CardPayloadProtocol.validateInvariants()` interface.
 
 ## Technical Context
 
@@ -47,7 +49,7 @@ dispatches remediation.
 | III. Glanceable flat briefing | PASS | latest snapshot appears as one normal container with bounded card parts; no navigation tree |
 | IV/VI. Typed schema and orthogonal card dimensions | PASS | one Core-owned `teamAudit` payload; audit state/priority are content, not size/style chrome |
 | Scope Discipline | PASS | each implementation task owns one resolver leaf and exact files; sibling exclusions are explicit |
-| URL policy | PASS | only central-policy HTTPS links become actionable; local/custom schemes remain text |
+| URL policy | PASS | a Service-role extension applies the unchanged central `URLPolicy`; Models retain opaque strings and never depend upward on Validation |
 | Error handling | PASS | invalid/missing evidence and write failure degrade visibly, never trap |
 | Accessibility/i18n/test coverage | PASS by plan | UI task includes semantic copy, hit targets, previews, action/round-trip tests |
 | Public-repo identity | PASS | contracts use neutral references and configurable ignored local import root; no account/workspace/machine IDs |
@@ -55,9 +57,12 @@ dispatches remediation.
 
 ### Post-design re-check
 
-PASS. Design artifacts retain every gate above. No dependency direction is
-reversed, no new persistence authority or dependency is introduced, and every
-cross-layer behavior is represented by a contract plus dependency edge.
+PASS. Design artifacts retain every gate above. The recovery seam follows the
+declared intra-layer direction: the Service-role protocol witness depends on
+Types-owned `TeamAuditPayload`, while Models reference no Validation symbol.
+No package dependency direction is reversed, no new persistence authority or
+dependency is introduced, and every cross-layer behavior is represented by a
+contract plus dependency edge.
 
 ## Project Structure
 
@@ -92,7 +97,7 @@ aidata/
 └── L5_apps/digest/                                   # AidataL5 fetch + card publication
 
 Packages/
-├── AIDashCore/                                       # typed payload + UserEvent actions
+├── AIDashCore/                                       # typed payload + Service-side schema/URL validation + UserEvent actions
 ├── DesignKit/                                        # classification tint only
 └── AIDashUI/                                         # card rendering + action intents
 
@@ -112,20 +117,61 @@ added to the matching router `test_paths` in the same layer task.
 ### `TeamAuditPayload` module
 
 **Interface**: one common snapshot envelope plus eight locked section variants
-and validation invariants defined by `contracts/card-payload.md` and the
-complete Core proof table in `contracts/t005-acceptance-matrix.md`.
+with a typed cross-part reference catalog. `CardPayloadProtocol` remains the
+small public interface; validation invariants are defined by
+`contracts/card-payload.md` and the complete Core proof table in
+`contracts/t005-acceptance-matrix.md`.
 
 **Implementation hidden behind it**: typed cohort/cases and evidence coverage;
-mode reconciliation; axis-specific verdict/count validation; typed finding,
-release, collision, and role-repeat enums; ordered case/event/attempt
-references; full lineage and five-role tagged repeats; collision and
-snapshot/sidecar/full-report referential integrity; bounded
-part/externalization semantics; mandatory artifact capacity; exact SHA-256 and
-received UTF-8 byte validation; and graceful unknown-enum/URL fallback. Callers
-learn one CardType and section enum, not multiple audit card schemas.
+axis-context verdict decoding; mode reconciliation; typed finding, release,
+collision, role-repeat, and optional-externalization enums; catalog-resolved
+case/event/evidence/subject/finding/revision references; canonical feedback
+lineage hashes; fully bounded role rounds; exact artifact/full-report
+resolution; bounded part/externalization semantics; mandatory artifact
+capacity; exact SHA-256 and received UTF-8 byte validation; and graceful
+unknown-enum/URL fallback. Callers learn one CardType and section enum, not
+multiple audit card schemas.
 
-**Test surface**: Core round trips/invariants and UI rendering through
-`CardType.decode`/`CardRouter`.
+**Test surface**: exact-equality Core round trips/invariants and Service URL
+checks through `CardType.validate`/`SchemaValidator.validateCardPut`, plus UI
+rendering through `CardType.decode`/`CardRouter`.
+
+### Team Audit URL-policy seam
+
+**External interface**: unchanged `CardType.validate(_:)`, reached in
+production from unchanged `SchemaValidator.validateCardPut`.
+
+**Types role**:
+`Models/Payloads/TeamAuditPayload.swift` owns Codable data, public
+construction, and an internal `validateStructuralInvariants()` helper. It may
+require mandatory URL strings to be present and may compare raw strings for
+exact referential equality, but it never names `URLPolicy` or another
+Validation-role symbol.
+
+**Service role**:
+`Validation/TeamAuditPayloadValidation.swift` supplies the public
+`TeamAuditPayload.validateInvariants()` protocol witness. The witness calls the
+Types helper and then an internal `TeamAuditPayloadURLValidator` that reuses
+unchanged `URLPolicy.validate(_:)`. It rejects missing/unsafe mandatory
+artifact URLs, unsafe full-report URLs (including coverage/externalized
+references), and unsafe present feedback-lineage PR URLs. Optional
+artifact/grill strings remain opaque data and may degrade to text later.
+
+**Depth and locality**: the existing protocol interface, decode count,
+structured error mapping, and `URLPolicy` interface do not change. URL field
+traversal and policy stay in one Service module; scheme/host rules are not
+copied into Models. The Service module is an internal seam, not a new public
+port or adapter.
+
+**Exact implementation paths**:
+
+- Types: `Packages/AIDashCore/Sources/AIDashCore/Models/Payloads/TeamAuditPayload.swift`
+- Service: `Packages/AIDashCore/Sources/AIDashCore/Validation/TeamAuditPayloadValidation.swift`
+- Service proof: `Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadValidationTests.swift`
+- Existing production/fallback proof: `Packages/AIDashCore/Tests/AIDashCoreTests/SchemaValidatorTests.swift`
+
+`Packages/AIDashCore/Sources/AIDashCore/Validation/SchemaValidator.swift` and
+`URLPolicy.swift` are explicit exclusions.
 
 ### Manual import seam
 
@@ -236,12 +282,12 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | Independently keyed observation carries parent snapshot ID/hash and never updates accepted content |
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
 | Named audit query bundles | AidataL4 | AidataL5 | L4 exposes immutable required entities/counts and optional facts only; L5 alone computes final publication coverage after packing |
-| `teamAudit` JSON payload | AIDashCore | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash and explicit finding identity; Core before mapping/render/schema |
+| `teamAudit` JSON payload | AIDashCore Types + Validation Service | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash, reference catalog, and explicit finding identity; Service-role protocol witness applies central URL policy without an upward Types dependency; Core before mapping/render/schema |
 | Future CardType fallback | AIDashUI | AIDashCore CardType expansion | AIDashUI fallback preparation merges before T005; T008 later adds the explicit renderer/token mapping |
 | Classification tint | DesignKit | AIDashUI | DesignKit before final UI renderer |
 | Audit action intent | AIDashUI | AIDashApp | Core action enum before both; UI interface before App wiring |
 | `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
-| Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore payload + AIDashUI URLPolicy | stable sidecar ID/exact byte hash, typed grill/full-report fields, mandatory invalid-link rejection, optional invalid-link text |
+| Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore Types + Validation Service + AIDashUI | stable sidecar ID/exact byte hash, typed grill/full-report fields, Service-side mandatory invalid-link rejection, optional invalid-link text through central render policy |
 | Assembled contract checker | RepoInfra hook gate | Core/App/UI/AidataL5 revision | T018 waits for all adapters, resolves current worktree, and runs only through normal hook selection |
 
 ## Dependency Graph
@@ -298,6 +344,15 @@ do not overlap and whose blocking contract has landed.
   focused diagnostic exception after a concrete failure.
 - Exact implementation SHA must match local HEAD, remote branch, and PR head
   before independent implementation review.
+- T005 verification inspects the committed surface for exactly eleven paths,
+  proves Models contains no `URLPolicy`/Validation reference, and exercises
+  both `CardType.validate` and production `SchemaValidator.validateCardPut`
+  through the Service-role protocol witness. Required fixtures include exact
+  equality for all eight sections, three axis-scoped insufficient-evidence
+  values, duplicate/unresolved catalog references, canonical lineage hashes,
+  role-round bounds, optional P2/info artifact behavior, structured unknown
+  fallback, unsafe optional-string preservation, and exact 262,144/262,145
+  valid mandatory payload bytes.
 - T020 proves the supervisor contract through the unchanged `run_with_timeout`
   interface, including a zero-sleep fast-leader/out-of-PGID fixture and an
   unrelated orphan-shaped process that must survive. No acceptance may depend
@@ -334,15 +389,31 @@ never re-reviewed or treated as a delivery.
    tested future-case fallback without adding `teamAudit`. It merges before
    T005 so the Core-only CardType expansion can pass required whole-repository
    builds.
-4. **AIDashCore T005 PR**: starts fresh after T019 from synchronized `main`,
-   uses only the original nine-file allowlist, and proves every row in
-   `contracts/t005-acceptance-matrix.md`.
+4. **AIDashCore T005 recovery PR**: the registered delivery workspace and
+   approved base `fdace13d20ee0b28759c4853c82445fd4d913dcc` and rejected
+   candidate `12577b03c866c73c53fa23d236d2005a68790358` are preserved as
+   evidence and are not mutated, published, or re-reviewed under the stale
+   planning revision. No new implementation begins until the exact revised
+   planning revision passes the spec/plan gate and Team Lead issues a new
+   implementation handoff for the preserved workspace. That later recovery
+   remains one AIDashCore layer task and uses the exact eleven-file allowlist:
+   the original nine paths
+   plus `Validation/TeamAuditPayloadValidation.swift` and
+   `TeamAuditPayloadValidationTests.swift`. It proves every row in
+   `contracts/t005-acceptance-matrix.md`; `SchemaValidator.swift` and
+   `URLPolicy.swift` remain unchanged.
 
 ## Complexity Tracking
 
 No constitutional violation remains. Constitution 1.13.0 is an authorized
 planning amendment that narrows the new actions to append-only audit receipts
 and explicitly denies workflow execution authority.
+
+The former nine-file T005 boundary is superseded because it forced Models
+(Types) to call `URLPolicy` (Service). The eleven-file boundary is the minimum
+architecture-compliant correction: one Service implementation file and its
+same-layer proof file, with no package/layer expansion and no change to
+`SchemaValidator` or `URLPolicy`.
 
 When the amendment-bearing PR is created, its title must use
 `constitution: <change>` and retain the 1.13.0 migration note, as required by
