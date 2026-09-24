@@ -3138,3 +3138,72 @@ class TestProcessSupervisorContract:
         assert adapter.signal_identity(target, signal.SIGTERM) is True
         assert signalled == [(99, signal.SIGTERM)]
 
+
+    def test_linux_environ_eacces_after_ownership_flip_is_skipped_not_fatal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """EACCES on environ is a TOCTOU with the same-UID filter, not uncertainty.
+
+        On Linux a same-UID process that execs a setuid/file-capability binary
+        becomes non-dumpable: its /proc/<pid> flips to root ownership and
+        environ reads return EACCES. The pre-read ``st_uid`` filter already
+        skips such processes; a process that flips BETWEEN that stat and the
+        environ read used to escape the filter and turn an unrelated runner
+        process into a 125 for a leader that exited normally (CI run
+        35730245781: ``rc=125`` instead of ``rc=3``). A fresh stat must settle
+        it: gone or no longer ours is skipped; still ours stays fail-closed.
+        """
+        import builtins
+        import io
+        import os
+        from review_process_supervisor import InspectionError, LinuxMembershipAdapter
+
+        my_uid = os.getuid()
+        fields = ["S", "1", "4242", "4242"] + ["0"] * 15 + ["5000", "0", "0"]
+        stat_line = "4242 (sudo) " + " ".join(fields)
+
+        orig_open = builtins.open
+        orig_stat = os.stat
+
+        def fake_open(path, *args, **kwargs):
+            if str(path) == "/proc/4242/stat":
+                return io.StringIO(stat_line)
+            if str(path) == "/proc/4242/environ":
+                raise PermissionError(13, "Permission denied", str(path))
+            return orig_open(path, *args, **kwargs)
+
+        def run_with_restat(restat):
+            calls = {"n": 0}
+
+            def fake_stat(path, *args, **kwargs):
+                if str(path) != "/proc/4242":
+                    return orig_stat(path, *args, **kwargs)
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return os.stat_result((0o555, 0, 0, 0, my_uid, 0, 0, 0, 0, 0))
+                return restat()
+
+            monkeypatch.setattr(os, "stat", fake_stat)
+            return LinuxMembershipAdapter().enumerate_candidates("cap", min_birth_marker="1000")
+
+        monkeypatch.setattr(os, "listdir", lambda p: ["4242"] if p == "/proc" else [])
+        monkeypatch.setattr(builtins, "open", fake_open)
+
+        # 1. Ownership flipped to root after the first stat -> skipped, no raise.
+        def flipped():
+            return os.stat_result((0o555, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+        assert run_with_restat(flipped) == []
+
+        # 2. Process vanished between the environ read and the re-stat -> skipped.
+        def vanished():
+            raise FileNotFoundError(2, "No such file or directory", "/proc/4242")
+
+        assert run_with_restat(vanished) == []
+
+        # 3. Still same-UID yet unreadable -> genuine uncertainty, still fails closed.
+        def same():
+            return os.stat_result((0o555, 0, 0, 0, my_uid, 0, 0, 0, 0, 0))
+
+        with pytest.raises(InspectionError, match="environ"):
+            run_with_restat(same)
