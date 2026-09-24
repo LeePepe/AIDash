@@ -607,6 +607,26 @@ class LinuxMembershipAdapter(BaseMembershipAdapter):
         except OSError as e:
             return e.errno in (errno.ESRCH, errno.ENOENT)
 
+    @staticmethod
+    def _released_mm(pid: int) -> bool:
+        """True only when /proc/<pid>/status proves the task no longer has an mm.
+
+        A user task past ``exit_mm()`` has no address space: ``status`` drops its
+        ``Vm*`` lines and ``environ`` is refused with EACCES even to the same UID
+        (observed on ubuntu-latest, kernel 6.17). Such a task cannot exec, fork,
+        or gain a capability. An absent task also counts. A status that still
+        shows an mm, or that cannot be read for any other reason, returns False
+        so the caller fails closed.
+        """
+        try:
+            with open(f"/proc/{pid}/status", "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        except OSError as e:
+            return e.errno in (errno.ESRCH, errno.ENOENT)
+        return not any(line.startswith("VmSize:") for line in content.splitlines())
+
     def get_identity(self, pid: int) -> Optional[ProcessIdentity]:
         """Resolves process identity on Linux via /proc/<pid>/stat.
 
@@ -735,7 +755,13 @@ class LinuxMembershipAdapter(BaseMembershipAdapter):
                     # skipped too. Still-ours-yet-unreadable stays fail-closed.
                     if self._left_same_uid(pid, my_uid):
                         continue
-                    raise InspectionError(f"permission denied reading /proc/{pid}/environ for same-UID process: {e}") from e
+                    # The other benign EACCES: the task is exiting (most often
+                    # our own fast-exit leader) and has dropped its mm. Report
+                    # it without capability proof: ledger, ancestry and PGID
+                    # membership are unaffected, and it can spawn nothing new.
+                    if not self._released_mm(pid):
+                        raise InspectionError(f"permission denied reading /proc/{pid}/environ for same-UID process: {e}") from e
+                    has_cap = False
                 except OSError as e:
                     if e.errno in (errno.ESRCH, errno.ENOENT):
                         has_cap = False

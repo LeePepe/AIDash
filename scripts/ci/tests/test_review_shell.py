@@ -3164,10 +3164,13 @@ class TestProcessSupervisorContract:
 
         orig_open = builtins.open
         orig_stat = os.stat
+        live_status = "Name:\tsudo\nState:\tS (sleeping)\nVmSize:\t  8000 kB\n"
 
         def fake_open(path, *args, **kwargs):
             if str(path) == "/proc/4242/stat":
                 return io.StringIO(stat_line)
+            if str(path) == "/proc/4242/status":
+                return io.StringIO(live_status)
             if str(path) == "/proc/4242/environ":
                 raise PermissionError(13, "Permission denied", str(path))
             return orig_open(path, *args, **kwargs)
@@ -3207,3 +3210,64 @@ class TestProcessSupervisorContract:
 
         with pytest.raises(InspectionError, match="environ"):
             run_with_restat(same)
+
+    def test_linux_environ_eacces_on_exiting_task_is_reported_without_capability(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A same-UID task that has released its mm is not uncertainty.
+
+        On ubuntu-latest the fast-exit leader itself (``/bin/sh -c 'exit 3'``)
+        is caught between ``exit_mm()`` and reaping: /proc/<pid> is still ours
+        but environ is refused with EACCES. That turned the leader's real
+        status into 125 (CI run 35730245781). Such a task is reported with no
+        capability proof, so it keeps ledger/ancestry/PGID membership but can
+        admit nothing new. A task that still has an mm stays fail-closed.
+        """
+        import builtins
+        import io
+        import os
+        from review_process_supervisor import (
+            CandidateInfo, InspectionError, LinuxMembershipAdapter,
+        )
+
+        my_uid = os.getuid()
+        fields = ["R", "4000", "4242", "4242"] + ["0"] * 15 + ["5000", "0", "0"]
+        stat_line = "4242 (sh) " + " ".join(fields)
+        orig_open = builtins.open
+        orig_stat = os.stat
+        status = {"text": ""}
+
+        def fake_open(path, *args, **kwargs):
+            if str(path) == "/proc/4242/stat":
+                return io.StringIO(stat_line)
+            if str(path) == "/proc/4242/status":
+                if status["text"] is None:
+                    raise FileNotFoundError(2, "No such file or directory", str(path))
+                return io.StringIO(status["text"])
+            if str(path) == "/proc/4242/environ":
+                raise PermissionError(13, "Permission denied", str(path))
+            return orig_open(path, *args, **kwargs)
+
+        def fake_stat(path, *args, **kwargs):
+            if str(path) == "/proc/4242":
+                return os.stat_result((0o555, 0, 0, 0, my_uid, 0, 0, 0, 0, 0))
+            return orig_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "listdir", lambda p: ["4242"] if p == "/proc" else [])
+        monkeypatch.setattr(os, "stat", fake_stat)
+        monkeypatch.setattr(builtins, "open", fake_open)
+        adapter = LinuxMembershipAdapter()
+        expected = [CandidateInfo(4242, 4000, 4242, "5000", False, False)]
+
+        # 1. Exiting: status has no Vm* lines -> reported, has_capability False.
+        status["text"] = "Name:\tsh\nState:\tR (running)\nThreads:\t1\n"
+        assert adapter.enumerate_candidates("cap", min_birth_marker="1000") == expected
+
+        # 2. Gone by the time status is read -> same, no raise.
+        status["text"] = None
+        assert adapter.enumerate_candidates("cap", min_birth_marker="1000") == expected
+
+        # 3. Still has an address space -> genuine uncertainty, fails closed.
+        status["text"] = "Name:\tsh\nState:\tS (sleeping)\nVmSize:\t  2000 kB\n"
+        with pytest.raises(InspectionError, match="environ"):
+            adapter.enumerate_candidates("cap", min_birth_marker="1000")
