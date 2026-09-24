@@ -593,6 +593,20 @@ class DarwinMembershipAdapter(BaseMembershipAdapter):
 
 
 class LinuxMembershipAdapter(BaseMembershipAdapter):
+    @staticmethod
+    def _left_same_uid(pid: int, my_uid: int) -> bool:
+        """True only when /proc/<pid> is provably gone or no longer owned by my_uid.
+
+        Any other stat failure is uncertainty and returns False, so the caller
+        keeps failing closed.
+        """
+        try:
+            return os.stat(f"/proc/{pid}").st_uid != my_uid
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        except OSError as e:
+            return e.errno in (errno.ESRCH, errno.ENOENT)
+
     def get_identity(self, pid: int) -> Optional[ProcessIdentity]:
         """Resolves process identity on Linux via /proc/<pid>/stat.
 
@@ -713,6 +727,14 @@ class LinuxMembershipAdapter(BaseMembershipAdapter):
                 except (FileNotFoundError, ProcessLookupError):
                     has_cap = False
                 except PermissionError as e:
+                    # TOCTOU with the st_uid filter above: a same-UID process
+                    # that execs a setuid/file-capability binary turns
+                    # non-dumpable, so /proc/<pid> flips to root ownership and
+                    # environ returns EACCES. The pre-read filter would have
+                    # skipped it; re-stat so a flip (or exit) in between is
+                    # skipped too. Still-ours-yet-unreadable stays fail-closed.
+                    if self._left_same_uid(pid, my_uid):
+                        continue
                     raise InspectionError(f"permission denied reading /proc/{pid}/environ for same-UID process: {e}") from e
                 except OSError as e:
                     if e.errno in (errno.ESRCH, errno.ENOENT):
