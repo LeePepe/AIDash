@@ -38,6 +38,14 @@ WITH session_cost AS (
       AND (:day IS NULL OR cst_day = :day)
     GROUP BY session_uuid
 ),
+-- The day's TOTAL spend (all requests, whether attributable or not).
+-- This is the denominator readers expect when they see a percentage on a cost
+-- card: "41% of what I spent today", not "41% of the portion we could trace".
+day_total AS (
+    SELECT COALESCE(sum(COALESCE(cost_usd, 0)), 0) AS total
+    FROM fact_request
+    WHERE :day IS NULL OR cst_day = :day
+),
 -- Each session's turn mix, as weights summing to 1.0 per session.
 project_weight AS (
     SELECT session_id AS sid,
@@ -58,13 +66,39 @@ allocated AS (
     FROM session_cost c
     JOIN project_weight w ON w.sid = c.sid
     GROUP BY w.project
+), rows AS (
+    SELECT project                                              AS project,
+           round(cost_usd, 2)                                   AS cost_usd,
+           round(100.0 * cost_usd
+                 / NULLIF((SELECT total FROM day_total), 0), 1) AS cost_pct,
+           round(tokens / 1000.0, 1)                            AS ktokens,
+           round(requests)                                      AS requests,
+           sessions                                             AS sessions,
+           round((SELECT total FROM day_total), 2)              AS day_total,
+           round((SELECT sum(cost_usd) FROM allocated), 2)      AS attributed_total
+    FROM allocated
+
+    UNION ALL
+
+    SELECT NULL AS project,
+           0.0 AS cost_usd,
+           0.0 AS cost_pct,
+           0.0 AS ktokens,
+           0 AS requests,
+           0 AS sessions,
+           round((SELECT total FROM day_total), 2) AS day_total,
+           0.0 AS attributed_total
+    FROM day_total
+    WHERE NOT EXISTS (SELECT 1 FROM allocated)
 )
-SELECT project                                              AS project,
-       round(cost_usd, 2)                                   AS cost_usd,
-       round(100.0 * cost_usd
-             / NULLIF((SELECT sum(cost_usd) FROM allocated), 0), 1) AS cost_pct,
-       round(tokens / 1000.0, 1)                            AS ktokens,
-       round(requests)                                      AS requests,
-       sessions                                             AS sessions
-FROM allocated
+SELECT project,
+       cost_usd,
+       cost_pct,
+       ktokens,
+       requests,
+       sessions,
+       day_total,
+       attributed_total
+FROM rows
+WHERE project IS NOT NULL OR (SELECT total FROM day_total) > 0
 ORDER BY cost_usd DESC;

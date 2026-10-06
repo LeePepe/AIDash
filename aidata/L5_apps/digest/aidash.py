@@ -917,7 +917,7 @@ def _attribution_container(mmdd: str, cost_by_project, model_by_project,
                            leverage=None, rework_by_workspace=None) -> "Container | None":
     """💸 成本归因 (order 22): WHY the trend arrows moved.
 
-    Sits immediately after 趋势指标 (order 20) on purpose — it exists to
+    Sits immediately after 趋势指標 (order 20) on purpose — it exists to
     explain the arrows directly above it. Every other card in the briefing
     reports a single dimension, so a "+968%" tells you something changed but
     not where to look; this splits the same spend across projects, then across
@@ -926,6 +926,11 @@ def _attribution_container(mmdd: str, cost_by_project, model_by_project,
     Cards are barLists + one metric (existing CardTypes, no new renderer).
     Omitted entirely when attribution is unavailable, rather than showing an
     empty frame (ADR-23).
+
+    When cost_by_project carries coverage metadata (CostByProjectBundle), the
+    subtitle surfaces the coverage fraction so the reader knows what share of
+    the headline the attributed projects explain. Full coverage (>=99.5%)
+    produces no warning — the subtitle stays neutral.
     """
     cards: list[Card] = []
     project_card = _bar_card(_kuid(mmdd, 32), cost_by_project, style="neutral")
@@ -942,8 +947,20 @@ def _attribution_container(mmdd: str, cost_by_project, model_by_project,
         cards.append(rework_card)
     if not cards:
         return None
+    # Build subtitle: include coverage when it's not full.
+    coverage_pct = getattr(cost_by_project, "coverage_pct", 100.0)
+    headline = getattr(cost_by_project, "headline_total", 0.0)
+    attributed = getattr(cost_by_project, "attributed_total", 0.0)
+    if coverage_pct < 99.5 and headline > 0:
+        subtitle = (
+            f"归因覆盖 {int(coverage_pct)}%"
+            f"（${attributed:.0f} / ${headline:.0f}）"
+            f" · 钱花在哪个项目 · 哪个模型 · 每条输入值多少"
+        )
+    else:
+        subtitle = "钱花在哪个项目 · 哪个模型 · 每条输入值多少"
     return Container(_cuid(mmdd, 11), "成本归因", 22, tuple(cards),
-                     layout="auto", subtitle="钱花在哪个项目 · 哪个模型 · 每条输入值多少")
+                     layout="auto", subtitle=subtitle)
 
 
 def _time_output_container(mmdd: str, app_focus, commit_by_repo) -> "Container | None":
