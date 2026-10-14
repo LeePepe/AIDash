@@ -17,7 +17,7 @@ file under `specs/007-release-workflow/`.
 
 ## Required local evidence
 
-1. Activate the repository hooks in the issue-scoped delivery workspace.
+1. Activate repository hooks in the issue-scoped delivery workspace.
 2. Confirm every changed implementation path resolves to `RepoInfra` with the
    repository context resolver.
 3. Stage the candidate and let the normal hook flow run the RepoInfra local
@@ -36,73 +36,76 @@ file under `specs/007-release-workflow/`.
 5. Freeze the candidate and obtain independent AI Reviewer PASS before commit,
    push, or PR publication.
 
-The pinned planning base currently fails this gate before reaching this
-feature's assertions because its review launcher imports `tomllib` under the
-machine's Python 3.9. That failure belongs to the separate review-machinery
-repair and is not waived. Use the Team Lead-approved refreshed delivery base and
-require a fully green fresh gate; otherwise return the exact blocker.
+The pinned planning base currently fails the RepoInfra gate before reaching
+this feature's assertions because its review launcher imports `tomllib` under
+the machine's Python 3.9. That failure belongs to MY-1692 and is not waived. Use
+the Team Lead-approved refreshed delivery base and require a fully green fresh
+gate; otherwise return the exact blocker.
 
 Do not run `xcodebuild`, host-based app tests, a real TestFlight upload, or a
 second copy of hook-owned suites during implementation.
 
 ## Contract cases the replacement test must cover
 
-- Same-repository `build.yml` push success is admitted; pull-request-origin,
-  fork repository with head branch named `main`, wrong workflow/path,
-  non-main, non-success, invalid SHA, and candidate not reachable from freshly
-  fetched protected `main` are rejected before checkout/self-hosted/secrets.
-- Automatic and manual candidates are pinned; manual force bypasses path
-  relevance only.
-- The workflow has one `release-contract-schema: 1` sentinel. Queue-start is
-  derived from its unique protected-main first-parent introducing commit and
-  excludes source-run identity; missing/multiple/mismatched activation or an
-  activation later than the candidate fails closed. Simultaneous creators
-  converge after refetch even when their annotated tag object IDs differ.
-- Queue-start/queue metadata is strict; exact semantic replay is idempotent;
-  collision, malformed/lightweight/mismatched/unknown queue state fails closed.
-- A/B/C admissions with B's pending drain replaced still drain all proven
-  heads. Out-of-order follower intake triggers exhaustive Actions API
-  reconciliation, missing-entry materialization, SHA de-duplication, and
-  first-parent order; simultaneous first admissions and newer-before-older
-  intake with no public marker retain both heads; incomplete pagination/range
-  proof fails closed.
-- Missing, duplicate, ancestor, non-ancestor, root, same-SHA, and out-of-order
-  public-marker histories; every app path and representative docs/specs/CI/
-  review/CLI/aidata-only exclusion.
-- Only a genuine lightweight public marker falls back. A valid annotated
-  marker succeeds; annotated missing/empty, malformed, duplicate, unknown, or
-  target-mismatched metadata fails before attempt.
-- Attempt creation is create-only and precedes exactly one lane invocation.
-  Attempted-only state blocks same-SHA force and descendants; ambiguous push
-  response refetches state and never repeats the lane.
-- Confirmation is create-only after exact build/all-group proof. Confirmation
-  with marker behind performs marker-only CAS reconciliation; equal/ahead never
-  rewinds; neither branch invokes Fastlane.
-- Explicit attempted-only recovery requires exact SHA/build inputs plus ASC
-  version/build/all-group proof and can only create confirmation/reconcile the
-  marker. It uses only required ASC readback credentials, creates no new
-  attempt, and cannot checkout, invoke Fastlane, build, sign, distribute, or
-  upload. Missing proof leaves quarantine.
+- Same-repository `build.yml` push success is trusted; pull-request-origin,
+  fork repository with head branch named `main`, wrong workflow/path, non-main,
+  non-success, invalid SHA, and candidate not reachable from freshly fetched
+  protected `main` are rejected before checkout/self-hosted/secrets.
+- Automatic candidate is exact `workflow_run.head_sha`; manual candidate is
+  once-pinned current protected `main`. Manual force bypasses relevance only.
+- Automatic and manual release work share one AIDash concurrency group with
+  `cancel-in-progress: false`. The workflow creates no queue-start, queue,
+  cursor, skip, attempt, confirmation, quarantine, or recovery state.
+- Existing-marker relevance uses `marker..candidate`. Several irrelevant
+  automatic merges each skip and leave the marker fixed; the later range still
+  contains them and a later app-relevant descendant releases its exact head.
+- An irrelevant automatic run followed by manual `force=true` releases pinned
+  current main. Same-candidate automatic/manual runs serialize: an automatic
+  skip permits later force, while the first success makes the other equality-
+  skip.
+- With an existing ancestor marker, a failed eligible release leaves the marker
+  unchanged and a later descendant's range includes the failed relevant change.
+  With no marker, a later docs-only descendant still skips; pickup requires an
+  independently app-relevant candidate or manual force on pinned current main.
+  No automatic retry or rollback is created.
+- Missing marker plus workflow-only enabling merge skips. The first later
+  app-relevant candidate bootstraps from its first-parent delta. Root candidate
+  bootstrap uses the empty tree.
+- Existing marker equal to candidate is an absolute no-upload skip; ancestor is
+  the normal accumulated range; descendant means stale/no-rewind skip;
+  unrelated history fails closed.
+- Every included app path and representative docs/specs/CI/review/CLI/aidata-
+  only exclusions are covered.
+- Only a genuine lightweight public marker receives legacy fallback. A valid
+  annotated marker succeeds; annotated absent/empty, malformed, duplicate,
+  unknown, or non-commit marker state fails before release side effects.
+- Configured, missing/lightweight/persisted marker, labelled/unlabelled exact
+  merged PR, direct-push, ambiguous-PR, and API-failure version states; existing
+  global build allocator and exactly one parsed selected build number.
 - Group normalization rejects empty/duplicate names; absent group fails before
-  attempt; group deleted or selected build missing any intended membership
-  fails after attempt without confirmation; all memberships allow confirmation.
-- Configured, lightweight-marker, persisted-marker, labelled, unlabelled,
-  direct-push, ambiguous-PR, and API-failure version states; existing global
-  build allocator and exactly one parsed selected build number.
-- Existing five secrets/signing path and exact self-hosted build runner labels;
-  no release-secret exposure before provenance, new secret, alternate release
-  runner, upload retry, rollback, or fallback.
-- Per-candidate success, skip, failure, quarantine, and reconciliation summary
-  fields, including the eventual survivor's evidence after pending replacement.
+  Fastlane; group deleted or selected build missing any intended membership
+  fails after the lane and leaves the marker unchanged; all memberships permit
+  marker compare-and-swap.
+- Existing five secrets/signing path and exact self-hosted runner labels; no
+  release-secret exposure before provenance/eligibility, new secret, alternate
+  release runner, upload retry, rollback, or fallback.
+- Marker compare-and-swap succeeds only against the fetched prior object (or
+  confirmed absence). Every preflight/release/postflight/CAS failure leaves the
+  marker unchanged.
+- Upload success followed by proof/marker failure has no journal or recovery;
+  a later run may upload again. Tests and docs assert same-recorded-SHA
+  protection and do not claim exactly-once for unrecorded external outcomes.
+- Each executed run summarizes its own success, skip, or failure fields. No
+  surviving run synthesizes a summary for a platform-replaced pending run.
 
 ## Publication and shipping
 
 The PR is protected-path work and requires Owner approval. It may be prepared
 after planning readiness, but Team Lead/PR Manager must not ship it until the
-separate review-machinery landing and fresh parked-PR proof satisfy the accepted
-delivery sequence. Any refresh creates a new candidate requiring renewed exact-
-head review and approval.
+MY-1692 repair landing and fresh parked-PR proof satisfy the accepted delivery
+sequence. Any refresh creates a new candidate requiring renewed exact-head
+review and approval.
 
-After merge, the next app-relevant `main` merge supplies production evidence:
-record its release run URL and build number on the delivery issue. Do not create
-a manual smoke-test issue.
+After merge, the next eligible app-relevant accumulated range supplies
+production evidence: record its release run URL and build number on the
+delivery issue. Do not create a manual smoke-test issue.

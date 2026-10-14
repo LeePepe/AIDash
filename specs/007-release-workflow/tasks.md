@@ -16,25 +16,26 @@ separate tasks, issues, commits, or PRs.
 
 | Internal phase | User outcome | Upstream | Dispatchable task | Acceptance |
 |---|---|---|---|---|
-| US1 | Every trusted exact-CI-head intent survives scheduling and releases safely | None | T001 | AC-01, AC-02, AC-03, AC-07, AC-08 |
-| US2 | Manual force and explicit marker-only recovery remain safe | US1 | T001 | AC-02, AC-04, AC-07 |
-| US3 | Build/version intent persists without regression | US2 | T001 | AC-05, AC-06, AC-09, AC-10 |
+| US1 | Trusted exact candidates serialize and accumulated relevance is safe | None | T001 | AC-01, AC-02, AC-03, AC-08 |
+| US2 | Manual force and failure pickup preserve marker safety | US1 | T001 | AC-04, AC-07, AC-08 |
+| US3 | Build/version/distribution intent persists without regression | US2 | T001 | AC-05, AC-06, AC-09, AC-10 |
 
 External gates AC-11 and AC-12 are not implementation tasks. Team Lead and PR
 Manager retain protected-path approval, MY-1692 sequencing, and post-merge
 production evidence.
 
 ```text
-T001: US1 trusted admission/drain
-   -> US2 manual/recovery compatibility
-   -> US3 version/journal/final integration
+T001: US1 trusted provenance/marker accumulation
+   -> US2 manual/failure/distribution safety
+   -> US3 version/final integration
 ```
 
 ## Sole implementation task
 
 - [ ] **T001** Replace the manual-only TestFlight policy with a trusted,
-  durable, exact-head release state machine; preserve safe manual control and
-  version intent; replace the obsolete contract test; and update operations.
+  serialized exact-head release state machine using only the existing public
+  marker; preserve safe manual control and version intent; replace the obsolete
+  contract test; and update operations.
 
   **Files in scope** (the implementation PR may modify only these paths):
   - `.github/workflows/testflight.yml`
@@ -54,92 +55,86 @@ T001: US1 trusted admission/drain
     `specs/007-release-workflow/**`
   - Paths under Apps/, Packages/, CLI/, and aidata/
 
-  **Allowed release refs**:
-  - Preserve `testflight/last-released` as the public moving release marker.
-  - The workflow may add only the reviewed operational namespaces
-    `testflight/queue-start`, `testflight/queue/**`,
-    `testflight/attempted/**`, and `testflight/confirmed/**`.
-  - Queue/journal refs use strict annotated metadata and the ownership,
-    create-only, compare-and-swap, cleanup, and fail-closed rules in
-    `contracts/release-workflow.md`. No other marker, branch, ref namespace,
-    database, artifact store, or credential path may be introduced.
+  **Allowed release state**:
+  - Preserve `testflight/last-released` as the sole durable release-progress
+    marker.
+  - Do not add queue-start, queue/cursor/skip, attempted, confirmed,
+    quarantine, recovery, or any other ref namespace, database, artifact,
+    recovery input, credential path, or durable state.
+  - Update the marker only through the strict metadata and compare-and-swap
+    rules in `contracts/release-workflow.md`; never blind-force it.
 
-  **Ordered internal phase US1 — trusted automatic admission and drain**:
+  **Ordered internal phase US1 — trusted provenance and marker accumulation**:
   - Implement FR-001–FR-006: require exact `build.yml`/`build`, `push`,
     same-repository, successful `main` provenance and protected-main
-    reachability in a hosted read-only stage before checkout, self-hosted
-    capacity, write authority, or release secrets.
-  - Durably enqueue every proven candidate before job-level concurrency. Only
-    the self-hosted drain worker uses group `testflight` with
-    `cancel-in-progress: false`.
-  - Add one unique `release-contract-schema: 1` workflow sentinel. With no
-    public marker, derive queue-start from its unique protected-main first-
-    parent introducing commit, exclude source-run metadata, and make concurrent
-    creators converge by refetching and validating semantic target/metadata.
-  - Under the lock, exhaustively reconcile successful protected-main build runs
-    across the release/activation boundary, materialize missing queue entries,
-    revalidate provenance, de-duplicate SHA entries, and drain in first-parent
-    order. Pending-worker replacement or out-of-order follower delivery must
-    not lose a candidate.
-  - Enforce absolute marker equality/ancestry, safe missing-marker bootstrap,
-    the exact app-path allowlist, per-candidate summaries, and zero release
-    side effects for rejected/irrelevant candidates.
+    reachability in a hosted read-only stage before candidate checkout,
+    self-hosted capacity, write authority, or release secrets.
+  - Pin the automatic `workflow_run.head_sha`; pin current official protected
+    `main` once for manual runs. Never substitute a moving tip later.
+  - Serialize trusted automatic and manual release workers in the one AIDash
+    group `testflight` with `cancel-in-progress: false`; refetch/revalidate the
+    candidate and marker under the lock before release side effects.
+  - Enforce marker equality/ancestor/descendant/unrelated behavior. With an
+    existing marker, evaluate the exact `marker..candidate` range; with no
+    marker, use candidate first-parent delta or empty tree for a root.
+  - With an existing ancestor marker, prove several irrelevant merges keep the
+    marker fixed and remain accumulated; a later relevant descendant includes
+    them. With no marker, prove each candidate uses only its own first-parent/
+    root delta. Do not claim every intermediate head survives pending
+    replacement or uploads once.
+  - Apply the exact app-path allowlist and emit this run's secret-free outcome
+    for every executed eligibility result.
 
-  **Ordered internal phase US2 — manual and recovery compatibility**:
-  - Preserve `workflow_dispatch(force)`. `force=false` uses the normal path
-    gate; `force=true` bypasses only app relevance and never provenance,
-    candidate pinning, journal, equality, ancestry, version, secrets, signing,
-    group proof, confirmation, or marker compare-and-swap.
-  - Create a remote, create-only attempt immediately before the sole permitted
-    Fastlane invocation. Attempted-only state is quarantined, blocks descendants,
-    and cannot be cleared or re-uploaded by force.
-  - Provide the explicit marker-only reconciliation branch defined by the
-    contract: exact operator-supplied SHA/build evidence must match the attempt
-    and independently verified ASC version/build/all-group membership; it may
-    create confirmation and repair the marker but cannot checkout candidate
-    code, create another attempt, invoke Fastlane, sign, build, distribute, or
-    upload. Apply the common and recovery-only invariants, requiring only the
-    existing ASC credentials needed for readback rather than the normal five-
-    secret signing/release preflight.
-  - Treat ambiguous state-ref pushes by refetching and validating remote state;
-    never infer failure as permission to repeat an upload.
+  **Ordered internal phase US2 — manual, failure, and distribution safety**:
+  - Preserve `workflow_dispatch(force)`. `force=false` uses the normal range
+    gate; `force=true` bypasses only path relevance and never candidate pinning,
+    released-SHA equality, ancestry, version, secrets, signing, group proof, or
+    marker compare-and-swap.
+  - Cover mixed same-candidate automatic/manual order: automatic irrelevant
+    skip permits later manual force; the first successful marker advance makes
+    the other run skip.
+  - Normalize the intended groups, prove each group exists before Fastlane, set
+    `TESTFLIGHT_STRICT_UPLOAD=1`, then independently prove exact selected-build
+    membership in every group before marker movement. Do not edit the Fastfile.
+  - On preflight, build, upload, postflight, or marker-update failure, leave the
+    marker unchanged and start no automatic retry/rollback. With an existing
+    ancestor marker, prove a later descendant includes the failed change. With
+    no marker, prove pickup requires a later independently app-relevant
+    candidate or manual force; the manual run pins current main.
+  - Do not add an attempt/confirmation journal, quarantine, marker-only
+    reconciliation, or an exactly-once claim. An upload/marker split may be
+    uploaded again by a later run under the accepted Owner tradeoff.
 
-  **Ordered internal phase US3 — version, distribution, and final integration**:
+  **Ordered internal phase US3 — version and final integration**:
   - Preserve Fastlane's existing App Store Connect global maximum-plus-one build
-    allocator and expose exactly one selected build number in the success
-    summary. Do not add a second allocator.
-  - Implement FR-009–FR-010 for configured version, genuine lightweight public
-    marker, strict annotated metadata, labelled/unlabelled exact PR, direct
+    allocator and expose exactly one selected build number in log/summary. Do
+    not add a second allocator.
+  - Implement FR-009–FR-010 for project version, genuine lightweight marker,
+    strict annotated marker metadata, labelled/unlabelled exact PR, direct
     push, ambiguous association, API failure, ephemeral project override,
-    create-only confirmation, post-bump non-regression, and public-marker
-    compare-and-swap.
-  - Normalize the intended internal groups; verify every exact group exists
-    before the attempt; set `TESTFLIGHT_STRICT_UPLOAD=1`; after the lane,
-    independently verify that the exact selected build belongs to every group.
-    Missing group, missing membership, or absent/duplicate build metadata fails
-    without confirmation. Do not edit `fastlane/Fastfile`.
+    post-bump non-regression, and public-marker compare-and-swap.
   - Keep build/sign/upload only on `[self-hosted, aidash-mac]`, reuse exactly the
     five existing secrets and signing/profile path, and add no fallback, retry,
-    rollback, tracked identity, alternate release runner, or secret.
+    rollback, tracked identity, alternate runner, or secret.
+  - Make every failure leave the marker unchanged; update it only after lane
+    success plus exact selected-build/all-group proof.
 
   **Replacement test and documentation acceptance**:
-  - Replacement tests prove AC-01–AC-08 with payload/history/state fixtures,
-    including PR/fork/unreachable rejection, ordering before checkout/secrets,
-    sentinel-derived activation, simultaneous first admissions, newer-before-
-    older first intake, A/B/C pending-worker replacement, out-of-order API
-    reconciliation, queue collision/deduplication, malformed refs, strict
-    public/journal metadata,
-    attempted-only quarantine, confirmed marker-only recovery, older attempt
-    blocking a descendant, recovery-specific credential/side-effect boundaries,
-    group existence, exact-build membership, and manual force boundaries.
+  - Replacement tests prove AC-01–AC-08 with payload/history/state fixtures:
+    PR/fork/unreachable rejection and privilege ordering; exact candidates;
+    missing-root/non-root/equal/ancestor/descendant/unrelated markers; existing-
+    marker accumulated irrelevant merges; pending replacement without durable
+    queue; absent-marker non-carry-forward/bootstrap; mixed auto/manual force;
+    qualified failure pickup; strict public-marker metadata; group existence;
+    exact-build membership; and no journal/recovery state.
   - Tests MUST remain compatible with the resolver gate's
     `/usr/bin/python3`, currently Python 3.9; do not use Python 3.10+ syntax or
     Python 3.11-only modules unless an approved refreshed base first changes
     the gate contract.
-  - `docs/testflight-handoff.md` documents automatic operation, queue/journal
-    states, group proof, quarantine, explicit marker-only recovery, and the ban
-    on rerunning an attempted SHA. It removes manual-only and "rerun after
-    interruption" guidance.
+  - `docs/testflight-handoff.md` documents automatic operation, accumulated
+    marker ranges, manual force, missing-marker bootstrap, distribution proof,
+    failure pickup, the upload/marker split tradeoff, and absence of recovery
+    state. It removes manual-only and superseded queue/journal guidance.
   - T001 completion proves AC-09–AC-10: the obsolete test is replaced, the fresh
     resolver-selected RepoInfra gate is green on the approved refreshed base,
     and the final implementation diff is exactly the four declared paths.
@@ -149,8 +144,8 @@ T001: US1 trusted admission/drain
   **Layer / context**: `RepoInfra`; `scripts/CONTEXT.md`.
 
   **Contract impact**: Implements the complete
-  `contracts/release-workflow.md` entrypoint, provenance, durable queue,
-  marker/journal, version, distribution, recovery, and summary contract.
+  `contracts/release-workflow.md` entrypoint, provenance, marker/range,
+  version, distribution, failure, and summary contract.
 
   **Verification**: Activate repository hooks; stage only the four declared
   implementation paths and let the resolver run the RepoInfra gate
@@ -183,13 +178,14 @@ T001: US1 trusted admission/drain
 
 ## Traceability validation
 
-- T001 is the sole Spec Kit task and therefore the sole Multica
-  implementation issue/PR. US1–US3 are non-dispatchable internal phases.
-- T001 implements FR-001–FR-015. Its replacement contract tests prove
-  AC-01–AC-08; integrated completion proves AC-09–AC-10; external Team Lead/PR
-  Manager gates prove AC-11–AC-12.
-- T001 owns exactly one layer and declares exact paths, exclusions, release-ref
-  namespaces, contract impact, acceptance, verification, and dependency.
+- T001 is the sole Spec Kit task and therefore the sole Multica implementation
+  issue/PR. US1–US3 are non-dispatchable internal phases.
+- T001 implements FR-001–FR-015. Its replacement tests prove AC-01–AC-08;
+  integrated completion proves AC-09–AC-10; external Team Lead/PR Manager gates
+  prove AC-11–AC-12.
+- T001 owns exactly one layer and declares exact paths, exclusions, the sole
+  allowed release marker, contract impact, acceptance, verification, and
+  dependency.
 - The internal phase graph is acyclic and serialized because all phases modify
   the same workflow, test, and guide.
 - No phase requires Fullstack to invent product behavior or broaden scope.

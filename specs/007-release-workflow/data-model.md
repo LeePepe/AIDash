@@ -1,178 +1,140 @@
 # Data Model: Release Workflow State
 
-This feature adds no product database or app schema. The model defines
-ephemeral workflow state, App Store Connect evidence, and strict operational Git
-refs. Every operational tag points to the exact candidate commit. Unknown,
-missing, empty, duplicate, malformed, or target-mismatched metadata is invalid
-unless the public-marker legacy rule explicitly permits a lightweight tag.
+This feature adds no product database or app schema. The model defines an
+ephemeral release candidate, the sole durable public release marker, the
+comparison range, release intent, distribution evidence, and per-run outcomes.
+No queue, cursor, skip, upload journal, quarantine, or recovery entity exists.
 
 ## ReleaseCandidate
 
 | Field | Type | Source | Validation |
 |---|---|---|---|
-| `sha` | 40-character Git object ID | `workflow_run.head_sha` or once-resolved protected `main` | Resolves to a commit reachable from fetched protected `main` |
+| `sha` | 40-character Git object ID | `workflow_run.head_sha` or once-resolved protected `main` | Resolves to a commit reachable from freshly fetched official protected `main` |
 | `entry_kind` | `automatic` or `manual` | GitHub event | Known value only |
-| `source_run_id` | positive integer | GitHub Actions | Exact run is queryable |
-| `source_run_attempt` | positive integer | GitHub Actions | Exact attempt is queryable |
-| `source_workflow_path` | string | Actions API | `.github/workflows/build.yml` for automatic |
-| `source_event` | string | Actions API | `push` for automatic |
+| `source_run_id` | positive integer | GitHub Actions | Recorded for provenance/summary, never as durable release state |
+| `source_workflow_path` | string or absent | Actions API | Exactly `.github/workflows/build.yml` for automatic |
+| `source_event` | string | event/API | Exactly `push` for automatic |
 | `source_repository` | string | event/API | Equals `github.repository` |
-| `source_conclusion` | string | Actions API | `success` for automatic |
-| `head_branch` | string | event/API | `main` |
-| `force` | boolean | manual input | Automatic is always false; changes only relevance |
-| `provenance_state` | enum | validation | `untrusted`, `proven`, or `invalid`; only `proven` may enqueue |
+| `source_conclusion` | string | event/API | Exactly `success` for automatic |
+| `head_branch` | string | event/API | Exactly `main` |
+| `force` | boolean | manual input | Automatic is false; manual true changes only relevance |
+| `provenance_state` | enum | validation | `untrusted`, `proven`, or `invalid`; only `proven` reaches the release worker |
 
-## ReleaseQueueBoundary
-
-| Field | Type | Rule |
-|---|---|---|
-| `ref` | constant | `refs/tags/testflight/queue-start` |
-| `commit_sha` / `candidate` | Git commit ID | Unique protected-`main` first-parent commit introducing `release-contract-schema: 1` |
-| `schema` | integer | Exactly `1` in an annotated tag |
-| `boundary_kind` | constant | `release-contract-activation` |
-
-The workflow file contains exactly one literal sentinel. With no public marker,
-zero/multiple first-parent introductions or an activation commit later than the
-candidate fail closed. The boundary is create-only and contains no source-run
-identity. Concurrent creators may produce
-different annotated tag object IDs; an exact target plus semantic-metadata
-re-observation is accepted after refetch. Replacement, deletion, lightweight
-shape, wrong target, or mismatched metadata fails closed.
-
-## ReleaseQueueEntry
-
-| Field | Type | Rule |
-|---|---|---|
-| `ref` | unique ref | `refs/tags/testflight/queue/<run-id>-<attempt>-<sha>` |
-| `commit_sha` | Git commit ID | Equals the candidate and the SHA encoded in the ref |
-| `schema` | integer | Exactly `1` |
-| `entry_kind` | enum | `automatic` or `manual` |
-| `source_run_id` / `source_run_attempt` | positive integers | Revalidated through Actions API before drain |
-| `force` | boolean | `false` for automatic; manual value affects relevance only |
-
-Admission creates the annotated tag before job-level release concurrency. An
-exact retry is idempotent; a collision or mismatch fails. The drain worker
-reconciles all successful protected-main build runs in the bounded range,
-creates missing automatic entries, de-duplicates candidate SHAs, and sorts
-entries along protected `main` first-parent ancestry.
+The candidate is immutable for the run. Automatic processing never substitutes
+a newer `main` tip for the CI-verified SHA. Manual processing resolves official
+protected `main` once in hosted read-only provenance and pins that SHA.
 
 ## ReleaseMarker
 
 | Field | Type | Source | Validation |
 |---|---|---|---|
 | `ref` | constant | Git | `refs/tags/testflight/last-released` |
-| `object_shape` | `lightweight` or `annotated` | Git object type | Only a genuine lightweight tag receives legacy fallback |
-| `commit_sha` | Git commit ID | Dereferenced tag | Equality/ancestry and no-rewind checks |
-| `schema` | integer or absent | Annotated message | Exactly `1`; absent only for genuine lightweight legacy |
-| `marketing_version` | semantic version or absent | Annotated message | Exactly one valid field; absent only for lightweight legacy |
-| `build_number` | positive integer or absent | Annotated message | Exactly one valid field; absent only for lightweight legacy |
+| `object_shape` | `missing`, `lightweight`, or `annotated` | Git object type | Only a genuine lightweight tag receives legacy fallback |
+| `tag_object_id` | Git object ID or absent | fetched remote ref | Compare-and-swap lease for update |
+| `commit_sha` | Git commit ID or absent | dereferenced tag | Equality/ancestry/no-rewind checks |
+| `schema` | integer or absent | annotated message | Exactly `1`; absent only for missing/lightweight state |
+| `marketing_version` | semantic version or absent | annotated message | Exactly one valid field for annotated state |
+| `build_number` | positive integer or absent | annotated message | Exactly one valid field for annotated state |
 
 An annotated marker with no metadata is not legacy. Missing, empty, malformed,
-duplicate, or unknown annotated fields fail preflight. The marker moves only
-after a durable confirmation and only by compare-and-swap against the fetched
-prior tag-object ID.
+duplicate, or unknown annotated metadata, or a marker that does not dereference
+to a commit, fails preflight. The marker advances only after build, upload, and
+exact distribution proof, and only by compare-and-swap against the fetched
+prior tag-object ID (or confirmed
+absence for bootstrap). It is the only durable release-progress state.
 
-## ReleaseAttempt
+## MarkerRelationship
 
-| Field | Type | Rule |
+| State | Meaning | Release behavior |
 |---|---|---|
-| `ref` | candidate-keyed ref | `refs/tags/testflight/attempted/<sha>` |
-| `commit_sha` / `candidate` | Git commit ID | Both equal the candidate and ref suffix |
-| `schema` | integer | Exactly `1` |
-| `marketing_version` | semantic version | Effective version selected by preflight |
-| `groups` | canonical non-empty list | Trimmed, unique intended internal groups |
-| `source_run_id` / `source_run_attempt` | positive integers | Release worker that crosses the attempt boundary |
-
-The remote annotated attempt is create-only and must be positively observed
-immediately before the sole permitted `fastlane ios beta` invocation. Existing
-valid attempt without confirmation is `quarantined_unknown`; automatic or
-manual force cannot invoke the lane again. An unresolved attempt on the
-candidate ancestry blocks later candidates.
-
-## ReleaseConfirmation
-
-| Field | Type | Rule |
-|---|---|---|
-| `ref` | candidate-keyed ref | `refs/tags/testflight/confirmed/<sha>` |
-| `commit_sha` / `candidate` | Git commit ID | Equal candidate and ref suffix |
-| `schema` | integer | Exactly `1` |
-| `marketing_version` | semantic version | Exactly matches the attempt |
-| `build_number` | positive integer | The single parsed Fastlane selection or explicit recovery evidence |
-| `groups` | canonical non-empty list | Exactly matches attempt groups |
-| `source_run_id` / `source_run_attempt` | positive integers | Upload run, or explicit reconciliation run |
-
-Confirmation is create-only and may be published only after ASC proves the
-exact version/build and membership in every intended group. A normal release
-creates it after the lane; an explicit marker-only recovery may create it for an
-attempted-only SHA after the same ASC proof. Neither path permits another
-upload.
+| `missing` | No public marker exists | Use missing-marker bootstrap range |
+| `equal` | Marker commit equals candidate | Absolute no-upload skip |
+| `ancestor` | Marker is an ancestor of candidate | Evaluate accumulated `marker..candidate` range |
+| `descendant` | Marker is a descendant of stale candidate | Skip; never rewind |
+| `unrelated` | Neither commit is ancestor of the other | Fail closed |
+| `invalid` | Marker cannot be strictly parsed/dereferenced | Fail closed |
 
 ## ChangeRange
 
-| State | Base | Head |
-|---|---|---|
-| Existing public marker | marker commit | candidate commit |
-| Missing marker, non-root | candidate first parent | candidate commit |
-| Missing marker, root | empty tree | candidate commit |
+| Marker state | Base | Head | Meaning |
+|---|---|---|---|
+| Existing ancestor marker | marker commit | candidate | All changes since last recorded successful release |
+| Missing marker, non-root candidate | candidate first parent | candidate | Only the candidate's introducing delta |
+| Missing marker, root candidate | empty tree | candidate | Root contents |
 
-`app_relevant` is true when at least one changed path matches the spec allowlist.
-Manual force may override only this boolean. After each successful candidate,
-the advanced public marker becomes the next candidate's base.
+`app_relevant` is true when at least one changed path matches the exact spec
+allowlist. Manual `force=true` may override only this boolean. Skips and failures
+do not persist anything; because the marker remains unchanged, a later
+descendant naturally sees the accumulated existing-marker range. Missing-marker
+bootstrap deliberately remains a single-commit delta so a workflow-only
+enabling merge does not release the entire repository.
 
 ## VersionIntent
 
 | Field | Type | Rule |
 |---|---|---|
 | `project_version` | semantic version | Parsed from tracked `project.yml` |
-| `marker_version` | semantic version or absent | Valid annotated marker, or absent for genuine lightweight legacy |
+| `marker_version` | semantic version or absent | Valid annotated marker, or absent for missing/genuine lightweight legacy marker |
 | `baseline_version` | semantic version | Maximum of valid project/marker values |
 | `exact_pr` | PR identity or absent | Provably associated with candidate |
-| `minor_label` | boolean | Exact PR contains `release:minor` |
+| `minor_label` | boolean | Exact candidate PR contains `release:minor` |
 | `effective_version` | semantic version | Baseline, or one minor increment when labelled |
 
-API failure or contradictory associations are invalid states. A proven direct
-push/no-PR association is valid and implies `minor_label=false`.
+API failure or contradictory associations are invalid. A proven direct push or
+no-associated-PR candidate is valid and implies `minor_label=false`.
+
+## DistributionProof
+
+| Field | Type | Rule |
+|---|---|---|
+| `intended_groups` | canonical non-empty list | Comma split, trimmed, unique; every exact group exists before Fastlane |
+| `selected_build_number` | positive integer | Exactly one value parsed from the existing lane output |
+| `selected_version` | semantic version | Equals `effective_version` |
+| `group_membership` | set of group names | ASC proves the selected version/build belongs to every intended group |
+
+The marker cannot advance until all fields are exact and unambiguous. Strict
+mode alone is not proof of group distribution.
 
 ## ReleaseOutcome
 
-| State | Meaning | Side effects |
+| State | Meaning | Durable side effect |
 |---|---|---|
-| `rejected_provenance` | Event is not a trusted protected-main source | Summary only; no checkout/self-hosted/secrets |
-| `queued` | Proven intent is durable before release concurrency | Queue entry only |
-| `skipped_duplicate` | Public marker equals candidate | Summary + queue cleanup; no upload |
-| `skipped_irrelevant` | Safe range has no app path and no force | Summary + queue cleanup; no upload |
-| `failed_preflight` | Invalid queue/state/ancestry/label/version/group/secrets | No attempt or upload |
-| `quarantined_unknown` | Attempt exists without confirmation | Attempt and queue retained; descendants blocked; no re-upload |
-| `confirmed_pending_marker` | Confirmation exists but public marker lags | Marker-only reconciliation; no Fastlane |
-| `failed_release` | Lane or postflight proof failed after attempt | Quarantined attempt; no confirmation/marker move |
-| `reconciled` | Existing/new confirmation advanced public marker | CAS marker + queue cleanup; no upload in recovery run |
-| `released` | One lane, ASC proof, confirmation, and marker CAS succeeded | Confirmation + annotated public marker + summary |
+| `rejected_provenance` | Event is not a trusted protected-main source | None |
+| `skipped_released` | Marker equals candidate | None |
+| `skipped_stale` | Marker is a descendant of candidate | None |
+| `skipped_irrelevant` | Applicable range has no app path and no force | None |
+| `failed_preflight` | Invalid marker/history/version/group/secrets | None |
+| `failed_release` | Build, lane, or distribution proof failed | None |
+| `failed_marker_update` | Release/proof completed but marker CAS failed | None; external upload may exist |
+| `released` | Build/upload/distribution proof and marker CAS succeeded | Annotated public marker advances to candidate |
+
+Every run reaching eligibility evaluation summarizes its own outcome. A
+platform-replaced pending run is not assigned an eventual surrogate summary.
 
 ## State transitions
 
 ```text
 event
-  ├─ untrusted ───────────────────────────────> rejected_provenance
-  └─ proven ──> durable queue ──> serialized/revalidated
-                                  ├─ duplicate ─> skipped_duplicate
-                                  ├─ irrelevant ─> skipped_irrelevant
-                                  ├─ invalid ─────> failed_preflight
-                                  ├─ confirmed ───> marker-only CAS ─> reconciled
-                                  ├─ attempted-only ────────────────> quarantined_unknown
-                                  └─ eligible ─> preflight groups
-                                                  ├─ fail ─> failed_preflight
-                                                  └─ create attempt
-                                                       └─ invoke lane once
-                                                            ├─ fail/unknown ─> quarantined_unknown
-                                                            └─ ASC build/group proof
-                                                                 ├─ fail ─> quarantined_unknown
-                                                                 └─ create confirmation
-                                                                      └─ marker CAS
-                                                                           ├─ fail ─> confirmed_pending_marker
-                                                                           └─ released
+  ├─ untrusted ─────────────────────────────> rejected_provenance
+  └─ proven ──> serialized release worker ──> refetch/revalidate marker
+                                              ├─ equal ─────> skipped_released
+                                              ├─ descendant > skipped_stale
+                                              ├─ unrelated/invalid > failed_preflight
+                                              └─ ancestor/missing > change range
+                                                                     ├─ irrelevant/no force > skipped_irrelevant
+                                                                     └─ eligible > version/group/secret preflight
+                                                                                   ├─ fail > failed_preflight
+                                                                                   └─ Fastlane
+                                                                                       ├─ fail > failed_release
+                                                                                       └─ exact ASC distribution proof
+                                                                                           ├─ fail > failed_release
+                                                                                           └─ marker CAS
+                                                                                               ├─ fail > failed_marker_update
+                                                                                               └─ released
 ```
 
-The public marker is release progress, not a lock. Job-level concurrency
-serializes drain workers; durable queue refs survive pending-worker replacement;
-attempt/confirmation refs prevent a scheduler or network ambiguity from
-authorizing a second upload.
+The concurrency group is a lock, not durable state. Any non-success outcome
+leaves the marker unchanged. A later merge or manual run performs a new
+evaluation; no automatic retry/rollback occurs. If an external upload succeeded
+before marker failure, this marker-only model cannot identify it and does not
+promise exactly-once upload.

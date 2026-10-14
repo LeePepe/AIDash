@@ -72,42 +72,43 @@ merge as app-relevant, violating the path-skip requirement.
 Owner's first automatic release; empty-tree whole-history comparison would
 release a CI-only merge.
 
-## R6 — Durable queue, concurrency, and delayed events
+## R6 — Marker-only concurrency and accumulated relevance
 
-**Decision**: Persist every trusted candidate in a strict workflow-owned queue
-ref before job-level concurrency. Only the self-hosted drain worker uses group
-`testflight` with `cancel-in-progress: false`. Under that lock, reconcile the
-authoritative successful protected-main `build.yml` push runs across the
-release/activation boundary, materialize missing queue entries, revalidate
-provenance, de-duplicate by SHA, and drain first-parent order. With no public
-marker, derive activation from the unique protected-main first-parent commit
-that introduces the workflow's `release-contract-schema: 1` sentinel. The
-queue-start ref targets that commit with run-independent strict metadata, so
-simultaneous creators converge after refetch even if their annotated tag object
-IDs differ. Missing/multiple/mismatched activation evidence or an activation
-commit later than the candidate fails closed. Same-SHA remains an absolute skip and marker ancestry is
-mandatory. Manual force bypasses path relevance only.
+**Decision**: Use one AIDash release concurrency group, `testflight`, with
+`cancel-in-progress: false`, and only the existing
+`testflight/last-released` marker. Automatic candidates remain their exact
+trusted CI heads; manual candidates pin current protected `main`. Under the
+lock, refetch and revalidate marker/candidate state. With a marker, evaluate
+`marker..candidate`; skips and failures do not move the marker, so their changes
+remain in a later descendant's accumulated range. With no marker, use only the
+candidate's first-parent delta (or empty tree for a root). Manual force bypasses
+only relevance. Marker equality is an absolute skip, a descendant marker makes
+the candidate stale/no-rewind, and unrelated history fails closed.
 
 **Evidence**: GitHub concurrency retains at most one running and one pending
-member; a new pending member replaces the old pending member even when
-`cancel-in-progress` is false. Durable refs before the group preserve intent.
-Queue refs alone still leave an event-delivery race where a later candidate
-could drain before an earlier follower enqueues, so authoritative Actions API
-reconciliation and exhaustive pagination are also required. A first-admission-
-derived boundary is likewise unsafe when a newer head wins creation before an
-older follower; the sentinel-derived boundary is independent of arrival order.
+member and may replace the older pending member even when cancellation is
+false. The delegated Owner refinement accepts coalescing intermediate heads
+rather than adding operational queue state. With an existing ancestor marker,
+a later descendant contains a replaced relevant change in
+`marker..candidate` while the marker is unchanged. With no marker, only the
+later candidate's first-parent/root delta applies, so a replaced relevant head
+is not carried forward unless the later candidate is independently relevant or
+manual force bootstraps. Serialization still protects the global build-number
+allocation and marker compare-and-swap, but it is not a durable per-head queue.
 
-**Alternatives rejected**: Workflow-level concurrency can discard pending
-heads; queue-only intake can reorder heads; blind tag movement can move release
-state backward; preserving current force semantics violates idempotency.
+**Alternatives rejected**: Queue-start/queue/cursor/skip refs, Actions API
+materialization, and a separate activation boundary add durable state the
+refined decision forbids. Promising every intermediate head survives GitHub's
+pending replacement contradicts the platform contract. Blind marker movement
+can rewind release state.
 
 ## R7 — Build number and proven internal distribution
 
 **Decision**: Preserve Fastlane's App Store Connect global maximum plus one;
 set strict mode, and add workflow-owned two-sided ASC verification. Normalize
-the existing group-name contract and require every group to exist before the
-attempt. After the lane, parse exactly one selected build number and require ASC
-to show that exact build in every intended group before confirmation.
+the existing group-name contract and require every group to exist before
+Fastlane. After the lane, parse exactly one selected build number and require
+ASC to show that exact build in every intended group before marker movement.
 
 **Evidence**: `fastlane/Fastfile` already supplies a global monotonic counter
 across marketing versions. Its missing-group branch logs and skips without
@@ -121,11 +122,11 @@ strict-mode-only assertion does not prove that testers received the build.
 
 ## R8 — Marketing-version persistence
 
-**Decision**: Persist the effective marketing version in strict annotated
-confirmation and `testflight/last-released` tags. Use the greater of the project
-version and the last effective version; apply one minor bump for a proven exact
-merged PR label. Only a genuine lightweight legacy public marker falls back to
-the project version; invalid annotated metadata fails preflight.
+**Decision**: Persist the effective marketing version in the strict annotated
+`testflight/last-released` tag. Use the greater of the project version and the
+last effective version; apply one minor bump for a proven exact merged PR label.
+Only a genuine lightweight legacy public marker falls back to the project
+version; invalid annotated metadata fails preflight.
 
 **Evidence**: A transient bump alone would regress on the next unlabelled
 release because tracked `project.yml` remains unchanged. Pushing a version
@@ -175,30 +176,30 @@ freshness, placeholder scan, and whitespace checks pass for this package.
 would violate exact scope; ignoring the result would fabricate green evidence.
 Fullstack must obtain a fresh passing gate on its approved refreshed base.
 
-## R12 — At-most-once upload and marker-only recovery
+## R12 — Failure pickup and the upload/marker split
 
-**Decision**: Use create-only annotated
-`testflight/attempted/<sha>` and `testflight/confirmed/<sha>` journal refs around
-the irreversible upload. The attempt is remotely confirmed immediately before
-the sole lane invocation. Confirmation is remotely persisted only after exact
-build/all-group proof, then the public marker moves with compare-and-swap. A
-confirmed-but-unmarked SHA reconciles without Fastlane. An attempted-only SHA is
-quarantined and blocks descendants; explicit reconciliation can only confirm it
-after exact operator SHA/build input and ASC-backed version/build/all-group
-evidence. Recovery uses only existing ASC readback credentials, creates no new
-attempt, and can never checkout, build, sign, distribute, invoke Fastlane, or
-upload; the normal five-secret release preflight is inapplicable.
+**Decision**: Add no attempt/confirmation journal or recovery mode. Advance the
+public marker by compare-and-swap only after the lane succeeds and ASC proves
+the exact build belongs to every intended group. Any preflight, lane,
+postflight, or marker-update failure leaves the marker unchanged and starts no
+automatic retry or rollback. With an existing ancestor marker, a later trusted
+descendant evaluates the accumulated `marker..candidate` range. With no marker,
+a later automatic candidate uses only its own first-parent/root delta and must
+be independently app-relevant; manual force can bootstrap pinned current
+protected `main`. Only a SHA already recorded by the public marker is guaranteed
+not to upload again.
 
-**Evidence**: App Store Connect upload and a Git ref update are not one atomic
-transaction. If upload succeeds but the process or marker push fails, a marker-
-only design cannot distinguish success from failure and may upload the same SHA
-again. A durable pre-upload attempt makes automatic invocation at-most-once; a
-post-upload confirmation supports eventual marker repair without a second lane.
+**Evidence**: App Store Connect upload and a Git ref update are not atomic. A
+marker-only model cannot distinguish an upload that externally succeeded before
+a marker failure from an upload that failed. The delegated Owner refinement
+explicitly accepts this uncertainty and chooses one public marker over journal,
+quarantine, or reconciliation state. Therefore a later run may upload again in
+that split-failure case, and the contract must not claim exactly-once behavior.
 
-**Alternatives rejected**: Retrying an unknown attempt violates same-SHA
-idempotency; writing `last-released` before upload can suppress a failed release;
-blind force-push loses concurrent state; automatic deletion of quarantine
-silently chooses a product/release policy not authorized by the Owner.
+**Alternatives rejected**: Queue/journal/attempt/confirmation refs, quarantine,
+operator recovery inputs, and marker-only reconciliation are superseded by the
+refined decision. Writing `last-released` before upload could suppress a failed
+release, and blind force-push could lose concurrent state.
 
 ## R13 — Gate interpreter and one implementation unit
 
