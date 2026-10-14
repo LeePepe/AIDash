@@ -34,6 +34,15 @@ extension CardType {
     }
 
     public func validate(_ data: Data) throws {
+        if self == .teamAudit {
+            guard data.count <= 262_144 else {
+                throw XPCError(
+                    code: "schema.payload_decode_failed",
+                    message: "Payload size (\(data.count) bytes) exceeds maximum limit of 262,144 bytes",
+                    field: "payload"
+                )
+            }
+        }
         let payload = try decode(data)
         try payload.validateInvariants()
     }

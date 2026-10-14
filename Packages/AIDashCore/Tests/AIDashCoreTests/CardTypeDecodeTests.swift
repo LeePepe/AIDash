@@ -94,6 +94,8 @@ struct CardTypeDecodeTests {
     }
 
     @Test func decodeTeamAudit() throws {
+        let sampleSHA = String(repeating: "a", count: 64)
+        let sidecarSHA = String(repeating: "b", count: 64)
         let payload = TeamAuditPayload(
             snapshotID: "audit-snapshot-001",
             capturedAt: Date(),
@@ -102,12 +104,19 @@ struct CardTypeDecodeTests {
             section: .overview,
             partIndex: 0,
             partCount: 1,
-            contentSHA256: String(repeating: "a", count: 64),
+            contentSHA256: sampleSHA,
             artifactSidecarID: "audit-snapshot-001:artifact-sidecar:v1",
-            artifactSidecarSHA256: String(repeating: "b", count: 64),
+            artifactSidecarSHA256: sidecarSHA,
             overview: .init(
+                cohort: .init(cohortID: "c1", caseIDs: (1...20).map { "case-\($0)" }),
+                evidenceCoverage: .init(requiredEvidenceCount: 1, availableEvidenceCount: 1),
+                axisSummaries: [
+                    .init(axis: .workflowConformance, verdict: .workflowConformance(.conformant), totalCases: 1, positive: 1),
+                    .init(axis: .workflowFitness, verdict: .workflowFitness(.fit), totalCases: 1, positive: 1),
+                    .init(axis: .outcomeIntegrity, verdict: .outcomeIntegrity(.intact), totalCases: 1, positive: 1)
+                ],
                 taskEffectiveness: .init(totalEvaluated: 1, effective: 1, ineffective: 0, regressed: 0, pending: 0, insufficientEvidence: 0),
-                limitations: ["Redacted"]
+                limitations: []
             )
         )
         let data = try encoder.encode(payload)
