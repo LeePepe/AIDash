@@ -1,19 +1,21 @@
 # Raven review operations
 
 The trusted `codex-review.sh` invokes the standard Codex CLI through
-`review-raven.py`. Only the existing daily provider's connection metadata is
-imported: `CODEX_RAVEN_CONFIG`, or `$HOME/.codex/config.toml` by default,
-must select `model_provider = "raven"`. The helper requires a loopback HTTP(S)
-endpoint with an explicit port, Responses transport, and no OpenAI account
-authentication requirement. It never copies the daily config or changes models.
+`review-raven.py`. Provider selection is authority-bound exclusively to the
+configured review home: `CODEX_HOME`, defaulting to `CODEX_REVIEW_HOME` or
+`$HOME/.codex-review`, must define a valid `config.toml` selecting a non-empty
+`model_provider`. The helper is provider-neutral, accepts any configured
+provider without Raven-specific restrictions or CLI overrides, and preserves all
+caller arguments verbatim. It never reads or requires daily config or environment
+credentials.
 
-## Runner readiness and two authentication layers
+## Runner readiness and authentication
 
-1. The review client authenticates to Raven using the provider's named
-   environment variable: only `OPENAI_API_KEY` or `RAVEN_API_KEY` is allowed.
-   The value must already exist in the actual noninteractive runner/job process.
-2. Raven owns its separate upstream Copilot authentication. A valid client key
-   does not prove that upstream authentication is ready.
+1. Authentication and provider configuration are owned entirely within the
+   independent review home (`$CODEX_HOME/config.toml` and associated review-home
+   auth state).
+2. The launcher does not require, inspect, allowlist, or inject `RAVEN_API_KEY`,
+   `OPENAI_API_KEY`, or any other model credentials from the process environment.
 
 Credential provisioning belongs to the host bootstrap, not this repository.
 Project code never sources credential files, shell startup files, or auth.json;
@@ -24,12 +26,12 @@ provisioning separately; do not print keys, copy daily auth caches, or restart
 services as an automatic repair.
 
 Runner prerequisites: Python 3.11+ on PATH (stdlib `tomllib`), the existing
-standard Codex binary (`CODEX_BIN`, normally `/opt/homebrew/bin/codex`), the
-daily provider metadata, and its allowed environment variable. Missing or unsafe
+standard Codex binary (`CODEX_BIN`, normally `/opt/homebrew/bin/codex`), and
+a valid review-home configuration selecting a `model_provider`. Missing or unsafe
 provider setup fails before Codex starts, with a sanitized `Raven setup failed`
 diagnostic and no direct-OpenAI fallback or retry.
 
-## Independent review home
+## Independent review home and result validation
 
 The caller sets `CODEX_HOME=${CODEX_REVIEW_HOME:-$HOME/.codex-review}`.
 An inherited daily CODEX_HOME is deliberately ignored. Provision that independent
@@ -37,6 +39,15 @@ review home separately and preserve its existing model/effort, no-hooks/no-MCP,
 read-only sandbox and never-approval settings. The caller continues to pin
 read-only and never-approval; the provider helper does not provision or verify
 the whole home, and does not modify login state or auth caches.
+
+Before rendering or determining exit status, `codex-review.sh` enforces complete
+terminal schema and state consistency validation:
+- The JSON object must strictly match the declared schema with exact root keys
+  (`verdict`, `summary`, `blockers`, `notes`) and typed blocker/note arrays.
+- `pass` strictly requires zero blockers and exits 0.
+- `changes` strictly requires at least one blocker and exits 1.
+- Contradictory, missing, extra, wrong-typed, or unparsable output fails closed
+  with an invalid-output diagnostic and exits 1.
 
 Legacy auth-refresh/model-catalog warnings are separate diagnostics: do not
 change login, CLI version, model or network policy merely to silence them.
