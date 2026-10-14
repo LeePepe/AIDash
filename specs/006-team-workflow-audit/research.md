@@ -300,6 +300,44 @@ and exact byte fixtures distinguish normative proof from approximate coverage.
 - Accept whitespace-only or merely over-limit fixtures: does not prove that an
   otherwise valid mandatory 262,145-byte payload fails at the wire boundary.
 
+## Decision 13: Recover T022–T026 contract-first from current main
+
+**Decision**: Forward-port the accepted T022–T026 planning package at
+`1ba0062bb2597efd91c46b8de9080b53b8484da1` onto current-main base
+`bdf1435fe7d3d9c4da43ed4297cbc24482447b46` by semantics, not by replacing
+current planning artifacts wholesale. Retire executable T002 as a coordination
+anchor; schedule the serial AidataL1L2 graph T022 strict decoder → T023 atomic
+reader → T024 recoverable identity index → T025 neutral matrix → T026 thin
+wiring. T003 and T016 consume only T026. T023 does not advance until T022 is
+terminal and accepted through the existing Team Lead gate.
+
+T022 directly proves D18–D20: exact case event/attempt source order, matching
+back-pointers, UTC timestamps and non-decreasing chronology with source-order
+ties; complete artifact event reference, non-null bound-case ownership, and
+finding-chain event/case membership; and arbitrary-size valid JSON integers
+that return an exact field-valid value or structured rejection with no escaped
+numeric exception. T025 repeats those proofs through neutral bundles. No
+existing test is deleted or weakened.
+
+**Rationale**: The accepted package contains the reviewed module boundaries,
+source-clean contract, restart semantics, and vertical task graph needed to
+replace the cancelled monolith. Current main independently contains later
+T005 recovery work and FR-020–FR-025 correctness contracts that must remain.
+The histories diverged, so taking either tree wholesale would drop accepted
+behavior. A semantic overlay retains both lines and provides an immutable
+revision for a new exact-SHA spec gate.
+
+**Alternatives rejected**:
+
+- Reschedule the cancelled monolithic task: it lacks accepted terminal
+  evidence and recreates the mixed validator/filesystem/index/wiring surface.
+- Replace current planning files with the old accepted tree: this would erase
+  the later FR-020–FR-025 and T005 contracts already present on main.
+- Advance T023 with T022 merely planned: the hard dependency requires T022 to
+  be terminal and accepted before the next serial node starts.
+- Treat an unpublished historical merge or a frozen implementation candidate
+  as acceptance: neither substitutes for exact-revision planning review.
+
 ## Resolved source ambiguities
 
 - “Three independent axes” means Workflow Conformance, Workflow Fitness, and

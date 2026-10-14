@@ -16,15 +16,16 @@ AidataL1L2, AidataL3, AidataL4, AidataL5, AIDashCore, DesignKit, AIDashUI,
 AIDashApp, and aidashCLI. Unrelated CLI commands, `project.yml`, aidata
 scripts/cron, generated data, and external audit sources are out of scope.
 
-T020/PR #204, T021/PR #210, and T019/PR #215 are completed history in parent
-`fdace13d…`; never dispatch them again. The active recovery is the eleven-file
-AIDashCore T005 Types+Service surface.
-The registered MY-1522 delivery workspace and candidate
-`12577b03c866c73c53fa23d236d2005a68790358` remain untouched evidence; no new
-implementation starts before the exact revised planning commit passes review,
-is pinned as the implementation base (or byte-identically preserved in an
-approved descendant), and Team Lead issues a fresh handoff for the preserved
-workspace. Parent `fdace13d…` alone is not the T005 base.
+T020/PR #204, T021/PR #210, and T019/PR #215 are completed history; never
+dispatch them again. The T022 recovery planning is a semantic forward-port of
+accepted package `1ba0062bb2597efd91c46b8de9080b53b8484da1` onto current-main
+base `bdf1435fe7d3d9c4da43ed4297cbc24482447b46`. The former executable T002 is
+coordination-only: T022 must pass exact-revision review and be accepted before
+Team Lead can advance T023. T023–T026 remain serial.
+
+The separate registered MY-1522 T005 delivery workspace and candidate
+`12577b03c866c73c53fa23d236d2005a68790358` remain untouched evidence; this
+T022 recovery neither re-reviews nor advances that candidate.
 
 ## 2. Exercise the manual boundary with fixtures
 
@@ -85,7 +86,14 @@ through the hook signal; it is not part of the normal task acceptance path.
   externalized entity kind cannot represent mandatory content.
 - Case timelines embed ordered events/attempts; their stable case/event/
   attempt/role/cycle references resolve exactly and reject missing, duplicate,
-  reordered, or foreign identities.
+  reordered, or foreign identities. Events preserve exact source order,
+  matching case back-pointers, UTC timestamps, and non-decreasing chronology;
+  equal timestamps retain source order.
+- Every artifact event reference resolves; every non-null case binding owns
+  the referenced events; each finding-chain event/case membership matches the
+  bound finding.
+- Arbitrary-size syntactically valid JSON integers return the exact field-valid
+  value or structured rejection; no numeric conversion exception escapes.
 - Missing/unsafe mandatory artifact URLs reject publication; unsafe optional
   artifact/grill URLs are text; valid HTTPS URLs are actionable.
 - Finding subject/responsibility and exact artifact-sidecar ID/content hash
@@ -119,6 +127,11 @@ inside the exact eleven-file AIDashCore allowlist. Models contain no
 witness and is exercised through both `CardType.validate` and
 `SchemaValidator.validateCardPut`. Existing `SchemaValidator.swift` and
 `URLPolicy.swift` remain unchanged.
+
+The complete T022–T026 interface matrix is
+`contracts/t002-acceptance-matrix.md`; T022 directly owns D01–D20 and T025
+repeats them through neutral bundles. `contracts/l1l2-normalized-output.md`
+is the only T026 → T003 data seam.
 
 ## 5. CI evidence
 

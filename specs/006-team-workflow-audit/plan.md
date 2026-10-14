@@ -24,7 +24,7 @@ the existing `CardPayloadProtocol.validateInvariants()` interface.
 
 **Primary Dependencies**: Foundation, SwiftUI, SwiftData, CloudKit, CryptoKit; existing Python standard-library/SQLite stack; no new third-party dependency
 
-**Storage**: append-only aidata raw/clean data and immutable warehouse facts; existing SwiftData mirror + CloudKit Private DB UserEvent path; briefing payload remains CloudKit-authored through CLI/XPC
+**Storage**: append-only aidata raw/clean data and immutable warehouse facts; one derived/rebuildable git-ignored SQLite identity cache for manual import decisions; existing SwiftData mirror + CloudKit Private DB UserEvent path; briefing payload remains CloudKit-authored through CLI/XPC
 
 **Testing**: resolver-driven package/pytest/repository gates, XCTest/Swift Testing, neutral fixtures, hook-driven local verification, CI-only App/CLI heavy builds
 
@@ -77,8 +77,10 @@ specs/006-team-workflow-audit/
 ├── quickstart.md
 ├── contracts/
 │   ├── manual-import.md
+│   ├── l1l2-normalized-output.md
 │   ├── card-payload.md
 │   ├── t020-process-supervisor.md
+│   ├── t002-acceptance-matrix.md
 │   ├── t005-acceptance-matrix.md
 │   └── owner-decision-events.md
 ├── checklists/
@@ -91,7 +93,11 @@ specs/006-team-workflow-audit/
 ```text
 aidata/
 ├── cli.py, config.py, config_local.example.py       # AidataFoundation manual registry/config
-├── adapters/                                         # AidataL1L2 import + event normalize
+├── adapters/team_audit_contract.py                  # strict immutable decoder/model
+├── adapters/team_audit_bundle.py                    # read-once contained filesystem adapter
+├── adapters/team_audit_index.py                     # recoverable persisted identity cache
+├── adapters/team_audit_snapshot.py                  # final collect/normalize wiring
+├── adapters/fixtures/team_audit/                    # neutral contract bundles
 ├── schema/warehouse.sql, merge.py                    # AidataL3 immutable facts
 ├── L4_serve/queries/team-audit/                      # AidataL4 named read-only queries
 └── L5_apps/digest/                                   # AidataL5 fetch + card publication
@@ -108,9 +114,12 @@ scripts/ci/review_process_supervisor.py                # T020 invocation-scoped 
 ```
 
 **Structure Decision**: Preserve the repository's existing resolver leaves.
-No new package, target, network client, store, or application surface is
-introduced. New files live inside existing owned scopes and every new test is
-added to the matching router `test_paths` in the same layer task.
+No new package, target, network client, authoritative product store, or
+application surface is introduced. The only new persistence is the
+AidataL1L2-derived identity cache, colocated with its git-ignored source output
+and rebuildable from append-only raw history. New files live inside existing
+owned scopes and every new test is added to the matching router `test_paths`
+in the same layer task.
 
 ## Module and Seam Design
 
@@ -173,17 +182,50 @@ port or adapter.
 `Packages/AIDashCore/Sources/AIDashCore/Validation/SchemaValidator.swift` and
 `URLPolicy.swift` are explicit exclusions.
 
-### Manual import seam
+### Manual import module and seams
 
-**Interface**: explicit `collect/normalize --source team_audit_snapshot` over a
-configured bundle root.
+**External interface**: explicit `collect/normalize --source
+team_audit_snapshot` over a configured bundle root. The existing
+`collect() -> int` and `normalize() -> int` functions remain the public adapter
+surface.
 
-**Adapters**: production filesystem bundle adapter and hermetic fixture
-adapter. Default source selection is a separate no-op path that excludes the
-manual source.
+**Strict decoder interface**: `decode_team_audit_bundle(snapshot_bytes,
+sidecar_bytes)` is a pure seam in `team_audit_contract.py`. It returns one
+immutable decoded model or structured rejection. All nested allowlists, locked
+enums, mode/count/reference rules, exact timeline chronology and artifact
+ownership, arbitrary-size integer handling, raw artifact wire validation,
+importer enrichment, mandatory 65,536-byte canonical wire-entry pre-ingest
+ceiling, and exact sidecar-file hashes live here. Nullable wire keys are
+explicit null, duplicates reject, and canonical wire bytes—not enriched
+sidecar-wide fields—define artifact child identity; no caller or test learns a
+second validator. L5's full-card 262,144-byte gate remains authoritative.
 
-**Implementation hidden behind it**: redaction, hashing, replay/collision
-handling, upstream schema normalization, and sidecar association.
+**Filesystem adapter**: `read_bundle(root, bundle_dir)` in
+`team_audit_bundle.py` resolves one immediate contained bundle and reads each
+regular contract file at most once. Its exact buffers feed both decoding and
+hashing, so a replacement race cannot split accepted content and provenance.
+The local filesystem is substitutable with `tmp_path`, so this remains an
+internal seam and does not expose a new port.
+
+**Persisted decision interface**: `TeamAuditIdentityIndex.open(index_path,
+raw_history)`, `classify(decoded_bundle, observed_at)`, and
+`commit(import_plan)` in `team_audit_index.py` expose a derived, atomically
+committed SQLite cache at
+`raw_source_dir("team_audit_snapshot") / ".identity-index.sqlite"` (injected
+`tmp_path` in tests). The final adapter commits a plan only after its expected
+raw append count succeeds. Append-only raw records are authoritative and
+rebuild missing/corrupt/stale cache state. Snapshot, child, and sidecar
+identities are classified independently; no rejected body enters the index.
+
+**Final adapter wiring**: `team_audit_snapshot.py` composes reader → decoder →
+index before `write_raw`, and accepted/body-free rows → the single
+`team_audit_record` source-clean table during normalize. The table's common
+columns, composite key, record types, grains, parent/snapshot/sidecar linkage,
+canonical JSON, and optional URL status are locked by
+`contracts/l1l2-normalized-output.md`; T003 consumes no other adapter output.
+The wiring contains no schema fallback, file reread, or collector-local
+identity map. `contracts/t002-acceptance-matrix.md` is the interface-level test
+surface.
 
 ### Owner decision seam
 
@@ -235,8 +277,12 @@ report resolves through its artifact catalog entry without another card.
 
 `AidataFoundation → AidataL1L2 → AidataL3 → AidataL4 → AidataL5 → AIDashCore → DesignKit → AIDashUI → AIDashApp schema advertisement`
 
-AIDashUI forward compatibility is already present in parent `fdace13d…`.
-AidataL1L2 validates canonical lineage and source identities; L3 preserves
+AIDashUI forward compatibility is already present in current main.
+The former executable T002 is coordination-only. AidataL1L2 proceeds serially
+as strict decoder/model (T022) → atomic reader (T023) → persisted identity
+index (T024) → neutral fixtures and full matrix (T025) → collector wiring
+(T026); T003 consumes only T026. AidataL1L2 validates canonical lineage and
+source identities; L3 preserves
 catalog facts; L4 emits required catalog inputs; L5 waits for L4 and Core,
 constructs each part's catalog, computes published/omitted/externalized results
 after packing, and emits the mandatory set. UI waits for Core and DesignKit,
@@ -282,11 +328,12 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 
 | Contract | Producer | Consumer | Blocking edges |
 |---|---|---|---|
-| Manual snapshot bundle | External explicit operator + AidataL1L2 | AidataL3 | Foundation registry before adapter; adapter before schema merge |
-| Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | Independently keyed observation carries parent snapshot ID/hash and never updates accepted content |
+| Manual snapshot bundle | External explicit operator + AidataL1L2 | AidataL3 | T001 → T022 strict decode → T023 atomic read → T024 persisted decision → T025 matrix → T026 wiring → T003 |
+| Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | T024 independently indexes snapshot/child/sidecar identities; T026 emits only body-free observations carrying parent snapshot ID/hash and never updates accepted content |
+| `team_audit_record` source-clean rows | AidataL1L2 T026 | AidataL3 T003 | `contracts/l1l2-normalized-output.md` fixes one table, common columns/key, locked record types/grains, canonical JSON, optional URL status, and snapshot/sidecar/parent linkage; T003 reads no raw/cache/private-model surface |
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
 | Named audit query bundles | AidataL4 | AidataL5 | L4 exposes immutable required entities/counts and optional facts only; L5 alone computes final publication coverage after packing |
-| Snapshot reference catalog | AidataL1L2/L3 identity facts → AidataL4 catalog inputs → AidataL5 per-part catalog | AIDashCore validation + AIDashUI rendering | T002/T003 preserve identity/priority/artifact bindings; T004/T010 query them; T007/T011 pack them; T005 validates; T008/T012 consume rendered results |
+| Snapshot reference catalog | AidataL1L2/L3 identity facts → AidataL4 catalog inputs → AidataL5 per-part catalog | AIDashCore validation + AIDashUI rendering | T022/T025 validate; T026/T003 preserve identity/priority/artifact bindings; T004/T010 query them; T007/T011 pack them; T005 validates; T008/T012 consume rendered results |
 | `teamAudit` JSON payload | AIDashCore Types + Validation Service | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash, reference catalog, and explicit finding identity; Service-role protocol witness applies central URL policy without an upward Types dependency; Core before mapping/render/schema |
 | Future CardType fallback | AIDashUI | AIDashCore CardType expansion | T019 compatibility is completed in `fdace13d…`; T008 adds explicit rendering and proves an unknown locked Team Audit value reaches the generic `CardRouter` fallback |
 | Classification tint | DesignKit | AIDashUI | DesignKit before final UI renderer |
@@ -299,8 +346,9 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 
 ```text
 Completed history: T020 ✓ → T021 ✓ → T019 ✓ (all in fdace13d…)
-Active recovery: exact revised-plan PASS + published base pin → Team Lead handoff → T005
-US1 data: T001 → T002 → T003 → T004 → T007
+T022 planning gate: exact revised-plan PASS + published base pin → Team Lead handoff → T022
+Separate T005 recovery: preserve its accepted plan/candidate evidence; do not advance it here
+US1 data: T001 → T022 → T023 → T024 → T025 → T026 → T003 → T004 → T007
 US1 app:  T005 ─┬→ T007
                 ├→ T008 ← T006
                 └→ T009
@@ -312,7 +360,7 @@ US3 core: T005 → T013
 US3 CLI:  T013 → T017
 US3 UI:   T012 + T013 → T014
 US3 App:  T009 + T014 → T015
-US3 data: T002 + T013 → T016
+US3 data: T026 + T013 → T016
 
 Assembled RepoInfra gate:
 T007 + T008 + T009 + T011 + T012 + T015 + T016 + T017 → T018
@@ -330,6 +378,11 @@ do not overlap and whose blocking contract has landed.
 - Do not invoke suites or resolver gates proactively. After an observed hook
   failure, one focused resolver rerun for the emitted layer is diagnostic-only;
   the next normal commit/push must still supply the passing hook evidence.
+- T022–T026 are separate serial AidataL1L2 commits. T022 pre-registers the
+  complete five-test route set in both aidata context indexes; every node then
+  obtains the normal routing-audit plus hook-selected AidataL1L2 gate before
+  the next starts. A stopped monolithic delivery branch is not accepted as
+  predecessor evidence.
 - T018 corrects the cross-language checker to use the current worktree and
   current App/Aidata anchors, registers it as a RepoInfra lint gate, and runs
   it once through normal hook selection on the assembled revision.

@@ -119,20 +119,26 @@ A repeated or unresolved case, event, or evidence reference rejects the part.
 - `AuditCaseTimeline` carries one stable case ID, its ordered `eventIDs` and
   `attemptIDs`, the complete embedded event/attempt values, and case-level
   limitations. Both ID arrays are unique and equal the embedded identities in
-  the same order; every embedded value points back to the containing case.
+  the same exact source order; every embedded value points back to the
+  containing case. Event timestamps are UTC and non-decreasing; equal
+  timestamps retain their source order rather than being re-sorted.
 - `AuditEvent` preserves exactly: event ID, case ID, source, subject ID, actor
   role, free-form kind, timestamp, revision SHA, and evidence reference.
 - `AuditAttempt` preserves stable attempt, case, actor-role, and cycle
   identities, actor role, trigger cause, outcome, and evidence references.
   Actor role is locked to Planner Lead, Team Lead, Fullstack Engineer, AI
   Reviewer, or PR Manager.
-- `IndividualMetric` always includes metric definition, numerator,
+- `IndividualMetric` always includes a stable non-empty `metricID`, metric
+  definition, numerator,
   denominator, observation window, and limitation; it is descriptive and must
   not be presented as causal or as a personnel score.
 
 Timeline event/evidence references also resolve through the common catalog.
 Embedded event and attempt arrays remain the ordered source of timeline values;
 the catalog provides cross-part identity resolution, not a second event body.
+Every syntactically valid JSON integer is decoded without a lossy intermediate:
+the decoder returns the exact field-valid value or a structured validation
+rejection, and no numeric conversion or range exception escapes.
 
 ### FeedbackLineage
 
@@ -242,7 +248,38 @@ observation IDs remain append-only history. The parent ID/hash is mandatory for
 snapshot- and child-fact collisions; no collision row updates the accepted
 snapshot.
 
-### ArtifactManifestEntry
+### TeamAuditIdentityIndex
+
+The AidataL1L2 collector maintains a derived SQLite cache at
+`raw_source_dir("team_audit_snapshot") / ".identity-index.sqlite"` (an
+injected `tmp_path` in tests) so immutable-identity decisions survive process
+restarts without rescanning every raw shard on the healthy path.
+
+| Indexed value | Key / rule |
+|---|---|
+| Accepted immutable entity | `(entityKind, stableIdentity)` → first accepted SHA-256, parent snapshot ID/hash |
+| Accepted sidecar | `(artifactSidecar, sidecarID)` → exact accepted sidecar-byte SHA-256, parent snapshot ID/hash |
+| Collision observation | `(parentSnapshotID, observationID)` → complete body-free observation fields |
+| Recovery marker | Raw-history fingerprint/checkpoint used only to detect stale cache state; never acceptance authority |
+
+The index stores no snapshot, child, sidecar, raw-log, or rejected body. Raw
+records and body-free observations remain authoritative. `open(index_path,
+raw_history)` atomically rebuilds a missing, corrupt, stale, or unverifiable
+cache from that history. A collector appends accepted raw records or body-free
+observations before `commit(import_plan)` updates the cache transaction;
+therefore a crash can leave raw ahead of the cache but never make an index-only
+identity accepted. Index-ahead rows unsupported by raw history are discarded.
+
+Classification is independent for the snapshot, every stable child kind, and
+the sidecar. A snapshot replay cannot hide a changed sidecar or child hash.
+Overlap-event deduplication uses the event stable identity through the same
+index. The full restart/collision proof is
+`contracts/t002-acceptance-matrix.md`.
+
+### ArtifactManifestEntryWire
+
+`ArtifactManifestEntryWire` is the exact raw entry allowed inside
+`artifacts.json`. It contains source-authored fields only:
 
 | Field | Type | Rules |
 |---|---|---|
@@ -250,27 +287,79 @@ snapshot.
 | `snapshotID` | String | Required parent |
 | `kind` | ArtifactKind | `genericWorkflow | teamRelationship | findingEventChain | fullReport` |
 | `title` | String | Redacted display label |
-| `findingFingerprint` | String? | Required for finding event chains |
-| `caseID` | String? | Optional case binding |
+| `findingFingerprint` | String? | Key is always present; non-null for finding event chains, JSON null otherwise |
+| `caseID` | String? | Key is always present; optional binding uses JSON null when absent |
 | `eventIDs` | [String] | Evidence relationship |
 | `revisionEvidence` | [String] | Verified revision/blob/line references |
-| `contentSHA256` | String | Generated artifact hash |
-| `url` | String? | Mandatory artifacts require a present HTTPS+host value or publication rejects; optional invalid values remain non-actionable text under central URL policy |
-| `requirement` | ArtifactRequirement | `mandatory` or `optional`; controls publication rejection versus non-actionable degradation |
-| `sidecarID` / `sidecarSHA256` | String | Must equal the payload envelope and owning sidecar |
+| `contentSHA256` | String | Generated artifact content hash |
+| `url` | String? | Key is always present; untrusted source value or JSON null; mandatory safety is validated during enrichment |
+| `requirement` | ArtifactRequirement | `mandatory` or `optional` |
 
-Artifact IDs are unique within the section. Each finding-chain fingerprint
-resolves exactly once to a catalog finding reference; its event IDs and
-revision-evidence values are trimmed, unique, and resolve through the catalog.
+Raw entries MUST NOT contain `sidecarID`, `sidecarSHA256`,
+`encodedByteCount`, `urlStatus`, or another importer-derived key. Their
+presence is an unknown-wire-field rejection.
+
+Every wire-table key above is required. The three nullable keys use explicit
+JSON null; omitting one rejects the wire entry. Duplicate JSON object members
+at any raw sidecar/entry level reject before canonicalization. These rules make
+semantically equal entries produce one canonical byte sequence and hash.
+
+For each valid wire entry, T022 computes `encodedByteCount` from exactly:
+
+```python
+len(json.dumps(
+    wire_entry,
+    sort_keys=True,
+    separators=(",", ":"),
+    ensure_ascii=False,
+).encode("utf-8"))
+```
+
+`wire_entry` contains all accepted raw keys above, including JSON null for an
+absent nullable value. The entry ceiling is **65,536 bytes inclusive**—an
+explicit one-quarter pre-ingest defense margin beneath the existing 262,144-byte
+card ceiling. A mandatory wire entry with
+`encodedByteCount <= 65_536` passes this size gate; `65_537` or greater rejects
+the entire bundle before raw append. An oversized optional entry remains typed
+with its exact count for the later L5 externalization/rejection contract.
+Importer-derived fields and the surrounding sidecar envelope are excluded from
+this entry count. The same canonical wire-entry bytes define that artifact's
+immutable child `entitySHA256`; enrichment never changes it. Separately,
+`ArtifactSidecar.contentSHA256` hashes the exact captured `artifacts.json` file
+bytes, not canonical entry bytes. Passing this pre-ingest gate does not
+guarantee publication: L5 still measures the complete serialized card,
+including its envelope and other entries, against 262,144 bytes.
+
+### ArtifactManifestEntry
+
+`ArtifactManifestEntry` is the importer-enriched normalized model. It contains
+every wire field plus:
+
+| Derived field | Type | Rules |
+|---|---|---|
+| `encodedByteCount` | Int | Exact canonical wire-entry byte count above |
+| `urlStatus` | ArtifactURLStatus | `absent | actionableHTTPS | nonActionable`; mandatory entries require `actionableHTTPS` |
+| `sidecarID` | String | Copied from the validated raw sidecar envelope after entry counting |
+| `sidecarSHA256` | String | Importer-computed SHA-256 of the exact captured `artifacts.json` bytes; never present in raw wire input |
+
 Every P0/P1 finding requires a direct mandatory `findingEventChain` entry.
-P2/info chains may be optional. Each snapshot requires one generic workflow
-and every applicable team/repository relationship entry. Missing, invalid, or
-oversized mandatory entries reject publication; they are never converted into
-optional limitations or one full-report link.
+Each finding-chain entry binds to exactly one catalog finding; every referenced
+event resolves and belongs to its non-null bound case, and the finding's case/
+event membership agrees with the chain. P2/info chains may be optional. Each
+snapshot requires one generic workflow and every applicable team/repository
+relationship entry. Missing, invalid, or oversized mandatory entries reject
+publication; they are never converted into optional limitations or one
+full-report link.
 
 ### ArtifactSidecar, grill links, and publication coverage
 
-`ArtifactSidecar` contains:
+`ArtifactSidecarWire` is the raw `artifacts.json` envelope and contains only
+`schemaVersion`, `snapshotID`, `sidecarID`,
+`artifacts: [ArtifactManifestEntryWire]`, and optional untrusted
+`grillMeURL`/`grillWithDocsURL` strings. It contains no content hash or URL
+status.
+
+The importer-enriched `ArtifactSidecar` contains:
 
 | Field | Type | Rules |
 |---|---|---|
@@ -431,10 +520,31 @@ displayed receipt sets collapse by `(itemRef, action)`. Neither action mutates
 `AuditFinding.state`. Only a later imported snapshot may publish a new
 canonical state.
 
+## Source-clean normalized seam
+
+T026 materializes one table, `team_audit_record`, in
+`clean_path("team_audit_snapshot")`. Its common columns, composite primary key,
+24 locked record types, parent/snapshot/sidecar linkage, canonical JSON/hash
+rules, optional URL status, and one-to-one T003 warehouse mapping are normative
+in `contracts/l1l2-normalized-output.md`. T003 consumes only this table; raw
+shards, the derived identity cache, and adapter-private decoded models are not
+part of the cross-layer interface.
+
+The snapshot record carries scope, mode, evidence coverage, and limitations.
+Instruction versions, the baseline cohort, incremental cursors, and every
+other stable child use independent record types so T024 collision decisions
+and T003 grains cannot be hidden inside opaque snapshot JSON. Rejected bodies
+produce no row; collision output is the body-free
+`importCollisionObservation` record type.
+
 ## Warehouse grains
 
 - `fact_team_audit_snapshot`: one row per snapshot identity.
+- `fact_team_audit_instruction_version`: one row per snapshot + instruction source identity.
+- `fact_team_audit_cohort`: one row per baseline snapshot + cohort identity, retaining ordered case IDs.
+- `fact_team_audit_cursor`: one row per incremental snapshot + cursor identity, retaining source/timestamp/overlap.
 - `fact_team_audit_axis_summary`: one row per snapshot + axis.
+- `fact_team_audit_task_effectiveness`: one row per snapshot, separate from the three core axes.
 - `fact_team_audit_case`: one row per snapshot + case identity.
 - `fact_team_audit_event`: one row per snapshot + source event identity.
 - `fact_team_audit_attempt`: one row per snapshot + attempt identity.
