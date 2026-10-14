@@ -196,16 +196,16 @@ review_evidence_rules() {
 '- 对「这个值无效 / 被拒绝 / 不应接受」这一类结论,有效证据应包含完整决定谓词' \
 '  （complete deciding predicate）以及它的实际条件: 并集 / union、默认值 / default、' \
 '  规范化 / normalization、否定 / negation，以及 material helper qualifier / helper 语义。' \
-'  只给单个常量、局部 hunk 或半截条件,不能支撑此类 blocker;不确定时记为 note。' \
-'- 特别地,像 `VALID_TIERS = {"explore"}` 这类孤立常量,不能单独支持 `tier not in VALID_TIERS | {"production"}`' \
-'  的拒绝结论;如果完整谓词仍保持未变、只是共享 helper 被消费,那是可信策略/基础谓词' \
-'  的已存在证据,不是新的 blocker。孤立常量 + 半截谓词只能写成 note,不升级为 blocker；最多写 note。' \
+'  只给单个常量、局部 hunk 或半截条件,不能支撑此类 blocker; 特别地,像 `VALID_TIERS = {"explore"}`' \
+'  这类孤立常量,不能单独支持 `tier not in VALID_TIERS | {"production"}` 的拒绝结论; 如果完整' \
+'  谓词仍保持未变、只是共享 helper 被消费,那是可信策略/基础谓词的已存在证据,不是新的 blocker。' \
+'  孤立常量 + 半截谓词只能写成 note,不升级为 blocker。仅当完整谓词和最终结论都被实际引用时,' \
+'  才允许形成“值无效或被拒绝”的结论。' \
 '- 直接证明的 critical/high defect、直接测试 / CI 失败输出、可信基线与不可信数据边界、' \
 '  严重阈值、required status 与 fail-closed 工具路径,都仍然是**独立的 blocker 证据**；' \
 '  它们不因部分谓词未被完全展开或某个 helper 语义未在该条目里逐项重述而被抹除。' \
-'- 不确定一律降级为 note。这条只放宽「归属靠猜」与「半截谓词」这两类判断;' \
-'  分层越界、崩溃、数据破坏、安全问题等有直接 diff 证据的 blocker,判定标准不变,照旧 fail-closed。' \
-'  实际引用时,才允许判定值无效或被拒绝。'
+'- 不确定一律降级为 note。这条只放宽「归属靠猜」与「半截谓词」这两类判断;分层越界、崩溃、数据' \
+'  破坏、安全问题等有直接 diff 证据的 blocker,判定标准不变,照旧 fail-closed。'
 }
 
 # The security notice both prompts share: the untrusted-data fence declaration.

@@ -98,7 +98,7 @@ def test_kimi_is_toolless_advisory_and_claude_is_paused() -> None:
 # and tail of the expected text so a silent truncation cannot pass.
 RULES_FIRST_LINE = "【证据纪律 —— Swift modifier 归属】"
 RULES_LAST_LINE = (
-    "  实际引用时,才允许判定值无效或被拒绝。"
+    "  破坏、安全问题等有直接 diff 证据的 blocker,判定标准不变,照旧 fail-closed。"
 )
 
 # A body comfortably past the 512-byte pipe buffer that triggered the deadlock.
@@ -236,8 +236,9 @@ def test_review_evidence_rules_requires_complete_deciding_predicate() -> None:
         "material helper qualifier",
         "直接测试 / CI 失败输出",
         "独立的 blocker 证据",
-        "孤立常量 + 半截谓词只能写成 note",
-        "最多写 note",
+        "孤立常量 + 半截谓词只能写成 note,不升级为 blocker",
+        "仅当完整谓词和最终结论都被实际引用时",
+        "才允许形成“值无效或被拒绝”的结论",
     ):
         assert needle in text, (
             "review_evidence_rules no longer names the complete deciding "
