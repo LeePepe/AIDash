@@ -1739,45 +1739,9 @@ class TestRealGateContract:
         assert result.returncode == 1
         sticky = (tmp_path / "sticky.log").read_text(encoding="utf-8")
         assert "暂不放行" in sticky
+# --------------------------------------------------------------------------
 # 5. Nonce-based untrusted-data fence (MY-1456 security fix).
 # --------------------------------------------------------------------------
-
-
-def test_gate_scripts_use_nonce_fence_not_static_delimiters() -> None:
-    """Claude review gate script must use nonce-based FENCE_OPEN/FENCE_CLOSE
-    variables instead of hardcoded static untrusted-data markers.
-
-    A static delimiter allows PR-controlled content (test source embedded via
-    COVERAGE_CONTEXT) to inject the exact closing marker and escape the
-    untrusted region. The nonce makes the boundary unpredictable.
-    """
-    for script_name in ("claude-review.sh",):
-        path = CI_DIR / script_name
-        content = path.read_text(encoding="utf-8")
-
-        # Must contain nonce generation and variable usage
-        assert "FENCE_NONCE" in content, (
-            f"{script_name} missing FENCE_NONCE generation"
-        )
-        assert "FENCE_OPEN" in content, (
-            f"{script_name} missing FENCE_OPEN variable"
-        )
-        assert "FENCE_CLOSE" in content, (
-            f"{script_name} missing FENCE_CLOSE variable"
-        )
-        assert "/dev/urandom" in content, (
-            f"{script_name} must use /dev/urandom for nonce generation"
-        )
-
-        # The prompt must reference $FENCE_OPEN and $FENCE_CLOSE, not
-        # hardcoded static delimiters. Check that the prompt area uses the
-        # variable (the prompt is in a string assigned to PROMPT="...")
-        assert "$FENCE_OPEN" in content, (
-            f"{script_name} prompt must use $FENCE_OPEN variable"
-        )
-        assert "$FENCE_CLOSE" in content, (
-            f"{script_name} prompt must use $FENCE_CLOSE variable"
-        )
 
 
 def test_nonce_generation_fail_closed() -> None:

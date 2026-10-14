@@ -522,10 +522,6 @@ review_coverage_rules() {
 '确实无其他测试。' \
 '' \
 '所以:' \
-'- blocker 条件 #4 的真实语义是: **只有在源码改动且没有相应测试改动时才成立**。' \
-'  也就是说,它要求的是 “source change → corresponding test change” 这一强联系,而不是' \
-'  “diff 里看不到覆盖”。如果 COVERAGE CONTEXT 列出了覆盖同一生产符号的 existing tests,' \
-'  那么覆盖并未丢失,该条件不满足,**不得**报 blocker。' \
 '- COVERAGE CONTEXT 中列出的候选测试基于符号共现检索,是 advisory candidates,只能用于' \
 '  评估“被删除测试是否已被等价覆盖”或“是否存在同源/同分支覆盖”,不能让一个' \
 '  source-only change 通过 coverage context 兜底来满足或重写条件 #4。' \

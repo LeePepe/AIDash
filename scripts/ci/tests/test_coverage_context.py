@@ -1679,9 +1679,81 @@ struct SmallTests {
         max_excerpt_bytes=COVERAGE_MAX_TOTAL_BYTES + 200,
     )
 
-    # Second file should be budget-omitted since the first fills the budget
-    assert any("budget-omitted" in o and "SmallTests" in o for o in file_outcomes)
+    # Because the outer candidate loop stops as soon as the total byte cap is
+    # reached, later candidate files are not iterated or read.
+    assert not any("SmallTests" in o for o in file_outcomes)
     # The cap marker should appear in excerpts
+    assert any("byte cap reached" in e for e in excerpts)
+
+
+def test_outer_loop_stops_immediately_on_byte_cap(monkeypatch):
+    """Fixture proving outer candidate loop stops and never iterates or reads
+    subsequent candidate files once COVERAGE_MAX_TOTAL_BYTES is reached."""
+
+    big_body = "a" * (COVERAGE_MAX_TOTAL_BYTES + 100)
+    big_source = f"""\
+import Testing
+@testable import AIDashCLI
+
+struct BigTests {{
+    @Test func testBigOne() async throws {{
+        let cmd = BriefingPublishCommand(client: MockAPIClient())
+        // {big_body}
+    }}
+}}
+"""
+    sentinel_source = """\
+import Testing
+@testable import AIDashCLI
+
+struct SentinelTests {
+    @Test func testSentinel() async throws {
+        let cmd = BriefingPublishCommand(client: MockAPIClient())
+        _ = try await cmd.run()
+    }
+}
+"""
+
+    accessed_paths = []
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
+        if args[0] == "show":
+            ref_path = args[1]
+            path = ref_path.split(":", 1)[1]
+            accessed_paths.append(path)
+            if path == "Tests/BigTests.swift":
+                return big_source
+            if path in ("Tests/Sentinel1.swift", "Tests/Sentinel2.swift"):
+                return sentinel_source
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    test_candidates = [
+        "Tests/BigTests.swift",
+        "Tests/Sentinel1.swift",
+        "Tests/Sentinel2.swift",
+    ]
+
+    excerpts, file_outcomes = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=test_candidates,
+        production_symbols={"BriefingPublishCommand", "run"},
+        max_excerpt_bytes=COVERAGE_MAX_TOTAL_BYTES + 200,
+    )
+
+    # BigTests was read and hit the byte cap
+    assert any("read: Tests/BigTests.swift" in o for o in file_outcomes)
+    # Sentinel files were NEVER read (run_git was never called for them)
+    assert "Tests/Sentinel1.swift" not in accessed_paths
+    assert "Tests/Sentinel2.swift" not in accessed_paths
+    # Sentinel files do not even appear in file_outcomes because outer loop stopped
+    assert not any("Sentinel" in o for o in file_outcomes)
+    # Excerpts contains the byte cap reached marker
     assert any("byte cap reached" in e for e in excerpts)
 
 

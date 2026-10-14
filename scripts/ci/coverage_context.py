@@ -1034,8 +1034,7 @@ def find_related_tests_in_head(
 
     for test_file in test_files:
         if budget_exhausted:
-            file_outcomes.append(f"budget-omitted: {test_file}")
-            continue
+            break
 
         # Check blob cache first — cached reads don't consume budget
         if test_file in blob_cache:

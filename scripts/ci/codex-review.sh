@@ -162,13 +162,67 @@ if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED_F
     exit 1
 fi
 
+# ---- exact-HEAD coverage context (MY-1456 / MY-1457) ----------------------
+# When tests are removed, search HEAD for remaining tests covering the same
+# production symbols — prevents false "missing coverage" blockers when
+# equivalent tests exist outside the diff window.
+#
+# fail-closed: like scope evidence, if the analyzer itself fails (python3
+# crash / bug), the gate blocks. An EMPTY result (no tests removed) is the
+# normal success — the distinction is exit code, not output length.
+COVERAGE_CONTEXT=""
+if ! COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED_FILE")"; then
+    echo "[codex-review] ❌ coverage context 生成失败"
+    post_sticky "$STICKY
+⚠️ 自动 review 未能生成 exact-HEAD 覆盖上下文(分析器异常)。为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
+
+# ---- nonce-based untrusted-data fence (MY-1456 security fix) ---------------
+# Static delimiter markers (the old hardcoded Chinese/English boundary strings)
+# are vulnerable to delimiter injection: a PR author can embed the exact closing
+# marker in test source code (which gets injected into the prompt via
+# COVERAGE_CONTEXT), escape the untrusted region, and append forged reviewer
+# instructions. The nonce makes the fence unpredictable to the PR author.
+# Python's sanitize_untrusted_content() handles the coverage context itself;
+# the nonce protects the outermost boundary.
+FENCE_NONCE="$(head -c 16 /dev/urandom | xxd -p)"
+if [ -z "$FENCE_NONCE" ] || ! printf '%s' "$FENCE_NONCE" | grep -qE '^[0-9a-f]{32}$'; then
+    echo "[codex-review] ❌ nonce generation failed (empty or malformed)"
+    post_sticky "$STICKY
+⚠️ 自动 review nonce 生成失败,为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
+FENCE_OPEN="======== UNTRUSTED_DATA_BEGIN_${FENCE_NONCE} ========"
+FENCE_CLOSE="======== UNTRUSTED_DATA_END_${FENCE_NONCE} ========"
+
 # ---- review prompt ------------------------------------------------------
 # 维度与 claude-review.sh 保持一致（同一套仓库宪法），两个模型交叉验证。
 # Trusted Markdown is rendered as data: no shell evaluation or recursive substitution.
 SECURITY_NOTICE="$(review_security_notice)" || exit 1
 EVIDENCE_RULES="$(review_evidence_rules)" || exit 1
+COVERAGE_RULES="$(review_coverage_rules "$FENCE_NONCE")" || exit 1
+UNTRUSTED_PAYLOAD="$FENCE_OPEN
+改动文件:
+$CHANGED_DISPLAY
+$TRUNCATED
+
+DIFF:
+$DIFF
+
+$SCOPE_EVIDENCE
+
+======== COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN ========
+$COVERAGE_CONTEXT
+======== COVERAGE_EVIDENCE_${FENCE_NONCE}_END ========
+$FENCE_CLOSE"
+
 if ! PROMPT="$(CHANGED="$CHANGED_DISPLAY" TRUNCATED="$TRUNCATED" DIFF="$DIFF" \
-    SECURITY_NOTICE="$SECURITY_NOTICE" EVIDENCE_RULES="$EVIDENCE_RULES" SCOPE_EVIDENCE="$SCOPE_EVIDENCE" \
+    SECURITY_NOTICE="$SECURITY_NOTICE" EVIDENCE_RULES="$EVIDENCE_RULES" \
+    COVERAGE_RULES="$COVERAGE_RULES" SCOPE_EVIDENCE="$SCOPE_EVIDENCE" \
+    COVERAGE_CONTEXT="$COVERAGE_CONTEXT" FENCE_NONCE="$FENCE_NONCE" \
+    FENCE_OPEN="$FENCE_OPEN" FENCE_CLOSE="$FENCE_CLOSE" \
+    UNTRUSTED_PAYLOAD="$UNTRUSTED_PAYLOAD" \
     python3 "$REPO_ROOT/scripts/ci/render-review-prompt.py" "$REPO_ROOT/scripts/ci/review-prompt.md")"; then
     echo "[codex-review] prompt render failed; refusing unreviewed diff" >&2
     exit 1
