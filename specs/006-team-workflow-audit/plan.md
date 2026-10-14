@@ -77,6 +77,7 @@ specs/006-team-workflow-audit/
 ├── quickstart.md
 ├── contracts/
 │   ├── manual-import.md
+│   ├── team-audit-snapshot-v1.md
 │   ├── l1l2-normalized-output.md
 │   ├── card-payload.md
 │   ├── t020-process-supervisor.md
@@ -199,6 +200,10 @@ ceiling, and exact sidecar-file hashes live here. Nullable wire keys are
 explicit null, duplicates reject, and canonical wire bytes—not enriched
 sidecar-wide fields—define artifact child identity; no caller or test learns a
 second validator. L5's full-card 262,144-byte gate remains authoritative.
+The complete raw snapshot schema is
+`contracts/team-audit-snapshot-v1.md`; its version, every object key, JSON
+type/nullability, and locked vocabulary are implementation inputs, not values
+for T022 to infer from prose or a producer model.
 
 **Filesystem adapter**: `read_bundle(root, bundle_dir)` in
 `team_audit_bundle.py` resolves one immediate contained bundle and reads each
@@ -328,7 +333,7 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 
 | Contract | Producer | Consumer | Blocking edges |
 |---|---|---|---|
-| Manual snapshot bundle | External explicit operator + AidataL1L2 | AidataL3 | T001 → T022 strict decode → T023 atomic read → T024 persisted decision → T025 matrix → T026 wiring → T003 |
+| Manual snapshot bundle | External explicit operator + AidataL1L2 | AidataL3 | T001 ✓ → T022 strict decode → T023 atomic read → T024 persisted decision → T025 matrix → T026 wiring → T003 |
 | Collision observations | AidataL1L2 | AidataL3 → AidataL4 → AidataL5 → AIDashUI | T024 independently indexes snapshot/child/sidecar identities; T026 emits only body-free observations carrying parent snapshot ID/hash and never updates accepted content |
 | `team_audit_record` source-clean rows | AidataL1L2 T026 | AidataL3 T003 | `contracts/l1l2-normalized-output.md` fixes one table, common columns/key, locked record types/grains, canonical JSON, optional URL status, and snapshot/sidecar/parent linkage; T003 reads no raw/cache/private-model surface |
 | Immutable warehouse facts | AidataL3 | AidataL4 | L3 before query definitions |
@@ -348,7 +353,7 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 Completed history: T020 ✓ → T021 ✓ → T019 ✓ (all in fdace13d…)
 T022 planning gate: exact revised-plan PASS + published base pin → Team Lead handoff → T022
 Separate T005 recovery: preserve its accepted plan/candidate evidence; do not advance it here
-US1 data: T001 → T022 → T023 → T024 → T025 → T026 → T003 → T004 → T007
+US1 data: T001 ✓ → T022 → T023 → T024 → T025 → T026 → T003 → T004 → T007
 US1 app:  T005 ─┬→ T007
                 ├→ T008 ← T006
                 └→ T009

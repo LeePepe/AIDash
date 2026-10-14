@@ -27,6 +27,7 @@
 - [x] FR-020–FR-025 stabilize every remaining Round 2 correctness/proof finding and map each proof to its owning Core, aidata, or AIDashUI task/test files.
 - [x] The former executable T002 is coordination-only; T022–T026 form a serial contract-first AidataL1L2 graph with non-overlapping files and interfaces.
 - [x] T022 directly proves D18–D20 and T025 repeats them with neutral bundles: exact timeline order/back-pointers/UTC chronology, complete artifact event/case/finding ownership, and structured arbitrary-size integer handling.
+- [x] `contracts/team-audit-snapshot-v1.md` pins the complete raw `snapshot.json` version, nested key allowlists, JSON types/nullability, and locked vocabularies; T022 need not infer a producer schema.
 - [x] `TeamAuditIdentityIndex` is derived and rebuildable from authoritative append-only raw history; cache-only state never grants acceptance.
 - [x] `ArtifactManifestEntryWire` is distinct from enriched normalized artifacts, and the canonical raw entry alone defines the 65,536/65,537-byte gate and artifact identity hash.
 - [x] A typed reference catalog makes finding/case/event/evidence/subject/revision references locally resolvable across independently decoded card parts.
@@ -57,6 +58,7 @@
 - [x] Repository constitution conflict is resolved by constitution 1.13.0.
 - [x] Constitution publication requires its own `constitution: <change>` PR and PR-body migration note; planning review is not a substitute.
 - [x] T020/PR #204, T021/PR #210, and T019/PR #215 are completed historical prerequisites and are not schedulable recovery work.
+- [x] T001 is completed/non-schedulable at `d75b14dfbfd7876610782479ec3f94d036c8efd0`, and the T022 dependency edge is explicitly satisfied.
 - [x] The exact planning commit receiving PASS is the T005 implementation base (or is byte-identically preserved in an approved descendant); parent `fdace13d…` alone is not valid.
 - [x] The registered MY-1522 workspace and candidate `12577b03c866c73c53fa23d236d2005a68790358` are preserved evidence; no new implementation starts before exact revised-planning PASS, base pinning, and a fresh Team Lead handoff.
 - [x] The T022 recovery is a semantic forward-port of accepted package `1ba0062bb2597efd91c46b8de9080b53b8484da1` onto current-main base `bdf1435fe7d3d9c4da43ed4297cbc24482447b46`; newer FR-020–FR-025/T005 work is preserved and T023 remains gated on accepted T022.

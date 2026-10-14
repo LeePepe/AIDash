@@ -338,6 +338,33 @@ revision for a new exact-SHA spec gate.
 - Treat an unpublished historical merge or a frozen implementation candidate
   as acceptance: neither substitutes for exact-revision planning review.
 
+## Decision 14: Pin the snapshot wire contract and retire T001 from scheduling
+
+**Decision**: Treat T001 as completed/non-schedulable at
+`d75b14dfbfd7876610782479ec3f94d036c8efd0` and render its T022 dependency as
+satisfied. Make `contracts/team-audit-snapshot-v1.md` the complete raw authority
+for `snapshot.json`, with version `team-workflow-audit/snapshot-v1`, exact
+required nested keys, JSON types/nullability, and locked vocabularies. T022
+rejects aliases, unknown keys/versions, omitted nullable keys, duplicate object
+members, and invalid integers rather than inferring a producer schema.
+
+**Rationale**: Current main already contains and tests the explicit-only manual
+source, so an open T001 row could trigger duplicate work. The accepted planning
+package described semantic models but did not expose a complete raw schema;
+that left the strict decoder unable to implement exact nested allowlists
+without invention. A repository-local versioned contract makes the boundary
+available to implementation and exact-revision review while preserving the
+accepted T022 scope and its D18–D20 acceptance.
+
+**Alternatives rejected**:
+
+- Keep T001 unchecked but mention current behavior elsewhere: the task remains
+  schedulable and the dependency graph remains ambiguous.
+- Refer to an unnamed upstream evidence schema: no immutable, available schema
+  revision exists for implementation or review.
+- Infer raw keys from semantic prose or a historical cancelled implementation:
+  that creates aliases/defaults outside the reviewed contract.
+
 ## Resolved source ambiguities
 
 - “Three independent axes” means Workflow Conformance, Workflow Fitness, and

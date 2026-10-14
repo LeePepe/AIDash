@@ -33,7 +33,12 @@ Each immutable bundle is a directory containing:
 └── artifacts.json       # required for publication; typed hosted-artifact sidecar
 ```
 
-`snapshot.json` follows the upstream Team Workflow Audit evidence schema.
+`snapshot.json` follows the complete, versioned raw contract in
+`contracts/team-audit-snapshot-v1.md`. Its envelope declares
+`schemaVersion: "team-workflow-audit/snapshot-v1"`; every object uses the exact
+required key allowlist, JSON type/nullability, and vocabulary declared there.
+Unknown versions, aliases, omitted nullable keys, duplicate members, and
+unlisted nested keys reject rather than falling back to producer inference.
 `artifacts.json` is an AIDash portability extension with this typed envelope:
 
 ```json
@@ -81,9 +86,10 @@ The AidataL1L2 implementation has four ordered interfaces behind the existing
 public `collect()`/`normalize()` adapter surface:
 
 1. `decode_team_audit_bundle(snapshot_bytes, sidecar_bytes)` is the sole strict
-   decoder. It validates every documented nested model and reference, computes
-   both hashes from those buffers, and returns an immutable decoded bundle or
-   structured rejection without performing I/O.
+   decoder. It implements `contracts/team-audit-snapshot-v1.md`, validates
+   every documented nested model and reference, computes both hashes from those
+   buffers, and returns an immutable decoded bundle or structured rejection
+   without performing I/O.
 2. `read_bundle(root, bundle_dir)` is the filesystem adapter. It resolves and
    contains an immediate bundle directory, reads each regular contract file at
    most once, and returns those exact buffers or a typed skip/rejection.

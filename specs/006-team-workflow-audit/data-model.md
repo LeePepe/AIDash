@@ -23,6 +23,7 @@
 
 | Field | Type | Rules |
 |---|---|---|
+| `schemaVersion` | String | Exactly `team-workflow-audit/snapshot-v1`; complete raw shape is `contracts/team-audit-snapshot-v1.md` |
 | `snapshotID` | String | Non-empty stable identity |
 | `capturedAt` | Date | UTC |
 | `scope` | AuditScope | Owner label, project reference, repository reference; redacted and portable |
@@ -41,6 +42,11 @@
 | `agentRepeatMetrics` | [AgentRepeatMetric] | Complete common, cycle/cause, role-specific, subject, and event metrics per actor role |
 | `findings` | [AuditFinding] | Stable fingerprint and canonical state |
 | `limitations` | [String] | Required when evidence or cohort is incomplete |
+
+The table's raw keys and every nested object's complete key/type/nullability
+allowlist are normative in `contracts/team-audit-snapshot-v1.md`. This document
+adds cross-field and reference semantics; it does not authorize undeclared wire
+fields, aliases, defaults, or producer-model inference.
 
 ### AuditMode and cohort/cursor invariants
 
@@ -125,7 +131,8 @@ A repeated or unresolved case, event, or evidence reference rejects the part.
 - `AuditEvent` preserves exactly: event ID, case ID, source, subject ID, actor
   role, free-form kind, timestamp, revision SHA, and evidence reference.
 - `AuditAttempt` preserves stable attempt, case, actor-role, and cycle
-  identities, actor role, trigger cause, outcome, and evidence references.
+  identities, actor role, UTC timestamp, trigger cause, outcome, and evidence
+  references.
   Actor role is locked to Planner Lead, Team Lead, Fullstack Engineer, AI
   Reviewer, or PR Manager.
 - `IndividualMetric` always includes a stable non-empty `metricID`, metric
