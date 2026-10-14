@@ -234,33 +234,75 @@ struct CardRouterTests {
     func everyTypeRoutes() throws {
         for cardType in CardType.allCases {
             let data: Data
+            let isKnownCase: Bool
             switch cardType {
             case .metric:
                 data = encode(MetricPayload(items: [.init(label: "L", value: 1)]))
+                isKnownCase = true
             case .insight:
                 data = encode(InsightPayload(title: "T", body: "B"))
+                isKnownCase = true
             case .agentSummary:
                 data = encode(AgentSummaryPayload(agentName: "A", completed: [.init(title: "C")]))
+                isKnownCase = true
             case .todoList:
                 data = encode(TodoListPayload(items: [.init(title: "I")]))
+                isKnownCase = true
             case .trending:
                 data = encode(TrendingPayload(topic: "T", items: [.init(title: "I", url: "u")]))
+                isKnownCase = true
             case .digest:
                 data = encode(DigestPayload(title: "T", body: "B"))
+                isKnownCase = true
             case .sectionHeader:
                 data = encode(SectionHeaderPayload(title: "H"))
+                isKnownCase = true
             case .barList:
                 data = encode(BarListPayload(items: [.init(label: "L", value: 1)]))
+                isKnownCase = true
             case .stackedBar:
                 data = encode(StackedBarPayload(segments: [.init(label: "S", value: 1)]))
+                isKnownCase = true
             case .relationship:
                 data = encode(RelationshipCardViewTests.scatter(points: 1))
+                isKnownCase = true
+            @unknown default:
+                data = Data()
+                isKnownCase = false
             }
 
             let card = makeCard(type: cardType, payloadJSON: data)
-            // Verify decode succeeds for every type
-            let decoded = try card.type.decode(card.payloadJSON)
-            #expect(decoded is CardPayloadProtocol)
+            // Verify decode succeeds for known types; future unknown types fall back
+            // gracefully through CardRouter generic fallback without asserting decode success.
+            if isKnownCase {
+                let decoded = try? card.type.decode(card.payloadJSON)
+                #expect(decoded != nil, "Known CardType \(cardType) must decode its test payload successfully")
+            }
+            _ = CardRouter(card: card).body
+        }
+    }
+
+    @Test("all ten current CardType mappings are exact")
+    func currentTenCardTypeMappingsAreExact() {
+        let expected: [(CardType, String, String?, String?)] = [
+            (.metric, "metric", "chart.bar.fill", "metric"),
+            (.insight, "insight", "sparkles", "insight"),
+            (.agentSummary, "agentSummary", "bubble.left.and.bubble.right.fill", "agentSummary"),
+            (.todoList, "todoList", "checklist", "todoList"),
+            (.trending, "trending", "chart.line.uptrend.xyaxis", "trending"),
+            (.digest, "digest", "doc.text.fill", "digest"),
+            (.sectionHeader, "sectionHeader", nil, nil),
+            (.barList, "barList", "chart.bar.xaxis", "barList"),
+            (.stackedBar, "stackedBar", "chart.bar.doc.horizontal", "stackedBar"),
+            (.relationship, "relationship", "point.3.connected.trianglepath.dotted", "relationship"),
+        ]
+
+        #expect(CardType.allCases.count >= 10)
+        for (type, rawValue, symbol, classification) in expected {
+            #expect(type.rawValue == rawValue)
+            #expect(type.iconSymbol == symbol)
+            #expect(type.classification?.rawValue == classification)
+            #expect(type.hasIconBadge == (symbol != nil && classification != nil))
         }
     }
 
@@ -315,6 +357,8 @@ struct CardRouterTests {
             return encode(StackedBarPayload(segments: [.init(label: "S", value: 1)]))
         case .relationship:
             return encode(RelationshipCardViewTests.scatter(points: 1))
+        @unknown default:
+            return Data()
         }
     }
 

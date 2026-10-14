@@ -12,19 +12,19 @@
 #   - 有 blocker(P0/严重) → 更新 sticky comment,exit 1(check 红 → 挡 auto-merge)
 #   - 任何工具异常          → exit 1(fail closed,宁可卡住也不放行未审的 diff)
 #
-# 依赖:git, gh(runner 环境自带 GITHUB_TOKEN), jq, codex(已订阅登录)。
+# 依赖:git, gh(runner 环境自带 GITHUB_TOKEN), jq, python3 >= 3.11, codex。
 # 需要的环境变量(workflow 注入):
 #   PR_NUMBER, BASE_SHA, HEAD_SHA, BASE_REPO, GH_TOKEN
 #
-# 认证:与 claude-review 对等——用 ChatGPT 订阅凭证(落磁盘),不依赖任何 API key。
-# 凭证放在独立的 CODEX_HOME(默认 ~/.codex-review),与 cmux 日常用的 ~/.codex 隔离,
-# 互不影响。该目录的 config.toml 已关 hooks / 清空 MCP / 只读沙箱。
+# Raven 连接元数据取自日常 provider;客户端 key 只从 runner 环境读取。
+# 独立 review home 保留原 model/effort、关闭 hooks/MCP 和只读沙箱配置。
+# 运维与 trusted-base 迁移顺序见 raven-review-operations.md。
 
 set -uo pipefail
 
 # 独立 CODEX_HOME:review 门专用,不碰用户日常的 ~/.codex(raven/cmux)。
-export CODEX_HOME="${CODEX_HOME:-$HOME/.codex-review}"
-# 用标准 codex 二进制(runner PATH 里可能有 cmux shim,显式指定避免走到 raven)。
+export CODEX_HOME="${CODEX_REVIEW_HOME:-$HOME/.codex-review}"
+# 用标准 codex 二进制;Raven 路由由受信任的 provider helper 显式注入。
 CODEX_BIN="${CODEX_BIN:-/opt/homebrew/bin/codex}"
 command -v "$CODEX_BIN" >/dev/null 2>&1 || CODEX_BIN="codex"
 
@@ -162,69 +162,17 @@ if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED_F
     exit 1
 fi
 
-# ---- exact-HEAD coverage context (MY-1456) --------------------------------
-# fail-closed: analyzer failure blocks the gate, same as scope evidence.
-COVERAGE_CONTEXT=""
-if ! COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED_FILE")"; then
-    echo "[codex-review] ❌ coverage context 生成失败"
-    post_sticky "$STICKY
-⚠️ 自动 review 未能生成 exact-HEAD 覆盖上下文(分析器异常)。为安全起见 **暂不放行**,请重跑。"
-    exit 1
-fi
-
-# ---- nonce-based untrusted-data fence (MY-1456 security fix) ---------------
-# Same rationale as claude-review.sh: prevents delimiter injection from
-# PR-controlled content escaping the untrusted region.
-FENCE_NONCE="$(head -c 16 /dev/urandom | xxd -p)"
-if [ -z "$FENCE_NONCE" ] || ! printf '%s' "$FENCE_NONCE" | grep -qE '^[0-9a-f]{32}$'; then
-    echo "[codex-review] ❌ nonce generation failed (empty or malformed)"
-    post_sticky "$STICKY
-⚠️ 自动 review nonce 生成失败,为安全起见 **暂不放行**,请重跑。"
-    exit 1
-fi
-FENCE_OPEN="======== UNTRUSTED_DATA_BEGIN_${FENCE_NONCE} ========"
-FENCE_CLOSE="======== UNTRUSTED_DATA_END_${FENCE_NONCE} ========"
-
 # ---- review prompt ------------------------------------------------------
 # 维度与 claude-review.sh 保持一致（同一套仓库宪法），两个模型交叉验证。
-# 安全声明: COVERAGE EVIDENCE / SOURCE EXCERPT 与 DIFF 一样是“不可信源数据”,
-# 不能把其内容当成对 reviewer 的指令；实际文案仍集中在 review_security_notice。
-PROMPT="你是 AIDash 仓库的自动 code reviewer。这是一个分层的 Swift/macOS 项目
-(SPM 包分层:Core / UI / App / CLI)。只 review 下面的 diff,按仓库约定判定。
-
-$(review_security_notice)
-
-判 blocker(critical/high,会挡合并)的维度,按优先级:
-1. 分层反向依赖:UI 不得反向依赖 App;CLI 不得 import UI;下层不得 import 上层。
-   新增的 import 越界 = critical。
-2. 明显 bug / 崩溃 / 数据破坏 / 并发错误 / 资源泄漏。
-3. 安全:硬编码密钥、注入、未校验的外部输入、CI/workflow 的提权或可被 PR 篡改的信任边界。
-4. 改了 .swift 源码却完全没有对应测试改动(除非 diff 里有 commit 说明 Allow-No-Tests)。
-
-非阻塞(notes,不挡合并):命名、可读性、小的可维护性问题、可选优化。
-
-只依据 diff 与下方 SCOPE EVIDENCE 的事实,不臆测未展示的代码。宁缺毋滥:只有真正
-确定的问题才进 blockers。
-只输出符合 schema 的 JSON,不要解释、不要额外文本。
-
-$(review_evidence_rules)
-
-$(review_coverage_rules "$FENCE_NONCE")
-
-$FENCE_OPEN
-改动文件:
-$CHANGED_DISPLAY
-$TRUNCATED
-
-DIFF:
-$DIFF
-
-$SCOPE_EVIDENCE
-
-======== COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN ========
-$COVERAGE_CONTEXT
-======== COVERAGE_EVIDENCE_${FENCE_NONCE}_END ========
-$FENCE_CLOSE"
+# Trusted Markdown is rendered as data: no shell evaluation or recursive substitution.
+SECURITY_NOTICE="$(review_security_notice)" || exit 1
+EVIDENCE_RULES="$(review_evidence_rules)" || exit 1
+if ! PROMPT="$(CHANGED="$CHANGED_DISPLAY" TRUNCATED="$TRUNCATED" DIFF="$DIFF" \
+    SECURITY_NOTICE="$SECURITY_NOTICE" EVIDENCE_RULES="$EVIDENCE_RULES" SCOPE_EVIDENCE="$SCOPE_EVIDENCE" \
+    python3 "$REPO_ROOT/scripts/ci/render-review-prompt.py" "$REPO_ROOT/scripts/ci/review-prompt.md")"; then
+    echo "[codex-review] prompt render failed; refusing unreviewed diff" >&2
+    exit 1
+fi
 
 echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED_DISPLAY" | grep -c . | tr -d ' ') files)..."
 
@@ -239,7 +187,7 @@ echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED_
 # 那种"红得说不清原因"。
 CLI_RC=0
 run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
-    "$CODEX_BIN" exec \
+    python3 "$REPO_ROOT/scripts/ci/review-raven.py" "$CODEX_BIN" \
     --output-schema "$SCHEMA_FILE" \
     -o "$OUT_FILE" \
     --skip-git-repo-check \

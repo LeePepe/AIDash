@@ -1,36 +1,20 @@
 name: testflight
 
-# 定时把 main 打包上传 TestFlight(内部测试)。
-#   - schedule: 每天 03:07 CST 检查一次;仅当 main 自上次成功发布后有新 commit 才 build。
-#     GitHub cron 延迟超过 60 分钟时整次跳过,避免过期任务在白天占用本机 runner。
-#     「上次发布点」记录在 moving tag `testflight/last-released`(累积式:build 失败
-#     或机器关机期间不丢 commit,下次开机的 cron 会把攒的一起发)。
-#     分钟取 7 而非 0 —— 整点是 GitHub cron 的高峰,排队延迟明显。
-#   - workflow_dispatch: 手动兜底,force=true 可忽略「无新提交」检查强制发一次。
-#     首次验证真实上传就走这条(见 docs/testflight-handoff.md)。
+# 仅通过 workflow_dispatch 手动构建 main 并上传 TestFlight（内部测试）。
+# 自动发布已暂停。force=true 可忽略“无新提交”检查；发布标记仍记录成功版本。
 #
 # 跑在 self-hosted `aidash-mac`(复用 claude-review / codex-review 那台):
 # Apple Distribution 证书已在登录钥匙串,所以不需要把 .p12 塞进 Secret。
 # 需要的 Secrets: ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8_BASE64 / ASC_TEAM_ID /
 # KEYCHAIN_PASSWORD。前置条件与配置步骤见 docs/testflight-handoff.md。
 #
-# 安全:本 workflow 只在 schedule / workflow_dispatch 上触发,永远 checkout main
+# 安全:本 workflow 只在 workflow_dispatch 上触发,永远 checkout main
 # ——不存在 fork PR 的代码在维护者本机执行的路径(与 claude-review.yml 的可信
 # 边界同理,只是这里更简单:根本不碰 PR 内容)。
 #
 # push tag 不触发 build.yml(其 push 过滤是 branches: [main]),无副作用。
 
 on:
-  schedule:
-    # 分成逐星期规则,让 github.event.schedule 携带预定星期;否则每日 cron
-    # 只有时分,无法区分「今天晚 30 分钟」和「昨天晚 24 小时 30 分钟」。
-    - cron: "7 19 * * 0" # Sunday, 19:07 UTC = 03:07 CST
-    - cron: "7 19 * * 1"
-    - cron: "7 19 * * 2"
-    - cron: "7 19 * * 3"
-    - cron: "7 19 * * 4"
-    - cron: "7 19 * * 5"
-    - cron: "7 19 * * 6"
   workflow_dispatch:
     inputs:
       force:
@@ -46,55 +30,9 @@ permissions:
   contents: write # 移动 testflight/last-released tag
 
 jobs:
-  freshness:
-    name: Reject stale schedule
-    runs-on: ubuntu-latest
-    outputs:
-      proceed: ${{ steps.deadline.outputs.proceed }}
-    steps:
-      - name: Check schedule delay
-        id: deadline
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_SCHEDULE: ${{ github.event.schedule }}
-          SCHEDULED_UTC_HOUR: "19"
-          SCHEDULED_UTC_MINUTE: "7"
-          MAX_DELAY_MINUTES: "60"
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" != "schedule" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "Manual dispatch: schedule deadline does not apply."
-            exit 0
-          fi
-
-          scheduled_dow="${EVENT_SCHEDULE##* }"
-          if [[ ! "$scheduled_dow" =~ ^[0-6]$ ]]; then
-            echo "::error::Unexpected schedule expression: $EVENT_SCHEDULE"
-            exit 1
-          fi
-
-          read -r now_dow now_hour now_minute < <(date -u '+%w %H %M')
-          now_minutes=$((10#$now_hour * 60 + 10#$now_minute))
-          scheduled_minutes=$((SCHEDULED_UTC_HOUR * 60 + SCHEDULED_UTC_MINUTE))
-          elapsed_days=$(((10#$now_dow - 10#$scheduled_dow + 7) % 7))
-          delay_minutes=$((elapsed_days * 1440 + now_minutes - scheduled_minutes))
-          if [ "$delay_minutes" -lt 0 ]; then
-            delay_minutes=$((delay_minutes + 10080))
-          fi
-          echo "Scheduled for 19:07 UTC; current delay is ${delay_minutes} minute(s)."
-
-          if [ "$delay_minutes" -gt "$MAX_DELAY_MINUTES" ]; then
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping stale TestFlight schedule (${delay_minutes}m > ${MAX_DELAY_MINUTES}m)."
-          else
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          fi
-
   release:
     name: Build & upload to TestFlight
-    needs: freshness
-    if: needs.freshness.outputs.proceed == 'true'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, aidash-mac]
     timeout-minutes: 40
     steps:
