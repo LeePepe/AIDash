@@ -18,6 +18,8 @@
 
 - [x] Requirements are testable and use stable successor IDs.
 - [x] All eight section variants and locked relationships are covered.
+- [x] Every public nested field, optional key, raw value, and reconciliation equation is fixed.
+- [x] Canonical feedback lineage, five role counter sets, primary-round bounds, ordered timeline children, collision parentage, ArtifactSection, and GrillLinks are explicit.
 - [x] Artifact `caseID` omission, exact resolution, blank, dangling, and duplicate cases are explicit.
 - [x] Full-report kind/ID/hash/URL/sidecar one-field negatives are explicit.
 - [x] Externalization kinds, positive byte count, fixed reason, sidecar, and report-binding negatives are explicit.
@@ -28,12 +30,14 @@
 
 ## Planning readiness
 
-- [x] AIDashCore is the sole owning implementation layer.
-- [x] One vertical implementation task maps every acceptance ID to tests.
-- [x] Exact allowed and forbidden paths are listed.
+- [x] AIDashCore owns the payload; App and CLI retain their own coordinated consumer surfaces.
+- [x] Three layer-scoped tasks plus one non-code publication barrier map every acceptance ID.
+- [x] Exact per-layer allowed and forbidden paths are listed.
 - [x] Models-to-Validation direction and unchanged URL/schema seams are locked.
-- [x] Package-only verification uses `swift build` and `swift test`; `xcodebuild` is prohibited.
-- [x] App schema advertisement is a separate downstream dependency.
+- [x] Normal pre-commit/pre-push hooks own verification; focused reruns are diagnostic only after hook failure.
+- [x] App schema parity and CLI help/consumer proof are hard prepublication dependencies.
+- [x] Independent review precedes commit/push; remote/PR SHA equality follows publication.
+- [x] Existing DesignKit Classification.teamAudit is recorded as satisfied and unchanged.
 - [x] No MY-1522 workspace, branch, metadata, candidate, or old allowlist is reused.
 
 ## Notes

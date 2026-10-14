@@ -1,47 +1,49 @@
 # Implementation Plan: Core Team Audit Contract
 
-**Branch**: `007-core-team-audit` | **Date**: 2026-10-14 | **Spec**: `specs/007-core-team-audit/spec.md`
+**Branch**: 007-core-team-audit | **Date**: 2026-10-14 |
+**Spec**: specs/007-core-team-audit/spec.md
 
-**Input**: Fresh successor specification derived from immutable current `main`
-`bdf1435fe7d3d9c4da43ed4297cbc24482447b46`.
+**Input**: Fresh successor specification derived from immutable current main
+bdf1435fe7d3d9c4da43ed4297cbc24482447b46.
 
 ## Summary
 
-Add the missing AIDashCore `teamAudit` card contract as one deep module: a
-public Codable payload with eight locked section variants, a complete local
-reference catalog, exact artifact/full-report/externalization bindings, and a
-Validation-role protocol witness that reuses the existing URL policy and
-schema-error flow. Register the eleventh card type and preserve authored size.
-Prove the whole contract through focused Core tests, including the still-open
-artifact `caseID` catalog rule and the full-report/externalization one-field
-negative matrix. No App, UI, CLI, data, storage, or producer behavior belongs
-to this slice.
+Add the missing AIDashCore teamAudit contract as one deep module with a
+field-complete public wire surface, eight locked section variants, exact local
+catalog resolution, deterministic reconciliation, and one Validation-role URL
+seam. Register the eleventh type and preserve all four authored sizes.
+
+Coordinate registration with two narrow consumer adaptations: AIDashApp adds
+the matching schema-list JSON schema and aidash makes card put help reflect
+CardType.allCases while retaining generic shared validation. Core, App, and CLI
+are separate layer tasks but one non-severable publication unit. The two
+historical FR-024 residuals remain explicit: artifact caseID catalog resolution
+and the complete full-report/externalization one-field negative matrix.
 
 ## Technical Context
 
-**Language/Version**: Swift 6 in strict-concurrency mode
+**Language/Version**: Swift 6 strict concurrency
 
-**Primary Dependencies**: Foundation and existing AIDashCore interfaces only;
-no new package or third-party dependency
+**Primary Dependencies**: Foundation and existing AIDashCore/App/CLI
+interfaces; no new package or third-party dependency
 
-**Storage**: N/A; immutable Codable values only
+**Storage**: None; immutable Codable values and existing schema-list metadata
 
-**Testing**: Swift Package Manager, XCTest/Swift Testing, public-API test target
+**Testing**: Existing Core, hostless AIDashAppLogicTests, and CLI test targets,
+selected by repository hooks
 
-**Target Platform**: The platforms already declared by AIDashCore
+**Target Platform**: Existing package and application platforms
 
-**Project Type**: Existing Swift library package
+**Performance**: Deterministic validation; exact received-payload acceptance
+through 262,144 UTF-8 bytes
 
-**Performance Goals**: Deterministic validation and exact received-payload
-acceptance through 262,144 UTF-8 bytes
+**Constraints**: One production decode; Models cannot depend on Validation;
+URLPolicy and SchemaValidator remain unchanged; neutral fixtures; normal
+pre-commit/pre-push hooks own local gates; focused commands are diagnostic
+only after an emitted hook failure
 
-**Constraints**: One decode on the production validation path; Models cannot
-depend on Validation; URL policy and schema validator stay unchanged; neutral
-fixtures; package-only verification uses `swift build` and `swift test`, never
-`xcodebuild`
-
-**Scale/Scope**: One card type, eight section variants, twelve explicitly
-allowed implementation/test paths, and no non-Core layer changes
+**Scale/Scope**: One card type, eight sections, twelve Core paths, two App
+paths, two CLI paths, and no UI/data/producer/DesignKit change
 
 ## Constitution Check
 
@@ -49,160 +51,193 @@ allowed implementation/test paths, and no non-Core layer changes
 
 | Principle / bar | Result | Evidence |
 |---|---|---|
-| Agent-authored, user-read | PASS | The contract carries immutable audit output; it grants no write, dispatch, or remediation authority. |
-| CLI/App authority boundary | PASS | This slice adds no persistence or event behavior. |
-| Typed schema | PASS | One locked public payload replaces stringly typed section, reference, report, and externalization semantics. |
-| Orthogonal card dimensions | PASS | `teamAudit` is a card type; authored `CardSize` is preserved. |
-| Deep-module boundary | PASS | Callers learn `CardType.teamAudit` and `TeamAuditPayload`; structural resolution and URL orchestration remain hidden. |
-| Intra-layer direction | PASS | Types own data and structural invariants; a Validation-role extension supplies the protocol witness and calls `URLPolicy`. |
-| Scope discipline | PASS | One AIDashCore task has an exact twelve-path allowlist and explicit forbidden paths. |
-| Error handling | PASS | Decode and invariant failures use the existing structured schema error; unknown locked values are never coerced. |
+| Agent-authored, user-read | PASS | Immutable audit output grants no mutation, dispatch, or remediation authority. |
+| Coordinated type release | PASS | Core registration cannot publish without App schema parity and CLI help/consumer proof. |
+| Typed schema | PASS | data-model.md fixes every field, optionality, enum, equation, and reference. |
+| Orthogonal card dimensions | PASS | teamAudit is a type and all four authored CardSize values pass through. |
+| Deep-module boundary | PASS | Callers learn CardType.teamAudit and TeamAuditPayload; resolution remains hidden. |
+| Intra-layer direction | PASS | Models owns data/structure; Validation supplies the witness and central policy call. |
+| Scope discipline | PASS | Three layer-scoped tasks have exact allowlists and a hard integration barrier. |
+| Error handling | PASS | Existing structured decode/schema errors carry unknown or invalid values. |
 | Public identity | PASS | Fixtures use neutral example identities and hosts. |
-| Verification | PASS | Package-only diff uses SPM build/test plus repository routing checks; no Xcode invocation. |
+| Verification | PASS | Configured hooks own resolver-selected gates; no manual suite duplication. |
 
-### Post-design re-check
+### Post-design gate
 
-PASS. The data model, contracts, acceptance matrix, and single task preserve the
-same boundaries. No new storage, dependency, network client, policy, or
-cross-layer coupling is introduced. The App's schema advertisement is an
-explicit downstream dependency rather than hidden scope in this Core slice.
+PASS by plan. The exact public surface and focused matrix remove ambiguous
+wire alternatives. App and CLI adaptations close the coordinated-release gap
+without introducing an audit-specific consumer API. The existing DesignKit
+Classification.teamAudit token is reused unchanged.
 
 ## Project Structure
 
-### Documentation (this feature)
+### Planning artifacts
 
-```text
-specs/007-core-team-audit/
-├── spec.md
-├── plan.md
-├── research.md
-├── data-model.md
-├── quickstart.md
-├── tasks.md
-├── checklists/
-│   └── requirements.md
-└── contracts/
-    ├── core-team-audit.md
-    └── core-acceptance-matrix.md
-```
+    specs/007-core-team-audit/
+    ├── spec.md
+    ├── plan.md
+    ├── research.md
+    ├── data-model.md
+    ├── quickstart.md
+    ├── tasks.md
+    ├── checklists/requirements.md
+    └── contracts/
+        ├── core-team-audit.md
+        └── core-acceptance-matrix.md
 
-### Source Code (repository root)
+### Implementation surfaces
 
-```text
-Packages/AIDashCore/
-├── Sources/AIDashCore/
-│   ├── Models/
-│   │   ├── CardType.swift
-│   │   ├── EffectiveCardSize.swift
-│   │   └── Payloads/TeamAuditPayload.swift          # new
-│   └── Validation/TeamAuditPayloadValidation.swift # new
-└── Tests/
-    ├── AIDashCoreTests/
-    │   ├── TeamAuditPayloadRoundTripTests.swift    # new
-    │   ├── TeamAuditPayloadInvariantTests.swift    # new
-    │   ├── TeamAuditPayloadValidationTests.swift   # new
-    │   ├── CardTypeDecodeTests.swift
-    │   ├── EnumRoundtripTests.swift
-    │   ├── EffectiveCardSizeTests.swift
-    │   └── SchemaValidatorTests.swift
-    └── AIDashCorePublicAPITests/PublicInitTests.swift
-```
+    Packages/AIDashCore/
+      Sources/AIDashCore/Models/CardType.swift
+      Sources/AIDashCore/Models/EffectiveCardSize.swift
+      Sources/AIDashCore/Models/Payloads/TeamAuditPayload.swift
+      Sources/AIDashCore/Validation/TeamAuditPayloadValidation.swift
+      Tests/AIDashCoreTests/
+      Tests/AIDashCorePublicAPITests/PublicInitTests.swift
 
-**Structure Decision**: Keep one AIDashCore module boundary. The payload file
-owns public value types and structural/reference invariants. The Validation
-file owns the `CardPayloadProtocol` witness and central URL-policy calls. Three
-focused new test files prevent the broad shared payload suite from becoming an
-unreviewable catch-all.
+    Apps/AIDashApp/
+      Sources/XPCService/XPCPayloadSchemas.swift
+      Tests/XPCHandlersContainerCardTests.swift
 
-## Module and Seam Design
+    CLI/aidash/
+      Sources/Commands/CardPutCommand.swift
+      Tests/CardPutCommandTests.swift
 
-### `TeamAuditPayload`
+**Structure decision**: Keep the public model and structural invariants in one
+Core Types file and its protocol/URL-policy orchestration in one Validation
+file. Keep schema advertisement in the existing App-owned catalog and CLI help
+in its existing command. No cross-layer task owns another layer's code.
 
-**Public interface**: One Codable/Equatable/Sendable payload with immutable
-envelope provenance, a locked `TeamAuditSection`, exactly one populated section
-body, and a `SnapshotReferenceCatalog`. All valid values are constructible from
-the external public-API test target.
+## Module and seam design
 
-**Hidden implementation**: Section exclusivity; identity uniqueness;
-baseline/incremental reconciliation; typed-axis decoding; reference resolution;
-SHA, count, sidecar, report, artifact, and externalization invariants. Internal
-helpers may be split inside the same allowed payload file but are not new
-caller concepts.
+### TeamAuditPayload
 
-**Validation seam**: `TeamAuditPayloadValidation.swift` supplies
-`validateInvariants()`. It first invokes the Types-owned structural validator,
-then checks only actionable mandatory/full-report URLs using unchanged
-`URLPolicy`. Optional unsafe artifact/grill strings remain exact untrusted data.
+**Public interface**: One Codable, Equatable, Sendable payload with a fixed
+envelope, one selected body key, and the complete nested surface in
+data-model.md. Every valid value is externally constructible.
 
-**Production path**: `CardType.teamAudit` decodes once via the existing
-`CardType.validate(_:)` flow. `SchemaValidator.validateCardPut` continues to
-apply its existing received-data limit and structured-error mapping unchanged.
+**Hidden implementation**: Section exclusivity, identity uniqueness,
+reconciliation, typed-axis decode, lineage hashing, timeline ordering, repeat
+equations, reference resolution, report binding, and externalization rules.
 
-## Exact Change Boundary
+**Validation seam**: TeamAuditPayloadValidation.swift supplies
+validateInvariants, calls the internal structural validator, then applies
+unchanged URLPolicy only to actionable mandatory/report/PR strings.
 
-### Allowed paths
+**Production seam**: CardType.validate and
+SchemaValidator.validateCardPut keep their interfaces and existing structured
+error mapping.
 
-1. `Packages/AIDashCore/Sources/AIDashCore/Models/Payloads/TeamAuditPayload.swift`
-2. `Packages/AIDashCore/Sources/AIDashCore/Validation/TeamAuditPayloadValidation.swift`
-3. `Packages/AIDashCore/Sources/AIDashCore/Models/CardType.swift`
-4. `Packages/AIDashCore/Sources/AIDashCore/Models/EffectiveCardSize.swift`
-5. `Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadRoundTripTests.swift`
-6. `Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadInvariantTests.swift`
-7. `Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadValidationTests.swift`
-8. `Packages/AIDashCore/Tests/AIDashCoreTests/CardTypeDecodeTests.swift`
-9. `Packages/AIDashCore/Tests/AIDashCoreTests/EnumRoundtripTests.swift`
-10. `Packages/AIDashCore/Tests/AIDashCoreTests/EffectiveCardSizeTests.swift`
-11. `Packages/AIDashCore/Tests/AIDashCoreTests/SchemaValidatorTests.swift`
-12. `Packages/AIDashCore/Tests/AIDashCorePublicAPITests/PublicInitTests.swift`
+### App schema catalog
+
+XPCPayloadSchemas.swift owns the hand-written JSON schema. The teamAudit entry
+must describe the locked discriminator/body relation and all public fields.
+Both schema builders already consume the same payloadSchemas dictionary.
+XPCHandlersContainerCardTests proves parseability, eleven-to-eleven parity,
+fully populated field coverage, and rejected-combination exclusion.
+
+### CLI shared consumer
+
+CardPutCommand continues to send generic card.put requests and use shared Core
+validation. Its help text must derive or be tested against every
+CardType.allCases value, including teamAudit. No audit-specific decoder,
+renderer, transport, or schema copy is added.
+
+## Exact change boundaries
+
+### T001 — AIDashCore allowed paths
+
+1. Packages/AIDashCore/Sources/AIDashCore/Models/Payloads/TeamAuditPayload.swift
+2. Packages/AIDashCore/Sources/AIDashCore/Validation/TeamAuditPayloadValidation.swift
+3. Packages/AIDashCore/Sources/AIDashCore/Models/CardType.swift
+4. Packages/AIDashCore/Sources/AIDashCore/Models/EffectiveCardSize.swift
+5. Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadRoundTripTests.swift
+6. Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadInvariantTests.swift
+7. Packages/AIDashCore/Tests/AIDashCoreTests/TeamAuditPayloadValidationTests.swift
+8. Packages/AIDashCore/Tests/AIDashCoreTests/CardTypeDecodeTests.swift
+9. Packages/AIDashCore/Tests/AIDashCoreTests/EnumRoundtripTests.swift
+10. Packages/AIDashCore/Tests/AIDashCoreTests/EffectiveCardSizeTests.swift
+11. Packages/AIDashCore/Tests/AIDashCoreTests/SchemaValidatorTests.swift
+12. Packages/AIDashCore/Tests/AIDashCorePublicAPITests/PublicInitTests.swift
+
+### T002 — AIDashApp allowed paths
+
+1. Apps/AIDashApp/Sources/XPCService/XPCPayloadSchemas.swift
+2. Apps/AIDashApp/Tests/XPCHandlersContainerCardTests.swift
+
+### T003 — aidash CLI allowed paths
+
+1. CLI/aidash/Sources/Commands/CardPutCommand.swift
+2. CLI/aidash/Tests/CardPutCommandTests.swift
 
 ### Forbidden paths
 
-- `Packages/AIDashCore/Sources/AIDashCore/Validation/SchemaValidator.swift`
-- `Packages/AIDashCore/Sources/AIDashCore/Validation/URLPolicy.swift`
-- `Packages/AIDashCore/Sources/AIDashCore/Models/Payloads/CardPayloadProtocol.swift`
-- `Packages/AIDashCore/Package.swift`
-- `Packages/AIDashCore/Tests/AIDashCoreTests/CardPayloadRoundTripTests.swift`
-- Any other AIDashCore source or test file
-- All `Apps/`, `CLI/`, `aidata/`, `Packages/AIDashUI/`, and
-  `Packages/DesignKit/` paths
-- Constitution, repository routing, and unrelated specification files
+- Packages/AIDashCore/Sources/AIDashCore/Validation/SchemaValidator.swift
+- Packages/AIDashCore/Sources/AIDashCore/Validation/URLPolicy.swift
+- Packages/AIDashCore/Sources/AIDashCore/Models/Payloads/CardPayloadProtocol.swift
+- Packages/AIDashCore/Package.swift
+- Packages/AIDashCore/Tests/AIDashCoreTests/CardPayloadRoundTripTests.swift
+- Apps/AIDashApp/project.yml and every other Apps path
+- CLI schema-list source/tests and every other CLI path
+- Packages/AIDashUI, Packages/DesignKit, aidata, storage, producer, routing,
+  constitution, and unrelated specification paths
 
-## Dependency and Delivery Graph
+If implementation needs any forbidden path, stop and return to Team Lead for a
+fresh planning decision.
 
-```text
-exact 007 planning revision + AI Reviewer spec/plan PASS
+## Dependency and delivery graph
+
+    exact 007 revision + AI Reviewer spec/plan PASS
                          |
                          v
-                  T001 AIDashCore
-                    /      |      \
-                   v       v       v
-       App schema advertisement   UI rendering   producer/data work
-          (separate owner)      (separate owner) (separate owner)
-```
+                   T001 AIDashCore
+                    /           \
+                   v             v
+        T002 App schema       T003 CLI help
+                    \           /
+                     v         v
+              one fixed integrated candidate
+                         |
+             AI Reviewer prepublication PASS
+                         |
+          commit hooks -> push hooks -> PR/SHA proof
+                         |
+            UI and producer/data successors
 
-T001 is the only implementation task in this successor. Adding
-`CardType.teamAudit` expands `CardType.allCases`; therefore integrated delivery
-must schedule a separate AIDashApp-owned schema-catalog adaptation before the
-new type is advertised end to end. That dependency is not permission to modify
-App code in T001.
+T002 and T003 depend on T001's public type vocabulary. No Core-only candidate
+may be published, pushed, or merged. The integration barrier closes only when
+all three layer tasks are present in one frozen candidate and every mapped
+acceptance row is satisfied.
 
-## Verification Strategy
+## Verification and publication strategy
 
-From `Packages/AIDashCore`:
+The normal repository flow owns verification:
 
-```bash
-swift build
-swift test
-```
+1. Freeze the complete local uncommitted three-layer candidate and exact path
+   manifest.
+2. Obtain independent AI Reviewer content/architecture review and explicit
+   publication permission for that fixed tree.
+3. Commit the unchanged reviewed tree normally. Resolver-selected pre-commit
+   hooks produce the required local Core and focused test evidence.
+4. Push normally. Resolver-selected pre-push hooks produce their required
+   evidence.
+5. Create or update the PR, then prove captured local commit SHA equals the
+   remote branch and PR head.
 
-Before those commands, confirm every implementation diff path is beneath
-`Packages/` and inside the twelve-path allowlist. Do not invoke `xcodebuild`.
-Also prove no Models source references `URLPolicy` or a Validation symbol, and
-run the repository's resolver-selected routing/context checks required by the
-normal hook. Planning-only validation uses Spec Kit prerequisites,
-`scripts/hooks/check-tasks-fresh`, and `scripts/context/audit`; it does not run
-product build/tests.
+Do not manually run swift build, swift test, xcodebuild, or host-based
+AIDashApp tests as a completion gate. A focused rerun is allowed only to
+diagnose a failure emitted by a normal hook. App heavy platform builds remain
+CI-only; XPCHandlersContainerCardTests is owned by the hostless App logic test
+target. Any candidate byte change after review invalidates publication
+permission and requires a new freeze/review.
 
-## Complexity Tracking
+Planning-only verification uses Spec Kit prerequisites,
+scripts/hooks/check-tasks-fresh, and scripts/context/audit. It runs no product
+build or product test.
 
-No constitutional violation or complexity exception is required.
+## Complexity tracking
+
+No constitutional exception is required. Three layer tasks are necessary
+because current main makes CardType.allCases a shared release surface; keeping
+their allowlists separate preserves ownership while the barrier preserves
+schema sufficiency.

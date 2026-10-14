@@ -2,59 +2,75 @@
 
 ## Preconditions
 
-1. Use the implementation workspace prepared for the successor, not the
-   preserved MY-1522 workspace.
-2. Base implementation on the exact planning revision named by the AI Reviewer
-   PASS, or on an explicitly approved descendant whose `007` planning artifact
-   blobs are byte-identical.
-3. Confirm the approved repository identity is `LeePepe/AIDash` and record the
-   immutable implementation base before editing.
-4. Read root and AIDashCore context/routing instructions.
+1. Use the successor implementation workspace, never the preserved MY-1522
+   workspace.
+2. Base work on the exact 007 revision named by the AI Reviewer PASS, or an
+   explicitly approved descendant with byte-identical planning artifacts.
+3. Verify repository identity LeePepe/AIDash and record the immutable base.
+4. Read root plus each affected Core, App, and CLI context/routing document.
+5. Treat T001, T002, and T003 as one publication unit.
 
-## Implement T001
+## T001 — Core
 
-Work only in the twelve paths listed in `plan.md` and `tasks.md`.
+Work only in T001's twelve paths.
 
-1. Add the public value model and Types-owned structural/reference invariants
-   in `TeamAuditPayload.swift`.
-2. Add the Validation-role protocol witness and central URL-policy checks in
-   `TeamAuditPayloadValidation.swift`.
-3. Register `.teamAudit` in `CardType` and preserve authored size in
-   `EffectiveCardSize`.
-4. Add focused round-trip, invariant, Validation-role, registration, enum,
-   effective-size, production-schema, and external public-construction proofs.
-5. Implement every row in `contracts/core-acceptance-matrix.md`, especially
-   artifact `caseID` resolution and the one-field report/externalization
-   negative matrix.
+1. Implement the exact public values and structural/reference invariants from
+   data-model.md in TeamAuditPayload.swift.
+2. Implement the Validation-role witness and unchanged central URL-policy
+   calls in TeamAuditPayloadValidation.swift.
+3. Register teamAudit and preserve small, medium, wide, and hero through both
+   effective-size resolver paths.
+4. Add the focused round-trip, invariant, validation, registration, enum,
+   size, production-schema, and external-public proofs.
+5. Implement every Core matrix row, especially the field-complete nested
+   surface, artifact caseID catalog rule, and full-report/externalization
+   one-field negatives.
 
-Do not edit `SchemaValidator.swift`, `URLPolicy.swift`,
-`CardPayloadProtocol.swift`, `Package.swift`, the broad shared payload test, or
-any non-Core layer.
+Do not edit SchemaValidator.swift, URLPolicy.swift, CardPayloadProtocol.swift,
+Package.swift, the broad shared payload test, or another layer.
 
-## Verify the implementation
+## T002 — App schema
 
-First inspect the diff path list relative to the approved base. If every change
-is under `Packages/` as required, use only Swift Package Manager:
+After T001 fixes the public surface, work only in T002's two App paths.
 
-```bash
-cd Packages/AIDashCore
-swift build
-swift test
-```
+1. Add the teamAudit JSON schema to the shared payloadSchemas catalog.
+2. Describe every public field, required/optional key, locked value, and
+   selected-body discriminator relation.
+3. Prove both schema builders expose eleven type values and eleven schemas,
+   each schema parses, all fully populated model keys are declared, and invalid
+   body combinations are not advertised.
 
-Do not run `xcodebuild` for this package-only task. Also verify:
+Use the hostless App logic test owner. Do not edit project.yml or add App
+storage, UI, or transport behavior.
 
-- all changed files are in the twelve-path allowlist;
-- no Models source refers to `URLPolicy` or a Validation symbol;
-- all eight variants round-trip and validate through public and production
-  paths;
-- exact 262,144/262,145-byte fixtures use received UTF-8 bytes;
-- existing ten card types retain behavior, with only the expected enum-count
-  tripwire changing from ten to eleven.
+## T003 — CLI shared consumer
 
-## Handoff
+After T001 fixes CardType, work only in T003's two CLI paths.
 
-Capture the implementation commit SHA, pushed branch SHA, and PR head SHA and
-require byte-for-byte equality before exact-SHA content review. Hand off the
-acceptance-matrix results and diff allowlist. App schema advertisement, UI
-rendering, and producer work remain separately owned successors.
+1. Make card put type help derive from or remain mechanically complete against
+   CardType.allCases.
+2. Prove every raw value, including teamAudit, is discoverable and a
+   teamAudit request preserves its generic type/payload fields.
+3. Retain the existing shared Core validator and generic schema-list renderer.
+
+Do not add an audit-specific CLI decoder, validator, renderer, or schema copy.
+
+## Verification and handoff
+
+1. Freeze one local uncommitted candidate containing exactly the sixteen task
+   paths and record its manifest.
+2. Request independent AI Reviewer content/architecture review of that fixed
+   tree and obtain explicit publication permission before committing.
+3. Commit the unchanged reviewed tree normally. The configured pre-commit
+   hooks own resolver-selected local verification.
+4. Push normally. The configured pre-push hooks own their gates.
+5. Create or update the PR, capture local/remote/PR SHAs, and prove equality.
+
+Do not manually run swift build, swift test, xcodebuild, host-based App tests,
+or another suite as the required completion evidence. A focused command is
+allowed only to diagnose a failure already emitted by a normal hook. Any
+source/test byte change after review requires a new freeze and review.
+
+Do not publish or merge T001 alone. UI rendering and producer/data work remain
+downstream. The existing DesignKit Classification.teamAudit token is reused
+unchanged and has no successor task.

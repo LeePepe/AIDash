@@ -23,9 +23,17 @@ plan only behavior that snapshot still lacks.
 - Agent-authored link safety already has one policy: HTTPS with a non-empty
   host. The policy and its public interface are accepted behavior.
 - AIDashUI already degrades an unrecognized decoded payload to its generic
-  card fallback. The App schema catalog still advertises only the ten current
-  payloads and requires a later AIDashApp-owned adaptation after Core adds the
-  new enum case.
+  card fallback. The App currently derives advertised card types from
+  CardType.allCases but has only ten explicit payload schemas; its exact
+  one-schema-per-type test makes the App schema adaptation a same-release
+  barrier, not downstream work.
+- The CLI consumes the shared schema.list response generically and Core
+  validation already accepts every CardType raw value. card put help has a
+  hard-coded, already incomplete type list, so coordinated teamAudit delivery
+  includes deriving and proving help against CardType.allCases.
+- DesignKit already defines Classification.teamAudit with light #E6294D and
+  dark #FF375F plus golden/distinctness/contrast coverage. That accepted token
+  is reused byte-for-byte and is not successor work.
 - Historical `specs/006-team-workflow-audit/` artifacts describe the broader
   product feature, but their retired T005 recovery base, candidate, task ID,
   and file allowlist are not execution authority for this successor.
@@ -38,8 +46,9 @@ plan only behavior that snapshot still lacks.
 - The existing `CardPayloadProtocol`, `CardType.validate`,
   `SchemaValidator.validateCardPut`, payload byte limit, and `URLPolicy`
   interfaces are reused unchanged.
-- Existing unknown-payload UI fallback behavior remains valid; explicit audit
-  rendering and schema advertisement stay downstream, layer-owned work.
+- Existing unknown-payload UI fallback behavior remains valid. App schema
+  advertisement and CLI help remain layer-owned tasks but are hard members of
+  the same coordinated publication unit as Core registration.
 - Unsafe optional artifact and grill strings remain round-trippable untrusted
   data. They do not become actionable links.
 - Neutral fixtures contain no account, employer, machine, workspace, or real
@@ -102,9 +111,10 @@ the existing structured failure without changing any non-Core layer.
 8. **US1/AC8** — Given otherwise-valid serialized payloads of exactly 262,144
    and 262,145 bytes, the first is accepted and the mandatory second is
    rejected by the production received-byte gate.
-9. **US1/AC9** — Given existing card payloads and URL strings, the successor
-   changes none of their behavior and neither widens nor duplicates the
-   central URL policy.
+9. **US1/AC9** — Given the integrated Core, App, and CLI candidate, schema.list
+   advertises exactly one parseable schema for every CardType, card put help
+   includes all eleven values, and existing payload, URL, UI-fallback, and
+   DesignKit behavior remains unchanged.
 
 ### Edge Cases
 
@@ -126,16 +136,19 @@ the existing structured failure without changing any non-Core layer.
 ### Functional Requirements
 
 - **FR-001**: AIDashCore MUST register `teamAudit` as the eleventh card type,
-  decode it as one public payload, and preserve authored size without a
+  decode it as one public payload, and preserve each authored `small`,
+  `medium`, `wide`, and `hero` size in both resolver paths without a
   content-derived downgrade.
 - **FR-002**: The payload MUST have one common immutable envelope and exactly
   eight locked section variants: `overview`, `findings`, `caseTimelines`,
   `individualMetrics`, `feedbackLineage`, `agentRepeatMetrics`,
   `importObservations`, and `artifacts`.
 - **FR-003**: Baseline/cohort and incremental/cursor modes, the three typed core
-  axes, separate Task Effectiveness, coverage counts, findings, timelines,
-  lineage, repeat metrics, and collision observations MUST satisfy the
-  reconciliation and catalog rules in the successor contract.
+  axes, separate Task Effectiveness, coverage and publication counts,
+  findings, ordered timelines/events/attempts, individual metrics, canonical
+  feedback lineage, five actor-role repeat variants, collision observations,
+  ArtifactSection, and GrillLinks MUST use the exact fields, optionality,
+  locked values, equations, and catalog rules in data-model.md.
 - **FR-004**: Every artifact's optional `caseID`, when present, MUST be trimmed,
   non-empty, and resolve exactly once through `referenceCatalog.caseIDs`.
   Omission is valid; blank, dangling, or multiply-resolved values reject.
@@ -152,7 +165,8 @@ the existing structured failure without changing any non-Core layer.
 - **FR-007**: Structural and referential validation MUST remain in the Types
   implementation while the protocol witness in the Validation role reuses the
   unchanged central URL policy. Models MUST NOT depend on a Validation symbol.
-- **FR-008**: Locked enums and all public payload types MUST round-trip exactly.
+- **FR-008**: Locked enums and every named public payload type/property MUST
+  round-trip exactly. The selected body MUST be the only encoded body key.
   Unknown locked values MUST propagate through the existing structured Core
   failure path without coercion.
 - **FR-009**: An otherwise-valid final serialized `teamAudit` payload of
@@ -161,9 +175,12 @@ the existing structured failure without changing any non-Core layer.
   re-encoding.
 - **FR-010**: The complete valid payload surface MUST be constructible from the
   external AIDashCore test target without `@testable import`.
-- **FR-011**: The implementation MUST preserve all accepted current-main card,
-  schema-validator, URL-policy, and fallback behavior and MUST remove or weaken
-  no existing test.
+- **FR-011**: AIDashApp MUST advertise a field-complete discriminator-aware
+  teamAudit JSON schema while preserving exact schema/type-key parity in both
+  builders. aidash MUST expose all CardType values in card put help and retain
+  generic shared validation/rendering. The coordinated implementation MUST
+  preserve current card, schema-validator, URL-policy, UI-fallback, and
+  DesignKit token behavior and weaken no test.
 
 ### Key Entities
 
@@ -195,25 +212,28 @@ the existing structured failure without changing any non-Core layer.
   and rejects zero and negative counts.
 - **SC-005**: Exact otherwise-valid 262,144/262,145 byte fixtures produce one
   acceptance and one rejection through the production path.
-- **SC-006**: The implementation diff is confined to the reviewed AIDashCore
-  allowlist, and all resolver-selected Core gates pass with no Models-to-
-  Validation dependency.
+- **SC-006**: Each layer diff is confined to its reviewed allowlist; the fixed
+  integrated candidate contains Core, App schema, and CLI help adaptations;
+  all resolver-selected hook gates pass with no Models-to-Validation
+  dependency.
 
 ## Assumptions
 
 - The broader Team Workflow Audit product contract in `006` remains historical
   source material; only the Core-owned, current-main-unsatisfied subset is
   carried into this successor.
-- Downstream AIDashApp schema advertisement, DesignKit token, AIDashUI renderer,
-  producer, and event work remain separate layer tasks and are not silently
-  absorbed here.
+- AIDashUI rendering, producer, and event work remain downstream. App schema
+  and CLI help are separate layer tasks inside this successor's hard
+  coordinated publication barrier. The existing DesignKit token is already
+  satisfied and excluded.
 - No new package, dependency, store, migration, network client, or public URL
   policy is required.
 
 ## Non-Goals
 
-- Rendering audit cards or adding design tokens.
-- Advertising the audit schema from AIDashApp or changing CLI commands.
+- Rendering audit cards or changing the existing DesignKit teamAudit token.
+- Adding audit-specific CLI validation or rendering behavior beyond coordinated
+  type help and generic shared schema consumption.
 - Importing, generating, or publishing audit data.
 - Adding Owner decision events or remediation behavior.
 - Mutating, publishing, or re-reviewing any preserved MY-1522 workspace,

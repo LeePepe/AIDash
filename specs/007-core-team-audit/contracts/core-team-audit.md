@@ -1,152 +1,148 @@
-# Contract: AIDashCore `teamAudit`
+# Contract: AIDashCore teamAudit
 
-## Registration and compatibility
+## Registration and coordinated advertisement
 
-- Wire value: `teamAudit`.
-- `CardType.teamAudit` decodes `TeamAuditPayload` through the existing
-  single-decode `CardType.validate(_:)` interface.
-- Authored card size is returned unchanged; the contract defines no
-  content-derived size override.
-- The ten existing card types and their payload behavior are unchanged.
-- Unknown locked enum values and invalid invariants use the existing decode or
-  structured schema failure. No fallback enum case is introduced.
+- The exact CardType wire value is teamAudit.
+- CardType.teamAudit decodes TeamAuditPayload through the existing single-decode
+  CardType.validate interface.
+- All four authored CardSize values, small, medium, wide, and hero, pass
+  through both EffectiveCardSize resolver paths unchanged, including when
+  collapse-to-list is enabled.
+- The ten existing card types and their behavior remain unchanged.
+- AIDashApp adds one real JSON schema whose discriminator and fields match the
+  public model. Both schema-list builders advertise the same eleven card types
+  and eleven payload schemas.
+- aidash card put help derives or proves its type vocabulary against
+  CardType.allCases, and a teamAudit request remains a generic shared-Core
+  validation request. No audit-specific CLI validator is introduced.
+- Core registration, App schema adaptation, and CLI help/consumer adaptation
+  are one coordinated publication unit. None may be published or merged alone.
 
-## Public payload surface
+## Normative public wire surface
 
-`TeamAuditPayload` and every nested value needed to construct a valid payload
-are public, Codable, Equatable, and Sendable. The common envelope is:
+TeamAuditPayload and every nested value needed for a complete fixture are
+public, Codable, Equatable, and Sendable with public memberwise initializers.
+The exact field names, types, optionality, enum raw values, and reconciliation
+equations are defined in ../data-model.md.
 
-```json
-{
-  "snapshotID": "snapshot-example-001",
-  "capturedAt": "2026-10-14T00:00:00Z",
-  "scope": {
-    "owner": "Owner",
-    "projectID": "project-example",
-    "repository": "https://example.com/org/repository"
-  },
-  "mode": "baseline",
-  "section": "overview",
-  "partIndex": 0,
-  "partCount": 1,
-  "contentSHA256": "<64 lowercase hex>",
-  "artifactSidecarID": "snapshot-example-001:artifact-sidecar:v1",
-  "artifactSidecarSHA256": "<64 lowercase hex>",
-  "referenceCatalog": {
-    "caseIDs": [],
-    "eventIDs": [],
-    "evidenceRefs": [],
-    "subjectIDs": [],
-    "revisionEvidenceRefs": [],
-    "findings": [],
-    "artifacts": []
-  }
-}
-```
+The envelope always contains snapshotID, capturedAt, scope, mode, section,
+partIndex, partCount, contentSHA256, artifactSidecarID,
+artifactSidecarSHA256, and referenceCatalog.
 
-Exactly one of `overview`, `findings`, `caseTimelines`, `individualMetrics`,
-`feedbackLineage`, `agentRepeatMetrics`, `importObservations`, or `artifacts`
-is populated, matching `section`; all other bodies are absent or empty.
+Exactly one selected body key is present and non-null:
 
-The payload types and invariants are normative in `../data-model.md`. Public
-API naming may follow existing Core Swift conventions, but it must preserve
-the locked wire values and relationships in this contract.
+    overview | findings | caseTimelines | individualMetrics |
+    feedbackLineage | agentRepeatMetrics | importObservations | artifacts
 
-## Catalog resolution
+The other seven keys are absent. A null, empty selected collection, unrelated
+body key, or discriminator/body mismatch rejects. Unknown locked enum values
+use the existing structured decode/schema failure and are never coerced.
 
-Every reference used by the selected body resolves exactly once in
-`SnapshotReferenceCatalog`. The catalog is identity-only and has unique
-trimmed IDs. Duplicate catalog keys reject even if their remaining data is
-equal.
+## Referential and reconciliation contract
 
-An artifact's `caseID` has three distinct states:
+Every selected-body case, event, evidence, subject, finding, revision, and
+artifact reference resolves exactly once in SnapshotReferenceCatalog.
+Catalog identities are trimmed and unique; artifact entries preserve kind,
+ID, hash, raw URL, and sidecar binding without presentation bodies.
 
-- omitted: valid;
-- present and trimmed/non-empty: valid only when exactly one catalog `caseID`
-  equals it;
-- present but blank, dangling, or multiply resolved: invalid.
+The mandatory equations and relationships include:
 
-Validation must exercise that rule from both direct card validation and the
-production schema-validation path.
+- baseline has a cohort and no cursors; incremental has no cohort and has one
+  or more unique-source cursors;
+- available evidence plus missing evidence equals required evidence, and
+  redacted evidence does not exceed available evidence;
+- exactly one Workflow Conformance, Workflow Fitness, and Outcome Integrity
+  summary exists; each count triple equals its total;
+- each shared insufficientEvidence value decodes only inside its already
+  decoded enclosing axis;
+- Task Effectiveness is separate and its five counts equal totalEvaluated;
+- all four publication required/published pairs match independently; a chain
+  cannot satisfy a finding and a report cannot satisfy a mandatory pair;
+- timeline identity arrays exactly equal their embedded event/attempt order
+  and every embedded value binds to the same case;
+- finding evidence arrays and repeat supporting subject/event arrays are
+  non-empty, unique, and catalog-resolved;
+- feedback lineage ID is lowercase SHA-256 of the trimmed
+  problem/origin/delivery tuple joined by U+001F; a merge OID is lowercase
+  40-hex;
+- every role-specific repeat tag matches actorRole, all counters are
+  non-negative, all breakdown equations hold, every primary round total is no
+  greater than attemptsTotal, and zero attempts has zero repeat/round/max
+  counters;
+- a collision has the envelope parent ID/hash, unequal accepted/rejected
+  hashes, the sole locked disposition, and no rejected body.
 
-## Axis and section semantics
+All focused positive and one-field negative proofs are mandatory in
+core-acceptance-matrix.md.
 
-- Baseline carries a cohort and no cursors; incremental carries cursors and no
-  cohort.
-- The core summary set is exactly Workflow Conformance, Workflow Fitness, and
-  Outcome Integrity. Each shared `insufficientEvidence` wire value is decoded
-  in its enclosing axis. Task Effectiveness remains a separate value.
-- Counts are non-negative and reconcile with their typed totals.
-- Finding, timeline, individual metric, feedback lineage, role-repeat, import
-  observation, and artifact identities are unique and catalog-resolved as
-  specified by `../data-model.md`.
-- All `*SHA256` values are 64 lowercase hexadecimal characters. A present Git
-  merge object ID is 40 lowercase hexadecimal characters.
+## Artifact caseID contract
 
-## Full-report binding
+An ArtifactManifestEntry caseID has three distinct states:
 
-A `FullReportReference` is accepted only if exactly one catalog
-`ArtifactReference` matches all six binding dimensions:
+- omitted is valid;
+- present, trimmed, and non-empty is valid only when it resolves exactly once
+  through referenceCatalog.caseIDs;
+- blank, dangling, or multiply resolved rejects.
 
-| Dimension | Required relationship |
+Both direct card validation and the production schema-validation path prove
+all states.
+
+## Full-report and externalization contract
+
+A FullReportReference is accepted only when exactly one ArtifactReference
+matches all six dimensions:
+
+| Dimension | Relationship |
 |---|---|
-| kind | exactly `fullReport` |
+| kind | exactly fullReport |
 | artifact ID | exact equality |
 | content SHA-256 | exact equality |
 | raw URL | exact equality |
 | sidecar ID | exact equality and envelope equality |
 | sidecar SHA-256 | exact equality and envelope equality |
 
-This rule is identical for an overview, an artifacts section, and a report
-embedded in externalization. An ID-only match is never sufficient. Absence,
-duplication, or a one-field substitution rejects.
+The same rule applies from overview publication coverage, ArtifactSection,
+and ExternalizedEntityReference. Every dimension, absence, and duplication has
+an isolated negative fixture.
 
-## Externalization binding
+Externalization has only these optional kinds:
 
-Externalization is available only for the locked optional kinds:
+    p2Finding | infoFinding | caseTimeline | individualMetric |
+    feedbackLineage | agentRepeatMetric | importObservation | optionalArtifact
 
-```text
-p2Finding | infoFinding | caseTimeline | individualMetric |
-feedbackLineage | agentRepeatMetric | importObservation | optionalArtifact
-```
+Each reference has a non-empty stableID, encodedByteCount greater than zero,
+reason exactly exceedsInlinePayloadLimit, envelope-equal sidecar fields, and a
+full report exactly equal to the section report. Mandatory-shaped and unknown
+kinds have no enum case.
 
-Every reference has a trimmed stable ID, a positive `encodedByteCount`, reason
-exactly `exceedsInlinePayloadLimit`, envelope-equal sidecar ID/hash, and an
-embedded full report exactly equal to the already-resolved report. Zero or
-negative counts, unknown kinds, mandatory-shaped kinds, different reason,
-sidecar drift, or any report-binding mismatch reject.
+## URL and byte seams
 
-## URL-policy seam
+Models treats URL fields as exact opaque strings. It enforces presence and
+equality only and contains no URLPolicy or Validation-role reference.
 
-The Models file treats all URLs as opaque strings. It may enforce presence and
-exact equality, but it does not reference `URLPolicy` or Validation types.
+TeamAuditPayloadValidation.swift supplies validateInvariants, first running
+the structural helper and then the unchanged central URL policy for:
 
-`TeamAuditPayloadValidation.swift` supplies the
-`CardPayloadProtocol.validateInvariants()` witness. It runs structural
-validation first and then delegates the following to unchanged `URLPolicy`:
-
-- full-report URL;
+- every full-report URL;
 - every mandatory artifact URL;
-- each present feedback-lineage PR URL.
+- every present feedback-lineage PR URL.
 
-Optional artifact and grill strings remain exact untrusted data even when
-unsafe. They are not promoted to actionable links by Core. `URLPolicy.swift`,
-`SchemaValidator.swift`, and `CardPayloadProtocol.swift` remain unchanged.
+Optional artifact and grill strings remain exact non-actionable data even when
+unsafe. SchemaValidator.swift, URLPolicy.swift, CardPayloadProtocol.swift, and
+their interfaces remain unchanged.
 
-## Received-byte contract
+The existing received-data limit remains 262,144 UTF-8 bytes. An otherwise
+valid teamAudit payload at exactly 262,144 received bytes passes; an
+otherwise-valid mandatory payload at exactly 262,145 bytes fails. The
+production path measures received Data.count and does not decide from semantic
+re-encoding.
 
-The existing production limit remains 262,144 received UTF-8 bytes.
+## Existing behavior reused unchanged
 
-- An otherwise-valid `teamAudit` payload whose received `Data.count` is
-  exactly 262,144 is accepted.
-- An otherwise-valid mandatory payload whose received `Data.count` is exactly
-  262,145 is rejected.
-- Tests reach the existing `SchemaValidator.validateCardPut` path and do not
-  replace the received-byte decision with decoded semantic re-encoding.
-
-## Failure and side-effect contract
-
-Validation is deterministic and side-effect-free. Failure never traps, never
-coerces unknown semantics, and never performs storage, network, issue, agent,
-or remediation work. It returns through the existing CardType/schema error
-surfaces.
+- Existing structured errors, URL policy, ten payloads, and generic UI
+  fallback stay accepted.
+- The baseline DesignKit Classification.teamAudit token already exists with
+  light #E6294D and dark #FF375F and existing golden/contrast coverage. It is
+  reused unchanged; this successor creates no DesignKit work.
+- Validation is deterministic and side-effect-free. It performs no storage,
+  network, publication, issue, dispatch, or remediation action.

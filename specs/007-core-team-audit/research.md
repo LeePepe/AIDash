@@ -83,20 +83,37 @@ re-encoding can change byte count and is not authoritative.
 
 ## Downstream compatibility
 
-**Decision**: Keep T001 Core-only and record App schema advertisement as a hard
-downstream integration dependency.
+**Decision**: Keep each implementation task layer-owned, but make Core
+registration, App schema advertisement, and CLI help/consumer adaptation one
+hard coordinated publication unit.
 
 **Rationale**: Adding the enum case grows `CardType.allCases`, while the App's
-current schema map covers only the ten baseline cases. App, UI, and producer
-adaptations each belong to separate layers and must not be hidden in a Core
+current schema map covers only ten cases and its test requires exact
+type/schema parity. The CLI generically consumes the shared result and Core
+validation, but card-put help is a hard-coded incomplete type list. The
+constitution requires a coordinated Core/App/CLI type release. UI and producer
+adaptations remain downstream.
+
+## Existing DesignKit behavior
+
+**Decision**: Reuse Classification.teamAudit unchanged and create no DesignKit
 task.
+
+**Rationale**: Current main already carries the teamAudit light #E6294D and
+dark #FF375F token plus golden, distinctness, and contrast tests. Token
+creation is already satisfied current-main behavior, not successor work.
+
+**Alternative rejected**: Carrying a historical downstream token task would
+violate the required current-main re-baseline.
 
 ## Verification
 
-**Decision**: Because the future implementation diff is package-only, verify
-from `Packages/AIDashCore` with `swift build` then `swift test`; never use
-`xcodebuild`. Verify path allowlist and absence of Models-to-Validation
-references separately.
+**Decision**: Normal commit and push hooks own resolver-selected verification.
+Freeze and independently review the complete uncommitted three-layer
+candidate first; only the unchanged reviewed tree may then be committed and
+pushed. Focused commands are diagnostic only after a hook emits a failure.
 
-**Rationale**: This is the repository's explicit package-only rule and gives
-the smallest authoritative build/test surface.
+**Rationale**: The constitution assigns build/test gates to configured hooks
+and requires independent prepublication review. Core SPM gates are selected by
+the hooks, hostless App logic tests own the schema proof, and heavy App
+platform builds remain CI-only. Manual duplication would not be authoritative.
