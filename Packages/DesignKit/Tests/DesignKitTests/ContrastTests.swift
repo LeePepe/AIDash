@@ -213,3 +213,19 @@ struct StatusPillContrastTests {
         }
     }
 }
+
+@Suite("Classification badge contrast")
+struct ClassificationBadgeContrastTests {
+    @Test("teamAudit badge clears the non-text UI floor on every neutral ground, both schemes")
+    func teamAuditBadgeIsReadable() {
+        for ground in Ground.every {
+            let tint = Classification.teamAudit.tint(isDark: ground.isDark)
+            for (name, bg) in ground.all {
+                let fill = WCAG.composite(tint, over: bg, alpha: 0.15)
+                let r = WCAG.ratio(tint, fill)
+                #expect(r >= WCAG.largeText,
+                        "\(ground.label) teamAudit on \(name) = \(r), needs >= \(WCAG.largeText)")
+            }
+        }
+    }
+}

@@ -58,6 +58,11 @@ GITHUB_PR_REPOS = (
 # import os
 # HOME = Path(os.path.expanduser("~"))
 #
+# # Team Workflow Audit bundle import root for the explicit manual source.
+# # Leave blank to keep the source disabled; a non-empty directory allows the
+# # operator to run `aidata/cli.py collect --source team_audit_snapshot`.
+# TEAM_AUDIT_IMPORT_ROOT = ""
+#
 # # Roots walked for `.git` repos to aggregate your own commit activity.
 # # Keep this narrow — walking all of ~ is slow. Author email is read live from
 # # `git config --global user.email`, never configured here.

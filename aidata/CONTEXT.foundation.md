@@ -6,7 +6,7 @@
   "group": "aidata",
   "parent": "aidata/CONTEXT.md",
   "scope": ["CONTEXT.foundation.md", "README.md", "tech-context.md", "pytest.ini", "cli.py", "cleanio.py", "config.py", "config_local.example.py", "rawio.py", "redaction.py", "sqlite_ro.py", "state.py", "timeutil.py", "docs/**"],
-  "test_paths": ["tests/__init__.py", "tests/test_config_m3.py", "tests/test_config_multica.py", "tests/test_timeutil.py"],
+  "test_paths": ["tests/__init__.py", "tests/test_config_m3.py", "tests/test_config_multica.py", "tests/test_team_audit_manual_source.py", "tests/test_timeutil.py"],
   "dependencies": [],
   "dependents": ["AidataL1L2", "AidataL3", "AidataL4", "AidataL5", "AidataOps"],
   "red_lines": [
