@@ -8,7 +8,7 @@
     {"patterns": ["CLI/**"], "context": "CLI/CONTEXT.md"},
     {"patterns": ["aidata/**"], "context": "aidata/CONTEXT.md"},
     {"patterns": ["Configs/**", "fastlane/**", "project.yml"], "context": "Configs/CONTEXT.md"},
-    {"patterns": [".claude/**", ".github/**", ".specify/**", "design/**", "docs/**", "scripts/**", "specs/**", ".gitignore", ".require-tests-ignore", ".swiftlint.yml", "AGENTS.md", "CLAUDE.md", "README.md", "tech-context.md"], "context": "scripts/CONTEXT.md"}
+    {"patterns": [".claude/**", ".github/**", ".specify/**", "design/**", "docs/**", "scripts/**", "specs/**", ".gitignore", ".require-tests-ignore", ".swiftlint.yml", "AGENTS.md", "CLAUDE.md", "LICENSE", "README.md", "tech-context.md"], "context": "scripts/CONTEXT.md"}
   ],
   "exclusions": [
     {"patterns": ["CONTEXT.md"], "reason": "Root routing metadata; it is audited as context structure rather than owned product code."}

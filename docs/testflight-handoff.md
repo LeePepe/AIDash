@@ -1,4 +1,4 @@
-# TestFlight 自动分发 — 交接与前置条件(spec 004 / T205)
+# TestFlight 手动分发 — 交接与前置条件(spec 004 / T205)
 
 `.github/workflows/testflight.yml` + `fastlane/` 已经落地,但**首次真实上传前需要
 用户做一次性人工配置**:5 个 GitHub Secret + Developer Portal / App Store Connect
@@ -104,18 +104,18 @@ gh run watch
 且已分发到 Internal 群组,测试员的 TestFlight app 里能看到。
 
 真实上传**不是 CI 阻塞项** —— `build.yml` 的 iOS 构建门(T204)才是每个 PR 都跑的
-硬门;TestFlight 发布是定时任务,失败了修完重跑即可。
+硬门;TestFlight 仅在用户明确要求后手动触发,失败后先诊断,再按授权重试。
 
 ---
 
 ## 四、日常运转
 
-- **定时**:每天 03:07 CST(`cron: "7 19 * * *"`)。分钟取 7 是避开 GitHub cron
-  整点高峰的排队延迟。
+- **仅手动**:自动发布已暂停。用户明确要求后,使用 Actions → testflight → Run workflow
+  或 `gh workflow run testflight.yml --ref main`；合并 PR 不会自动发布。
 - **只在有新提交时才 build**:上次发布点记在 moving tag
   `testflight/last-released`。累积式 —— build 失败或机器关机期间不丢 commit,
-  下次开机的 cron 会把攒的一起发。
-- **runner 离线 = 不发布**,不报错,下次开机补上。
+  下次获授权的手动发布会包含累积改动。
+- **runner 离线 = 暂不可发布**:确认恢复后再按用户授权处理,不自动补发。
 - **build number 全局单调递增**:`latest_testflight_build_number` 刻意**不传**
   `version:`,查的是该 app 所有版本的最大 build number,next = latest + 1。
   传了 version 会把查询限定在当前 marketing version 内,bump 版本后 build 从 1

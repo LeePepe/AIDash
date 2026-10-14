@@ -129,9 +129,11 @@ def _build_action_inbox(cost_improvement) -> list:
 
 def _render_template(report_date: str, sources: DigestSources) -> str:
     """The deterministic M1–M3 template output (the number-owning ground truth)."""
+    from L5_apps.digest.aidash import load_delivery_state
+    delivery = load_delivery_state()
     return render_digest(sources.raven, report_date, multica=sources.multica,
                          ado=sources.ado, automation=sources.automation,
-                         repo_radar=sources.repo_radar)
+                         repo_radar=sources.repo_radar, delivery=delivery)
 
 
 def _maybe_polish(template_md: str, client: LLMClient | None) -> str:
@@ -173,7 +175,8 @@ def build_digest(report_date: str, use_llm: bool = False,
 
 
 def _push_to_aidash(md: str, report_date: str,
-                    sources: DigestSources) -> PushResult:
+                    sources: DigestSources,
+                    failure_sink=None) -> PushResult:
     """Transform the digest into a Briefing and push it (best-effort).
 
     Split out so tests can monkeypatch the whole push at the app boundary. This
@@ -185,10 +188,21 @@ def _push_to_aidash(md: str, report_date: str,
     archive filename and the digest title — never the run date (BUG 3). The
     structured `sources` give the metric cards real numbers + sparkline series
     instead of parsing them back out of the rendered markdown.
+
+    Side-effect (MY-1450): persists delivery state after the push attempt so the
+    next briefing can report delivery health independently of source health.
     """
-    from L5_apps.digest.aidash import resolve_aidash_bin
-    briefing = build_briefing(report_date, sources, md, must_see_layer(md))
-    return push_briefing(briefing, bin_path=resolve_aidash_bin())
+    from L5_apps.digest.aidash import resolve_aidash_bin, save_delivery_state, load_delivery_state
+    delivery = load_delivery_state()
+    briefing = build_briefing(report_date, sources, md, must_see_layer(md),
+                              delivery=delivery)
+    result = push_briefing(briefing, bin_path=resolve_aidash_bin(),
+                           failure_sink=failure_sink)
+    try:
+        save_delivery_state(result)
+    except Exception:  # noqa: BLE001 - state persistence is non-fatal
+        log.warning("could not persist delivery state (non-fatal)")
+    return result
 
 
 def write_digest(report_date: str, use_llm: bool = False,

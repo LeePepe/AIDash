@@ -229,6 +229,20 @@ NEWS_FEEDS = (
 )
 
 # ---------------------------------------------------------------------------
+# Manual-only registry: opt-in sources that are intentionally excluded from the
+# normal scheduled collect/normalize pass and are only accepted when an operator
+# explicitly names them via `--source`. These sources never feed the default
+# L3 merge path.
+# ---------------------------------------------------------------------------
+MANUAL_SOURCES = (
+    "team_audit_snapshot",
+)
+
+# Portable local import root for manual bundle imports. Empty by default so the
+# manual source is inert until a machine sets a real path in config_local.py.
+TEAM_AUDIT_IMPORT_ROOT = ""
+
+# ---------------------------------------------------------------------------
 # Source registry: canonical source names -> whether they feed L3 merge.
 # memory_* sources stop at L2 (queried directly), per design.
 # ---------------------------------------------------------------------------

@@ -204,11 +204,19 @@ def render_digest(t: RavenTrends, report_date: str,
                   multica: MulticaTrends | None = None,
                   ado: AdoPrTrends | None = None,
                   automation: AutomationTrends | None = None,
-                  repo_radar=None) -> str:
+                  repo_radar=None,
+                  delivery=None) -> str:
     y = yesterday(report_date)
     lines: list[str] = [f"# AI 使用日报 {y}", ""]
 
     lines += [_health_line(t, multica, ado, automation), ""]
+
+    # Delivery/XPC health — distinct from content-source health (MY-1450).
+    if delivery is not None:
+        from L5_apps.digest.aidash import delivery_health_line
+        d_line = delivery_health_line(report_date, delivery)
+        if d_line:
+            lines += [d_line, ""]
 
     degraded = t.health.state != "ok"
 

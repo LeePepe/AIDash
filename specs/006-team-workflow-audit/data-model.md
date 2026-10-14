@@ -12,6 +12,10 @@
 - Generated card IDs are deterministic from
   `(snapshotID, section, partIndex, stable subject range)` so a republish does
   not create duplicate cards.
+- Every card part carries a typed `SnapshotReferenceCatalog` derived from the
+  accepted snapshot. Section-local case, event, evidence, subject, finding,
+  revision, and artifact/full-report references resolve through that catalog
+  exactly once; the catalog is not a display-label bag.
 
 ## Import bundle
 
@@ -24,6 +28,7 @@
 | `scope` | AuditScope | Owner label, project reference, repository reference; redacted and portable |
 | `mode` | AuditMode | `baseline` or `incremental` |
 | `instructionVersions` | [InstructionVersion] | Each has source identity, update time, SHA-256 |
+| `evidenceCoverage` | EvidenceCoverage | Required/available/missing/redacted evidence counts plus limitations |
 | `cohort` | AuditCohort? | Required for baseline, absent for incremental |
 | `cursors` | [AuditCursor] | Required and non-empty for incremental, absent for baseline |
 | `axisSummaries` | [CoreAxisSummary] | Exactly one each for Conformance, Fitness, Outcome |
@@ -45,25 +50,45 @@
 - Incremental overlap replay deduplicates events by stable source identity; it
   does not modify the baseline cohort.
 
-### AuditAxis and verdicts
+`AuditCohort` contains a non-empty stable `cohortID` and the source-ordered,
+unique stable `caseIDs`; it is never collapsed into a display string. A cohort
+with fewer than the normal 20 eligible cases requires an explicit limitation.
+`AuditCursor` contains non-empty `sourceID` and `cursorID`, a UTC timestamp,
+and non-negative `overlapHours`; source IDs are unique within an overview.
 
-`AuditAxis` has four cases:
+### Audit axes, evidence coverage, and verdicts
 
-- `workflowConformance`
-- `workflowFitness`
-- `outcomeIntegrity`
-- `taskEffectiveness`
+`CoreAuditAxis` has exactly three cases: `workflowConformance`,
+`workflowFitness`, and `outcomeIntegrity`. `taskEffectiveness` is not a
+core-axis case. Findings use a separate `FindingAxis` vocabulary that may also
+identify `taskEffectiveness` without allowing it into `axisSummaries`.
 
-The first three are core axes with independent verdict enums:
+The three core axes use independent verdict enums:
 
 - Conformance: `conformant | nonconformant | insufficientEvidence`
 - Fitness: `fit | unfit | insufficientEvidence`
 - Outcome: `intact | compromised | insufficientEvidence`
 
+Because `insufficientEvidence` is shared by all three wire vocabularies, a
+verdict is decoded only after `CoreAxisSummary.axis` is known. A standalone
+"try Conformance, then Fitness, then Outcome" decoder is invalid: it would
+silently reclassify Fitness or Outcome insufficient-evidence values as
+Workflow Conformance. `CoreAxisVerdict` is the typed Sendable/Equatable union;
+`CoreAxisSummary` owns custom Codable conformance, decodes `axis` first, and
+constructs the matching union case from the raw verdict. The union has no
+context-free `Decoder` initializer.
+
 Each core summary's positive + negative + insufficient-evidence counts equals
 `totalCases`. Task Effectiveness is never stored as a core verdict; it has
 `effective`, `ineffective`, `regressed`, `pending`, and
 `insufficientEvidence` counts that reconcile to its evaluated total.
+
+`EvidenceCoverage` carries `requiredEvidenceCount`, `availableEvidenceCount`,
+`missingEvidenceCount`, `redactedEvidenceCount`, and `limitations`. All counts
+are non-negative,
+`availableEvidenceCount + missingEvidenceCount == requiredEvidenceCount`, and
+`redactedEvidenceCount <= availableEvidenceCount`. Missing or redacted
+evidence requires a limitation and never borrows a verdict from another axis.
 
 ### AuditFinding
 
@@ -72,7 +97,7 @@ Each core summary's positive + negative + insufficient-evidence counts equals
 | `fingerprint` | String | Stable, non-empty decision target |
 | `subjectID` | String | Explicit stable source subject; never parsed from fingerprint |
 | `responsibilityLayer` | String | Explicit source responsibility layer; never parsed from fingerprint |
-| `axis` | AuditAxis | Independent classification |
+| `axis` | FindingAxis | Independent classification; may identify Task Effectiveness without entering the core summary set |
 | `priority` | FindingPriority | `P0 | P1 | P2 | info` |
 | `verdict` | String | Preserved source verdict; display only when not a locked core verdict |
 | `state` | FindingState | Exactly one locked lifecycle case |
@@ -85,18 +110,29 @@ Each core summary's positive + negative + insufficient-evidence counts equals
 `FindingState` is exactly:
 `open | acknowledged | approvedForRemediation | resolved | regressed | superseded`.
 
-### AuditCase, AuditEvent, AuditAttempt, and IndividualMetric
+Each finding reference array is non-empty, contains trimmed unique values, and
+each value resolves exactly once through the card's `SnapshotReferenceCatalog`.
+A repeated or unresolved case, event, or evidence reference rejects the part.
 
-- `AuditCase` references an ordered set of event/attempt identities and carries
-  case-level limitations.
-- `AuditEvent` preserves exactly: event ID, source, subject ID, actor role,
-  free-form kind, timestamp, revision SHA, and evidence reference.
-- `AuditAttempt` preserves stable attempt/role/cycle identities, actor role,
-  trigger cause, outcome, and evidence references. Actor role is locked to
-  Planner Lead, Team Lead, Fullstack Engineer, AI Reviewer, or PR Manager.
+### AuditCaseTimeline, AuditEvent, AuditAttempt, and IndividualMetric
+
+- `AuditCaseTimeline` carries one stable case ID, its ordered `eventIDs` and
+  `attemptIDs`, the complete embedded event/attempt values, and case-level
+  limitations. Both ID arrays are unique and equal the embedded identities in
+  the same order; every embedded value points back to the containing case.
+- `AuditEvent` preserves exactly: event ID, case ID, source, subject ID, actor
+  role, free-form kind, timestamp, revision SHA, and evidence reference.
+- `AuditAttempt` preserves stable attempt, case, actor-role, and cycle
+  identities, actor role, trigger cause, outcome, and evidence references.
+  Actor role is locked to Planner Lead, Team Lead, Fullstack Engineer, AI
+  Reviewer, or PR Manager.
 - `IndividualMetric` always includes metric definition, numerator,
   denominator, observation window, and limitation; it is descriptive and must
   not be presented as causal or as a personnel score.
+
+Timeline event/evidence references also resolve through the common catalog.
+Embedded event and attempt arrays remain the ordered source of timeline values;
+the catalog provides cross-part identity resolution, not a second event body.
 
 ### FeedbackLineage
 
@@ -105,18 +141,27 @@ release state:
 
 | Field | Type | Rules |
 |---|---|---|
-| `lineageID` | String | `SHA256(problemFingerprint, originIssueID, deliveryIssueID)` |
+| `lineageID` | String | Lowercase SHA-256 of the canonical tuple described below |
 | `problemFingerprint` | String | Stable problem identity |
 | `originIssueID` | String | Stable feedback-origin identity |
 | `deliveryIssueID` | String | Stable delivery identity |
 | `prURL` | String? | Untrusted source value; display policy applies |
-| `mergeSHA` | String? | Exact delivery revision when known |
+| `mergeSHA` | String? | Exact lowercase 40-hex Git SHA-1 object ID when known |
 | `releaseChannel` | ReleaseChannel? | `testflight | appStore | production | internal` |
 | `firstVersion` / `firstBuild` | String? | First containing release identity |
 | `availableAt` | Date? | UTC availability time |
 | `observationEventIDs` | [String] | Stable supporting observation identities |
 | `relatedFeedbackIssueIDs` | [String] | Stable related-feedback identities |
 | `taskEffectiveness` | TaskEffectivenessState | `effective | ineffective | regressed | pendingDelivery | pendingRelease | pendingObservation | insufficientEvidence` |
+
+The canonical lineage preimage is the UTF-8 byte sequence
+`problemFingerprint + U+001F + originIssueID + U+001F + deliveryIssueID`.
+`lineageID` is its 64-character lowercase SHA-256. Each tuple member is
+trimmed and non-empty before hashing. When present, `mergeSHA` is also exactly
+40 lowercase hexadecimal characters, matching this repository's Git SHA-1
+object format. Observation and related-feedback arrays
+contain trimmed unique stable identities; malformed identities reject rather
+than degrading to display text.
 
 ### AgentRepeatMetric
 
@@ -159,6 +204,20 @@ workflowConfiguration | unknown`.
   `sameSHACIReruns`, `shippingAttemptRounds`,
   `shippingAttemptRepeatCycles`, `implementationReturnRounds`.
 
+The tagged case must match `actorRole`. Every common, breakdown, and
+role-specific value is present and non-negative. `repeatCycles` and
+`repeatCases` do not exceed `attemptsTotal`;
+`sameArtifactRepeatCycles + changedArtifactRepeatCycles == repeatCycles`; the
+complete cycle-kind and trigger-cause maps each sum to `repeatCycles`; and
+each role-specific repeat counter does not exceed its corresponding round/
+attempt total. Zero attempts require zero repeat and maximum-cycle values.
+
+The primary round totals (`planningRevisionRounds`, `recoveryDispatchRounds`,
+`implementationRevisionRounds`, `reviewRounds`, `ciSupervisionRounds`, and
+`shippingAttemptRounds`) are each no greater than `attemptsTotal`. Supporting
+`subjectIDs` and `eventIDs` are required, trimmed, unique, and resolve exactly
+once through the snapshot reference catalog.
+
 ### ImportCollisionObservation
 
 An identity/hash conflict is observed without changing or annotating the
@@ -197,11 +256,17 @@ snapshot.
 | `revisionEvidence` | [String] | Verified revision/blob/line references |
 | `contentSHA256` | String | Generated artifact hash |
 | `url` | String? | Mandatory artifacts require a present HTTPS+host value or publication rejects; optional invalid values remain non-actionable text under central URL policy |
+| `requirement` | ArtifactRequirement | `mandatory` or `optional`; controls publication rejection versus non-actionable degradation |
+| `sidecarID` / `sidecarSHA256` | String | Must equal the payload envelope and owning sidecar |
 
-Every P0/P1 finding requires a direct `findingEventChain` entry. Each snapshot
-requires one generic workflow and every applicable team/repository relationship
-entry. Missing, invalid, or oversized mandatory entries reject publication;
-they are never converted into optional limitations or one full-report link.
+Artifact IDs are unique within the section. Each finding-chain fingerprint
+resolves exactly once to a catalog finding reference; its event IDs and
+revision-evidence values are trimmed, unique, and resolve through the catalog.
+Every P0/P1 finding requires a direct mandatory `findingEventChain` entry.
+P2/info chains may be optional. Each snapshot requires one generic workflow
+and every applicable team/repository relationship entry. Missing, invalid, or
+oversized mandatory entries reject publication; they are never converted into
+optional limitations or one full-report link.
 
 ### ArtifactSidecar, grill links, and publication coverage
 
@@ -214,7 +279,7 @@ they are never converted into optional limitations or one full-report link.
 | `schemaVersion` | Int | Exactly 1 |
 | `snapshotID` | String | Must match the snapshot parent |
 | `artifacts` | [ArtifactManifestEntry] | Every entry binds back to this sidecar and snapshot |
-| `grillMeURL` / `grillWithDocsURL` | String? | Optional untrusted strings |
+| `grillMeURL` / `grillWithDocsURL` | String? | Optional untrusted raw sidecar strings |
 
 Sidecar identity/hash is preserved through normalized rows, warehouse facts,
 L4 bundles, every card's common provenance envelope, and collision detection.
@@ -223,10 +288,24 @@ inferred from an artifact title.
 The normalized `ArtifactSidecar.contentSHA256` maps without transformation to
 card-envelope `artifactSidecarSHA256`.
 
+The Core payload normalizes the two raw strings into a typed `GrillLinks`
+value that also carries the envelope `sidecarID`/`sidecarSHA256`; the raw
+sidecar file does not self-declare its computed hash.
+
 `FullReportReference` is explicitly typed as `artifactID`, `title`,
-`contentSHA256`, and untrusted `url`. It may externalize optional detail only.
-Its `artifactID`, hash, and URL must resolve exactly to one sidecar entry whose
-kind is `fullReport`; otherwise the reference is invalid.
+`contentSHA256`, untrusted `url`, `sidecarID`, and `sidecarSHA256`. It may
+externalize optional detail only. Its ID, hash, URL, and sidecar binding must
+resolve exactly to one sidecar entry whose kind is `fullReport`; otherwise the
+reference is invalid.
+
+`ArtifactReference` is the identity-only catalog form of an artifact:
+`artifactID`, `kind`, `contentSHA256`, raw `url`, `sidecarID`, and
+`sidecarSHA256`. It carries no display body. Every
+`PublicationCoverage.fullReport`, including one in an independently decoded
+overview part, resolves to exactly one catalog `ArtifactReference` whose kind
+is `fullReport` and whose ID, hash, URL, and sidecar binding all match. An
+artifacts part applies the same catalog resolution in addition to resolving its
+complete manifest entry.
 
 L4 emits `RequiredPublicationInputs`: the required entities and counts for the
 generic workflow, team/repository relationships, and P0/P1 findings/chains. It
@@ -249,9 +328,16 @@ report never satisfies a missing required count. The finding pair counts
 complete P0/P1 `AuditFinding` entities independently from their required event
 chain links; publishing a chain never increments the finding count.
 
-`ExternalizedEntityReference` contains `entityKind`, `stableID`,
-`encodedByteCount`, fixed reason `exceedsInlinePayloadLimit`, and a
-`FullReportReference`. It can replace only optional detail.
+`ExternalizedEntityReference` contains typed `entityKind`, `stableID`,
+`encodedByteCount`, fixed reason `exceedsInlinePayloadLimit`, sidecar ID/hash,
+and a `FullReportReference`. The byte count is positive, every sidecar value
+matches the payload envelope, and it can replace only optional detail.
+`ExternalizableEntityKind` is exactly `p2Finding | infoFinding | caseTimeline |
+individualMetric | feedbackLineage | agentRepeatMetric | importObservation |
+optionalArtifact`; no case can represent overview, P0/P1 finding, generic
+workflow, team relationship, or a P0/P1 finding chain. The embedded full report
+matches the section's resolved report by artifact ID, content hash, URL, and
+sidecar ID/hash—not by artifact ID alone.
 
 ## Card contract
 
@@ -269,23 +355,38 @@ chain links; publishing a chain never increments the finding count.
 | `contentSHA256` | String | Hash of the accepted immutable snapshot/bundle |
 | `artifactSidecarID` | String | Stable immutable sidecar identity |
 | `artifactSidecarSHA256` | String | Exact sidecar content hash retained as payload provenance |
+| `referenceCatalog` | SnapshotReferenceCatalog | Typed cross-part identities used for exact local reference resolution |
+
+`SnapshotReferenceCatalog` contains unique, trimmed `caseIDs`, `eventIDs`,
+`evidenceRefs`, `subjectIDs`, and `revisionEvidenceRefs`, plus unique
+`FindingReference(fingerprint, priority)` and `ArtifactReference` values.
+Artifact IDs are unique in the catalog. Each section may carry the
+snapshot-wide catalog or a deterministic complete subset for the entities in
+that part, but every reference present in the part must resolve exactly once.
+An overview carrying a full report always includes its matching artifact
+reference. Catalog entries carry identity/binding data only; they never
+duplicate raw logs, event bodies, finding presentation text, or artifact
+display bodies.
 
 `TeamAuditSection` is
 `overview | findings | caseTimelines | individualMetrics | feedbackLineage |
 agentRepeatMetrics | importObservations | artifacts`.
 The payload contains only the collection selected by `section`; all unrelated
 collections must be empty. Every final serialized UTF-8 payload, including its
-envelope, must be at most 262,144 bytes.
+envelope, must be at most 262,144 bytes. The exact gate measures the received
+JSON `Data.count` in `CardType.teamAudit.validate(_:)`; semantic re-encoding is
+not a substitute for wire-byte validation.
 
 ### Section content
 
-- `overview`: cohort or cursors, instruction versions, evidence coverage,
-  exactly three core summaries, separate Task Effectiveness, provenance,
+- `overview`: a typed cohort with case IDs or typed cursors, instruction
+  versions, typed evidence coverage, exactly three core summaries with
+  axis-specific verdicts, separate Task Effectiveness, provenance,
   `PublicationCoverage`, collision count/limitations, and limitations.
 - `findings`: one or more complete `AuditFinding` values. This is the only
   section that exposes decision controls.
-- `caseTimelines`: bounded `AuditCase` values plus their referenced events and
-  attempts.
+- `caseTimelines`: bounded `AuditCaseTimeline` values with their ordered,
+  embedded, referentially complete events and attempts.
 - `individualMetrics`: bounded descriptive metrics.
 - `feedbackLineage`: complete typed problem → delivery → release → observation
   chains and pending/effectiveness state.
@@ -293,8 +394,24 @@ envelope, must be at most 262,144 bytes.
   role-specific counters, and supporting subject/event IDs.
 - `importObservations`: independently keyed collision observations tied to the
   explicit accepted parent snapshot ID/hash without changing its content.
-- `artifacts`: direct artifact entries, typed full-report/externalized optional
-  references, and optional grill URLs from `ArtifactSidecar`.
+- `artifacts`: one typed `ArtifactSection` containing unique direct artifact
+  entries, catalog-resolved finding/event/revision bindings, typed
+  full-report/externalized optional references, and typed optional grill links
+  from `ArtifactSidecar`.
+
+All SHA-256 values are exactly 64 lowercase hexadecimal characters. Collision
+parents match the envelope snapshot ID/hash; artifacts, grill links, full
+reports, and externalized references match the envelope sidecar ID/hash.
+Locally supplied case/event/attempt, finding, evidence, subject, revision,
+artifact, and full-report references resolve exactly once. URL strings stay
+opaque in this Types model. The AIDashCore Validation Service supplies the
+public `validateInvariants()` protocol witness in a Service-role extension:
+it invokes the model's internal structural helper and then the central
+`URLPolicy`. `CardType.validate(_:)` and `SchemaValidator.validateCardPut`
+therefore keep their existing single-decode interfaces without any
+Models-to-Validation reference. The complete Core acceptance and negative
+fixture matrix is normative in
+`contracts/t005-acceptance-matrix.md`.
 
 ## OwnerDecisionEvent
 

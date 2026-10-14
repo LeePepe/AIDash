@@ -31,6 +31,15 @@ signals, never `CardStyle` or whole-card background changes.
   "contentSHA256": "<64 lowercase hex characters>",
   "artifactSidecarID": "audit-snapshot-001:artifact-sidecar:v1",
   "artifactSidecarSHA256": "<64 lowercase hex characters>",
+  "referenceCatalog": {
+    "caseIDs": [],
+    "eventIDs": [],
+    "evidenceRefs": [],
+    "subjectIDs": [],
+    "revisionEvidenceRefs": [],
+    "findings": [],
+    "artifacts": []
+  },
   "overview": {},
   "findings": [],
   "caseTimelines": [],
@@ -44,37 +53,98 @@ signals, never `CardStyle` or whole-card background changes.
 
 Exactly one section collection is populated according to `section`; the
 others are absent or empty. The detailed field types and invariants are in
-`data-model.md`.
+`data-model.md`; the complete T005 type, invariant, referential, round-trip,
+public-API, and byte-boundary proof is normative in
+`t005-acceptance-matrix.md`.
+
+The common `SnapshotReferenceCatalog` supplies typed cross-part identity
+resolution. Every case, event, evidence, subject, finding, revision, or
+artifact/full-report value used by the populated section is unique and
+resolves exactly once through that catalog. Typed artifact catalog entries
+carry kind, ID, hash, raw URL, and sidecar binding so an overview full report
+is self-resolving. Catalog entries never carry raw evidence or duplicated
+display bodies.
+
+The overview is not a bag of display strings. Baseline uses a typed cohort
+with stable case IDs and no cursors; incremental uses typed per-source cursors
+and no cohort. Evidence coverage is typed and reconciled. The core summary set
+contains exactly Workflow Conformance, Workflow Fitness, and Outcome Integrity
+with their own locked verdict vocabularies. The shared
+`insufficientEvidence` raw value is decoded using the already-decoded enclosing
+axis, never by trying the verdict enums in a fixed order. Task Effectiveness is
+a separate summary and cannot appear as a core axis.
+
+All `*SHA256` fields are exactly 64 lowercase hexadecimal characters. Finding
+priority wire values are exactly `P0`, `P1`, `P2`, and `info`.
+`ReleaseChannel` and `ImportObservationDisposition` are locked enums. Unknown
+locked values fail with the existing structured payload-decode error so the
+caller uses the generic card fallback; no unknown value is coerced to a known
+semantic case.
 
 ## Rendering contract
 
-- `overview` shows scope, mode, cohort or cursors, evidence coverage,
-  provenance, limitations, the three core axes side-by-side, and Task
-  Effectiveness in its own group.
+- `overview` shows scope, mode, typed cohort/case IDs or typed cursors,
+  reconciled evidence coverage, provenance, limitations, the three locked core
+  axes side-by-side, and Task Effectiveness in its own group.
 - `findings` shows explicit subject ID and responsibility layer plus
   fingerprint, axis, priority, canonical state, evidence, and remediation
   owner. It never parses source identity from the fingerprint; it emits
   optional decision intents but never writes.
-- `caseTimelines` shows ordered redacted events/attempts with stable IDs,
-  roles, timestamps, revision SHA, and limitations.
+- `caseTimelines` embeds ordered redacted events/attempts with stable case,
+  event, attempt, actor-role, and cycle identities; the ordered reference arrays
+  must resolve exactly to the embedded values.
 - `individualMetrics` shows definition, numerator/denominator, window, and
   limitation. Copy is descriptive and never causal or evaluative of a person.
 - `feedbackLineage` shows problem, origin/delivery, PR/merge,
   release/build/availability, observation/related-feedback identities, and the
-  exact pending/effectiveness state.
+  exact pending/effectiveness state. Its identity is the lowercase SHA-256 of
+  the canonical U+001F-delimited problem/origin/delivery tuple; any supplied
+  merge revision is one lowercase 40-hex Git SHA-1 object ID.
 - `agentRepeatMetrics` shows each role independently with common counters,
-  cycle/cause breakdowns, role-specific counters, and supporting subject/event
-  identities. It never computes a cross-role efficiency score.
+  cycle/cause breakdowns, one of five role-specific tagged counter sets, and
+  supporting subject/event identities. The tag matches `actorRole`; every
+  counter is non-negative and reconciles to its applicable attempt/repeat
+  total. Primary role-round totals do not exceed attempts, and supporting
+  subject/event identities are required, unique, and catalog-resolved. It
+  never computes a cross-role efficiency score.
 - `importObservations` shows each collision observation identity, time, source,
   explicit parent snapshot ID/hash, entity identity, accepted/rejected hashes,
   disposition, and limitation while keeping accepted content unchanged.
-- `artifacts` shows artifact identity/hash/evidence relationships and the
-  sidecar identity/hash provenance. Mandatory artifact URLs have already passed
-  publication validation; optional artifact/grill URLs become a `Link` only
-  when `URLPolicy.validate` accepts them and otherwise remain text.
+- `artifacts` is a typed section containing artifact entries, optional grill
+  links, an optional full-report reference, and externalized optional-entity
+  references. Artifact IDs are unique; chain finding/event/revision references
+  are unique and catalog-resolved. Every value binds to the envelope sidecar
+  ID/hash. The full report resolves to exactly one matching `fullReport`
+  catalog artifact by ID, hash, URL, kind, and sidecar binding, including when
+  the reference is carried by an overview part. Externalization uses the locked
+  optional-only entity-kind enum. P0/P1 chains are mandatory; P2/info chains
+  may be optional. Mandatory artifact URLs pass `URLPolicy`; optional
+  artifact/grill strings remain untrusted and become a `Link` only when
+  `URLPolicy.validate` accepts them.
 - P0/P1 event-chain entries display finding fingerprint, event IDs, and
   revision evidence together.
 - Invalid payloads use the existing generic card fallback.
+
+## Validation-role URL-policy seam
+
+The existing interfaces remain `CardType.validate(_:)` and the production
+`SchemaValidator.validateCardPut(..., payload:)` caller. In Models,
+`TeamAuditPayload` retains an internal `validateStructuralInvariants()` helper
+but no public witness body. The Service-role file
+`Validation/TeamAuditPayloadValidation.swift` supplies the public
+`validateInvariants()` protocol witness: it runs the structural helper, then
+delegates URL fields to an internal `TeamAuditPayloadURLValidator`. Only that
+Validation-role module calls the existing `URLPolicy`. This preserves the
+single decode and existing structured-error flow.
+
+`TeamAuditPayload` and all nested Models treat URL fields as opaque strings:
+they may require presence and exact equality, but they never call a Validation
+role. The Service validator rejects an unsafe full-report URL, an unsafe
+present feedback-lineage PR URL, or a missing/unsafe mandatory artifact URL
+with the existing structured payload error. Optional artifact and grill
+strings are preserved unchanged, including unsafe values, so the renderer can
+degrade them to text through the same central policy. `URLPolicy.swift` itself
+is unchanged.
 
 ## Bounded publication
 
@@ -122,12 +192,20 @@ Oversized behavior is deterministic:
   `omittedOptionalEntityCount`/`externalizedEntityCount` and the typed full
   report. No arbitrary string truncation or array clipping is permitted.
 
-Boundary fixtures encode the final payload and prove: 262,144 bytes accepted;
-262,145 bytes rejected or externalized only for optional detail; oversized
+Boundary fixtures measure the received final serialized UTF-8 `Data.count` in
+the CardType/schema validation path and prove: 262,144 bytes accepted; 262,145
+bytes rejected or externalized only for optional detail; oversized
 overview rejected; optional detail with/without full report; oversized
 mandatory P0/P1 finding or chain rejected; and the mandatory P0/P1-finding,
 generic-workflow, team-relationship, and P0/P1-chain required/published pairs
 equal independently.
+
+Normative proof also compares exact decoded equality for all eight section
+variants, covers `insufficientEvidence` independently on all three enclosing
+axes, sends unknown locked values through the Core production structured-error
+path, and round-trips an unsafe optional URL string without constructing an
+actionable URL. The rendered generic-card fallback is proved separately by the
+AIDashUI T008 `CardRouterTests` task.
 
 ## Accessibility and localization
 

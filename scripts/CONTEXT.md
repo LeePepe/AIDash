@@ -4,7 +4,7 @@
   "kind": "leaf",
   "layer": "RepoInfra",
   "parent": "CONTEXT.md",
-  "scope": [".claude/**", ".github/**", ".specify/**", "design/**", "docs/**", "scripts/**", "specs/**", ".gitignore", ".require-tests-ignore", ".swiftlint.yml", "AGENTS.md", "CLAUDE.md", "README.md", "tech-context.md"],
+  "scope": [".claude/**", ".github/**", ".specify/**", "design/**", "docs/**", "scripts/**", "specs/**", ".gitignore", ".require-tests-ignore", ".swiftlint.yml", "AGENTS.md", "CLAUDE.md", "LICENSE", "README.md", "tech-context.md"],
   "dependencies": [],
   "dependents": [],
   "red_lines": [

@@ -127,6 +127,20 @@ class PushResult:
     published: bool = False
 
 
+@dataclass(frozen=True)
+class DeliveryState:
+    """Last-known delivery/XPC health, persisted across briefings.
+
+    Read at digest-build time to expose delivery health SEPARATELY from
+    content-source health (MY-1438/MY-1450). Written after every push attempt.
+    Freshness: `timestamp` is UTC ISO-8601; consumers compare against the
+    current briefing date to detect staleness.
+    """
+    ok: bool
+    reason: str = ""
+    timestamp: str = ""  # UTC ISO-8601, e.g. "2026-08-19T04:01:23Z"
+
+
 # ---------------------------------------------------------------------------
 # Pure transform.
 # ---------------------------------------------------------------------------
@@ -482,7 +496,9 @@ def _overview_sections(sections: dict[str, list[str]]) -> list[dict]:
 
 
 def _overview_container(mmdd: str, reported_day: str, must_see: str,
-                        sections: dict[str, list[str]]) -> Container:
+                        sections: dict[str, list[str]],
+                        delivery: "DeliveryState | None" = None,
+                        report_date: str = "") -> Container:
     """总览: the always-present digest card + optional data-health insight."""
     digest_payload = {
         "title": f"AI 使用日报 {reported_day}",
@@ -498,6 +514,15 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
         cards.append(Card(_kuid(mmdd, 2), "insight", "wide",
                           {"title": "数据源健康", "body": _strip_md(health)},
                           style="warning"))
+    # Delivery/XPC health — separate from content-source health (MY-1450).
+    # Show a delivery-health card when the last push failed OR the persisted
+    # delivery is stale, even if the most recent push reported OK.
+    if delivery is not None:
+        d_line = delivery_health_line(report_date, delivery)
+        if d_line and (not delivery.ok or "stale" in d_line):
+            cards.append(Card(_kuid(mmdd, 99), "insight", "wide",
+                              {"title": "投递健康", "body": _strip_md(d_line)},
+                              style="warning"))
     return Container(_cuid(mmdd, 1), "总览", 10, tuple(cards),
                      layout="auto", style="accent")
 
@@ -1263,8 +1288,28 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     return tuple([head] + published)
 
 
+def _normalize_sources(sources):
+    """Accept either the full DigestSources bundle or a raven-only bundle."""
+    if hasattr(sources, "raven"):
+        return sources
+    from L5_apps.digest.sources import (
+        AdoPrTrends,
+        AutomationTrends,
+        DigestSources,
+        MulticaTrends,
+        SourceHealth,
+    )
+    return DigestSources(
+        raven=sources,
+        multica=MulticaTrends([], {}, SourceHealth("multica", "skipped:未取")),
+        ado=AdoPrTrends([], [], SourceHealth("ado_pr", "skipped:未取")),
+        automation=AutomationTrends([], [], [], SourceHealth("state_db", "skipped:未取")),
+    )
+
+
 def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
-                   must_see: str) -> Briefing:
+                   must_see: str,
+                   delivery: "DeliveryState | None" = None) -> Briefing:
     """Map the digest into a Briefing (pure). `report_date` is the RUN date.
 
     Numeric trends render as a `metric` card (sparklines + a ring gauge for the
@@ -1282,10 +1327,13 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     A degraded digest (no series data) still yields a valid briefing: the overview
     `digest` card is always present, so the briefing is never empty/invalid.
     """
+    sources = _normalize_sources(sources)
     reported_day = yesterday(report_date)
     sections = parse_sections(full_md)
     mmdd = _mmdd(reported_day)
-    containers = [_overview_container(mmdd, reported_day, must_see, sections)]
+    containers = [_overview_container(mmdd, reported_day, must_see, sections,
+                                      delivery=delivery,
+                                      report_date=report_date)]
 
     # 今日工作 (goal ① 做了什么, M2): per-project effort, right after overview.
     work_container = _work_container(
@@ -1583,6 +1631,75 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# ---------------------------------------------------------------------------
+# Delivery state persistence (MY-1438/MY-1450).
+#
+# The push path writes `DeliveryState` after every attempt; the next
+# digest-build reads it to expose delivery health separately from
+# content-source health. Uses the existing state.json watermark store
+# under key "delivery".
+# ---------------------------------------------------------------------------
+_DELIVERY_KEY = "delivery"
+
+
+def save_delivery_state(result: PushResult,
+                        now: Callable[[], str] | None = None) -> DeliveryState:
+    """Persist delivery state from a PushResult. Returns the saved state."""
+    from state import set_watermark
+    stamp = (now or _utc_now)()
+    state = DeliveryState(ok=result.ok, reason=result.reason, timestamp=stamp)
+    set_watermark(_DELIVERY_KEY, {
+        "ok": state.ok, "reason": state.reason, "timestamp": state.timestamp,
+    })
+    return state
+
+
+def load_delivery_state() -> DeliveryState | None:
+    """Read the last-persisted delivery state, or None if never pushed."""
+    from state import get_watermark
+    raw = get_watermark(_DELIVERY_KEY)
+    if raw is None or not isinstance(raw, dict):
+        return None
+    if not raw.get("ok") and not raw.get("reason") and not raw.get("timestamp"):
+        return None
+    return DeliveryState(
+        ok=bool(raw.get("ok", False)),
+        reason=str(raw.get("reason", "")),
+        timestamp=str(raw.get("timestamp", "")),
+    )
+
+
+def delivery_health_line(report_date: str,
+                         delivery: "DeliveryState | None" = None) -> str:
+    """Human-readable delivery/XPC health line with freshness semantics.
+
+    Returns "" when no delivery state exists (first run, never pushed).
+    Marks the state as stale when its timestamp is >36h before the report date.
+    """
+    if delivery is None:
+        return ""
+    if delivery.ok:
+        label = "XPC✅"
+    else:
+        short_reason = delivery.reason.split("(")[0].strip() if delivery.reason else "unknown"
+        label = f"XPC⚠️{short_reason}"
+    # Freshness: compare delivery timestamp to report_date.
+    stale_tag = ""
+    if delivery.timestamp and report_date:
+        try:
+            from datetime import datetime, timedelta
+            ts = datetime.fromisoformat(delivery.timestamp.replace("Z", "+00:00"))
+            from L5_apps.digest.cst import _parse as _parse_cst_day, _CST
+            report_dt = _parse_cst_day(report_date).replace(tzinfo=_CST)
+            age = report_dt - ts
+            if age > timedelta(hours=36):
+                stale_tag = f"(stale: {age.days}d ago)"
+        except (ValueError, TypeError):
+            pass
+    parts = label + (f" {stale_tag}" if stale_tag else "")
+    return f"> 投递: {parts}"
+
+
 def _card_argv(bin_path: str, container_id: str, card: Card,
                payload_file: str) -> list[str]:
     return [bin_path, "card", "put",
@@ -1598,14 +1715,14 @@ def _publish_briefing(briefing: Briefing, bin_path: str,
     rc = runner([bin_path, "briefing", "put", "--date", briefing.date,
                  "--generated-by", briefing.generated_by])
     if rc != 0:
-        return PushResult(False, f"briefing put exit {rc}")
+        return PushResult(False, "xpc.connection_invalidated" if rc == 2 else f"briefing put exit {rc}")
     for container in briefing.containers:
         rc = runner([bin_path, "container", "put",
                      "--briefing-date", briefing.date, "--id", container.id,
                      "--title", container.title, "--order", str(container.order),
                      "--layout", container.layout, "--style", container.style])
         if rc != 0:
-            return PushResult(False, f"container put exit {rc}")
+            return PushResult(False, "xpc.connection_invalidated" if rc == 2 else f"container put exit {rc}")
         for card in container.cards:
             with tempfile.NamedTemporaryFile("w", suffix=".json",
                                              delete=False, encoding="utf-8") as fh:
@@ -1613,10 +1730,10 @@ def _publish_briefing(briefing: Briefing, bin_path: str,
                 payload_file = fh.name
             rc = runner(_card_argv(bin_path, container.id, card, payload_file))
             if rc != 0:
-                return PushResult(False, f"card put exit {rc}")
+                return PushResult(False, "xpc.connection_invalidated" if rc == 2 else f"card put exit {rc}")
     rc = runner([bin_path, "briefing", "publish", "--date", briefing.date])
     if rc != 0:
-        return PushResult(False, f"briefing publish exit {rc}")
+        return PushResult(False, "xpc.connection_invalidated" if rc == 2 else f"briefing publish exit {rc}")
     return PushResult(True, "", published=True)
 
 
@@ -1625,7 +1742,7 @@ def push_briefing(briefing: Briefing, *, bin_path: str | None,
                   opener: Opener = _default_opener,
                   pgrep: Pgrep = _default_pgrep,
                   probe: Probe = _default_probe,
-                  failure_sink: Callable[[str], None] = _record_push_failure,
+                  failure_sink: Callable[[str], None] | None = None,
                   poll_s: float = 0.5, attempts: int = 6,
                   xpc_attempts: int = 24) -> PushResult:
     """Push a briefing to AIDash, best-effort and NON-FATAL (ADR-16/17/23).
@@ -1653,31 +1770,31 @@ def push_briefing(briefing: Briefing, *, bin_path: str | None,
     the 必成 sink (written before push), so a stale mirror is recoverable — not
     data loss.
     """
+    sink = failure_sink or _record_push_failure
     if bin_path is None:
         log.warning("AIDash push skipped: aidash CLI not found (bin missing)")
-        failure_sink("aidash CLI not found in DerivedData (build the CLI?)")
+        sink("aidash CLI not found in DerivedData (build the CLI?)")
         return PushResult(False, "aidash cli/bin not found")
     try:
         if not ensure_app_running(opener=opener, pgrep=pgrep,
                                   poll_s=poll_s, attempts=attempts):
             log.warning("AIDash push skipped: app not running (asleep Mac?)")
-            failure_sink("AIDash app process never came up (asleep Mac?)")
+            sink("AIDash app process never came up (asleep Mac?)")
             return PushResult(False, "AIDash app not running")
         if not ensure_xpc_ready(bin_path, probe=probe,
                                 poll_s=poll_s, attempts=xpc_attempts):
             # Process is up but XPC never became reachable — the digest is
             # archived locally but the menubar mirror is stale. Make it loud.
-            log.warning("AIDash push skipped: XPC not reachable "
-                        "(app up, listener not serving)")
-            failure_sink("XPC not reachable — app process up but its listener "
-                         "never checked in (try relaunching AIDash)")
-            return PushResult(False, "AIDash XPC not reachable")
+            code = "xpc.app_unavailable"
+            log.warning("AIDash push skipped: %s (app up, listener not serving)", code)
+            sink(f"{code} — app process up but its listener never checked in (try relaunching AIDash)")
+            return PushResult(False, code)
         result = _publish_briefing(briefing, bin_path, runner)
         if not result.ok:
             log.warning("AIDash push failed: %s", result.reason)
-            failure_sink(result.reason)
+            sink(f"{result.reason} — push attempt returned a non-zero XPC/CLI status")
         return result
     except Exception as exc:  # noqa: BLE001 - best-effort: degrade, never crash
         log.warning("AIDash push errored (non-fatal): %s", exc)
-        failure_sink(f"unexpected push error: {type(exc).__name__}: {exc}")
+        sink(f"unexpected push error: {type(exc).__name__}: {exc}")
         return PushResult(False, f"push error: {type(exc).__name__}")
