@@ -1,217 +1,84 @@
-# Research: CI-Gated TestFlight Release
+# Research: Minimal CI-Gated TestFlight Release
 
-## R1 — Repository authority
+## R1 — Canonical cross-app pattern
 
-**Decision**: Use repository-local rules without a shared-ci overlay.
+**Decision**: Use Owner decision B on MY-1777 as the canonical control-flow
+shape for all three apps, while keeping AIDash's runner, secrets, lane,
+keychain, path allowlist, and gates repository-specific.
 
-**Evidence**: `AGENTS.md` points to the constitution and recursive context
-router. No `shared-ci@<SHA>` reference or tracked `CODEOWNERS` file exists.
-`.github/**`, `scripts/**`, and `docs/**` resolve to `RepoInfra` through
-`scripts/CONTEXT.md`.
+**Why**: Two implementation review rounds on revision 3 exposed expanding
+privilege-boundary and workflow-harness complexity. The Owner chose scope
+reduction rather than another repair round.
 
-**Alternatives rejected**: Inventing CODEOWNERS patterns or editing protection
-configuration. The Owner decision directly supplies approval authority.
+## R2 — One release job and ordinary write permission
 
-## R2 — New Spec Kit feature rather than rewriting Spec 004
+**Decision**: Use one serialized self-hosted release job with job-level
+`contents: write`; do not design a hosted provenance job or CAS-only permission
+boundary.
 
-**Decision**: Create `specs/007-release-workflow/` and preserve Spec 004 as
-completed history.
+**Safety retained**: A job-level event guard validates exact workflow path/name,
+same-repository push, successful `main`, and candidate format. The job checks
+official-main reachability and pins the exact candidate before signing secrets
+or Fastlane steps. Checkout uses full history.
 
-**Evidence**: Spec 004 describes the original iOS/TestFlight rollout and an
-obsolete scheduled release. Commit `a542b312…` later established manual-only
-behavior without updating it. The current Owner decision is a new release-policy
-revision with new acceptance and operational state.
+**Accepted tradeoff**: The write permission exists for the job rather than a
+dedicated marker-only boundary. This is an explicit Owner decision, not an
+accidental omission.
 
-**Alternatives rejected**: Rewriting completed T205 would erase the chronology;
-using active Spec 006 would mix unrelated team-workflow scope.
+## R3 — Marker-only relevance
 
-## R3 — Trusted trigger and immutable candidate
+**Decision**: Keep only `testflight/last-released`. Existing ancestor state uses
+`marker..candidate`; equality skips; non-ancestor state fails closed. An
+automatic run with no marker fails closed; manual `force=true` may bootstrap
+the exact pinned current-main candidate. Force otherwise bypasses relevance
+only.
 
-**Decision**: Bind `workflow_run` to `.github/workflows/build.yml` / workflow
-name `build`, type `completed`, source event `push`, branch `main`, conclusion
-`success`, and the same head repository as the current repository. Before any
-candidate checkout, self-hosted job, write authority, or release secret, a
-hosted read-only stage bare-fetches official protected `main` and proves the
-event's `head_sha` is a reachable commit.
+**Why**: This matches the literal marker-to-head minimal contract, avoids
+inventing an implicit cursor when no marker exists, and retains accumulated
+relevance without queue, skip, attempt, recovery, or quarantine records.
 
-**Evidence**: `.github/workflows/build.yml` is named `build` and runs on both
-`pull_request` and `push`. GitHub's `workflow_run` follower may receive secrets
-and write permission even when the source workflow did not, so workflow name,
-branch label, conclusion, and SHA alone admit a fork PR head named `main`.
-Checking out the moving branch after CI also creates a race and can upload a
-different commit from the one CI verified.
+## R4 — Preserve the lane as the release boundary
 
-**Alternatives rejected**: `push` alone cannot prove the required workflow
-finished; branch/name-only `workflow_run` trust can elevate PR provenance;
-checking out `main` violates exact-head evidence; scheduled release is obsolete.
+**Decision**: Treat successful return of unchanged `fastlane ios beta` as the
+upload-success boundary and move the marker afterward.
 
-## R4 — Path relevance
+**Preserved**: ASC global build number, runtime profile fetch, five secrets,
+login keychain, internal distribution behavior, tracked marketing version.
 
-**Decision**: Compute a Git diff after checkout because `workflow_run` has no
-native paths filter. Use the exact allowlist in the spec.
+**Removed from revision 3**: workflow-owned group preflight/readback,
+`release:minor`, annotated metadata, and terminal phase taxonomy.
 
-**Evidence**: App product sources are the app target and three packages; signing
-and build inputs are `Configs/**`, `project.yml`, and `fastlane/**`. CLI, aidata,
-docs, specs, CI/review scripts, and workflow-only changes do not alter the app
-archive.
+## R5 — Cleanup follows each repository's signing model
 
-**Alternatives rejected**: Treating every merge as app-relevant wastes signing
-and TestFlight builds; an unrestricted repo diff contradicts the Owner decision.
+**Decision**: Require `always()` cleanup for local temporary refs, signing
+artifacts, and keychain state created or changed by the workflow. Do not impose
+a shared temporary-keychain implementation.
 
-## R5 — Missing marker bootstrap
+**Why**: AIDash intentionally uses the runner login keychain, while sibling
+repositories have different signing mechanics. Cross-app consistency applies
+to release control flow, not signing internals.
 
-**Decision**: On no marker, inspect only the candidate's first-parent delta (or
-empty-tree delta for a root commit). Auto-release only an app-relevant candidate;
-allow manual force to bootstrap.
+## R6 — Narrow verification surface
 
-**Evidence**: The remote marker does not currently exist. Diffing the entire
-repository against the empty tree would classify the workflow-only enabling
-merge as app-relevant, violating the path-skip requirement.
+**Decision**: Replace the current manual-only regression with focused relevance
+unit cases, stable workflow-structure assertions, and action/workflow lint.
+Delete rather than port the unpublished shadow-policy suite.
 
-**Alternatives rejected**: Always fail on a missing marker would prevent the
-Owner's first automatic release; empty-tree whole-history comparison would
-release a CI-only merge.
+**Why**: The Owner explicitly rejected an exhaustive workflow-policy harness.
+The new tests must not recreate provenance, marker, version, distribution, or
+outcome state machines in Python.
 
-## R6 — Marker-only concurrency and accumulated relevance
+## R7 — One issue and four paths or fewer
 
-**Decision**: Use one AIDash release concurrency group, `testflight`, with
-`cancel-in-progress: false`, and only the existing
-`testflight/last-released` marker. Automatic candidates remain their exact
-trusted CI heads; manual candidates pin current protected `main`. Under the
-lock, refetch and revalidate marker/candidate state. With a marker, evaluate
-`marker..candidate`; skips and failures do not move the marker, so their changes
-remain in a later descendant's accumulated range. With no marker, use only the
-candidate's first-parent delta (or empty tree for a root). Manual force bypasses
-only relevance. Marker equality is an absolute skip, a descendant marker makes
-the candidate stale/no-rewind, and unrelated history fails closed.
+**Decision**: Keep one RepoInfra task/issue/PR and the existing owned paths:
+workflow, old test deletion, concise replacement test, and handoff guide.
 
-**Evidence**: GitHub concurrency retains at most one running and one pending
-member and may replace the older pending member even when cancellation is
-false. The delegated Owner refinement accepts coalescing intermediate heads
-rather than adding operational queue state. With an existing ancestor marker,
-a later descendant contains a replaced relevant change in
-`marker..candidate` while the marker is unchanged. With no marker, only the
-later candidate's first-parent/root delta applies, so a replaced relevant head
-is not carried forward unless the later candidate is independently relevant or
-manual force bootstraps. Serialization still protects the global build-number
-allocation and marker compare-and-swap, but it is not a durable per-head queue.
+**Why**: All paths resolve to `RepoInfra`, serve one release goal, and require
+one protected-path review. Splitting would not create independent value.
 
-**Alternatives rejected**: Queue-start/queue/cursor/skip refs, Actions API
-materialization, and a separate activation boundary add durable state the
-refined decision forbids. Promising every intermediate head survives GitHub's
-pending replacement contradicts the platform contract. Blind marker movement
-can rewind release state.
+## R8 — Delivery sequencing
 
-## R7 — Build number and proven internal distribution
-
-**Decision**: Preserve Fastlane's App Store Connect global maximum plus one;
-set strict mode, and add workflow-owned two-sided ASC verification. Normalize
-the existing group-name contract and require every group to exist before
-Fastlane. After the lane, parse exactly one selected build number and require
-ASC to show that exact build in every intended group before marker movement.
-
-**Evidence**: `fastlane/Fastfile` already supplies a global monotonic counter
-across marketing versions. Its missing-group branch logs and skips without
-raising, so `TESTFLIGHT_STRICT_UPLOAD=1` alone does not make a misspelled or
-absent group fatal. Preflight prevents known absence; postflight catches a race,
-silent skip, missing membership, or ambiguous build result.
-
-**Alternatives rejected**: A second workflow counter risks collision or reuse;
-editing the prohibited Fastfile broadens scope; best-effort distribution or a
-strict-mode-only assertion does not prove that testers received the build.
-
-## R8 — Marketing-version persistence
-
-**Decision**: Persist the effective marketing version in the strict annotated
-`testflight/last-released` tag. Use the greater of the project version and the
-last effective version; apply one minor bump for a proven exact merged PR label.
-Only a genuine lightweight legacy public marker falls back to the project
-version; invalid annotated metadata fails preflight.
-
-**Evidence**: A transient bump alone would regress on the next unlabelled
-release because tracked `project.yml` remains unchanged. Pushing a version
-commit would mutate `main` with code CI did not verify and create a release loop.
-
-**Alternatives rejected**: Editing/pushing `project.yml`; adding a new secret or
-database; treating malformed annotated state as legacy; relying on mutable PR
-state without exact-head association.
-
-## R9 — Exact implementation scope
-
-**Decision**: Keep all implementation in RepoInfra: workflow, replacement
-contract test, and operating guide. The workflow performs any version override
-only in its isolated checkout.
-
-**Evidence**: This preserves one layer and reuses the existing Fastlane lane.
-
-**Alternatives rejected**: Editing `fastlane/Fastfile` or tracked
-`project.yml` would introduce an XcodeWorkspace slice and broaden the issue.
-
-## R10 — Delivery dependency
-
-**Decision**: Planning and PR preparation can proceed, but merge/ship waits for
-the separately governed review-machinery repair to land and for a fresh
-eligible parked-PR event to produce a real terminal verdict.
-
-**Evidence**: The accepted sequencing contract distinguishes planning/source
-work from release of dependent AIDash PRs. Setup failures or pre-landing reruns
-are not proof.
-
-**Alternatives rejected**: Treating the dependency as source overlap; assuming
-repair behavior exists on the planning base; refreshing a parked branch early.
-
-## R11 — Planning-base gate failure
-
-**Decision**: Record and carry the existing RepoInfra gate failure as a hard
-delivery dependency; do not edit or waive it in this feature.
-
-**Evidence**: On the pinned base, the resolver-selected local gate runs with
-`/usr/bin/python3` 3.9. `scripts/ci/review-raven.py` imports `tomllib`, producing
-two direct review-machinery test failures and one cascading hook-regression
-failure. The failing implementation/test paths are owned by the separate repair
-plan and are prohibited here. Spec Kit prerequisites, context audit, task
-freshness, placeholder scan, and whitespace checks pass for this package.
-
-**Alternatives rejected**: Adding a dependency or editing review machinery
-would violate exact scope; ignoring the result would fabricate green evidence.
-Fullstack must obtain a fresh passing gate on its approved refreshed base.
-
-## R12 — Failure pickup and the upload/marker split
-
-**Decision**: Add no attempt/confirmation journal or recovery mode. Advance the
-public marker by compare-and-swap only after the lane succeeds and ASC proves
-the exact build belongs to every intended group. Any preflight, lane,
-postflight, or marker-update failure leaves the marker unchanged and starts no
-automatic retry or rollback. With an existing ancestor marker, a later trusted
-descendant evaluates the accumulated `marker..candidate` range. With no marker,
-a later automatic candidate uses only its own first-parent/root delta and must
-be independently app-relevant; manual force can bootstrap pinned current
-protected `main`. Only a SHA already recorded by the public marker is guaranteed
-not to upload again.
-
-**Evidence**: App Store Connect upload and a Git ref update are not atomic. A
-marker-only model cannot distinguish an upload that externally succeeded before
-a marker failure from an upload that failed. The delegated Owner refinement
-explicitly accepts this uncertainty and chooses one public marker over journal,
-quarantine, or reconciliation state. Therefore a later run may upload again in
-that split-failure case, and the contract must not claim exactly-once behavior.
-
-**Alternatives rejected**: Queue/journal/attempt/confirmation refs, quarantine,
-operator recovery inputs, and marker-only reconciliation are superseded by the
-refined decision. Writing `last-released` before upload could suppress a failed
-release, and blind force-push could lose concurrent state.
-
-## R13 — Gate interpreter and one implementation unit
-
-**Decision**: Keep the replacement tests compatible with the RepoInfra gate's
-`/usr/bin/python3`, currently 3.9, and model all three user-story phases inside
-one Spec Kit task `T001`, one Multica implementation issue, and one PR.
-
-**Evidence**: `scripts/CONTEXT.md` is the gate authority and names
-`/usr/bin/python3`; the planning base reports Python 3.9. The constitution maps
-each `tasks.md` task to a Multica issue, while `AGENTS.md` makes one PR the unit
-of one issue. The phases intentionally edit the same workflow/test/guide.
-
-**Alternatives rejected**: Requiring Python 3.11 contradicts the mandatory local
-gate. Three T-numbers would imply three issues/PRs while claiming one delivery
-unit and would create overlapping ownership of the same files.
+**Decision**: Park revision-3 candidate `e8c353ce…`; do not publish or repair
+it. Resume in the registered delivery workspace only after exact-revision
+planning PASS and Team Lead handoff. MY-1692 gates merge, not post-PASS
+implementation preparation.
