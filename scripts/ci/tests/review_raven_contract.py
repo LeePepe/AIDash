@@ -28,11 +28,11 @@ class RavenRoutingTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.config = Path(self.directory.name) / "config.toml"
-        self.config.write_text(CONFIG)
+        self.config.write_text(CONFIG, encoding="utf-8")
 
     def command(self, config_text=None, env=None):
         if config_text is not None:
-            self.config.write_text(config_text)
+            self.config.write_text(config_text, encoding="utf-8")
         return raven.build_command(
             self.config, "/opt/homebrew/bin/codex",
             ["--output-schema", "schema.json", "-o", "out.json", "synthetic prompt"],
@@ -56,7 +56,7 @@ class RavenRoutingTests(unittest.TestCase):
                     self.command(invalid)
 
     def test_missing_or_malformed_config_is_sanitized(self):
-        self.config.write_text('secret = "fixture-sensitive-invalid')
+        self.config.write_text('secret = "fixture-sensitive-invalid', encoding="utf-8")
         with self.assertRaises(ValueError) as error:
             self.command()
         self.assertNotIn("fixture-sensitive", str(error.exception))
@@ -95,12 +95,13 @@ class RavenRoutingTests(unittest.TestCase):
         fake = Path(self.directory.name) / "codex"
         fake.write_text(
             '#!' + sys.executable + '\nimport json,os,sys\n'
-            'print(json.dumps({"args":sys.argv[1:],"review_home":os.environ.get("CODEX_HOME")}))\n'
+            'print(json.dumps({"args":sys.argv[1:],"review_home":os.environ.get("CODEX_HOME")}))\n',
+            encoding="utf-8"
         )
         fake.chmod(0o700)
         review_home = Path(self.directory.name) / "review-home"
         review_home.mkdir()
-        (review_home / "config.toml").write_text('model_provider = "isolated-provider"\n')
+        (review_home / "config.toml").write_text('model_provider = "isolated-provider"\n', encoding="utf-8")
         env = dict(PATH=os.environ["PATH"], HOME=self.directory.name,
                    CODEX_HOME=str(review_home))
         result = subprocess.run([sys.executable, str(HELPER), str(fake), "--skip-git-repo-check", "fixture"],
@@ -112,7 +113,7 @@ class RavenRoutingTests(unittest.TestCase):
 
     def test_real_launcher_missing_or_empty_codex_home_fails_before_codex(self):
         fake = Path(self.directory.name) / "codex"
-        fake.write_text('#!' + sys.executable + '\nimport sys\nsys.exit(0)\n')
+        fake.write_text('#!' + sys.executable + '\nimport sys\nsys.exit(0)\n', encoding="utf-8")
         fake.chmod(0o700)
         for bad_home in (None, "", "   "):
             with self.subTest(bad_home=bad_home):
@@ -124,8 +125,39 @@ class RavenRoutingTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Raven setup failed", result.stderr)
 
+    def test_real_launcher_missing_or_unreadable_or_unselected_config_fails_before_codex(self):
+        fake = Path(self.directory.name) / "codex"
+        fake.write_text('#!' + sys.executable + '\nimport sys\nsys.exit(0)\n', encoding="utf-8")
+        fake.chmod(0o700)
+        review_home = Path(self.directory.name) / "review-home"
+        review_home.mkdir(exist_ok=True)
+        env = dict(PATH=os.environ["PATH"], HOME=self.directory.name, CODEX_HOME=str(review_home))
+
+        # Missing config
+        cfg = review_home / "config.toml"
+        if cfg.exists():
+            cfg.unlink()
+        result = subprocess.run([sys.executable, str(HELPER), str(fake), "fixture"],
+                                env=env, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Raven setup failed", result.stderr)
+
+        # Unselected config
+        cfg.write_text('approval_policy = "never"\n', encoding="utf-8")
+        result = subprocess.run([sys.executable, str(HELPER), str(fake), "fixture"],
+                                env=env, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Raven setup failed", result.stderr)
+
+        # Missing executable
+        cfg.write_text('model_provider = "p"\n', encoding="utf-8")
+        result = subprocess.run([sys.executable, str(HELPER), "/nonexistent/path/to/codex", "fixture"],
+                                env=env, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Raven setup failed", result.stderr)
+
     def test_caller_keeps_isolation_and_uses_raven_launcher(self):
-        source = (CI / "codex-review.sh").read_text()
+        source = (CI / "codex-review.sh").read_text(encoding="utf-8")
         self.assertIn('python3 "$REPO_ROOT/scripts/ci/review-raven.py" "$CODEX_BIN"', source)
         self.assertIn('CODEX_HOME="${CODEX_REVIEW_HOME:-$HOME/.codex-review}"', source)
         self.assertIn("-c sandbox_mode=read-only", source)
@@ -133,7 +165,9 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertNotIn('"$CODEX_BIN" exec', source)
 
     def run_actual_caller(self, *, override=False, payload_response=None, hang=False,
-                          no_review_config=False, malformed_review_config=False):
+                          no_review_config=False, unreadable_review_config=False,
+                          unselected_review_config=False, malformed_review_config=False,
+                          empty_output=False):
         """Run the real shell, renderer, provider helper and watchdog; fake only external tools."""
         root = Path(self.directory.name)
         bin_dir = root / "bin"
@@ -141,24 +175,44 @@ class RavenRoutingTests(unittest.TestCase):
 
         daily = root / ".codex"
         daily.mkdir(exist_ok=True)
-        (daily / "config.toml").write_text('model_provider = "daily-sentinel-must-not-change"\n')
-        (daily / "auth.json").write_text('{"api_key":"daily-auth-file-must-not-be-used"}')
+        daily_config_content = 'model_provider = "daily-sentinel-must-not-change"\n'
+        daily_auth_content = '{"api_key":"daily-auth-file-must-not-be-used"}'
+        (daily / "config.toml").write_text(daily_config_content, encoding="utf-8")
+        (daily / "auth.json").write_text(daily_auth_content, encoding="utf-8")
 
         inherited = root / "inherited daily home"
         inherited.mkdir(exist_ok=True)
-        (inherited / "config.toml").write_text('model_provider = "inherited-sentinel-must-not-change"\n')
+        inherited_config_content = 'model_provider = "inherited-sentinel-must-not-change"\n'
+        inherited_auth_content = '{"api_key":"inherited-auth-sentinel-must-not-change"}'
+        (inherited / "config.toml").write_text(inherited_config_content, encoding="utf-8")
+        (inherited / "auth.json").write_text(inherited_auth_content, encoding="utf-8")
+
+        codex_raven_config = root / "isolated_raven_config.toml"
+        codex_raven_config_content = 'model_provider = "raven-env-sentinel-must-not-change"\n'
+        codex_raven_config.write_text(codex_raven_config_content, encoding="utf-8")
 
         default_review = root / ".codex-review"
         default_review.mkdir(exist_ok=True)
+        default_review_auth_content = '{"api_key":"default-review-auth-sentinel"}'
+        (default_review / "auth.json").write_text(default_review_auth_content, encoding="utf-8")
+
         if not no_review_config:
             if malformed_review_config:
-                (default_review / "config.toml").write_text('invalid = toml [[[\n')
+                default_review_config_content = 'invalid = toml [[[\n'
+            elif unselected_review_config:
+                default_review_config_content = 'approval_policy = "never"\n'
             else:
-                (default_review / "config.toml").write_text('model_provider = "default-review-provider"\n')
+                default_review_config_content = 'model_provider = "default-review-provider"\n'
+            (default_review / "config.toml").write_text(default_review_config_content, encoding="utf-8")
+            if unreadable_review_config:
+                (default_review / "config.toml").chmod(0o000)
 
         override_review = root / "explicit review home"
         override_review.mkdir(exist_ok=True)
-        (override_review / "config.toml").write_text('model_provider = "override-review-provider"\n')
+        override_review_config_content = 'model_provider = "override-review-provider"\n'
+        override_review_auth_content = '{"api_key":"override-review-auth-sentinel"}'
+        (override_review / "config.toml").write_text(override_review_config_content, encoding="utf-8")
+        (override_review / "auth.json").write_text(override_review_auth_content, encoding="utf-8")
 
         marker = root / "SHELL_MUST_NOT_RUN"
         payload = f"+ quoted 'text' $(touch {marker}) `touch {marker}` 中文"
@@ -181,8 +235,10 @@ class RavenRoutingTests(unittest.TestCase):
             "'stage':Path(stage).read_text() if stage else None,"
             "'stdin':sys.stdin.read()}))\n"
             "if os.environ.get('FIXTURE_HANG'): time.sleep(60)\n"
+            "if os.environ.get('EMPTY_OUTPUT'): sys.exit(0)\n"
             "raw_resp = os.environ.get('RESPONSE_BODY')\n"
-            "Path(args[args.index('-o')+1]).write_text(raw_resp if raw_resp else '')\n"
+            "Path(args[args.index('-o')+1]).write_text(raw_resp if raw_resp else '')\n",
+            encoding="utf-8"
         )
         (bin_dir / "git").write_text(
             "#!" + sys.executable + "\nimport os,sys\n"
@@ -190,14 +246,17 @@ class RavenRoutingTests(unittest.TestCase):
             "if cmd=='rev-parse': print(os.environ['FIXTURE_REPO'])\n"
             "elif cmd=='diff': print('fixture.md' if '--name-only' in sys.argv else "
             "'diff --git a/fixture.md b/fixture.md\\n'+os.environ['FIXTURE_DIFF'])\n"
-            "elif cmd not in ('fetch','cat-file'): sys.exit(1)\n"
+            "elif cmd not in ('fetch','cat-file'): sys.exit(1)\n",
+            encoding="utf-8"
         )
-        (bin_dir / "gh").write_text("#!/bin/sh\nexit 0\n")
+        (bin_dir / "gh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         for binary in (fake, bin_dir / "git", bin_dir / "gh"):
             binary.chmod(0o700)
+
         env = {
             "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
             "HOME": str(root), "CODEX_HOME": str(inherited), "CODEX_BIN": str(fake),
+            "CODEX_RAVEN_CONFIG": str(codex_raven_config),
             "PR_NUMBER": "1", "BASE_SHA": "fixture-base", "HEAD_SHA": "fixture-head",
             "BASE_REPO": "fixture/repository", "CAPTURE": str(capture),
             "FIXTURE_REPO": str(CI.parents[1]), "FIXTURE_DIFF": payload,
@@ -205,24 +264,40 @@ class RavenRoutingTests(unittest.TestCase):
             "REVIEW_CLI_TIMEOUT_SECONDS": "1" if hang else "30",
             "RESPONSE_BODY": json.dumps(response_body) if isinstance(response_body, (dict, list)) else str(response_body),
         }
+        if empty_output:
+            env["EMPTY_OUTPUT"] = "1"
         if override:
             env["CODEX_REVIEW_HOME"] = str(override_review)
         if hang:
             env["FIXTURE_HANG"] = "1"
-        result = subprocess.run(
-            ["bash", str(CI / "codex-review.sh")], cwd=CI.parents[1], env=env,
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20,
-        )
+
+        try:
+            result = subprocess.run(
+                ["bash", str(CI / "codex-review.sh")], cwd=CI.parents[1], env=env,
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20,
+            )
+        finally:
+            if unreadable_review_config and not no_review_config:
+                (default_review / "config.toml").chmod(0o600)
+
         self.assertFalse(marker.exists())
-        self.assertEqual((daily / "config.toml").read_text(), 'model_provider = "daily-sentinel-must-not-change"\n')
-        self.assertEqual((daily / "auth.json").read_text(), '{"api_key":"daily-auth-file-must-not-be-used"}')
-        self.assertEqual((inherited / "config.toml").read_text(), 'model_provider = "inherited-sentinel-must-not-change"\n')
+
+        # Verify sentinels across daily, inherited, isolated-env and override homes
+        self.assertEqual((daily / "config.toml").read_text(encoding="utf-8"), daily_config_content)
+        self.assertEqual((daily / "auth.json").read_text(encoding="utf-8"), daily_auth_content)
+        self.assertEqual((inherited / "config.toml").read_text(encoding="utf-8"), inherited_config_content)
+        self.assertEqual((inherited / "auth.json").read_text(encoding="utf-8"), inherited_auth_content)
+        self.assertEqual(codex_raven_config.read_text(encoding="utf-8"), codex_raven_config_content)
+        self.assertEqual((override_review / "config.toml").read_text(encoding="utf-8"), override_review_config_content)
+        self.assertEqual((override_review / "auth.json").read_text(encoding="utf-8"), override_review_auth_content)
+        self.assertEqual((default_review / "auth.json").read_text(encoding="utf-8"), default_review_auth_content)
+
         return result, capture, env, payload
 
     def test_actual_caller_defaults_to_independent_home_without_credentials(self):
         result, capture, env, payload = self.run_actual_caller()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        recorded = json.loads(capture.read_text())
+        recorded = json.loads(capture.read_text(encoding="utf-8"))
         self.assertEqual(recorded["home"], str(Path(env["HOME"]) / ".codex-review"))
         self.assertEqual(recorded["args"][0], "exec")
         self.assertIn(payload, recorded["args"][-1])
@@ -234,7 +309,7 @@ class RavenRoutingTests(unittest.TestCase):
     def test_actual_caller_honors_explicit_review_home(self):
         result, capture, env, _ = self.run_actual_caller(override=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(capture.read_text())["home"], env["CODEX_REVIEW_HOME"])
+        self.assertEqual(json.loads(capture.read_text(encoding="utf-8"))["home"], env["CODEX_REVIEW_HOME"])
 
     def test_actual_caller_valid_changes_verdict_exits_nonzero(self):
         changes_body = {
@@ -249,61 +324,92 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertIn("verdict=changes, blockers=1", result.stdout)
 
     def test_actual_caller_rejects_parseable_invalid_verdict_schema(self):
+        sentinel_secret = "ATTACKER_INFLUENCED_SECRET_SENTINEL_XYZ123"
         bad_payloads = [
+            # Wrong root type
+            ["verdict", "pass"],
+            "string root",
+            12345,
             # Missing required key
-            {"summary": "s", "blockers": [], "notes": []},
+            {"summary": f"s {sentinel_secret}", "blockers": [], "notes": []},
             {"verdict": "pass", "blockers": [], "notes": []},
-            {"verdict": "pass", "summary": "s", "notes": []},
-            {"verdict": "pass", "summary": "s", "blockers": []},
-            # Extra key
-            {"verdict": "pass", "summary": "s", "blockers": [], "notes": [], "extra": 123},
+            {"verdict": "pass", "summary": f"s {sentinel_secret}", "notes": []},
+            {"verdict": "pass", "summary": f"s {sentinel_secret}", "blockers": []},
+            # Extra key at root
+            {"verdict": "pass", "summary": f"s {sentinel_secret}", "blockers": [], "notes": [], "extra": 123},
             # Unknown verdict
-            {"verdict": "unknown", "summary": "s", "blockers": [], "notes": []},
-            # Wrong types
+            {"verdict": "unknown", "summary": f"s {sentinel_secret}", "blockers": [], "notes": []},
+            # Wrong types at root
             {"verdict": "pass", "summary": 123, "blockers": [], "notes": []},
-            {"verdict": "pass", "summary": "s", "blockers": "none", "notes": []},
-            {"verdict": "pass", "summary": "s", "blockers": [], "notes": "none"},
+            {"verdict": "pass", "summary": f"s {sentinel_secret}", "blockers": "none", "notes": []},
+            {"verdict": "pass", "summary": f"s {sentinel_secret}", "blockers": [], "notes": "none"},
             # Invalid blocker fields or types
-            {"verdict": "changes", "summary": "s", "blockers": [{"file": 12, "line": None, "severity": "high", "why": "w"}], "notes": []},
-            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": "1", "severity": "high", "why": "w"}], "notes": []},
-            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": True, "severity": "high", "why": "w"}], "notes": []},
-            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "low", "why": "w"}], "notes": []},
+            {"verdict": "changes", "summary": "s", "blockers": [{"file": 12, "line": None, "severity": "high", "why": sentinel_secret}], "notes": []},
+            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": "1", "severity": "high", "why": sentinel_secret}], "notes": []},
+            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": True, "severity": "high", "why": sentinel_secret}], "notes": []},
+            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "low", "why": sentinel_secret}], "notes": []},
             {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "high"}], "notes": []},
-            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "high", "why": "w", "extra": 1}], "notes": []},
+            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "high", "why": sentinel_secret, "extra": 1}], "notes": []},
             # Invalid note fields or types
             {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": None}]},
-            {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": "bad", "note": "n"}]},
+            {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": "bad", "note": sentinel_secret}]},
+            {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": True, "note": sentinel_secret}]},
+            {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": None, "note": sentinel_secret, "extra": 1}]},
+            {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": 123, "line": None, "note": sentinel_secret}]},
         ]
         for bad in bad_payloads:
             with self.subTest(bad=bad):
                 result, capture, _, _ = self.run_actual_caller(payload_response=bad)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("verdict schema 或 state consistency 校验失败", result.stdout)
                 self.assertNotIn("verdict=pass", result.stdout)
+                # Ensure rejected output content is sanitized and never dumped
+                self.assertNotIn(sentinel_secret, result.stdout + result.stderr)
 
     def test_actual_caller_rejects_state_inconsistent_verdicts(self):
+        sentinel_secret = "STATE_INCONSISTENT_SECRET_SENTINEL_456"
         inconsistent_payloads = [
             # pass with blockers
-            {"verdict": "pass", "summary": "s",
+            {"verdict": "pass", "summary": sentinel_secret,
              "blockers": [{"file": "f", "line": 1, "severity": "critical", "why": "bug"}], "notes": []},
             # changes with 0 blockers
-            {"verdict": "changes", "summary": "s", "blockers": [], "notes": []},
+            {"verdict": "changes", "summary": sentinel_secret, "blockers": [], "notes": []},
         ]
         for bad in inconsistent_payloads:
             with self.subTest(bad=bad):
                 result, capture, _, _ = self.run_actual_caller(payload_response=bad)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("verdict schema 或 state consistency 校验失败", result.stdout)
+                self.assertIn("verdict schema 或 state consistency 校验失败", result.stdout + result.stderr)
                 self.assertNotIn("verdict=pass", result.stdout)
+                self.assertNotIn(sentinel_secret, result.stdout + result.stderr)
 
-    def test_actual_caller_rejects_unparsable_output(self):
-        result, capture, _, _ = self.run_actual_caller(payload_response="not json at all")
+    def test_actual_caller_rejects_unparsable_output_sanitized(self):
+        sentinel = "UNPARSABLE_SECRET_IN_PROMPT_OR_DIFF"
+        result, capture, _, _ = self.run_actual_caller(payload_response=f"not json at all {sentinel}")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("无法解析 verdict", result.stdout)
+        self.assertIn("无法解析 verdict", result.stdout + result.stderr)
+        self.assertNotIn("verdict=pass", result.stdout)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+
+    def test_actual_caller_empty_output_fails_closed(self):
+        result, capture, _, _ = self.run_actual_caller(empty_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("codex CLI 失败", result.stdout)
         self.assertNotIn("verdict=pass", result.stdout)
 
     def test_actual_caller_missing_review_config_fails_before_codex(self):
         result, capture, _, _ = self.run_actual_caller(no_review_config=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(capture.exists())
+        self.assertIn("Raven setup failed", result.stderr)
+
+    def test_actual_caller_unreadable_review_config_fails_before_codex(self):
+        result, capture, _, _ = self.run_actual_caller(unreadable_review_config=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(capture.exists())
+        self.assertIn("Raven setup failed", result.stderr)
+
+    def test_actual_caller_unselected_review_config_fails_before_codex(self):
+        result, capture, _, _ = self.run_actual_caller(unselected_review_config=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(capture.exists())
         self.assertIn("Raven setup failed", result.stderr)

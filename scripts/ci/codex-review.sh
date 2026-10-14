@@ -196,7 +196,7 @@ if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
     VERDICT_JSON="$(printf %s "$RAW" | sed -n '/{/,/}/p' | jq -c '.' 2>/dev/null | head -1)"
 fi
 if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
-    echo "[codex-review] ❌ 无法解析 verdict"; printf %s "$RAW" | head -c 2000 >&2
+    echo "[codex-review] ❌ 无法解析 verdict"
     post_sticky "$STICKY
 ⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
     exit 1
@@ -255,7 +255,7 @@ if obj["verdict"] == "pass" and len(obj["blockers"]) != 0:
 if obj["verdict"] == "changes" and len(obj["blockers"]) == 0:
     sys.exit(1)
 ' >/dev/null 2>&1; then
-    echo "[codex-review] ❌ verdict schema 或 state consistency 校验失败"; printf %s "$RAW" | head -c 2000 >&2
+    echo "[codex-review] ❌ verdict schema 或 state consistency 校验失败"
     post_sticky "$STICKY
 ⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
     exit 1
