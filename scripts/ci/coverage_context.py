@@ -1333,6 +1333,7 @@ def _merge_search_outcomes(
         outcome_map[path.strip()] = status.strip()
 
     merged: list[str] = []
+    unreached_count = 0
     for entry in discovery:
         # Discovery entries look like "changed: path", "sibling: path", etc.
         # Extract the path portion
@@ -1355,9 +1356,13 @@ def _merge_search_outcomes(
         elif outcome == "budget-omitted":
             merged.append(f"{entry} [not reached — global work budget exhausted]")
         else:
-            # File was in discovery but not in test_files passed to
-            # find_related_tests_in_head, or no outcome recorded
-            merged.append(entry)
+            # File was in discovery but not read/cached (e.g. candidate iteration
+            # stopped after byte cap or search limits were reached).
+            # Do NOT list skipped candidate paths as searched scope.
+            unreached_count += 1
+
+    if unreached_count > 0:
+        merged.append(f"[{unreached_count} candidate file(s) not reached — search budget/cap exhausted]")
 
     # Add any budget-omitted files not in the original discovery list
     discovery_paths = set()

@@ -38,6 +38,7 @@ from coverage_context import (  # noqa: E402
     _enforce_changed_file_budget,
     _find_func_end,
     _find_all_test_functions,
+    _merge_search_outcomes,
     _find_containing_type,
     _bounded_blob_read,
     _json_encode_untrusted,
@@ -1755,6 +1756,89 @@ struct SentinelTests {
     assert not any("Sentinel" in o for o in file_outcomes)
     # Excerpts contains the byte cap reached marker
     assert any("byte cap reached" in e for e in excerpts)
+
+
+def test_rendered_evidence_never_claims_skipped_candidates_were_searched(monkeypatch):
+    """Build-level regression for MY-1457: when byte cap is reached during candidate
+    search, candidates that were not reached must NOT be listed as searched files
+    in the rendered SEARCH SCOPE evidence."""
+
+    big_body = "a" * (COVERAGE_MAX_TOTAL_BYTES + 100)
+    big_source = f"""\
+import Testing
+@testable import AIDashCLI
+
+struct BigTests {{
+    @Test func testBigOne() async throws {{
+        let cmd = BriefingPublishCommand(client: MockAPIClient())
+        // {big_body}
+    }}
+}}
+"""
+    sentinel_source = """\
+import Testing
+@testable import AIDashCLI
+
+struct SentinelTests {
+    @Test func testSentinel() async throws {
+        let cmd = BriefingPublishCommand(client: MockAPIClient())
+        _ = try await cmd.run()
+    }
+}
+"""
+
+    def fake_run_git(args):
+        if args[0] == "cat-file" and "-s" in args:
+            ref_path = args[2] if len(args) > 2 else args[-1]
+            content = fake_run_git(["show", ref_path])
+            return str(len(content.encode("utf-8"))) if content else None
+        if args[0] == "show":
+            ref_path = args[1]
+            if "BigTests" in ref_path:
+                return big_source
+            if "Sentinel" in ref_path:
+                return sentinel_source
+            return None
+        return None
+
+    monkeypatch.setattr(coverage_context, "run_git", fake_run_git, raising=True)
+
+    discovery_summary = [
+        "changed: Tests/BigTests.swift",
+        "sibling: Tests/Sentinel1.swift",
+        "symbol-match: Tests/Sentinel2.swift",
+    ]
+    test_candidates = [
+        "Tests/BigTests.swift",
+        "Tests/Sentinel1.swift",
+        "Tests/Sentinel2.swift",
+    ]
+
+    excerpts, file_outcomes = find_related_tests_in_head(
+        head_sha="abc123",
+        test_files=test_candidates,
+        production_symbols={"BriefingPublishCommand", "run"},
+        max_excerpt_bytes=COVERAGE_MAX_TOTAL_BYTES + 200,
+    )
+
+    merged_scope = _merge_search_outcomes(discovery_summary, file_outcomes)
+
+    removed = [
+        RemovedTest(
+            file="CLI/aidash/Tests/OldTests.swift",
+            func_name="testOld",
+            body_snippet="let x = 1",
+        )
+    ]
+    rendered = render_coverage_evidence(removed, excerpts, merged_scope)
+
+    # BigTests was read and is annotated as [read]
+    assert "Tests/BigTests.swift [read]" in rendered
+    # Sentinel files were not reached and must NEVER appear as searched scope
+    assert "Tests/Sentinel1.swift" not in rendered
+    assert "Tests/Sentinel2.swift" not in rendered
+    # A bounded unreached indicator must be present
+    assert "not reached" in rendered
 
 
 def test_malicious_filename_sanitized_in_render():
