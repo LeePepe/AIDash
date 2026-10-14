@@ -196,6 +196,7 @@ class RavenRoutingTests(unittest.TestCase):
         default_review_auth_content = '{"api_key":"default-review-auth-sentinel"}'
         (default_review / "auth.json").write_text(default_review_auth_content, encoding="utf-8")
 
+        default_review_config_content = None
         if not no_review_config:
             if malformed_review_config:
                 default_review_config_content = 'invalid = toml [[[\n'
@@ -217,6 +218,7 @@ class RavenRoutingTests(unittest.TestCase):
         marker = root / "SHELL_MUST_NOT_RUN"
         payload = f"+ quoted 'text' $(touch {marker}) `touch {marker}` 中文"
         capture = root / "capture.json"
+        posted_comments = root / "posted_comments.json"
         fake = bin_dir / "codex fixture"
 
         response_body = payload_response if payload_response is not None else {
@@ -249,8 +251,31 @@ class RavenRoutingTests(unittest.TestCase):
             "elif cmd not in ('fetch','cat-file'): sys.exit(1)\n",
             encoding="utf-8"
         )
-        (bin_dir / "gh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        for binary in (fake, bin_dir / "git", bin_dir / "gh"):
+        fake_gh = bin_dir / "gh"
+        fake_gh.write_text(
+            "#!" + sys.executable + "\nimport json,os,sys\nfrom pathlib import Path\n"
+            "comments_path = Path(os.environ['POSTED_COMMENTS'])\n"
+            "if comments_path.exists():\n"
+            "    comments = json.loads(comments_path.read_text(encoding='utf-8'))\n"
+            "else:\n"
+            "    comments = []\n"
+            "args = sys.argv[1:]\n"
+            "body = None\n"
+            "if 'pr' in args and 'comment' in args and '--body' in args:\n"
+            "    body = args[args.index('--body') + 1]\n"
+            "elif 'api' in args:\n"
+            "    for arg in args:\n"
+            "        if arg.startswith('body='):\n"
+            "            body = arg[5:]\n"
+            "        elif arg == '-f' and args.index(arg) + 1 < len(args) and args[args.index(arg) + 1].startswith('body='):\n"
+            "            body = args[args.index(arg) + 1][5:]\n"
+            "if body is not None:\n"
+            "    comments.append({'argv': args, 'body': body})\n"
+            "    comments_path.write_text(json.dumps(comments), encoding='utf-8')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8"
+        )
+        for binary in (fake, bin_dir / "git", fake_gh):
             binary.chmod(0o700)
 
         env = {
@@ -259,6 +284,7 @@ class RavenRoutingTests(unittest.TestCase):
             "CODEX_RAVEN_CONFIG": str(codex_raven_config),
             "PR_NUMBER": "1", "BASE_SHA": "fixture-base", "HEAD_SHA": "fixture-head",
             "BASE_REPO": "fixture/repository", "CAPTURE": str(capture),
+            "POSTED_COMMENTS": str(posted_comments),
             "FIXTURE_REPO": str(CI.parents[1]), "FIXTURE_DIFF": payload,
             "GATE_TIMEOUT_SECONDS": "1" if hang else "30",
             "REVIEW_CLI_TIMEOUT_SECONDS": "1" if hang else "30",
@@ -282,7 +308,7 @@ class RavenRoutingTests(unittest.TestCase):
 
         self.assertFalse(marker.exists())
 
-        # Verify sentinels across daily, inherited, isolated-env and override homes
+        # Verify sentinels across daily, inherited, isolated-env, override, and default review homes
         self.assertEqual((daily / "config.toml").read_text(encoding="utf-8"), daily_config_content)
         self.assertEqual((daily / "auth.json").read_text(encoding="utf-8"), daily_auth_content)
         self.assertEqual((inherited / "config.toml").read_text(encoding="utf-8"), inherited_config_content)
@@ -291,11 +317,15 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertEqual((override_review / "config.toml").read_text(encoding="utf-8"), override_review_config_content)
         self.assertEqual((override_review / "auth.json").read_text(encoding="utf-8"), override_review_auth_content)
         self.assertEqual((default_review / "auth.json").read_text(encoding="utf-8"), default_review_auth_content)
+        if default_review_config_content is not None:
+            self.assertEqual((default_review / "config.toml").read_text(encoding="utf-8"), default_review_config_content)
 
-        return result, capture, env, payload
+        posted_comments_list = json.loads(posted_comments.read_text(encoding="utf-8")) if posted_comments.exists() else []
+
+        return result, capture, env, payload, posted_comments_list
 
     def test_actual_caller_defaults_to_independent_home_without_credentials(self):
-        result, capture, env, payload = self.run_actual_caller()
+        result, capture, env, payload, posted_comments = self.run_actual_caller()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         recorded = json.loads(capture.read_text(encoding="utf-8"))
         self.assertEqual(recorded["home"], str(Path(env["HOME"]) / ".codex-review"))
@@ -305,9 +335,11 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertIn("approval_policy=never", recorded["args"])
         self.assertEqual(recorded["stdin"], "")
         self.assertIn("verdict=pass", result.stdout)
+        self.assertTrue(posted_comments)
+        self.assertIn("✅ codex review:通过", posted_comments[-1]["body"])
 
     def test_actual_caller_honors_explicit_review_home(self):
-        result, capture, env, _ = self.run_actual_caller(override=True)
+        result, capture, env, _, _ = self.run_actual_caller(override=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(capture.read_text(encoding="utf-8"))["home"], env["CODEX_REVIEW_HOME"])
 
@@ -318,10 +350,13 @@ class RavenRoutingTests(unittest.TestCase):
             "blockers": [{"file": "Sources/App.swift", "line": 42, "severity": "critical", "why": "layer violation"}],
             "notes": [{"file": "Sources/App.swift", "line": None, "note": "refactor"}]
         }
-        result, capture, _, _ = self.run_actual_caller(payload_response=changes_body)
+        result, capture, _, _, posted_comments = self.run_actual_caller(payload_response=changes_body)
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(capture.exists())
         self.assertIn("verdict=changes, blockers=1", result.stdout)
+        self.assertTrue(posted_comments)
+        self.assertIn("🔴 codex review:需要修改", posted_comments[-1]["body"])
+        self.assertIn("layer violation", posted_comments[-1]["body"])
 
     def test_actual_caller_rejects_parseable_invalid_verdict_schema(self):
         sentinel_secret = "ATTACKER_INFLUENCED_SECRET_SENTINEL_XYZ123"
@@ -350,20 +385,32 @@ class RavenRoutingTests(unittest.TestCase):
             {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "low", "why": sentinel_secret}], "notes": []},
             {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "high"}], "notes": []},
             {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "high", "why": sentinel_secret, "extra": 1}], "notes": []},
+            # Non-string blockers[].why
+            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "high", "why": 12345}], "notes": []},
+            {"verdict": "changes", "summary": "s", "blockers": [{"file": "f", "line": None, "severity": "high", "why": ["not", "string"]}], "notes": []},
             # Invalid note fields or types
             {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": None}]},
             {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": "bad", "note": sentinel_secret}]},
             {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": True, "note": sentinel_secret}]},
             {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": None, "note": sentinel_secret, "extra": 1}]},
             {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": 123, "line": None, "note": sentinel_secret}]},
+            # Non-string notes[].note
+            {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": None, "note": 12345}]},
+            {"verdict": "pass", "summary": "s", "blockers": [], "notes": [{"file": "f", "line": None, "note": {"nested": "dict"}}]},
         ]
         for bad in bad_payloads:
             with self.subTest(bad=bad):
-                result, capture, _, _ = self.run_actual_caller(payload_response=bad)
+                result, capture, _, _, posted_comments = self.run_actual_caller(payload_response=bad)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn("verdict=pass", result.stdout)
-                # Ensure rejected output content is sanitized and never dumped
+                # Ensure rejected output content is sanitized and never dumped to process output
                 self.assertNotIn(sentinel_secret, result.stdout + result.stderr)
+                # Ensure sticky comment is posted with sanitized diagnostic and no attacker secret or pass rendering
+                self.assertTrue(posted_comments)
+                posted_body = posted_comments[-1]["body"]
+                self.assertIn("自动 review 输出无法解析", posted_body)
+                self.assertNotIn("✅ codex review:通过", posted_body)
+                self.assertNotIn(sentinel_secret, posted_body)
 
     def test_actual_caller_rejects_state_inconsistent_verdicts(self):
         sentinel_secret = "STATE_INCONSISTENT_SECRET_SENTINEL_456"
@@ -376,55 +423,69 @@ class RavenRoutingTests(unittest.TestCase):
         ]
         for bad in inconsistent_payloads:
             with self.subTest(bad=bad):
-                result, capture, _, _ = self.run_actual_caller(payload_response=bad)
+                result, capture, _, _, posted_comments = self.run_actual_caller(payload_response=bad)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("verdict schema 或 state consistency 校验失败", result.stdout + result.stderr)
                 self.assertNotIn("verdict=pass", result.stdout)
                 self.assertNotIn(sentinel_secret, result.stdout + result.stderr)
+                self.assertTrue(posted_comments)
+                posted_body = posted_comments[-1]["body"]
+                self.assertIn("自动 review 输出无法解析", posted_body)
+                self.assertNotIn("✅ codex review:通过", posted_body)
+                self.assertNotIn(sentinel_secret, posted_body)
 
     def test_actual_caller_rejects_unparsable_output_sanitized(self):
         sentinel = "UNPARSABLE_SECRET_IN_PROMPT_OR_DIFF"
-        result, capture, _, _ = self.run_actual_caller(payload_response=f"not json at all {sentinel}")
+        result, capture, _, _, posted_comments = self.run_actual_caller(payload_response=f"not json at all {sentinel}")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("无法解析 verdict", result.stdout + result.stderr)
         self.assertNotIn("verdict=pass", result.stdout)
         self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertTrue(posted_comments)
+        posted_body = posted_comments[-1]["body"]
+        self.assertIn("自动 review 输出无法解析", posted_body)
+        self.assertNotIn("✅ codex review:通过", posted_body)
+        self.assertNotIn(sentinel, posted_body)
 
     def test_actual_caller_empty_output_fails_closed(self):
-        result, capture, _, _ = self.run_actual_caller(empty_output=True)
+        result, capture, _, _, posted_comments = self.run_actual_caller(empty_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("codex CLI 失败", result.stdout)
         self.assertNotIn("verdict=pass", result.stdout)
+        self.assertTrue(posted_comments)
+        self.assertIn("自动 review 未能完成(codex CLI 异常)", posted_comments[-1]["body"])
 
     def test_actual_caller_missing_review_config_fails_before_codex(self):
-        result, capture, _, _ = self.run_actual_caller(no_review_config=True)
+        result, capture, _, _, _ = self.run_actual_caller(no_review_config=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(capture.exists())
         self.assertIn("Raven setup failed", result.stderr)
 
     def test_actual_caller_unreadable_review_config_fails_before_codex(self):
-        result, capture, _, _ = self.run_actual_caller(unreadable_review_config=True)
+        result, capture, _, _, _ = self.run_actual_caller(unreadable_review_config=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(capture.exists())
         self.assertIn("Raven setup failed", result.stderr)
 
     def test_actual_caller_unselected_review_config_fails_before_codex(self):
-        result, capture, _, _ = self.run_actual_caller(unselected_review_config=True)
+        result, capture, _, _, _ = self.run_actual_caller(unselected_review_config=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(capture.exists())
         self.assertIn("Raven setup failed", result.stderr)
 
     def test_actual_caller_malformed_review_config_fails_before_codex(self):
-        result, capture, _, _ = self.run_actual_caller(malformed_review_config=True)
+        result, capture, _, _, _ = self.run_actual_caller(malformed_review_config=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(capture.exists())
         self.assertIn("Raven setup failed", result.stderr)
 
     def test_actual_caller_watchdog_still_bounds_exec(self):
-        result, capture, _, _ = self.run_actual_caller(hang=True)
+        result, capture, _, _, posted_comments = self.run_actual_caller(hang=True)
         self.assertTrue(capture.exists(), result.stdout + result.stderr)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("超时", result.stdout)
+        self.assertTrue(posted_comments)
+        self.assertIn("codex CLI 超过", posted_comments[-1]["body"])
 
 
 if __name__ == "__main__":
