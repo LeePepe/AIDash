@@ -6,26 +6,32 @@
 
 ## Summary
 
-Replace AIDash's manual-only TestFlight trigger with a serialized,
-`workflow_run`-driven release that checks out the exact successful `build`
-workflow head, filters app-relevant changes, preserves a safe manual dispatch,
-and fails closed on duplicate, stale, ambiguous, signing, upload, distribution,
-or marker failures. Keep the existing Fastlane lane, ASC build-number counter,
-secrets, and runner unchanged. Implement the behavior in one RepoInfra slice:
-the workflow, its contract tests, and its operating guide.
+Replace AIDash's manual-only TestFlight trigger with a trusted
+`workflow_run`-driven release. Validate same-repository protected-`main` push
+provenance before candidate checkout or privileges, durably enqueue every
+proven head before the replaceable GitHub concurrency slot, and drain the queue
+in first-parent order on the existing self-hosted Mac. Journal the irreversible
+upload with create-only attempt and confirmation refs, verify exact TestFlight
+group membership, and move the public release marker by compare-and-swap. Keep
+the existing Fastlane lane, ASC build-number counter, secrets, signing, and
+build runner unchanged. Implement the behavior in one RepoInfra issue/PR: the
+workflow, its replacement contract tests, and its operating guide.
 
 ## Technical context
 
-**Language/Version**: GitHub Actions YAML; POSIX/Bash on macOS; Python 3.11+
-`unittest`/`pytest` contract tests
+**Language/Version**: GitHub Actions YAML; POSIX/Bash on hosted Linux and
+macOS; replacement `unittest`/`pytest` contract tests compatible with the
+RepoInfra gate's `/usr/bin/python3` (Python 3.9 on the planning base; no
+3.10/3.11-only syntax or standard-library dependency)
 
 **Primary Dependencies**: GitHub Actions `workflow_run` and `workflow_dispatch`
 payloads; `actions/checkout@v4`; repository Git history/tags; GitHub REST API via
 the existing `GITHUB_TOKEN`; existing Fastlane `ios beta` lane
 
-**Storage**: Git tag `testflight/last-released` as the durable commit and
-effective-marketing-version marker; App Store Connect as the existing global
-build-number counter
+**Storage**: Strict workflow-owned Git refs for queue boundary/entries,
+create-only upload attempts and confirmations, plus the existing
+`testflight/last-released` public moving marker; App Store Connect remains the
+global build-number allocator and external distribution authority
 
 **Testing**: Resolver-selected RepoInfra pytest gate and repository hooks; no
 app tests, host-based tests, manual upload, or `xcodebuild` during implementation
@@ -35,15 +41,17 @@ app tests, host-based tests, manual upload, or `xcodebuild` during implementatio
 
 **Project Type**: Repository release automation
 
-**Performance Goals**: Ineligible events stop before tooling installation,
-secret access, signing, archive, or upload; eligible events remain serialized
+**Performance Goals**: Untrusted events stop before candidate checkout,
+self-hosted capacity, secret access, signing, archive, or upload; trusted
+candidates survive pending-worker replacement and release work remains
+serialized
 
 **Constraints**: Exact CI head; fail closed; no new secret; no tracked identity;
 no automatic retry/rollback; no branch/ruleset/review-gate change; Owner approval
 required for `.github/**`
 
 **Scale/Scope**: One workflow, one renamed/replacement contract test, one
-operating guide; one implementation PR serving one goal
+operating guide; one implementation task/issue/PR serving one goal
 
 ## Repository authority and base
 
@@ -97,6 +105,11 @@ specs/007-release-workflow/
 └── tasks.md
 ```
 
+The reviewed planning package also includes `.specify/feature.json` and only
+the `<!-- SPECKIT START/END -->` marker block in `AGENTS.md`. Those two routing
+authorities select this feature together and remain frozen with the feature
+artifacts during implementation.
+
 ### Owned implementation paths
 
 ```text
@@ -116,47 +129,126 @@ number and perform signing/upload/distribution.
 ## Architecture and data flow
 
 ```text
-build workflow completed on main ─┐
-                                  ├─> select immutable candidate SHA
-manual workflow_dispatch ─────────┘
-        │
-        v
-fetch candidate + release marker
-        │
-        ├─ duplicate / non-ancestor / invalid ─> fail or skip + summary
-        └─ safe range
-             │
-             ├─ no app path and not manual force ─> skip + summary
-             └─ eligible
-                  │
-                  ├─ resolve exact merged-PR label and effective version
-                  ├─ ephemeral version override in isolated checkout
-                  ├─ existing strict Fastlane lane + global ASC build counter
-                  └─ success: annotated marker + success summary
+build workflow completed ─┐
+                          ├─> hosted read-only provenance + protected-main fetch
+manual workflow_dispatch ─┘        (no checkout, candidate execution, or secrets)
+                                      │
+                                      v
+                         ungrouped durable queue admission
+                                      │
+                                      v
+                 serialized self-hosted drain worker (`testflight`)
+                                      │
+                 reconcile successful build runs + queue refs
+                 revalidate provenance + first-parent order
+                                      │
+                 duplicate / stale / invalid ─> terminal candidate summary
+                                      │
+                           path/version/group preflight
+                                      │
+                     create-only attempted/<sha> ref
+                                      │
+             existing Fastlane lane + global ASC build counter
+                                      │
+                  exact-build/all-group membership proof
+                                      │
+                    create-only confirmed/<sha> ref
+                                      │
+                compare-and-swap last-released marker
 ```
 
-Automatic and manual events share the same eligibility function and concurrency
-group. Only event-to-candidate selection differs. Marker equality is an absolute
-no-upload rule. Ancestry prevents delayed events from moving the marker backward.
+Automatic and manual events share the same eligibility state machine. Only the
+event-to-candidate proof and manual `force` relevance override differ. Hosted
+provenance/admission jobs never build or upload; the existing
+`[self-hosted, aidash-mac]` runner remains the only release worker. Marker
+equality is an absolute no-upload rule. Ancestry and first-parent queue ordering
+prevent delayed events from moving release state backward.
 
-## Version and marker design
+## Trusted provenance and durable queue design
+
+- Automatic admission requires workflow path `.github/workflows/build.yml`,
+  name `build`, source event `push`, completed/success, head branch `main`, the
+  same head repository as `github.repository`, and a 40-hex head SHA.
+- A read-only hosted job initializes a metadata-only Git repository, fetches
+  official protected `main`, and proves the candidate commit is reachable. It
+  does not use `actions/checkout`, execute repository code, request contents
+  write, enter the self-hosted runner, or receive ASC/keychain secrets.
+- The following ungrouped admission job is the first write-capable job. It
+  creates an immutable, annotated `testflight/queue/<run-id>-<attempt>-<sha>`
+  ref targeting the candidate. Exact retry is idempotent; a collision,
+  mismatched target, or invalid/unknown metadata fails closed.
+- The workflow carries one unique literal sentinel
+  `release-contract-schema: 1`. With no public marker, scan freshly fetched
+  protected `main` first-parent history and require exactly one commit that
+  introduces that sentinel in `.github/workflows/testflight.yml`.
+  `testflight/queue-start` targets that deterministic activation commit and its
+  strict semantic metadata contains no admitting-run identity. Concurrent
+  creators may produce different annotated tag object IDs; after a create race,
+  the loser refetches and accepts the winner only when target and metadata match
+  the derived activation commit. Missing/multiple introducing commits, an
+  activation commit later than the candidate, or mismatched activation evidence
+  fails closed. Before each drain, the worker uses
+  `actions: read` to exhaustively reconcile successful same-repository
+  `build.yml` push runs between the current public marker (or queue-start) and
+  the newest queued head. Missing queue entries are materialized before any
+  candidate checkout. Incomplete pagination or a history/API disagreement
+  fails closed.
+- Only the drain job uses job-level group `testflight` with
+  `cancel-in-progress: false`. GitHub may replace a pending worker, but every
+  candidate already has durable intent. The survivor rescans, revalidates
+  source run IDs/attempts and protected-main reachability, de-duplicates SHA
+  entries, and drains them oldest-first along protected `main`'s first-parent
+  chain.
+- Queue takeover before an attempt is continuation, not an upload retry. Queue
+  entries are compare-and-swap deleted only after a terminal skip, successful
+  release/reconciliation, or safe supersession. Attempted-only entries remain.
+
+## Version and release-state design
 
 - Project version: parse the tracked `MARKETING_VERSION` from `project.yml`.
 - Marker version: parse a single validated `marketing-version=<semver>` field
-  from the annotated `testflight/last-released` tag. A lightweight or malformed
+  from the annotated `testflight/last-released` tag. Only a genuine lightweight
   legacy marker contributes no version and falls back to the project version.
+  An annotated marker with missing/empty, malformed, duplicate, or unknown
+  metadata fails preflight.
 - Effective baseline: the semantically greater of project and marker versions.
 - `release:minor`: only a proven exact merged PR for the candidate can set it;
   increment `major.minor`, resetting patch to zero. No PR/direct push means no
   bump. API or contradictory-association failure stops before upload.
 - Build input: modify only the isolated checkout used by the runner so XcodeGen
   sees the effective version. Never commit or push this transformation.
-- Success marker: force-replace the existing tag ref only after strict Fastlane
-  success, pointing to the candidate and carrying the effective version.
+- Attempt journal: after every deterministic preflight (including group
+  existence) and immediately before Fastlane, create
+  `testflight/attempted/<sha>` remotely with strict schema, candidate, effective
+  version, intended groups, and source-run metadata. It is create-only. If the
+  create cannot be positively confirmed, no lane runs.
+- Confirmation journal: only after the lane succeeds, exactly one build number
+  is parsed, and ASC independently proves that exact build belongs to every
+  intended group, create `testflight/confirmed/<sha>` with strict version,
+  build, group, candidate, and run metadata. It is also create-only.
+- Public marker: after confirmation is durable, replace the annotated
+  `testflight/last-released` ref only with `--force-with-lease` against the
+  fetched prior tag-object ID. Its strict metadata carries the confirmed
+  marketing version and build number. It is never a blind force-push.
+- Recovery: a confirmation with a lagging ancestor marker takes a marker-only
+  compare-and-swap path that invokes no checkout, Xcode, signing, or Fastlane.
+  An attempt without confirmation is unknown external state: automatic and
+  manual-force runs quarantine it and block later descendants. An explicit
+  `workflow_dispatch` reconciliation mode accepts the exact SHA and build
+  number, verifies the attempt plus exact ASC version/build/group membership
+  with only the existing ASC readback credentials it needs, then creates
+  confirmation and repairs the marker. Common state/ref, exact-SHA, marker
+  ancestry/no-rewind, strict-metadata, and applicable ASC-evidence invariants
+  remain mandatory. Recovery does not run the normal five-secret/signing/group-
+  existence/new-attempt preflight and cannot create a new attempt, checkout
+  candidate code, invoke the upload lane, build, sign, distribute, or upload.
+  If proof is absent, quarantine remains; deleting the attempt or uploading
+  again requires a new Owner decision.
 
 The workflow captures Fastlane's existing selected-build message for the final
-summary. Absence or ambiguity of that value after a nominally successful lane is
-an invalid success and prevents marker movement.
+summary. Absence or duplication of that value after a nominally successful lane
+is an invalid success, leaves the attempt quarantined, and prevents confirmation
+or marker movement.
 
 ## Path eligibility contract
 
@@ -180,12 +272,25 @@ allowing the first subsequent app-relevant merge to bootstrap automatically.
 
 ## Permissions and failure policy
 
-- Retain `contents: write` for the moving tag.
-- Add only the least permission needed to resolve an exact commit's associated
-  merged PR and labels. Repository contents and PR metadata are read-only.
-- Set `TESTFLIGHT_STRICT_UPLOAD=1` so internal distribution failure is fatal.
-- Emit an outcome summary on `always()` without exposing secret or identity
-  values. No failure starts an automatic rerun or rollback.
+- The hosted provenance job has read-only contents/actions permission. It runs
+  before any write token or release-secret reference.
+- The ungrouped admission job adds only `contents: write` for strict queue refs
+  and still has no candidate checkout, candidate execution, or release secrets.
+- The serialized drain job has `actions: read`, read-only PR metadata, and
+  `contents: write` for queue/journal/public-marker compare-and-swap updates.
+  ASC/keychain secrets are referenced only after queued provenance is
+  revalidated on the locked worker.
+- Normalize the same `TESTFLIGHT_GROUPS` contract used by the existing lane
+  (default `Internal`; comma-split/trim; reject empty or duplicate names).
+  Before the attempt, query ASC and require every group to exist. Set
+  `TESTFLIGHT_STRICT_UPLOAD=1`, run the lane once, parse exactly one selected
+  build number, then query ASC again and require that exact build to belong to
+  every intended group. This closes the current Fastfile branch that logs and
+  skips a missing group without raising.
+- Emit per-candidate outcomes on `always()` without exposing secrets or
+  identity values. A replaced pending worker has no terminal candidate outcome;
+  its durable entries remain. No failure starts an automatic upload retry or
+  rollback.
 
 ## Delivery sequencing
 
@@ -220,7 +325,7 @@ the review-machinery repair paths are explicitly prohibited from this diff.
 | AC-06 | FR-009–FR-010 | T001 |
 | AC-07 | FR-011–FR-012 | T001 |
 | AC-08 | FR-013 | T001 |
-| AC-09 | Replacement tests + RepoInfra gate | T001 |
+| AC-09 | FR-015 + replacement tests + RepoInfra gate | T001 |
 | AC-10 | Exact diff scope | T001 |
 | AC-11 | Owner approval + delivery dependency | Team Lead / PR Manager gate |
 | AC-12 | Post-merge run URL + build number | Team Lead / PR Manager evidence |
@@ -231,9 +336,19 @@ the review-machinery repair paths are explicitly prohibited from this diff.
 - Let the staged commit/push flow run the resolver-selected RepoInfra gates.
 - Required focused command if invoked through the resolver/hook:
   `/usr/bin/python3 -m pytest scripts/ci/tests scripts/context/tests -q`.
+- The replacement test must remain Python 3.9-compatible under that exact
+  interpreter unless an approved refreshed base first changes the gate.
 - Confirm `scripts/context/resolve` maps each changed path to `RepoInfra` and
   `scripts/context/audit` remains clean through repository gates.
-- Run `git diff --check` and validate the exact four-path add/delete/modify set.
+- Contract fixtures cover untrusted PR/fork events, protected-main reachability,
+  sentinel-derived activation, simultaneous first admissions, newer-before-
+  older intake, queue collision/deduplication, pending-worker replacement,
+  out-of-order ingestion/API reconciliation, strict journal metadata,
+  quarantine and mode-specific marker-only recovery, group existence and exact-
+  build membership, and prove checkout/secrets/Fastlane cannot precede
+  provenance.
+- Run `git diff --check` and validate the exact four-path implementation
+  add/delete/modify set.
 - Do not run `xcodebuild`, app tests, a real upload, or duplicate test suites
   manually during implementation.
 - Before publication, freeze the local candidate and obtain AI Reviewer PASS on
@@ -241,20 +356,26 @@ the review-machinery repair paths are explicitly prohibited from this diff.
 
 ## Planning validation evidence
 
-Fresh validation on the pinned planning base produced:
+Fresh round-2 planning validation on the pinned planning base produced:
 
 - Spec Kit prerequisites with required Tasks: PASS; all required Plan artifacts
   were discovered.
 - `scripts/context/audit`: PASS with zero findings.
-- `scripts/hooks/check-tasks-fresh`: PASS after the task metadata was adjusted
-  to the repository parser's native format.
+- `scripts/hooks/check-tasks-fresh`: PASS; T001 is the sole native task row and
+  remains single-layer.
 - Placeholder scan and `git diff --check`: PASS.
-- Resolver-selected RepoInfra local gate: FAIL on pre-existing review-machinery
-  runtime compatibility. The workspace `/usr/bin/python3` is Python 3.9, while
-  `scripts/ci/review-raven.py` imports Python 3.11's `tomllib`. This causes two
-  direct failures (`test_review_raven` contract and Codex timeout fixture) plus
-  one cascading wrapper failure in the hook regression. No failure cites a new
-  planning artifact or this feature's implementation scope.
+- `.specify/feature.json` and the `AGENTS.md` managed marker both select Spec
+  007. The repository agent-context extension was invoked with this plan but
+  skipped because no installed Python exposes PyYAML; the managed marker was
+  byte-checked directly and no dependency was installed.
+- The complete RepoInfra suite was not duplicated in round 2 because repository
+  policy leaves test execution to hooks. Its most recent exact-base evidence
+  remains FAIL on pre-existing review-machinery runtime compatibility: the
+  workspace `/usr/bin/python3` is Python 3.9, while
+  `scripts/ci/review-raven.py` imports Python 3.11's `tomllib`. That evidence
+  contains two direct review-machinery failures plus one cascading hook-wrapper
+  failure; none cites a planning artifact or this feature's implementation
+  scope.
 
 The failing source/tests are explicitly prohibited review-machinery paths owned
 by the separate repair sequence. This plan does not waive, suppress, or repair
@@ -266,11 +387,21 @@ does not make that possible, return the exact failure to Team Lead.
 
 - GitHub payload/API shape drift or ambiguous exact-commit PR association:
   fail closed and return to Fullstack; do not infer label state.
-- Missing/invalid marker metadata: fall back only as explicitly defined; unsafe
-  commit ancestry blocks.
-- Upload succeeds but marker push fails: run is failed and requires diagnosis;
-  no automatic retry. Same-SHA re-upload remains prohibited, so repair may need
-  an Owner decision if remote systems disagree with the marker.
+- Missing/invalid marker metadata: fallback applies only to a genuine
+  lightweight public marker; every invalid annotated marker or journal state
+  fails preflight and unsafe commit ancestry blocks.
+- A durable confirmation plus failed public-marker update is resolved by the
+  specified marker-only reconciliation path. An attempted-only record is
+  quarantined and never invokes Fastlane again; explicit ASC-backed
+  reconciliation may confirm it, while clearing/retrying requires Owner
+  authority.
+- GitHub may replace pending concurrency members or deliver follower events out
+  of order. Durable pre-concurrency admission plus exhaustive successful-run
+  reconciliation preserves candidate intent; incomplete API pagination or
+  activation-boundary proof fails closed.
+- The existing Fastfile does not throw when a requested group is absent. The
+  workflow-owned preflight existence and postflight exact-build membership
+  checks are therefore mandatory; strict mode alone is insufficient.
 - Separate review-machinery sequencing remains external to this source slice and
   is owned by Team Lead.
 - The current planning-base RepoInfra failure is a concrete dependency, not an

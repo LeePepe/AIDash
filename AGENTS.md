@@ -243,5 +243,5 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/006-team-workflow-audit/plan.md
+at specs/007-release-workflow/plan.md
 <!-- SPECKIT END -->

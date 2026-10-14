@@ -25,18 +25,25 @@ revision with new acceptance and operational state.
 **Alternatives rejected**: Rewriting completed T205 would erase the chronology;
 using active Spec 006 would mix unrelated team-workflow scope.
 
-## R3 — Trigger and immutable candidate
+## R3 — Trusted trigger and immutable candidate
 
-**Decision**: Bind `workflow_run` to workflow name `build`, type `completed`,
-branch `main`, conclusion `success`, and checkout the event's `head_sha`.
+**Decision**: Bind `workflow_run` to `.github/workflows/build.yml` / workflow
+name `build`, type `completed`, source event `push`, branch `main`, conclusion
+`success`, and the same head repository as the current repository. Before any
+candidate checkout, self-hosted job, write authority, or release secret, a
+hosted read-only stage bare-fetches official protected `main` and proves the
+event's `head_sha` is a reachable commit.
 
-**Evidence**: `.github/workflows/build.yml` is named `build` and runs on
-`main`. Checking out the moving branch after CI creates a race and can upload a
+**Evidence**: `.github/workflows/build.yml` is named `build` and runs on both
+`pull_request` and `push`. GitHub's `workflow_run` follower may receive secrets
+and write permission even when the source workflow did not, so workflow name,
+branch label, conclusion, and SHA alone admit a fork PR head named `main`.
+Checking out the moving branch after CI also creates a race and can upload a
 different commit from the one CI verified.
 
-**Alternatives rejected**: `push` cannot itself prove the required workflow
-finished; checking out `main` violates exact-head evidence; scheduled release is
-explicitly obsolete.
+**Alternatives rejected**: `push` alone cannot prove the required workflow
+finished; branch/name-only `workflow_run` trust can elevate PR provenance;
+checking out `main` violates exact-head evidence; scheduled release is obsolete.
 
 ## R4 — Path relevance
 
@@ -65,43 +72,68 @@ merge as app-relevant, violating the path-skip requirement.
 Owner's first automatic release; empty-tree whole-history comparison would
 release a CI-only merge.
 
-## R6 — Idempotency and delayed events
+## R6 — Durable queue, concurrency, and delayed events
 
-**Decision**: Same-SHA is an absolute skip and existing marker ancestry is
+**Decision**: Persist every trusted candidate in a strict workflow-owned queue
+ref before job-level concurrency. Only the self-hosted drain worker uses group
+`testflight` with `cancel-in-progress: false`. Under that lock, reconcile the
+authoritative successful protected-main `build.yml` push runs across the
+release/activation boundary, materialize missing queue entries, revalidate
+provenance, de-duplicate by SHA, and drain first-parent order. With no public
+marker, derive activation from the unique protected-main first-parent commit
+that introduces the workflow's `release-contract-schema: 1` sentinel. The
+queue-start ref targets that commit with run-independent strict metadata, so
+simultaneous creators converge after refetch even if their annotated tag object
+IDs differ. Missing/multiple/mismatched activation evidence or an activation
+commit later than the candidate fails closed. Same-SHA remains an absolute skip and marker ancestry is
 mandatory. Manual force bypasses path relevance only.
 
-**Evidence**: The Owner requires that a SHA never upload twice. Shared queued
-concurrency does not itself prevent an older completed workflow event from
-running after a newer release.
+**Evidence**: GitHub concurrency retains at most one running and one pending
+member; a new pending member replaces the old pending member even when
+`cancel-in-progress` is false. Durable refs before the group preserve intent.
+Queue refs alone still leave an event-delivery race where a later candidate
+could drain before an earlier follower enqueues, so authoritative Actions API
+reconciliation and exhaustive pagination are also required. A first-admission-
+derived boundary is likewise unsafe when a newer head wins creation before an
+older follower; the sentinel-derived boundary is independent of arrival order.
 
-**Alternatives rejected**: Preserving current force semantics violates the
-explicit idempotency requirement; blindly force-moving the tag can move release
-state backward.
+**Alternatives rejected**: Workflow-level concurrency can discard pending
+heads; queue-only intake can reorder heads; blind tag movement can move release
+state backward; preserving current force semantics violates idempotency.
 
-## R7 — Build number and strict upload
+## R7 — Build number and proven internal distribution
 
 **Decision**: Preserve Fastlane's App Store Connect global maximum plus one;
-enable strict internal-group distribution from the workflow.
+set strict mode, and add workflow-owned two-sided ASC verification. Normalize
+the existing group-name contract and require every group to exist before the
+attempt. After the lane, parse exactly one selected build number and require ASC
+to show that exact build in every intended group before confirmation.
 
 **Evidence**: `fastlane/Fastfile` already supplies a global monotonic counter
-across marketing versions. It only fails on group distribution when
-`TESTFLIGHT_STRICT_UPLOAD=1`.
+across marketing versions. Its missing-group branch logs and skips without
+raising, so `TESTFLIGHT_STRICT_UPLOAD=1` alone does not make a misspelled or
+absent group fatal. Preflight prevents known absence; postflight catches a race,
+silent skip, missing membership, or ambiguous build result.
 
 **Alternatives rejected**: A second workflow counter risks collision or reuse;
-best-effort distribution contradicts fail-closed release semantics.
+editing the prohibited Fastfile broadens scope; best-effort distribution or a
+strict-mode-only assertion does not prove that testers received the build.
 
 ## R8 — Marketing-version persistence
 
-**Decision**: Persist the effective marketing version in an annotated
-`testflight/last-released` tag. Use the greater of the project version and the
-last effective version; apply one minor bump for a proven exact merged PR label.
+**Decision**: Persist the effective marketing version in strict annotated
+confirmation and `testflight/last-released` tags. Use the greater of the project
+version and the last effective version; apply one minor bump for a proven exact
+merged PR label. Only a genuine lightweight legacy public marker falls back to
+the project version; invalid annotated metadata fails preflight.
 
 **Evidence**: A transient bump alone would regress on the next unlabelled
 release because tracked `project.yml` remains unchanged. Pushing a version
 commit would mutate `main` with code CI did not verify and create a release loop.
 
 **Alternatives rejected**: Editing/pushing `project.yml`; adding a new secret or
-database; relying on mutable PR state without exact-head association.
+database; treating malformed annotated state as legacy; relying on mutable PR
+state without exact-head association.
 
 ## R9 — Exact implementation scope
 
@@ -142,3 +174,43 @@ freshness, placeholder scan, and whitespace checks pass for this package.
 **Alternatives rejected**: Adding a dependency or editing review machinery
 would violate exact scope; ignoring the result would fabricate green evidence.
 Fullstack must obtain a fresh passing gate on its approved refreshed base.
+
+## R12 — At-most-once upload and marker-only recovery
+
+**Decision**: Use create-only annotated
+`testflight/attempted/<sha>` and `testflight/confirmed/<sha>` journal refs around
+the irreversible upload. The attempt is remotely confirmed immediately before
+the sole lane invocation. Confirmation is remotely persisted only after exact
+build/all-group proof, then the public marker moves with compare-and-swap. A
+confirmed-but-unmarked SHA reconciles without Fastlane. An attempted-only SHA is
+quarantined and blocks descendants; explicit reconciliation can only confirm it
+after exact operator SHA/build input and ASC-backed version/build/all-group
+evidence. Recovery uses only existing ASC readback credentials, creates no new
+attempt, and can never checkout, build, sign, distribute, invoke Fastlane, or
+upload; the normal five-secret release preflight is inapplicable.
+
+**Evidence**: App Store Connect upload and a Git ref update are not one atomic
+transaction. If upload succeeds but the process or marker push fails, a marker-
+only design cannot distinguish success from failure and may upload the same SHA
+again. A durable pre-upload attempt makes automatic invocation at-most-once; a
+post-upload confirmation supports eventual marker repair without a second lane.
+
+**Alternatives rejected**: Retrying an unknown attempt violates same-SHA
+idempotency; writing `last-released` before upload can suppress a failed release;
+blind force-push loses concurrent state; automatic deletion of quarantine
+silently chooses a product/release policy not authorized by the Owner.
+
+## R13 — Gate interpreter and one implementation unit
+
+**Decision**: Keep the replacement tests compatible with the RepoInfra gate's
+`/usr/bin/python3`, currently 3.9, and model all three user-story phases inside
+one Spec Kit task `T001`, one Multica implementation issue, and one PR.
+
+**Evidence**: `scripts/CONTEXT.md` is the gate authority and names
+`/usr/bin/python3`; the planning base reports Python 3.9. The constitution maps
+each `tasks.md` task to a Multica issue, while `AGENTS.md` makes one PR the unit
+of one issue. The phases intentionally edit the same workflow/test/guide.
+
+**Alternatives rejected**: Requiring Python 3.11 contradicts the mandatory local
+gate. Three T-numbers would imply three issues/PRs while claiming one delivery
+unit and would create overlapping ownership of the same files.
