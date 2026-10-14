@@ -1,4 +1,3 @@
--- aidata-tier: production
 -- attribution/cost-by-project — WHERE the day's spend actually went.
 --
 -- This answers the question the dashboard could not: "cost is up 968%" tells

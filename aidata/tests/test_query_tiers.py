@@ -77,11 +77,12 @@ def _l5_referenced() -> set[str]:
 
 def test_every_query_declares_a_valid_tier():
     """A typo'd marker would silently read as production — catch it."""
-    bad = {
-        name: _tier_of(name)
-        for name in _all_queries()
-        if _tier_of(name) not in VALID_TIERS | {"production"}
-    }
+    bad = {}
+    for name in _all_queries():
+        sql = (QUERIES / f"{name}.sql").read_text(encoding="utf-8")
+        match = TIER_DIRECTIVE.search(sql)
+        if match and match.group(1) not in VALID_TIERS:
+            bad[name] = match.group(1)
     assert not bad, f"queries with an unrecognized aidata-tier: {bad}"
 
 
