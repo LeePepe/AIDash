@@ -1,75 +1,42 @@
-# Specification Quality Checklist: CI-Gated TestFlight Release
+# Specification Quality Checklist: Minimal CI-Gated TestFlight Release
 
-**Purpose**: Verify Specify-stage completeness before independent planning review.
-**Created**: 2026-10-15
-**Feature**: `specs/007-release-workflow/spec.md`
+**Purpose**: Verify the `OD-2026-10-15-B` re-scope before independent review.
 
 ## Content quality
 
-- [x] Owner outcome, actors, and operational value precede implementation detail.
-- [x] All user stories are prioritized and independently testable with fixtures.
-- [x] Success criteria describe observable release outcomes.
-- [x] No unresolved clarification marker or placeholder remains.
+- [x] Owner outcome, actors, existing behavior, compatibility, and removals are explicit.
+- [x] User stories are prioritized and independently testable.
+- [x] Stable FR/AC identifiers cover the complete minimal design.
+- [x] No placeholder or unresolved product choice remains.
 
-## Requirement completeness
+## Minimal-v1 contract
 
-- [x] Existing behavior, compatibility, and removed behavior are explicit.
-- [x] The 2026-10-15 delegated Owner refinement supersedes the earlier
-  queue/journal/recovery planning model without changing repository authority.
-- [x] FR-001–FR-015 use mandatory, testable language.
-- [x] AC-01–AC-12 provide stable review identifiers.
-- [x] Automatic and manual entrypoints select immutable candidates.
-- [x] Automatic provenance requires push, same repository, exact workflow path,
-  success, main, and protected-main reachability before privileges.
-- [x] One per-app group serializes release work without claiming durable
-  per-head queue behavior or survival of every pending head.
-- [x] `testflight/last-released` is the sole durable release-progress state;
-  queue/cursor/skip/journal/quarantine/recovery state is prohibited.
-- [x] Existing-marker relevance accumulates over `marker..candidate`; skipped
-  and failed runs leave the marker unchanged.
-- [x] Missing-marker first-parent/root bootstrap is explicit and introduces no
-  second durable state.
-- [x] Equal, ancestor, descendant/stale, unrelated, missing, and invalid marker
-  states are defined with no-rewind behavior.
-- [x] Mixed automatic/manual force ordering and same-recorded-SHA protection are
-  explicit; force bypasses only path relevance.
-- [x] Failure pickup distinguishes existing-marker accumulation from absent-
-  marker first-parent bootstrap; no automatic retry, rollback, exactly-once
-  claim, or marker-only recovery remains.
-- [x] App-relevant and non-relevant path families are exact.
-- [x] Build-number allocation preserves the existing single global counter.
-- [x] Marketing-version bump and marker persistence prevent later regression.
-- [x] Direct-push, missing-PR, ambiguous-PR, and label-API outcomes are defined.
-- [x] Group existence and exact selected-build membership are independently
-  proven; strict-mode configuration alone is not treated as evidence.
-- [x] Every executed run's failure/skip/success summary is explicit; no survivor
-  synthesizes per-candidate evidence for a replaced pending run.
-- [x] Protected-path approval and post-merge evidence are explicit.
+- [x] Trigger is successful same-repository `build` push on `main`; manual dispatch remains.
+- [x] Automatic checkout is exact `head_sha` with `fetch-depth: 0` and tags.
+- [x] One self-hosted job has ordinary job-level `contents: write`.
+- [x] One concurrency group uses `cancel-in-progress: false`.
+- [x] Relevance is exactly `git diff --name-only marker..head` against the app roots.
+- [x] Irrelevant non-forced execution skips with one summary line before secrets.
+- [x] Missing/invalid marker fails closed; retained manual force may bootstrap.
+- [x] Existing lane, build-number behavior, runner, signing, and five secrets are preserved.
+- [x] All five secrets are scoped only to the build/upload step.
+- [x] Marker movement occurs only after successful upload.
+- [x] `always()` cleanup restores keychain state and removes run-scoped local artifacts.
+- [x] No retry, rollback, alternate runner, cursor, journal, recovery ref, or CAS-only boundary remains.
 
-## Scope and authority
+## Testing and removal
 
-- [x] Spec 004 history and the later manual-only policy are superseded narrowly.
-- [x] Scheduled release is explicitly not restored.
-- [x] Product, Fastlane, project configuration, review machinery, rulesets, and
-  runner/secret changes are prohibited.
-- [x] No tracked personal, account, team, workspace, or credential value is
-  introduced.
-- [x] The MY-1692 sequencing dependency is stated without becoming source scope.
-- [x] `.specify/feature.json` and the `AGENTS.md` Spec Kit marker both select
-  Spec 007 and are frozen with the reviewed package.
+- [x] The workflow invokes the same focused classifier exercised by Python 3.9 unit tests.
+- [x] Tests cover included roots, exclusions, mixed/empty inputs, and near misses.
+- [x] Actionlint is the explicit workflow-lint gate; its absence/failure blocks delivery.
+- [x] The obsolete manual-only test is replaced.
+- [x] The unpublished 542-line shadow-policy suite is discarded, not ported, and must be listed in the PR body.
 
-## Readiness
+## Scope and delivery
 
-- [x] Constitution and RepoInfra ownership checks have no unresolved conflict.
-- [x] AC-01–AC-10 map to sole implementation task T001; AC-11–AC-12 map to
-  explicit external delivery gates.
-- [x] US1–US3 are ordered internal phases, not extra tasks/issues/PRs; the
-  implementation graph is single-layer, acyclic, and schedulable.
-- [x] Verification uses repository hooks/resolver gates and forbids host-based
-  app tests.
-- [x] Replacement tests remain compatible with the gate's `/usr/bin/python3`
-  (currently Python 3.9).
-- [x] Focused cases cover irrelevant accumulation, mixed auto/manual force,
-  failed-release pickup, absent-marker bootstrap, and same-recorded-SHA safety.
-- [x] The specification is ready for the authorized final exact-revision AI
-  Reviewer spec gate.
+- [x] T001 is one RepoInfra task/issue/PR with four final paths or fewer.
+- [x] Product, Fastlane, project, CI-build, review, ruleset, and planning paths are excluded.
+- [x] `e8c353ce` preservation/non-publication is a Team Lead recovery precondition.
+- [x] Protected-path approval and the MY-1692 merge gate are unchanged.
+- [x] Round-2 implementation review failure parks and reports without another round or Owner escalation.
+- [x] The package is ready for exact-revision AI Reviewer spec gate.

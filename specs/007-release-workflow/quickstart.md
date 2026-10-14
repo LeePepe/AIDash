@@ -1,111 +1,62 @@
-# Quickstart: Verify the Release-Workflow Change
+# Quickstart: Verify the Minimal Release Workflow
 
-## Scope check
+## Final diff scope
 
-The implementation candidate may change only:
+The implementation PR may change only:
 
 ```text
 .github/workflows/testflight.yml
-scripts/ci/tests/test_testflight_manual_only.py  # deletion/rename
-scripts/ci/tests/test_testflight_release.py      # replacement
+scripts/ci/tests/test_testflight_manual_only.py   # delete
+scripts/ci/tests/test_testflight_relevance.py     # add
 docs/testflight-handoff.md
 ```
 
-The exact reviewed package remains byte-identical during implementation:
-`.specify/feature.json`, the Spec Kit marker block in `AGENTS.md`, and every
-file under `specs/007-release-workflow/`.
+The unpublished shadow suite `scripts/ci/tests/test_testflight_release.py` must
+not exist in the final tree or PR diff. Its discard must be stated in the PR
+body. Planning artifacts remain byte-identical during implementation.
 
-## Required local evidence
+## Focused evidence
 
-1. Activate repository hooks in the issue-scoped delivery workspace.
-2. Confirm every changed implementation path resolves to `RepoInfra` with the
-   repository context resolver.
-3. Stage the candidate and let the normal hook flow run the RepoInfra local
-   gates. The declared gate is:
+1. Confirm every final path resolves to `RepoInfra`.
+2. Run the production classifier unit tests:
 
    ```text
-   /usr/bin/python3 -m pytest scripts/ci/tests scripts/context/tests -q
+   /usr/bin/python3 -m pytest scripts/ci/tests/test_testflight_relevance.py -q
    ```
 
-   The replacement test must be compatible with this interpreter (Python 3.9
-   on the planning base): no Python 3.10+ syntax or Python 3.11-only standard-
-   library module unless the approved refreshed base first changes the gate.
+   Required cases: every allowed root, representative excluded roots, mixed
+   input, empty input, exact `project.yml`, and root-prefix near misses.
 
-4. Confirm `git diff --check` is clean and the diff contains only the declared
-   paths.
-5. Freeze the candidate and obtain independent AI Reviewer PASS before commit,
-   push, or PR publication.
+3. Install actionlint locally if absent, record `actionlint -version`, and run:
 
-The pinned planning base currently fails the RepoInfra gate before reaching
-this feature's assertions because its review launcher imports `tomllib` under
-the machine's Python 3.9. That failure belongs to MY-1692 and is not waived. Use
-the Team Lead-approved refreshed delivery base and require a fully green fresh
-gate; otherwise return the exact blocker.
+   ```text
+   actionlint .github/workflows/testflight.yml
+   ```
 
-Do not run `xcodebuild`, host-based app tests, a real TestFlight upload, or a
-second copy of hook-owned suites during implementation.
+   Planning-time Homebrew reports stable 1.7.12. Installation or lint failure
+   blocks delivery; pytest is not a substitute for workflow lint.
 
-## Contract cases the replacement test must cover
+4. Stage only the declared paths and let repository hooks run the normal
+   RepoInfra gate. Confirm context audit, task freshness, `git diff --check`, and
+   exact path manifest.
+5. Inspect the workflow to prove:
+   - exact automatic `head_sha`, full history, and tag fetch;
+   - successful same-repository `build` push on `main` guard;
+   - one self-hosted job/group and `cancel-in-progress: false`;
+   - irrelevant summary occurs before any secret-bearing step;
+   - all five secrets appear only on build/upload;
+   - marker movement follows successful lane completion;
+   - `always()` cleanup restores keychain state and removes local temp artifacts;
+   - no retry, CAS-only job, cursor, journal, recovery ref, or shadow suite.
+6. Freeze the candidate and obtain AI Reviewer PASS before publication.
 
-- Same-repository `build.yml` push success is trusted; pull-request-origin,
-  fork repository with head branch named `main`, wrong workflow/path, non-main,
-  non-success, invalid SHA, and candidate not reachable from freshly fetched
-  protected `main` are rejected before checkout/self-hosted/secrets.
-- Automatic candidate is exact `workflow_run.head_sha`; manual candidate is
-  once-pinned current protected `main`. Manual force bypasses relevance only.
-- Automatic and manual release work share one AIDash concurrency group with
-  `cancel-in-progress: false`. The workflow creates no queue-start, queue,
-  cursor, skip, attempt, confirmation, quarantine, or recovery state.
-- Existing-marker relevance uses `marker..candidate`. Several irrelevant
-  automatic merges each skip and leave the marker fixed; the later range still
-  contains them and a later app-relevant descendant releases its exact head.
-- An irrelevant automatic run followed by manual `force=true` releases pinned
-  current main. Same-candidate automatic/manual runs serialize: an automatic
-  skip permits later force, while the first success makes the other equality-
-  skip.
-- With an existing ancestor marker, a failed eligible release leaves the marker
-  unchanged and a later descendant's range includes the failed relevant change.
-  With no marker, a later docs-only descendant still skips; pickup requires an
-  independently app-relevant candidate or manual force on pinned current main.
-  No automatic retry or rollback is created.
-- Missing marker plus workflow-only enabling merge skips. The first later
-  app-relevant candidate bootstraps from its first-parent delta. Root candidate
-  bootstrap uses the empty tree.
-- Existing marker equal to candidate is an absolute no-upload skip; ancestor is
-  the normal accumulated range; descendant means stale/no-rewind skip;
-  unrelated history fails closed.
-- Every included app path and representative docs/specs/CI/review/CLI/aidata-
-  only exclusions are covered.
-- Only a genuine lightweight public marker receives legacy fallback. A valid
-  annotated marker succeeds; annotated absent/empty, malformed, duplicate,
-  unknown, or non-commit marker state fails before release side effects.
-- Configured, missing/lightweight/persisted marker, labelled/unlabelled exact
-  merged PR, direct-push, ambiguous-PR, and API-failure version states; existing
-  global build allocator and exactly one parsed selected build number.
-- Group normalization rejects empty/duplicate names; absent group fails before
-  Fastlane; group deleted or selected build missing any intended membership
-  fails after the lane and leaves the marker unchanged; all memberships permit
-  marker compare-and-swap.
-- Existing five secrets/signing path and exact self-hosted runner labels; no
-  release-secret exposure before provenance/eligibility, new secret, alternate
-  release runner, upload retry, rollback, or fallback.
-- Marker compare-and-swap succeeds only against the fetched prior object (or
-  confirmed absence). Every preflight/release/postflight/CAS failure leaves the
-  marker unchanged.
-- Upload success followed by proof/marker failure has no journal or recovery;
-  a later run may upload again. Tests and docs assert same-recorded-SHA
-  protection and do not claim exactly-once for unrecorded external outcomes.
-- Each executed run summarizes its own success, skip, or failure fields. No
-  surviving run synthesizes a summary for a platform-replaced pending run.
+Do not run Xcode tests, host-based app tests, or a real TestFlight upload.
 
-## Publication and shipping
+## Delivery gates
 
-The PR is protected-path work and requires Owner approval. It may be prepared
-after planning readiness, but Team Lead/PR Manager must not ship it until the
-MY-1692 repair landing and fresh parked-PR proof satisfy the accepted delivery
-sequence. Any refresh creates a new candidate requiring renewed exact-head
-review and approval.
-
-After merge, the next eligible app-relevant accumulated range supplies
-production evidence: record its release run URL and build number on the
-delivery issue. Do not create a manual smoke-test issue.
+- Team Lead must preserve and not publish `e8c353ce`, and establish the revised
+  implementation line under the delivery-workspace recovery contract.
+- Protected workflow changes require Owner approval.
+- MY-1692 remains the merge/ship gate.
+- If revised implementation review round 2 fails, park and report to the Owner
+  delegate; do not request a third round or Owner escalation.
