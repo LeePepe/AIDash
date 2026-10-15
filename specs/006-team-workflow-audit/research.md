@@ -300,6 +300,81 @@ and exact byte fixtures distinguish normative proof from approximate coverage.
 - Accept whitespace-only or merely over-limit fixtures: does not prove that an
   otherwise valid mandatory 262,145-byte payload fails at the wire boundary.
 
+## Decision 13: Recover T022–T026 contract-first from current main
+
+**Decision**: Forward-port the accepted T022–T026 planning package at
+`1ba0062bb2597efd91c46b8de9080b53b8484da1` onto current-main base
+`bdf1435fe7d3d9c4da43ed4297cbc24482447b46` by semantics, not by replacing
+current planning artifacts wholesale. Retire executable T002 as a coordination
+anchor; schedule the serial AidataL1L2 graph T022 strict decoder → T023 atomic
+reader → T024 recoverable identity index → T025 neutral matrix → T026 thin
+wiring. T003 and T016 consume only T026. T023 does not advance until T022 is
+terminal and accepted through the existing Team Lead gate.
+
+T022 directly proves D18–D26: exact case event/attempt source order, matching
+back-pointers, UTC timestamps and non-decreasing chronology with source-order
+ties; complete artifact event reference, non-null bound-case ownership, and
+finding-chain event/case membership; and arbitrary-size valid JSON integers
+that return an exact field-valid value or structured rejection with no escaped
+numeric exception. The expanded rows also prove the limited empty/short
+baseline and parameterize required-key, nullability, JSON-type,
+duplicate-member, and integer-impostor rejection across the complete raw
+contract. T025 repeats those proofs through neutral bundles. No existing test
+is deleted or weakened.
+
+**Rationale**: The accepted package contains the reviewed module boundaries,
+source-clean contract, restart semantics, and vertical task graph needed to
+replace the cancelled monolith. Current main independently contains later
+T005 recovery work and FR-020–FR-025 correctness contracts that must remain.
+The histories diverged, so taking either tree wholesale would drop accepted
+behavior. A semantic overlay retains both lines and provides an immutable
+revision for a new exact-SHA spec gate.
+
+**Alternatives rejected**:
+
+- Reschedule the cancelled monolithic task: it lacks accepted terminal
+  evidence and recreates the mixed validator/filesystem/index/wiring surface.
+- Replace current planning files with the old accepted tree: this would erase
+  the later FR-020–FR-025 and T005 contracts already present on main.
+- Advance T023 with T022 merely planned: the hard dependency requires T022 to
+  be terminal and accepted before the next serial node starts.
+- Treat an unpublished historical merge or a frozen implementation candidate
+  as acceptance: neither substitutes for exact-revision planning review.
+
+## Decision 14: Pin the snapshot wire contract and retire T001 from scheduling
+
+**Decision**: Treat T001 as completed/non-schedulable at
+`d75b14dfbfd7876610782479ec3f94d036c8efd0` and render its T022 dependency as
+satisfied. Make `contracts/team-audit-snapshot-v1.md` the complete raw authority
+for `snapshot.json`, with version `team-workflow-audit/snapshot-v1`, exact
+required nested keys, JSON types/nullability, and locked vocabularies. T022
+rejects aliases, unknown keys/versions, omitted nullable keys, duplicate object
+members, and invalid integers rather than inferring a producer schema.
+
+**Rationale**: Current main already contains and tests the explicit-only manual
+source, so an open T001 row could trigger duplicate work. The accepted planning
+package described semantic models but did not expose a complete raw schema;
+that left the strict decoder unable to implement exact nested allowlists
+without invention. A repository-local versioned contract makes the boundary
+available to implementation and exact-revision review while preserving the
+accepted T022 scope and its expanded D18–D26 acceptance.
+
+The contract permits an empty baseline cohort only as the zero-case instance
+of the existing incomplete-baseline rule: the top-level snapshot limitation is
+mandatory, and the decoder never pads, fabricates, reorders, or re-baselines
+cases. D22–D26 turn every contract-wide strict-schema category into a
+parameterized direct T022 proof and a neutral-bundle T025 repeat rather than
+letting implementation infer how broadly the rule applies.
+
+**Alternatives rejected**:
+
+- Keep T001 unchecked but mention current behavior elsewhere: the task remains
+  schedulable and the dependency graph remains ambiguous.
+- Refer to an unnamed upstream evidence schema: no immutable, available schema
+  revision exists for implementation or review.
+- Infer raw keys from semantic prose or a historical cancelled implementation:
+  that creates aliases/defaults outside the reviewed contract.
+
 ## Resolved source ambiguities
 
 - “Three independent axes” means Workflow Conformance, Workflow Fitness, and
