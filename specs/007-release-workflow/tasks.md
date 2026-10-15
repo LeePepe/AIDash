@@ -35,7 +35,8 @@ T001 implementation -> AI Reviewer prepublication review -> protected-path appro
   | Blocking tasks | None |
   | Contract | External release-workflow behavior in `contracts/release-workflow.md`; no product API |
   | Acceptance | AC-01–AC-08 |
-  | Verification | `/usr/bin/python3 -m pytest scripts/ci/tests/test_testflight_relevance.py -q`; `actionlint .github/workflows/testflight.yml`; normal RepoInfra hook gate |
+  | Governing constitution | §Testing → Who runs tests; §Development Workflow → Spec-Driven, Multica-Executed; §Cross-Cutting Quality Bars → A. Scope Discipline; §Development Workflow → No Identity in Version Control |
+  | Verification | Normal hook-selected RepoInfra gate (collects classifier units once); distinct `actionlint .github/workflows/testflight.yml`; structural checks |
 
   **Final files in scope** (no more than these four paths):
   - `.github/workflows/testflight.yml`
@@ -69,23 +70,34 @@ T001 implementation -> AI Reviewer prepublication review -> protected-path appro
     and one-line irrelevant summary before secrets.
   - Implement FR-008–FR-011: existing lane and infrastructure, all five secrets
     only on build/upload, marker only after lane success, no retry/fallback, and
-    `always()` cleanup of run-scoped keychain/local-tag state.
+    reversible keychain handling. Capture search-list/default/login-lock/
+    auto-lock state before mutation; make the temporary keychain the temporary
+    default/search-list head while retaining login; do not mutate partition
+    ACLs; require the existing non-interactive signing ACL; and use secret-free
+    `always()` cleanup to restore state and delete the temporary
+    keychain/state/local tags. A
+    pre-marker failure leaves the marker unchanged; cleanup failure after marker
+    movement fails as `failed_cleanup_after_release` and leaves it advanced.
   - Update the handoff guide to describe automatic and manual operation,
-    relevance, force bootstrap, secret scope, cleanup, failure behavior, and
-    removed policy machinery without promising recovery or exactly-once state.
+    relevance, force bootstrap, secret scope, the preconfigured signing-ACL
+    prerequisite, cleanup, failure behavior, and removed policy machinery
+    without promising recovery or exactly-once state.
 
   **Acceptance**: AC-01 through AC-08.
 
   **Layer/context**: `RepoInfra`; `scripts/CONTEXT.md`.
 
   **Verification**:
-  - `/usr/bin/python3 -m pytest scripts/ci/tests/test_testflight_relevance.py -q`
+  - stage only the declared paths and let the normal hook-selected RepoInfra
+    gate collect `test_testflight_relevance.py` once; do not directly invoke or
+    repeat the focused file or full suite
   - record `actionlint -version`; run
     `actionlint .github/workflows/testflight.yml`
-  - normal hook-selected RepoInfra gate, context audit, task freshness,
-    `git diff --check`, and exact four-path-or-fewer manifest
+  - context audit, task freshness, `git diff --check`, and exact
+    four-path-or-fewer manifest
   - independent review of exact checkout, secret scope, upload/marker ordering,
-    cleanup, and absence of superseded machinery
+    exact keychain capture/restore and no partition mutation, both ordered
+    marker outcomes, and absence of superseded machinery
   - no Xcode test or real upload
 
   **Dependencies**: Team Lead recovery of the preserved unpublished candidate;

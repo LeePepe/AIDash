@@ -46,7 +46,10 @@ exact classifier.
 
 **Evidence**: This keeps the final diff at four paths and avoids a test that
 parses or simulates the entire workflow. Unit tests can exercise path matching
-without shadowing permissions, triggers, marker logic, or step ordering.
+without shadowing permissions, triggers, marker logic, or step ordering. They
+are collected once by the hook-selected RepoInfra gate declared in
+`scripts/CONTEXT.md`; agents do not invoke the focused file or full suite
+directly or repeat it.
 
 **Rejected**: Porting the unpublished 542-line policy suite; duplicating the
 allowlist in a separate test oracle; adding a fifth helper path.
@@ -65,26 +68,38 @@ annotated marker metadata, and alternate durable state.
 ## R7 — Existing lane and strict secret scope
 
 **Decision**: Reuse `fastlane ios beta` unchanged. Put all five secrets,
-validation, keychain preparation, and lane execution on one build/upload step.
+validation, reversible keychain preparation, and lane execution on one
+build/upload step. Do not mutate the login keychain's partition ACL; require and
+preflight the runner's existing non-interactive `apple-tool`/`codesign` access.
 
 **Evidence**: The lane already owns global build-number allocation, signing,
 upload, and internal distribution. Reimplementing those policies in the
 workflow caused the superseded complexity. Step-only environment scope meets
-the Owner's credential boundary without another job.
+the Owner's credential boundary without another job. Partition-list mutation
+has no reliable exact read/restore contract, so avoiding it is the only
+reversible design; the already-provisioned signing ACL remains a prerequisite.
 
 ## R8 — Cleanup
 
-**Decision**: A final `always()` step restores the prior keychain search list
-and deletes only run-scoped temporary keychain files and local temporary tags.
+**Decision**: Before mutation, capture the exact user search list, default
+keychain, login-keychain lock state, and auto-lock settings in a secret-free
+run-scoped file. The build step may create a temporary keychain and use it as
+the temporary default/search-list head, keep login in the list, unlock login,
+and temporarily relax auto-lock for the archive. A final `always()` step
+restores the captured search/default/settings, relocks login only if it began
+locked, and deletes the temporary keychain, state file, and local temporary
+tags without signing secrets.
 
-**Evidence**: The existing workflow changes persistent keychain search/settings
-state. Cleanup must run on success, skip, and failure and must not need secrets
-or touch the remote marker.
+**Evidence**: The existing workflow changes persistent search, auto-lock, lock,
+and partition state. Capturing the supported reversible settings before change
+preserves long-running signing without leaving them altered. Cleanup must run on
+success, skip, and failure and must not need secrets or touch the remote marker.
 
 ## R9 — Workflow lint
 
-**Decision**: Use actionlint as the requested workflow linter in addition to
-focused classifier tests and normal repository gates.
+**Decision**: Use actionlint as the requested distinct workflow linter. Let the
+normal hook-selected RepoInfra gate collect the classifier units once; do not
+invoke the focused test file or full suite directly or repeat hook-owned tests.
 
 **Evidence**: The repository has no current workflow-lint command and this
 planning machine has no actionlint binary. Homebrew exposes actionlint 1.7.12.
@@ -113,9 +128,11 @@ make the rejected commit reachable remotely.
 
 **Decision**: Any preflight/build/upload/marker error fails the run, leaves the
 remote marker unchanged when failure precedes marker movement, and schedules no
-retry. The revised implementation receives the normal two-round review budget;
-round-2 failure is parked and reported to the Owner delegate without another
-round or Owner escalation.
+retry. Cleanup failure after successful upload and marker movement fails as
+`failed_cleanup_after_release` while the marker remains at the uploaded SHA;
+there is no rollback or retry. The revised implementation receives the normal
+two-round review budget; round-2 failure is parked and reported to the Owner
+delegate without another round or Owner escalation.
 
 **Evidence**: This is the explicit `OD-2026-10-15-B` stop rule and prevents
 another edge-case expansion cycle.

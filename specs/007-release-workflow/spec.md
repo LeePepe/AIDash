@@ -32,8 +32,9 @@ rewriting or publishing that candidate.
   `testflight/last-released` after lane success.
 - Manual dispatch exposes `force`; it may release even when the checked-out SHA
   equals the marker.
-- The workflow exposes signing secrets across several steps and mutates keychain
-  state without a run-scoped `always()` cleanup.
+- The workflow exposes signing secrets across several steps; unlocks the login
+  keychain; disables its auto-lock; rewrites the user search list; and mutates
+  private-key partition access without a run-scoped `always()` cleanup.
 - `scripts/ci/tests/test_testflight_manual_only.py` rejects automatic triggers,
   and `docs/testflight-handoff.md` documents manual-only operation.
 - The unpublished candidate replaced that small test with the Owner-described
@@ -48,10 +49,11 @@ As the Owner, I receive a TestFlight build for the exact successful `main` CI
 head when the accumulated changes since the release marker include an app path,
 while retaining the existing manual release escape.
 
-**Independent Test**: Focused classifier unit tests prove included and excluded
-paths; actionlint validates automatic and manual entrypoints; reviewer
-inspection proves exact checkout, one concurrency group, upload-before-marker
-ordering, secret scope, and cleanup.
+**Independent Test**: The normal hook-selected RepoInfra gate collects the
+focused classifier units that prove included and excluded paths; actionlint
+separately validates automatic and manual entrypoints; reviewer inspection
+proves exact checkout, one concurrency group, upload-before-marker ordering,
+secret scope, and cleanup. Agents do not invoke or repeat the hook-owned suite.
 
 **Acceptance Scenarios**:
 
@@ -70,8 +72,12 @@ ordering, secret scope, and cleanup.
 5. **Given** `workflow_dispatch` with `force=true`, **when** the marker is
    missing, equal, or the range is irrelevant, **then** current `main` may build
    and upload; all upload, cleanup, and marker-ordering requirements remain.
-6. **Given** any preflight, build, signing, or upload failure, **then** the run
-   fails, does not move the remote marker, and schedules no retry.
+6. **Given** any preflight, build, signing, upload, or marker failure before a
+   successful marker move, **then** the run fails, leaves the remote marker
+   unchanged, and schedules no retry.
+7. **Given** upload and marker movement succeeded, **when** final cleanup fails,
+   **then** the run fails as `failed_cleanup_after_release`, leaves the marker
+   at the uploaded SHA, and performs no rollback or automatic retry.
 
 ## Functional requirements
 
@@ -112,22 +118,39 @@ ordering, secret scope, and cleanup.
   signing configuration, app code, or secret inventory.
 - **FR-009 — Secret scope**: All five signing/upload secrets MUST appear only on
   the single build/upload step. Secret validation, keychain preparation, and
-  lane invocation happen inside that step. No preceding, marker, summary, or
-  cleanup step may reference them.
+  lane invocation happen inside that step. Preparation MUST implement the
+  capture, temporary-default/search-list, conditional login unlock/settings,
+  and no-partition-mutation contract in FR-011. No preceding, marker, summary,
+  or cleanup step may reference the secrets.
 - **FR-010 — Marker movement**: Move the plain public
   `testflight/last-released` tag to the checked-out head only after the existing
   lane exits successfully. Use the job's ordinary contents-write token; do not
   add a CAS-only permission boundary, annotated marker schema, or alternate
   release state.
-- **FR-011 — Cleanup and failure**: A final `if: always()` step MUST restore the
-  prior keychain search list and remove only run-scoped temporary keychain files
-  and local temporary release tags. Failures leave the remote marker unchanged.
-  No automatic retry, rollback, alternate runner, or fallback credential path
-  is permitted.
-- **FR-012 — Validation and scope**: Run focused classifier unit tests under
-  `/usr/bin/python3`, actionlint as the workflow linter, repository planning
-  checks, and the normal hook-selected RepoInfra gate. The final implementation
-  diff MUST contain the same four paths or fewer.
+- **FR-011 — Reversible cleanup and ordered failure**: Before mutating user
+  keychain state, the build/upload step MUST capture the original user search
+  list, default keychain, login-keychain lock state, and login-keychain
+  auto-lock settings in a run-scoped secret-free state file. It MAY create a
+  run-scoped temporary keychain and use it as the temporary user default and
+  search-list head, without dropping the original list; it MAY unlock the login
+  keychain and temporarily change its auto-lock settings only when required for
+  the long-running lane. It MUST NOT mutate private-key partition ACLs; existing
+  non-interactive `apple-tool`/`codesign` access is a runner prerequisite and
+  MUST fail closed when unavailable. A final `if: always()` step, with no
+  signing-secret references, MUST restore the exact prior search list, default
+  keychain, and auto-lock settings; relock the login keychain only if it began
+  locked; and delete the temporary keychain, state file, and local temporary
+  release tags. A failure before successful marker movement leaves the remote
+  marker unchanged. Cleanup failure after successful marker movement fails the
+  run as `failed_cleanup_after_release` while leaving the marker at the uploaded
+  SHA; no rollback, automatic retry, alternate runner, or fallback credential
+  path is permitted.
+- **FR-012 — Validation and scope**: The normal hook-selected RepoInfra gate
+  MUST collect the classifier units under its repository-owned `/usr/bin/python3`
+  test command; agents MUST NOT invoke that suite separately or repeat it.
+  Actionlint remains the distinct workflow-lint requirement, alongside
+  repository planning/structural checks. The final implementation diff MUST
+  contain the same four paths or fewer.
 
 ## Compatibility
 
@@ -135,6 +158,9 @@ ordering, secret scope, and cleanup.
   public marker name, existing Fastlane lane, global build-number behavior,
   runner labels, five secrets, signing/profile path, and internal distribution
   behavior remain compatible.
+- Existing non-interactive `apple-tool`/`codesign` partition access remains a
+  documented runner prerequisite; the workflow verifies but no longer rewrites
+  that persistent ACL on every run.
 - Product behavior, project settings, Fastlane sources, CI build workflow,
   review machinery, rulesets, and required-check names are unchanged.
 - Planning remains one `RepoInfra` task, one implementation issue, and one PR.
@@ -172,19 +198,21 @@ tests. No product or Fastlane test is removed or weakened.
   history satisfy FR-001–FR-002; manual dispatch still targets `main`.
 - **AC-02**: One self-hosted job, one concurrency group, and plain job-level
   contents-write permission satisfy FR-003–FR-004.
-- **AC-03**: The actual production classifier and its focused unit tests satisfy
-  FR-005–FR-007, including a one-line irrelevant summary and fail-closed marker
-  errors.
+- **AC-03**: The actual production classifier and its focused units, collected
+  once by the hook-selected RepoInfra gate, satisfy FR-005–FR-007, including a
+  one-line irrelevant summary and fail-closed marker errors.
 - **AC-04**: Existing lane/runner/build-number/signing behavior is preserved;
-  all five secrets occur only on the build/upload step.
-- **AC-05**: The marker moves only after successful upload; every earlier
-  failure leaves it untouched and no retry/fallback path exists.
-- **AC-06**: The `always()` cleanup restores keychain state and removes only
-  run-scoped temporary keychain/local-tag artifacts on success, skip, or
-  failure.
-- **AC-07**: `/usr/bin/python3` classifier tests, actionlint workflow lint,
-  repository hooks/RepoInfra gate, context audit, task freshness, and exact-path
-  checks provide fresh evidence.
+  all five secrets occur only on the build/upload step, and the existing
+  non-interactive signing ACL is verified rather than mutated.
+- **AC-05**: The marker moves only after successful upload; every failure before
+  that move leaves it untouched and no retry/fallback path exists.
+- **AC-06**: The `always()` cleanup restores captured search-list, default,
+  lock, and auto-lock state without mutating partition ACLs, and removes only
+  run-scoped temporary keychain/state/local-tag artifacts. Cleanup failure after
+  marker movement fails the run but leaves the marker at the uploaded SHA.
+- **AC-07**: The hook-selected RepoInfra gate collects the Python 3.9 classifier
+  units once; separate actionlint workflow lint, context audit, task freshness,
+  and exact-path checks provide the remaining fresh evidence.
 - **AC-08**: The final PR changes no more than the four declared paths, records
   the discarded shadow suite in its Removed/weakened-tests section, receives
   protected-path Owner approval, and remains blocked from merge by MY-1692
@@ -196,6 +224,8 @@ tests. No product or Fastlane test is removed or weakened.
   and then recorded by the marker.
 - **SC-002**: An irrelevant non-forced range performs no signing/upload and
   leaves a concise summary line.
-- **SC-003**: A failed run moves no remote marker and starts no retry.
+- **SC-003**: A run failing before marker movement leaves the marker unchanged;
+  a cleanup failure after movement leaves it at the uploaded SHA. Neither case
+  starts a retry or rollback.
 - **SC-004**: The implementation is materially smaller than the discarded
   candidate and contains no workflow-policy shadow suite.

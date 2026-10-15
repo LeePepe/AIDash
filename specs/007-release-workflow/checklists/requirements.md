@@ -21,12 +21,16 @@
 - [x] Existing lane, build-number behavior, runner, signing, and five secrets are preserved.
 - [x] All five secrets are scoped only to the build/upload step.
 - [x] Marker movement occurs only after successful upload.
-- [x] `always()` cleanup restores keychain state and removes run-scoped local artifacts.
+- [x] Keychain preparation captures search-list, default, lock, and auto-lock state before mutation.
+- [x] Partition ACLs are not mutated; existing non-interactive signing access is a fail-closed runner prerequisite.
+- [x] Secret-free `always()` cleanup restores captured state and removes run-scoped keychain/state/local-tag artifacts.
+- [x] Pre-marker failure leaves the marker unchanged; post-marker cleanup failure leaves it advanced and fails without retry/rollback.
 - [x] No retry, rollback, alternate runner, cursor, journal, recovery ref, or CAS-only boundary remains.
 
 ## Testing and removal
 
-- [x] The workflow invokes the same focused classifier exercised by Python 3.9 unit tests.
+- [x] The workflow invokes the same focused classifier exercised by Python 3.9 unit tests collected once by the hook-selected RepoInfra gate.
+- [x] Agents do not directly invoke or repeat the focused file or full hook-owned suite.
 - [x] Tests cover included roots, exclusions, mixed/empty inputs, and near misses.
 - [x] Actionlint is the explicit workflow-lint gate; its absence/failure blocks delivery.
 - [x] The obsolete manual-only test is replaced.
@@ -35,6 +39,7 @@
 ## Scope and delivery
 
 - [x] T001 is one RepoInfra task/issue/PR with four final paths or fewer.
+- [x] T001 cites the governing constitution sections for hook-owned tests, Spec Kit/Multica execution, scope discipline, and identity safety.
 - [x] Product, Fastlane, project, CI-build, review, ruleset, and planning paths are excluded.
 - [x] `e8c353ce` preservation/non-publication is a Team Lead recovery precondition.
 - [x] Protected-path approval and the MY-1692 merge gate are unchanged.

@@ -10,10 +10,11 @@ source `head_sha` with full history. The job compares the public release marker
 to that head, runs a small production relevance classifier, skips irrelevant
 ranges with one summary line, otherwise invokes the existing Fastlane lane,
 then moves the marker. Manual dispatch and its existing `force` escape remain.
-Signing secrets exist only on the build/upload step. A final `always()` step
-restores keychain state and removes run-scoped temporary keychain/local-tag
-artifacts. No separate provenance/CAS job, release journal, recovery model, or
-workflow-policy shadow suite remains.
+Signing secrets exist only on the build/upload step. That step captures the
+pre-run keychain state without secrets and avoids partition-ACL mutation; a
+final `always()` step restores the captured state and removes run-scoped
+temporary keychain/state/local-tag artifacts. No separate provenance/CAS job,
+release journal, recovery model, or workflow-policy shadow suite remains.
 
 ## Technical context
 
@@ -25,8 +26,9 @@ classifier/tests
 
 **Storage**: Existing moving tag `testflight/last-released` only
 
-**Testing**: Focused classifier unit tests; actionlint workflow lint; normal
-hook-selected RepoInfra gate; no Xcode tests or real upload
+**Testing**: Classifier units collected once by the normal hook-selected
+RepoInfra gate; distinct actionlint workflow lint; no direct/repeated suite,
+Xcode test, or real upload
 
 **Target**: Existing `[self-hosted, aidash-mac]` runner
 
@@ -50,8 +52,9 @@ always; four final diff paths or fewer; Owner approval for `.github/**`
 ### Before design
 
 - **Scope**: PASS. One RepoInfra task declares four final diff paths.
-- **Testing**: PASS. The obsolete manual-only test is replaced by unit tests for
-  the production classifier; the unaccepted shadow suite is explicitly removed.
+- **Testing**: PASS. Under Constitution §Testing → “Who runs tests,” the
+  hook-selected RepoInfra gate alone collects the replacement classifier units;
+  actionlint remains a distinct lint, and the shadow suite is removed.
 - **Identity**: PASS. No tracked identity, credential, or secret is added.
 - **Local safety**: PASS. Verification uses hooks, Python, and workflow lint;
   no host-based app test or upload is planned.
@@ -112,7 +115,9 @@ workflow_dispatch on current main ───────┘        │
                        irrelevant/no force ───────> summary + stop
                                                    ├─ build/upload step (all secrets)
                                                    ├─ move marker after lane success
-                                                   └─ always cleanup temp keychain/tags
+                                                   └─ always restore captured keychain state
+                                                          └─ failure after move:
+                                                             marker stays advanced
 ```
 
 ## Trigger, checkout, and serialization
@@ -138,7 +143,8 @@ workflow_dispatch on current main ───────┘        │
 - The production classifier is
   `scripts/ci/tests/test_testflight_relevance.py`. It accepts newline-delimited
   paths and returns relevant/non-relevant. The workflow calls that exact code;
-  pytest imports the same function. No YAML-policy mirror is permitted.
+  units collected by the hook-selected RepoInfra gate import the same function.
+  No separate pytest invocation or YAML-policy mirror is permitted.
 - Relevant roots are the seven families in FR-006. Matching is root-anchored;
   near misses such as `docs/Apps/AIDashApp/...` remain irrelevant.
 - A non-forced irrelevant result appends one concise summary line and exits
@@ -150,15 +156,30 @@ workflow_dispatch on current main ───────┘        │
   changing Fastlane, build-number allocation, signing, groups, or project files.
 - Put secret presence validation, run-scoped keychain preparation, login
   keychain unlock as needed, and the lane invocation in one build/upload step.
-  Its environment is the only place containing the five secrets.
+  Its environment is the only place containing the five secrets. Before any
+  mutation, capture the exact user search list, default keychain,
+  login-keychain lock state, and login-keychain auto-lock settings in a
+  permission-restricted, secret-free file under the run's temporary directory.
+- Create a run-scoped temporary keychain for ephemeral tooling, make it the
+  temporary user default and search-list head without dropping existing
+  keychains, and keep login available for the preinstalled identity.
+  Temporarily disable/extend login auto-lock only when required for the long
+  archive. Do not run
+  `set-key-partition-list`: pre-existing non-interactive `apple-tool`/`codesign`
+  partition access is a runner prerequisite, verified before the lane, and its
+  absence fails closed.
 - After that step succeeds, move the plain remote marker to the checked-out
   commit using the checkout-provided job token. No annotated schema, lease, or
   separate permission job is added.
-- A final `if: always()` step restores the prior user keychain search list and
-  removes only the per-run temporary keychain and local temporary marker tag.
-  It never removes or rewrites the remote marker. Cleanup requires no signing
-  secret.
-- Any command error fails the run. There is no automatic retry, rollback,
+- A final `if: always()` step uses only the secret-free state file to restore
+  the exact prior search list, default keychain, and auto-lock settings, relock
+  login only when it began locked, and remove the temporary keychain, state
+  file, and local temporary marker tag. It never removes or rewrites the remote
+  marker and references no signing secret.
+- Any command error fails the run. A failure before successful marker movement
+  leaves the remote marker unchanged. If cleanup fails after upload and marker
+  movement, the terminal outcome is `failed_cleanup_after_release` and the
+  marker remains at the uploaded SHA. There is no automatic retry, rollback,
   alternate runner, or fallback credential path.
 
 ## Focused validation scenarios
@@ -171,7 +192,8 @@ workflow_dispatch on current main ───────┘        │
   permissions, concurrency, step conditions, and `always()` cleanup.
 - Reviewer inspection confirms exact automatic SHA checkout, summary-before-
   secrets ordering, all five secrets on one step only, upload-before-marker,
-  marker unchanged on failure, and cleanup on skip/failure/success.
+  captured/restored keychain state without partition-ACL mutation, the two
+  ordered failure outcomes, and cleanup on skip/failure/success.
 
 ## Delivery sequencing
 
@@ -204,15 +226,14 @@ workflow_dispatch on current main ───────┘        │
 
 ## Verification strategy
 
-- Activate `scripts/hooks` and let commit/push run the resolver-selected gates.
-- Focused evidence before commit:
-  `/usr/bin/python3 -m pytest scripts/ci/tests/test_testflight_relevance.py -q`.
+- Activate `scripts/hooks`, stage only the declared paths, and let commit/push
+  run the resolver-selected RepoInfra gate. Confirm its output collected
+  `test_testflight_relevance.py` under the repository-owned Python 3.9 command;
+  do not invoke the focused file or full suite directly, and do not repeat it.
 - Workflow lint: install Homebrew `actionlint` if absent, record
   `actionlint -version`, then run
   `actionlint .github/workflows/testflight.yml`. Planning-time Homebrew reports
   stable `1.7.12`; any unavailable/failed lint is a blocker, not a waiver.
-- Normal hook-selected RepoInfra evidence remains
-  `/usr/bin/python3 -m pytest scripts/ci/tests scripts/context/tests -q`.
 - Confirm resolver ownership, `scripts/context/audit`, task freshness,
   `git diff --check`, and exact final paths.
 - Do not run Xcode tests, host-based tests, or a real upload.
@@ -233,6 +254,8 @@ obtain a fresh green complete gate on the Team Lead-approved refreshed base.
   bootstrap escape. Do not add bootstrap state.
 - Plain marker movement is deliberately not CAS. One concurrency group is the
   accepted boundary; do not reintroduce a permission/state machine.
+- Exact partition ACL round-tripping is unsupported and therefore prohibited;
+  the existing non-interactive signing ACL is a fail-closed runner prerequisite.
 - Actionlint is not currently installed. Fullstack installs the verification
   tool locally and records its version; failure to provision it blocks delivery.
 - The preserved unpublished candidate requires Team Lead recovery before a new

@@ -1,7 +1,8 @@
 # Data Model: Minimal Release Workflow
 
-This feature adds no product schema. It uses one ephemeral candidate, one
-existing Git marker, and one ephemeral relevance result.
+This feature adds no product or durable workflow schema. It uses one ephemeral
+candidate, one existing Git marker, one ephemeral relevance result, and one
+secret-free ephemeral keychain snapshot.
 
 ## ReleaseCandidate
 
@@ -36,17 +37,40 @@ Allowed roots are `Apps/AIDashApp/`, `Packages/AIDashCore/`,
 `Packages/AIDashUI/`, `Packages/DesignKit/`, `Configs/`, `fastlane/`, plus the
 exact root file `project.yml`. Matching is anchored at repository root.
 
+## EphemeralKeychainState
+
+This secret-free, permission-restricted run-scoped file exists only when the
+build/upload path prepares signing state.
+
+| Field | Source | Restore rule |
+|---|---|---|
+| `search_list` | `security list-keychains -d user` before mutation | Restore the exact ordered list |
+| `default_keychain` | `security default-keychain -d user` before mutation | Restore the exact prior default |
+| `login_was_locked` | non-mutating pre-unlock probe | Relock only when true |
+| `login_settings` | `security show-keychain-info` before mutation | Restore timeout/lock-on-sleep exactly |
+| `temporary_keychain` | unique path under the run temp directory | Delete during cleanup |
+| `snapshot_path` | unique path under the run temp directory | Delete during cleanup |
+
+Partition ACLs are not captured or mutated. Existing non-interactive
+`apple-tool`/`codesign` access is a runner prerequisite and fails closed when
+absent. The snapshot contains no password, credential, or signing secret.
+
 ## State flow
 
 ```text
 event -> guard -> exact checkout -> marker diff -> classifier
                                       ├─ irrelevant/no force -> summary + stop
                                       └─ relevant/force -> build+upload
-                                                            ├─ failure -> stop
+                                                            ├─ failure -> stop; marker unchanged
                                                             └─ success -> move marker
-always -----------------------------------------------------> cleanup temp state
+always -----------------------------------------------------> restore/delete temp state
+                                                              ├─ success -> released
+                                                              └─ failure after marker
+                                                                 -> failed_cleanup_after_release;
+                                                                    marker stays advanced
 ```
 
 No queue, cursor, skip record, attempt record, confirmation record, annotated
 marker metadata, recovery entity, version intent, or distribution-proof entity
-exists.
+exists. `EphemeralKeychainState` is deleted by cleanup and is never a durable
+workflow cursor or release record.
