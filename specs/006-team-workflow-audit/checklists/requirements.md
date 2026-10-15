@@ -56,8 +56,8 @@
 - [x] T006's repository-accepted tint is `#E6294D`/`#FF375F`; no DesignKit redispatch or stale `#FF2D55` contract remains.
 - [x] The exact planning commit receiving PASS is the implementation base (or is byte-identically preserved in an approved descendant); current PR base `bdf1435…` alone is not valid.
 - [x] The registered MY-1522 workspace and candidate `121e6cf4e3016bec41b25cb1a34729799fa8f023` are preserved evidence; no implementation continues before exact revised-planning PASS, base pinning, and a fresh Team Lead handoff.
-- [x] T005 remains exactly eleven AIDashCore paths and lands as its own layer commit; T008 owns `DesignTokensFoundationTests.swift` plus the explicit UI mapping/renderer.
+- [x] T005 remains exactly eleven AIDashCore paths as its own layer task scope; T008 remains a distinct eight-path AIDashUI scope and owns `DesignTokensFoundationTests.swift` plus the explicit UI mapping/renderer.
 - [x] T008 removes the candidate's `.teamAudit` exemption and positively proves symbol, classification, and badge totality for the known type.
-- [x] PR #202 review/publication binds the combined T005+T008 head; no T005-only head is publishable or mergeable.
+- [x] PR #202 retains its existing published history and is not judged by one-commit-per-task topology; final review/publication/merge binds a head satisfying both T005 and T008.
 - [x] HTTPS-only artifact and grill entry-point behavior agrees with the repository URL policy.
 - [x] The specification is ready for Plan-stage architecture and contract design.

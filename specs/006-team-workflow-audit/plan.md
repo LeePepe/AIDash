@@ -17,9 +17,10 @@ record receipts only; no layer invokes an audit, changes source state, or
 dispatches remediation. T005 keeps Models as pure Types and implements Team
 Audit URL-policy orchestration in the AIDashCore Validation Service role behind
 the existing `CardPayloadProtocol.validateInvariants()` interface. Recovery
-publishes T005's exact eleven-path Core commit only together with the subsequent
-T008 AIDashUI commit; the combined PR #202 head restores the existing badge
-totality contract and carries the explicit Team Audit renderer.
+retains T005's exact eleven-path Core task scope and T008's distinct eight-path
+AIDashUI task scope. PR #202 keeps its published history; the final reviewed
+head restores the existing badge-totality contract and carries the explicit
+Team Audit renderer.
 
 ## Technical Context
 
@@ -51,7 +52,7 @@ totality contract and carries the explicit Team Audit renderer.
 | II. CLI writes content / App writes events | PASS | aidata publishes through existing CLI/XPC; only AIDashApp appends UserEvent rows |
 | III. Glanceable flat briefing | PASS | latest snapshot appears as one normal container with bounded card parts; no navigation tree |
 | IV/VI. Typed schema and orthogonal card dimensions | PASS | one Core-owned `teamAudit` payload; audit state/priority are content, not size/style chrome |
-| Scope Discipline | PASS | each implementation task owns one resolver leaf and exact files; T005 and T008 remain separate layer commits inside one ordered PR #202 publication unit; sibling exclusions are explicit |
+| Scope Discipline | PASS | each implementation task owns one resolver leaf and exact files; T005 and T008 remain distinct layer task scopes with a T005→T008 dependency; physical commit topology is not acceptance; sibling exclusions are explicit |
 | URL policy | PASS | a Service-role extension applies the unchanged central `URLPolicy`; Models retain opaque strings and never depend upward on Validation |
 | Error handling | PASS | invalid/missing evidence and write failure degrade visibly, never trap |
 | Accessibility/i18n/test coverage | PASS by plan | UI task includes semantic copy, hit targets, previews, action/round-trip tests |
@@ -299,7 +300,7 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | `teamAudit` JSON payload | AIDashCore Types + Validation Service | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash, reference catalog, and explicit finding identity; Service-role protocol witness applies central URL policy without an upward Types dependency; Core before mapping/render/schema |
 | Future CardType fallback | AIDashUI | AIDashCore CardType expansion | T019 compatibility is completed in `bdf1435…`; it is source compatibility only, not a badge waiver for known `teamAudit`; T008 adds explicit rendering and proves an unknown locked Team Audit value reaches the generic `CardRouter` fallback |
 | Classification tint | DesignKit | AIDashUI | T006 is complete at `8716846…` with `#E6294D`/`#FF375F`; T008 consumes it without redispatch or recoloring |
-| Known-card badge totality | AIDashCore `CardType.teamAudit` + DesignKit token | AIDashUI mapping, router, and totality tests | T005 and T008 are separate layer commits, but PR #202 publishes/reviews only their combined head; T008 removes the candidate exemption and adds positive symbol/classification/badge proof |
+| Known-card badge totality | AIDashCore `CardType.teamAudit` + DesignKit token | AIDashUI mapping, router, and totality tests | T005 and T008 are distinct layer task scopes; the final PR #202 head is reviewed only after both are satisfied; T008 removes the candidate exemption and adds positive symbol/classification/badge proof |
 | Audit action intent | AIDashUI | AIDashApp | Core action enum before both; UI interface before App wiring |
 | `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
 | Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore Types + Validation Service + AIDashUI | stable sidecar ID/exact byte hash, typed grill/full-report fields, Service-side mandatory invalid-link rejection, optional invalid-link text through central render policy |
@@ -310,8 +311,8 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 ```text
 Completed history: T006 ✓ + T020 ✓ → T021 ✓ → T019 ✓ (all in bdf1435…)
 Active recovery: exact revised-plan PASS + published base pin → Team Lead handoff
-                 → T005 exact 11-path Core commit → T008 UI commit
-                 → review/publish combined PR #202 head
+                 → T005 exact 11-path Core scope → T008 8-path UI scope
+                 → review/publish final PR #202 head
 US1 data: T001 → T002 → T003 → T004 → T007
 US1 app:  T005 ─┬→ T007
                 ├→ T008 (T006 already complete)
@@ -350,7 +351,7 @@ do not overlap and whose blocking contract has landed.
   focused diagnostic exception after a concrete failure.
 - Exact implementation SHA must match local HEAD, remote branch, and PR head
   before independent implementation review.
-- T005 verification inspects the committed surface for exactly eleven paths,
+- T005 verification inspects its scoped change set for exactly eleven paths,
   proves Models contains no `URLPolicy`/Validation reference, and exercises
   both `CardType.validate` and production `SchemaValidator.validateCardPut`
   through the Service-role protocol witness. Required fixtures include exact
@@ -365,8 +366,9 @@ do not overlap and whose blocking contract has landed.
   assertions, consumes `checkmark.shield.fill` and the completed T006 token,
   and proves the AIDashUI-owned half of FR-025: the same unknown locked Team
   Audit value renders the existing generic `CardRouter` fallback.
-- Independent implementation review binds the combined T005+T008 PR #202 head.
-  The intermediate T005-only head is neither published nor mergeable.
+- Independent implementation review binds the final T005+T008 PR #202 head.
+  Existing partial published history is retained, but a final review,
+  publication, or merge candidate omitting T008 is invalid.
 
 ## Completed history and active T005/T008 recovery
 
@@ -388,18 +390,20 @@ The active edge is:
    without discarding candidate evidence.
 3. T005 proceeds as one AIDashCore layer task with the exact eleven-file
    allowlist. `SchemaValidator.swift` and `URLPolicy.swift` remain unchanged.
-4. Without publishing the intermediate T005-only head, T008 proceeds as one
-   separate AIDashUI layer commit. It removes the temporary totality-test
+4. After the T005 dependency is satisfied, T008 proceeds as one distinct
+   eight-path AIDashUI layer task. It removes the temporary totality-test
    exemption, adds positive known-card badge/classification assertions, and
    supplies the already specified renderer/mapping/fallback proof.
 5. Independent implementation review and publication bind the combined
-   T005+T008 head of PR #202.
+   T005+T008 head of PR #202. Its existing published history is retained and
+   is not judged by one-commit-per-task topology.
 
 Base `bdf1435…` alone is not a valid implementation base because it
 does not contain FR-020–FR-025. Candidate
 `121e6cf4e3016bec41b25cb1a34729799fa8f023` remains unmutated/unpublished until
-the fresh handoff; Team Lead reconciles it to the reviewed two-commit sequence
-without publishing or re-reviewing its stale twelve-path tree.
+the fresh handoff; Team Lead reconciles it to the reviewed task scopes while
+retaining PR #202 history and without publishing or re-reviewing its stale
+twelve-path tree.
 
 ## Complexity Tracking
 

@@ -122,8 +122,8 @@ overview renderer; default collection performs no audit import or invocation.
 | Functional acceptance | FR-020–FR-025 and every Core-owned row of the T005 acceptance matrix pass: axis-context decoding including all three `insufficientEvidence` cases; unique/catalog-resolved finding/case/event/evidence/subject/revision/artifact references; canonical lineage hash and 40-hex Git SHA-1 merge OID; five-role primary-round, repeat, breakdown, and supporting-evidence reconciliation; unique priority-aware artifacts; exact kind/ID/hash/URL/sidecar full-report binding from overview or artifacts; optional-only typed externalization with P2/info chains preserved; exact equality for all eight variants; public initializers; structured Core unknown-enum error propagation; unsafe optional URL-string preservation; CardType 10→11; no size downgrade; exact received valid UTF-8 262,144 acceptance and mandatory 262,145 rejection |
 | Architecture acceptance | `TeamAuditPayload.swift` contains no `URLPolicy` or other Validation-role reference. It exposes an internal structural helper; `Validation/TeamAuditPayloadValidation.swift` supplies the public protocol witness and internal URL traversal. Existing `CardType.validate`, `SchemaValidator.validateCardPut`, `SchemaValidator.swift`, and `URLPolicy.swift` behavior/interface remain unchanged. |
 | Planning-base / recovery gate | The implementation base is the exact published planning commit cited by the fresh AI Reviewer `PASS`; current PR base `bdf1435fe7d3d9c4da43ed4297cbc24482447b46` alone is not valid. Team Lead must pin that reviewed revision (or an approved descendant with byte-identical nine artifact blobs) in the handoff and delivery metadata before Fullstack continues. Preserve the registered delivery workspace and candidate `121e6cf4e3016bec41b25cb1a34729799fa8f023` as immutable review evidence until that recovery handoff; do not publish or re-review its stale twelve-path tree. |
-| Exact verification | Normal `git commit` with configured hooks; hook-selected AIDashCore Swift build/test gates must exit 0. The T005 commit surface must equal the eleven listed paths; focused architecture proof finds no Models→Validation reference; Service tests exercise `CardType.validate` and production `SchemaValidator` error fields. Keep this Core commit unpublished until T008 lands as the next layer-scoped commit; review/push/publication bind the combined PR #202 head. A focused resolver rerun is diagnostic only after an emitted hook failure. |
-| Dependencies / slice | Active edge: exact revised-plan publication/base pin → Team Lead recovery handoff → T005 Core commit → T008 UI commit → combined-head review/publication. Historical T006/T020/T021/T019 are complete in the base and are not schedulable dependencies; US1/US2 contract foundation. |
+| Exact verification | Normal `git commit` with configured hooks; hook-selected AIDashCore Swift build/test gates must exit 0. The T005 task scope must equal the eleven listed paths; focused architecture proof finds no Models→Validation reference; Service tests exercise `CardType.validate` and production `SchemaValidator` error fields. PR #202 retains its published history; final review/push/publication bind a head satisfying both T005 and T008, not a one-commit-per-task topology. A focused resolver rerun is diagnostic only after an emitted hook failure. |
+| Dependencies / slice | Active edge: exact revised-plan publication/base pin → Team Lead recovery handoff → T005 Core scope → T008 UI scope → final-head review/publication. Historical T006/T020/T021/T019 are complete in the base and are not schedulable dependencies; US1/US2 contract foundation. |
 
 - [x] **T006 [P] [US1]** Add `Classification.teamAudit` in `Packages/DesignKit/Sources/DesignKit/Color/ColorSystem.swift`. **Completed by PR #200 / `8716846ac42b48bfd89b9a09d5dd05fc4819025d`.**
 
@@ -158,7 +158,7 @@ overview renderer; default collection performs no audit import or invocation.
 | Files NOT to touch | Packages/AIDashUI/Sources/AIDashUI/CardView/AuditActionEnvironment.swift (T014); existing card renderers; Packages/AIDashCore/**; Packages/DesignKit/**; Apps/** |
 | Interface / contract | Render the US1 `overview`, mandatory P0/P1 `findings`, and mandatory `artifacts` sections read-only; map the known `teamAudit` type to `Classification.teamAudit` and `checkmark.shield.fill`; sidecar/snapshot provenance and optional URLs use Core policy; symbol/tokens remain in DesignKit/AIDashUI; no persistence |
 | Functional acceptance | Remove the preserved candidate's `.teamAudit` totality-test exemption and positively assert its symbol, classification, and badge alongside every other known non-`sectionHeader` type; scope/cohort-or-cursors/axes/limitations and L5-computed coverage render, including independently matched P0/P1-finding and mandatory-link count pairs; mandatory findings show explicit subject/responsibility; mandatory artifacts are direct validated links with sidecar identity/hash; collision summary retains parent; a `teamAudit` payload containing an unknown locked enum produces the existing generic `CardRouter` fallback in `CardRouterTests`; invalid mandatory entries never reach a published card; size/style orthogonality, localization, accessibility, and ≥2 previews cover baseline/incremental/rejected fallback |
-| Exact verification | Land as the separate AIDashUI commit immediately after T005, then commit/push normally with configured hooks; hook-selected AIDashUI Swift build/test gates must exit 0, including positive `DesignTokensFoundationTests` totality proof. Cross-language contract verification is deferred to assembled T018. Independent review and publication bind the combined T005+T008 PR #202 head; no T005-only head is publishable or mergeable. |
+| Exact verification | After the T005 dependency is satisfied, complete the distinct AIDashUI scope and commit/push normally with configured hooks; hook-selected AIDashUI Swift build/test gates must exit 0, including positive `DesignTokensFoundationTests` totality proof. Cross-language contract verification is deferred to assembled T018. Independent review and publication bind the final PR #202 head satisfying both T005 and T008; existing partial history is retained, but a final candidate omitting T008 is invalid. |
 | Dependencies / slice | T005 plus completed T006; required PR #202 publication barrier and US1 renderer |
 
 - [ ] **T009 [P] [US1]** Advertise the `teamAudit` schema in `Apps/AIDashApp/Sources/XPCService/XPCPayloadSchemas.swift`.
@@ -324,8 +324,8 @@ adapter is assembled.
 ```text
 Completed history: T006 ✓ + T020 ✓ → T021 ✓ → T019 ✓ (all present in bdf1435…)
 Active recovery: exact revised-plan PASS + published base pin → Team Lead handoff
-                 → T005 exact 11-path Core commit → T008 UI commit
-                 → review/publish combined PR #202 head
+                 → T005 exact 11-path Core scope → T008 8-path UI scope
+                 → review/publish final PR #202 head
 US1 data: T001 → T002 → T003 → T004 → T007
 US1 app:  T005 ─┬→ T007
                 ├→ T008 (T006 already complete)
@@ -355,8 +355,10 @@ T006, T020, T021, and T019 are completed history and MUST NOT be dispatched
 again. Before T005, Team Lead pins the exact planning commit named by the fresh PASS
 as the implementation base (or an approved descendant with byte-identical
 artifact blobs) and reconciles the preserved delivery workspace under the
-workspace recovery protocol. T005 and T008 then land as separate layer commits;
-only their combined PR #202 head proceeds to independent review/publication.
+workspace recovery protocol. T005 and T008 then proceed as distinct layer task
+scopes in dependency order; physical commit count and order are not acceptance.
+Only a final PR #202 head satisfying both proceeds to independent
+review/publication.
 
 ## Acceptance Coverage
 
@@ -426,10 +428,12 @@ only their combined PR #202 head proceeds to independent review/publication.
   keeps `SchemaValidator.swift`/`URLPolicy.swift` unchanged, contains no
   Models→Validation reference, and satisfies every Core-owned FR-020–FR-025
   proof plus every T005 row of `contracts/t005-acceptance-matrix.md`.
-- T008 lands immediately after T005 as a separate AIDashUI commit, owns the
-  rendered fallback and positive known-card badge/classification totality
-  proofs, and removes the candidate exemption. No T005-only head is published
-  or merged; independent review binds the combined T005+T008 PR #202 head.
+- T008 proceeds after the T005 dependency is satisfied as a distinct eight-path
+  AIDashUI task scope, owns the rendered fallback and positive known-card
+  badge/classification totality proofs, and removes the candidate exemption.
+  PR #202 retains its existing published history; independent review binds a
+  final head satisfying both T005 and T008, regardless of physical commit
+  topology.
 - The registered MY-1522 delivery workspace and candidate
   `121e6cf4e3016bec41b25cb1a34729799fa8f023` remain preserved evidence until
   exact revised-planning PASS, planning-base pin, and fresh Team Lead handoff;

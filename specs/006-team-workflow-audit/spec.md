@@ -45,10 +45,12 @@ execution surface.
   or changing its public interface.
 - T019's future-case fallback remains source compatibility only; it does not
   waive the badge/classification contract for the known `teamAudit` case.
-- T005 remains an exact eleven-path AIDashCore task/commit. T008 remains a
-  separate AIDashUI task/commit, and PR #202 publishes only their combined
-  head after T008 supplies the explicit renderer, badge mapping, and positive
-  totality proof. No T005-only head is publishable or mergeable.
+- T005 remains an exact eleven-path AIDashCore task scope. T008 remains a
+  distinct eight-path AIDashUI task scope and depends on T005. PR #202 retains
+  its existing published history; physical commit count and order are not
+  acceptance criteria. The final independently reviewed, published, and
+  mergeable head must satisfy both scopes after T008 supplies the explicit
+  renderer, badge mapping, and positive totality proof.
 - The accepted T006 tint pair remains `#E6294D`/`#FF375F`; planning does not
   redispatch or recolor the merged DesignKit work.
 
