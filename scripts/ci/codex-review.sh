@@ -236,7 +236,7 @@ echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED_
 # 那种"红得说不清原因"。
 CLI_RC=0
 run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
-    python3 "$REPO_ROOT/scripts/ci/review-raven.py" "$CODEX_BIN" \
+    "$REPO_ROOT/scripts/ci/review-python311" "$REPO_ROOT/scripts/ci/review-raven.py" "$CODEX_BIN" \
     --output-schema "$SCHEMA_FILE" \
     -o "$OUT_FILE" \
     --skip-git-repo-check \

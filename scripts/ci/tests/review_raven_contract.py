@@ -158,7 +158,11 @@ class RavenRoutingTests(unittest.TestCase):
 
     def test_caller_keeps_isolation_and_uses_raven_launcher(self):
         source = (CI / "codex-review.sh").read_text(encoding="utf-8")
-        self.assertIn('python3 "$REPO_ROOT/scripts/ci/review-raven.py" "$CODEX_BIN"', source)
+        self.assertIn(
+            '"$REPO_ROOT/scripts/ci/review-python311" '
+            '"$REPO_ROOT/scripts/ci/review-raven.py" "$CODEX_BIN"',
+            source,
+        )
         self.assertIn('CODEX_HOME="${CODEX_REVIEW_HOME:-$HOME/.codex-review}"', source)
         self.assertIn("-c sandbox_mode=read-only", source)
         self.assertIn("-c approval_policy=never", source)
