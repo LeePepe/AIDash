@@ -404,18 +404,23 @@ class RavenRoutingTests(unittest.TestCase):
         ]
         for bad in bad_payloads:
             with self.subTest(bad=bad):
-                result, capture, _, _, posted_comments = self.run_actual_caller(payload_response=bad)
+                result, capture, _, payload, posted_comments = self.run_actual_caller(payload_response=bad)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn("verdict=pass", result.stdout)
                 # Ensure rejected output content is sanitized and never dumped to process output
                 self.assertNotIn(sentinel_secret, result.stdout + result.stderr)
-                # Ensure sticky comment is posted with sanitized diagnostic and no attacker secret or pass rendering
+                # Ensure sticky comment is posted with sanitized diagnostic and no attacker secret, prompt payload, or pass rendering
                 self.assertTrue(posted_comments)
                 posted_bodies = [c["body"] for c in posted_comments]
+                expected_diagnostic = (
+                    "<!-- aidash-codex-review -->\n"
+                    "⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+                )
                 for posted_body in posted_bodies:
+                    self.assertEqual(posted_body, expected_diagnostic)
                     self.assertNotIn("✅ codex review:通过", posted_body)
                     self.assertNotIn(sentinel_secret, posted_body)
-                self.assertTrue(any("自动 review 输出无法解析" in body for body in posted_bodies))
+                    self.assertNotIn(payload, posted_body)
 
     def test_actual_caller_rejects_state_inconsistent_verdicts(self):
         sentinel_secret = "STATE_INCONSISTENT_SECRET_SENTINEL_456"
@@ -428,31 +433,66 @@ class RavenRoutingTests(unittest.TestCase):
         ]
         for bad in inconsistent_payloads:
             with self.subTest(bad=bad):
-                result, capture, _, _, posted_comments = self.run_actual_caller(payload_response=bad)
+                result, capture, _, payload, posted_comments = self.run_actual_caller(payload_response=bad)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("verdict schema 或 state consistency 校验失败", result.stdout + result.stderr)
                 self.assertNotIn("verdict=pass", result.stdout)
                 self.assertNotIn(sentinel_secret, result.stdout + result.stderr)
                 self.assertTrue(posted_comments)
                 posted_bodies = [c["body"] for c in posted_comments]
+                expected_diagnostic = (
+                    "<!-- aidash-codex-review -->\n"
+                    "⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+                )
                 for posted_body in posted_bodies:
+                    self.assertEqual(posted_body, expected_diagnostic)
                     self.assertNotIn("✅ codex review:通过", posted_body)
                     self.assertNotIn(sentinel_secret, posted_body)
-                self.assertTrue(any("自动 review 输出无法解析" in body for body in posted_bodies))
+                    self.assertNotIn(payload, posted_body)
 
     def test_actual_caller_rejects_unparsable_output_sanitized(self):
         sentinel = "UNPARSABLE_SECRET_IN_PROMPT_OR_DIFF"
-        result, capture, _, _, posted_comments = self.run_actual_caller(payload_response=f"not json at all {sentinel}")
+        result, capture, _, payload, posted_comments = self.run_actual_caller(payload_response=f"not json at all {sentinel}")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("无法解析 verdict", result.stdout + result.stderr)
         self.assertNotIn("verdict=pass", result.stdout)
         self.assertNotIn(sentinel, result.stdout + result.stderr)
         self.assertTrue(posted_comments)
         posted_bodies = [c["body"] for c in posted_comments]
+        expected_diagnostic = (
+            "<!-- aidash-codex-review -->\n"
+            "⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        )
         for posted_body in posted_bodies:
+            self.assertEqual(posted_body, expected_diagnostic)
             self.assertNotIn("✅ codex review:通过", posted_body)
             self.assertNotIn(sentinel, posted_body)
-        self.assertTrue(any("自动 review 输出无法解析" in body for body in posted_bodies))
+            self.assertNotIn(payload, posted_body)
+
+    def test_actual_caller_contaminated_body_followed_by_sanitized_fails(self):
+        expected_diagnostic = (
+            "<!-- aidash-codex-review -->\n"
+            "⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+        )
+        contaminated_comments = [
+            {"argv": ["fake", "post"], "body": "contaminated payload leaking secret or diff"},
+            {"argv": ["fake", "patch"], "body": expected_diagnostic},
+        ]
+        # Validating the strict contract: every body must equal expected_diagnostic and contain no contaminated secret/pass
+        def validate_captured_bodies(comments, sentinel_secret="secret", prompt_payload="diff"):
+            bodies = [c["body"] for c in comments]
+            for body in bodies:
+                if body != expected_diagnostic:
+                    raise AssertionError(f"Body {body!r} does not equal expected diagnostic {expected_diagnostic!r}")
+                if "✅ codex review:通过" in body:
+                    raise AssertionError("Pass rendering found in body")
+                if sentinel_secret in body:
+                    raise AssertionError("Sentinel secret found in body")
+                if prompt_payload in body:
+                    raise AssertionError("Prompt payload found in body")
+
+        with self.assertRaises(AssertionError):
+            validate_captured_bodies(contaminated_comments, sentinel_secret="secret", prompt_payload="diff")
 
     def test_actual_caller_empty_output_fails_closed(self):
         result, capture, _, _, posted_comments = self.run_actual_caller(empty_output=True)
