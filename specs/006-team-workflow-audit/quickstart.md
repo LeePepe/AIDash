@@ -64,6 +64,11 @@ through the hook signal; it is not part of the normal task acceptance path.
 - Baseline and incremental overview parts render different cohort/cursor
   sections, typed evidence coverage, locked axis-specific verdicts, and
   independent reconciled axes.
+- A baseline with zero through 19 case IDs, including an empty ordered cohort,
+  decodes unchanged only with a non-empty top-level snapshot limitation; the
+  same baseline without that limitation rejects, while a normal 20-case control
+  requires no cohort-size limitation. No fixture pads, fabricates, reorders, or
+  re-baselines cases.
 - Workflow Conformance, Workflow Fitness, and Outcome Integrity each
   round-trip their own `insufficientEvidence` value using the enclosing axis.
 - Replay and overlap records deduplicate by stable identity; hash collision
@@ -94,6 +99,12 @@ through the hook signal; it is not part of the normal task acceptance path.
   bound finding.
 - Arbitrary-size syntactically valid JSON integers return the exact field-valid
   value or structured rejection; no numeric conversion exception escapes.
+- Parameterized strict-schema fixtures mutate every declared snapshot/sidecar
+  object kind one field at a time: omitted required keys (including required
+  nullable keys), unexpected nulls, wrong primitive/container types, duplicate
+  members, and boolean/float/numeric-string integer impostors all reject before
+  model construction. Declared nullable values and optional grill omissions
+  remain positive controls.
 - Missing/unsafe mandatory artifact URLs reject publication; unsafe optional
   artifact/grill URLs are text; valid HTTPS URLs are actionable.
 - Finding subject/responsibility and exact artifact-sidecar ID/content hash
@@ -129,7 +140,7 @@ witness and is exercised through both `CardType.validate` and
 `URLPolicy.swift` remain unchanged.
 
 The complete T022–T026 interface matrix is
-`contracts/t002-acceptance-matrix.md`; T022 directly owns D01–D20 and T025
+`contracts/t002-acceptance-matrix.md`; T022 directly owns D01–D26 and T025
 repeats them through neutral bundles. `contracts/l1l2-normalized-output.md`
 is the only T026 → T003 data seam.
 

@@ -26,7 +26,7 @@
 - [x] T005 maps type, scalar, cross-field, referential, round-trip, public-API, fallback, and exact 262,144/262,145-byte proofs to its exact eleven-file Types+Service allowlist.
 - [x] FR-020–FR-025 stabilize every remaining Round 2 correctness/proof finding and map each proof to its owning Core, aidata, or AIDashUI task/test files.
 - [x] The former executable T002 is coordination-only; T022–T026 form a serial contract-first AidataL1L2 graph with non-overlapping files and interfaces.
-- [x] T022 directly proves D18–D20 and T025 repeats them with neutral bundles: exact timeline order/back-pointers/UTC chronology, complete artifact event/case/finding ownership, and structured arbitrary-size integer handling.
+- [x] T022 directly proves D18–D26 and T025 repeats them with neutral bundles: exact timeline order/back-pointers/UTC chronology, complete artifact event/case/finding ownership, structured arbitrary-size integer handling, limited empty/short baseline behavior, and contract-wide required-key/null/type/duplicate/integer-impostor rejection.
 - [x] `contracts/team-audit-snapshot-v1.md` pins the complete raw `snapshot.json` version, nested key allowlists, JSON types/nullability, and locked vocabularies; T022 need not infer a producer schema.
 - [x] `TeamAuditIdentityIndex` is derived and rebuildable from authoritative append-only raw history; cache-only state never grants acceptance.
 - [x] `ArtifactManifestEntryWire` is distinct from enriched normalized artifacts, and the canonical raw entry alone defines the 65,536/65,537-byte gate and artifact identity hash.

@@ -37,8 +37,9 @@ Each immutable bundle is a directory containing:
 `contracts/team-audit-snapshot-v1.md`. Its envelope declares
 `schemaVersion: "team-workflow-audit/snapshot-v1"`; every object uses the exact
 required key allowlist, JSON type/nullability, and vocabulary declared there.
-Unknown versions, aliases, omitted nullable keys, duplicate members, and
-unlisted nested keys reject rather than falling back to producer inference.
+Unknown versions, aliases, omitted required or nullable keys, unexpected nulls,
+wrong JSON types, duplicate members, integer impostors, and unlisted nested keys
+reject rather than falling back to producer inference or coercion.
 `artifacts.json` is an AIDash portability extension with this typed envelope:
 
 ```json
@@ -184,6 +185,14 @@ The complete observable proof is locked in
 - Arbitrary-size syntactically valid JSON integer fixtures return an exact
   field-valid decoded value or structured rejection without an escaped
   `OverflowError`, `ValueError`, or implementation numeric exception.
+- Empty and 1–19-case baseline fixtures decode unchanged only with a non-empty
+  top-level snapshot limitation; the same inputs without it reject, and no case
+  is padded, fabricated, reordered, or re-baselined.
+- Contract-wide parameterized mutations cover every declared snapshot/sidecar
+  object kind: required-key omission, unexpected null, wrong JSON type,
+  duplicate member, and boolean/float/numeric-string integer impostors reject
+  before model construction. Declared nullable fields and optional grill
+  omissions are positive controls.
 - Missing/unsafe mandatory URLs, hashes, or required references reject
   publication input; unsafe optional artifact/grill strings remain present
   with `nonActionable` status, while valid HTTPS plus host is

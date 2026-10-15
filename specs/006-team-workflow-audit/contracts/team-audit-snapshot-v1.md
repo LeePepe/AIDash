@@ -57,14 +57,16 @@ fabricate an absent object or translate an empty object into null.
 | AuditScope | `ownerLabel: string`; `projectReference: string`; `repositoryReference: string` |
 | InstructionVersion | `sourceID: string`; `updatedAt: UTC string`; `sha256: SHA-256 string` |
 | EvidenceCoverage | `requiredEvidenceCount: integer >= 0`; `availableEvidenceCount: integer >= 0`; `missingEvidenceCount: integer >= 0`; `redactedEvidenceCount: integer >= 0`; `limitations: string[]` |
-| AuditCohort | `cohortID: string`; `caseIDs: string[]` (non-empty, source ordered, unique) |
+| AuditCohort | `cohortID: string`; `caseIDs: string[]` (may be empty; source ordered and unique when populated) |
 | AuditCursor | `sourceID: string`; `cursorID: string`; `timestamp: UTC string`; `overlapHours: integer >= 0` |
 
 Evidence coverage requires
 `availableEvidenceCount + missingEvidenceCount == requiredEvidenceCount` and
 `redactedEvidenceCount <= availableEvidenceCount`. Missing/redacted evidence
-requires a limitation. A baseline cohort with fewer than 20 cases also requires
-a limitation.
+requires a limitation. A baseline cohort with zero through 19 case IDs,
+including `caseIDs: []`, is accepted only when the top-level snapshot
+`limitations` array is non-empty; otherwise it rejects. The decoder never pads,
+fabricates, reorders, or re-baselines cohort cases.
 
 ## Axis objects
 

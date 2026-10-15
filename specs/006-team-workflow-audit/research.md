@@ -311,13 +311,16 @@ reader → T024 recoverable identity index → T025 neutral matrix → T026 thin
 wiring. T003 and T016 consume only T026. T023 does not advance until T022 is
 terminal and accepted through the existing Team Lead gate.
 
-T022 directly proves D18–D20: exact case event/attempt source order, matching
+T022 directly proves D18–D26: exact case event/attempt source order, matching
 back-pointers, UTC timestamps and non-decreasing chronology with source-order
 ties; complete artifact event reference, non-null bound-case ownership, and
 finding-chain event/case membership; and arbitrary-size valid JSON integers
 that return an exact field-valid value or structured rejection with no escaped
-numeric exception. T025 repeats those proofs through neutral bundles. No
-existing test is deleted or weakened.
+numeric exception. The expanded rows also prove the limited empty/short
+baseline and parameterize required-key, nullability, JSON-type,
+duplicate-member, and integer-impostor rejection across the complete raw
+contract. T025 repeats those proofs through neutral bundles. No existing test
+is deleted or weakened.
 
 **Rationale**: The accepted package contains the reviewed module boundaries,
 source-clean contract, restart semantics, and vertical task graph needed to
@@ -354,7 +357,14 @@ package described semantic models but did not expose a complete raw schema;
 that left the strict decoder unable to implement exact nested allowlists
 without invention. A repository-local versioned contract makes the boundary
 available to implementation and exact-revision review while preserving the
-accepted T022 scope and its D18–D20 acceptance.
+accepted T022 scope and its expanded D18–D26 acceptance.
+
+The contract permits an empty baseline cohort only as the zero-case instance
+of the existing incomplete-baseline rule: the top-level snapshot limitation is
+mandatory, and the decoder never pads, fabricates, reorders, or re-baselines
+cases. D22–D26 turn every contract-wide strict-schema category into a
+parameterized direct T022 proof and a neutral-bundle T025 repeat rather than
+letting implementation infer how broadly the rule applies.
 
 **Alternatives rejected**:
 

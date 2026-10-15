@@ -56,9 +56,12 @@ fields, aliases, defaults, or producer-model inference.
 - Incremental overlap replay deduplicates events by stable source identity; it
   does not modify the baseline cohort.
 
-`AuditCohort` contains a non-empty stable `cohortID` and the source-ordered,
-unique stable `caseIDs`; it is never collapsed into a display string. A cohort
-with fewer than the normal 20 eligible cases requires an explicit limitation.
+`AuditCohort` contains a non-empty stable `cohortID` and a required,
+source-ordered, unique stable `caseIDs` array that may be empty; it is never
+collapsed into a display string. A cohort with zero through 19 eligible cases,
+including an empty cohort, is accepted only when the top-level snapshot
+`limitations` array is non-empty. The decoder never pads, fabricates, reorders,
+or re-baselines cohort cases.
 `AuditCursor` contains non-empty `sourceID` and `cursorID`, a UTC timestamp,
 and non-negative `overlapHours`; source IDs are unique within an overview.
 
