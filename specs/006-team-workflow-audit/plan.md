@@ -16,7 +16,10 @@ and remediation approval reuse the existing append-only UserEvent seam and
 record receipts only; no layer invokes an audit, changes source state, or
 dispatches remediation. T005 keeps Models as pure Types and implements Team
 Audit URL-policy orchestration in the AIDashCore Validation Service role behind
-the existing `CardPayloadProtocol.validateInvariants()` interface.
+the existing `CardPayloadProtocol.validateInvariants()` interface. Recovery
+publishes T005's exact eleven-path Core commit only together with the subsequent
+T008 AIDashUI commit; the combined PR #202 head restores the existing badge
+totality contract and carries the explicit Team Audit renderer.
 
 ## Technical Context
 
@@ -48,7 +51,7 @@ the existing `CardPayloadProtocol.validateInvariants()` interface.
 | II. CLI writes content / App writes events | PASS | aidata publishes through existing CLI/XPC; only AIDashApp appends UserEvent rows |
 | III. Glanceable flat briefing | PASS | latest snapshot appears as one normal container with bounded card parts; no navigation tree |
 | IV/VI. Typed schema and orthogonal card dimensions | PASS | one Core-owned `teamAudit` payload; audit state/priority are content, not size/style chrome |
-| Scope Discipline | PASS | each implementation task owns one resolver leaf and exact files; sibling exclusions are explicit |
+| Scope Discipline | PASS | each implementation task owns one resolver leaf and exact files; T005 and T008 remain separate layer commits inside one ordered PR #202 publication unit; sibling exclusions are explicit |
 | URL policy | PASS | a Service-role extension applies the unchanged central `URLPolicy`; Models retain opaque strings and never depend upward on Validation |
 | Error handling | PASS | invalid/missing evidence and write failure degrade visibly, never trap |
 | Accessibility/i18n/test coverage | PASS by plan | UI task includes semantic copy, hit targets, previews, action/round-trip tests |
@@ -62,7 +65,10 @@ declared intra-layer direction: the Service-role protocol witness depends on
 Types-owned `TeamAuditPayload`, while Models reference no Validation symbol.
 No package dependency direction is reversed, no new persistence authority or
 dependency is introduced, and every cross-layer behavior is represented by a
-contract plus dependency edge.
+contract plus dependency edge. T006 is completed repository history; the
+active `T005 → T008 → combined-head review/publication` edge prevents a known
+card type from passing through an unbadged published state without broadening
+either task's layer boundary.
 
 ## Project Structure
 
@@ -235,7 +241,10 @@ report resolves through its artifact catalog entry without another card.
 
 `AidataFoundation → AidataL1L2 → AidataL3 → AidataL4 → AidataL5 → AIDashCore → DesignKit → AIDashUI → AIDashApp schema advertisement`
 
-AIDashUI forward compatibility is already present in parent `fdace13d…`.
+AIDashUI future-case source compatibility is already present in current base
+`bdf1435…`, and DesignKit's Team Audit classification is already present from
+T006/PR #200 with `#E6294D`/`#FF375F`. Neither is a badge-totality waiver for a
+known `teamAudit` case.
 AidataL1L2 validates canonical lineage and source identities; L3 preserves
 catalog facts; L4 emits required catalog inputs; L5 waits for L4 and Core,
 constructs each part's catalog, computes published/omitted/externalized results
@@ -288,8 +297,9 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 | Named audit query bundles | AidataL4 | AidataL5 | L4 exposes immutable required entities/counts and optional facts only; L5 alone computes final publication coverage after packing |
 | Snapshot reference catalog | AidataL1L2/L3 identity facts → AidataL4 catalog inputs → AidataL5 per-part catalog | AIDashCore validation + AIDashUI rendering | T002/T003 preserve identity/priority/artifact bindings; T004/T010 query them; T007/T011 pack them; T005 validates; T008/T012 consume rendered results |
 | `teamAudit` JSON payload | AIDashCore Types + Validation Service | AidataL5, AIDashUI, AIDashApp schema advertisement, generic CLI | Payload carries snapshot + sidecar identity/hash, reference catalog, and explicit finding identity; Service-role protocol witness applies central URL policy without an upward Types dependency; Core before mapping/render/schema |
-| Future CardType fallback | AIDashUI | AIDashCore CardType expansion | T019 compatibility is completed in `fdace13d…`; T008 adds explicit rendering and proves an unknown locked Team Audit value reaches the generic `CardRouter` fallback |
-| Classification tint | DesignKit | AIDashUI | DesignKit before final UI renderer |
+| Future CardType fallback | AIDashUI | AIDashCore CardType expansion | T019 compatibility is completed in `bdf1435…`; it is source compatibility only, not a badge waiver for known `teamAudit`; T008 adds explicit rendering and proves an unknown locked Team Audit value reaches the generic `CardRouter` fallback |
+| Classification tint | DesignKit | AIDashUI | T006 is complete at `8716846…` with `#E6294D`/`#FF375F`; T008 consumes it without redispatch or recoloring |
+| Known-card badge totality | AIDashCore `CardType.teamAudit` + DesignKit token | AIDashUI mapping, router, and totality tests | T005 and T008 are separate layer commits, but PR #202 publishes/reviews only their combined head; T008 removes the candidate exemption and adds positive symbol/classification/badge proof |
 | Audit action intent | AIDashUI | AIDashApp | Core action enum before both; UI interface before App wiring |
 | `UserEvent` audit actions | AIDashApp | aidashCLI events pull → AidataL1L2 | Core enum before App, CLI filter, and adapter normalization |
 | Hosted artifact sidecar | AidataL1L2/L3/L4/L5 | AIDashCore Types + Validation Service + AIDashUI | stable sidecar ID/exact byte hash, typed grill/full-report fields, Service-side mandatory invalid-link rejection, optional invalid-link text through central render policy |
@@ -298,11 +308,13 @@ action normalization, immutable-snapshot comparison, and zero-dispatch spies.
 ## Dependency Graph
 
 ```text
-Completed history: T020 ✓ → T021 ✓ → T019 ✓ (all in fdace13d…)
-Active recovery: exact revised-plan PASS + published base pin → Team Lead handoff → T005
+Completed history: T006 ✓ + T020 ✓ → T021 ✓ → T019 ✓ (all in bdf1435…)
+Active recovery: exact revised-plan PASS + published base pin → Team Lead handoff
+                 → T005 exact 11-path Core commit → T008 UI commit
+                 → review/publish combined PR #202 head
 US1 data: T001 → T002 → T003 → T004 → T007
 US1 app:  T005 ─┬→ T007
-                ├→ T008 ← T006
+                ├→ T008 (T006 already complete)
                 └→ T009
 
 US2 data: T004 → T010 → T011 (T011 also waits for T007)
@@ -348,32 +360,46 @@ do not overlap and whose blocking contract has landed.
   behavior, overview/artifact full-report catalog resolution, structured Core
   unknown-value propagation, unsafe optional-string preservation, and exact
   262,144/262,145 valid mandatory payload bytes.
-- T008 proves the AIDashUI-owned half of FR-025: the same unknown locked Team
+- T008 verification owns `DesignTokensFoundationTests.swift`, replaces the
+  candidate's `.teamAudit` exemption with positive symbol/classification/badge
+  assertions, consumes `checkmark.shield.fill` and the completed T006 token,
+  and proves the AIDashUI-owned half of FR-025: the same unknown locked Team
   Audit value renders the existing generic `CardRouter` fallback.
+- Independent implementation review binds the combined T005+T008 PR #202 head.
+  The intermediate T005-only head is neither published nor mergeable.
 
-## Completed history and active T005 recovery
+## Completed history and active T005/T008 recovery
 
-T020, T021, and T019 are complete historical prerequisites: PR #204 delivered
-the RepoInfra supervisor, PR #210 delivered the planning/constitution package,
-and PR #215 delivered AIDashUI compatibility. All are present in parent
-`fdace13d20ee0b28759c4853c82445fd4d913dcc` and MUST NOT be dispatched again.
+T006, T020, T021, and T019 are complete historical prerequisites: PR #200 /
+`8716846ac42b48bfd89b9a09d5dd05fc4819025d` delivered the calibrated DesignKit
+classification, PR #204 delivered the RepoInfra supervisor, PR #210 delivered
+the planning/constitution package, and PR #215 delivered AIDashUI future-case
+compatibility. All are present in current base
+`bdf1435fe7d3d9c4da43ed4297cbc24482447b46` and MUST NOT be dispatched again.
 Rejected historical heads remain evidence only.
 
 The active edge is:
 
 1. Publish the revised planning commit and obtain AI Reviewer `PASS` on that
    exact SHA and its nine artifact blobs.
-2. Team Lead pins that reviewed commit as the T005 implementation base—or an
+2. Team Lead pins that reviewed commit as the implementation base—or an
    explicitly approved descendant with byte-identical artifact blobs—in the
    handoff and delivery metadata, then reconciles the preserved workspace
    without discarding candidate evidence.
 3. T005 proceeds as one AIDashCore layer task with the exact eleven-file
    allowlist. `SchemaValidator.swift` and `URLPolicy.swift` remain unchanged.
+4. Without publishing the intermediate T005-only head, T008 proceeds as one
+   separate AIDashUI layer commit. It removes the temporary totality-test
+   exemption, adds positive known-card badge/classification assertions, and
+   supplies the already specified renderer/mapping/fallback proof.
+5. Independent implementation review and publication bind the combined
+   T005+T008 head of PR #202.
 
-Parent `fdace13d…` alone is not a valid T005 implementation base because it
+Base `bdf1435…` alone is not a valid implementation base because it
 does not contain FR-020–FR-025. Candidate
-`12577b03c866c73c53fa23d236d2005a68790358` remains unmutated/unpublished until
-the fresh handoff; it is never re-reviewed under the stale planning revision.
+`121e6cf4e3016bec41b25cb1a34729799fa8f023` remains unmutated/unpublished until
+the fresh handoff; Team Lead reconciles it to the reviewed two-commit sequence
+without publishing or re-reviewing its stale twelve-path tree.
 
 ## Complexity Tracking
 

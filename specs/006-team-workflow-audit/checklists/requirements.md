@@ -52,8 +52,12 @@
 
 - [x] Repository constitution conflict is resolved by constitution 1.13.0.
 - [x] Constitution publication requires its own `constitution: <change>` PR and PR-body migration note; planning review is not a substitute.
-- [x] T020/PR #204, T021/PR #210, and T019/PR #215 are completed historical prerequisites and are not schedulable recovery work.
-- [x] The exact planning commit receiving PASS is the T005 implementation base (or is byte-identically preserved in an approved descendant); parent `fdace13d…` alone is not valid.
-- [x] The registered MY-1522 workspace and candidate `12577b03c866c73c53fa23d236d2005a68790358` are preserved evidence; no new implementation starts before exact revised-planning PASS, base pinning, and a fresh Team Lead handoff.
+- [x] T006/PR #200/`8716846…`, T020/PR #204, T021/PR #210, and T019/PR #215 are completed historical prerequisites and are not schedulable recovery work.
+- [x] T006's repository-accepted tint is `#E6294D`/`#FF375F`; no DesignKit redispatch or stale `#FF2D55` contract remains.
+- [x] The exact planning commit receiving PASS is the implementation base (or is byte-identically preserved in an approved descendant); current PR base `bdf1435…` alone is not valid.
+- [x] The registered MY-1522 workspace and candidate `121e6cf4e3016bec41b25cb1a34729799fa8f023` are preserved evidence; no implementation continues before exact revised-planning PASS, base pinning, and a fresh Team Lead handoff.
+- [x] T005 remains exactly eleven AIDashCore paths and lands as its own layer commit; T008 owns `DesignTokensFoundationTests.swift` plus the explicit UI mapping/renderer.
+- [x] T008 removes the candidate's `.teamAudit` exemption and positively proves symbol, classification, and badge totality for the known type.
+- [x] PR #202 review/publication binds the combined T005+T008 head; no T005-only head is publishable or mergeable.
 - [x] HTTPS-only artifact and grill entry-point behavior agrees with the repository URL policy.
 - [x] The specification is ready for Plan-stage architecture and contract design.

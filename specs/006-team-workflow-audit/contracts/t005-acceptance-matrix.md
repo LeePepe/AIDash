@@ -1,17 +1,25 @@
 # Contract: T005 AIDashCore Acceptance Matrix
 
 This contract is the complete implementation boundary for T005. The task is
-one AIDashCore-only PR. It may modify only the eleven files listed in the T005
-row of `tasks.md`: the original nine Types/test paths plus
+one AIDashCore-only task/commit. It may modify only the eleven files listed in
+the T005 row of `tasks.md`: the original nine Types/test paths plus
 `Validation/TeamAuditPayloadValidation.swift` and
 `TeamAuditPayloadValidationTests.swift`. It does not carry planning, AIDashUI,
 App, CLI, aidata, or RepoInfra changes. The existing
 `Validation/SchemaValidator.swift` and `Validation/URLPolicy.swift` are
 consumed unchanged and are not in scope.
 
+PR #202's publication unit also contains the subsequent, separately scoped
+T008 AIDashUI commit. The intermediate T005-only head is neither publishable
+nor mergeable because the accepted base requires a badge/classification for
+every known non-`sectionHeader` card type. T008 owns the explicit Team Audit
+mapping/renderer and `DesignTokensFoundationTests.swift`; it must remove the
+preserved candidate's temporary exemption and positively assert the
+`checkmark.shield.fill` symbol, `Classification.teamAudit`, and badge totality.
+
 The implementation base is the exact published planning commit that receives
-AI Reviewer `PASS`, as pinned in Team Lead's fresh handoff. Parent
-`fdace13d20ee0b28759c4853c82445fd4d913dcc` alone is not an implementation
+AI Reviewer `PASS`, as pinned in Team Lead's fresh handoff. Current PR base
+`bdf1435fe7d3d9c4da43ed4297cbc24482447b46` alone is not an implementation
 base because it does not contain FR-020–FR-025. A later approved descendant is
 valid only when these nine planning artifact blobs are byte-identical.
 

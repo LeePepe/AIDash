@@ -178,13 +178,15 @@ failure, never normal acceptance or a substitute for CI App builds.
 
 ## Decision 9: Treat prior recovery gates as history and pin the reviewed plan as base
 
-**Decision**: T020, T021, and T019 are completed history in parent
-`fdace13d20ee0b28759c4853c82445fd4d913dcc` through merged PRs #204, #210, and
-#215. They are not schedulable dependencies. The only active recovery edge is
-`exact revised-plan PASS + published planning-base pin → Team Lead handoff →
-T005`. The implementation base is the exact reviewed planning commit named by
-the PASS verdict, or an explicitly approved descendant containing byte-identical
-copies of all nine artifact blobs.
+**Decision**: T020, T021, and T019 are completed history in current PR #202
+base `bdf1435fe7d3d9c4da43ed4297cbc24482447b46` through merged PRs #204, #210,
+and #215. They are not schedulable dependencies. T006 is also completed history
+through PR #200 / `8716846ac42b48bfd89b9a09d5dd05fc4819025d`. The active
+recovery edge is `exact revised-plan PASS + published planning-base pin → Team
+Lead handoff → T005 Core commit → T008 UI commit → combined-head review and
+publication`. The implementation base is the exact reviewed planning commit
+named by the PASS verdict, or an explicitly approved descendant containing
+byte-identical copies of all nine artifact blobs.
 
 **Rationale**: The parent contains the completed compatibility and process
 work, but it does not contain FR-020–FR-025. Using the parent alone would omit
@@ -198,10 +200,11 @@ after pinning that exact reviewed revision in the handoff and delivery metadata.
 
 - Dispatch T020/T021/T019 again: duplicates already-merged work and risks stale
   recovery branches.
-- Keep `fdace13d…` as the T005 base: it lacks the reviewed recovery artifacts.
+- Keep `bdf1435…` alone as the T005 base: it lacks the reviewed recovery
+  artifacts.
 - Count planning files in the T005 implementation diff: violates the exact
   AIDashCore eleven-file surface.
-- Re-review candidate `12577b03…` under the new plan: the prior verdict is
+- Re-review candidate `121e6cf…` under the new plan: the prior verdict is
   revision-specific and the two-round implementation budget is exhausted.
 
 ## Decision 10: Put invocation-scoped supervision behind the existing shell seam
@@ -252,9 +255,9 @@ protocol instead: Service depends on the decoded Types value, Models never
 name Service, and the existing single-decode/error interface remains deep and
 stable. The exact T005 implementation surface is eleven files—the original
 nine plus the Service implementation and its proof. `SchemaValidator.swift`,
-`URLPolicy.swift`, every other layer, parent
-`fdace13d20ee0b28759c4853c82445fd4d913dcc`, and candidate
-`12577b03c866c73c53fa23d236d2005a68790358` stay unchanged.
+`URLPolicy.swift`, every other layer, PR base
+`bdf1435fe7d3d9c4da43ed4297cbc24482447b46`, and candidate
+`121e6cf4e3016bec41b25cb1a34729799fa8f023` stay unchanged.
 
 **Alternatives rejected**:
 
@@ -299,6 +302,37 @@ and exact byte fixtures distinguish normative proof from approximate coverage.
   URL, or sidecar substitution and breaks immutable provenance.
 - Accept whitespace-only or merely over-limit fixtures: does not prove that an
   otherwise valid mandatory 262,145-byte payload fails at the wire boundary.
+
+## Decision 13: Publish T005 and T008 as one ordered PR head
+
+**Decision**: Treat T006 as completed history with its merged
+`#E6294D`/`#FF375F` token, retain T005 as one exact eleven-path AIDashCore
+commit, and follow it with one separately scoped T008 AIDashUI commit before
+PR #202 is reviewed, published, or merged. T008 owns
+`DesignTokensFoundationTests.swift`, removes the preserved candidate's
+temporary `.teamAudit` exemption, positively asserts the known type's
+`checkmark.shield.fill` symbol/classification/badge, and implements the already
+specified renderer, mapping, localization, and generic-invalid-payload
+fallback. No T005-only head is a delivery candidate.
+
+**Rationale**: The constitution requires a badge for every known
+non-`sectionHeader` card type, the base AIDashUI tests enforce that totality,
+and CI runs AIDashUI for every PR. T019's `@unknown default` work protects a
+consumer from future imported enum cases; it is not permission to leave the
+new known `teamAudit` case unmapped. The ordered pair preserves the task and
+layer boundaries while making the final PR head satisfy both the Core contract
+and the already accepted UI contract.
+
+**Alternatives rejected**:
+
+- Publish or merge T005 alone: the known type violates the always-run UI
+  badge/classification totality gate.
+- Keep or broaden the candidate's UI test exemption: weakens accepted behavior
+  and violates T005's exact AIDashCore boundary.
+- Redispatch T006: PR #200 is already in the base and its golden-tested tint is
+  repository authority.
+- Invent a temporary third UI prerequisite: duplicates T008's existing
+  renderer/mapping/test ownership and creates throwaway behavior.
 
 ## Resolved source ambiguities
 

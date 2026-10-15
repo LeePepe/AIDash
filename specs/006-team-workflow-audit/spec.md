@@ -15,13 +15,19 @@ execution surface.
 
 ## Existing behavior
 
-- At recovery parent `fdace13d20ee0b28759c4853c82445fd4d913dcc`,
+- At current PR #202 base `bdf1435fe7d3d9c4da43ed4297cbc24482447b46`,
   AIDashCore exposes ten card types; `teamAudit` has not shipped.
+- T006 is already delivered by PR #200 at
+  `8716846ac42b48bfd89b9a09d5dd05fc4819025d`: DesignKit exposes
+  `Classification.teamAudit` with the accepted light/dark tint pair
+  `#E6294D`/`#FF375F`.
+- Base AIDashUI enforces badge and classification totality for every known
+  non-`sectionHeader` `CardType`; a newly known type cannot ship badge-less.
 - Agent-authored URL safety is centralized in the AIDashCore Validation
   Service role. Model types retain untrusted strings, while the Service entry
   point decides which values must be valid HTTPS links before publication.
 - The preserved implementation candidate
-  `12577b03c866c73c53fa23d236d2005a68790358` is review evidence only. It is
+  `121e6cf4e3016bec41b25cb1a34729799fa8f023` is review evidence only. It is
   not published behavior and this planning revision does not mutate it.
 - The exact published planning commit that receives AI Reviewer `PASS` is the
   next T005 implementation base. The older parent is not an implementation
@@ -37,12 +43,23 @@ execution surface.
   satisfy the central HTTPS-with-host policy.
 - Existing `URLPolicy` behavior is reused without widening its allowed scheme
   or changing its public interface.
+- T019's future-case fallback remains source compatibility only; it does not
+  waive the badge/classification contract for the known `teamAudit` case.
+- T005 remains an exact eleven-path AIDashCore task/commit. T008 remains a
+  separate AIDashUI task/commit, and PR #202 publishes only their combined
+  head after T008 supplies the explicit renderer, badge mapping, and positive
+  totality proof. No T005-only head is publishable or mergeable.
+- The accepted T006 tint pair remains `#E6294D`/`#FF375F`; planning does not
+  redispatch or recolor the merged DesignKit work.
 
 ## Removed behavior
 
 - None. This revision removes or weakens no accepted-base behavior or test.
 - The frozen candidate is not treated as an accepted baseline, and no finding
   is closed merely because that candidate attempted an implementation.
+- In particular, the candidate's temporary `.teamAudit` exemption from the
+  AIDashUI badge-totality test is rejected; T008 replaces it with positive
+  symbol, classification, and badge assertions.
 
 ## User Scenarios & Testing *(mandatory)*
 

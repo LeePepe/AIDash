@@ -4,7 +4,7 @@
 
 - `CardType.rawValue`: `teamAudit`
 - Design classification token: `Classification.teamAudit`
-- Badge tint: system-pink pair, light `#FF2D55`, dark `#FF375F`
+- Badge tint: calibrated system-pink pair, light `#E6294D`, dark `#FF375F`
 - Badge symbol: `checkmark.shield.fill`
 - Effective size: authored size is preserved; no content-derived downgrade
   until a future spec defines per-section richness thresholds.

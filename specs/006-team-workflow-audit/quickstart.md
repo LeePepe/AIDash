@@ -16,15 +16,21 @@ AidataL1L2, AidataL3, AidataL4, AidataL5, AIDashCore, DesignKit, AIDashUI,
 AIDashApp, and aidashCLI. Unrelated CLI commands, `project.yml`, aidata
 scripts/cron, generated data, and external audit sources are out of scope.
 
-T020/PR #204, T021/PR #210, and T019/PR #215 are completed history in parent
-`fdace13d…`; never dispatch them again. The active recovery is the eleven-file
-AIDashCore T005 Types+Service surface.
+T006/PR #200, T020/PR #204, T021/PR #210, and T019/PR #215 are completed
+history in current base `bdf1435…`; never dispatch them again. T006's accepted
+classification tint is `#E6294D`/`#FF375F`. The active recovery is an ordered
+pair: the exact eleven-file AIDashCore T005 Types+Service commit, followed by
+the separately scoped AIDashUI T008 commit before PR #202 review/publication.
 The registered MY-1522 delivery workspace and candidate
-`12577b03c866c73c53fa23d236d2005a68790358` remain untouched evidence; no new
+`121e6cf4e3016bec41b25cb1a34729799fa8f023` remain untouched evidence; no new
 implementation starts before the exact revised planning commit passes review,
 is pinned as the implementation base (or byte-identically preserved in an
 approved descendant), and Team Lead issues a fresh handoff for the preserved
-workspace. Parent `fdace13d…` alone is not the T005 base.
+workspace. Base `bdf1435…` alone is not the implementation base. The preserved
+candidate's AIDashUI test exemption is not accepted behavior: T008 removes it,
+adds positive `teamAudit` symbol/classification/badge assertions, and supplies
+the already specified renderer and fallback proof. No T005-only head is
+publishable or mergeable.
 
 ## 2. Exercise the manual boundary with fixtures
 
@@ -118,7 +124,10 @@ inside the exact eleven-file AIDashCore allowlist. Models contain no
 `Validation/TeamAuditPayloadValidation.swift` supplies the existing protocol
 witness and is exercised through both `CardType.validate` and
 `SchemaValidator.validateCardPut`. Existing `SchemaValidator.swift` and
-`URLPolicy.swift` remain unchanged.
+`URLPolicy.swift` remain unchanged. T005 and T008 remain separate layer commits,
+but the implementation review and publication unit is their combined PR #202
+head. T008 owns `DesignTokensFoundationTests.swift` and must preserve totality
+for every known non-`sectionHeader` card type.
 
 ## 5. CI evidence
 
