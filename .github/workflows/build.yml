@@ -34,6 +34,8 @@ jobs:
         # flakiness a gate must not have. Bump this deliberately, with the
         # resulting fixes in the same commit.
         run: python -m pip install pytest 'ruff==0.15.13'
+      - name: Validate aidata dependency install (resolved RepoInfra gate)
+        run: scripts/context/run RepoInfra --mode ci
       - name: pytest + ruff + degrade (resolved aidata leaf gates)
         # The warehouse (L3_merge/warehouse.db) is a gitignored local artifact,
         # so integration tests that need it skip themselves here. The hermetic
