@@ -70,7 +70,29 @@ if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || ! git cat-file -e "$HEA
     exit 1
 fi
 DIFF="$(git diff "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff "$BASE_SHA..$HEAD_SHA")"
-CHANGED="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff --name-only "$BASE_SHA..$HEAD_SHA")"
+# NUL-delimited path transport: -z ensures paths with newlines, quotes,
+# backslashes, and non-ASCII are transmitted losslessly from git.
+# Written to a temp file because NUL bytes are stripped by Bash command
+# substitution ($(...)) and scalars — a file preserves them intact.
+CHANGED_FILE="$(mktemp -t codex-review-changed.XXXXXX)"
+if ! git diff -z --name-only "$BASE_SHA...$HEAD_SHA" > "$CHANGED_FILE" 2>/dev/null; then
+    if ! git diff -z --name-only "$BASE_SHA..$HEAD_SHA" > "$CHANGED_FILE" 2>/dev/null; then
+        echo "[codex-review] ❌ git diff -z 生成 changed paths 失败,无法可靠评审 diff"
+        post_sticky "$STICKY
+⚠️ 自动 review 无法生成 changed-file 范围(无法读取 git diff -z 输出)。为安全起见 **暂不放行**,请重跑。"
+        exit 1
+    fi
+fi
+# Newline-separated version for prompt display only. Each path is
+# JSON-encoded (control chars/newlines/backslashes/quotes escaped) so a
+# malicious path containing newlines cannot inject additional lines into
+# the prompt that look like reviewer instructions or structural directives.
+CHANGED_DISPLAY="$(python3 -c "
+import json, sys
+for p in sys.stdin.buffer.read().split(b'\\x00'):
+    if p:
+        sys.stdout.write(json.dumps(p.decode('utf-8','replace'), ensure_ascii=True) + '\\n')
+" < "$CHANGED_FILE")"
 
 # 此处 DIFF 为空 = BASE/HEAD 对象都在但两者间确无差异(罕见但合法)。对象已确认
 # 存在,空 diff 是真·无改动,可安全 pass。
@@ -100,7 +122,7 @@ ERR_FILE="$(mktemp -t codex-review-err.XXXXXX.log)"
 # 截断,而行号必须以完整 diff 为准)。
 DIFF_FILE="$(mktemp -t codex-review-diff.XXXXXX.patch)"
 printf %s "$FULL_DIFF" > "$DIFF_FILE"
-cleanup() { rm -f "$SCHEMA_FILE" "$OUT_FILE" "$ERR_FILE" "$DIFF_FILE"; }
+cleanup() { rm -f "$SCHEMA_FILE" "$OUT_FILE" "$ERR_FILE" "$DIFF_FILE" "$CHANGED_FILE"; }
 trap cleanup EXIT
 
 # 用 printf 写,不用 heredoc:brew bash 5.3 下 body 超过一个 pipe buffer(实测
@@ -132,26 +154,76 @@ printf '%s\n' \
 #
 # fail-closed:分析器失败 = 工具异常,不在缺证据的情况下继续 review。
 SCOPE_EVIDENCE=""
-if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED")"; then
+if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED_FILE")"; then
     echo "[codex-review] ❌ scope evidence 生成失败"
     post_sticky "$STICKY
 ⚠️ 自动 review 未能生成 exact-HEAD 作用域证据(分析器异常)。为安全起见 **暂不放行**,请重跑。"
     exit 1
 fi
 
+# ---- exact-HEAD coverage context (MY-1456 / MY-1457) ----------------------
+# When tests are removed, search HEAD for remaining tests covering the same
+# production symbols — prevents false "missing coverage" blockers when
+# equivalent tests exist outside the diff window.
+#
+# fail-closed: like scope evidence, if the analyzer itself fails (python3
+# crash / bug), the gate blocks. An EMPTY result (no tests removed) is the
+# normal success — the distinction is exit code, not output length.
+COVERAGE_CONTEXT=""
+if ! COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED_FILE")"; then
+    echo "[codex-review] ❌ coverage context 生成失败"
+    post_sticky "$STICKY
+⚠️ 自动 review 未能生成 exact-HEAD 覆盖上下文(分析器异常)。为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
+
+# ---- nonce-based untrusted-data fence (MY-1456 security fix) ---------------
+# Static delimiter markers (the old hardcoded Chinese/English boundary strings)
+# are vulnerable to delimiter injection: a PR author can embed the exact closing
+# marker in test source code (which gets injected into the prompt via
+# COVERAGE_CONTEXT), escape the untrusted region, and append forged reviewer
+# instructions. The nonce makes the fence unpredictable to the PR author.
+# Python's sanitize_untrusted_content() handles the coverage context itself;
+# the nonce protects the outermost boundary.
+FENCE_NONCE="$(head -c 16 /dev/urandom | xxd -p)"
+if [ -z "$FENCE_NONCE" ] || ! printf '%s' "$FENCE_NONCE" | grep -qE '^[0-9a-f]{32}$'; then
+    echo "[codex-review] ❌ nonce generation failed (empty or malformed)"
+    post_sticky "$STICKY
+⚠️ 自动 review nonce 生成失败,为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
+FENCE_OPEN="======== UNTRUSTED_DATA_BEGIN_${FENCE_NONCE} ========"
+FENCE_CLOSE="======== UNTRUSTED_DATA_END_${FENCE_NONCE} ========"
+
 # ---- review prompt ------------------------------------------------------
 # 维度与 claude-review.sh 保持一致（同一套仓库宪法），两个模型交叉验证。
 # Trusted Markdown is rendered as data: no shell evaluation or recursive substitution.
 SECURITY_NOTICE="$(review_security_notice)" || exit 1
 EVIDENCE_RULES="$(review_evidence_rules)" || exit 1
-if ! PROMPT="$(CHANGED="$CHANGED" TRUNCATED="$TRUNCATED" DIFF="$DIFF" \
-    SECURITY_NOTICE="$SECURITY_NOTICE" EVIDENCE_RULES="$EVIDENCE_RULES" SCOPE_EVIDENCE="$SCOPE_EVIDENCE" \
+COVERAGE_RULES="$(review_coverage_rules "$FENCE_NONCE")" || exit 1
+UNTRUSTED_PAYLOAD="$FENCE_OPEN
+改动文件:
+$CHANGED_DISPLAY
+$TRUNCATED
+
+DIFF:
+$DIFF
+
+$SCOPE_EVIDENCE
+
+======== COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN ========
+$COVERAGE_CONTEXT
+======== COVERAGE_EVIDENCE_${FENCE_NONCE}_END ========
+$FENCE_CLOSE"
+
+if ! PROMPT="$(SECURITY_NOTICE="$SECURITY_NOTICE" EVIDENCE_RULES="$EVIDENCE_RULES" \
+    COVERAGE_RULES="$COVERAGE_RULES" UNTRUSTED_PAYLOAD="$UNTRUSTED_PAYLOAD" \
     python3 "$REPO_ROOT/scripts/ci/render-review-prompt.py" "$REPO_ROOT/scripts/ci/review-prompt.md")"; then
     echo "[codex-review] prompt render failed; refusing unreviewed diff" >&2
     exit 1
 fi
 
-echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED" | grep -c . | tr -d ' ') files)..."
+echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED_DISPLAY" | grep -c . | tr -d ' ') files)..."
 
 # codex exec：非交互、结构化输出到 --output-last-message 文件。
 # --skip-git-repo-check：checkout 目录是 detached HEAD，跳过 git 仓库信任检查。
