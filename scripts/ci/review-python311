@@ -1,0 +1,25 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo "review-python311: Python script argument is required" >&2
+    exit 2
+fi
+
+compatible_python() {
+    command -v "$1" >/dev/null 2>&1 || return 1
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' \
+        >/dev/null 2>&1
+}
+
+if compatible_python python3; then
+    python_command="$(command -v python3)"
+elif compatible_python python3.11; then
+    python_command="$(command -v python3.11)"
+else
+    echo "review-python311: Python 3.11+ is required for Raven review" >&2
+    exit 1
+fi
+
+exec "$python_command" "$@"
