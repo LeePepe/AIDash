@@ -7,23 +7,40 @@
 | Symbolic local key | Type | Rule |
 |---|---|---|
 | `telemetry.sendUsageData` | `Bool` | Missing or malformed is `false`; the cross-platform GUI Settings toggle **Send usage data** is the sole production writer |
-| `telemetry.installID` | canonical UUID string | Absent before first opt-in; created randomly once on the first false-to-true transition, persisted before consent becomes active, and reused across launches and consent cycles for the app's lifetime |
+| `telemetry.installID` | canonical UUID string | Absent in the exact never-opted state; created randomly once only when that state receives its first false-to-true action, persisted before the marker and active consent, and reused across launches and consent cycles for the app's lifetime |
+| `telemetry.identityEstablished` | `Bool` | Key is absent before first opt-in and persisted as `true` after the first UUID is written; it is monotonic lifecycle provenance, contains no identity value, and is never cleared or set to `false` in version 1 |
 
 Production preferences read/write `UserDefaults.standard` through the
 app-owned seam. Hook-owned hostless tests inject an isolated suite and never
-touch the user's standard defaults. First opt-in is the only UUID creation
-point. If persisted consent is true but the established UUID is missing or
-malformed, construction fails closed instead of silently rotating identity. It
-never derives identity from `AIDashCore.DeviceIdentifier`, device/hardware
-attributes, account data, a credential, or private telemetry storage.
+touch the user's standard defaults. The seam derives one explicit state from
+all three raw keys; it does not use `bool(forKey:)` in a way that loses
+missing/malformed-marker information:
+
+| Derived state | Stored conditions | Allowed behavior |
+|---|---|---|
+| `neverOpted` | Consent is off; marker key is absent; install-ID key is absent | The only state from which a false-to-true action may generate one UUID |
+| `establishedDisabled` | Consent is off; marker is exactly `true`; install ID is a canonical UUID | Retain both values; re-enable reuses the UUID without calling UUID generation |
+| `establishedEnabled` | Consent is exactly `true`; marker is exactly `true`; install ID is a canonical UUID | Eligible for later producer-configuration validation |
+| `establishedInvalid` | Consent is true without a complete established identity; the marker exists but is not exactly `true`; the marker is true with a missing/malformed UUID; or any install-ID value exists without a true marker | Fail closed, keep consent inactive, create no producer resources, and never generate a replacement UUID |
+
+First opt-in is the only UUID creation point: write the canonical UUID, persist
+the monotonic marker as `true`, and only then make consent active. A partial or
+corrupt combination is never reclassified as `neverOpted`. The marker is not a
+second identifier and is never emitted, logged, copied into events, or used in
+an object path. Identity never derives from `AIDashCore.DeviceIdentifier`,
+device/hardware attributes, account data, a credential, or private telemetry
+storage.
 
 Turning consent off persists `false` before admission closes and upload
-is disabled/cancelled, then awaits quiescence. The install ID, isolated store,
-frozen pending batches, and SDK history remain; a request made
+is disabled/cancelled, then awaits quiescence. The established marker, install
+ID, isolated store, frozen pending batches, and SDK history remain; a request made
 ambiguous by cancellation stays retained/unconfirmed and no work uploads while
 off. Re-enable is fresh consent and resumes eligible retained work under the
-same retained ID. Version 1 has no Reset/rotation action or secondary identity
-state. A future Reset requires its own SDK feature and product decision.
+same retained ID. If the retained identity is missing/malformed, re-enable
+enters `establishedInvalid` and fails closed rather than recreating it. Version
+1 has no Reset/rotation action or alternative identity value; the monotonic
+marker records only whether UUID creation has already occurred. A future Reset
+requires its own SDK feature and product decision.
 
 ### ProductTelemetryConfiguration
 
@@ -39,12 +56,14 @@ state. A future Reset requires its own SDK feature and product decision.
 | `maxDiskBytes` | positive integer | Invalid/zero/overflow fails before store creation |
 | `heartbeatVersion` | null | Always `nil`; no SDK timer/heartbeat |
 
-State: `disabled` → `eligible` → `validated` → `active` → `quiescing` →
-`disabledRetained`. First opt-in may persist install-ID/consent preferences
-before endpoint validation. Invalid producer input stays `eligible` or
-`disabled` and creates no telemetry service, store, uploader, timer, or network
-side effect. CLI, headless/XPC, and test-host production composition cannot
-enter `eligible`.
+Producer state: `disabled` → `eligible` → `validated` → `active` →
+`quiescing` → `disabledRetained`. Only `establishedEnabled` preferences may
+enter `eligible`; `neverOpted`, `establishedDisabled`, and
+`establishedInvalid` remain producer-disabled. First opt-in may persist the
+install ID, established marker, and consent before endpoint validation.
+Invalid producer input stays `eligible` or `disabled` and creates no telemetry
+service, store, uploader, timer, or network side effect. CLI, headless/XPC, and
+test-host production composition cannot enter `eligible`.
 
 ### ProductEvent
 
