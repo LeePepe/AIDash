@@ -1,6 +1,7 @@
-# Tasks: Minimal CI-Gated TestFlight Release
+# Tasks: Minimal Post-Merge TestFlight Release
 
-**Input**: Owner decision B on MY-1777 and the reviewed Spec 007 package.
+**Input**: Owner decision B on MY-1777, Owner decision `cd-on-merge`, and the
+reviewed Spec 007 revision-5 package.
 
 **Shape**: One goal, one RepoInfra implementation task, one issue, one PR.
 The phases below are ordered work within T001, not separate Multica tasks.
@@ -9,7 +10,7 @@ The phases below are ordered work within T001, not separate Multica tasks.
 
 | Slice | Outcome | Dependency |
 |---|---|---|
-| US1 | A trusted app-relevant CI head uses the existing TestFlight lane and records success | none |
+| US1 | An app-relevant post-merge `main` push SHA uses the existing TestFlight lane and records success | none |
 | US2 | Manual force remains available; pre-success failures leave the marker unchanged and post-success cleanup can only warn | US1 |
 
 ```text
@@ -38,10 +39,11 @@ T001 (US1 + US2, RepoInfra)
 
 ### Ordered phase A — entrypoint and exact candidate
 
-- Register trusted `workflow_run` and preserve `workflow_dispatch.force`.
+- Register `push` scoped to `main` and preserve `workflow_dispatch.force`.
 - Use one non-cancelling concurrency group, one AIDash self-hosted job, and
   ordinary job-level `contents: write`.
-- Pin and check out exactly the selected candidate with full history and
+- Pin automatic work to exact `github.sha`; pin manual work to official `main`
+  once. Check out exactly the selected candidate with full history and
   `persist-credentials: false`; validate official-main reachability before the
   release path and expose the job token only for marker movement.
 
@@ -83,9 +85,10 @@ T001 (US1 + US2, RepoInfra)
   excluded paths in isolated temporary Git repositories with temporary outputs;
   missing/ambiguous extraction fails, and the allowlist is not duplicated in
   Python.
-- Add stable structural assertions without reimplementing policy state
-  machines; provision a pinned verification-only `actionlint` outside tracked
-  paths, record its version, and run
+- Add stable structural assertions for `push.branches: [main]`, exact automatic
+  `github.sha`, manual dispatch, and the retained safety contract without
+  reimplementing policy state machines; provision a pinned verification-only
+  `actionlint` outside tracked paths, record its version, and run
   `actionlint .github/workflows/testflight.yml` without a host-wide install,
   then preserve every mandatory repository gate.
 - Update the handoff guide and PR body to disclose removed coverage, job-level
@@ -105,4 +108,4 @@ or attempt to publish the revision-3 candidate fails scope.
 2. Push only the reviewed SHA and create/update a non-Draft PR.
 3. Do not merge until MY-1692 refreshed eligible proof, required checks, and
    Owner protected-path approval are present.
-4. Record the first eligible post-merge run URL and build number.
+4. Record the first eligible post-merge `main` push run URL and build number.

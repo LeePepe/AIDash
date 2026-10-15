@@ -1,4 +1,4 @@
-# Quickstart: Implement the Minimal Release Pattern
+# Quickstart: Implement the Minimal Post-Merge Release Pattern
 
 ## Scope check
 
@@ -15,9 +15,10 @@ docs/testflight-handoff.md
 
 ## Implementation order
 
-1. Replace the manual-only trigger with trusted `workflow_run` plus existing
+1. Replace the manual-only trigger with `push` scoped to `main` plus existing
    `workflow_dispatch`.
-2. Select and check out the exact candidate with full history.
+2. For push, select exact `github.sha`; for manual dispatch, pin official
+   `main` once. Check out only that candidate with full history.
 3. Add marker ancestry/missing/equality handling and the AIDash relevance
    classifier; keep force as relevance-only. Automatic and non-force missing-
    marker execution fails closed; manual force may bootstrap.
@@ -60,5 +61,5 @@ exact tree. Any remaining blocker after implementation review round 2 parks the
 delivery without another review round or Owner escalation. Team Lead controls
 publication, refreshed MY-1692 merge proof, and Owner approval for `.github/**`.
 
-After merge, record the next eligible workflow URL and its build number on the
-delivery issue.
+After merge, record the next eligible `main` push workflow URL and its build
+number on the delivery issue.

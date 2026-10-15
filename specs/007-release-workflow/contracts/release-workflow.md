@@ -1,12 +1,12 @@
-# Contract: Minimal TestFlight Release Workflow
+# Contract: Minimal Post-Merge TestFlight Release Workflow
 
 ## Entrypoints
 
 ### Automatic
 
-Register `workflow_run` for `build`, `main`, `completed`. Continue only for
-the exact `.github/workflows/build.yml` workflow, same-repository `push`,
-successful conclusion, `main` head branch, and valid `head_sha`.
+Register `push` with `branches: [main]`. Automatic work pins exact
+`github.sha`; any unexpected automatic event/ref or invalid candidate fails
+closed before signing secrets or Fastlane.
 
 ### Manual
 
@@ -19,7 +19,8 @@ missing marker; non-force missing-marker execution fails.
 - One job on `[self-hosted, aidash-mac]`.
 - One `testflight` concurrency group, `cancel-in-progress: false`.
 - Plain job-level `permissions: contents: write`.
-- Checkout the pinned candidate with `fetch-depth: 0` and
+- For push, select exact `github.sha`; for manual dispatch, pin official
+  protected `main` once. Checkout the pinned candidate with `fetch-depth: 0` and
   `persist-credentials: false`; never substitute a newer ref. Supply the job
   token only to the marker-movement step.
 - Validate candidate reachability from fetched official `main` before signing
@@ -86,9 +87,9 @@ once.
 
 - concise Python 3.9 cases that extract and execute the exact production
   classifier block;
-- stable structural assertions for entrypoints, exact checkout, concurrency,
-  force boundary, success-only marker movement, credential step scope, and
-  cleanup;
+- stable structural assertions for `push.branches: [main]`, exact automatic
+  `github.sha`, manual dispatch, exact checkout, concurrency, force boundary,
+  success-only marker movement, credential step scope, and cleanup;
 - pinned verification-only
   `actionlint .github/workflows/testflight.yml` over the complete workflow plus
   every mandatory repository RepoInfra/hook/CI gate;

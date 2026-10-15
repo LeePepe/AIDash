@@ -1,10 +1,14 @@
-# Research: Minimal CI-Gated TestFlight Release
+# Research: Minimal Post-Merge TestFlight Release
 
 ## R1 — Canonical cross-app pattern
 
 **Decision**: Use Owner decision B on MY-1777 as the canonical control-flow
 shape for all three apps, while keeping AIDash's runner, secrets, lane,
 keychain, path allowlist, and gates repository-specific.
+
+Owner decision `cd-on-merge` mechanically changes the automatic entry to
+post-merge `push` on `main` and makes exact `github.sha` the automatic
+candidate; every other minimal-v1 decision remains unchanged.
 
 **Why**: Two implementation review rounds on revision 3 exposed expanding
 privilege-boundary and workflow-harness complexity. The Owner chose scope
@@ -17,10 +21,10 @@ reduction rather than another repair round.
 boundary. The final marker update still uses the observed ref as a compare-and-
 swap guard inside that one job.
 
-**Safety retained**: A job-level event guard validates exact workflow path/name,
-same-repository push, successful `main`, and candidate format. The job checks
-official-main reachability and pins the exact candidate before signing secrets
-or Fastlane steps. Checkout uses full history.
+**Safety retained**: The automatic trigger is limited to `push` on `main` and
+pins exact `github.sha`. The job checks candidate format and official-main
+reachability before signing secrets or Fastlane steps. Checkout uses full
+history.
 
 **Accepted tradeoff**: The write permission exists for the job rather than a
 dedicated marker-only boundary. This is an explicit Owner decision, not an

@@ -1,4 +1,4 @@
-# Feature Specification: Minimal CI-Gated TestFlight Release
+# Feature Specification: Minimal Post-Merge TestFlight Release
 
 **Feature Branch**: `007-release-workflow`
 
@@ -7,18 +7,21 @@
 **Status**: Ready for planning review
 
 **Input**: Owner decision B on MY-1777 dated 2026-10-15, refined by Lead
-decision `01a13ce1-ee23-711b-a336-f64c1e1637f0`. Replace the
+decision `01a13ce1-ee23-711b-a336-f64c1e1637f0` and the Owner's
+`cd-on-merge` decision recorded by Team Lead in
+`01a13eea-17b9-7e9b-ab5c-4c67c85482c7`. Replace the
 over-designed revision-3 release contract with the same minimal marker-plus-
 relevance pattern used across AIDash, VitalStride, and VoxPocket, while
 preserving this repository's runner, lane, build-number, and signing details.
 
 ## Authority and supersession
 
-This revision supersedes MY-1767 planning revision 3 and the unpublished local
-implementation candidates derived from it. Those candidates remain preserved
-as evidence and MUST NOT be pushed or published. Implementation may resume
-only from an exact revision of this package that receives AI Reviewer spec-gate
-PASS.
+This revision supersedes MY-1767 planning revision 5 only for automatic
+trigger and candidate provenance, and continues to supersede planning revision
+3 and its unpublished local implementation candidates. Those candidates remain
+preserved as evidence and MUST NOT be pushed or published. Implementation may
+resume only from an exact revision of this package that receives AI Reviewer
+spec-gate PASS.
 
 This feature replaces only the current manual-only TestFlight trigger policy.
 It does not change product code, the CI workflow, the Fastlane lane, signing
@@ -48,31 +51,27 @@ requires Owner approval before merge.
 
 ## User scenarios and testing
 
-### User Story 1 - Release an app-relevant verified main head (Priority: P1)
+### User Story 1 - Release an app-relevant merged main head (Priority: P1)
 
-As the Owner, I receive an automatic TestFlight upload after the required CI
-workflow succeeds for a trusted protected-`main` push whose accumulated range
-contains an AIDash app change.
+As the Owner, I receive an automatic TestFlight upload after a post-merge push
+to protected `main` whose accumulated range contains an AIDash app change.
 
-**Independent Test**: Workflow lint passes, the automatic event guard accepts
-only the required same-repository successful `build.yml` push on `main`, and
-focused relevance-classifier unit cases cover every included and excluded path
-family.
+**Independent Test**: Workflow lint proves the automatic trigger is limited to
+`push` on `main` and pins exact `github.sha`, while focused relevance-classifier
+unit cases cover every included and excluded path family.
 
 **Acceptance Scenarios**:
 
-1. **Given** the repository `build` workflow at `.github/workflows/build.yml`
-   completed successfully for a same-repository push to `main`, **when** the
-   marker-to-`head_sha` range contains an allowed path, **then** the one release
-   job checks out that exact SHA with full history and invokes the existing
-   lane.
+1. **Given** a commit is pushed to protected `main`, **when** the marker-to-
+   `github.sha` range contains an allowed path, **then** the one release job
+   checks out that exact SHA with full history and invokes the existing lane.
 2. **Given** the accumulated range contains only excluded paths, **when** the
    run evaluates relevance, **then** it skips upload, leaves the marker
    unchanged, and records the reason in the job summary.
-3. **Given** the event is a PR/fork run, wrong workflow, wrong branch, failed or
-   cancelled run, invalid SHA, or a SHA not reachable from official `main`,
-   **when** the workflow evaluates it, **then** it fails closed before signing
-   secrets or Fastlane are used.
+3. **Given** an automatic context is not a `push` on `refs/heads/main`, the
+   candidate is malformed, or the candidate is not reachable from official
+   `main`, **when** the workflow evaluates it, **then** it fails closed before
+   signing secrets or Fastlane are used.
 
 ### User Story 2 - Preserve manual force and failure safety (Priority: P1)
 
@@ -103,19 +102,16 @@ block, and `actionlint` validates the complete workflow.
 
 ### Functional requirements
 
-- **FR-001 — Trusted automatic entry**: The workflow MUST register
-  `workflow_run` for workflow `build`, branch `main`, type `completed`, and
-  accept automatic work only when the source path is
-  `.github/workflows/build.yml`, event is `push`, conclusion is `success`,
-  head branch is `main`, and
-  `head_repository.full_name == github.repository`.
+- **FR-001 — Post-merge automatic entry**: The workflow MUST register
+  `push` with `branches: [main]` and accept automatic work only for
+  `github.event_name == 'push'` on `refs/heads/main`.
 - **FR-002 — Exact candidate**: Automatic work MUST pin
-  `github.event.workflow_run.head_sha`; manual work MUST resolve official
-  protected `main` once and pin it. The job MUST reject a malformed candidate
-  or one not reachable from fetched official `main`, and MUST check out only
-  that candidate with `fetch-depth: 0` and `persist-credentials: false`. It
-  MUST NOT substitute a newer tip; the job token is supplied only to marker
-  movement despite the job-level write permission.
+  `github.sha`; manual work MUST resolve official protected `main` once and pin
+  it. The job MUST reject a malformed candidate or one not reachable from
+  fetched official `main`, and MUST check out only that candidate with
+  `fetch-depth: 0` and `persist-credentials: false`. It MUST NOT substitute a
+  newer tip; the job token is supplied only to marker movement despite the
+  job-level write permission.
 - **FR-003 — One serialized release job**: Automatic and manual execution MUST
   use one AIDash concurrency group with `cancel-in-progress: false`, one
   `[self-hosted, aidash-mac]` release job, and plain job-level
@@ -177,11 +173,12 @@ block, and `actionlint` validates the complete workflow.
   Success MUST include the run URL; cleanup trouble after success MUST appear
   only as a secret-free warning. Build number remains visible in the existing
   lane log.
-- **FR-014 — Failure without recovery machinery**: Invalid provenance, history,
-  marker, marker compare-and-swap, or release work before the success boundary
-  MUST fail the run and leave the marker unchanged. Post-success cleanup is the
-  sole warning-only exception. There is no automatic retry, rollback, queue,
-  cursor, skip record, attempt journal, recovery ref, or alternate runner.
+- **FR-014 — Failure without recovery machinery**: Invalid automatic event or
+  ref, candidate, history, marker, marker compare-and-swap, or release work
+  before the success boundary MUST fail the run and leave the marker unchanged.
+  Post-success cleanup is the sole warning-only exception. There is no
+  automatic retry, rollback, queue, cursor, skip record, attempt journal,
+  recovery ref, or alternate runner.
 - **FR-015 — Focused verification**: Delete the manual-only regression and do
   not port the unpublished shadow-policy suite. The replacement test MUST be a
   small Python 3.9-compatible harness whose table-driven relevance cases extract
@@ -261,9 +258,9 @@ structure, and action/workflow lint required by the Owner's minimal v1.
 
 ## Stable acceptance criteria
 
-- **AC-01**: Trusted automatic and manual candidates are pinned exactly,
-  fetched with full history, and unsafe automatic payloads fail before signing
-  secrets or Fastlane.
+- **AC-01**: Automatic `main` push runs pin exact `github.sha`; manual
+  candidates are also pinned exactly, fetched with full history, and invalid
+  automatic contexts or candidates fail before signing secrets or Fastlane.
 - **AC-02**: Marker equality, ancestor accumulation, non-ancestor failure, and
   force-only missing-marker bootstrap match FR-004–FR-005.
 - **AC-03**: Every included and representative excluded AIDash path family is
@@ -289,15 +286,17 @@ structure, and action/workflow lint required by the Owner's minimal v1.
   package and all prohibited paths remain unchanged during implementation.
 - **AC-11**: Owner approval is recorded for `.github/**`, and MY-1692's
   refreshed eligible proof is satisfied before merge.
-- **AC-12**: After merge, the next eligible run records its run URL on the
-  delivery issue; its build number is captured from the existing lane log.
+- **AC-12**: After merge, the next eligible `main` push run records its run URL
+  on the delivery issue; its build number is captured from the existing lane
+  log.
 
 ## Success criteria
 
-- **SC-001**: A trusted app-relevant CI head reaches the unchanged lane once in
-  its executed run, then succeeds only when the guarded marker update succeeds.
-- **SC-002**: Irrelevant, duplicate, untrusted, or pre-release-unsafe runs
-  perform no build or upload and expose a concise reason. A lease rejection
+- **SC-001**: An app-relevant post-merge `main` push SHA reaches the unchanged
+  lane once in its executed run, then succeeds only when the guarded marker
+  update succeeds.
+- **SC-002**: Irrelevant, duplicate, invalid-candidate, or pre-release-unsafe
+  runs perform no build or upload and expose a concise reason. A lease rejection
   after upload is reported as a failed release without claiming no upload.
 - **SC-003**: Manual force, existing signing, existing global build numbers,
   and existing internal-group behavior remain operational without new state or

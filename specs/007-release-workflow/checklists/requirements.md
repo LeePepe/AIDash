@@ -1,15 +1,15 @@
-# Specification Quality Checklist: Minimal CI-Gated TestFlight Release
+# Specification Quality Checklist: Minimal Post-Merge TestFlight Release
 
 ## Content quality
 
 - [x] Focused on user outcomes and repository release contracts
 - [x] Existing behavior, compatibility, removed behavior, and non-goals are explicit
-- [x] Owner decision B, final Lead decision `01a13ce1-ee23-711b-a336-f64c1e1637f0`, and superseded revision-3 behavior are traceable
+- [x] Owner decision B, final Lead decision `01a13ce1-ee23-711b-a336-f64c1e1637f0`, Owner decision `cd-on-merge`, and superseded revision-3 behavior are traceable
 
 ## Requirement completeness
 
 - [x] Stable FR and AC identifiers remain traceable across revisions
-- [x] Automatic and manual candidate selection is explicit
+- [x] Automatic `push` on `main` pins exact `github.sha`; manual candidate selection is explicit
 - [x] Missing/equal/ancestor/non-ancestor marker states are defined
 - [x] Manual force and automatic entry share one explicit boundary
 - [x] Repository-specific runner/signing/build-number behavior is preserved

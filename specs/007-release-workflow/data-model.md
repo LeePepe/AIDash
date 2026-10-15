@@ -1,4 +1,4 @@
-# Data Model: Minimal CI-Gated TestFlight Release
+# Data Model: Minimal Post-Merge TestFlight Release
 
 This workflow stores no product data. Its sole durable release-progress state
 is the existing Git tag `testflight/last-released`.
@@ -7,12 +7,12 @@ is the existing Git tag `testflight/last-released`.
 
 | Field | Meaning |
 |---|---|
-| `source` | `automatic` or `manual` |
-| `sha` | Pinned 40-hex commit selected from `workflow_run.head_sha` or official `main` |
+| `source` | `automatic` (`push`) or `manual` |
+| `sha` | Pinned 40-hex commit selected from push `github.sha` or official `main` |
 | `force` | Manual relevance-only override; false for automatic runs |
 
-Validation: automatic payload identity, same-repository push provenance,
-successful `main`, valid commit, and reachability from fetched official main.
+Validation: automatic `push` on `refs/heads/main`, exact `github.sha`, valid
+commit, and reachability from fetched official main.
 
 ## ReleaseMarker
 
@@ -57,7 +57,7 @@ defines no phase-specific outcome taxonomy.
 ## Processing sequence (not persisted state)
 
 ```text
-event -> validate/pin candidate -> fetch marker
+push/dispatch -> validate/pin candidate -> fetch marker
   -> equal: skip
   -> invalid: fail
   -> missing + manual force: eligible bootstrap

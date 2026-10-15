@@ -1,4 +1,4 @@
-# Implementation Plan: Minimal CI-Gated TestFlight Release
+# Implementation Plan: Minimal Post-Merge TestFlight Release
 
 **Branch**: `007-release-workflow` | **Date**: 2026-10-15 | **Spec**: `spec.md`
 
@@ -6,9 +6,10 @@
 
 Replace AIDash's manual-only release entry with the Owner-approved cross-app
 minimal pattern: one self-hosted release job, one non-cancelling concurrency
-group, one moving last-released marker, exact CI-head checkout with full
-history, focused path relevance, the unchanged Fastlane lane, success-only
-marker compare-and-swap, and unconditional warning-only post-success cleanup.
+group, one moving last-released marker, exact post-merge `github.sha` checkout
+with full history, focused path relevance, the unchanged Fastlane lane,
+success-only marker compare-and-swap, and unconditional warning-only
+post-success cleanup.
 Keep manual force. Delete the
 manual-only regression and discard the unpublished shadow-policy suite; verify
 only the relevance classifier, stable workflow structure, and workflow lint.
@@ -31,9 +32,8 @@ fewer
 ## Repository authority and base
 
 - Repository: `https://github.com/LeePepe/AIDash`
-- Revision-5 planning starts from revision-4 SHA
-  `2269a59ac28439c1bc2638d6c66f87f464278bf5` on
-  `agent/planner-lead/389b2a66f633`.
+- This mechanical CD-on-merge revision starts from the reviewed revision-5 SHA
+  `f9c7335d4ede6bb6bcce4ea681988fb3bfb4484a`.
 - Authority: `AGENTS.md` → `.specify/memory/constitution.md` →
   `CONTEXT.md` → `scripts/CONTEXT.md`; no shared-ci pin exists.
 - All planning and implementation paths resolve to dependency-free layer
@@ -42,6 +42,9 @@ fewer
   `contents: write`; `.github/**` still requires Owner approval before merge.
 - Lead decision `01a13ce1-ee23-711b-a336-f64c1e1637f0` fixes the final marker,
   cleanup, keychain, classifier-harness, and full-workflow lint contracts.
+- Owner decision `cd-on-merge`, recorded by Team Lead in
+  `01a13eea-17b9-7e9b-ab5c-4c67c85482c7`, changes only automatic triggering
+  and provenance to `push` on `main` with exact `github.sha`.
 
 ## Constitution check
 
@@ -77,9 +80,9 @@ repository routing/constitution, and every planning artifact.
 ## Minimal architecture
 
 ```text
-trusted workflow_run head_sha ─┐
+push main github.sha ──────────┐
                                ├─> one serialized self-hosted release job
-manual pinned official main ───┘        permissions: contents: write
+manual pinned official main ──┘        permissions: contents: write
                                            │ checkout exact SHA, depth 0
                                            │ validate official-main reachability
                                            v
@@ -100,13 +103,15 @@ manual pinned official main ───┘        permissions: contents: write
             successful release boundary; always cleanup warns only
 ```
 
-The job-level event guard must reject PR/fork/wrong-workflow/wrong-branch/
-non-success payloads. `actions/checkout` pins the selected SHA with
+The automatic entry is limited to `push` on `main` and selects exact
+`github.sha`; manual dispatch pins official `main` once. The job rejects any
+unexpected automatic event/ref, malformed candidate, or candidate not reachable
+from official `main`. `actions/checkout` pins the selected SHA with
 `fetch-depth: 0` and `persist-credentials: false`; the job token is supplied
 only to marker movement. This is credential hygiene inside the Owner-authorized
 job permission, not a separate CAS boundary. No newer `main` tip is
-substituted. The release worker may
-fetch official `main` and tags as metadata but must not execute another ref.
+substituted. The release worker may fetch official `main` and tags as metadata
+but must not execute another ref.
 
 ## Relevance and marker rules
 
@@ -168,11 +173,12 @@ Replace the current manual-only test with a concise Python 3.9 suite that:
    every included family and representative excluded docs/specs/workflow/
    scripts/CLI/aidata paths; missing or ambiguous extraction fails, and no
    Python copy of the allowlist is allowed;
-2. asserts the stable YAML contract: both entrypoints, exact head checkout,
-   full history, one concurrency group, force limited to relevance, success-
-   only marker compare-and-swap, signing-secret step scope, unlock-only login-
-   keychain handling, unconditional re-lock, and warning-only post-success
-   cleanup;
+2. asserts the stable YAML contract: `push.branches: [main]`,
+   `workflow_dispatch`, exact automatic `github.sha` checkout, exact manual
+   candidate checkout, full history, one concurrency group, force limited to
+   relevance, success-only marker compare-and-swap, signing-secret step scope,
+   unlock-only login-keychain handling, unconditional re-lock, and warning-only
+   post-success cleanup;
 3. contains no copied provenance, marker, version, distribution, or outcome
    state machine.
 
@@ -199,13 +205,14 @@ fifth path, run app tests/`xcodebuild`, or perform a real upload.
 3. Team Lead authorizes reuse of the registered delivery workspace and the
    exact reviewed planning base. Fullstack replaces the superseded four-path
    candidate rather than pushing or incrementally repairing it.
-4. The normal two-round implementation review budget restarts for this new
-   accepted plan version. A blocking round-2 verdict parks delivery and returns
-   to Owner without another escalation or review round.
+4. The cumulative normal two-round implementation review budget remains
+   unchanged by this mechanical revision. A blocking round-2 verdict parks
+   delivery and returns to Team Lead without another escalation or review
+   round.
 5. Implementation and PR preparation may proceed after PASS. Merge still waits
    for refreshed eligible MY-1692 proof and Owner approval of `.github/**`.
-6. After merge, record the next eligible run URL and build number on the
-   delivery issue; do not create a manual smoke-test issue.
+6. After merge, record the next eligible `main` push run URL and build number
+   on the delivery issue; do not create a manual smoke-test issue.
 
 ## Acceptance traceability
 
