@@ -14,15 +14,18 @@ touched leaves;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gate
 ## 一图
 
 ```
-建 PR ──► auto-merge.yml         → 立即挂上 squash auto-merge(draft 除外)
-       └► build + test (macOS 26) → SPM/App/CLI 构建+测试、frontmatter、tests-with-code
+建 PR ──► build + test (macOS 26) → SPM/App/CLI 构建+测试、frontmatter、tests-with-code
        └► codex-review-target     → self-hosted 本机跑 Codex;required
        └► kimi-review             → self-hosted 本机跑 Kimi;advisory-only
                                       │
         ruleset「main protection」要求:build/aidata + codex-review-target 全绿并与 main 同步
                                       ▼
-                            required 门皆绿 → 自动 squash 合并 + 删分支
+                            required checks 与 approvals 通过
+                                      ▼
+                            PR Manager 用 GitHub App 身份合并 + 删分支
 ```
+
+不使用 `GITHUB_TOKEN` auto-merge：该身份造成的 push 不触发后续 workflows。
 
 ## 三层门
 
@@ -35,7 +38,7 @@ touched leaves;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gate
 | paused legacy review | `.github/workflows/codex-review.yml` | 手动 no-op | — |
 | advisory review | `.github/workflows/kimi-review.yml` + `scripts/ci/kimi-review.sh` | PR | 不阻塞 |
 | paused review | `.github/workflows/claude-review.yml` | 手动 no-op | — |
-| 自动合并 | `.github/workflows/auto-merge.yml` | PR | — |
+| 合并 | PR Manager（GitHub App 身份；required checks 与 approvals 通过后） | PR | — |
 | ruleset(硬门) | `scripts/rulesets/main-protection.json` | main | admin 可 bypass |
 
 ## 自动 review 是怎么工作的
