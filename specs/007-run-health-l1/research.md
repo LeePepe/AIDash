@@ -106,7 +106,7 @@
 
 ## Decision 10: Separate fixture proof from one real acceptance run
 
-**Decision**: CI and unit tests inject canned responses/files and forbid live Multica subprocess calls. Before prepublication implementation review, one local configured run records a nonzero sanitized count and sample for all eight raw families. Remote/PR SHA proof occurs only after that fixed candidate receives PASS/publication permission and is pushed.
+**Decision**: CI and unit tests inject canned responses/files and forbid live Multica subprocess calls. Before prepublication implementation review, exactly one unfiltered manual `cli.py collect` invocation with local configuration records a nonzero sanitized count and sample for all eight raw families. Remote/PR SHA proof occurs only after that fixed candidate receives PASS/publication permission and is pushed.
 
 **Rationale**: Hermetic CI is a repository red line. A single live acceptance run is still needed to prove current CLI shapes and end-to-end wiring, but its evidence must not expose machine-local IDs or raw content.
 
@@ -144,16 +144,16 @@
 - Persist response ID, context, content, whole span, or file path: rejected because none is needed for tokens/window correlation and each expands the privacy surface.
 - Permit arbitrary locally configured source labels: rejected because a persisted free-form label can itself disclose personal or machine-local identity; the two Owner-selected role labels are sufficient for this scope.
 
-## Decision 13: Gate cadence activation on a named post-merge operator
+## Decision 13: Keep installed cadence activation outside repository acceptance
 
-**Decision**: The lead's CLI session on the Owner's Mac is the Owner-authorized post-merge operator. Only after the implementation PR merges, that session resolves the exact merged SHA, synchronizes `aidata/scripts/aidata_digest_run.sh` from the merged revision to `~/.hermes/scripts/aidata_digest_run.sh`, runs the installed script as the manual full chain, and posts merged-SHA, source/destination equality, and verification receipts on MY-1817. No squad agent or prepublication step mutates the installed copy.
+**Decision**: Decision `scope-cut-cadence` removes installed-run proof from repository tasks and acceptance while preserving `A-lead-operator`. Only after the implementation PR merges, the lead's CLI session on the Owner's Mac may synchronize `aidata/scripts/aidata_digest_run.sh` from the merged revision to `~/.hermes/scripts/aidata_digest_run.sh`, verify cadence, and post the receipt on MY-1817. The receipt gates issue closure only—not repository acceptance, implementation review, publication, or PR merge—and no squad agent or prepublication step mutates the installed copy.
 
-**Rationale**: The scheduled Hermes job executes an independent installed copy, so merging repository wiring alone does not activate the cadence. The named executor and three receipts close that deployment seam without broadening a squad role's host authority or publishing an unreviewed candidate.
+**Rationale**: The repository can deterministically prove registration, ordered runner equality, and all eight persisted families without taking host authority or making an external deployment seam a PR gate. The named executor remains responsible for the later issue-closure check.
 
 **Alternatives considered**:
 
-- Treat repository merge as cadence completion: rejected because the installed copy can remain stale.
-- Let an unspecified operations actor perform the sync: rejected because the task would have no schedulable owner or auditable receipt obligation.
+- Keep an installed-host task or installed-run receipts in repository acceptance: rejected by `scope-cut-cadence` because host deployment is external to the PR.
+- Treat repository merge as proof that the installed copy is active: rejected because the installed copy can remain stale; the separate issue-closure check covers that fact.
 - Let a squad agent install the prepublication candidate: rejected because no squad role has that host authority and the installed bytes must come from the exact merged revision.
 
 ## Resolved Unknowns
@@ -163,6 +163,6 @@
 - `agent tasks`/`agent get` have no workspace flag; workspace provenance comes from the explicit agent configuration pair.
 - Copilot empty usage is a valid source result, not an error and not a zero-token measurement.
 - The OTel token source remains a separate L1 observation; future attribution requires both conversation ID and a source timestamp inside the run window.
-- `copilot_otel` is synchronized to the repository runner before review, but the separately installed `~/.hermes/scripts` copy is deployed only from the merged revision by the lead's CLI session on the Owner's Mac, never by a squad agent or from the unreviewed candidate; MY-1817 remains open for cadence acceptance until the three receipts are posted.
+- `copilot_otel` is synchronized to the repository runner before review. The separately installed `~/.hermes/scripts` copy is an external post-merge issue-closure concern owned only by the lead's CLI session on the Owner's Mac, never a repository acceptance or PR merge gate.
 
 No unresolved clarification remains for implementation.

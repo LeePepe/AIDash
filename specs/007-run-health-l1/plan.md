@@ -6,7 +6,7 @@
 
 ## Summary
 
-Repair stale Multica run collection by making configured per-agent task history the run-discovery and lifecycle source, retaining a pending-run revisit set, and emitting six additional privacy-safe L1 raw families from the three scheduled Multica adapters. Add `copilot_otel` as one registered L1-only source, producing the eighth total family on the existing daily cadence. The repository runner and an ordered-list equality verifier ship together in `AidataOps`; after merge, the lead's CLI session on the Owner's Mac synchronizes the merged runner to the independently installed Hermes copy, manually runs the full chain, and posts three receipts before cadence acceptance. Shared helpers project and sanitize before persistence, canonicalize hashes, apply red-line rules before hashing, enforce a read-only CLI allowlist, and read OTel JSONL with replay-safe byte offsets. Existing normalized contracts and every downstream aidata layer remain unchanged.
+Repair stale Multica run collection by making configured per-agent task history the run-discovery and lifecycle source, retaining a pending-run revisit set, and emitting six additional privacy-safe L1 raw families from the three scheduled Multica adapters. Add `copilot_otel` as one registered L1-only source, producing the eighth total family through the existing daily repository runner. The runner and an ordered-list equality verifier ship together in `AidataOps`; one authorized manual `cli.py collect` run supplies privacy-safe repository acceptance evidence. Shared helpers project and sanitize before persistence, canonicalize hashes, apply red-line rules before hashing, enforce a read-only CLI allowlist, and read OTel JSONL with replay-safe byte offsets. Existing normalized contracts and every downstream aidata layer remain unchanged.
 
 ## Technical Context
 
@@ -41,9 +41,9 @@ Repair stale Multica run collection by making configured per-agent task history 
 | `AidataL1L2` leaf | Collection and paired compatibility behavior stay in adapters; no fictional new layer directory. | PASS |
 | `AidataL1L2` red line | External access is read-only and raw output append-only. | PASS |
 | Aidata test contract | Unit tests are hermetic and do not require `config_local.py`, network, or live CLI. | PASS |
-| Existing cadence contract | Add `copilot_otel` to `SOURCES` and the repository runner without adding a timer; require ordered-list registry equality; keep `MERGE_SOURCES` unchanged; gate acceptance on the named lead operator's post-merge installed-copy sync and manual full-chain receipts. | PASS |
+| Existing cadence contract | Add `copilot_otel` to `SOURCES` and the repository runner without adding a timer; require ordered-list registry equality; keep `MERGE_SOURCES` unchanged; require no installed-copy mutation or live scheduled-run proof for repository acceptance. | PASS |
 | Cross-layer task rule | Work is split into Foundation, AidataL1L2, and AidataOps commits in one PR. | PASS |
-| Repository verification contract | Implementation relies on normal commit/push hooks and CI; T004's real collection is fixed-candidate acceptance evidence and T005's manual full chain is a post-merge operational receipt, never a CI test. | PASS |
+| Repository verification contract | Implementation relies on normal commit/push hooks and CI; T004's one manual `cli.py collect` run is fixed-candidate acceptance evidence, never a CI test. | PASS |
 
 No constitutional violation requires a complexity exception.
 
@@ -190,10 +190,9 @@ aidata/
 1. **AidataFoundation commit**: neutral configuration, `SOURCES` registration, local example, and Foundation-owned tests. Independently proves no-config degradation, no tracked private identifiers, and `MERGE_SOURCES` exclusion.
 2. **AidataL1L2 commit**: shared read-only/privacy helper, lifecycle sanitizer, replay-safe snapshots, registered OTel adapter/no-op normalizer, run repair, raw families, routing metadata, and all canned adapter/compatibility tests. Depends on slice 1 and independently proves every collection contract.
 3. **AidataOps commit**: add `copilot_otel` to the existing repository runner list and change its owned verifier to compare the parsed ordered list directly with ordered `config.SOURCES`, so omissions, duplicates, and reordering fail. Depends on slices 1–2; adds no timer or collection logic.
-4. **Acceptance and publication evidence (no additional source commit)**: normal hook-selected gates plus one explicit real local collection with a nonzero sanitized count/sample for every family belong to the fixed prepublication candidate. After independent implementation PASS grants publication permission, push only that reviewed SHA, create/update the non-Draft PR, then prove local/remote/PR equality.
-5. **Post-merge cadence activation (external evidence gate, no source commit)**: after the reviewed PR merges, the lead's CLI session on the Owner's Mac verifies the merged SHA, copies `aidata/scripts/aidata_digest_run.sh` from that merged revision to `~/.hermes/scripts/aidata_digest_run.sh`, runs the installed manual full chain, and posts merged-SHA, source/destination sync, and successful verification receipts on MY-1817. This gate is not delegated to a squad agent and cannot run before merge.
+4. **Acceptance and publication evidence (no additional source commit)**: normal hook-selected gates plus exactly one unfiltered manual `cli.py collect` run with a nonzero sanitized count/sample for every family belong to the fixed prepublication candidate. After independent implementation PASS grants publication permission, push only that reviewed SHA, create/update the non-Draft PR, then prove local/remote/PR equality.
 
-The three commits form one PR and one feature goal. The installed `~/.hermes/scripts/aidata_digest_run.sh` copy is not modified from an unreviewed delivery checkout or by any squad agent. MY-1817 cannot claim the active-cadence outcome until the named lead operator completes slice 5 from the exact merged revision and records all three receipts. A failure whose root cause is outside these owned leaves becomes a new task rather than scope expansion.
+The three commits form one PR and one feature goal. Host installation and scheduled-run proof are not delivery slices, acceptance gates, or PR merge conditions. Separately after merge, the Owner-authorized lead CLI session may synchronize the merged runner to the installed Hermes copy, verify cadence, and post the receipt that gates MY-1817 closure only; no squad agent or prepublication candidate mutates the host. A failure whose root cause is outside these owned leaves becomes a new task rather than scope expansion.
 
 ## Post-Design Constitution Re-check
 
@@ -202,6 +201,6 @@ The three commits form one PR and one feature goal. The installed `~/.hermes/scr
 - Privacy is structural: persistence DTOs cannot carry raw message/tool/path/content fields and lifecycle text is sanitized before construction.
 - No source mutation command, live CI dependency, analysis layer, or UI was introduced.
 - Missing configuration degrades to zero collection, and missing source values remain missing.
-- Host mutation is separated from implementation: only the Owner-authorized lead CLI session performs the post-merge sync and manual full-chain verification, with receipts gating cadence acceptance.
+- Host mutation and scheduled-run proof are outside repository implementation and acceptance; the Owner-authorized lead CLI session's post-merge receipt gates MY-1817 closure only.
 
 Result: **PASS**. No complexity exception is required.

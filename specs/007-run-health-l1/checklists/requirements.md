@@ -48,7 +48,7 @@
 - [x] Foundation, L1L2, and Ops changes are separate commits with exact paths.
 - [x] Tracked defaults contain no real workspace, agent, runtime, email, slot path, or local identifier.
 - [x] Existing tests remain active and unweakened.
-- [x] Installed Hermes runner sync is owned by the lead's CLI session on the Owner's Mac after merge, with merged-SHA/sync/full-chain receipts and no squad or prepublication host mutation.
+- [x] Installed Hermes runner sync/cadence verification is an external post-merge MY-1817 closure action owned by the lead's CLI session, not a repository acceptance/review/publication/merge gate; no squad or prepublication host mutation is allowed.
 
 ## Readiness
 
@@ -57,4 +57,4 @@
 - [x] L1 record contract defines allowed DTOs and read-only commands.
 - [x] Acceptance matrix maps all 42 IDs exactly once.
 - [x] Plan passes pre/post-design constitution checks.
-- [x] Tasks are schedulable as T001 Foundation → T002 L1L2 → T003 Ops → T004 evidence/review/publication → merge → T005 lead-operator cadence activation.
+- [x] Repository tasks are schedulable as T001 Foundation → T002 L1L2 → T003 Ops → T004 one-run evidence/review/publication; no installed-host task is included.

@@ -6,7 +6,7 @@
 
 **Tests**: Fixture, privacy, compatibility, read-only, offset, and replay tests are mandatory for RH-L1-002 through RH-L1-015. T004's real local collection is prepublication acceptance evidence, never CI.
 
-**Organization**: T001–T003 are dependency-ordered, layer-scoped commits in one PR. T004 changes no tracked file: it freezes the candidate plus sanitized live evidence for independent review, then publishes only after PASS. T005 is an external post-merge cadence gate executed only by the lead's CLI session on the Owner's Mac. Do not combine layer commits or move host mutation into prepublication work.
+**Organization**: T001–T003 are dependency-ordered, layer-scoped commits in one PR. T004 changes no tracked file: it freezes the candidate plus sanitized live evidence for independent review, then publishes only after PASS. Do not combine layer commits or make host mutation part of repository delivery.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -113,8 +113,8 @@
   - Add `copilot_otel` once to the existing `SOURCES="..."` list without adding/reordering timers or changing collect → normalize → merge → digest flow.
   - Strengthen `test_runner_sources.py` so its parser returns an ordered list and the assertion compares that list directly with `list(config.SOURCES)`. Set conversion is forbidden: an omission, duplicate, or reorder in the runner must fail the verifier.
   - The OTel no-op normalizer keeps the normalize pass successful without L2 output.
-  - Record the T005 post-merge gate in the delivery handoff. This code PR neither deploys nor claims the installed-copy host mutation.
-  - Covers RH-L1-001 and the cadence portion of US3/AC5.
+  - This code PR neither deploys nor claims the installed-copy host mutation.
+  - Covers RH-L1-001 and the repository-cadence portion of US3/AC5.
 
   **Dependencies**: T001 and T002.
 
@@ -132,7 +132,7 @@
   - Machine-global Python, Git, cron, Multica, or installed Hermes configuration
 
   **Prepublication acceptance**:
-  - After T001–T003 local commits and commit-hook success, run authorized local collection for `multica_issue`, `multica_comment`, `multica_run`, and `copilot_otel`.
+  - After T001–T003 local commits and commit-hook success, execute exactly one authorized manual `python3 aidata/cli.py collect` invocation with no `--source` filter and with the required local configuration. This is the sole real collection acceptance run.
   - Report at least one persisted logical row and exactly one sanitized sample for each family: `multica_run`, `multica_run_message`, `multica_agent_snapshot`, `multica_runtime_usage`, `multica_runtime_activity`, `multica_issue_timeline`, `multica_issue_pr_link`, and `copilot_otel`. Any zero-row family blocks RH-L1-013; do not fabricate data.
   - The runtime-usage sample may truthfully contain empty usage, but the wrapper row must exist. OTel evidence retains allowed timestamps/conversation/model/token fields only. Replace local IDs; expose no raw content, email, private metadata, local path, stderr, or configured value.
   - Freeze the local candidate HEAD/tree and include changed-path/three-commit manifest, hook evidence, privacy assertions, and the eight-family table in the independent AI Reviewer package. Request explicit PASS/publication permission before any push or PR creation/update.
@@ -145,27 +145,6 @@
 
   **Dependencies**: T003, authorized local configuration, local commit-hook success, then independent prepublication PASS before push/PR.
 
-## Phase 5: Post-merge cadence activation
-
-- [ ] **T005 [US3] Activate and prove the merged runner on the existing Hermes cadence.**
-
-  **Executor / authority**: The lead's CLI session on the Owner's Mac, authorized by decision `A-lead-operator` on MY-1817. This is an external acceptance action, not a squad-agent implementation task.
-
-  **Files in scope**: No tracked repository file. The only permitted host mutation is the post-merge replacement of `~/.hermes/scripts/aidata_digest_run.sh` from the exact merged repository copy.
-
-  **Preconditions**:
-  - T004 publication is complete, the implementation PR is merged, and the exact merged SHA is resolved.
-  - The source is `aidata/scripts/aidata_digest_run.sh` at that merged SHA. No delivery checkout, unreviewed candidate, or pre-merge revision may be installed.
-  - No squad agent performs or delegates the host mutation.
-
-  **Acceptance and receipts on MY-1817**:
-  - Synchronize the merged source to `~/.hermes/scripts/aidata_digest_run.sh` through the documented copy seam, then prove the installed bytes equal the merged source bytes (for example, equal SHA-256 values). This is the sync receipt.
-  - Execute the installed runner once as the manual full chain and record a privacy-safe successful exit/timestamp receipt. Failure blocks cadence acceptance and is reported without fabricating success.
-  - Post the exact merged SHA, the source/destination equality receipt, and the manual full-chain verification receipt together on MY-1817. The issue cannot claim US3/AC5 or RH-L1-001 complete before all three receipts exist.
-  - Covers the active-host cadence portion of US3/AC5 and RH-L1-001.
-
-  **Dependencies**: T004 publication, implementation PR merge, exact merged revision.
-
 ## Dependencies & execution order
 
 ```text
@@ -175,8 +154,6 @@ T001 AidataFoundation config/source registration
                 └──> T004 local eight-family evidence + fixed candidate
                        └──> AI Reviewer PASS/publication permission
                               └──> push + non-Draft PR + SHA equality proof
-                                     └──> implementation PR merges
-                                            └──> T005 lead CLI sync + manual full-chain receipts
 ```
 
 ## Verification map
@@ -190,9 +167,8 @@ T001 AidataFoundation config/source registration
 | OTel offset/projection/no-op normalize | T002 | complete/partial/resume/rotate/truncate/privacy/window fixtures |
 | Routing uniqueness | T002 | `scripts/context/audit` |
 | Repository cadence wiring | T003 | unchanged runner structure + ordered-list equality verifier that fails omissions, duplicates, and reordering |
-| Eight nonzero families | T004 | sanitized prepublication evidence table |
+| Eight nonzero families | T004 | one unfiltered manual `cli.py collect` run + sanitized prepublication evidence table |
 | Publication identity | T004 | post-PASS local HEAD = remote branch = PR head |
-| Active installed cadence | T005 | exact merged SHA + equal source/destination digest + successful installed manual full-chain receipt on MY-1817 |
 
 ## Definition of Done
 
@@ -203,5 +179,4 @@ T001 AidataFoundation config/source registration
 - No raw message/tool/lifecycle/OTel prohibited content, local identity/path, or ignored config enters the published diff/evidence.
 - `copilot_otel` is registered on the existing cadence, has no clean/merge/downstream consumer, and later run attribution remains out of scope.
 - Independent review precedes publication; only the reviewed SHA is pushed and post-publication local/remote/PR equality is proven.
-- After merge, only the lead's CLI session on the Owner's Mac synchronizes the runner from the exact merged revision, proves installed/source byte equality, runs the installed manual full chain, and posts merged-SHA/sync/verification receipts on MY-1817; cadence acceptance remains open until those receipts exist, and no squad agent or prepublication step mutates the host.
 - Team Lead uses the exact planning commit that receives AI Reviewer PASS as the implementation base, or an explicitly approved descendant with byte-identical reviewed planning artifacts.
