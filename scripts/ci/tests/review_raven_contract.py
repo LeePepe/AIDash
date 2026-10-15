@@ -470,7 +470,7 @@ class RavenRoutingTests(unittest.TestCase):
             "⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
         )
         contaminated_comments = [
-            {"argv": ["fake", "post"], "body": "contaminated payload leaking secret or diff"},
+            {"argv": ["fake", "post"], "body": "unexpected non-diagnostic body"},
             {"argv": ["fake", "patch"], "body": expected_diagnostic},
         ]
         with self.assertRaises(AssertionError):
