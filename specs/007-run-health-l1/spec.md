@@ -18,7 +18,7 @@
 
 ## Compatibility
 
-- The existing daily cadence remains unchanged. One registered L1 source, `copilot_otel`, is added to `config.SOURCES` and the repository runner; `MERGE_SOURCES` remains unchanged and its required `normalize()` is an explicit no-op that creates no clean database.
+- The existing daily cadence remains unchanged. One registered L1 source, `copilot_otel`, is added to `config.SOURCES` and the repository runner; the runner verifier compares ordered lists so duplicates and reordering fail. After merge, the lead's CLI session on the Owner's Mac synchronizes that merged runner to the independently installed Hermes copy and proves the active cadence with a manual full-chain receipt. `MERGE_SOURCES` remains unchanged and the source's required `normalize()` is an explicit no-op that creates no clean database.
 - Existing `multica_issue`, `multica_comment`, `github_pr`, and `multica_run` normalized contracts remain compatible. New evidence is additive raw data.
 - Repeated collection is idempotent by stable source identity. Missing source values remain missing; an absent or empty usage payload never becomes a zero-token observation.
 - Copilot OTel spans remain an independent L1 source/family. This feature does not join spans into runs or alter run/runtime usage.
@@ -80,7 +80,7 @@ As a later run-health analyst, I can correlate runs with change-only agent confi
 2. **US3/AC2** — **Given** a runtime referenced by a configured agent, **When** usage and hourly activity are collected, **Then** the exact source observations are stored once per observation identity, including a truthful empty usage response.
 3. **US3/AC3** — **Given** a known issue has status changes, task outcomes, or other activity records, **When** its activity-only timeline is collected incrementally, **Then** each event is persisted idempotently with issue provenance and server truncation is explicitly marked.
 4. **US3/AC4** — **Given** issue metadata or a comment contains a valid GitHub pull-request URL, **When** candidate extraction runs transiently, **Then** the normalized URL, issue identity, source kind, source record identity, and observation time are persisted without the surrounding body or metadata.
-5. **US3/AC5** — **Given** the existing daily cadence invokes its configured sources, **When** collection runs, **Then** all eight raw families are produced with `copilot_otel` registered on that cadence and no downstream schema or consumer change.
+5. **US3/AC5** — **Given** `copilot_otel` is registered in the merged repository runner, **When** the lead's CLI session on the Owner's Mac synchronizes that exact merged runner to the independently installed Hermes copy and runs the manual full chain, **Then** all eight raw families are produced on the existing daily cadence, merged-SHA/sync/verification receipts are posted on MY-1817, and no downstream schema or consumer changes. No squad agent or prepublication step mutates the installed copy.
 
 ---
 
@@ -119,7 +119,7 @@ As a later run-health analyst, I can use privacy-safe Copilot chat-span token ev
 
 ### Functional Requirements
 
-- **RH-L1-001**: The system MUST preserve the existing daily cadence, register `copilot_otel` as one additional L1 source, and limit this feature to append-only L1 raw observations; it MUST NOT add or modify L2/L3/L4/L5 schemas, metrics, queries, cards, or UI. `MERGE_SOURCES` remains unchanged and `copilot_otel.normalize()` is a tested no-op that creates no clean database.
+- **RH-L1-001**: The system MUST preserve the existing daily cadence, register `copilot_otel` as one additional L1 source, and limit this feature to append-only L1 raw observations; it MUST NOT add or modify L2/L3/L4/L5 schemas, metrics, queries, cards, or UI. The repository runner verifier MUST compare its parsed ordered source list directly with the ordered `config.SOURCES` list so a duplicate, omission, or reorder fails. Only after merge, the lead's CLI session on the Owner's Mac MUST synchronize the runner from that exact merged revision to `~/.hermes/scripts/aidata_digest_run.sh`, run the manual full chain, and post merged-SHA, sync, and verification receipts on MY-1817 before the cadence outcome is accepted. No squad agent or prepublication step may mutate the installed copy. `MERGE_SOURCES` remains unchanged and `copilot_otel.normalize()` is a tested no-op that creates no clean database.
 - **RH-L1-002**: The system MUST discover runs from each explicitly configured agent using `multica agent tasks <agent>` and MUST discover a new run on an issue older than any previous issue-number watermark.
 - **RH-L1-003**: The system MUST retain a stable run identity, re-read every non-terminal run until terminal, and project source-supplied created, dispatched, started, completed, status, failure, cancellation, model, and usage facts without inference. Every permitted lifecycle free-text field MUST pass the deterministic pre-write lifecycle sanitizer; cancellation actors MUST be projected as stable IDs only. The explicit terminal allowlist MUST be fixture-tested; an unknown status MUST remain refreshable.
 - **RH-L1-004**: The system MUST collect execution messages incrementally by `(run_id, sequence)` and MUST make replay and cursor overlap idempotent.
@@ -169,6 +169,7 @@ As a later run-health analyst, I can use privacy-safe Copilot chat-span token ev
 - Protected branches default to `main` and `master` and can be overridden in ignored local configuration.
 - Red-line matching is an observation signal, not an authorization decision, policy engine, or substitute for branch protection.
 - Configured Copilot OTel streams use neutral logical source slots plus local-only file paths. The five token counters are `input_tokens`, `output_tokens`, `cache_read.input_tokens`, `cache_write.input_tokens`, and `reasoning.output_tokens`; absent counters remain absent.
+- The lead's CLI session on the Owner's Mac is the Owner-authorized post-merge operator for the installed Hermes runner. This authority applies only after the implementation PR merges and does not authorize a squad agent or prepublication candidate to mutate the host.
 
 ## Out of Scope
 

@@ -2,15 +2,16 @@
 
 ## Decision 1: Preserve cadence and add one registered L1 source
 
-**Decision**: Keep the existing timer/cadence, let the three Multica sources write their additive families, and register `copilot_otel` in `config.SOURCES` plus the repository runner. Keep it out of `MERGE_SOURCES`; provide a tested `normalize() -> 0` that creates no clean DB because this issue is L1-only.
+**Decision**: Keep the existing timer/cadence, let the three Multica sources write their additive families, and register `copilot_otel` in `config.SOURCES` plus the repository runner. The runner verifier compares ordered lists directly, never sets, so omissions, duplicates, and reordering fail. Keep the source out of `MERGE_SOURCES`; provide a tested `normalize() -> 0` that creates no clean DB because this issue is L1-only.
 
-**Rationale**: The accepted lead addition explicitly asks for an aidata L1 source. The current runner's registry-equality test requires explicit wiring, while the generic CLI calls `normalize()` for every source. A no-op normalizer satisfies that interface without inventing L2 scope; one existing timer remains authoritative.
+**Rationale**: The accepted lead addition explicitly asks for an aidata L1 source. The repository runner's explicit order controls collection order and per-source budget, so set equality is insufficient: it erases both duplicate entries and reordering. Direct ordered-list equality proves the intended registry invariant, while the generic CLI calls `normalize()` for every source. A no-op normalizer satisfies that interface without inventing L2 scope; one existing timer remains authoritative.
 
 **Alternatives considered**:
 
 - Hide OTel collection inside `multica_run`: rejected because it contradicts the requested source boundary and couples local-file progress to Multica collection.
 - Give OTel a clean schema/merge path: rejected as unauthorized L2/L3 scope.
 - Create a separate daemon: rejected because it expands operations and ownership beyond this L1 feature.
+- Retain set-based runner comparison: rejected because a duplicated source or a changed order can pass while changing real collection behavior.
 
 ## Decision 2: Use an explicit per-workspace agent allowlist
 
@@ -143,6 +144,18 @@
 - Persist response ID, context, content, whole span, or file path: rejected because none is needed for tokens/window correlation and each expands the privacy surface.
 - Permit arbitrary locally configured source labels: rejected because a persisted free-form label can itself disclose personal or machine-local identity; the two Owner-selected role labels are sufficient for this scope.
 
+## Decision 13: Gate cadence activation on a named post-merge operator
+
+**Decision**: The lead's CLI session on the Owner's Mac is the Owner-authorized post-merge operator. Only after the implementation PR merges, that session resolves the exact merged SHA, synchronizes `aidata/scripts/aidata_digest_run.sh` from the merged revision to `~/.hermes/scripts/aidata_digest_run.sh`, runs the installed script as the manual full chain, and posts merged-SHA, source/destination equality, and verification receipts on MY-1817. No squad agent or prepublication step mutates the installed copy.
+
+**Rationale**: The scheduled Hermes job executes an independent installed copy, so merging repository wiring alone does not activate the cadence. The named executor and three receipts close that deployment seam without broadening a squad role's host authority or publishing an unreviewed candidate.
+
+**Alternatives considered**:
+
+- Treat repository merge as cadence completion: rejected because the installed copy can remain stale.
+- Let an unspecified operations actor perform the sync: rejected because the task would have no schedulable owner or auditable receipt obligation.
+- Let a squad agent install the prepublication candidate: rejected because no squad role has that host authority and the installed bytes must come from the exact merged revision.
+
 ## Resolved Unknowns
 
 - `agent tasks` advertises `--limit` and `--before`; implementation supports cursor envelopes and treats a full bare list with no cursor as incomplete instead of guessing.
@@ -150,6 +163,6 @@
 - `agent tasks`/`agent get` have no workspace flag; workspace provenance comes from the explicit agent configuration pair.
 - Copilot empty usage is a valid source result, not an error and not a zero-token measurement.
 - The OTel token source remains a separate L1 observation; future attribution requires both conversation ID and a source timestamp inside the run window.
-- `copilot_otel` is synchronized to the repository runner before review, but the separately installed `~/.hermes/scripts` copy is deployed only from the merged revision by authorized operations, never from the unreviewed candidate.
+- `copilot_otel` is synchronized to the repository runner before review, but the separately installed `~/.hermes/scripts` copy is deployed only from the merged revision by the lead's CLI session on the Owner's Mac, never by a squad agent or from the unreviewed candidate; MY-1817 remains open for cadence acceptance until the three receipts are posted.
 
 No unresolved clarification remains for implementation.

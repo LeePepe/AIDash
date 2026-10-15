@@ -1,6 +1,6 @@
 # Contract: Acceptance-to-Task Matrix
 
-Every acceptance row is stable and mapped exactly once. “Fixture” means injected canned CLI/file input. Only T004 reads a real configured environment.
+Every acceptance row is stable and mapped exactly once. “Fixture” means injected canned CLI/file input. Only T004's prepublication collection and T005's post-merge manual full chain read a real configured environment.
 
 ## User-story acceptance (18)
 
@@ -19,7 +19,7 @@ Every acceptance row is stable and mapped exactly once. “Fixture” means inje
 | US3/AC2 exact runtime usage/activity | T002; T004 | exact/empty fixtures and live wrapper sample |
 | US3/AC3 timeline/truncation | T002 | activity vector, overlap, event/collection keys, empty truncation |
 | US3/AC4 PR candidate provenance only | T002 | valid/repeated/malformed/sentinel fixtures |
-| US3/AC5 existing cadence produces eight | T001–T004 | registration, runner equality, eight nonzero live samples |
+| US3/AC5 existing cadence produces eight | T001–T005 | registration, ordered runner equality, eight nonzero live samples, then merged-SHA/sync/full-chain receipts |
 | US4/AC1 complete/partial line cursor | T002 | partial tail emits only after completion |
 | US4/AC2 rotate/truncate generation | T002 | generation/reset/replay identities |
 | US4/AC3 allowlisted OTel projection | T001; T002 | fixed neutral-slot validation + serialized prohibited-sentinel absence |
@@ -29,7 +29,7 @@ Every acceptance row is stable and mapped exactly once. “Fixture” means inje
 
 | Requirement | Owning task | Required proof |
 |---|---|---|
-| RH-L1-001 cadence + L1-only source | T001; T002; T003 | `SOURCES` registration, no-op normalize/no DB, runner equality, no downstream diff |
+| RH-L1-001 cadence + L1-only source | T001; T002; T003; T005 | `SOURCES` registration, no-op normalize/no DB, ordered runner equality, no downstream diff, post-merge installed-copy receipts |
 | RH-L1-002 per-agent discovery | T001; T002 | neutral config + old-issue fixture |
 | RH-L1-003 lifecycle/pending/sanitizer | T002 | terminal/unknown transitions and raw+normalized privacy fixtures |
 | RH-L1-004 messages by run/sequence | T002 | incremental overlap/replay |
@@ -72,8 +72,8 @@ Every acceptance row is stable and mapped exactly once. “Fixture” means inje
 | Empty usage is not zero | T002 fixtures; T004 wrapper sample |
 | Timeline truncation is not completeness | T002 collection-marker fixture |
 | OTel is L1-only, deterministic, no AI | T001 registration, T002 no-op normalize, no downstream diff |
-| Existing timer; registered source wired | T003 runner + existing equality test |
+| Existing timer; registered source wired | T003 runner + ordered-list equality verifier |
 | Evidence precedes review; publication follows PASS | T004 review/publication receipts |
-| Installed runner sync is post-merge authorized ops | T003 external handoff, no prepublication host mutation |
+| Installed runner sync is post-merge and authority-scoped | T005 lead CLI merged-SHA/sync/full-chain receipts; no squad/prepublication host mutation |
 
 Coverage result: **42/42 mapped** (18 US + 15 RH-L1 + 9 SC); zero unresolved row.

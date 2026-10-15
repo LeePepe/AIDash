@@ -1,6 +1,6 @@
 # Quickstart: Run-Health L1 Collection
 
-This is the implementation and acceptance guide. Only T004's authorized local acceptance run contacts Multica or configured Copilot files; automated tests and CI use fixtures.
+This is the implementation and acceptance guide. Only T004's authorized prepublication acceptance run and T005's post-merge manual full-chain verification contact Multica or configured Copilot files; automated tests and CI use fixtures.
 
 ## 1. Configure locally
 
@@ -10,10 +10,10 @@ In ignored `aidata/config_local.py`, configure `MULTICA_RUN_AGENTS`, protected b
 
 1. T001: commit the `AidataFoundation` configuration/source-registration allowlist.
 2. T002: commit the `AidataL1L2` adapters, routing metadata, and canned fixtures.
-3. T003: commit only the `AidataOps` repository-runner wiring.
+3. T003: commit the `AidataOps` repository-runner wiring and its ordered-list registry verifier.
 4. Keep all three commits in one fixed candidate/PR goal. Do not modify L2 schemas/output, `MERGE_SOURCES`, L3/L4/L5, Swift packages, or UI.
 
-Normal commit hooks select repository gates. Do not bypass or manually repeat the full suite. The installed Hermes runner copy is an authorized post-merge operations sync, not a prepublication task.
+Normal commit hooks select repository gates. Do not bypass or manually repeat the full suite. The installed Hermes runner copy is a T005 post-merge action reserved to the lead's CLI session on the Owner's Mac, not a prepublication or squad-agent task.
 
 ## 3. Fixture verification
 
@@ -28,7 +28,7 @@ Fixtures must prove:
 - OTel complete-line emission, partial-tail deferral/completion, offset resume, rotation/truncation generation, malformed/non-chat handling, write failure, and logical replay.
 - OTel accepts only tracked `fullstack`/`pr-manager` slots, retains timestamps, conversation ID, model, and five token counters; unknown/duplicate slots fail before file access and response/context/content/path/label sentinels never serialize.
 - Same-conversation spans across disjoint/overlapping run windows remain separate and unassigned; L1 performs no join.
-- `copilot_otel.normalize() -> 0` creates no clean DB, the source is not mergeable, and runner registry equality holds.
+- `copilot_otel.normalize() -> 0` creates no clean DB, the source is not mergeable, and the runner parser's ordered list equals `list(config.SOURCES)` directly so omissions, duplicates, and reordering fail.
 - Automated tests launch no live Multica subprocess and read no private configured stream.
 
 ## 4. One real local acceptance run
@@ -65,10 +65,22 @@ Do not push or create/update the PR before explicit PASS/publication permission.
 
 After PASS, run the normal pre-push hook, push only the reviewed SHA, and create/update the non-Draft PR. Then verify local HEAD, remote branch SHA, and PR `headRefOid` byte-for-byte. This equality proof is post-publication evidence.
 
+## 7. Activate the cadence after merge
+
+T005 starts only after the implementation PR merges. The lead's CLI session on the Owner's Mac is the named Owner-authorized executor; no squad agent performs this step.
+
+1. Resolve and record the exact merged SHA, then use `aidata/scripts/aidata_digest_run.sh` from that merged revision as the only source.
+2. Copy it to `~/.hermes/scripts/aidata_digest_run.sh` through the documented deployment seam. Prove the source and destination bytes are equal, such as with matching SHA-256 digests.
+3. Execute the installed runner once as the manual full chain. Record only a privacy-safe success/failure, completion timestamp, and evidence needed to identify the merged revision; do not expose configured values or raw content.
+4. Post the merged-SHA, sync-equality, and full-chain verification receipts together on MY-1817. Until all three exist, US3/AC5 and RH-L1-001 remain incomplete.
+
+The installed copy must never be changed from a prepublication candidate, an unmerged PR head, or a squad-agent run.
+
 ## Failure handling
 
 - Unknown CLI/page shapes, unknown/duplicate OTel slots, zero-row families, or missing required OTel fields block completeness claims.
 - Empty Multica usage is a successful empty payload only when its wrapper row persists.
 - Timeline truncation remains successful partial evidence, never full history.
 - OTel incomplete tails wait; malformed complete lines may advance; path/content must never be logged as evidence.
+- A missing/mismatched post-merge sync receipt or a failed manual full chain blocks the active-cadence outcome; do not substitute prepublication evidence or let a squad agent repair the host.
 - Any need for normalized schema, attribution, cost, queries, metrics, UI, or a new timer returns to Team Lead as separate scope.

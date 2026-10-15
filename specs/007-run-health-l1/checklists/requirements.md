@@ -22,7 +22,7 @@
 - [x] Agent snapshot transition ordinal plus complete pending projection preserves `A → B → A` and replays B exactly if the live source becomes C before retry.
 - [x] Runtime usage/activity provenance and truthful empty wrappers are fixed.
 - [x] Timeline activity-only overlap/event-marker/truncation and PR-link provenance/privacy are fixed.
-- [x] `copilot_otel` registration, existing cadence, no-op normalizer, and no-merge boundary are fixed.
+- [x] `copilot_otel` registration, ordered runner equality that rejects omissions/duplicates/reordering, existing cadence, no-op normalizer, and no-merge boundary are fixed.
 - [x] OTel binary byte offsets, incomplete tail, rotation/truncation generation, malformed-line behavior, and state ordering are fixed.
 - [x] OTel fixed neutral source-slot allowlist, field allowlist, and response/context/content/path/free-label exclusions are fixed.
 - [x] Conversation ID plus timestamp/window sufficiency is retained without L1 attribution; zero/multiple future matches are unresolved.
@@ -48,7 +48,7 @@
 - [x] Foundation, L1L2, and Ops changes are separate commits with exact paths.
 - [x] Tracked defaults contain no real workspace, agent, runtime, email, slot path, or local identifier.
 - [x] Existing tests remain active and unweakened.
-- [x] Installed Hermes runner sync is an authorized post-merge operations handoff, never an unreviewed host mutation.
+- [x] Installed Hermes runner sync is owned by the lead's CLI session on the Owner's Mac after merge, with merged-SHA/sync/full-chain receipts and no squad or prepublication host mutation.
 
 ## Readiness
 
@@ -57,4 +57,4 @@
 - [x] L1 record contract defines allowed DTOs and read-only commands.
 - [x] Acceptance matrix maps all 42 IDs exactly once.
 - [x] Plan passes pre/post-design constitution checks.
-- [x] Tasks are schedulable as T001 Foundation → T002 L1L2 → T003 Ops → T004 evidence/review/publication.
+- [x] Tasks are schedulable as T001 Foundation → T002 L1L2 → T003 Ops → T004 evidence/review/publication → merge → T005 lead-operator cadence activation.
