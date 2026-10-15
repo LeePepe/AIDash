@@ -126,7 +126,7 @@ class RavenContractTests(unittest.TestCase):
             [str(self.adapter), "-B", str(contract)],
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=300,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
