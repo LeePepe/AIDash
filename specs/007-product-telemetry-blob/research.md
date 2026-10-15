@@ -23,12 +23,16 @@
 
 **Decision**: The GUI Settings toggle **Send usage data** is the sole consent
 authority. It defaults off in app-scoped `UserDefaults`. First opt-in creates a
-random persisted UUID; later launches and consent cycles reuse it for the app's
-lifetime. Turning consent off first
-persists false, closes admission, disables/cancels delivery, and awaits
-quiescence while retaining ambiguous/pending work and identity history. No
-queued work uploads while off. Re-enable is fresh consent and resumes under the
-same UUID. Version 1 exposes no install-ID Reset/rotation. AIDash adds no shared
+random persisted UUID, then persists a monotonic non-identity
+`telemetry.identityEstablished` marker before consent becomes active. The exact
+never-opted state has neither marker nor UUID and is the only state allowed to
+generate one. Later launches and consent cycles retain the marker and reuse the
+UUID for the app's lifetime. A marker/UUID/consent mismatch or a
+missing/malformed post-opt-in UUID fails closed without replacement. Turning
+consent off first persists false, closes admission, disables/cancels delivery,
+and awaits quiescence while retaining ambiguous/pending work, the marker, and
+identity history. No queued work uploads while off. Re-enable is fresh consent
+and resumes under the same UUID. Version 1 exposes no install-ID Reset/rotation. AIDash adds no shared
 reset API and never parses private telemetry storage for identity. CLI,
 headless/XPC, and test-host production composition never constructs the
 service.
@@ -43,6 +47,9 @@ most once in an eligible GUI lifecycle.
 
 **Rationale**: Default-off, product-owned consent prevents accidental telemetry
 construction; a random opt-in identity avoids hardware/account-derived identity.
+The monotonic non-identity marker distinguishes never-opted from a disabled or
+corrupt post-opt-in state, so re-enable cannot silently reinterpret corruption
+as permission to create a new lifetime identity.
 The single first-ready callback makes action and performance evidence
 deterministic without expanding shared telemetry vocabulary.
 
@@ -52,6 +59,9 @@ deterministic without expanding shared telemetry vocabulary.
   and exists independently of telemetry consent.
 - Enable by endpoint presence: producer configuration is not consent.
 - Create an ID at install/launch: identity must not precede first opt-in.
+- Infer never-opted from consent plus UUID absence alone: after opt-out that
+  would make a corrupt retained identity look pristine and permit silent
+  rotation; the monotonic established marker makes the states explicit.
 - Delete pending state on disable: this contradicts the SDK retention contract
   and would rewrite or orphan frozen immutable batches.
 - Add Reset/rotation in version 1: the replacement decision finds no current
