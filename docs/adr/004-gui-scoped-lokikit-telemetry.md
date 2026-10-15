@@ -22,14 +22,20 @@ ADR-003 separately governs a future sandboxed fixed install. Its fixed entitleme
   on macOS and iOS/iPadOS. Persist it through app `UserDefaults.standard`;
   missing is false. Production CLI, headless/XPC, and test-host modes never construct the
   telemetry service.
-- On first opt-in, create and persist one random install UUID. Reuse it across
-  launches and consent cycles for the app's lifetime. Do not reuse
+- On first opt-in from the exact never-opted state, create and persist one
+  random install UUID, then persist monotonic non-identity
+  `telemetry.identityEstablished = true` before consent becomes active. Reuse
+  the UUID and retain the marker across launches and consent cycles for the
+  app's lifetime. A post-opt-in missing/malformed UUID or inconsistent
+  marker/UUID/consent combination fails closed and never generates a
+  replacement. Do not reuse
   `AIDashCore.DeviceIdentifier` or derive identity from device/hardware/account
   data.
 - Construct the service at the existing app-mode seam only after persisted
   consent and validated manual host-key reads. First opt-in may persist its
-  consent/UUID preferences before config validates, but invalid config creates
-  no service, store, uploader, timer, or network work.
+  UUID/established-marker/consent preferences before config validates, but
+  invalid config or established-preference inconsistency creates no service,
+  store, uploader, timer, or network work.
 - Use the direct Blob initializer, a Blob-only store, product-local privacy
   allowlist and persisted random UUID provider, and `heartbeatVersion: nil`.
   The bundle convenience initializer and SDK-owned startup/daily timers are
@@ -58,12 +64,13 @@ ADR-003 separately governs a future sandboxed fixed install. Its fixed entitleme
 ## Concurrency and lifecycle cost
 
 - The app-local preferences/coordinator seam owns consent, the lifetime-stable
-  install ID, service lifetime, and at-most-once eligible GUI lifecycle state.
+  install ID, monotonic established marker, explicit preference-state model,
+  service lifetime, and at-most-once eligible GUI lifecycle state.
 - View-layer entry remains `@MainActor`; transport/store work stays inside LokiKit's structured concurrency boundary.
 - No `nonisolated(unsafe)`, `@unchecked Sendable`, detached task, or global actor escape is authorized by this ADR. A need for one requires a separate ADR.
 - Disable persists consent false and disables/cancels delivery before awaiting
   quiescence. Disable/re-enable never rotates the install ID, erases durable
-  pending state, or rewrites a frozen identity/path.
+  pending state or the established marker, or rewrites a frozen identity/path.
 
 ## Security and release injection
 

@@ -19,8 +19,8 @@
 - [x] Each requirement is testable and has an owning task or explicit external closure.
 - [x] GUI, headless, test-host, disabled, rollback, and unsafe-event behavior are specified.
 - [x] `aidash.action` and `aidash.performance.ready_scene` have exact triggers, typed properties, no sampling, lifecycle cardinality, and monotonic timing formula.
-- [x] Consent source/default/persistence/lifecycle, first-opt-in-only install-ID creation, fail-closed invalid established identity, and production read seam are exact and cross-platform.
-- [x] Hostless acceptance covers the same install ID across relaunch and disable/re-enable and proves no Reset/rotation/shared-reset/private-catalog path exists.
+- [x] Consent source/default/persistence/lifecycle, the monotonic non-identity established marker, explicit never-opted/established-disabled/established-enabled/established-invalid states, first-opt-in-only install-ID creation, fail-closed invalid established identity, and production read seam are exact and cross-platform.
+- [x] Hostless acceptance covers exactly-once generation, the retained marker and same install ID across relaunch and disable/re-enable, every inconsistent/corrupt post-opt-in state failing closed without replacement generation, and no Reset/rotation/shared-reset/private-catalog path.
 - [x] Reader no-op, CLI-only DAC, GET-only origin confinement, redirect refusal, and no-fallback behavior are specified.
 - [x] Complete-unit checkpoint, deterministic event key, idempotent L3 grain, and read-only L4 query are specified.
 - [x] Reader request/run/page/object/byte limits and exact within/after-page checkpoint behavior are measurable.
