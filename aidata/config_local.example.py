@@ -12,6 +12,10 @@ sources below simply collect nothing (ADR-23 degrade-not-crash), so the digest
 still builds on a fresh machine.
 """
 
+# Product telemetry Blob reader. Keep empty unless configuring a local,
+# query-free HTTPS Azure Blob container URL.
+PRODUCT_BLOB_CONTAINER_URL = ""
+
 # ---------------------------------------------------------------------------
 # Multica workspaces the digest collects from (ADR-5 / EXT-2).
 # An allow-list of (workspace_uuid, friendly_name). The friendly name appears
