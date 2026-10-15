@@ -242,6 +242,10 @@ MANUAL_SOURCES = (
 # manual source is inert until a machine sets a real path in config_local.py.
 TEAM_AUDIT_IMPORT_ROOT = ""
 
+# Product telemetry Blob reader. Empty keeps the source disabled; a real
+# query-free container URL belongs only in config_local.py.
+PRODUCT_BLOB_CONTAINER_URL = ""
+
 # ---------------------------------------------------------------------------
 # Source registry: canonical source names -> whether they feed L3 merge.
 # memory_* sources stop at L2 (queried directly), per design.
@@ -266,6 +270,35 @@ SOURCES = (
     "memory_hermes_md",
     "github_repo",
     "github_pr",
+    "news",
+    "aidash_events",
+    "local_git",
+    "browser_history",
+    "gecko",
+)
+
+# Current effective 04:00 runner order. The runner will consume this canonical
+# declaration in T009; declaring it here does not activate a new source.
+SCHEDULED_SOURCES = (
+    "raven",
+    "claude_jsonl",
+    "claude_prompts",
+    "codex_prompts",
+    "kimi_prompts",
+    "multica_issue",
+    "multica_run",
+    "multica_comment",
+    "claude_job",
+    "github_repo",
+    "github_pr",
+    "pr_cache",
+    "ado_pr",
+    "state_db",
+    "hermes_tools",
+    "hermes_messages",
+    "memory_claude",
+    "memory_hermes_db",
+    "memory_hermes_md",
     "news",
     "aidash_events",
     "local_git",
