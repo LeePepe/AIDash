@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from decimal import Decimal, ROUND_HALF_UP
 
 import serve
 from config import MULTICA_WORKSPACES, clean_path
@@ -571,6 +572,18 @@ class RankBundle:
 
 
 @dataclass(frozen=True)
+class CostAttributionBundle:
+    """RankBundle-compatible cost attribution with reconciliation metadata."""
+    items: list[RankItem]
+    health: SourceHealth
+    headline_total: float = 0.0
+    attributed_total: float = 0.0
+    coverage_pct: float = 0.0
+    residual_total: float = 0.0
+    residual_pct: float = 0.0
+
+
+@dataclass(frozen=True)
 class Segment:
     """One stackedBar segment: category label + magnitude + optional semantic
     ("good"/"warning") for a quality-graded segment (None = plain category)."""
@@ -779,7 +792,8 @@ def fetch_ai_efficiency() -> "AiEfficiency":
 
 
 # ---- ⏱ 时间与产出 -------------------------------------------------------
-def fetch_cost_by_project(day: str | None, top_n: int = 6) -> "RankBundle":
+def fetch_cost_by_project(day: str | None,
+                          top_n: int = 6) -> "CostAttributionBundle":
     """Where the day's spend actually went, as a descending barList.
 
     This is the attribution layer: every other trend card reports one
@@ -793,17 +807,97 @@ def fetch_cost_by_project(day: str | None, top_n: int = 6) -> "RankBundle":
     """
     try:
         rows, idx = _rows("attribution/cost-by-project", {"day": day})
-        pi, ci, pci = idx["project"], idx["cost_usd"], idx["cost_pct"]
-        ranked = [(str(r[pi]), float(r[ci] or 0), float(r[pci] or 0))
-                  for r in rows]
+        required = (
+            "project", "bucket", "cost_usd", "cost_pct", "ktokens",
+            "requests", "sessions", "day_total", "attributed_total",
+        )
+        positions = {column: idx[column] for column in required}
+        if not rows:
+            return CostAttributionBundle(
+                [], SourceHealth("attribution", "ok")
+            )
+
+        cents = Decimal("0.01")
+
+        def money(value) -> Decimal:
+            return Decimal(str(value or 0)).quantize(
+                cents, rounding=ROUND_HALF_UP
+            )
+
+        headline = money(rows[0][positions["day_total"]])
+        attributed = money(rows[0][positions["attributed_total"]])
+        projects: list[tuple[str, float, float]] = []
+        residual_row = None
+        for row in rows:
+            if money(row[positions["day_total"]]) != headline:
+                raise ValueError("inconsistent day_total")
+            if money(row[positions["attributed_total"]]) != attributed:
+                raise ValueError("inconsistent attributed_total")
+            bucket = str(row[positions["bucket"]])
+            if bucket == "project":
+                project_cost = money(row[positions["cost_usd"]])
+                if project_cost < 0:
+                    raise ValueError("negative project cost")
+                if project_cost == 0:
+                    continue
+                projects.append((
+                    str(row[positions["project"]]),
+                    float(project_cost),
+                    float(row[positions["cost_pct"]] or 0),
+                ))
+            elif bucket == "residual":
+                if residual_row is not None:
+                    raise ValueError("multiple residual rows")
+                residual_row = row
+            else:
+                raise ValueError(f"unknown attribution bucket: {bucket}")
+
+        projects.sort(key=lambda item: item[1], reverse=True)
         items = _fold_top_n(
-            ranked, top_n,
+            projects, top_n,
             value_text=lambda pct: f"{pct:.0f}%",
             semantic=lambda _label: None,
         )
-        return RankBundle(items, SourceHealth("attribution", "ok"))
+        residual_total = Decimal("0.00")
+        residual_pct = 0.0
+        expected_residual = (headline - attributed).quantize(
+            cents, rounding=ROUND_HALF_UP
+        )
+        if residual_row is not None:
+            residual_total = money(residual_row[positions["cost_usd"]])
+            if residual_total < 0:
+                raise ValueError("negative residual cost")
+            residual_pct = float(
+                residual_row[positions["cost_pct"]] or 0
+            )
+            if residual_total > 0:
+                items.append(RankItem(
+                    "未归因",
+                    float(residual_total),
+                    f"{residual_pct:.1f}%",
+                    "warning",
+                ))
+        if residual_total != expected_residual:
+            raise ValueError("residual row does not reconcile to summary totals")
+        items.sort(key=lambda item: item.value, reverse=True)
+
+        coverage_pct = (
+            round(float(attributed / headline * 100), 1)
+            if headline > 0 else 0.0
+        )
+        return CostAttributionBundle(
+            items=items,
+            health=SourceHealth("attribution", "ok"),
+            headline_total=float(headline),
+            attributed_total=float(attributed),
+            coverage_pct=coverage_pct,
+            residual_total=float(residual_total),
+            residual_pct=round(residual_pct, 1),
+        )
     except Exception as exc:
-        return RankBundle([], SourceHealth("attribution", "error", str(exc)[:200]))
+        return CostAttributionBundle(
+            [], SourceHealth("attribution", "error", str(exc)[:200])
+        )
 
 
 def fetch_model_by_project(day: str | None, top_n: int = 5) -> "RankBundle":
