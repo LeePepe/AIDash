@@ -10,7 +10,7 @@ The phases below are ordered work within T001, not separate Multica tasks.
 | Slice | Outcome | Dependency |
 |---|---|---|
 | US1 | A trusted app-relevant CI head uses the existing TestFlight lane and records success | none |
-| US2 | Manual force remains available and failures leave the marker unchanged with cleanup | US1 |
+| US2 | Manual force remains available; pre-success failures leave the marker unchanged and post-success cleanup can only warn | US1 |
 
 ```text
 T001 (US1 + US2, RepoInfra)
@@ -33,7 +33,8 @@ T001 (US1 + US2, RepoInfra)
 | Out of scope | build/review workflows, Fastlane, project/signing config, app/package/CLI/aidata code, routing/constitution/planning artifacts, host config, secrets/rulesets |
 | Interface | Automatic and manual GitHub Actions release entrypoints plus the public `testflight/last-released` tag |
 | Dependencies | Exact planning PASS before work resumes; refreshed MY-1692 proof and Owner `.github/**` approval before merge |
-| Verification | Python 3.9 focused tests and repository-local workflow lint; resolver RepoInfra gates; context audit; hook/CI gates; exact manifest; `git diff --check` |
+| Constitution | `.specify/memory/constitution.md` §Technical Constraints → Testing → Who runs tests (NON-NEGOTIABLE), §Cross-Cutting Quality Bars → A. Scope Discipline (P0), and §Development Workflow → Quality Gates |
+| Verification | Python 3.9 harness executing the exact production classifier block; complete-workflow `actionlint`; resolver RepoInfra gates; context audit; hook/CI gates; exact manifest; `git diff --check` |
 
 ### Ordered phase A — entrypoint and exact candidate
 
@@ -51,25 +52,42 @@ T001 (US1 + US2, RepoInfra)
   relationships fail.
 - Classify the exact AIDash allowlist. Force otherwise bypasses only classifier
   output.
-- Leave the marker unchanged on every skip or failure.
+- Leave the marker unchanged on every skip or failure before successful marker
+  compare-and-swap.
 
 ### Ordered phase C — unchanged release lane and cleanup
 
-- Preserve runner labels, existing secrets, login-keychain flow, runtime
+- Preserve runner labels, existing secrets, login-keychain identity, runtime
   profile, global build number, tracked marketing version, and
   `fastlane ios beta` behavior.
-- Move the lightweight marker only after lane success.
-- Run summary and workflow-created ref/signing/keychain cleanup with
-  `always()`.
+- After lane success, use a lease-guarded compare-and-swap against the exact
+  remote marker object ID observed during eligibility (or authorized expected
+  absence). A rejected update means this run did not mutate the marker and
+  fails after upload; a successful update is the successful release outcome.
+- Use only `security unlock-keychain` on `login.keychain-db`; do not run
+  `security set-keychain-settings`, mutate the user search list, or run
+  `security set-key-partition-list`. Rely on the runner's preconfigured
+  certificate ACL; an insufficient ACL fails before marker update. If unlock
+  was attempted, `always()` unconditionally runs `security lock-keychain` and
+  cleans workflow-created refs/signing artifacts.
+- Catch all cleanup failures after marker success, emit only secret-free
+  warnings, and preserve the successful outcome; before marker success, cleanup
+  failures cannot mask the earlier failure.
 
 ### Ordered phase D — narrow replacement evidence
 
 - Delete the manual-only regression and do not reuse/port the unpublished
   shadow-policy suite.
-- Add Python 3.9 classifier unit cases for every allowlisted family and
-  representative excluded paths.
+- Add Python 3.9 table-driven cases that extract and execute the exact
+  production classifier block for every allowlisted family and representative
+  excluded paths in isolated temporary Git repositories with temporary outputs;
+  missing/ambiguous extraction fails, and the allowlist is not duplicated in
+  Python.
 - Add stable structural assertions without reimplementing policy state
-  machines; run repository-local workflow lint and repository gates.
+  machines; provision a pinned verification-only `actionlint` outside tracked
+  paths, record its version, and run
+  `actionlint .github/workflows/testflight.yml` without a host-wide install,
+  then preserve every mandatory repository gate.
 - Update the handoff guide and PR body to disclose removed coverage, job-level
   write permission, upload/tag non-atomicity, no retry/recovery, and the
   repository-specific signing flow.

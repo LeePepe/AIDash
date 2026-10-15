@@ -21,6 +21,7 @@ successful `main`, valid commit, and reachability from fetched official main.
 | `ref` | `refs/tags/testflight/last-released` |
 | `sha` | Commit currently recorded by the lightweight tag |
 | `state` | `missing`, `equal`, `ancestor`, or `invalid` |
+| `expected_remote_oid` | Exact remote marker object ID observed during eligibility, or expected absence for authorized bootstrap; consumed by the lease-guarded compare-and-swap |
 
 `invalid` includes a non-commit target or a marker not ancestral to the
 candidate. It fails closed. The marker has no schema/version/build metadata.
@@ -45,19 +46,15 @@ Missing state fails automatic execution; manual `force=true` may bootstrap.
 | `eligible` | safe marker state and (`matched` or `force`) |
 | `reason` | concise secret-free explanation |
 
-## ReleaseOutcome
+## Secret-free summary facts
 
-- `skipped_released`
-- `skipped_irrelevant`
-- `failed_preflight`
-- `failed_release`
-- `failed_marker_update`
-- `released`
+The workflow summary records only the candidate SHA/source, observed marker
+relationship/object ID, relevance/force decision, whether the lane ran, marker
+compare-and-swap result, native job conclusion, run URL on success, and any
+cleanup warning. The summary is evidence, not durable workflow state, and
+defines no phase-specific outcome taxonomy.
 
-The outcome is summary-only, not durable state. Every failure leaves the public
-marker unchanged. `released` requires lane success followed by marker movement.
-
-## State transitions
+## Processing sequence (not persisted state)
 
 ```text
 event -> validate/pin candidate -> fetch marker
@@ -68,11 +65,12 @@ event -> validate/pin candidate -> fetch marker
   -> ancestor: classify marker..candidate
        -> irrelevant and !force: skip
        -> eligible: existing lane
-            -> failure: cleanup, marker unchanged
-            -> success: move marker
-                 -> push failure: cleanup, marker unchanged
-                 -> push success: released
+            -> pre-marker failure: cleanup, marker unchanged
+            -> lane success: lease-guarded compare-and-swap observed marker to candidate
+                 -> rejected: cleanup; this run did not mutate marker
+                 -> accepted: release success; cleanup may warn only
 ```
 
 There is no queue, cursor, attempt, confirmation, quarantine, recovery record,
-annotated marker metadata, or exactly-once guarantee.
+annotated marker metadata, terminal-outcome state machine, or exactly-once
+guarantee.

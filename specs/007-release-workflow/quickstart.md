@@ -2,7 +2,7 @@
 
 ## Scope check
 
-Use the exact reviewed planning revision and registered MY-1777 workspace.
+Use the exact reviewed planning revision and registered MY-1767 workspace.
 The unpublished revision-3 candidate is preserved evidence, not a base to push
 or incrementally repair. Confirm the implementation diff is limited to:
 
@@ -22,10 +22,19 @@ docs/testflight-handoff.md
    classifier; keep force as relevance-only. Automatic and non-force missing-
    marker execution fails closed; manual force may bootstrap.
 4. Preserve the existing runner, lane, secrets, global build number, login
-   keychain, runtime profile, and internal distribution behavior.
-5. Move the lightweight marker only after lane success.
-6. Add `always()` cleanup and a concise secret-free summary.
-7. Delete the manual-only test and add only focused classifier/structure tests.
+   keychain identity, runtime profile, and internal distribution behavior. Use
+   only `security unlock-keychain` on `login.keychain-db`: no
+   `security set-keychain-settings`, search-list mutation, or
+   `security set-key-partition-list`. Rely on the preconfigured certificate ACL.
+5. After lane success, use a lease-guarded compare-and-swap from the exact
+   remote marker object ID observed during eligibility (or expected absence for
+   authorized bootstrap) to the candidate; marker success is release success.
+6. If unlock was attempted, make `always()` cleanup unconditionally run
+   `security lock-keychain`, plus local-artifact cleanup and a concise
+   secret-free summary. Catch post-success cleanup errors as warnings and never
+   let cleanup mask an earlier failure.
+7. Delete the manual-only test. Make table-driven cases extract and execute the
+   exact production classifier block; keep structural assertions narrow.
 8. Update the handoff guide for automatic operation, failure behavior, and the
    explicit upload/tag non-atomicity.
 
@@ -33,8 +42,12 @@ docs/testflight-handoff.md
 
 - Every owned path resolves to `RepoInfra`; `scripts/context/audit` is clean.
 - Repository hook-selected RepoInfra checks pass on the approved delivery base.
-- Replacement tests run with `/usr/bin/python3` Python 3.9.
-- Repository-local workflow lint passes without a new tool dependency.
+- Replacement tests run with `/usr/bin/python3` Python 3.9 and execute the exact
+  production classifier block.
+- Pinned verification-only `actionlint`, provisioned outside tracked paths with
+  its version recorded, runs as
+  `actionlint .github/workflows/testflight.yml` without a tracked dependency or
+  host-wide install; mandatory repository gates also pass.
 - `git diff --check` is clean and the manifest contains four paths or fewer.
 - Planning artifacts and prohibited paths match the reviewed revision.
 

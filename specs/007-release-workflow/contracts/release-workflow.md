@@ -54,16 +54,29 @@ login-keychain signing, runtime profile fetch, global build-number allocation,
 tracked marketing version, and lane-owned internal distribution behavior.
 Reference ASC and keychain secrets only in the release path.
 
-Move the marker to the exact candidate only after the lane returns success.
-Use ordinary contents-write tag update; no CAS-only job, annotated metadata, or
-additional ref.
+For signing, use only `security unlock-keychain` on `login.keychain-db`. Do not
+run `security set-keychain-settings`, mutate the user search list, or run
+`security set-key-partition-list`. Rely on the runner's preconfigured
+certificate ACL; insufficient access fails before marker update and does not
+authorize host mutation. If unlock was attempted, `always()` cleanup
+unconditionally runs `security lock-keychain`.
+
+Only after the lane returns success, use a lease-guarded compare-and-swap from
+the exact remote marker object ID observed during eligibility (or expected
+absence for authorized bootstrap) to the exact candidate using the ordinary
+contents-write permission. Rejection means this run did not mutate the marker
+and fails after upload; success is the successful release outcome. There is no
+separate CAS-only job, annotated metadata, or additional ref.
 
 ## Failure and cleanup
 
-Every invalid state or command failure is terminal. No automatic retry,
-rollback, or recovery state exists. An `always()` step removes workflow-created
-temporary refs/signing artifacts, restores keychain state changed by the run,
-and writes a secret-free summary.
+Every invalid state or command failure before marker compare-and-swap success
+fails the run. No automatic retry, rollback, or recovery state exists. An
+`always()` step removes workflow-created temporary refs/signing artifacts,
+attempts to re-lock the login keychain, and writes a secret-free summary. After
+marker success, cleanup commands are caught and can emit only secret-free
+warnings; they cannot change the successful release outcome. Before marker
+success, cleanup warnings cannot mask the earlier failure.
 
 Upload and marker movement are not atomic. If upload succeeds and tag push
 fails, a later run may upload again. This contract does not promise exactly
@@ -71,9 +84,12 @@ once.
 
 ## Verification contract
 
-- concise Python 3.9 relevance-classifier cases;
+- concise Python 3.9 cases that extract and execute the exact production
+  classifier block;
 - stable structural assertions for entrypoints, exact checkout, concurrency,
   force boundary, success-only marker movement, credential step scope, and
   cleanup;
-- action/workflow lint and repository RepoInfra gates;
+- pinned verification-only
+  `actionlint .github/workflows/testflight.yml` over the complete workflow plus
+  every mandatory repository RepoInfra/hook/CI gate;
 - no shadow provenance/marker/version/distribution/outcome policy model.

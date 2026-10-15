@@ -8,7 +8,8 @@ Replace AIDash's manual-only release entry with the Owner-approved cross-app
 minimal pattern: one self-hosted release job, one non-cancelling concurrency
 group, one moving last-released marker, exact CI-head checkout with full
 history, focused path relevance, the unchanged Fastlane lane, success-only
-marker movement, and unconditional cleanup. Keep manual force. Delete the
+marker compare-and-swap, and unconditional warning-only post-success cleanup.
+Keep manual force. Delete the
 manual-only regression and discard the unpublished shadow-policy suite; verify
 only the relevance classifier, stable workflow structure, and workflow lint.
 
@@ -30,8 +31,8 @@ fewer
 ## Repository authority and base
 
 - Repository: `https://github.com/LeePepe/AIDash`
-- Revision-4 planning starts from reviewed revision-3 SHA
-  `efc5760d496a92934fba096ef54e48fb4d1fe86e` on
+- Revision-5 planning starts from revision-4 SHA
+  `2269a59ac28439c1bc2638d6c66f87f464278bf5` on
   `agent/planner-lead/389b2a66f633`.
 - Authority: `AGENTS.md` → `.specify/memory/constitution.md` →
   `CONTEXT.md` → `scripts/CONTEXT.md`; no shared-ci pin exists.
@@ -39,10 +40,16 @@ fewer
   `RepoInfra`.
 - Owner decision B on MY-1777 authorizes this re-scope and ordinary job-level
   `contents: write`; `.github/**` still requires Owner approval before merge.
+- Lead decision `01a13ce1-ee23-711b-a336-f64c1e1637f0` fixes the final marker,
+  cleanup, keychain, classifier-harness, and full-workflow lint contracts.
 
 ## Constitution check
 
 - Scope remains one layer and one PR goal.
+- T001 cites `.specify/memory/constitution.md` §Technical Constraints → Testing
+  → Who runs tests (NON-NEGOTIABLE), §Cross-Cutting Quality Bars → A. Scope
+  Discipline (P0), and §Development Workflow → Quality Gates rather than
+  replacing their hook/CI ownership.
 - No product schema, dependency, identity, or credential is added.
 - Existing hook/CI gates and host-test safety rules remain unchanged.
 - Removed test coverage is explicitly Owner-authorized and replaced by the
@@ -88,9 +95,9 @@ manual pinned official main ───┘        permissions: contents: write
                                            v
                     existing secret/signing setup + fastlane ios beta
                                            v
-                         success only: move last-released tag
+                   success only: compare-and-swap last-released tag
                                            v
-                     always: summary + local tag/keychain cleanup
+            successful release boundary; always cleanup warns only
 ```
 
 The job-level event guard must reject PR/fork/wrong-workflow/wrong-branch/
@@ -120,48 +127,73 @@ Equality skips. Non-ancestor state fails closed. Missing marker fails automatic
 and non-force execution; manual `force=true` may bootstrap the exact pinned
 current-main candidate. Force otherwise bypasses only classifier output.
 
-The public marker stays lightweight and moves with the existing ordinary
-contents-write push only after `fastlane ios beta` succeeds. There is no CAS
-protocol, marker metadata, label-derived version, distribution readback,
-attempt journal, recovery state, retry, or rollback.
+The public marker stays lightweight. Only after `fastlane ios beta` succeeds,
+push the candidate with a lease-guarded compare-and-swap expectation for the
+exact remote marker object ID observed during eligibility, or expected absence
+for authorized bootstrap. A rejected update means this run did not mutate the
+marker and records a failed release after upload; a successful update is the
+successful release outcome. This stays in the one release job and adds no
+CAS-only permission boundary, marker metadata, label-derived version,
+distribution readback, attempt journal, recovery state, retry, or rollback.
 
 ## Repository-specific release preservation
 
 - Keep `[self-hosted, aidash-mac]` and concurrency group `testflight`.
-- Keep the five existing secrets and the login-keychain unlock/signing flow.
+- Keep the five existing secrets and login-keychain signing identity. The only
+  permitted keychain mutation is `security unlock-keychain` against
+  `login.keychain-db` for signing.
+- Remove `security set-keychain-settings`, user search-list rewrites, and
+  `security set-key-partition-list`. Signing relies on the runner's
+  preconfigured certificate ACL; an insufficient ACL fails before marker update
+  and grants no authority to mutate host/keychain configuration. If unlock was
+  attempted, `always()` cleanup unconditionally runs `security lock-keychain`.
 - Keep runtime provisioning-profile fetch and the unchanged lane.
 - Keep the lane's global build-number allocation and current internal-group
   distribution behavior.
-- Scope ASC/keychain secrets to the build/upload path. An `always()` cleanup
-  removes workflow-created temporary refs/artifacts and restores keychain state
-  changed by the workflow. Do not invent a temporary keychain where AIDash
-  currently uses the login keychain.
+- Scope ASC/keychain secrets to the build/upload path. `always()` cleanup
+  removes workflow-created temporary refs/artifacts and re-locks the login
+  keychain without reading secrets into logs. Once marker compare-and-swap has
+  succeeded, every cleanup command is caught: failure emits only a secret-free
+  warning and cannot change release success. Before marker success, cleanup
+  errors likewise cannot mask the earlier failure. Do not invent a temporary
+  keychain.
 
 ## Verification design
 
 Replace the current manual-only test with a concise Python 3.9 suite that:
 
-1. unit-tests the AIDash allowlist with every included family and representative
-   excluded docs/specs/workflow/scripts/CLI/aidata paths;
+1. locates the production classifier step by its stable workflow step ID,
+   extracts its exact `run` block, and executes that block against table-driven
+   fixtures in isolated temporary Git repositories with temporary outputs for
+   every included family and representative excluded docs/specs/workflow/
+   scripts/CLI/aidata paths; missing or ambiguous extraction fails, and no
+   Python copy of the allowlist is allowed;
 2. asserts the stable YAML contract: both entrypoints, exact head checkout,
    full history, one concurrency group, force limited to relevance, success-
-   only marker movement, signing-secret step scope, and `always()` cleanup;
+   only marker compare-and-swap, signing-secret step scope, unlock-only login-
+   keychain handling, unconditional re-lock, and warning-only post-success
+   cleanup;
 3. contains no copied provenance, marker, version, distribution, or outcome
    state machine.
 
-AIDash has no installed or repository-declared `actionlint` binary. Keep the
-four-path scope by making the replacement test perform repository-local
-workflow lint (YAML parse/structure plus syntax checks for the exact extracted
-classifier block), then run resolver-selected RepoInfra gates,
-`scripts/context/audit`, task freshness, placeholder/pointer checks, and
-`git diff --check`. Do not add a lint dependency or fifth path, and do not run
-app tests, `xcodebuild`, or a real upload.
+AIDash has no installed or repository-declared `actionlint` binary. Provision
+`actionlint` only as a task-local verification executable outside tracked
+paths, record its version, and run it against the complete
+`.github/workflows/testflight.yml` using
+`actionlint .github/workflows/testflight.yml`; pin the provisioned version in
+the delivery evidence, perform no host-wide install, and treat a missing
+executable or any diagnostic as verification failure. This full-workflow lint
+supplements rather than replaces
+the exact-production-block cases and all resolver-selected RepoInfra gates,
+`scripts/context/audit`, task freshness, placeholder/pointer checks, hook/CI
+gates, and `git diff --check`. Do not add a tracked lint dependency, edit a
+fifth path, run app tests/`xcodebuild`, or perform a real upload.
 
 ## Delivery sequencing
 
 1. Commit and publish only this planning revision on the existing Planner
    branch; obtain AI Reviewer spec-gate PASS bound to its exact SHA.
-2. Reconcile MY-1777 only after PASS. The preserved unpublished candidate
+2. Reconcile MY-1767 only after PASS. The preserved unpublished candidate
    `e8c353ce61e5cc3b6167481598b35556bb4dc02a` remains parked and is not an
    implementation base or publication candidate.
 3. Team Lead authorizes reuse of the registered delivery workspace and the
@@ -198,6 +230,8 @@ app tests, `xcodebuild`, or a real upload.
   boundary. Owner decision B explicitly accepts this simpler design.
 - Upload and marker movement are non-atomic; a marker-push failure can permit a
   later duplicate external upload. No exactly-once claim is made.
+- Marker compare-and-swap success is final even if later best-effort cleanup
+  warns. The summary must disclose the warning without secrets.
 - Existing Fastlane internal-group distribution remains best-effort unless the
   lane itself fails. This revision does not add workflow-owned ASC proof.
 - GitHub may replace pending concurrency members. Accumulated relevance is
