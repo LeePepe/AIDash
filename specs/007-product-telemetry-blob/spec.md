@@ -16,7 +16,7 @@ It also preserves the cross-repository `SL-E2E` evidence gate. VitalStride imple
 
 ### Existing behavior and compatibility
 
-- AIDash has no product telemetry. GUI, headless XPC, CLI, and test-host modes must remain distinguishable.
+- AIDash has no product telemetry. Constitution 1.14.0 authorizes it only after the amendment is published and merged; GUI, headless XPC, CLI, and test-host modes must remain distinguishable.
 - `AIDashCore`, `AIDashUI`, CLI behavior, CloudKit/UserEvent storage, and existing analytics/data sources remain unchanged by this feature.
 - `aidata` is a recursively routed Python subsystem. Its external sources are read-only, raw data is append-only, and an unconfigured source degrades to zero records.
 - No accepted behavior or test is removed, skipped, weakened, or reclassified.
@@ -25,22 +25,26 @@ It also preserves the cross-repository `SL-E2E` evidence gate. VitalStride imple
 
 - **D-01 — Product ownership**: action names, performance names, fields, allowlists, sampling, and formulas remain product-local. Shared telemetry owns only generic transport, timing, privacy validation, persistence, and delivery diagnostics.
 - **D-02 — Blob wire/durability contract**: producers and the reader use the exact contract in `contracts/blob-wire.md`. Producer credentials remain the previously approved create-only CI inputs and are never read by planning or implementation agents.
-- **OA-002 / `aad-owner-local` — Reader identity**: the only reader is the Owner's existing Azure AD identity, used locally through the Azure CLI-backed `DefaultAzureCredential` leg. It has read/list authority only. There is no SAS mode, secret field, stored-policy use, or authentication fallback. Missing endpoint configuration, missing Azure CLI sign-in, or token failure returns zero records before state advances. Tracked files use only symbolic identifiers; the real selector belongs only in ignored `aidata/config_local.py`.
+- **D-03 — Consent, identity, and AIDash events**: `contracts/aidash-events.md` is the normative AIDash event table. The GUI Settings toggle **Send usage data** is the sole consent source, reads/writes app `UserDefaults.standard`, defaults off, and creates a random persisted install UUID on first opt-in. Disable stops admission/upload but retains pending state; re-enable is fresh consent; Reset rotates only future identity. CLI, headless/XPC, and test-host production composition never constructs the telemetry service.
+- **OA-002 / `aad-owner-local` — Reader identity**: the only reader is the Owner's existing Azure AD identity, used locally through the Azure CLI-backed `DefaultAzureCredential` leg. It has read/list authority only. There is no SAS mode, secret field, stored-policy use, or authentication fallback. Missing endpoint/sign-in or initial-token failure before listing returns zero with no state change; a later auth/network failure preserves earlier completed records/object checkpoints and leaves only its incomplete object/page unadvanced. Tracked files use only symbolic identifiers; the real selector belongs only in ignored `aidata/config_local.py`.
 
 ## User scenarios and testing
 
 ### User Story 1 — Safe GUI telemetry producer (Priority: P1)
 
-As the Owner, I can enable AIDash GUI telemetry and receive one product-local action signal and one ready-scene performance signal without changing headless, CLI, test-host, CloudKit, or UserEvent behavior.
+As the Owner, I can explicitly enable AIDash GUI telemetry and receive the two events in `contracts/aidash-events.md` without changing headless, CLI, test-host, CloudKit, or UserEvent behavior.
 
-**Independent test**: Hostless logic constructs the service only from valid, consented GUI configuration, emits exactly the two product event kinds once per GUI lifecycle, and proves every disabled mode returns before identity, store, timer, or network creation.
+**Independent test**: Hook-owned hostless logic uses isolated preferences and fakes to prove default-off consent, first-opt-in identity, Reset/disable/re-enable behavior, eligible once-per-lifecycle event emission, and no service/store/timer/network construction in every disabled production mode.
 
 **Acceptance scenarios**:
 
-1. Given empty, unexpanded, or unsafe producer configuration, when the factory is evaluated, then it returns a no-op before creating durable identity, storage, or network work.
-2. Given valid configuration and consent in a GUI lifecycle, when the app becomes ready, then one product-local action event and one ready-scene performance event are accepted with only allowlisted properties.
-3. Given headless XPC, CLI, test-host, or no-consent mode, when lifecycle seams run, then no telemetry service, timer, identity, store, or event is created.
-4. Given producer disable or rollback, when active flush work exits, then pending files and historical identity epochs remain intact.
+1. Given a fresh install or missing/malformed consent preference, when any GUI lifecycle begins, then **Send usage data** is off and no install ID, telemetry service, store, timer, uploader, event, or network work is created.
+2. Given the first explicit false-to-true opt-in, when preferences persist it, then a random canonical UUID is created once and reused on later launches; empty, unexpanded, or unsafe producer configuration still returns before service/store/timer/uploader/network construction.
+3. Given valid configuration and consent already true at eligible GUI launch, when the first `.ready(container)` scene becomes interactive, then `aidash.action` with only `action_name=briefing_viewed` and `aidash.performance.ready_scene` with only finite nonnegative integer `duration_ms` are admitted at 100% sampling and at most once in that lifecycle.
+4. Given consent becomes true only after the scene is already ready, readiness never occurs, or consent is revoked before readiness, then no retrospective action/performance event is emitted for that lifecycle.
+5. Given headless XPC, CLI, or test-host production composition, when lifecycle seams run, then no telemetry service, store, uploader, timer, or event is constructed.
+6. Given consent is turned off or producer rollback begins, when false is persisted, then admission closes and active delivery is disabled/cancelled before quiescence; no pending upload starts/continues, ambiguous in-flight work stays retained/unconfirmed, and a later opt-in may resume eligible retained work.
+7. Given Reset before first opt-in, then it is disabled/no-op and creates no ID. Given an existing ID, Reset while off rotates it locally without service/upload construction; while active it disables/cancels delivery, awaits quiescence, persists a new UUID for future batches only, leaves frozen pending batches/history unchanged, and resumes only if consent/configuration remain valid.
 
 ### User Story 2 — Read-only product-event analytics (Priority: P1)
 
@@ -51,8 +55,8 @@ As the Owner, I can collect authorized product Blob objects into `aidata`, prese
 **Acceptance scenarios**:
 
 1. Given an empty tracked endpoint selector or unavailable Owner-local Azure CLI identity, when `product_blob` collects, then it returns zero and neither contacts the endpoint nor advances state.
-2. Given a signed-in authorized identity and paginated objects, when collection succeeds, then every complete object is parsed, redacted, appended, normalized, and checkpointed exactly once.
-3. Given malformed gzip/NDJSON, interrupted pagination, or token/network failure, when a unit fails, then incomplete work does not advance its seen/watermark state and the wider pipeline continues.
+2. Given a signed-in authorized identity and paginated objects within `contracts/reader-auth.md` limits, when collection succeeds, then every complete object is parsed, redacted, appended, normalized, and checkpointed exactly once.
+3. Given malformed gzip/NDJSON, invalid path, an oversized object, a timeout, a collection-budget/page/object limit, interrupted pagination, or mid-run token/network failure, when a unit cannot complete, then incomplete work emits no record and does not advance its page/object state while previously completed records/checkpoints remain and the wider pipeline continues.
 4. Given normalized product events, when L3 merge and the L4 query rerun, then the honest event grain and object provenance remain stable and no analytical duplicate appears.
 
 ### User Story 3 — Correlated least-privilege proof (Priority: P2)
@@ -73,19 +77,22 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 - Redirects and non-server-trust authentication challenges are refused by producer transport.
 - Only HTTP `201`, or an ambiguous immutable retry receiving the exact qualified overwrite rejection, may remove producer queue work.
 - Changed destinations, corrupt sidecars, or source/body mismatches retain and block a producer batch.
-- An object path that does not match the reviewed five-part layout is rejected without advancing state.
+- Consent disabled while work is pending retains the queue but forbids upload; Reset never rewrites a frozen batch's install-ID-bearing path.
+- Ready-scene duration uses a monotonic clock and rejects negative/overflow results; wall-clock adjustment cannot change it.
+- Every listed object reference is selected; a path that does not match the reviewed five-part layout is rejected before GET without an object checkpoint and blocks its page-marker advance.
 - One invalid NDJSON line rejects its containing collection unit; partial facts are not published.
+- Compressed/decompressed byte caps are enforced while streaming; `Content-Length` is only an early-rejection hint.
 - The real endpoint or a personal identity accidentally present in a fixture, doc, log, error, or tracked config is a release-blocking failure.
 
 ## Requirements
 
 ### Functional requirements
 
-- **FR-001**: Both in-scope products MUST define their own allowlisted action and performance event names, fields, sampling, and formulas; shared telemetry MUST NOT gain product semantics.
-- **FR-002**: Producers MUST fail closed for missing/unsafe configuration or consent, isolate Blob state and network work, reject an entire unsafe event before persistence/network, freeze exact retry bytes/path/destination, classify receipt exactly, and retain pending work and historical identity on disable or rollback.
+- **FR-001**: Both in-scope products MUST define their own allowlisted action and performance event names, fields, sampling, formulas, and cardinality; shared telemetry MUST NOT gain product semantics. AIDash MUST implement exactly `contracts/aidash-events.md`.
+- **FR-002**: Producers MUST fail closed for missing/unsafe configuration or consent, isolate Blob state and network work, reject an entire unsafe event before persistence/network, freeze exact retry bytes/path/destination, classify receipt exactly, and retain pending work and historical identity on disable or rollback. AIDash consent MUST use the default-off local preference lifecycle in D-03; first opt-in MAY create its preference/UUID before producer configuration validates, but invalid configuration MUST create no telemetry service/store/uploader/timer/network work.
 - **FR-003**: VitalStride MUST retain its product-local TelemetryKit and Aptabase behavior and add Blob only through the separately owned VitalStride adapter slice; no AIDash task may edit that repository.
-- **FR-004**: AIDash MUST add the exact approved LokiKit dependency only to GUI app composition, manually read the two expanded host keys, use the direct timer-free initializer with `heartbeatVersion: nil`, emit exactly one product action and one ready-scene performance event per GUI lifecycle, and remain a no-op in headless/test-host modes.
-- **FR-005**: `aidata` MUST add a single-mode `product_blob` source using only the `aad-owner-local` contract, paginate and read the reviewed gzip NDJSON Blob format, preserve stable object/event provenance through an honest `fact_product_event`, expose a bounded read-only L4 query, and register the source in scheduled operations without adding L5 formulas or cards.
+- **FR-004**: AIDash MUST add the exact approved LokiKit dependency only to consented GUI app composition, manually read the two expanded host keys, use the direct timer-free initializer with `heartbeatVersion: nil`, expose the cross-platform Settings consent/Reset surface, emit the exact two AIDash events only for an eligible lifecycle, and remain a no-op in CLI/headless/test-host production composition.
+- **FR-005**: `aidata` MUST add a single-mode `product_blob` source using only the `aad-owner-local` contract, paginate and read the reviewed gzip NDJSON Blob format within the exact timeout/page/object/byte limits in `contracts/reader-auth.md`, preserve stable object/event provenance through an honest `fact_product_event`, expose a bounded read-only L4 query, and activate the source atomically in registries and scheduled operations only after adapter/schema/query/runner readiness without adding L5 formulas or cards.
 - **FR-006**: Final acceptance MUST correlate a bounded two-product canary set through producer, Blob, L1, L3, and L4, including rerun/no-duplicate and unsafe-event rejection evidence.
 - **FR-007**: All writer and reader permissions, dependency identities, release inputs, temporary CI injection, evidence, and rollback MUST remain least-privilege and auditable. No agent may create/read/copy a credential or real endpoint, and no tracked artifact may contain personal identity metadata.
 
@@ -96,6 +103,7 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 - No tracked or ignored config key exists for token, SAS, account key, tenant, client secret, username, object ID, or alternate auth mode.
 - `DefaultAzureCredential` is configured so Azure CLI is its only enabled leg. Interactive login and every non-CLI credential leg are disabled; failure never falls back to another mechanism.
 - The requested scope is the Azure Storage data-plane audience only. Adapter operations are limited to container list and object read.
+- Reader collection uses a 30-second request timeout and 240-second monotonic run budget, with at most 100 list results per page, 10 pages, 1,000 object references/GETs, 8,388,608 compressed bytes per object, and 67,108,864 decompressed bytes per object.
 
 ### Non-goals
 
@@ -109,6 +117,7 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 ### Key entities
 
 - **Product Event**: Product-owned action or performance record with name, ISO timestamp, and closed properties.
+- **Telemetry Preferences**: Local default-off consent and random install UUID state; not a credential and never a source of device/hardware identity.
 - **Frozen Blob Batch**: Immutable gzip NDJSON bytes plus digest, destination, object path, and credential-free sidecar.
 - **Blob Object Cursor**: Stable object path/ETag fingerprint and completed-unit state used for idempotent collection.
 - **Product Event Fact**: One accepted event keyed by deterministic object-path plus line ordinal, retaining sanitized object provenance.
@@ -117,8 +126,8 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 
 ## Success criteria
 
-- **SC-001**: Hermetic producer tests observe exactly one allowlisted action and one performance event, zero SDK heartbeat events, and zero telemetry construction in every disabled mode.
-- **SC-002**: Hermetic reader tests cover pagination, malformed content, auth/network degradation, no partial advance, and idempotent rerun with zero credential material in records or errors.
+- **SC-001**: Hook-owned hermetic producer evidence observes the exact two AIDash events at most once in an eligible lifecycle, exact trigger/properties/timing, default-off/first-opt-in/Reset/disable/re-enable behavior, zero SDK heartbeat events, and zero telemetry construction in every disabled production mode.
+- **SC-002**: Hook/CI-owned hermetic reader evidence covers every request/run/page/object/byte boundary, malformed content, auth/network degradation, exact page/object checkpoint behavior, and idempotent rerun with zero credential material in records or errors.
 - **SC-003**: Temporary-database merge and L4 tests return one stable row per synthetic event after repeated runs and perform no source mutation.
 - **SC-004**: The final evidence bundle correlates both products and both event types across every required stage and proves the unsafe event is absent.
 - **SC-005**: Repository scanning finds no real endpoint, personal identity metadata, token, SAS, account key, or secret in the planned/implemented change.
@@ -126,7 +135,8 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 
 ## Dependencies and gates
 
-- `SL-AID-PLAN` is closed only by repository-native analysis, RepoInfra local gate, accepted ADR-004 and ADR-005, and exact-revision AI Reviewer PASS.
+- `SL-AID-PLAN` is closed only by repository-native analysis, a normal-commit RepoInfra hook receipt, accepted ADR-004 and ADR-005, and exact-revision AI Reviewer PASS.
+- Every T001–T010 implementation task is additionally blocked until the constitution 1.14.0 amendment is published and merged in the required `constitution: authorize explicit-consent GUI telemetry` PR with its migration note.
 - `REL-001` gates only the exact LokiKit resolution in `AID-XCODE` and live E2E identity; it does not block this planning package or `SL-DATA`.
 - OA-003/OA-004 gate live producer/canary evidence, not secret-free implementation.
 - E2E-05 begins only after `SL-AID-PRODUCER`, `SL-DATA`, and the separately owned VitalStride slice are merged at recorded immutable revisions.

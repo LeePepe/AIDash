@@ -20,6 +20,9 @@ The public repository must not carry the real endpoint or personal principal/ope
 - Expose only `PRODUCT_BLOB_CONTAINER_URL`, empty in tracked configuration/examples. The real query-free HTTPS container selector may exist only in ignored `aidata/config_local.py`.
 - Add no token, SAS, account-key, tenant, client, username, object-ID, stored-policy, or auth-mode config field.
 - Reject embedded query/userinfo/fragment, cross-origin/path escape, redirects, non-GET requests, and any authentication fallback.
+- Enforce the deterministic request/run/page/object/byte limits and checkpoint
+  behavior in `specs/007-product-telemetry-blob/contracts/reader-auth.md`; a
+  limit hit is a bounded pause/failure, never authority to broaden access.
 - Persist no token, real endpoint, or personal identity in raw data, normalized data, state, diagnostics, errors, fixtures, or logs.
 
 ## Dependency and CI cost
