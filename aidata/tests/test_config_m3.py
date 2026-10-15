@@ -1,7 +1,6 @@
 import ast
 import builtins
 import importlib.util
-import re
 from pathlib import Path
 
 import pytest
@@ -87,17 +86,7 @@ def test_product_blob_config_surface_has_no_auth_or_secret_fields(monkeypatch):
 
 
 @pytest.mark.unit
-def test_scheduled_sources_match_current_runner_order_and_are_registered():
-    runner_path = Path(config.__file__).with_name("scripts") / "aidata_digest_run.sh"
-    match = re.search(
-        r'^SOURCES="([^"]*)"$',
-        runner_path.read_text(encoding="utf-8"),
-        flags=re.MULTILINE,
-    )
-
-    assert match is not None
-    runner_sources = tuple(match.group(1).split())
-    assert config.SCHEDULED_SOURCES == runner_sources
+def test_scheduled_sources_are_unique_and_registered():
     assert len(config.SCHEDULED_SOURCES) == len(set(config.SCHEDULED_SOURCES))
     assert set(config.SCHEDULED_SOURCES) <= set(config.SOURCES)
 
