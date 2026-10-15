@@ -1,83 +1,179 @@
 name: testflight
 
-# 仅通过 workflow_dispatch 手动构建 main 并上传 TestFlight（内部测试）。
-# 自动发布已暂停。force=true 可忽略“无新提交”检查；发布标记仍记录成功版本。
-#
-# 跑在 self-hosted `aidash-mac`(复用 claude-review / codex-review 那台):
-# Apple Distribution 证书已在登录钥匙串,所以不需要把 .p12 塞进 Secret。
-# 需要的 Secrets: ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8_BASE64 / ASC_TEAM_ID /
-# KEYCHAIN_PASSWORD。前置条件与配置步骤见 docs/testflight-handoff.md。
-#
-# 安全:本 workflow 只在 workflow_dispatch 上触发,永远 checkout main
-# ——不存在 fork PR 的代码在维护者本机执行的路径(与 claude-review.yml 的可信
-# 边界同理,只是这里更简单:根本不碰 PR 内容)。
-#
-# push tag 不触发 build.yml(其 push 过滤是 branches: [main]),无副作用。
+# Post-merge pushes to main release app-relevant changes automatically.
+# Manual dispatch remains available; force bypasses only path relevance and may
+# bootstrap a missing release marker.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       force:
-        description: '忽略「无新提交」检查,强制发一次'
+        description: 'Ignore path relevance and release the selected main commit'
         type: boolean
         default: false
 
 concurrency:
   group: testflight
-  cancel-in-progress: false # 不打断进行中的上传
+  cancel-in-progress: false
 
 permissions:
-  contents: write # 移动 testflight/last-released tag
+  contents: write
 
 jobs:
   release:
     name: Build & upload to TestFlight
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, aidash-mac]
     timeout-minutes: 40
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Decide whether to release
-        id: gate
+      - name: Select exact candidate
+        id: candidate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          EVENT_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          LATEST="$(git rev-parse HEAD)"
-          RELEASED="$(git rev-parse -q --verify refs/tags/testflight/last-released || echo none)"
-          FORCE="${{ github.event.inputs.force }}"
-          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "HEAD=$LATEST  last-released=$RELEASED  force=$FORCE"
-          if [ "$FORCE" = "true" ] || [ "$LATEST" != "$RELEASED" ]; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "→ 有新提交(或 force):将 build + 上传"
+          if [ "$EVENT_NAME" = "push" ]; then
+            if [ "$EVENT_REF" != "refs/heads/main" ]; then
+              echo "::error::Unexpected automatic release ref"
+              exit 1
+            fi
+            CANDIDATE="$EVENT_SHA"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            CANDIDATE="$(
+              git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/main |
+                awk 'NR == 1 { print $1 }'
+            )"
           else
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            echo "→ skipped: no new commits since last TestFlight release"
+            echo "::error::Unexpected release event"
+            exit 1
           fi
+          if ! printf '%s\n' "$CANDIDATE" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::Could not resolve an exact release candidate"
+            exit 1
+          fi
+          echo "sha=$CANDIDATE" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.candidate.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: false
+          persist-credentials: false
+
+      - name: Evaluate marker and app relevance
+        id: gate
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force == true }}
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          MARKER_REF="refs/tags/testflight/last-released"
+          set_output() {
+            printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+          }
+
+          set_output candidate "$CANDIDATE_SHA"
+          set_output force "$FORCE"
+          set_output release false
+
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main"
+          if [ "$(git rev-parse HEAD)" != "$CANDIDATE_SHA" ]; then
+            set_output outcome failed-candidate-mismatch
+            echo "::error::Checkout does not match the pinned candidate"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/main; then
+            set_output outcome failed-unreachable-candidate
+            echo "::error::Candidate is not reachable from official main"
+            exit 1
+          fi
+
+          MARKER_OID="$(
+            git ls-remote --tags origin "$MARKER_REF" |
+              awk -v ref="$MARKER_REF" '$2 == ref { print $1 }'
+          )"
+          set_output marker_oid "$MARKER_OID"
+
+          if [ -z "$MARKER_OID" ]; then
+            set_output marker_state missing
+            if [ "$EVENT_NAME" != "workflow_dispatch" ] || [ "$FORCE" != "true" ]; then
+              set_output outcome failed-missing-marker
+              echo "::error::Release marker is missing; only manual force may bootstrap it"
+              exit 1
+            fi
+            set_output relevant forced-bootstrap
+            set_output release true
+            set_output outcome eligible
+            exit 0
+          fi
+
+          git fetch --no-tags origin "+$MARKER_REF:$MARKER_REF"
+          if [ "$(git cat-file -t "$MARKER_OID")" != "commit" ]; then
+            set_output marker_state invalid
+            set_output outcome failed-invalid-marker
+            echo "::error::Release marker must be a lightweight tag"
+            exit 1
+          fi
+          if [ "$MARKER_OID" = "$CANDIDATE_SHA" ]; then
+            set_output marker_state equal
+            set_output relevant not-evaluated
+            set_output outcome skipped-already-released
+            exit 0
+          fi
+          if ! git merge-base --is-ancestor "$MARKER_OID" "$CANDIDATE_SHA"; then
+            set_output marker_state non-ancestor
+            set_output relevant not-evaluated
+            set_output outcome failed-unsafe-marker
+            echo "::error::Release marker is not an ancestor of the candidate"
+            exit 1
+          fi
+          set_output marker_state ancestor
+
+          BASE_SHA="$MARKER_OID"
+          # CLASSIFIER-BEGIN
+          RELEVANT=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              Apps/AIDashApp/*|Packages/AIDashCore/*|Packages/AIDashUI/*|Packages/DesignKit/*|Configs/*|project.yml|fastlane/*)
+                RELEVANT=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only -z "$BASE_SHA..$CANDIDATE_SHA")
+          echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
+          # CLASSIFIER-END
+
+          if [ "$RELEVANT" != "true" ] && [ "$FORCE" != "true" ]; then
+            set_output outcome skipped-no-app-changes
+            exit 0
+          fi
+          set_output release true
+          set_output outcome eligible
 
       - name: Verify Xcode
         if: steps.gate.outputs.release == 'true'
-        # self-hosted runner 上 Xcode 由用户选定(无 passwordless sudo,不能像
-        # GitHub 托管 runner 那样 sudo xcode-select)。这里只校验版本可用。
         run: |
           echo "Using: $(xcode-select -p)"
           xcodebuild -version
 
       - name: Ensure xcodegen + fastlane
         if: steps.gate.outputs.release == 'true'
-        # AIDash.xcodeproj 是 gitignore 的生成物,lane 里会 xcodegen generate,
-        # 所以两个工具都得在。已装则跳过(brew list 比 brew install 快得多)。
         run: |
           set -euo pipefail
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           brew list fastlane >/dev/null 2>&1 || brew install fastlane
 
-      - name: Verify API key secret
+      - name: Verify API key secrets
         if: steps.gate.outputs.release == 'true'
         env:
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
@@ -86,67 +182,105 @@ jobs:
           ASC_TEAM_ID: ${{ secrets.ASC_TEAM_ID }}
         run: |
           set -euo pipefail
-          # fastlane 直接吃 base64 的 key_content(is_key_content_base64: true),
-          # 所以这里只校验 Secret 存在,不把明文 .p8 落到磁盘上。
-          # 提前失败比让 fastlane 在 archive 之后才报「认证失败」省 10 分钟。
           missing=0
           for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64 ASC_TEAM_ID; do
             if [ -z "$(eval "echo \${$name:-}")" ]; then
-              echo "::error::$name secret 未设置(gh secret set $name)"
+              echo "::error::$name secret is not configured"
               missing=1
             fi
           done
           [ "$missing" -eq 0 ]
 
       - name: Unlock login keychain for codesign
+        id: keychain
         if: steps.gate.outputs.release == 'true'
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
-          # runner 跑在独立 launchd 会话(PPID=1),login keychain 在该会话里默认
-          # 锁定 → codesign 拿不到 Apple Distribution 私钥 → errSecInternalComponent
-          # (报错完全不提「钥匙串锁着」,极难排查)。每次 build 前显式解锁 +
-          # 放行 codesign 无提示访问私钥。
           if [ -z "${KEYCHAIN_PASSWORD:-}" ]; then
-            echo "::error::KEYCHAIN_PASSWORD secret 未设置(gh secret set KEYCHAIN_PASSWORD)"; exit 1
+            echo "::error::KEYCHAIN_PASSWORD secret is not configured"
+            exit 1
           fi
-          KC="$HOME/Library/Keychains/login.keychain-db"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
-          # 关掉自动锁定(interval / lock-on-sleep),避免长 archive 期间被重新锁上。
-          security set-keychain-settings "$KC"
-          # 确保 login keychain 在 search list 里(codesign 才找得到私钥)。
-          # 保留现有 search list,只补上 login —— `-s` 会替换整份,所以先读回再合并去重。
-          EXISTING=$(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//')
-          security list-keychains -d user -s $(printf '%s\n' "$KC" $EXISTING | awk '!seen[$0]++')
-          # 放行 codesign / apple 工具无提示访问私钥(幂等,重复跑无害)。
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KC" >/dev/null 2>&1 || true
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" \
+            "$HOME/Library/Keychains/login.keychain-db"
 
       - name: fastlane ios beta
+        id: upload
         if: steps.gate.outputs.release == 'true'
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
-          # 宪法 §No Identity in Version Control:Team ID 不进版本库,由 secret
-          # 注入(fastlane/identity.rb 优先读它,本机则回退 Identity.local.xcconfig)。
           AIDASH_DEVELOPMENT_TEAM: ${{ secrets.ASC_TEAM_ID }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
-          # self-hosted runner 首次 SPM resolve + showBuildSettings 慢,会撞上
-          # fastlane 默认 3s 超时(重试到 24s 仍不够)导致 build_app 直接放弃。
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
           FASTLANE_XCODEBUILD_SETTINGS_RETRIES: "6"
         run: fastlane ios beta
 
-      - name: Move last-released tag
-        if: steps.gate.outputs.release == 'true'
+      - name: Compare-and-swap last-released marker
+        id: marker
+        if: steps.upload.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          EXPECTED_MARKER: ${{ steps.gate.outputs.marker_oid }}
         run: |
           set -euo pipefail
-          SHA="${{ steps.gate.outputs.latest }}"
-          git tag -f testflight/last-released "$SHA"
-          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "refs/tags/testflight/last-released"
-          echo "✅ testflight/last-released → $SHA"
+          MARKER_REF="refs/tags/testflight/last-released"
+          LEASE="${MARKER_REF}:${EXPECTED_MARKER}"
+          git push --force-with-lease="$LEASE" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "${CANDIDATE_SHA}:${MARKER_REF}"
+
+      - name: Cleanup and summarize
+        if: always()
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          MARKER_STATE: ${{ steps.gate.outputs.marker_state }}
+          RELEVANT: ${{ steps.gate.outputs.relevant }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force == true }}
+          GATE_OUTCOME: ${{ steps.gate.outputs.outcome }}
+          MARKER_OUTCOME: ${{ steps.marker.outcome }}
+          KEYCHAIN_ATTEMPTED: ${{ steps.keychain.outputs.attempted }}
+        run: |
+          set -u
+          cleanup_warning=false
+          if [ "$KEYCHAIN_ATTEMPTED" = "true" ]; then
+            if ! security lock-keychain "$HOME/Library/Keychains/login.keychain-db"; then
+              echo "::warning::Could not re-lock the login keychain"
+              cleanup_warning=true
+            fi
+          fi
+          if ! git update-ref -d refs/tags/testflight/last-released; then
+            echo "::warning::Could not remove the local release marker"
+            cleanup_warning=true
+          fi
+
+          if [ "$MARKER_OUTCOME" = "success" ]; then
+            FINAL_OUTCOME=success
+            CAS_RESULT=success
+          elif [[ "$GATE_OUTCOME" == skipped-* ]]; then
+            FINAL_OUTCOME="$GATE_OUTCOME"
+            CAS_RESULT=not-attempted
+          else
+            FINAL_OUTCOME=failed
+            CAS_RESULT=not-completed
+          fi
+          if ! {
+            echo "## TestFlight release"
+            echo "- Candidate: \`${CANDIDATE_SHA:-unresolved}\`"
+            echo "- Marker state: \`${MARKER_STATE:-unknown}\`"
+            echo "- Relevance: \`${RELEVANT:-not-evaluated}\`"
+            echo "- Force: \`${FORCE:-false}\`"
+            echo "- Marker CAS: \`$CAS_RESULT\`"
+            echo "- Outcome: \`$FINAL_OUTCOME\`"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } >> "$GITHUB_STEP_SUMMARY"; then
+            echo "::warning::Could not write the release summary"
+            cleanup_warning=true
+          fi
+          if [ "$cleanup_warning" = "true" ] && [ "$MARKER_OUTCOME" = "success" ]; then
+            echo "::warning::Release succeeded; cleanup reported a warning"
+          fi
