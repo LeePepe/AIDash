@@ -38,18 +38,34 @@ class _Missing:
         return False
 
 
+_COST_COLUMNS = [
+    "project", "bucket", "cost_usd", "cost_pct", "ktokens", "requests",
+    "sessions", "day_total", "attributed_total",
+]
+
+
+def _cost_row(project, bucket, cost, pct, day_total, attributed_total):
+    return (
+        project, bucket, cost, pct, 0.0, 0, 0, day_total, attributed_total,
+    )
+
+
+def _empty_attribution():
+    return s.RankBundle([], s.SourceHealth("attribution", "skipped:未取"))
+
+
 # --------------------------------------------------------------------------- #
 # fetch_cost_by_project
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
 def test_cost_by_project_ranks_by_share(monkeypatch):
     monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [("AIDash", 1552.93, 41.4, 331680.5, 1492.0, 19),
-         ("VitalStride", 900.04, 24.0, 191641.8, 1807.0, 26)],
-        ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
+        [_cost_row("Nimbus", "project", 1552.93, 41.4, 2452.97, 2452.97),
+         _cost_row("Harbor", "project", 900.04, 24.0, 2452.97, 2452.97)],
+        _COST_COLUMNS))
     bundle = s.fetch_cost_by_project("2026-08-02")
     assert bundle.health.state == "ok"
-    assert [i.label for i in bundle.items] == ["AIDash", "VitalStride"]
+    assert [i.label for i in bundle.items] == ["Nimbus", "Harbor"]
     # The bar is drawn from the SHARE, so the card reads as "where the money
     # went" rather than an unanchored dollar figure.
     assert bundle.items[0].value_text == "41%"
@@ -69,10 +85,202 @@ def test_cost_by_project_degrades_on_failure(monkeypatch):
 @pytest.mark.unit
 def test_cost_by_project_handles_empty(monkeypatch):
     monkeypatch.setattr(s.serve, "run_query", _FakeRows(
-        [], ["project", "cost_usd", "cost_pct", "ktokens", "requests", "sessions"]))
+        [], _COST_COLUMNS))
     bundle = s.fetch_cost_by_project(None)
     assert bundle.items == []
     assert bundle.health.state == "ok"
+
+
+@pytest.mark.unit
+def test_cost_by_project_reconciles_partial_coverage(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("Nimbus", "project", 1500.00, 52.5, 2858.35, 2107.23),
+        _cost_row("Harbor", "project", 607.23, 21.2, 2858.35, 2107.23),
+        _cost_row("ignored sentinel", "residual", 751.12, 26.3,
+                  2858.35, 2107.23),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project("2026-08-02")
+
+    assert bundle.headline_total == 2858.35
+    assert bundle.attributed_total == 2107.23
+    assert bundle.residual_total == 751.12
+    assert bundle.coverage_pct == pytest.approx(73.7)
+    assert sum(i.value for i in bundle.items if i.label != "未归因") == 2107.23
+    residual = next(i for i in bundle.items if i.label == "未归因")
+    assert residual.value == 751.12
+    assert residual.value_text == "26.3%"
+    assert residual.semantic == "warning"
+
+    from L5_apps.digest.aidash import _attribution_container
+
+    container = _attribution_container("0803", bundle, _empty_attribution())
+    assert container is not None
+    assert container.subtitle == (
+        "归因覆盖 73.7%（$2,107.23 / $2,858.35）· 未归因 $751.12（26.3%）"
+    )
+
+
+@pytest.mark.unit
+def test_cost_by_project_uses_bucket_not_label_for_residual(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("unattributed", "project", 80.00, 80.0, 100.00, 80.00),
+        _cost_row("anything", "residual", 20.00, 20.0, 100.00, 80.00),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project(None)
+
+    assert [item.label for item in bundle.items] == ["unattributed", "未归因"]
+    assert [item.semantic for item in bundle.items] == [None, "warning"]
+
+
+@pytest.mark.unit
+def test_cost_by_project_folds_projects_before_merging_residual(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("Nimbus", "project", 50.00, 30.3, 165.00, 120.00),
+        _cost_row("Harbor", "project", 40.00, 24.2, 165.00, 120.00),
+        _cost_row("Summit", "project", 30.00, 18.2, 165.00, 120.00),
+        _cost_row("unattributed", "residual", 45.00, 27.3, 165.00, 120.00),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project(None, top_n=2)
+
+    assert [item.label for item in bundle.items] == [
+        "Nimbus", "未归因", "Harbor", "Other",
+    ]
+    assert len(bundle.items) <= 4
+    assert [item.value for item in bundle.items] == sorted(
+        (item.value for item in bundle.items), reverse=True
+    )
+
+
+@pytest.mark.unit
+def test_cost_by_project_zero_valid_attribution_is_explicit(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("unattributed", "residual", 50.00, 100.0, 50.00, 0.00),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project(None)
+
+    assert bundle.coverage_pct == 0.0
+    assert bundle.residual_total == 50.0
+    assert [(item.label, item.value_text, item.semantic)
+            for item in bundle.items] == [("未归因", "100.0%", "warning")]
+
+
+@pytest.mark.unit
+def test_cost_by_project_exact_full_coverage_stays_neutral(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("Nimbus", "project", 100.00, 100.0, 100.00, 100.00),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project(None)
+
+    assert bundle.coverage_pct == 100.0
+    assert bundle.residual_total == 0.0
+    assert all(item.semantic is None for item in bundle.items)
+
+    from L5_apps.digest.aidash import _attribution_container
+
+    container = _attribution_container("0803", bundle, _empty_attribution())
+    assert container is not None
+    assert container.subtitle == "钱花在哪个项目 · 哪个模型 · 每条输入值多少"
+
+
+@pytest.mark.unit
+def test_cost_by_project_no_spend_project_row_is_healthy_empty(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("Nimbus", "project", 0.00, 0.0, 0.00, 0.00),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project(None)
+
+    assert bundle.health.state == "ok"
+    assert bundle.items == []
+
+    from L5_apps.digest.aidash import _attribution_container
+
+    assert _attribution_container(
+        "0803", bundle, _empty_attribution()
+    ) is None
+
+
+@pytest.mark.unit
+def test_cost_by_project_accepts_independently_rounded_project_rows(
+        monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("Nimbus", "project", 0.33, 33.3, 1.00, 1.00),
+        _cost_row("Harbor", "project", 0.33, 33.3, 1.00, 1.00),
+        _cost_row("Summit", "project", 0.33, 33.3, 1.00, 1.00),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project(None)
+
+    assert bundle.health.state == "ok"
+    assert [item.label for item in bundle.items] == [
+        "Nimbus", "Harbor", "Summit",
+    ]
+    assert bundle.headline_total == 1.0
+    assert bundle.attributed_total == 1.0
+    assert bundle.coverage_pct == 100.0
+    assert bundle.residual_total == 0.0
+
+    from L5_apps.digest.aidash import _attribution_container
+
+    container = _attribution_container("0803", bundle, _empty_attribution())
+    assert container is not None
+    assert container.subtitle == "钱花在哪个项目 · 哪个模型 · 每条输入值多少"
+
+
+@pytest.mark.unit
+def test_cost_by_project_one_cent_residual_never_uses_full_coverage_state(
+        monkeypatch):
+    assert round(100.00 - 99.99, 2) == 0.01
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("Nimbus", "project", 99.99, 100.0, 100.00, 99.99),
+        _cost_row("unattributed", "residual", 0.01, 0.0, 100.00, 99.99),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project(None)
+
+    residuals = [item for item in bundle.items if item.semantic == "warning"]
+    assert [(item.label, item.value) for item in residuals] == [("未归因", 0.01)]
+    assert bundle.residual_total == 0.01
+    assert bundle.coverage_pct == pytest.approx(100.0)
+
+    from L5_apps.digest.aidash import _attribution_container
+
+    container = _attribution_container("0803", bundle, _empty_attribution())
+    assert container is not None
+    assert container.subtitle == (
+        "归因覆盖 100.0%（$99.99 / $100.00）· 未归因 $0.01（0.0%）"
+    )
+    assert container.subtitle != "钱花在哪个项目 · 哪个模型 · 每条输入值多少"
+
+
+@pytest.mark.unit
+def test_cost_by_project_degrades_on_missing_contract_column(monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows(
+        [_cost_row("Nimbus", "project", 10.0, 100.0, 10.0, 10.0)],
+        [column for column in _COST_COLUMNS if column != "bucket"]))
+
+    bundle = s.fetch_cost_by_project(None)
+
+    assert bundle.items == []
+    assert bundle.health.state == "error"
+
+
+@pytest.mark.unit
+def test_cost_by_project_degrades_when_incomplete_summary_has_no_residual(
+        monkeypatch):
+    monkeypatch.setattr(s.serve, "run_query", _FakeRows([
+        _cost_row("Nimbus", "project", 80.00, 80.0, 100.00, 80.00),
+    ], _COST_COLUMNS))
+
+    bundle = s.fetch_cost_by_project(None)
+
+    assert bundle.items == []
+    assert bundle.health.state == "error"
 
 
 # --------------------------------------------------------------------------- #
