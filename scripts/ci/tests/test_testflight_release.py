@@ -165,8 +165,20 @@ class TestFlightReleaseTests(unittest.TestCase):
         )
         self.assertIn("security cms -D -i", cleanup)
         self.assertIn("Print :UUID", cleanup)
-        self.assertIn('INSTALLED_PROFILE="$PROFILE_DIR/$PROFILE_UUID.mobileprovision"', cleanup)
-        self.assertIn('rm -f -- "$INSTALLED_PROFILE" "$downloaded_profile"', cleanup)
+        self.assertIn(
+            'LEGACY_PROFILE="$HOME/Library/MobileDevice/Provisioning '
+            'Profiles/$PROFILE_UUID.mobileprovision"',
+            cleanup,
+        )
+        self.assertIn(
+            'XCODE_PROFILE="$HOME/Library/Developer/Xcode/UserData/Provisioning '
+            'Profiles/$PROFILE_UUID.mobileprovision"',
+            cleanup,
+        )
+        self.assertIn(
+            'rm -f -- "$LEGACY_PROFILE" "$XCODE_PROFILE" "$downloaded_profile"',
+            cleanup,
+        )
 
     def test_classifier_executes_the_exact_production_block(self):
         classifier = extract_classifier(self.workflow)

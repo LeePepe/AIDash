@@ -255,7 +255,6 @@ jobs:
           set -u
           cleanup_warning=false
           STATE_DIR="$RUNNER_TEMP/aidash-testflight-$GITHUB_RUN_ID"
-          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
 
           if [ "$KEYCHAIN_ATTEMPTED" = "true" ]; then
             if ! security lock-keychain "$HOME/Library/Keychains/login.keychain-db"; then
@@ -278,8 +277,9 @@ jobs:
                 cleanup_warning=true
                 continue
               fi
-              INSTALLED_PROFILE="$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
-              if ! rm -f -- "$INSTALLED_PROFILE" "$downloaded_profile"; then
+              LEGACY_PROFILE="$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+              XCODE_PROFILE="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+              if ! rm -f -- "$LEGACY_PROFILE" "$XCODE_PROFILE" "$downloaded_profile"; then
                 echo "::warning::Could not remove a provisioning profile created by this run"
                 cleanup_warning=true
               fi
