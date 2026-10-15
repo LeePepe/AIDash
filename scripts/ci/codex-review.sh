@@ -16,7 +16,6 @@
 # 需要的环境变量(workflow 注入):
 #   PR_NUMBER, BASE_SHA, HEAD_SHA, BASE_REPO, GH_TOKEN
 #
-# Raven 连接元数据取自日常 provider;客户端 key 只从 runner 环境读取。
 # 独立 review home 保留原 model/effort、关闭 hooks/MCP 和只读沙箱配置。
 # 运维与 trusted-base 迁移顺序见 raven-review-operations.md。
 
@@ -24,7 +23,7 @@ set -uo pipefail
 
 # 独立 CODEX_HOME:review 门专用,不碰用户日常的 ~/.codex(raven/cmux)。
 export CODEX_HOME="${CODEX_REVIEW_HOME:-$HOME/.codex-review}"
-# 用标准 codex 二进制;Raven 路由由受信任的 provider helper 显式注入。
+# 用标准 codex 二进制。
 CODEX_BIN="${CODEX_BIN:-/opt/homebrew/bin/codex}"
 command -v "$CODEX_BIN" >/dev/null 2>&1 || CODEX_BIN="codex"
 
@@ -269,7 +268,66 @@ if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
     VERDICT_JSON="$(printf %s "$RAW" | sed -n '/{/,/}/p' | jq -c '.' 2>/dev/null | head -1)"
 fi
 if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
-    echo "[codex-review] ❌ 无法解析 verdict"; printf %s "$RAW" | head -c 2000 >&2
+    echo "[codex-review] ❌ 无法解析 verdict"
+    post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+    exit 1
+fi
+
+# 严格校验 terminal schema 与 state consistency:
+# 根对象字段必须恰好为 verdict, summary, blockers, notes;
+# verdict 必须为 pass 或 changes; summary 必须为 string; blockers/notes 必须为 array;
+# blockers 项必须恰好包含 file(str), line(int|null), severity("critical"|"high"), why(str);
+# notes 项必须恰好包含 file(str), line(int|null), note(str);
+# 状态一致性: pass 必须 blockers 长度为 0; changes 必须 blockers 长度 >= 1。
+if ! printf '%s' "$VERDICT_JSON" | python3 -c '
+import json, sys
+
+try:
+    obj = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+if not isinstance(obj, dict):
+    sys.exit(1)
+
+if set(obj.keys()) != {"verdict", "summary", "blockers", "notes"}:
+    sys.exit(1)
+
+if obj["verdict"] not in ("pass", "changes"):
+    sys.exit(1)
+
+if not isinstance(obj["summary"], str):
+    sys.exit(1)
+
+if not isinstance(obj["blockers"], list) or not isinstance(obj["notes"], list):
+    sys.exit(1)
+
+for b in obj["blockers"]:
+    if not isinstance(b, dict) or set(b.keys()) != {"file", "line", "severity", "why"}:
+        sys.exit(1)
+    if not isinstance(b["file"], str) or not isinstance(b["why"], str):
+        sys.exit(1)
+    if b["severity"] not in ("critical", "high"):
+        sys.exit(1)
+    if b["line"] is not None and (isinstance(b["line"], bool) or not isinstance(b["line"], int)):
+        sys.exit(1)
+
+for n in obj["notes"]:
+    if not isinstance(n, dict) or set(n.keys()) != {"file", "line", "note"}:
+        sys.exit(1)
+    if not isinstance(n["file"], str) or not isinstance(n["note"], str):
+        sys.exit(1)
+    if n["line"] is not None and (isinstance(n["line"], bool) or not isinstance(n["line"], int)):
+        sys.exit(1)
+
+if obj["verdict"] == "pass" and len(obj["blockers"]) != 0:
+    sys.exit(1)
+
+if obj["verdict"] == "changes" and len(obj["blockers"]) == 0:
+    sys.exit(1)
+' >/dev/null 2>&1; then
+    echo "[codex-review] ❌ verdict schema 或 state consistency 校验失败"
     post_sticky "$STICKY
 ⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
     exit 1

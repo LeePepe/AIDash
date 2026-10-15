@@ -835,16 +835,15 @@ def test_timed_out_gate_fails_closed(
 
     # Reach the sleeping fake Codex through the real provider bootstrap, not a
     # setup failure or the operator's daily provider/credentials.
-    raven_config = tmp_path / "raven.toml"
-    raven_config.write_text(
-        'model_provider = "raven"\n[model_providers.raven]\n'
-        'base_url = "http://localhost:7024/v1"\n'
-        'wire_api = "responses"\nenv_key = "RAVEN_API_KEY"\n',
+    review_home = tmp_path / "review-home"
+    review_home.mkdir()
+    (review_home / "config.toml").write_text(
+        'model_provider = "offline-fixture"\n',
         encoding="utf-8",
     )
     env_prefix = (
         f'export PATH="{stub_dir}:$PATH"\n'
-        f'export CODEX_RAVEN_CONFIG="{raven_config}" RAVEN_API_KEY=offline-fixture\n'
+        f'export CODEX_REVIEW_HOME="{review_home}"\n'
         "export REVIEW_CLI_TIMEOUT_SECONDS=2\n"
         "export PR_NUMBER=1 BASE_REPO=LeePepe/AIDash GH_TOKEN=stub\n"
         "export BASE_SHA=HEAD HEAD_SHA=HEAD\n"
