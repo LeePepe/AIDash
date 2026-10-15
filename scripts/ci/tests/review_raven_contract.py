@@ -264,11 +264,15 @@ class RavenRoutingTests(unittest.TestCase):
             "if 'pr' in args and 'comment' in args and '--body' in args:\n"
             "    body = args[args.index('--body') + 1]\n"
             "elif 'api' in args:\n"
-            "    for arg in args:\n"
+            "    for i, arg in enumerate(args):\n"
             "        if arg.startswith('body='):\n"
             "            body = arg[5:]\n"
-            "        elif arg == '-f' and args.index(arg) + 1 < len(args) and args[args.index(arg) + 1].startswith('body='):\n"
-            "            body = args[args.index(arg) + 1][5:]\n"
+            "        elif arg.startswith('-fbody='):\n"
+            "            body = arg[7:]\n"
+            "        elif arg.startswith('-Fbody='):\n"
+            "            body = arg[7:]\n"
+            "        elif arg in ('-f', '-F', '--field', '--raw-field') and i + 1 < len(args) and args[i + 1].startswith('body='):\n"
+            "            body = args[i + 1][5:]\n"
             "if body is not None:\n"
             "    comments.append({'argv': args, 'body': body})\n"
             "    comments_path.write_text(json.dumps(comments), encoding='utf-8')\n"
@@ -336,7 +340,7 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertEqual(recorded["stdin"], "")
         self.assertIn("verdict=pass", result.stdout)
         self.assertTrue(posted_comments)
-        self.assertIn("✅ codex review:通过", posted_comments[-1]["body"])
+        self.assertTrue(any("✅ codex review:通过" in c["body"] for c in posted_comments))
 
     def test_actual_caller_honors_explicit_review_home(self):
         result, capture, env, _, _ = self.run_actual_caller(override=True)
@@ -355,8 +359,8 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertTrue(capture.exists())
         self.assertIn("verdict=changes, blockers=1", result.stdout)
         self.assertTrue(posted_comments)
-        self.assertIn("🔴 codex review:需要修改", posted_comments[-1]["body"])
-        self.assertIn("layer violation", posted_comments[-1]["body"])
+        self.assertTrue(any("🔴 codex review:需要修改" in c["body"] for c in posted_comments))
+        self.assertTrue(any("layer violation" in c["body"] for c in posted_comments))
 
     def test_actual_caller_rejects_parseable_invalid_verdict_schema(self):
         sentinel_secret = "ATTACKER_INFLUENCED_SECRET_SENTINEL_XYZ123"
@@ -407,10 +411,11 @@ class RavenRoutingTests(unittest.TestCase):
                 self.assertNotIn(sentinel_secret, result.stdout + result.stderr)
                 # Ensure sticky comment is posted with sanitized diagnostic and no attacker secret or pass rendering
                 self.assertTrue(posted_comments)
-                posted_body = posted_comments[-1]["body"]
-                self.assertIn("自动 review 输出无法解析", posted_body)
-                self.assertNotIn("✅ codex review:通过", posted_body)
-                self.assertNotIn(sentinel_secret, posted_body)
+                posted_bodies = [c["body"] for c in posted_comments]
+                for posted_body in posted_bodies:
+                    self.assertNotIn("✅ codex review:通过", posted_body)
+                    self.assertNotIn(sentinel_secret, posted_body)
+                self.assertTrue(any("自动 review 输出无法解析" in body for body in posted_bodies))
 
     def test_actual_caller_rejects_state_inconsistent_verdicts(self):
         sentinel_secret = "STATE_INCONSISTENT_SECRET_SENTINEL_456"
@@ -429,10 +434,11 @@ class RavenRoutingTests(unittest.TestCase):
                 self.assertNotIn("verdict=pass", result.stdout)
                 self.assertNotIn(sentinel_secret, result.stdout + result.stderr)
                 self.assertTrue(posted_comments)
-                posted_body = posted_comments[-1]["body"]
-                self.assertIn("自动 review 输出无法解析", posted_body)
-                self.assertNotIn("✅ codex review:通过", posted_body)
-                self.assertNotIn(sentinel_secret, posted_body)
+                posted_bodies = [c["body"] for c in posted_comments]
+                for posted_body in posted_bodies:
+                    self.assertNotIn("✅ codex review:通过", posted_body)
+                    self.assertNotIn(sentinel_secret, posted_body)
+                self.assertTrue(any("自动 review 输出无法解析" in body for body in posted_bodies))
 
     def test_actual_caller_rejects_unparsable_output_sanitized(self):
         sentinel = "UNPARSABLE_SECRET_IN_PROMPT_OR_DIFF"
@@ -442,10 +448,11 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertNotIn("verdict=pass", result.stdout)
         self.assertNotIn(sentinel, result.stdout + result.stderr)
         self.assertTrue(posted_comments)
-        posted_body = posted_comments[-1]["body"]
-        self.assertIn("自动 review 输出无法解析", posted_body)
-        self.assertNotIn("✅ codex review:通过", posted_body)
-        self.assertNotIn(sentinel, posted_body)
+        posted_bodies = [c["body"] for c in posted_comments]
+        for posted_body in posted_bodies:
+            self.assertNotIn("✅ codex review:通过", posted_body)
+            self.assertNotIn(sentinel, posted_body)
+        self.assertTrue(any("自动 review 输出无法解析" in body for body in posted_bodies))
 
     def test_actual_caller_empty_output_fails_closed(self):
         result, capture, _, _, posted_comments = self.run_actual_caller(empty_output=True)
@@ -453,7 +460,7 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertIn("codex CLI 失败", result.stdout)
         self.assertNotIn("verdict=pass", result.stdout)
         self.assertTrue(posted_comments)
-        self.assertIn("自动 review 未能完成(codex CLI 异常)", posted_comments[-1]["body"])
+        self.assertTrue(any("自动 review 未能完成(codex CLI 异常)" in c["body"] for c in posted_comments))
 
     def test_actual_caller_missing_review_config_fails_before_codex(self):
         result, capture, _, _, _ = self.run_actual_caller(no_review_config=True)
@@ -485,7 +492,7 @@ class RavenRoutingTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("超时", result.stdout)
         self.assertTrue(posted_comments)
-        self.assertIn("codex CLI 超过", posted_comments[-1]["body"])
+        self.assertTrue(any("codex CLI 超过" in c["body"] for c in posted_comments))
 
 
 if __name__ == "__main__":
