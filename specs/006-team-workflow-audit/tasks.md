@@ -61,7 +61,7 @@ Effectiveness in today's briefing.
 manual import, immutable facts, named queries, bounded card mapping, and
 overview renderer; default collection performs no audit import or invocation.
 
-- [ ] **T001 [US1]** Add the manual-only source registry in `aidata/cli.py`, `aidata/config.py`, and `aidata/config_local.example.py`.
+- [x] **T001 [US1]** Add the manual-only source registry in `aidata/cli.py`, `aidata/config.py`, and `aidata/config_local.example.py`. **Completed on current main; not schedulable.**
 
 | Metadata | T001 |
 |---|---|
@@ -71,19 +71,75 @@ overview renderer; default collection performs no audit import or invocation.
 | Interface / contract | `contracts/manual-import.md`: `MANUAL_SOURCES` is selectable only with explicit `--source`; default source iteration excludes it; empty ignored-local import root returns zero |
 | Functional acceptance | Parser accepts `team_audit_snapshot` explicitly for collect/normalize; default collect/normalize never selects it; neutral default contains no identity/path; no schedule, subprocess, network, or audit invocation is introduced; new test path is routed to AidataFoundation |
 | Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected AidataFoundation tests and the routing audit must exit 0. A focused resolver rerun is diagnostic only after an emitted hook failure. |
-| Dependencies / slice | None; US1 foundation |
+| Completion evidence | Delivered by `d75b14dfbfd7876610782479ec3f94d036c8efd0`; current-main `aidata/config.py`, `aidata/cli.py`, and `aidata/tests/test_team_audit_manual_source.py` retain the accepted explicit-only source behavior. |
+| Dependencies / slice | None; completed US1 foundation; no further dispatch |
 
-- [ ] **T002 [US1]** Implement immutable bundle collection and normalization in `aidata/adapters/team_audit_snapshot.py`.
+### T002 contract-first repair graph
 
-| Metadata | T002 |
+The former executable T002 is retired as a coordination anchor. Its
+implementation scope is replaced by the serial T022–T026 graph below. No
+Fullstack task owns the old monolithic surface, and downstream tasks consume
+only T026's completed adapter interface.
+
+- [ ] **T022 [US1]** Define the strict Team Audit decoder and immutable model seam in `aidata/adapters/team_audit_contract.py`.
+
+| Metadata | T022 |
 |---|---|
 | Owning layer / context | **AidataL1L2** — CONTEXT.md → aidata/CONTEXT.md → aidata/adapters/CONTEXT.md; aidata/tech-context.md |
-| Files in scope | `aidata/adapters/team_audit_snapshot.py`; `aidata/adapters/CONTEXT.md`; `aidata/CONTEXT.md`; `aidata/tests/test_team_audit_adapter.py`; neutral fixtures under `aidata/adapters/fixtures/team_audit/**` |
-| Files NOT to touch | aidata/tests/fixtures/** (AidataL5-owned); aidata/scripts/**; aidata/cli.py; aidata/config.py; aidata/merge.py; aidata/schema/**; external audit sources; generated raw/clean data |
-| Interface / contract | `contracts/manual-import.md` and `data-model.md`: read-only bundle adapter, append-only redacted raw records, explicit finding subject/responsibility/priority, exact feedback-lineage/agent-repeat fields, source case/event/evidence/subject/revision identity sets, artifact kind/ID/hash/raw-URL/sidecar bindings, stable sidecar ID/exact byte hash, and independently keyed collision observations with accepted parent snapshot ID/hash |
-| Functional acceptance | Fixtures preserve cohort/cursors, instruction hashes, axes, explicit finding identity/priority, catalog source identities, artifact/full-report binding fields, limitations, artifacts/grill fields, and importer-computed sidecar ID/hash; lineage ID equals the canonical U+001F tuple SHA-256 and any merge revision is a lowercase 40-hex Git SHA-1 OID; repeat subject/event identities are non-empty and unique; same identity+hash replays; snapshot/child/sidecar identity+different hash appends a parented collision observation and never overwrites/stores rejected content; overlap IDs dedupe; path/redaction/missing-config cases degrade safely; spies observe zero dispatch/invocation/mutation calls |
-| Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected AidataL1L2 tests and the routing audit must exit 0. A focused resolver rerun is diagnostic only after an emitted hook failure. |
-| Dependencies / slice | T001; US1 import seam (also supplies US2 evidence facts) |
+| Files in scope | `aidata/adapters/team_audit_contract.py`; `aidata/tests/test_team_audit_contract.py`; `aidata/CONTEXT.md`; `aidata/adapters/CONTEXT.md` |
+| Files NOT to touch | `aidata/adapters/team_audit_snapshot.py`; `aidata/adapters/team_audit_bundle.py`; `aidata/adapters/team_audit_index.py`; `aidata/adapters/fixtures/team_audit/**`; `aidata/tests/test_team_audit_adapter.py`; Foundation `state.py`/`rawio.py`/`cleanio.py`; config/CLI; schema/merge/L4/L5; scripts/cron; generated raw/clean data; Swift files |
+| Interface / contract | `contracts/team-audit-snapshot-v1.md`, `contracts/manual-import.md`, `contracts/t002-acceptance-matrix.md`, `contracts/l1l2-normalized-output.md`, and `data-model.md`: pure `decode_team_audit_bundle(snapshot_bytes, sidecar_bytes)` returns one immutable decoded bundle or structured rejection. The versioned snapshot contract fixes every raw nested key, JSON type/nullability, and vocabulary; the interface owns the only snapshot/sidecar wire-schema validation, exact nested allowlists, raw `ArtifactManifestEntryWire` → enriched `ArtifactManifestEntry` transformation, locked enums, mode/count/referential invariants, exact byte hashes, canonical raw-entry size gate, and optional-link safety classification; it performs no filesystem, state, raw, clean, subprocess, or network I/O. |
+| Functional acceptance | Valid baseline/incremental bytes decode without key aliases or fabrication; baseline cohort versus incremental cursor rules, UTC, instruction hashes, three reconciled core axes, separate Task Effectiveness, cases/events/attempts, explicit finding subject/responsibility, complete lineage/five-role repeats, sidecar parent/version/ID, raw artifact entries, and optional grill fields are preserved exactly. A baseline with zero through 19 case IDs, including an empty ordered cohort, is accepted only with a non-empty top-level snapshot limitation; the same input without it rejects, a normal 20-case baseline requires no cohort-size limitation, and no case is padded, fabricated, reordered, or re-baselined. Exact per-case event/attempt source order, matching back-pointers, UTC timestamps, and non-decreasing chronology with source-order ties are required; every artifact event reference resolves, non-null case ownership is valid, and finding-chain event/case membership agrees. Arbitrary-size valid JSON integers return an exact field-valid value or structured rejection with no escaped numeric exception. Parameterized D22–D26 mutations cover every declared snapshot/sidecar object kind and reject each omitted required key (including required nullable keys), unexpected null, wrong JSON type, duplicate member, and boolean/float/numeric-string integer impostor before model construction; declared nullable fields and optional grill omissions remain positive controls. Raw artifact entries require every wire key, use JSON null for nullable absences, reject duplicate object members, and reject importer-derived `sidecarID`/`sidecarSHA256`/`encodedByteCount`/`urlStatus`. After hashing exact captured sidecar bytes, T022 enriches each entry with sidecar ID/hash, URL status, and `encodedByteCount` over only its canonical raw UTF-8 JSON (`sort_keys=True`, compact separators, `ensure_ascii=False`); those same wire bytes define artifact `entitySHA256`, so sidecar-only changes cannot create child collisions. Invalid mandatory artifact URLs and invalid hashes/references/counts reject before raw storage; a mandatory entry accepts at 65,536 bytes and rejects at 65,537, while L5's complete-card 262,144-byte gate remains authoritative. Unsafe optional artifact/grill strings do not reject and retain the exact untrusted value with `actionableHTTPS` only for HTTPS plus host or `nonActionable` otherwise; absent optional artifact URL is null/`absent`, and absent grill fields emit no link record. Unknown/future keys or enums, generic body/payload/log fields, and malformed UTF-8/JSON also reject. The two context files pre-register `test_team_audit_contract.py`, `test_team_audit_bundle.py`, `test_team_audit_index.py`, `test_team_audit_acceptance.py`, and `test_team_audit_adapter.py` for AidataL1L2 before later tasks create them. |
+| Exact verification | Normal `git commit` and `git push` with `core.hooksPath=scripts/hooks`; pre-commit/pre-push must report a clean routing audit and a zero-exit hook-selected AidataL1L2 local gate. Both context indexes contain the complete five-test route set. A focused `scripts/context/run AidataL1L2 --mode local` rerun is diagnostic only after an emitted hook failure. |
+| Dependencies / slice | T001 ✓ at `d75b14dfbfd7876610782479ec3f94d036c8efd0`; first schedulable node of the T002 repair graph; US1 import contract foundation and US2 evidence model |
+
+- [ ] **T023 [US1]** Add the read-once atomic snapshot/sidecar filesystem adapter in `aidata/adapters/team_audit_bundle.py`.
+
+| Metadata | T023 |
+|---|---|
+| Owning layer / context | **AidataL1L2** — CONTEXT.md → aidata/CONTEXT.md → aidata/adapters/CONTEXT.md; aidata/tech-context.md |
+| Files in scope | `aidata/adapters/team_audit_bundle.py`; `aidata/tests/test_team_audit_bundle.py` |
+| Files NOT to touch | `aidata/CONTEXT.md` and `aidata/adapters/CONTEXT.md` (routes pre-registered by T022); `aidata/adapters/team_audit_contract.py` (T022); `aidata/adapters/team_audit_snapshot.py`; `aidata/adapters/team_audit_index.py`; production fixtures; `aidata/tests/test_team_audit_adapter.py`; Foundation/config/CLI; schema/merge/L4/L5; scripts/cron; generated data; Swift files |
+| Interface / contract | `read_bundle(root, bundle_dir)` returns the exact `snapshot.json` and optional `artifacts.json` byte buffers, portable bundle identity, or a typed skip/rejection. It enumerates only immediate bundle directories, rejects symlinks/path escapes/extra JSON-like files, reads each accepted file once, and passes those same buffers to T022 for parsing and hashing. |
+| Functional acceptance | Tests prove containment after resolution, regular-file enforcement, exact two-file shape for publishable input, deliberate missing-sidecar limitation input, same-buffer parse/hash behavior under replacement races, and graceful zero/skip on root/directory/file `OSError`, deletion, permission loss, malformed partial pairs, and empty/unconfigured roots. The module performs no raw/index/clean write and exposes no local absolute path as portable provenance. |
+| Exact verification | Normal hook-running `git commit` and `git push`; routing audit and hook-selected AidataL1L2 tests must exit 0 using the route pre-registered by T022. A focused resolver rerun is diagnostic only after a hook failure. |
+| Dependencies / slice | T022 hard; second node of the T002 repair graph; US1 atomic bundle read seam |
+
+- [ ] **T024 [US1]** Implement the recoverable persisted identity/collision index in `aidata/adapters/team_audit_index.py`.
+
+| Metadata | T024 |
+|---|---|
+| Owning layer / context | **AidataL1L2** — CONTEXT.md → aidata/CONTEXT.md → aidata/adapters/CONTEXT.md; aidata/tech-context.md |
+| Files in scope | `aidata/adapters/team_audit_index.py`; `aidata/tests/test_team_audit_index.py` |
+| Files NOT to touch | `aidata/CONTEXT.md` and `aidata/adapters/CONTEXT.md` (routes pre-registered by T022); T022/T023 modules; `aidata/adapters/team_audit_snapshot.py`; production fixtures; `aidata/tests/test_team_audit_adapter.py`; Foundation `state.py`/`rawio.py`/`cleanio.py`; config/CLI; schema/merge/L4/L5; scripts/cron; generated data; Swift files |
+| Interface / contract | `TeamAuditIdentityIndex.open(index_path, raw_history)` maintains a derived SQLite index at an injected git-ignored path; T026 supplies `raw_source_dir("team_audit_snapshot") / ".identity-index.sqlite"`, while tests supply `tmp_path`. `classify(decoded_bundle, observed_at)` returns an append-only import plan for snapshot, every stable child entity, and sidecar identities; `commit(import_plan)` atomically updates the cache only after the expected raw append succeeds. Raw history is authoritative: missing/corrupt/stale index state rebuilds from accepted raw records and body-free observations; the index never stores rejected content. |
+| Functional acceptance | Across process restarts, same identity+hash is replay/no-op; same snapshot, sidecar, or child identity+different hash keeps the first accepted hash and returns a body-free `rejectedIdentityHashCollision` observation with entity kind, stable identity, accepted/rejected hashes, UTC time, portable source, limitation, and explicit accepted parent snapshot ID/hash. Artifact child identity uses canonical raw `ArtifactManifestEntryWire` hash, so a sidecar whitespace/grill/derived-field change is classified only at the sidecar identity and does not collide unchanged artifacts. Observation IDs follow the normative SHA-256 tuple; the same observation ID is idempotent, distinct attempts remain append-only; overlap event IDs dedupe; failed/short raw writes do not commit; raw-ahead/index-behind and corrupt/index-ahead recovery converge without accepting a rejected body. |
+| Exact verification | Normal hook-running `git commit` and `git push`; routing audit and hook-selected AidataL1L2 tests must exit 0 using the route pre-registered by T022. A focused resolver rerun is diagnostic only after a hook failure. |
+| Dependencies / slice | T023 hard (and therefore T022); third node of the T002 repair graph; US1 persisted immutable-identity decision seam |
+
+- [ ] **T025 [US1]** Add contract-valid neutral bundles and lock the full L1/L2 acceptance matrix.
+
+| Metadata | T025 |
+|---|---|
+| Owning layer / context | **AidataL1L2** — CONTEXT.md → aidata/CONTEXT.md → aidata/adapters/CONTEXT.md; aidata/tech-context.md |
+| Files in scope | neutral two-file bundles under `aidata/adapters/fixtures/team_audit/**`; `aidata/tests/test_team_audit_acceptance.py` |
+| Files NOT to touch | `aidata/CONTEXT.md` and `aidata/adapters/CONTEXT.md` (routes pre-registered by T022); all production Python modules, including T022–T024 and `team_audit_snapshot.py`; `aidata/tests/test_team_audit_adapter.py`; `aidata/tests/fixtures/**` (AidataL5-owned); Foundation/config/CLI; schema/merge/L4/L5; scripts/cron; generated data; Swift files; planning contracts |
+| Interface / contract | `contracts/t002-acceptance-matrix.md`: hermetic baseline and incremental directory bundles are the neutral source of truth. Matrix tests exercise the T022 decoder, T023 byte reader, and T024 restartable index only through their declared interfaces; implementation-private helpers are not a test surface. |
+| Functional acceptance | Every matrix row assigned to T022–T025 passes, including D18–D26 neutral-bundle repeats: valid baseline/incremental preservation; limited empty/short baseline acceptance only with its top-level limitation and no case fabrication/reordering; all locked model/referential/sidecar/artifact cases; recursive raw-body/future-schema rejection; exact timeline order/back-pointer/UTC chronology; complete artifact event/case/finding-chain ownership; arbitrary-size JSON integer structured handling; contract-wide parameterized required-key omission, unexpected-null, wrong-type, duplicate-member, and integer-impostor rejection; read-once/race/path/symlink/OSError behavior; cross-run snapshot/child/sidecar replay and collision; exact observation fields/IDs; overlap dedupe; missing-sidecar limitation; rejected-body absence; and zero subprocess/network/audit/dispatch/issue/run/source-mutation calls. Fixtures contain only invented neutral identities and valid 64-hex hashes. |
+| Exact verification | Normal hook-running `git commit` and `git push`; routing audit and hook-selected AidataL1L2 tests must exit 0 using the matrix-test route pre-registered by T022. No production code exception is permitted in this fixture/test task. A focused resolver rerun is diagnostic only after a hook failure. |
+| Dependencies / slice | T024 hard; fourth node of the T002 repair graph; US1/US2 contract proof before collector wiring |
+
+- [ ] **T026 [US1]** Replace the monolith with thin collector/normalizer wiring in `aidata/adapters/team_audit_snapshot.py`.
+
+| Metadata | T026 |
+|---|---|
+| Owning layer / context | **AidataL1L2** — CONTEXT.md → aidata/CONTEXT.md → aidata/adapters/CONTEXT.md; aidata/tech-context.md |
+| Files in scope | `aidata/adapters/team_audit_snapshot.py`; `aidata/tests/test_team_audit_adapter.py` |
+| Files NOT to touch | `aidata/CONTEXT.md` and `aidata/adapters/CONTEXT.md` (routes owned by T022); T022–T024 production modules; T025 fixtures/matrix test; `aidata/tests/fixtures/**`; Foundation `state.py`/`rawio.py`/`cleanio.py`; config/CLI; schema/merge/L4/L5; scripts/cron; external audit sources; generated raw/clean data; Swift files |
+| Interface / contract | Preserve public `collect() -> int` and `normalize() -> int`. The adapter composes T023 read-once buffers → T022 strict decode → T024 persisted classification before `rawio.write_raw`, then produces exactly the `team_audit_record` table defined by `contracts/l1l2-normalized-output.md` through `cleanio.write_clean`. Only accepted records and body-free observations normalize; no duplicate schema validator, fallback key alias, second file read, or in-memory-only identity map remains on the active path. |
+| Functional acceptance | The existing manual CLI seam imports valid baseline/incremental bundles and returns exact accepted counts; replay returns zero; every rejected/colliding body is excluded before raw write; accepted raw data still passes the existing redaction helper. Clean output has the exact common columns, composite key, 24 locked record types/grains, canonical `record_json`, `entity_sha256`, snapshot/sidecar hashes and linkage, optional URL status, and collision key `(parentSnapshotID, observationID)` from `contracts/l1l2-normalized-output.md`; artifact `entity_sha256` and `encodedByteCount` derive from canonical raw wire bytes, not enriched sidecar-wide fields. No legacy `snapshot`/`observation`/`sidecar` ad hoc table is part of the interface, and `normalize()` returns accepted snapshot-row count rather than total tagged rows. Missing/unreadable configuration degrades to zero; patched I/O is restored after tests; spies prove no subprocess/network/audit/dispatch/issue/run/source mutation. Wiring tests close the T026 rows of `contracts/t002-acceptance-matrix.md` without altering the previously passing module matrix. |
+| Exact verification | Normal `git commit` and `git push` with configured hooks; pre-commit/pre-push must report a clean routing audit and zero-exit hook-selected AidataL1L2 local gate. A focused resolver rerun is diagnostic only after an emitted hook failure and never replaces the next normal hook run. |
+| Dependencies / slice | T025 hard; final node of the T002 repair graph and sole dependency exposed to T003/T016 |
 
 - [ ] **T003 [US1]** Add immutable Team Audit warehouse facts in `aidata/schema/warehouse.sql` and `aidata/merge.py`.
 
@@ -92,10 +148,10 @@ overview renderer; default collection performs no audit import or invocation.
 | Owning layer / context | **AidataL3** — CONTEXT.md → aidata/CONTEXT.md → aidata/schema/CONTEXT.md; aidata/tech-context.md |
 | Files in scope | `aidata/schema/warehouse.sql`; `aidata/merge.py`; `aidata/tests/test_warehouse_integrity.py`; `aidata/tests/test_warehouse_quality.py` |
 | Files NOT to touch | aidata/adapters/**; aidata/L4_serve/**; aidata/L5_apps/**; generated databases |
-| Interface / contract | `data-model.md` grains/bridges: snapshot, axis, case/event/attempt/finding with explicit subject/responsibility/priority, metrics/lineage/repeats, all reference-catalog source identities, sidecar identity/hash, collision observations with parent snapshot ID/hash, artifacts/full-report kind/ID/hash/raw-URL/sidecar bindings, and grill links, all retaining immutable provenance |
-| Functional acceptance | Merge produces one row per grain/bridge; accepted facts never update; parented collision IDs merge independently; finding/catalog identity fields, canonical lineage ID and 40-hex merge OID, complete repeats, exact sidecar hash, and sidecar foreign keys on artifact/grill rows round-trip; artifact references retain priority/kind/ID/hash/raw URL/sidecar without display-body duplication; same sidecar ID/different hash observes a collision; foreign/mode/axis violations fabricate nothing; generated DB stays untracked |
+| Interface / contract | Consume only the `team_audit_record` table in `clean_path("team_audit_snapshot")`, as defined by `contracts/l1l2-normalized-output.md`; map its 24 locked record types one-to-one into the `data-model.md` warehouse grains/bridges. T003 does not read raw shards, the identity cache, or adapter-private models and does not infer a mapping for unknown record types. |
+| Functional acceptance | T003 verifies the normalized common columns, composite key, canonical record JSON, accepted snapshot hash, sidecar nullability/linkage, and type-specific parent/stable identities before mapping. Merge produces one row per named grain/bridge; accepted facts never update; parented collision IDs merge independently; finding identity fields, full lineage/repeats, exact sidecar hash, artifact/grill sidecar foreign keys, and optional URL raw value/status round-trip unchanged; same sidecar ID/different hash observes a collision; unknown/foreign/mode/axis violations fabricate nothing; generated DB stays untracked. |
 | Exact verification | Normal `git commit` and `git push` with configured hooks; the hook-selected AidataL3 pytest/ruff gates must exit 0. A focused resolver rerun is diagnostic only after an emitted hook failure. |
-| Dependencies / slice | T002; US1 immutable warehouse |
+| Dependencies / slice | T026; US1 immutable warehouse |
 
 - [ ] **T004 [US1]** Add overview and required-publication input queries under `aidata/L4_serve/queries/team-audit/`.
 
@@ -277,11 +333,11 @@ snapshot bytes, preserved normalization, and zero dispatch/remediation calls.
 |---|---|
 | Owning layer / context | **AidataL1L2** — CONTEXT.md → aidata/CONTEXT.md → aidata/adapters/CONTEXT.md; aidata/tech-context.md |
 | Files in scope | `aidata/adapters/aidash_events.py`; `aidata/tests/test_aidash_events_adapter.py` |
-| Files NOT to touch | team_audit_snapshot.py owned by T002; warehouse/query/L5 files; aidata scripts/cron; Swift/App files |
+| Files NOT to touch | `team_audit_snapshot.py` owned by T026 and T022–T024 contract modules; warehouse/query/L5 files; aidata scripts/cron; Swift/App files |
 | Interface / contract | Event normalizer preserves both locked action strings, finding fingerprint in `item_ref`, and `teamAudit` in `card_type`; existing done/undone/star behavior is unchanged |
 | Functional acceptance | New events never normalize action to null/unknown; old events without card type remain compatible; redaction and no-config degradation persist; adapter only reads `aidash events pull` output and does not invoke an audit or remediation |
 | Exact verification | Normal `git commit` and `git push` with configured hooks; hook-selected AidataL1L2 pytest/ruff gates must exit 0. A focused resolver rerun is diagnostic only after an emitted hook failure. |
-| Dependencies / slice | T002, T013; parallel with T014/T015 where files do not conflict; US3 feedback lineage |
+| Dependencies / slice | T026, T013; parallel with T014/T015 where files do not conflict; US3 feedback lineage |
 
 - [ ] **T017 [P] [US3]** Extend audit-action filtering in `CLI/aidash/Sources/Commands/EventsPullCommand.swift`.
 
@@ -321,8 +377,9 @@ adapter is assembled.
 
 ```text
 Completed history: T020 ✓ → T021 ✓ → T019 ✓ (all present in fdace13d…)
-Active recovery: exact revised-plan PASS + published base pin → Team Lead handoff → T005
-US1 data: T001 → T002 → T003 → T004 → T007
+T022 planning gate: exact revised-plan PASS + published base pin → Team Lead handoff → T022
+Separate T005 recovery: preserve its accepted plan/candidate evidence; do not advance it here
+US1 data: T001 ✓ → T022 → T023 → T024 → T025 → T026 → T003 → T004 → T007
 US1 app:  T005 ─┬→ T007
                 ├→ T008 ← T006
                 └→ T009
@@ -336,7 +393,7 @@ US3 core: T005 → T013
 US3 CLI:  T013 → T017
 US3 UI:   T012 + T013 → T014
 US3 App:  T009 + T014 → T015
-US3 data: T002 + T013 → T016
+US3 data: T026 + T013 → T016
 US3 done: T015 + T016 + T017
 
 Assembled gate:
@@ -357,46 +414,52 @@ workspace recovery protocol.
 
 | Spec requirement / criterion | Slice / tasks |
 |---|---|
-| US1/AC1–US1/AC4 trustworthy baseline/incremental snapshot, insufficient evidence, mandatory coverage | US1: T002–T009 |
+| US1/AC1–US1/AC4 trustworthy baseline/incremental snapshot, insufficient evidence, mandatory coverage | US1: T022–T026, T003–T009 |
 | US1/AC5 enclosing-axis insufficient-evidence round trip | US1 Core contract: T005 |
-| US2/AC1–US2/AC2 findings, timelines, lineage, and repeat evidence | US2: T002–T005, T010–T012 |
-| US2/AC3–US2/AC4 exact safe artifact binding and mandatory/optional URL behavior | US1/US2: T002–T005, T007–T012 |
-| US2/AC5 parented immutable collision observation | US1/US2: T002–T005, T007–T008, T010–T012 |
+| US1/AC6 exact case order/back-pointers/UTC chronology | AidataL1L2: T022 direct proof; T025 neutral-bundle repeat |
+| US1/AC7 complete artifact event/case/finding-chain ownership | AidataL1L2: T022 direct proof; T025 neutral-bundle repeat |
+| US1/AC8 arbitrary-size JSON integers never escape numeric exceptions | AidataL1L2: T022 direct proof; T025 neutral-bundle repeat |
+| US1 edge case + FR-003 empty/short baseline with required limitation and no fabricated cases | AidataL1L2: T022 D21 direct proof; T025 neutral-bundle repeat; T026 and downstream consumers preserve the decoded cohort/limitation |
+| FR-018/FR-019 contract-wide strict-schema rejection before storage | AidataL1L2: T022 D22–D26 parameterized direct proof; T025 neutral-bundle repeat |
+| US2/AC1–US2/AC2 findings, timelines, lineage, and repeat evidence | US2: T022, T025–T026, T003–T005, T010–T012 |
+| US2/AC3–US2/AC4 exact safe artifact binding and mandatory/optional URL behavior | US1/US2: T022, T025–T026, T003–T005, T007–T012 |
+| US2/AC5 parented immutable collision observation | US1/US2: T023–T026, T003–T005, T007–T008, T010–T012 |
 | US2/AC6 mandatory content never truncates/externalizes | US1/US2: T005, T007–T012 |
 | US3/AC1–US3/AC4 acknowledgement, approval, immutable history, open-only grill links | US3: T013–T017 |
 | Constitution amendment publication contract and migration note | Completed history: T021 / PR #210 |
 | Future CardType consumer compatibility before Core expansion | Completed history: T019 / PR #215 |
-| FR-001 manual-only source | US1: T001–T002 |
-| FR-002 immutable/redacted/provenanced snapshot + sidecar L1–L5 records | US1: T002–T005, T007–T008 |
-| FR-003 baseline cohort vs incremental cursors | US1: T002–T005, T007–T008 |
-| FR-004 replay/collision/overlap dedupe with accepted parent snapshot | US1: T002–T005, T007–T008; US2: T010–T012 |
+| FR-001 manual-only source | US1: T001, T026 |
+| FR-002 immutable/redacted/provenanced snapshot + sidecar L1–L5 records | US1: T022–T026, T003–T005, T007–T008 |
+| FR-003 baseline cohort vs incremental cursors | US1: T022, T025–T026, T003–T005, T007–T008 |
+| FR-004 restart-safe replay/collision/overlap dedupe with accepted parent snapshot | US1: T023–T026, T003–T005, T007–T008; US2: T010–T012 |
 | FR-005 scope/mode/version/coverage/limitations display | US1: T004, T007–T008 |
-| FR-006 three independent core axes + separate Task Effectiveness | US1: T002–T005, T007–T008 |
-| FR-007 reconciled axis/effectiveness counts | US1: T002–T005, T007–T008 |
-| FR-008 fingerprints and all six states | US2: T002–T003, T005, T010–T012 |
-| FR-009 explicit finding subject/responsibility plus evidence/remediation owner | US1: T002–T005, T007–T008; US2: T010–T012 |
-| FR-010 timelines, full feedback lineage, and complete per-role repeat metrics | US2: T002–T003, T005, T010–T012 |
-| FR-011 every mandatory generic/team/P0/P1 direct link | US1: T002–T005, T007–T009; assembled T018 |
-| FR-012 mandatory invalid-link rejection; optional full-report/externalization/degradation | US1: T002–T005, T007–T008; US2: T010–T012 |
+| FR-006 three independent core axes + separate Task Effectiveness | US1: T022, T025–T026, T003–T005, T007–T008 |
+| FR-007 reconciled axis/effectiveness counts | US1: T022, T025–T026, T003–T005, T007–T008 |
+| FR-008 fingerprints and all six states | US2: T022, T025–T026, T003, T005, T010–T012 |
+| FR-009 explicit finding subject/responsibility plus evidence/remediation owner | US1: T022, T025–T026, T003–T005, T007–T008; US2: T010–T012 |
+| FR-010 timelines, full feedback lineage, and complete per-role repeat metrics | US2: T022, T025–T026, T003, T005, T010–T012 |
+| FR-011 every mandatory generic/team/P0/P1 direct link | US1: T022, T025–T026, T003–T005, T007–T009; assembled T018 |
+| FR-012 mandatory invalid-link rejection; optional full-report/externalization/degradation | US1: T022, T025–T026, T003–T005, T007–T008; US2: T010–T012 |
 | FR-013 append acknowledgement/approval receipt | US3: T013–T015 |
 | FR-014 decision idempotency | US3: T013–T015 |
 | FR-015 no canonical snapshot mutation | US3: T014–T015 |
 | FR-016 approval grants no remediation/dispatch authority | US3: T014–T017 |
-| FR-017 typed sidecar identity/hash and HTTPS-only grill entry points | US1: T002–T005, T007–T008; US2: T010–T012; US3: T014 |
-| FR-018 exact size, mandatory rejection, optional externalization, and graceful invalid/future behavior | US1: T005, T007–T008; US2: T011–T012; US3: T014–T015 |
-| FR-019 automated contract/boundary coverage | US1: T001–T009; US2: T010–T012; US3: T013–T017; assembled T018 |
+| FR-017 typed sidecar identity/hash and HTTPS-only grill entry points | US1: T022–T026, T003–T005, T007–T008; US2: T010–T012; US3: T014 |
+| FR-018 exact size, mandatory rejection, optional externalization, and graceful invalid/future behavior | AidataL1L2: T022 direct proof, T025 neutral-bundle repeat; US1: T005, T007–T008; US2: T011–T012; US3: T014–T015 |
+| FR-019 automated contract/boundary coverage | US1: T001, T022–T026, T003–T009; US2: T010–T012; US3: T013–T017; assembled T018 |
 | FR-020 enclosing-axis verdict decode and three insufficient-evidence round trips | US1: T005 |
-| FR-021 unique/catalog-resolved finding references | Validate: T005; source/preserve: T002–T003; query: T004/T010; pack: T007/T011; render: T008/T012 |
-| FR-022 canonical lineage identity and 40-hex merge OID | Validate: T002/T005; preserve: T003/T010; pack/render: T011/T012 |
-| FR-023 complete role-round/evidence reconciliation | Validate: T002/T005; preserve/query: T003/T010; pack/render: T011/T012 |
-| FR-024 exact priority-aware artifact/report/externalization resolution | Validate: T005; source/preserve/query: T002–T004/T010; pack: T007/T011; render: T008/T012 |
+| FR-021 unique/catalog-resolved finding references | Validate: T022/T025/T005; preserve: T026/T003; query: T004/T010; pack: T007/T011; render: T008/T012 |
+| FR-022 canonical lineage identity and 40-hex merge OID | Validate: T022/T025/T005; preserve: T026/T003/T010; pack/render: T011/T012 |
+| FR-023 complete role-round/evidence reconciliation | Validate: T022/T025/T005; preserve/query: T026/T003/T010; pack/render: T011/T012 |
+| FR-024 exact priority-aware artifact/report/externalization resolution | Validate: T022/T025/T005; source/preserve/query: T026/T003–T004/T010; pack: T007/T011; render: T008/T012 |
 | FR-025 exact eight-section/optional-string/byte Core proofs plus rendered fallback | Core: T005; AIDashUI generic fallback: T008 |
 | SC-001/SC-003 complete fixture render and enum round-trip | US1: T005, T007–T009; US2: T010–T012 |
-| SC-002 one record per identity, zero overwrites, parented collision observation | US1: T002–T005, T007–T008; US2: T010–T012 |
+| SC-002 one record per identity across restarts, zero overwrites, parented collision observation | US1: T023–T026, T003–T005, T007–T008; US2: T010–T012 |
 | SC-004 one receipt per decision kind, immutable source bytes | US3: T013–T015 |
-| SC-005 zero invocation/mutation/dispatch/remediation | US1: T001–T002; US3: T014–T017 |
-| SC-006 mandatory invalid-link rejection and optional artifact/grill URL policy | US1: T002–T005, T007–T008; US2: T010–T012; US3: T014 |
-| SC-007 262,144/262,145 boundary and exact mandatory P0/P1-finding/link counts | US1: T002–T008; US2: T010–T012 |
+| SC-005 zero invocation/mutation/dispatch/remediation | US1: T001, T022–T026; US3: T014–T017 |
+| SC-006 mandatory invalid-link rejection and optional artifact/grill URL policy | US1: T022, T025–T026, T003–T005, T007–T008; US2: T010–T012; US3: T014 |
+| SC-007 raw-entry 65,536/65,537 plus card 262,144/262,145 boundaries and exact mandatory P0/P1-finding/link counts | US1: T022, T025–T026, T003–T008; US2: T010–T012 |
+| SC-008 exact timeline/artifact ownership and structured arbitrary-size integer handling | AidataL1L2: T022 direct proof; T025 neutral-bundle repeat |
 | Watchdog exit/tree/pipe cleanup without product scope | Completed history: T020 / PR #204 |
 
 ## Definition of Done
