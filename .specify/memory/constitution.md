@@ -252,18 +252,26 @@ an isolated Azure Blob telemetry store only under all of these conditions:
   future batches only; it never rewrites or deletes frozen pending batches or
   historical identity epochs. Before first opt-in, when no install ID exists,
   Reset is disabled/no-op and MUST NOT create one. After an ID exists, Reset
-  while consent is off may rotate it locally but constructs no service and
-  starts no upload.
+  persists a generation-bound pending target UUID. While consent is off it
+  performs no service or network work; the transition remains pending.
 - Turning consent off first persists the false value, closes new event
   admission immediately, disables/cancels active delivery, and only then awaits
   quiescence. No queued or later upload may start or continue while consent is
   off. Any in-flight request made ambiguous by cancellation remains retained
   and unconfirmed. The isolated local telemetry store and pending work remain
-  intact. Turning the toggle on again is fresh consent and resumes eligible
-  retained work under the retained install UUID.
+  intact. Turning the toggle on again is fresh consent, but retained work may
+  resume only after any pending Reset transition is reconciled as required
+  below.
 - Before Reset while active, the app disables/cancels delivery and awaits
-  quiescence. It resumes only if the current consent and producer configuration
-  are still valid.
+  quiescence, then persists the generation-bound pending target. On the next
+  consented construction with valid producer configuration, the service opens
+  disabled and admission/flush remain closed while the app reconciles the
+  retained catalog through the SDK reset seam. It first accepts an already
+  current target epoch, otherwise applies SDK reset, then proves the catalog's
+  current epoch uses the target UUID. Only that proof may promote the target,
+  clear the matching generation, and enable admission/delivery. Failure,
+  ambiguity, or a stale completion leaves the transition pending, closed, and
+  retryable; it never appends blindly or clears a newer Reset.
 - Only GUI app composition may construct the service. CLI, headless/XPC, and
   test-host production composition never constructs the service, telemetry
   store, uploader, or timer. Hostless tests may construct isolated preference
@@ -982,7 +990,8 @@ The constitution version follows MAJOR.MINOR.PATCH:
 Authorizes one explicit-consent GUI action/performance telemetry channel and
 isolated telemetry storage exception. Consent defaults off in UserDefaults;
 the first opt-in creates a random install UUID; disable stops admission/upload
-while retaining pending state; Reset rotates only future identity. CLI,
+while retaining pending state; Reset stages a generation-bound future identity
+and must reconcile a retained SDK catalog before resuming. CLI,
 headless, and test-host composition remain excluded. Briefing/UserEvent
 CloudKit and SwiftData rules are unchanged.
 
@@ -990,7 +999,8 @@ Migration note: no Briefing, UserEvent, CloudKit, or existing app-cache data is
 migrated. Existing installs start with telemetry off, and no install ID,
 telemetry store, or network work may exist before first opt-in. In-flight spec
 007 must adopt the consent/identity lifecycle and hook-owned verification
-contract. Its implementation remains blocked until the constitution amendment
+contract, including restart and retry evidence for pending Reset reconciliation.
+Its implementation remains blocked until the constitution amendment
 is published and merged through a PR titled
 `constitution: authorize explicit-consent GUI telemetry`.
 -->

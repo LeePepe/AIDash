@@ -26,7 +26,7 @@ Adopt the accepted central telemetry scope into AIDash's native Spec Kit and con
 |---|---|
 | §Principle I + §GUI Product Telemetry | PASS after amendment merge — telemetry is default-off, explicit-consent, GUI-only, typed, and not a briefing authoring channel |
 | §Principle II + §Persistence | PASS after amendment merge — isolated telemetry queue/Blob is the sole narrow third-party exception; briefing/UserEvent CloudKit and SwiftData rules are unchanged |
-| Append-only / durable state | PASS — writer retry state is immutable/retained across disable/Reset; aidata raw is append-only; L3 rerun is idempotent |
+| Append-only / durable state | PASS — writer retry state is immutable/retained across disable/Reset; a generation-bound Reset transition cannot resume before current-epoch proof; aidata raw is append-only; L3 rerun is idempotent |
 | Dependency ADR | PASS — ADR-004 covers LokiKit; ADR-005 covers `azure-identity` |
 | Layer direction | PASS — RepoInfra, XcodeWorkspace, AIDashApp, and each aidata leaf have separate tasks |
 | Swift concurrency | PASS — no unsafe escape is authorized; app coordinator owns structured lifecycle |
@@ -122,7 +122,7 @@ app creates the direct LokiKit Blob service. CLI, headless/XPC, and test-host
 production paths receive a no-op.
 
 The app-local preferences/coordinator owns service lifetime, consent
-transitions, install-ID rotation, and the exact contract in
+transitions, install-ID Reset reconciliation, and the exact contract in
 `contracts/aidash-events.md`. It captures a `ContinuousClock` start at entry to
 the GUI-production app-init branch, before consent/configuration reads and
 bootstrap/service construction, and discards it if eligibility fails. It emits
@@ -132,8 +132,17 @@ bootstrap/service construction, and discards it if eligibility fails. It emits
 opt-in is not retrospective. Disable persists false, closes admission,
 disables/cancels delivery before awaiting quiescence, and retains any
 ambiguous/pending work without continued upload. Reset is no-op before first
-opt-in; with an existing ID it rotates only future identity, locally while off
-or after disable/cancel/quiescence while active.
+opt-in. With an existing ID, it disables/cancels active delivery before
+quiescence and atomically stages a target UUID plus opaque generation; while
+off it performs no service/network work. On the next consented valid
+construction the retained LokiKit catalog opens disabled, admission/flush stay
+closed, and the coordinator reconciles an already-current target or applies SDK
+reset before reading back current-epoch proof. Only matching proof promotes the
+target and clears that generation. Failure, ambiguity, or stale completion
+stays pending and retryable across restart without rewriting frozen work or
+blindly appending another epoch. The retained-catalog behavior was inspected at
+`a9df829421829eff9f589f205e2da401fd70fffb`; it informs this contract but does
+not resolve REL-001.
 
 The two release-input names remain `TELEMETRY_BLOB_ENDPOINT` and `TELEMETRY_BLOB_SAS`; their values are never read by agents. XcodeWorkspace owns empty build settings, dependency wiring, and Fastlane path-only xcconfig consumption. RepoInfra owns protected workflow injection, permissions/cleanup, sentinel leak tests, and workflow assertions.
 
@@ -156,8 +165,9 @@ AidataL3 adds one `fact_product_event` row per deterministic object-path/line-or
 Writer rollback first persists consent off, closes admission,
 disables/cancels delivery without starting or continuing queued upload, awaits
 quiescence, and proves any ambiguous in-flight batch plus all pending
-files/identities remain. Only then may dependency/build/release plumbing be
-removed. Reader rollback removes scheduled
+files/identities remain. A pending Reset transition also remains closed and
+retryable and cannot be cleared by rollback. Only then may
+dependency/build/release plumbing be removed. Reader rollback removes scheduled
 registration/config/adapter/fact/query as a coordinated change but never
 deletes append-only raw or accepted warehouse evidence.
 
@@ -213,7 +223,7 @@ Rollback ordering is compensation, not a reverse dependency edge.
 
 - `azure-identity` changes aidata's stdlib-only baseline. Exact lock, separate ADR, routed manifest, CI install, and dependency audit contain this risk.
 - Release injection spans XcodeWorkspace and RepoInfra; split tasks prevent cross-layer ownership drift.
-- `AIDashApp` currently lacks a hostless resolver test gate; AID-APP must add it before claiming hermetic producer acceptance.
+- `AIDashApp` currently lacks a hostless resolver test gate; AID-APP must add it before claiming hermetic producer acceptance, including SDK-backed retained-store Reset restart and failure/retry evidence.
 - The LokiKit release identity remains unresolved; REL-001 blocks only AID-XCODE and live proof.
 - The future sandboxed fixed install has no network entitlement; this plan neither edits nor works around ADR-003.
 - Local Azure identity availability is operational state. No-op is correct; implementation must never prompt or choose a substitute principal.

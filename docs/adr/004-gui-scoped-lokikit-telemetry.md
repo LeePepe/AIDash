@@ -39,12 +39,19 @@ ADR-003 separately governs a future sandboxed fixed install. Its fixed entitleme
 - Turning consent off persists false, closes admission, disables/cancels active
   delivery, then awaits quiescence. No pending upload starts/continues; an
   ambiguous in-flight batch stays retained/unconfirmed with the store/install
-  ID/history. Re-enable is fresh consent and resumes eligible retained work.
-- Reset is disabled/no-op before an install ID exists. With an existing ID and
-  consent off it rotates locally without constructing/uploading. While active,
-  it disables/cancels delivery and awaits quiescence before rotating the UUID
-  for future batches only. Frozen pending batches/history stay unchanged;
-  resume requires valid consent/config. Dependency rollback uses the same order.
+  ID/history. Re-enable is fresh consent; eligible retained work resumes only
+  after any pending Reset transition is proven reconciled.
+- Reset is disabled/no-op before an install ID exists. With an existing ID it
+  persists a target UUID bound to an opaque generation; while consent is off it
+  constructs nothing and leaves that transition pending. With consent and valid
+  configuration, construction opens the retained LokiKit catalog disabled,
+  admission/flush stay closed, and the coordinator first accepts an already
+  current target epoch or otherwise applies the SDK reset seam. It reads back
+  and proves the current catalog epoch uses the target before promoting the ID,
+  clearing only the matching generation, and enabling. Failure, ambiguity, or
+  stale completion stays pending and retryable without blindly appending an
+  epoch. Frozen pending batches/history stay unchanged. Dependency rollback
+  uses the same disable/cancel/quiesce/retain order.
 
 ## Build and platform cost
 
@@ -60,8 +67,12 @@ ADR-003 separately governs a future sandboxed fixed install. Its fixed entitleme
 - View-layer entry remains `@MainActor`; transport/store work stays inside LokiKit's structured concurrency boundary.
 - No `nonisolated(unsafe)`, `@unchecked Sendable`, detached task, or global actor escape is authorized by this ADR. A need for one requires a separate ADR.
 - Disable persists consent false and disables/cancels delivery before awaiting
-  quiescence. Active Reset disables/cancels delivery before quiescence/rotation.
-  Neither may erase durable pending state or rewrite its frozen identity/path.
+  quiescence. Active Reset disables/cancels delivery before it stages and
+  reconciles its generation-bound target. The pinned LokiKit behavior at
+  `a9df829421829eff9f589f205e2da401fd70fffb` requires this ordering because
+  reopening an existing catalog can bypass `identityProvider`; this inspection
+  does not resolve REL-001. Neither lifecycle may erase durable pending state
+  or rewrite its frozen identity/path.
 
 ## Security and release injection
 

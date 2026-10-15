@@ -29,13 +29,10 @@ freshly re-signed binary each build. Therefore, every run:
    test here once moved the user's SwiftData store into a temp directory and
    deleted it on teardown.
 
-**If you must verify an app-layer change** beyond the build gate, use the
-hostless target — runs as `xctest`, launches no app, cannot reach the real
-home:
-
-```bash
-xcodebuild -scheme AIDashAppLogicTests -destination 'platform=macOS' test
-```
+The resolver-selected hook may verify app-layer logic with the hostless
+`AIDashAppLogicTests` product. It runs as `xctest`, launches no app, and cannot
+reach the real home; humans and agents inspect its receipt rather than invoking
+the product directly.
 
 Host-based targets belong to CI, or to a run the user explicitly asks for.
 
@@ -45,7 +42,7 @@ hooks do it" does not.
 
 ## Verification, ranked
 
-1. Let the resolver-driven hooks run. They are the local gate that matters.
-2. Build gates (`xcodebuild ... build`) — cheap, no app launch, no prompts.
-3. `swift test --package-path Packages/<X>` for package-local logic.
-4. `AIDashAppLogicTests` for app-layer logic, when 1–3 cannot answer it.
+1. Resolver-driven hook receipts for every changed owning leaf.
+2. Permitted build, static-analysis, and contract checks.
+3. Required CI receipts for heavy app/workspace builds and repository-wide
+   suites.
