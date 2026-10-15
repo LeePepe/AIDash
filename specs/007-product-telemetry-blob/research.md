@@ -5,7 +5,7 @@
 - Accepted MY-1816 planning v6, SHA-256 `97dc0822f4ade9f6e70a5c070e9860c6eeb57076e0744f1cdd7744750e8c55f2`.
 - AIDash constitution 1.14.0 amendment, repository context routers, `aidata/adapters/CONTEXT.md`, ADR-003, and the existing manual-import contract.
 - Owner decision `aad-owner-local`, effective 2026-10-15. The external authority record carries the actual operator/resource metadata; this public repository intentionally does not.
-- Lead decision effective 2026-10-15 on the Owner's behalf: authorize constitution 1.14.0, default-off Settings consent, first-opt-in random install UUID, Reset, GUI-only composition, and Planner-owned minimal AIDash event vocabulary.
+- Lead replacement decision `no-reset-v1`, effective 2026-10-15 on the Owner's behalf: authorize constitution 1.14.0, default-off Settings consent, one lifetime-stable first-opt-in random install UUID, no Reset/rotation in version 1, GUI-only composition, and Planner-owned minimal AIDash event vocabulary.
 
 ## Decision D-01: keep product semantics outside shared telemetry
 
@@ -23,26 +23,15 @@
 
 **Decision**: The GUI Settings toggle **Send usage data** is the sole consent
 authority. It defaults off in app-scoped `UserDefaults`. First opt-in creates a
-random persisted UUID; later launches reuse it. Reset is disabled/no-op before
-an ID exists; later it stages only future identity as a target UUID bound to an
-opaque generation. Turning consent off first
+random persisted UUID; later launches and consent cycles reuse it for the app's
+lifetime. Turning consent off first
 persists false, closes admission, disables/cancels delivery, and awaits
 quiescence while retaining ambiguous/pending work and identity history. No
-queued work uploads while off. Re-enable is fresh consent, but retained work
-does not resume while Reset reconciliation is pending. CLI, headless/XPC, and
-test-host production composition never constructs the service.
-
-At pinned LokiKit Blob revision
-`a9df829421829eff9f589f205e2da401fd70fffb`, reopening an existing catalog can
-bypass `identityProvider`, while the SDK reset seam appends/reconciles an
-identity epoch. Therefore the next consented valid construction opens the
-retained service disabled, closes admission/flush, accepts an already-current
-target or applies SDK reset, and reads back proof that the target epoch is
-current. Only matching generation proof promotes/clears the transition.
-Failure, ambiguous confirmation, and stale completion remain pending and
-retryable across restart; retry reconciles before applying another reset. This
-behavioral inspection does not establish the approved dependency identity and
-does not close REL-001.
+queued work uploads while off. Re-enable is fresh consent and resumes under the
+same UUID. Version 1 exposes no install-ID Reset/rotation. AIDash adds no shared
+reset API and never parses private telemetry storage for identity. CLI,
+headless/XPC, and test-host production composition never constructs the
+service.
 
 AIDash defines exactly the two events in `contracts/aidash-events.md`:
 `aidash.action` with closed `action_name=briefing_viewed`, and
@@ -63,12 +52,13 @@ deterministic without expanding shared telemetry vocabulary.
   and exists independently of telemetry consent.
 - Enable by endpoint presence: producer configuration is not consent.
 - Create an ID at install/launch: identity must not precede first opt-in.
-- Delete pending state on disable or Reset: this contradicts the SDK retention
-  contract and would rewrite or orphan frozen immutable batches.
-- Replace the persisted ID immediately on Reset: reopening a retained catalog
-  can bypass the provider, so the new value would not prove the current epoch.
-- Blindly repeat SDK reset after an ambiguous result: retry must reconcile first
-  to avoid appending a duplicate epoch.
+- Delete pending state on disable: this contradicts the SDK retention contract
+  and would rewrite or orphan frozen immutable batches.
+- Add Reset/rotation in version 1: the replacement decision finds no current
+  product need; adding shared-SDK surface or parsing private catalog storage is
+  unjustified. Revisit only as a separately authorized SDK feature.
+- Silently replace a missing/malformed established ID: that is unrequested
+  rotation; fail closed instead.
 - Emit after a mid-lifecycle opt-in: a retrospective ready event lacks the
   required launch-to-ready boundary.
 

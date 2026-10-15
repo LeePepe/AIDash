@@ -137,5 +137,8 @@ Key constraints (apply once implemented):
 
 ## 构建 / 测试
 
-见 `AGENTS.md → Build commands`。快速门:`swift test --package-path Packages/AIDashCore`。
-Python 数据层有独立 CI job `aidata (pytest + ruff)`:`/usr/bin/python3 -m pytest aidata/tests/ -q`。
+见 `AGENTS.md → Test through hooks; do not manually repeat suites`。本地 human/agent
+只通过正常 commit/push 触发 resolver-selected hooks，并检查 hook receipt；重型
+App/workspace build 与仓库级 suites 由 CI 持有。允许的 generation、build、static
+analysis 与 contract 检查仍按 owning leaf authority 执行。可执行 suite 命令只保留在
+resolver-owned gate declarations，不作为 human/agent 的直接运行指令。

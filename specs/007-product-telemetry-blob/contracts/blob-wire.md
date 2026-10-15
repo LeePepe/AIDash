@@ -32,15 +32,6 @@ uses a Blob-only store, the product privacy allowlist, the persisted random UUID
 provider, and `heartbeatVersion: nil`. The bundle convenience initializer is
 forbidden.
 
-If a generation-bound Reset target is pending, the same valid construction
-opens the retained service disabled. Admission and flush remain closed while
-the app reads the catalog's current epoch, accepts an already-current target or
-otherwise applies the pinned SDK reset seam, and reads back proof. Only proof
-that the target is current may promote it, clear the matching generation, and
-enable the service. Failure, ambiguity, malformed state, or stale completion
-leaves the exact transition pending and retryable; retry reconciles before
-deciding whether another SDK reset is needed.
-
 ## Reader interpretation
 
 The reader accepts only the exact five-segment object layout and complete gzip NDJSON unit. It derives a deterministic source-event key from canonical object path plus line ordinal, retains product/build/time and sanitized object provenance, and advances completion state only after the whole unit succeeds.
@@ -51,14 +42,9 @@ The reader accepts only the exact five-segment object layout and complete gzip N
 persists false, closes admission, disables/cancels active delivery, and then
 awaits quiescence. No queued/later upload may start or continue while off; a
 request made ambiguous by cancellation remains retained and unconfirmed. The
-store, pending files, install ID, epochs, and history remain. Re-enable is fresh
-consent; eligible retained work resumes only when no Reset is pending. Before
-first opt-in, Reset is disabled/no-op. After an ID exists, Reset first
-disables/cancels active delivery and awaits quiescence, then persists a target
-UUID and opaque generation. While off it constructs/uploads nothing. On the
-next consented valid construction, disabled catalog reconciliation and target
-epoch proof must complete before any admission/flush. Failure or ambiguity
-remains pending, closed, and retryable across restart. Reset affects future
-batches only and never rewrites frozen paths/batches or deletes history.
-Dependency rollback follows the same disable/cancel/quiesce/retain order and
-never represents reset as deletion.
+store, pending files, install ID, and SDK history remain. Re-enable is fresh
+consent and resumes eligible retained work under the same lifetime-stable
+install ID. Version 1 exposes no Reset/rotation and never parses private
+telemetry storage for identity. Dependency rollback follows the same
+disable/cancel/quiesce/retain order and never deletes retained state or rewrites
+frozen paths/batches.

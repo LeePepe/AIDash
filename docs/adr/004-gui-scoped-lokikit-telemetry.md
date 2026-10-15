@@ -23,8 +23,9 @@ ADR-003 separately governs a future sandboxed fixed install. Its fixed entitleme
   missing is false. Production CLI, headless/XPC, and test-host modes never construct the
   telemetry service.
 - On first opt-in, create and persist one random install UUID. Reuse it across
-  launches. Do not reuse `AIDashCore.DeviceIdentifier` or derive identity from
-  device/hardware/account data.
+  launches and consent cycles for the app's lifetime. Do not reuse
+  `AIDashCore.DeviceIdentifier` or derive identity from device/hardware/account
+  data.
 - Construct the service at the existing app-mode seam only after persisted
   consent and validated manual host-key reads. First opt-in may persist its
   consent/UUID preferences before config validates, but invalid config creates
@@ -39,19 +40,13 @@ ADR-003 separately governs a future sandboxed fixed install. Its fixed entitleme
 - Turning consent off persists false, closes admission, disables/cancels active
   delivery, then awaits quiescence. No pending upload starts/continues; an
   ambiguous in-flight batch stays retained/unconfirmed with the store/install
-  ID/history. Re-enable is fresh consent; eligible retained work resumes only
-  after any pending Reset transition is proven reconciled.
-- Reset is disabled/no-op before an install ID exists. With an existing ID it
-  persists a target UUID bound to an opaque generation; while consent is off it
-  constructs nothing and leaves that transition pending. With consent and valid
-  configuration, construction opens the retained LokiKit catalog disabled,
-  admission/flush stay closed, and the coordinator first accepts an already
-  current target epoch or otherwise applies the SDK reset seam. It reads back
-  and proves the current catalog epoch uses the target before promoting the ID,
-  clearing only the matching generation, and enabling. Failure, ambiguity, or
-  stale completion stays pending and retryable without blindly appending an
-  epoch. Frozen pending batches/history stay unchanged. Dependency rollback
-  uses the same disable/cancel/quiesce/retain order.
+  ID/history. Re-enable is fresh consent and resumes eligible retained work
+  under the same install UUID.
+- Version 1 has no install-ID Reset or rotation surface. A future Reset is a
+  separate LokiKit SDK feature and product decision. AIDash must not add a
+  shared-telemetry API for it or infer identity by parsing private catalog
+  storage. Dependency rollback uses the same disable/cancel/quiesce/retain
+  order and leaves the persisted install UUID unchanged.
 
 ## Build and platform cost
 
@@ -62,17 +57,13 @@ ADR-003 separately governs a future sandboxed fixed install. Its fixed entitleme
 
 ## Concurrency and lifecycle cost
 
-- The app-local preferences/coordinator seam owns consent, install-ID/reset,
-  service lifetime, and at-most-once eligible GUI lifecycle state.
+- The app-local preferences/coordinator seam owns consent, the lifetime-stable
+  install ID, service lifetime, and at-most-once eligible GUI lifecycle state.
 - View-layer entry remains `@MainActor`; transport/store work stays inside LokiKit's structured concurrency boundary.
 - No `nonisolated(unsafe)`, `@unchecked Sendable`, detached task, or global actor escape is authorized by this ADR. A need for one requires a separate ADR.
 - Disable persists consent false and disables/cancels delivery before awaiting
-  quiescence. Active Reset disables/cancels delivery before it stages and
-  reconciles its generation-bound target. The pinned LokiKit behavior at
-  `a9df829421829eff9f589f205e2da401fd70fffb` requires this ordering because
-  reopening an existing catalog can bypass `identityProvider`; this inspection
-  does not resolve REL-001. Neither lifecycle may erase durable pending state
-  or rewrite its frozen identity/path.
+  quiescence. Disable/re-enable never rotates the install ID, erases durable
+  pending state, or rewrites a frozen identity/path.
 
 ## Security and release injection
 
@@ -93,6 +84,9 @@ This change does not edit ADR-003 or its fixed-install entitlements. A future sa
 5. **Change ADR-003 entitlements now** — rejected: fixed-install networking is outside scope and carries a distinct packaging/security decision.
 6. **Reuse DeviceIdentifier as install ID** — rejected: it may expose
    device/hardware identity and can exist before explicit opt-in.
+7. **Expose install-ID Reset in version 1** — rejected by the replacement
+   `no-reset-v1` decision: no current need justifies shared-SDK surface or
+   private catalog inspection. Revisit it only as its own SDK feature.
 
 ## Consequences
 
@@ -101,4 +95,6 @@ This change does not edit ADR-003 or its fixed-install entitlements. A future sa
   published and merged via `constitution: authorize explicit-consent GUI telemetry`.
 - Project/release wiring spans XcodeWorkspace and RepoInfra and must be delivered as separate layer-owned packets.
 - Rollback ordering is compensating: first quiesce/retain in AIDashApp, then remove XcodeWorkspace/RepoInfra wiring.
-- Any dependency identity change, mode expansion, heartbeat, fixed-install network change, or durable-store deletion requires a superseding ADR/review.
+- Any dependency identity change, mode expansion, heartbeat, install-ID Reset,
+  fixed-install network change, or durable-store deletion requires a
+  superseding ADR/review.

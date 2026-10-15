@@ -9,7 +9,7 @@
 - [x] Accepted v6 hash, fixed repository base, D-01/D-02, and stable FR-001–FR-007 are preserved.
 - [x] OA-002 is persisted as the single `aad-owner-local` contract without copying real resource or personal identity metadata.
 - [x] Owner-authorized constitution 1.14.0 amendment, migration note, and required PR title are persisted; implementation waits for amendment merge.
-- [x] Lead decisions for default-off Settings consent, first-opt-in random install ID, disable/re-enable retention, and GUI-only construction are persisted; Reset uses a generation-bound target and disabled retained-catalog proof before resume.
+- [x] Lead replacement decision `no-reset-v1` is persisted: default-off Settings consent, one lifetime-stable first-opt-in random install ID, same-ID disable/re-enable, GUI-only construction, and no Reset/rotation/shared reset API/private-catalog parsing.
 - [x] REL-001 remains a dependency-resolution gate, not a planning blocker.
 - [x] VitalStride, VoxPocket/T3, Azure mutation, credentials, L5, and fixed-install entitlement changes are excluded.
 - [x] No implementation or live canary is included in the planning slice.
@@ -19,8 +19,8 @@
 - [x] Each requirement is testable and has an owning task or explicit external closure.
 - [x] GUI, headless, test-host, disabled, rollback, and unsafe-event behavior are specified.
 - [x] `aidash.action` and `aidash.performance.ready_scene` have exact triggers, typed properties, no sampling, lifecycle cardinality, and monotonic timing formula.
-- [x] Consent source/default/persistence/lifecycle, install-ID repair, Reset transition/reconciliation, and production read seam are exact and cross-platform.
-- [x] SDK-backed hostless acceptance covers Reset while off across restart with a retained store and failure/ambiguous-confirmation retry before admission/flush.
+- [x] Consent source/default/persistence/lifecycle, first-opt-in-only install-ID creation, fail-closed invalid established identity, and production read seam are exact and cross-platform.
+- [x] Hostless acceptance covers the same install ID across relaunch and disable/re-enable and proves no Reset/rotation/shared-reset/private-catalog path exists.
 - [x] Reader no-op, CLI-only DAC, GET-only origin confinement, redirect refusal, and no-fallback behavior are specified.
 - [x] Complete-unit checkpoint, deterministic event key, idempotent L3 grain, and read-only L4 query are specified.
 - [x] Reader request/run/page/object/byte limits and exact within/after-page checkpoint behavior are measurable.

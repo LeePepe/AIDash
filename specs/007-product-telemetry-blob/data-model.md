@@ -7,44 +7,23 @@
 | Symbolic local key | Type | Rule |
 |---|---|---|
 | `telemetry.sendUsageData` | `Bool` | Missing or malformed is `false`; the cross-platform GUI Settings toggle **Send usage data** is the sole production writer |
-| `telemetry.installID` | canonical UUID string | Last install UUID proven current for the SDK catalog; absent before first opt-in, created randomly on the first false-to-true transition, and reused across launches |
-| `telemetry.pendingInstallID` | canonical UUID string? | Target UUID for a staged Reset; present only as one pair with `telemetry.pendingResetGeneration` and never used for admission until catalog proof |
-| `telemetry.pendingResetGeneration` | canonical UUID string? | Opaque generation token binding one Reset attempt to its target; only the matching reconciliation completion may clear it |
+| `telemetry.installID` | canonical UUID string | Absent before first opt-in; created randomly once on the first false-to-true transition, persisted before consent becomes active, and reused across launches and consent cycles for the app's lifetime |
 
 Production preferences read/write `UserDefaults.standard` through the
 app-owned seam. Hook-owned hostless tests inject an isolated suite and never
-touch the user's standard defaults. If consent is
-true but the UUID is missing or malformed, the preference seam persists a new
-random UUID before service construction. It never derives identity from
-`AIDashCore.DeviceIdentifier`, device/hardware attributes, account data, or a
-credential.
-
-The pending fields form one atomic record: both valid or both absent. A partial
-or malformed pair fails closed and cannot enable admission/flush. A new Reset
-atomically replaces the pair with a new random target and generation. A
-completion captured for an older generation may neither promote its target nor
-clear a newer pair.
+touch the user's standard defaults. First opt-in is the only UUID creation
+point. If persisted consent is true but the established UUID is missing or
+malformed, construction fails closed instead of silently rotating identity. It
+never derives identity from `AIDashCore.DeviceIdentifier`, device/hardware
+attributes, account data, a credential, or private telemetry storage.
 
 Turning consent off persists `false` before admission closes and upload
 is disabled/cancelled, then awaits quiescence. The install ID, isolated store,
-frozen pending batches, and historical identity epochs remain; a request made
+frozen pending batches, and SDK history remain; a request made
 ambiguous by cancellation stays retained/unconfirmed and no work uploads while
 off. Re-enable is fresh consent and resumes eligible retained work under the
-retained ID only when no Reset is pending. Reset is disabled/no-op and creates
-no ID before first opt-in. After an ID exists, Reset first disables/cancels
-active delivery and awaits quiescence, then atomically stages a target/generation
-pair; while off it performs no service/upload construction.
-
-On the next consented launch or retry with valid configuration, open the
-retained LokiKit service disabled and keep admission/flush closed. Reconcile
-the catalog before enabling: if its current epoch already uses the staged
-target, accept that proof without another reset; otherwise apply the pinned SDK
-reset seam and read back the current epoch. Only proof that the target is
-current may atomically promote it to `telemetry.installID` and clear the same
-generation. Reset failure, ambiguous confirmation, malformed state, or a stale
-completion preserves the transition, keeps admission/flush closed, and remains
-retryable across process restart. Reconciliation never blindly appends an
-epoch and never deletes or rewrites frozen pending batches, paths, or history.
+same retained ID. Version 1 has no Reset/rotation action or secondary identity
+state. A future Reset requires its own SDK feature and product decision.
 
 ### ProductTelemetryConfiguration
 
@@ -55,19 +34,17 @@ epoch and never deletes or rewrites frozen pending batches, paths, or history.
 | `app` | closed string | Trusted product identifier, not user input |
 | `build` | closed string | Trusted build identifier |
 | `consent` | bool | Read from `telemetry.sendUsageData`; must be true before telemetry service/store/uploader/timer/network construction |
-| `installID` | UUID | From the last-proven `telemetry.installID`, or the pending target only after catalog proof; never derived from device identity |
+| `installID` | UUID | From the lifetime-stable `telemetry.installID`; never derived from device identity or private telemetry storage |
 | `storeDirectory` | path | Blob-only, isolated from Loki and UserEvent stores |
 | `maxDiskBytes` | positive integer | Invalid/zero/overflow fails before store creation |
 | `heartbeatVersion` | null | Always `nil`; no SDK timer/heartbeat |
 
-State: `disabled` → `eligible` → `validated` → (`reconcilingReset` →)
-`active` → `quiescing` → `disabledRetained`. `reconcilingReset` always has an
-open-but-disabled service and closed admission/flush; only target-epoch proof
-enters `active`. First opt-in may persist consent/install-ID preferences before
-endpoint validation. Invalid producer input stays `eligible` or `disabled` and
-creates no telemetry service, store, uploader, timer, or network side effect.
-CLI, headless/XPC, and test-host production composition cannot enter
-`eligible`.
+State: `disabled` → `eligible` → `validated` → `active` → `quiescing` →
+`disabledRetained`. First opt-in may persist install-ID/consent preferences
+before endpoint validation. Invalid producer input stays `eligible` or
+`disabled` and creates no telemetry service, store, uploader, timer, or network
+side effect. CLI, headless/XPC, and test-host production composition cannot
+enter `eligible`.
 
 ### ProductEvent
 

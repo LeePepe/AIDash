@@ -73,16 +73,16 @@ receipts.
 | Constitution refs (1.14.0) | §A. Scope Discipline; §GUI Product Telemetry; §Dependencies; §Testing → Who runs tests; §Development Workflow → Quality Gates; §No Identity in Version Control |
 | Dependencies / slice | T003 path contract; OA-004 gates live values only; atomic `SL-AID-PRODUCER` candidate |
 
-- [ ] **T005 [AID-APP]** Add default-off GUI consent, install-ID/reset lifecycle, exact events, retained disable, and hostless gate.
+- [ ] **T005 [AID-APP]** Add default-off GUI consent, lifetime install ID, exact events, retained disable/re-enable, and hostless gate.
 
 | Metadata | T005 |
 |---|---|
 | Owning layer / context | **AIDashApp** — `CONTEXT.md` → `Apps/CONTEXT.md` → `Apps/AIDashApp/CONTEXT.md`; root `tech-context.md` |
 | Files in scope | `Apps/AIDashApp/CONTEXT.md`; `Apps/AIDashApp/Info.plist`; `Apps/AIDashApp/Sources/AIDashApp.swift`; `Apps/AIDashApp/Sources/RunMode.swift`; `Apps/AIDashApp/Sources/Scenes/BriefingWindowScene.swift`; new `Apps/AIDashApp/Sources/Settings/AIDashTelemetrySettingsView.swift`; new `Apps/AIDashApp/Sources/Telemetry/AIDashTelemetryPreferences.swift`; new `Apps/AIDashApp/Sources/Telemetry/AIDashTelemetryFactory.swift`; new `Apps/AIDashApp/Sources/Telemetry/AIDashTelemetryCoordinator.swift`; `Apps/AIDashApp/Resources/Localizable.xcstrings`; new hostless `Apps/AIDashApp/Tests/AIDashTelemetryPreferencesTests.swift`, `AIDashTelemetryFactoryTests.swift`, and `AIDashTelemetryCoordinatorTests.swift` |
 | Files NOT to touch | AIDashCore/AIDashUI/CLI; XPC protocol/schema/store/migration; project/Configs/fastlane/workflows; fixed-install scripts/entitlements/ADR-003; aidata |
-| Interface / contract | ADR-004; `contracts/aidash-events.md`; `contracts/blob-wire.md`; production `UserDefaults.standard` keys `telemetry.sendUsageData`, `telemetry.installID`, `telemetry.pendingInstallID`, and `telemetry.pendingResetGeneration`; isolated injected defaults in hostless tests; cross-platform Settings toggle/Reset; pinned SDK reset/catalog reconciliation seam without assuming a method name; manual host-key read; direct initializer; `heartbeatVersion: nil`; injected clock/fakes |
-| Functional acceptance | Missing consent is false; first opt-in creates/reuses random UUID; Reset before any ID is disabled/no-op; later Reset disables/cancels active delivery before quiescence and atomically stages a target UUID/generation without rewriting frozen work; off constructs nothing; next consented valid construction opens the retained catalog disabled and closes admission/flush, accepts an already-current target or applies SDK reset, proves the target epoch current, and clears only the matching generation before enabling; failure, ambiguity, malformed pair, or stale completion remains pending/closed/retryable and cannot blindly append an epoch; malformed opted-in UUID repairs before service construction; invalid config may leave preferences but no service/store/uploader/timer/network; app-init GUI-branch clock starts before consent/config reads and is discarded if ineligible; exact first-ready events/properties/formula emit unsampled at most once, with unresolved-at-ready Reset producing no retrospective event; off retains ambiguous/pending state and permits no upload; CLI/headless/test-host production composition is no-op; bundle initializer/device identifier/heartbeat absent |
-| Verification | Normal commit/push must produce **AIDashApp** hook receipts whose declared local test product is hostless; inspect receipts rather than invoking suites. SDK-backed hostless cases must cover Reset while off → process restart → retained store/current-target proof with frozen history unchanged, plus reset failure or ambiguous confirmation → persisted closed state → idempotent later retry that clears only after proof. Required macOS/iOS CI owns app logic tests/builds; host-based `AIDashAppTests` are never run locally |
+| Interface / contract | ADR-004; `contracts/aidash-events.md`; `contracts/blob-wire.md`; production `UserDefaults.standard` keys `telemetry.sendUsageData` and `telemetry.installID`; isolated injected defaults in hostless tests; cross-platform Settings toggle with no Reset/rotation action; no shared reset API or private catalog parsing; manual host-key read; direct initializer; `heartbeatVersion: nil`; injected clock/fakes |
+| Functional acceptance | Missing consent is false; first opt-in creates one random UUID before consent becomes active and relaunch/off-on cycles reuse it for the app's lifetime; an established missing/malformed UUID fails closed without construction or silent rotation; invalid config may leave first-opt-in preferences but no service/store/uploader/timer/network; app-init GUI-branch clock starts before consent/config reads and is discarded if ineligible; exact first-ready events/properties/formula emit unsampled at most once; mid-lifecycle opt-in is not retrospective; off persists false, closes admission, disables/cancels delivery, retains ambiguous/pending state, and permits no upload; re-enable resumes with the same ID; Settings and composition expose no Reset/rotation surface; CLI/headless/test-host production composition is no-op; bundle initializer/device identifier/heartbeat absent |
+| Verification | Normal commit/push must produce **AIDashApp** hook receipts whose declared local test product is hostless; inspect receipts rather than invoking suites. Hostless cases must cover one first-opt-in UUID reused across relaunch and disable/re-enable, fail-closed missing/malformed established identity, absence of Reset/rotation/shared-reset/private-catalog paths, retained frozen work, and exact events. Required macOS/iOS CI owns app logic tests/builds; host-based `AIDashAppTests` are never run locally |
 | Constitution refs (1.14.0) | §Principle I; §Principle II; §A. Scope Discipline; §E. Accessibility; §F. Internationalization; §GUI Product Telemetry; §Persistence; §Dependencies; §Testing → Who runs tests; §Development Workflow → Quality Gates; §No Identity in Version Control |
 | Dependencies / slice | T003 + merged constitution amendment; assembled with T004; closes `SL-AID-PRODUCER` after exact-revision implementation review |
 
@@ -189,7 +189,7 @@ Reverse rollback ordering is compensation, not a dependency cycle.
 | FR-005 bounded aidata L1–L4/Ops + atomic activation | T001–T002 + T006–T010 |
 | FR-006 bounded two-product correlation | E2E-05 only |
 | FR-007 least privilege/dependency/release evidence | T001–T006 + T010 + E2E-05 + external REL/OA evidence |
-| US1 default-off, first opt-in, exact events, mode no-op, disable/re-enable/Reset | T003–T005 |
+| US1 default-off, lifetime first-opt-in ID, exact events, mode no-op, disable/re-enable with same ID, no Reset | T003–T005 |
 | US2 no-op auth, exact bounds/checkpoints, idempotent query/activation | T001–T002 + T006–T010 |
 | US3 correlation, rerun, unsafe rejection, sanitized authorization | E2E-05 with T005–T008 evidence |
 | SC-001 | T005 |
@@ -212,9 +212,9 @@ Reverse rollback ordering is compensation, not a dependency cycle.
   the exact pushed head.
 - The exact Azure Identity lock/CI install precede adapter import; source
   activation occurs only in T010 after adapter/schema/query/runner readiness.
-- Producer evidence covers exact Settings consent/install-ID/Reset/events,
-  retained-store restart and reset failure/retry, and no-secret/dependency
-  gates; data evidence covers every reader bound,
+- Producer evidence covers exact Settings consent/lifetime install ID/events,
+  same-ID relaunch and disable/re-enable, absence of Reset/rotation, and
+  no-secret/dependency gates; data evidence covers every reader bound,
   checkpoint, rerun, registry, query, and no-secret gate.
 - Exact local, pushed branch, and PR revisions match before implementation
   review/publication.

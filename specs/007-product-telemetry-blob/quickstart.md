@@ -68,7 +68,7 @@ An authorized operator may set the real query-free HTTPS container URL only in i
 
 Producer: persist consent off, close admission, disable/cancel delivery without
 starting or continuing pending upload, await quiescence, and verify ambiguous
-in-flight/pending files and identity epochs remain before removing release and
-dependency wiring. Reader: stop scheduled registration and code paths without
+in-flight/pending files, the install ID, and SDK history remain before removing
+release and dependency wiring. Reader: stop scheduled registration and code paths without
 deleting accepted append-only raw or warehouse evidence. Any requested
 deletion/migration is a separate decision.

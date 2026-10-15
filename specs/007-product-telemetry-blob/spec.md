@@ -21,11 +21,19 @@ It also preserves the cross-repository `SL-E2E` evidence gate. VitalStride imple
 - `aidata` is a recursively routed Python subsystem. Its external sources are read-only, raw data is append-only, and an unconfigured source degrades to zero records.
 - No accepted behavior or test is removed, skipped, weakened, or reclassified.
 
+### Removed planned behavior
+
+- Owner decision `no-reset-v1` supersedes the earlier planned install-ID Reset.
+  Telemetry is not implemented at the fixed base, so this removes no production
+  behavior or existing test. Version 1 must expose no Reset/rotation surface,
+  shared-telemetry reset API, or private-catalog parsing. A future Reset requires
+  its own SDK feature and product decision.
+
 ### Locked decisions
 
 - **D-01 — Product ownership**: action names, performance names, fields, allowlists, sampling, and formulas remain product-local. Shared telemetry owns only generic transport, timing, privacy validation, persistence, and delivery diagnostics.
 - **D-02 — Blob wire/durability contract**: producers and the reader use the exact contract in `contracts/blob-wire.md`. Producer credentials remain the previously approved create-only CI inputs and are never read by planning or implementation agents.
-- **D-03 — Consent, identity, and AIDash events**: `contracts/aidash-events.md` is the normative AIDash event table. The GUI Settings toggle **Send usage data** is the sole consent source, reads/writes app `UserDefaults.standard`, defaults off, and creates a random persisted install UUID on first opt-in. Disable stops admission/upload but retains pending state; re-enable is fresh consent. Reset stages a generation-bound target UUID and cannot admit or flush until the retained LokiKit catalog proves that target is its current epoch. CLI, headless/XPC, and test-host production composition never constructs the telemetry service.
+- **D-03 — Consent, identity, and AIDash events**: `contracts/aidash-events.md` is the normative AIDash event table. The GUI Settings toggle **Send usage data** is the sole consent source, reads/writes app `UserDefaults.standard`, defaults off, and creates one random persisted install UUID on first opt-in. Later launches and consent cycles reuse that UUID for the app's lifetime. Disable stops admission/upload but retains pending state; re-enable is fresh consent and resumes under the same ID. Version 1 has no install-ID Reset/rotation, shared reset API, or private-catalog parsing. CLI, headless/XPC, and test-host production composition never constructs the telemetry service.
 - **OA-002 / `aad-owner-local` — Reader identity**: the only reader is the Owner's existing Azure AD identity, used locally through the Azure CLI-backed `DefaultAzureCredential` leg. It has read/list authority only. There is no SAS mode, secret field, stored-policy use, or authentication fallback. Missing endpoint/sign-in or initial-token failure before listing returns zero with no state change; a later auth/network failure preserves earlier completed records/object checkpoints and leaves only its incomplete object/page unadvanced. Tracked files use only symbolic identifiers; the real selector belongs only in ignored `aidata/config_local.py`.
 
 ## User scenarios and testing
@@ -34,17 +42,17 @@ It also preserves the cross-repository `SL-E2E` evidence gate. VitalStride imple
 
 As the Owner, I can explicitly enable AIDash GUI telemetry and receive the two events in `contracts/aidash-events.md` without changing headless, CLI, test-host, CloudKit, or UserEvent behavior.
 
-**Independent test**: Hook-owned hostless logic uses isolated preferences and fakes for default-off consent, first-opt-in identity, eligible once-per-lifecycle event emission, and disabled production modes. SDK-backed hostless evidence proves retained-store Reset reconciliation across restart and failure/ambiguous-confirmation retry before admission or flush.
+**Independent test**: Hook-owned hostless logic uses isolated preferences and fakes to prove default-off consent, one first-opt-in identity reused across relaunch and disable/re-enable, eligible once-per-lifecycle event emission, no Reset/rotation surface, and no service/store/timer/network construction in every disabled production mode.
 
 **Acceptance scenarios**:
 
 1. Given a fresh install or missing/malformed consent preference, when any GUI lifecycle begins, then **Send usage data** is off and no install ID, telemetry service, store, timer, uploader, event, or network work is created.
-2. Given the first explicit false-to-true opt-in, when preferences persist it, then a random canonical UUID is created once and reused on later launches; empty, unexpanded, or unsafe producer configuration still returns before service/store/timer/uploader/network construction.
+2. Given the first explicit false-to-true opt-in, when preferences persist it, then a random canonical UUID is created once before consent becomes active and is reused on later launches; empty, unexpanded, or unsafe producer configuration still returns before service/store/timer/uploader/network construction. After that first opt-in, a missing or malformed stored UUID fails closed rather than silently rotating identity.
 3. Given valid configuration and consent already true at eligible GUI launch, when the first `.ready(container)` scene becomes interactive, then `aidash.action` with only `action_name=briefing_viewed` and `aidash.performance.ready_scene` with only finite nonnegative integer `duration_ms` are admitted at 100% sampling and at most once in that lifecycle.
 4. Given consent becomes true only after the scene is already ready, readiness never occurs, or consent is revoked before readiness, then no retrospective action/performance event is emitted for that lifecycle.
 5. Given headless XPC, CLI, or test-host production composition, when lifecycle seams run, then no telemetry service, store, uploader, timer, or event is constructed.
-6. Given consent is turned off or producer rollback begins, when false is persisted, then admission closes and active delivery is disabled/cancelled before quiescence; no pending upload starts/continues, ambiguous in-flight work stays retained/unconfirmed, and a later opt-in may resume eligible retained work only after any pending Reset is proven reconciled.
-7. Given Reset before first opt-in, then it is disabled/no-op and creates no ID. Given an existing ID, Reset disables/cancels active delivery before quiescence and atomically persists a target UUID plus opaque generation without rewriting frozen work; while off it constructs nothing. On the next consented valid construction, the retained catalog opens disabled, admission/flush remain closed, and the app reconciles an already-current target or applies SDK reset before proving the target epoch current. It promotes the target and clears only that generation after proof; failure, ambiguity, or stale completion remains pending, closed, and retryable across restart.
+6. Given consent is turned off or producer rollback begins, when false is persisted, then admission closes and active delivery is disabled/cancelled before quiescence; no pending upload starts/continues, ambiguous in-flight work stays retained/unconfirmed, and a later opt-in resumes eligible retained work under the same persisted install UUID.
+7. Given Settings or production composition in version 1, then no install-ID Reset/rotation action or API exists, no shared-telemetry reset feature is required, and AIDash never parses private telemetry storage to infer identity.
 
 ### User Story 2 — Read-only product-event analytics (Priority: P1)
 
@@ -77,7 +85,7 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 - Redirects and non-server-trust authentication challenges are refused by producer transport.
 - Only HTTP `201`, or an ambiguous immutable retry receiving the exact qualified overwrite rejection, may remove producer queue work.
 - Changed destinations, corrupt sidecars, or source/body mismatches retain and block a producer batch.
-- Consent disabled while work is pending retains the queue but forbids upload; a pending Reset blocks admission/flush until catalog proof and never rewrites a frozen batch's install-ID-bearing path.
+- Consent disabled while work is pending retains the queue but forbids upload; re-enable uses the same install ID and never rewrites a frozen batch's install-ID-bearing path.
 - Ready-scene duration uses a monotonic clock and rejects negative/overflow results; wall-clock adjustment cannot change it.
 - Every listed object reference is selected; a path that does not match the reviewed five-part layout is rejected before GET without an object checkpoint and blocks its page-marker advance.
 - One invalid NDJSON line rejects its containing collection unit; partial facts are not published.
@@ -89,9 +97,9 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 ### Functional requirements
 
 - **FR-001**: Both in-scope products MUST define their own allowlisted action and performance event names, fields, sampling, formulas, and cardinality; shared telemetry MUST NOT gain product semantics. AIDash MUST implement exactly `contracts/aidash-events.md`.
-- **FR-002**: Producers MUST fail closed for missing/unsafe configuration or consent, isolate Blob state and network work, reject an entire unsafe event before persistence/network, freeze exact retry bytes/path/destination, classify receipt exactly, and retain pending work and historical identity on disable or rollback. AIDash consent MUST use the default-off local preference lifecycle in D-03; first opt-in MAY create its preference/UUID before producer configuration validates, but invalid configuration MUST create no telemetry service/store/uploader/timer/network work. AIDash MUST persist a generation-bound Reset target, reconcile the retained catalog while disabled before admission/flush, clear only the proven matching generation, and keep failures or ambiguous/stale outcomes pending and retryable.
+- **FR-002**: Producers MUST fail closed for missing/unsafe configuration or consent, isolate Blob state and network work, reject an entire unsafe event before persistence/network, freeze exact retry bytes/path/destination, classify receipt exactly, and retain pending work and historical identity on disable or rollback. AIDash consent MUST use the default-off local preference lifecycle in D-03; first opt-in MAY create its preference/UUID before producer configuration validates, but invalid configuration MUST create no telemetry service/store/uploader/timer/network work. After first opt-in the same install UUID MUST be reused for the app's lifetime; missing/malformed stored identity fails closed and no v1 path may reset, rotate, or infer it from private storage.
 - **FR-003**: VitalStride MUST retain its product-local TelemetryKit and Aptabase behavior and add Blob only through the separately owned VitalStride adapter slice; no AIDash task may edit that repository.
-- **FR-004**: AIDash MUST add the exact approved LokiKit dependency only to consented GUI app composition, manually read the two expanded host keys, use the direct timer-free initializer with `heartbeatVersion: nil`, expose the cross-platform Settings consent/Reset surface, keep a newly opened retained catalog disabled until Reset reconciliation proves its current epoch, emit the exact two AIDash events only for an eligible lifecycle, and remain a no-op in CLI/headless/test-host production composition.
+- **FR-004**: AIDash MUST add the exact approved LokiKit dependency only to consented GUI app composition, manually read the two expanded host keys, use the direct timer-free initializer with `heartbeatVersion: nil`, expose the cross-platform Settings consent surface without Reset/rotation, emit the exact two AIDash events only for an eligible lifecycle, and remain a no-op in CLI/headless/test-host production composition.
 - **FR-005**: `aidata` MUST add a single-mode `product_blob` source using only the `aad-owner-local` contract, paginate and read the reviewed gzip NDJSON Blob format within the exact timeout/page/object/byte limits in `contracts/reader-auth.md`, preserve stable object/event provenance through an honest `fact_product_event`, expose a bounded read-only L4 query, and activate the source atomically in registries and scheduled operations only after adapter/schema/query/runner readiness without adding L5 formulas or cards.
 - **FR-006**: Final acceptance MUST correlate a bounded two-product canary set through producer, Blob, L1, L3, and L4, including rerun/no-duplicate and unsafe-event rejection evidence.
 - **FR-007**: All writer and reader permissions, dependency identities, release inputs, temporary CI injection, evidence, and rollback MUST remain least-privilege and auditable. No agent may create/read/copy a credential or real endpoint, and no tracked artifact may contain personal identity metadata.
@@ -113,11 +121,12 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 - Product metric formulas, dashboards, digests, or any L5 consumer.
 - VoxPocket/T3 or VitalStride source changes.
 - Treating `REL-001` as a planning blocker. It gates AIDash's final dependency pin and live proof only.
+- Install-ID Reset/rotation, a shared-telemetry reset API, or private telemetry-storage parsing. Revisit Reset only as a separately authorized SDK feature.
 
 ### Key entities
 
 - **Product Event**: Product-owned action or performance record with name, ISO timestamp, and closed properties.
-- **Telemetry Preferences**: Local default-off consent, last-proven install UUID, and optional generation-bound pending Reset target; not a credential and never a source of device/hardware identity.
+- **Telemetry Preferences**: Local default-off consent and one lifetime-stable random install UUID created on first opt-in; not a credential and never a source of device/hardware identity.
 - **Frozen Blob Batch**: Immutable gzip NDJSON bytes plus digest, destination, object path, and credential-free sidecar.
 - **Blob Object Cursor**: Stable object path/ETag fingerprint and completed-unit state used for idempotent collection.
 - **Product Event Fact**: One accepted event keyed by deterministic object-path plus line ordinal, retaining sanitized object provenance.
@@ -126,7 +135,7 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 
 ## Success criteria
 
-- **SC-001**: Hook/CI-owned hermetic producer evidence observes the exact two AIDash events at most once in an eligible lifecycle, exact trigger/properties/timing, default-off/first-opt-in/disable/re-enable behavior, zero SDK heartbeat events, and zero telemetry construction in every disabled production mode. SDK-backed hostless evidence proves retained-store Reset across restart plus reset failure/ambiguous confirmation and successful retry, with admission/flush closed until the target epoch is proven current.
+- **SC-001**: Hook/CI-owned hermetic producer evidence observes the exact two AIDash events at most once in an eligible lifecycle, exact trigger/properties/timing, default-off/first-opt-in/disable/re-enable behavior with the same install UUID across relaunch and consent cycles, zero Reset/rotation surface, zero SDK heartbeat events, and zero telemetry construction in every disabled production mode.
 - **SC-002**: Hook/CI-owned hermetic reader evidence covers every request/run/page/object/byte boundary, malformed content, auth/network degradation, exact page/object checkpoint behavior, and idempotent rerun with zero credential material in records or errors.
 - **SC-003**: Temporary-database merge and L4 tests return one stable row per synthetic event after repeated runs and perform no source mutation.
 - **SC-004**: The final evidence bundle correlates both products and both event types across every required stage and proves the unsafe event is absent.

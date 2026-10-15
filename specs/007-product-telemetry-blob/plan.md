@@ -26,7 +26,7 @@ Adopt the accepted central telemetry scope into AIDash's native Spec Kit and con
 |---|---|
 | §Principle I + §GUI Product Telemetry | PASS after amendment merge — telemetry is default-off, explicit-consent, GUI-only, typed, and not a briefing authoring channel |
 | §Principle II + §Persistence | PASS after amendment merge — isolated telemetry queue/Blob is the sole narrow third-party exception; briefing/UserEvent CloudKit and SwiftData rules are unchanged |
-| Append-only / durable state | PASS — writer retry state is immutable/retained across disable/Reset; a generation-bound Reset transition cannot resume before current-epoch proof; aidata raw is append-only; L3 rerun is idempotent |
+| Append-only / durable state | PASS — writer retry state and the lifetime-stable install ID are retained across disable/re-enable; aidata raw is append-only; L3 rerun is idempotent |
 | Dependency ADR | PASS — ADR-004 covers LokiKit; ADR-005 covers `azure-identity` |
 | Layer direction | PASS — RepoInfra, XcodeWorkspace, AIDashApp, and each aidata leaf have separate tasks |
 | Swift concurrency | PASS — no unsafe escape is authorized; app coordinator owns structured lifecycle |
@@ -115,14 +115,16 @@ aidata/
 
 `AIDashApp.init` already fixes run mode once. GUI composition reads the
 `UserDefaults.standard` key `telemetry.sendUsageData` (missing is false) and exposes
-the cross-platform Settings toggle **Send usage data** plus Reset. First opt-in
-creates/persists random `telemetry.installID`; no device-derived identifier is
-used. With persisted consent, GUI mode, and valid expanded plist values, the
-app creates the direct LokiKit Blob service. CLI, headless/XPC, and test-host
-production paths receive a no-op.
+the cross-platform Settings toggle **Send usage data**. First opt-in creates and
+persists one random `telemetry.installID`; later launches and consent cycles
+reuse it for the app's lifetime, and no device-derived identifier is used. A
+missing/malformed established ID fails closed rather than rotating. With
+persisted consent, GUI mode, and valid expanded plist values, the app creates
+the direct LokiKit Blob service. CLI, headless/XPC, and test-host production
+paths receive a no-op.
 
 The app-local preferences/coordinator owns service lifetime, consent
-transitions, install-ID Reset reconciliation, and the exact contract in
+transitions, the lifetime-stable install ID, and the exact contract in
 `contracts/aidash-events.md`. It captures a `ContinuousClock` start at entry to
 the GUI-production app-init branch, before consent/configuration reads and
 bootstrap/service construction, and discards it if eligibility fails. It emits
@@ -131,18 +133,9 @@ bootstrap/service construction, and discards it if eligibility fails. It emits
 `.ready(container)` appearance, unsampled and at most once. Mid-lifecycle
 opt-in is not retrospective. Disable persists false, closes admission,
 disables/cancels delivery before awaiting quiescence, and retains any
-ambiguous/pending work without continued upload. Reset is no-op before first
-opt-in. With an existing ID, it disables/cancels active delivery before
-quiescence and atomically stages a target UUID plus opaque generation; while
-off it performs no service/network work. On the next consented valid
-construction the retained LokiKit catalog opens disabled, admission/flush stay
-closed, and the coordinator reconciles an already-current target or applies SDK
-reset before reading back current-epoch proof. Only matching proof promotes the
-target and clears that generation. Failure, ambiguity, or stale completion
-stays pending and retryable across restart without rewriting frozen work or
-blindly appending another epoch. The retained-catalog behavior was inspected at
-`a9df829421829eff9f589f205e2da401fd70fffb`; it informs this contract but does
-not resolve REL-001.
+ambiguous/pending work without continued upload. Re-enable resumes eligible
+retained work under the same install UUID. Version 1 exposes no Reset/rotation;
+it adds no shared-telemetry reset API and performs no private catalog parsing.
 
 The two release-input names remain `TELEMETRY_BLOB_ENDPOINT` and `TELEMETRY_BLOB_SAS`; their values are never read by agents. XcodeWorkspace owns empty build settings, dependency wiring, and Fastlane path-only xcconfig consumption. RepoInfra owns protected workflow injection, permissions/cleanup, sentinel leak tests, and workflow assertions.
 
@@ -165,8 +158,7 @@ AidataL3 adds one `fact_product_event` row per deterministic object-path/line-or
 Writer rollback first persists consent off, closes admission,
 disables/cancels delivery without starting or continuing queued upload, awaits
 quiescence, and proves any ambiguous in-flight batch plus all pending
-files/identities remain. A pending Reset transition also remains closed and
-retryable and cannot be cleared by rollback. Only then may
+files and the lifetime-stable install ID remain. Only then may
 dependency/build/release plumbing be removed. Reader rollback removes scheduled
 registration/config/adapter/fact/query as a coordinated change but never
 deletes append-only raw or accepted warehouse evidence.
@@ -178,7 +170,7 @@ deletes append-only raw or accepted warehouse evidence.
 | `AID-DEP` | RepoInfra | Install exact `aidata` dependency lock in CI and gate it | AID-PLAN, DATA-FOUND manifest |
 | `AID-XCODE` | XcodeWorkspace | Immutable LokiKit wiring, empty host keys, logic-test target, Fastlane path-only xcconfig lifecycle | AID-PLAN, REL-001 |
 | `AID-RELEASE` | RepoInfra | TestFlight secret-to-temp-xcconfig injection, 0600/path-only/ensure+always cleanup and sentinel gates | AID-XCODE, OA-004 for live values only |
-| `AID-APP` | AIDashApp | GUI-only direct producer, Settings consent/install ID/Reset, exact two events, retention, hostless gate | constitution amendment merged, AID-XCODE |
+| `AID-APP` | AIDashApp | GUI-only direct producer, Settings consent/lifetime install ID, exact two events, retained disable/re-enable, hostless gate | constitution amendment merged, AID-XCODE |
 | `DATA-FOUND` | AidataFoundation | Exact Azure Identity lock, endpoint selector, current-effective scheduled-source declaration, routing; no `product_blob` activation | AID-PLAN, constitution amendment merged, OA-002 fixed |
 | `DATA-L12` | AidataL1L2 | GET-only CLI-DAC Blob adapter, complete-unit state and provenance | DATA-FOUND, AID-DEP |
 | `DATA-L3` | AidataL3 | Honest idempotent product-event fact | DATA-L12 |
@@ -223,7 +215,8 @@ Rollback ordering is compensation, not a reverse dependency edge.
 
 - `azure-identity` changes aidata's stdlib-only baseline. Exact lock, separate ADR, routed manifest, CI install, and dependency audit contain this risk.
 - Release injection spans XcodeWorkspace and RepoInfra; split tasks prevent cross-layer ownership drift.
-- `AIDashApp` currently lacks a hostless resolver test gate; AID-APP must add it before claiming hermetic producer acceptance, including SDK-backed retained-store Reset restart and failure/retry evidence.
+- `AIDashApp` currently lacks a hostless resolver test gate; AID-APP must add it before claiming hermetic producer acceptance, including same-ID relaunch and disable/re-enable evidence plus absence of a Reset/rotation surface.
+- Install-ID Reset is deliberately outside version 1. A future need requires a separately authorized LokiKit SDK feature; this plan adds neither shared API nor private-storage parsing.
 - The LokiKit release identity remains unresolved; REL-001 blocks only AID-XCODE and live proof.
 - The future sandboxed fixed install has no network entitlement; this plan neither edits nor works around ADR-003.
 - Local Azure identity availability is operational state. No-op is correct; implementation must never prompt or choose a substitute principal.

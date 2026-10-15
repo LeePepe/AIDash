@@ -10,14 +10,10 @@ properties.
 | `aidash.performance.ready_scene` | The same first-ready callback | `duration_ms`: finite, nonnegative integer | 100% (no sampling); at most once per eligible GUI lifecycle |
 
 An eligible lifecycle is GUI production composition with persisted consent
-already true when app initialization reads it, valid producer configuration,
-and no unresolved Reset transition. When a Reset is pending, eligibility begins
-only after disabled SDK catalog reconciliation proves its target epoch current;
-admission and flush remain closed until then. The launch instant is captured
-before those eligibility checks, then discarded if they fail. If consent is
-enabled only after the scene is already ready, or Reset reconciliation is
-still unresolved at the first-ready callback, the app emits no retrospective
-event after later enablement/retry. Both events are absent if the scene never
+already true when app initialization reads it and valid producer configuration.
+The launch instant is captured before those eligibility checks, then discarded
+if they fail. If consent is enabled only after the scene is already ready, the
+app emits no retrospective event. Both events are absent if the scene never
 becomes ready or consent is revoked before the trigger. The event-envelope
 timestamp is UTC at emission.
 
