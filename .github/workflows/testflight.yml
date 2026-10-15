@@ -18,9 +18,6 @@ concurrency:
   group: testflight
   cancel-in-progress: false
 
-permissions:
-  contents: write
-
 jobs:
   release:
     name: Build & upload to TestFlight
@@ -29,6 +26,8 @@ jobs:
       github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, aidash-mac]
     timeout-minutes: 40
+    permissions:
+      contents: write
     steps:
       - name: Select exact candidate
         id: candidate
@@ -149,7 +148,7 @@ jobs:
                 break
                 ;;
             esac
-          done < <(git diff --name-only -z "$BASE_SHA..$CANDIDATE_SHA")
+          done < <(git diff --no-renames --name-only -z "$BASE_SHA..$CANDIDATE_SHA")
           echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
           # CLASSIFIER-END
 
@@ -206,6 +205,13 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" \
             "$HOME/Library/Keychains/login.keychain-db"
 
+      - name: Prepare provisioning profile tracking
+        if: steps.gate.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          STATE_DIR="$RUNNER_TEMP/aidash-testflight-$GITHUB_RUN_ID"
+          mkdir -p "$STATE_DIR"
+
       - name: fastlane ios beta
         id: upload
         if: steps.gate.outputs.release == 'true'
@@ -217,6 +223,7 @@ jobs:
           FASTLANE_SKIP_UPDATE_CHECK: "1"
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
           FASTLANE_XCODEBUILD_SETTINGS_RETRIES: "6"
+          SIGH_OUTPUT_PATH: ${{ runner.temp }}/aidash-testflight-${{ github.run_id }}
         run: fastlane ios beta
 
       - name: Compare-and-swap last-released marker
@@ -247,9 +254,44 @@ jobs:
         run: |
           set -u
           cleanup_warning=false
+          STATE_DIR="$RUNNER_TEMP/aidash-testflight-$GITHUB_RUN_ID"
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+
           if [ "$KEYCHAIN_ATTEMPTED" = "true" ]; then
             if ! security lock-keychain "$HOME/Library/Keychains/login.keychain-db"; then
               echo "::warning::Could not re-lock the login keychain"
+              cleanup_warning=true
+            fi
+          fi
+          if [ -d "$STATE_DIR" ]; then
+            while IFS= read -r downloaded_profile; do
+              PROFILE_PLIST="$STATE_DIR/profile.plist"
+              if ! security cms -D -i "$downloaded_profile" > "$PROFILE_PLIST"; then
+                echo "::warning::Could not inspect a provisioning profile created by this run"
+                cleanup_warning=true
+                continue
+              fi
+              if ! PROFILE_UUID="$(
+                /usr/libexec/PlistBuddy -c 'Print :UUID' "$PROFILE_PLIST"
+              )"; then
+                echo "::warning::Could not read the provisioning profile UUID"
+                cleanup_warning=true
+                continue
+              fi
+              INSTALLED_PROFILE="$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+              if ! rm -f -- "$INSTALLED_PROFILE" "$downloaded_profile"; then
+                echo "::warning::Could not remove a provisioning profile created by this run"
+                cleanup_warning=true
+              fi
+            done < <(
+              find "$STATE_DIR" -type f -name '*.mobileprovision' -print
+            )
+            if ! rm -f -- "$STATE_DIR/profile.plist"; then
+              echo "::warning::Could not remove provisioning-profile metadata"
+              cleanup_warning=true
+            fi
+            if ! rmdir "$STATE_DIR"; then
+              echo "::warning::Could not remove the release state directory"
               cleanup_warning=true
             fi
           fi
@@ -268,6 +310,11 @@ jobs:
             FINAL_OUTCOME=failed
             CAS_RESULT=not-completed
           fi
+          if [ "$cleanup_warning" = "true" ]; then
+            CLEANUP_STATUS=warning
+          else
+            CLEANUP_STATUS=clean
+          fi
           if ! {
             echo "## TestFlight release"
             echo "- Candidate: \`${CANDIDATE_SHA:-unresolved}\`"
@@ -276,6 +323,7 @@ jobs:
             echo "- Force: \`${FORCE:-false}\`"
             echo "- Marker CAS: \`$CAS_RESULT\`"
             echo "- Outcome: \`$FINAL_OUTCOME\`"
+            echo "- Cleanup: \`$CLEANUP_STATUS\`"
             echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           } >> "$GITHUB_STEP_SUMMARY"; then
             echo "::warning::Could not write the release summary"

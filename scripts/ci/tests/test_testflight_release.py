@@ -14,6 +14,7 @@ while not (ROOT / ".github/workflows/testflight.yml").is_file():
         raise RuntimeError("TestFlight workflow not found")
     ROOT = ROOT.parent
 WORKFLOW = ROOT / ".github/workflows/testflight.yml"
+HANDOFF = ROOT / "docs/testflight-handoff.md"
 
 
 def extract_step(workflow: str, step_id: str) -> str:
@@ -66,11 +67,22 @@ class TestFlightReleaseTests(unittest.TestCase):
         self.assertIn("EVENT_SHA: ${{ github.sha }}", self.release)
         self.assertNotIn("workflow_run", self.workflow)
         self.assertNotIn("head_sha", self.workflow)
+        candidate = extract_step(self.workflow, "candidate")
+        self.assertIn('elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then', candidate)
+        manual = candidate.split(
+            'elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then', 1
+        )[1].split("\n          else", 1)[0]
+        self.assertIn("git ls-remote", manual)
+        self.assertEqual(manual.count("refs/heads/main"), 1)
+        self.assertIn('CANDIDATE="$(', manual)
 
     def test_checkout_and_job_safety_contract(self):
         self.assertEqual(self.workflow.count("\n  release:\n"), 1)
         self.assertIn("runs-on: [self-hosted, aidash-mac]", self.release)
-        self.assertIn("permissions:\n  contents: write", self.workflow)
+        self.assertNotRegex(self.workflow, r"(?m)^permissions:$")
+        self.assertRegex(
+            self.release, r"(?m)^    permissions:\n      contents: write$"
+        )
         self.assertIn("group: testflight", self.workflow)
         self.assertIn("cancel-in-progress: false", self.workflow)
         self.assertIn("ref: ${{ steps.candidate.outputs.sha }}", self.release)
@@ -137,6 +149,24 @@ class TestFlightReleaseTests(unittest.TestCase):
         self.assertIn('if [ "$KEYCHAIN_ATTEMPTED" = "true" ]; then', cleanup)
         self.assertIn("Release succeeded; cleanup reported a warning", cleanup)
         self.assertIn('echo "- Force: \\`${FORCE:-false}\\`"', cleanup)
+        self.assertIn('echo "- Cleanup: \\`$CLEANUP_STATUS\\`"', cleanup)
+
+    def test_cleanup_removes_only_profiles_added_by_the_release(self):
+        tracking = self.release.split(
+            "- name: Prepare provisioning profile tracking", 1
+        )[1].split("- name: fastlane ios beta", 1)[0]
+        release = extract_step(self.workflow, "upload")
+        cleanup = self.release.split("- name: Cleanup and summarize", 1)[1]
+        self.assertIn('mkdir -p "$STATE_DIR"', tracking)
+        self.assertIn(
+            "SIGH_OUTPUT_PATH: ${{ runner.temp }}/aidash-testflight-"
+            "${{ github.run_id }}",
+            release,
+        )
+        self.assertIn("security cms -D -i", cleanup)
+        self.assertIn("Print :UUID", cleanup)
+        self.assertIn('INSTALLED_PROFILE="$PROFILE_DIR/$PROFILE_UUID.mobileprovision"', cleanup)
+        self.assertIn('rm -f -- "$INSTALLED_PROFILE" "$downloaded_profile"', cleanup)
 
     def test_classifier_executes_the_exact_production_block(self):
         classifier = extract_classifier(self.workflow)
@@ -230,10 +260,86 @@ class TestFlightReleaseTests(unittest.TestCase):
                     f"relevant={'true' if expected else 'false'}",
                 )
 
+    def test_classifier_treats_rename_out_of_app_path_as_relevant(self):
+        classifier = extract_classifier(self.workflow)
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            git_environment = isolated_git_environment()
+            subprocess.run(
+                ["git", "init", "-q"], cwd=repo, env=git_environment, check=True
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                env=git_environment,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"],
+                cwd=repo,
+                env=git_environment,
+                check=True,
+            )
+            source = repo / "Apps/AIDashApp/Foo.swift"
+            source.parent.mkdir(parents=True)
+            source.write_text("fixture\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "."], cwd=repo, env=git_environment, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-qm", "base"],
+                cwd=repo,
+                env=git_environment,
+                check=True,
+            )
+            base = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                env=git_environment,
+                text=True,
+            ).strip()
+            destination = repo / "docs/Foo.swift"
+            destination.parent.mkdir()
+            source.rename(destination)
+            subprocess.run(
+                ["git", "add", "-A"], cwd=repo, env=git_environment, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-qm", "rename"],
+                cwd=repo,
+                env=git_environment,
+                check=True,
+            )
+            candidate = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                env=git_environment,
+                text=True,
+            ).strip()
+            output = repo / "output"
+            subprocess.run(
+                ["bash", "-c", "set -euo pipefail\n" + classifier],
+                cwd=repo,
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "BASE_SHA": base,
+                    "CANDIDATE_SHA": candidate,
+                    "GITHUB_OUTPUT": str(output),
+                },
+                check=True,
+            )
+            self.assertEqual(output.read_text(encoding="utf-8").strip(), "relevant=true")
+
     def test_classifier_markers_are_unambiguous(self):
         self.assertEqual(self.workflow.count("# CLASSIFIER-BEGIN"), 1)
         self.assertEqual(self.workflow.count("# CLASSIFIER-END"), 1)
         self.assertTrue(extract_classifier(self.workflow).strip())
+
+    def test_handoff_discloses_permission_and_removed_coverage(self):
+        handoff = HANDOFF.read_text(encoding="utf-8")
+        self.assertIn("`contents: write`", handoff)
+        self.assertIn("manual-only regression was removed", handoff)
+        self.assertIn("shadow-policy suite was intentionally discarded", handoff)
 
 
 if __name__ == "__main__":

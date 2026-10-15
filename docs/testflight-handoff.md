@@ -8,6 +8,10 @@ The workflow uses the existing `fastlane ios beta` lane. Before the first real
 upload, configure the five repository secrets and the Apple account resources
 below.
 
+The single release job has `contents: write` permission so it can move the
+public release marker after upload. Checkout credentials are not persisted, and
+the job token is exposed only to that marker compare-and-swap step.
+
 ## GitHub secrets
 
 | Secret | Value |
@@ -84,6 +88,11 @@ The workflow unlocks `login.keychain-db` immediately before release and always
 attempts to re-lock it. It does not change keychain settings, search lists, or
 partition lists; those are runner provisioning responsibilities.
 
+The lane generates and installs a fresh provisioning profile. The workflow
+directs its downloaded profile into a run-specific directory, reads that
+profile's UUID, and removes only the matching installed profile during
+`always()` cleanup, preserving pre-existing runner state.
+
 After a successful upload, the workflow updates `testflight/last-released` with
 a compare-and-swap lease against the exact marker observed during eligibility.
 Skipped or pre-upload failed runs never move the marker. Upload and marker
@@ -99,8 +108,15 @@ warnings only and cannot reclassify the successful release.
 ## Verification and troubleshooting
 
 The summary records the candidate, marker state, relevance decision, marker
-CAS result, final outcome, and workflow URL. A real TestFlight upload is not a
-PR gate; the first eligible post-merge run provides delivery evidence.
+CAS result, final outcome, cleanup status, and workflow URL. A real TestFlight
+upload is not a PR gate; the first eligible post-merge run provides delivery
+evidence.
+
+The prior tracked manual-only regression was removed because post-merge
+automatic release supersedes that behavior. The unpublished revision-3
+shadow-policy suite was intentionally discarded rather than ported. Replacement
+coverage is limited to the exact production relevance classifier, stable
+workflow structure, and complete-workflow lint required by Spec 007.
 
 | Symptom | Cause / action |
 |---|---|
