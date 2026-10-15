@@ -212,6 +212,53 @@ def test_review_evidence_rules_emits_full_text_without_hanging() -> None:
     assert "fail-closed" in result.stdout
 
 
+def test_review_evidence_rules_requires_complete_deciding_predicate() -> None:
+    """A rejected/invalid value claim must cite the whole predicate, not a fragment.
+
+    This keeps the PR #199 false-positive hunk from being treated as blocker
+    evidence: `VALID_TIERS = {"explore"}` alone does not prove `tier not in
+    VALID_TIERS | {"production"}` is a rejection, and direct CI/test failures
+    remain independent evidence that must not be over-abstained.
+    """
+    result = _run(f". {COMMON}\nreview_evidence_rules\n", timeout=30)
+    assert result.returncode == 0, result.stderr
+    text = result.stdout
+
+    for needle in (
+        "complete deciding predicate",
+        "tier not in VALID_TIERS | {\"production\"}",
+        "VALID_TIERS",
+        "production",
+        "union",
+        "default",
+        "normalization",
+        "negation",
+        "material helper qualifier",
+        "直接测试 / CI 失败输出",
+        "独立的 blocker 证据",
+        "孤立常量 + 半截谓词只能写成 note,不升级为 blocker",
+        "仅当完整谓词和最终结论都被实际引用时",
+        "才允许形成“值无效或被拒绝”的结论",
+    ):
+        assert needle in text, (
+            "review_evidence_rules no longer names the complete deciding "
+            f"predicate requirement for {needle!r}"
+        )
+
+    for path in (CLAUDE, CODEX):
+        source = path.read_text(encoding="utf-8")
+        assert "$(review_evidence_rules)" in source, (
+            f"{path.name} no longer invokes the shared review_evidence_rules helper"
+        )
+        assert "tier not in VALID_TIERS | {\"production\"}" not in source, (
+            f"{path.name} still copies the contract text inline instead of calling the helper"
+        )
+        assert "VALID_TIERS = {\"explore\"}" not in source, (
+            f"{path.name} still duplicates the PR #199 hunk text inline instead of using the shared helper"
+        )
+
+
+
 # --------------------------------------------------------------------------
 # 2b. The shared security notice: one source, and reviewable-by-itself.
 # --------------------------------------------------------------------------
