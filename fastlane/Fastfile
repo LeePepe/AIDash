@@ -35,20 +35,23 @@ platform :ios do
   lane :beta do
     telemetry_xcconfig_path = File.expand_path(ENV.fetch("TELEMETRY_XCCONFIG_PATH"))
     runner_temp = File.expand_path(ENV.fetch("RUNNER_TEMP"))
-    telemetry_mode = File.stat(telemetry_xcconfig_path).mode & 0o777
-    unless telemetry_xcconfig_path.start_with?("#{runner_temp}/") &&
-           File.file?(telemetry_xcconfig_path) && telemetry_mode == 0o600
+    unless telemetry_xcconfig_path.start_with?("#{runner_temp}/")
       UI.user_error!("Telemetry xcconfig must be a private runner-temp file")
     end
 
     begin
-    api_key = app_store_connect_api_key(
-      key_id: ENV.fetch("ASC_KEY_ID"),
-      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
-      key_content: ENV.fetch("ASC_KEY_P8_BASE64"),
-      is_key_content_base64: true,
-      in_house: false
-    )
+      telemetry_mode = File.stat(telemetry_xcconfig_path).mode & 0o777
+      unless File.file?(telemetry_xcconfig_path) && telemetry_mode == 0o600
+        UI.user_error!("Telemetry xcconfig must be a private runner-temp file")
+      end
+
+      api_key = app_store_connect_api_key(
+        key_id: ENV.fetch("ASC_KEY_ID"),
+        issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+        key_content: ENV.fetch("ASC_KEY_P8_BASE64"),
+        is_key_content_base64: true,
+        in_house: false
+      )
 
     # AIDash.xcodeproj 是 gitignore 的生成物(project.yml 才是源),所以 lane 必须
     # 先生成它 —— runner 上 checkout 出来的工作区里没有 .xcodeproj。

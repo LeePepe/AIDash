@@ -46,6 +46,11 @@ packages:
   shared-telemetry:
     url: https://github.com/LeePepe/shared-telemetry
     revision: 903f4b9bc01cfcfeba3ce96e13519d841781b40a
+  # Exact root constraint for shared-telemetry's ranged dependency. A clean
+  # resolver selected TelemetryDeck 2.14.2 at this immutable revision.
+  telemetrydeck:
+    url: https://github.com/TelemetryDeck/SwiftSDK
+    revision: 58f436299d3f6710bcedc18aff26480aaf1879fc
 
 targets:
   AIDashApp:
