@@ -38,6 +38,8 @@ final class AIDashTelemetryCoordinator {
     private var service: AIDashTelemetryServicing?
     private var deliveryTask: Task<Void, Never>?
     private var consentTransition: Task<Void, Never>?
+    private var consentRevision = 0
+    private var desiredConsent = false
     private var acceptsReadyEvent = false
     private var didRecordReady = false
 
@@ -65,6 +67,7 @@ final class AIDashTelemetryCoordinator {
             return
         }
         self.service = service
+        desiredConsent = true
         acceptsReadyEvent = true
     }
 
@@ -80,27 +83,38 @@ final class AIDashTelemetryCoordinator {
     }
 
     func setConsent(_ enabled: Bool) async {
+        consentRevision &+= 1
+        let revision = consentRevision
+        desiredConsent = enabled
+        let quiescingDelivery: Task<Void, Never>?
+        if enabled {
+            quiescingDelivery = nil
+        } else {
+            _ = preferences.setConsent(false)
+            acceptsReadyEvent = false
+            service?.isEnabled = false
+            quiescingDelivery = deliveryTask
+            deliveryTask = nil
+            quiescingDelivery?.cancel()
+        }
+
         let previousTransition = consentTransition
         let transition = Task { @MainActor [weak self] in
             await previousTransition?.value
-            await self?.applyConsent(enabled)
+            await quiescingDelivery?.value
+            guard enabled,
+                  let self,
+                  self.desiredConsent,
+                  self.consentRevision == revision else {
+                return
+            }
+            self.applyConsentEnabled()
         }
         consentTransition = transition
         await transition.value
     }
 
-    private func applyConsent(_ enabled: Bool) async {
-        if !enabled {
-            _ = preferences.setConsent(false)
-            acceptsReadyEvent = false
-            service?.isEnabled = false
-            let task = deliveryTask
-            deliveryTask = nil
-            task?.cancel()
-            await task?.value
-            return
-        }
-
+    private func applyConsentEnabled() {
         guard mode == .gui else { return }
         let state = preferences.setConsent(true)
         guard case .establishedEnabled(let identifier) = state else { return }

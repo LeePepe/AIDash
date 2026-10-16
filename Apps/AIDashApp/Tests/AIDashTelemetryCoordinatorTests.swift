@@ -318,6 +318,67 @@ struct AIDashTelemetryCoordinatorTests {
         #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
     }
 
+    @Test("latest opt-out suppresses an older queued opt-in")
+    func rapidOffOnOffSuppressesStaleEnable() async {
+        let preferenceDefaults = defaults()
+        let identifier = UUID()
+        preferenceDefaults.set(identifier.uuidString, forKey: "telemetry.installID")
+        preferenceDefaults.set(true, forKey: "telemetry.identityEstablished")
+        preferenceDefaults.set(true, forKey: "telemetry.sendUsageData")
+        var cancellationObserved = false
+        var allowCancelledGenerationToExit = false
+        let service = TelemetryServiceSpy()
+        service.flushHandler = {
+            if service.flushCount == 1 {
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+                cancellationObserved = true
+                while !allowCancelledGenerationToExit {
+                    await Task.yield()
+                }
+            } else {
+                Issue.record("stale opt-in must not start another delivery generation")
+            }
+        }
+        let coordinator = AIDashTelemetryCoordinator(
+            mode: .gui,
+            preferences: AIDashTelemetryPreferences(defaults: preferenceDefaults) {
+                Issue.record("established state must never generate a replacement ID")
+                return UUID()
+            },
+            configuration: validConfiguration(),
+            factory: AIDashTelemetryFactory { _ in service },
+            launchStart: .zero,
+            monotonicNow: { .milliseconds(5) }
+        )
+
+        coordinator.readySceneAppeared()
+        while service.flushCount == 0 {
+            await Task.yield()
+        }
+        let firstDisable = Task { await coordinator.setConsent(false) }
+        while !cancellationObserved {
+            await Task.yield()
+        }
+        let staleEnable = Task { await coordinator.setConsent(true) }
+        let latestDisable = Task { await coordinator.setConsent(false) }
+        await Task.yield()
+
+        #expect(!service.isEnabled)
+        #expect(!preferenceDefaults.bool(forKey: "telemetry.sendUsageData"))
+        allowCancelledGenerationToExit = true
+        await firstDisable.value
+        await staleEnable.value
+        await latestDisable.value
+        await coordinator.awaitDelivery()
+
+        #expect(service.flushCount == 1)
+        #expect(!service.isEnabled)
+        #expect(!preferenceDefaults.bool(forKey: "telemetry.sendUsageData"))
+        #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
+    }
+
     @Test("settings authority is present only for non-headless GUI composition")
     func settingsAuthorityPlacement() {
         #expect(AIDashTelemetrySettingsPlacement.isAvailable(headless: false, hasCoordinator: true))
