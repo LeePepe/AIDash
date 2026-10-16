@@ -35,7 +35,7 @@ class TelemetryReleaseInjectionTests(unittest.TestCase):
         }
 
     def tearDown(self):
-        if self.config.exists():
+        if os.path.lexists(self.config):
             self.config.unlink()
         harness = self.scratch / "fastlane_release_harness.rb"
         if harness.exists():
@@ -198,6 +198,18 @@ class TelemetryReleaseInjectionTests(unittest.TestCase):
         self.assertEqual(release.returncode, 23, release.stdout + release.stderr)
         self.assert_no_sentinel(release)
         self.assertFalse(self.config.exists())
+
+    def test_actual_release_path_cleans_up_after_file_stat_failure(self):
+        created = self.run_helper("create")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.config.unlink()
+        self.config.symlink_to(self.scratch / "missing.xcconfig")
+
+        release = self.run_release()
+
+        self.assertEqual(release.returncode, 23, release.stdout + release.stderr)
+        self.assert_no_sentinel(release)
+        self.assertFalse(os.path.lexists(self.config))
 
     def test_workflow_uses_protected_names_and_path_only_handoff(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
