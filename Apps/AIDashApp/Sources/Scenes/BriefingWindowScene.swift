@@ -69,33 +69,43 @@ public struct BriefingWindowScene: Scene {
             .frame(minWidth: 720, minHeight: 480)
             #if os(macOS)
             .windowDismissBehavior(.disabled)
-            #endif
             .toolbar {
-                if AIDashTelemetrySettingsPlacement.isAvailable(
-                    headless: headless,
-                    hasCoordinator: telemetryCoordinator != nil
-                ), let telemetryCoordinator {
-                    ToolbarItem {
-                        Menu {
-                            AIDashTelemetrySettingsView(coordinator: telemetryCoordinator)
-                        } label: {
-                            Label(
-                                String(
-                                    localized: "telemetry.settings.title",
-                                    defaultValue: "Usage data",
-                                    bundle: .main
-                                ),
-                                systemImage: "gearshape"
-                            )
-                        }
-                    }
+                ToolbarItem {
+                    telemetrySettingsMenu
                 }
             }
+            #else
+            .overlay(alignment: .topTrailing) {
+                telemetrySettingsMenu
+                    .padding()
+            }
+            #endif
         }
         #if os(macOS)
         .defaultSize(width: 1024, height: 720)
         .windowResizability(.contentMinSize)
         #endif
+    }
+
+    @ViewBuilder
+    private var telemetrySettingsMenu: some View {
+        if AIDashTelemetrySettingsPlacement.isAvailable(
+            headless: headless,
+            hasCoordinator: telemetryCoordinator != nil
+        ), let telemetryCoordinator {
+            Menu {
+                AIDashTelemetrySettingsView(coordinator: telemetryCoordinator)
+            } label: {
+                Label(
+                    String(
+                        localized: "telemetry.settings.title",
+                        defaultValue: "Usage data",
+                        bundle: .main
+                    ),
+                    systemImage: "gearshape"
+                )
+            }
+        }
     }
 }
 
