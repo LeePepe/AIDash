@@ -21,15 +21,160 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
+import re
 import sys
+import uuid
+from urllib.parse import urlsplit
 
-from config import SOURCES, MANUAL_SOURCES, MERGE_SOURCES
+from config import (
+    MANUAL_SOURCES,
+    MERGE_SOURCES,
+    PRODUCT_BLOB_CONTAINER_URL,
+    PRODUCT_BLOB_PREFIX,
+    SOURCES,
+)
 
 ALL_SOURCES = tuple(SOURCES) + tuple(MANUAL_SOURCES)
+_PRODUCT_BLOB_ERROR_CODE = "product_blob.collection_failed"
+_PRODUCT_BLOB_ERROR_MESSAGE = "product blob collection failed"
+_AZURE_ACCOUNT_RE = re.compile(r"[a-z0-9]{3,24}")
+_AZURE_CONTAINER_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?")
+_PRODUCT_PREFIX_SEGMENT_RE = re.compile(r"[A-Za-z0-9._-]+", re.ASCII)
 
 
 def _load_adapter(source: str):
     return importlib.import_module(f"adapters.{source}")
+
+
+def _write_json(value: dict, stream) -> None:
+    print(json.dumps(value, separators=(",", ":")), file=stream)
+
+
+def _valid_product_blob_selectors(container_url: str, prefix: str) -> bool:
+    if not isinstance(container_url, str) or not isinstance(prefix, str):
+        return False
+    if not container_url and not prefix:
+        return True
+    if (
+        not container_url
+        or not prefix
+        or "%" in container_url
+        or "?" in container_url
+        or "#" in container_url
+    ):
+        return False
+    try:
+        parsed = urlsplit(container_url)
+        port = parsed.port
+    except ValueError:
+        return False
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+    host_suffix = ".blob.core.windows.net"
+    if not parsed.hostname or not parsed.hostname.endswith(host_suffix):
+        return False
+    account = parsed.hostname[: -len(host_suffix)]
+    if not _AZURE_ACCOUNT_RE.fullmatch(account):
+        return False
+    if parsed.netloc != parsed.hostname:
+        return False
+    if not parsed.path.startswith("/") or parsed.path.count("/") != 1:
+        return False
+    container = parsed.path[1:]
+    if (
+        not (3 <= len(container) <= 63)
+        or "--" in container
+        or not _AZURE_CONTAINER_RE.fullmatch(container)
+    ):
+        return False
+    segments = prefix.split("/")
+    return bool(
+        segments
+        and all(
+            segment not in {".", ".."}
+            and _PRODUCT_PREFIX_SEGMENT_RE.fullmatch(segment)
+            for segment in segments
+        )
+    )
+
+
+def _validated_product_blob_result(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("invalid adapter result")
+    status = value.get("status")
+    object_count = value.get("objectCount")
+    if type(object_count) is not int:
+        raise ValueError("invalid object count")
+    if status == "empty":
+        if set(value) != {"status", "objectCount"} or object_count != 0:
+            raise ValueError("invalid empty result")
+        return value
+    if status == "completed":
+        if (
+            set(value) != {"status", "batchId", "objectCount"}
+            or object_count <= 0
+            or not isinstance(value.get("batchId"), str)
+        ):
+            raise ValueError("invalid completed result")
+        batch_id = value["batchId"]
+        if str(uuid.UUID(batch_id)) != batch_id:
+            raise ValueError("invalid batch id")
+        return value
+    raise ValueError("invalid adapter status")
+
+
+def _product_blob_failure() -> int:
+    _write_json(
+        {
+            "ok": False,
+            "error": {
+                "code": _PRODUCT_BLOB_ERROR_CODE,
+                "message": _PRODUCT_BLOB_ERROR_MESSAGE,
+                "field": None,
+                "requestId": str(uuid.uuid4()),
+            },
+        },
+        sys.stderr,
+    )
+    return 1
+
+
+def cmd_product_blob(extra_args: list[str]) -> int:
+    if extra_args or not _valid_product_blob_selectors(
+        PRODUCT_BLOB_CONTAINER_URL,
+        PRODUCT_BLOB_PREFIX,
+    ):
+        return _product_blob_failure()
+    if not PRODUCT_BLOB_CONTAINER_URL:
+        result = {"status": "empty", "objectCount": 0}
+    else:
+        try:
+            adapter = _load_adapter("product_blob")
+            result = _validated_product_blob_result(
+                adapter.collect(
+                    PRODUCT_BLOB_CONTAINER_URL,
+                    PRODUCT_BLOB_PREFIX,
+                )
+            )
+        except Exception:
+            return _product_blob_failure()
+    _write_json(
+        {
+            "ok": True,
+            "data": result,
+            "requestId": str(uuid.uuid4()),
+        },
+        sys.stdout,
+    )
+    return 0
 
 
 def cmd_collect(args: argparse.Namespace) -> int:
@@ -101,6 +246,9 @@ def cmd_digest(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "product-blob":
+        return cmd_product_blob(sys.argv[2:])
+
     parser = argparse.ArgumentParser(prog="aidata", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)

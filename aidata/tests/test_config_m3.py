@@ -61,6 +61,7 @@ def test_fresh_config_import_disables_product_blob(monkeypatch):
     fresh_config = _load_config_without_local(monkeypatch)
 
     assert fresh_config.PRODUCT_BLOB_CONTAINER_URL == ""
+    assert fresh_config.PRODUCT_BLOB_PREFIX == ""
 
 
 @pytest.mark.unit
@@ -69,7 +70,10 @@ def test_product_blob_config_surface_has_no_auth_or_secret_fields(monkeypatch):
     config_fields = {
         name for name in vars(fresh_config) if name.startswith("PRODUCT_BLOB_")
     }
-    assert config_fields == {"PRODUCT_BLOB_CONTAINER_URL"}
+    assert config_fields == {
+        "PRODUCT_BLOB_CONTAINER_URL",
+        "PRODUCT_BLOB_PREFIX",
+    }
 
     example_path = Path(config.__file__).with_name("config_local.example.py")
     assignments = {
@@ -82,7 +86,10 @@ def test_product_blob_config_surface_has_no_auth_or_secret_fields(monkeypatch):
             and node.targets[0].id.startswith("PRODUCT_BLOB_")
         )
     }
-    assert assignments == {"PRODUCT_BLOB_CONTAINER_URL": ""}
+    assert assignments == {
+        "PRODUCT_BLOB_CONTAINER_URL": "",
+        "PRODUCT_BLOB_PREFIX": "",
+    }
 
 
 @pytest.mark.unit
