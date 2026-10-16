@@ -43,6 +43,9 @@ packages:
   swift-argument-parser:
     url: https://github.com/apple/swift-argument-parser
     from: "1.5.0"
+  shared-telemetry:
+    url: https://github.com/LeePepe/shared-telemetry
+    revision: 903f4b9bc01cfcfeba3ce96e13519d841781b40a
 
 targets:
   AIDashApp:
@@ -68,6 +71,8 @@ targets:
       - package: AIDashCore
       - package: AIDashUI
       - package: DesignKit
+      - package: shared-telemetry
+        product: LokiKit
 
   # Hostless logic tests. NO TEST_HOST on purpose.
   #
@@ -104,6 +109,8 @@ targets:
       - path: Apps/AIDashApp/Sources/RunMode.swift
       - path: Apps/AIDashApp/Sources/Menubar
       - path: Apps/AIDashApp/Sources/Scenes
+      - path: Apps/AIDashApp/Sources/Settings
+      - path: Apps/AIDashApp/Sources/Telemetry
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(AIDASH_BUNDLE_ID).logictests
@@ -125,6 +132,8 @@ targets:
       - package: AIDashCore
       - package: AIDashUI
       - package: DesignKit
+      - package: shared-telemetry
+        product: LokiKit
 
   AIDashAppTests:
     type: bundle.unit-test
