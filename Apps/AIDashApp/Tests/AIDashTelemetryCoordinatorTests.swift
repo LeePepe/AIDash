@@ -345,6 +345,7 @@ struct AIDashTelemetryCoordinatorTests {
         var observedIntermediateEnable = false
         var activeWorkers = 0
         var maximumActiveWorkers = 0
+        var factoryCalls = 0
         let service = TelemetryServiceSpy()
         service.flushHandler = {
             if service.flushCount == 1 {
@@ -366,7 +367,10 @@ struct AIDashTelemetryCoordinatorTests {
                 return UUID()
             },
             configuration: validConfiguration(),
-            factory: AIDashTelemetryFactory { _ in service },
+            factory: AIDashTelemetryFactory { _ in
+                factoryCalls += 1
+                return service
+            },
             launchStart: .zero,
             monotonicNow: { .milliseconds(5) },
             reconciliationObserver: { event in
@@ -388,6 +392,7 @@ struct AIDashTelemetryCoordinatorTests {
         while service.flushCount == 0 {
             await Task.yield()
         }
+        let initialEvents = service.events
         let firstDisable = Task { await coordinator.setConsent(false) }
         while !cancellationObserved {
             await Task.yield()
@@ -408,8 +413,12 @@ struct AIDashTelemetryCoordinatorTests {
         await staleEnable.value
         await latestDisable.value
         await coordinator.awaitDelivery()
+        coordinator.readySceneAppeared()
 
         #expect(service.flushCount == 1)
+        #expect(service.events == initialEvents)
+        #expect(factoryCalls == 1)
+        #expect(!coordinator.isConsentEnabled)
         #expect(!service.isEnabled)
         #expect(!preferenceDefaults.bool(forKey: "telemetry.sendUsageData"))
         #expect(maximumActiveWorkers == 1)
