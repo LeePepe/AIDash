@@ -39,6 +39,11 @@ class TestFlightManualOnlyTests(unittest.TestCase):
         self.assertIn("          ref: main", self.release)
         self.assertRegex(self.workflow, r"(?m)^  cancel-in-progress: false(?: |$)")
 
+    def test_telemetry_cleanup_does_not_add_an_automatic_trigger(self):
+        self.assertIn("if: always()", self.release)
+        self.assertNotIn("\n  push:", self.triggers)
+        self.assertNotIn("\n  schedule:", self.triggers)
+
 
 if __name__ == "__main__":
     unittest.main()

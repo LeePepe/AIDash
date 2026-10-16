@@ -18,3 +18,8 @@ AIDASH_DEVELOPMENT_TEAM = ABCDE12345
 // 仅当你的 CloudKit 容器名不遵循 `iCloud.<bundle id>` 惯例时才需要设。
 // 容器必须在 CloudKit Dashboard 里真实存在,否则 app 启动即 CKError 15/2000。
 // AIDASH_CLOUDKIT_CONTAINER = iCloud.com.yourname.aidash
+
+// Optional GUI product telemetry host configuration. Keep these empty unless
+// you are exercising an explicitly authorized local producer environment.
+TELEMETRY_BLOB_ENDPOINT =
+TELEMETRY_BLOB_SAS =
