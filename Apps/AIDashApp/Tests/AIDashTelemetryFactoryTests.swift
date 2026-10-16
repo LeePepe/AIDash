@@ -54,13 +54,17 @@ struct AIDashTelemetryFactoryTests {
     @Test("SAS accepts only reviewed create-only service and stored-policy forms")
     func sasCapabilityBoundary() {
         var constructions = 0
-        let factory = AIDashTelemetryFactory { _ in
+        var receivedSASValues: [String] = []
+        let factory = AIDashTelemetryFactory {
             constructions += 1
+            receivedSASValues.append($0.sas)
             return TelemetryServiceSpy()
         }
         let invalidSASValues = [
             "sv=neutral&sr=c&sig=value",
             "sv=neutral&sr=c&si=&sig=value",
+            "sv=neutral&sr=c&sp=c&si=&sig=value",
+            "sv=neutral&sr=c&sp=c",
             "sv=neutral&sr=c&sp=&sig=value",
             "sv=neutral&sr=c&sp=r&sig=value",
             "sv=neutral&sr=c&sp=a&sig=value",
@@ -106,22 +110,41 @@ struct AIDashTelemetryFactoryTests {
             #expect(factory.make(configuration: configuration, installID: UUID()) == nil)
         }
         #expect(constructions == 0)
+        #expect(receivedSASValues.isEmpty)
 
-        for sas in [
-            "sv=neutral&sr=c&sp=c&sig=value",
-            "sv=neutral&sr=c&si=policy&sig=value",
-            "sv=neutral&sr=c&si=policy&spr=https&sig=value",
-            "sv=neutral&sr=c&sp=c&si=policy&sig=value",
-        ] {
+        let acceptedSASValues = [
+            (
+                input: "sv=neutral&sr=c&sp=c&sig=value",
+                expected: "sv=neutral&sr=c&sp=c&sig=value"
+            ),
+            (
+                input: "sv=neutral&sr=c&si=policy&sig=value",
+                expected: "sv=neutral&sr=c&si=policy&sig=value"
+            ),
+            (
+                input: "sv=neutral&sr=c&si=policy&spr=https&sig=value",
+                expected: "sv=neutral&sr=c&si=policy&spr=https&sig=value"
+            ),
+            (
+                input: "sv=neutral&sr=c&sp=c&si=policy&sig=value",
+                expected: "sv=neutral&sr=c&sp=c&si=policy&sig=value"
+            ),
+            (
+                input: "  ?sig=a%2Bb%2Fc%3D&si=policy%2Dname&sr=c&sv=neutral  ",
+                expected: "?sig=a%2Bb%2Fc%3D&si=policy%2Dname&sr=c&sv=neutral"
+            ),
+        ]
+        for sas in acceptedSASValues {
             let configuration = AIDashTelemetryHostConfiguration(
                 endpoint: "https://example.invalid/container",
-                sas: sas,
+                sas: sas.input,
                 app: "aidash",
                 build: "1"
             )
             #expect(factory.make(configuration: configuration, installID: UUID()) != nil)
         }
-        #expect(constructions == 4)
+        #expect(constructions == acceptedSASValues.count)
+        #expect(receivedSASValues == acceptedSASValues.map(\.expected))
     }
 
     @Test("valid configuration reaches the direct builder once")
