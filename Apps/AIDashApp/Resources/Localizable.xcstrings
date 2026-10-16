@@ -71,6 +71,30 @@
             "value" : "Quit AIDash"
           }
         }
+      },
+      "telemetry.settings.send_usage_data" : {
+        "comment" : "The sole opt-in control for anonymous product telemetry.",
+        "extractionState" : "manual",
+        "localizations" : {
+          "en" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "Send usage data"
+            }
+          }
+        }
+      },
+      "telemetry.settings.title" : {
+        "comment" : "Toolbar menu title for product telemetry settings.",
+        "extractionState" : "manual",
+        "localizations" : {
+          "en" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "Usage data"
+            }
+          }
+        }
       }
     }
   },

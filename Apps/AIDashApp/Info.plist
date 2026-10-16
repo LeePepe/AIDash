@@ -29,6 +29,10 @@
 	<string>26.0</string>
 	<key>MinimumOSVersion</key>
 	<string>26.0</string>
+	<key>LokiKitBlobEndpoint</key>
+	<string>$(TELEMETRY_BLOB_ENDPOINT)</string>
+	<key>LokiKitBlobSAS</key>
+	<string>$(TELEMETRY_BLOB_SAS)</string>
 	<!-- 以下三键仅 iOS 生效(UIKit 键,macOS 忽略),但 App Store 上传校验会硬查:
 	     · UILaunchScreen 缺失 → "A launch configuration or launch storyboard
 	       or xib must be provided unless the app requires full screen"。

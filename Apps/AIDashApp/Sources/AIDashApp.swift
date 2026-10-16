@@ -5,6 +5,7 @@ import AIDashUI
 
 @main
 struct AIDashApp: App {
+    private let telemetryCoordinator: AIDashTelemetryCoordinator?
     #if os(macOS)
     private let runMode: RunMode
     private let menuBarController: MenuBarController?
@@ -25,6 +26,18 @@ struct AIDashApp: App {
         // effects + `_xpc_api_misuse` on a machService resume inside a test proc).
         let mode = RunMode.decide(env: ProcessInfo.processInfo.environment)
         self.runMode = mode
+        let telemetryOrigin = ContinuousClock.now
+        let telemetryNow = { telemetryOrigin.duration(to: ContinuousClock.now) }
+        let telemetryLaunchStart = mode == .gui ? telemetryNow() : nil
+        self.telemetryCoordinator = mode == .gui
+            ? AIDashTelemetryCoordinator(
+                mode: mode,
+                preferences: AIDashTelemetryPreferences(),
+                configuration: .production(),
+                launchStart: telemetryLaunchStart,
+                monotonicNow: telemetryNow
+            )
+            : nil
 
         // GUI chrome only in GUI mode.
         self.menuBarController = mode == .gui ? MenuBarController() : nil
@@ -77,6 +90,20 @@ struct AIDashApp: App {
         }
 
         #else
+        let mode = RunMode.decide(env: ProcessInfo.processInfo.environment)
+        let telemetryOrigin = ContinuousClock.now
+        let telemetryNow = { telemetryOrigin.duration(to: ContinuousClock.now) }
+        let telemetryLaunchStart = mode == .gui ? telemetryNow() : nil
+        self.telemetryCoordinator = mode == .gui
+            ? AIDashTelemetryCoordinator(
+                mode: mode,
+                preferences: AIDashTelemetryPreferences(),
+                configuration: .production(),
+                launchStart: telemetryLaunchStart,
+                monotonicNow: telemetryNow
+            )
+            : nil
+
         // iOS/iPadOS: off-MainActor via GUIContainerLoader. Same guarantee as
         // macOS — MainActor never blocks on store open. The CloudKit-vs-local
         // decision runs nonisolated in CloudKitContainer's static methods.
@@ -91,9 +118,16 @@ struct AIDashApp: App {
         #if os(macOS)
         // Present the window only in a real GUI launch; agent + test-host are
         // headless (LSUIElement already hides the Dock).
-        BriefingWindowScene(state: bootstrap.containerState, headless: runMode != .gui)
+        BriefingWindowScene(
+            state: bootstrap.containerState,
+            headless: runMode != .gui,
+            telemetryCoordinator: telemetryCoordinator
+        )
         #else
-        BriefingWindowScene(state: bootstrap.containerState)
+        BriefingWindowScene(
+            state: bootstrap.containerState,
+            telemetryCoordinator: telemetryCoordinator
+        )
         #endif
     }
 

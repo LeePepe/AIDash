@@ -15,10 +15,16 @@ import DesignKit
 public struct BriefingWindowScene: Scene {
     let state: CloudKitContainer.InitState
     let headless: Bool
+    let telemetryCoordinator: AIDashTelemetryCoordinator?
 
-    public init(state: CloudKitContainer.InitState, headless: Bool = false) {
+    init(
+        state: CloudKitContainer.InitState,
+        headless: Bool = false,
+        telemetryCoordinator: AIDashTelemetryCoordinator? = nil
+    ) {
         self.state = state
         self.headless = headless
+        self.telemetryCoordinator = telemetryCoordinator
     }
 
     public var body: some Scene {
@@ -40,9 +46,15 @@ public struct BriefingWindowScene: Scene {
                         ProgressView()
                             .controlSize(.large)
                     case .ready(let container):
-                        StarFeedbackScope(container: container)
+                        StarFeedbackScope(
+                            container: container,
+                            telemetryCoordinator: telemetryCoordinator
+                        )
                             .designTheme(seed: .lime, neutral: .slate)
                             .modelContainer(container)
+                            .onAppear {
+                                telemetryCoordinator?.readySceneAppeared()
+                            }
                     case .failed(let reason):
                         ICloudUnavailableView(reason: reason)
                     }
@@ -69,6 +81,7 @@ public struct BriefingWindowScene: Scene {
 /// comes back empty rather than crashing.
 private struct StarFeedbackScope: View {
     let container: ModelContainer
+    let telemetryCoordinator: AIDashTelemetryCoordinator?
 
     /// Every persisted star event that targets a specific item. Filled state
     /// is inferred from emitted events (spec 002 D2: append-only, no unstar
@@ -87,8 +100,12 @@ private struct StarFeedbackScope: View {
     /// latest-wins reducer (spec 003 §8, spec 005 D3).
     @Query private var doneEvents: [UserEventModel]
 
-    init(container: ModelContainer) {
+    init(
+        container: ModelContainer,
+        telemetryCoordinator: AIDashTelemetryCoordinator? = nil
+    ) {
         self.container = container
+        self.telemetryCoordinator = telemetryCoordinator
         let starRaw = UserEventAction.star.rawValue
         _starEvents = Query(filter: #Predicate {
             $0.actionRaw == starRaw && $0.itemRef != nil
@@ -114,6 +131,24 @@ private struct StarFeedbackScope: View {
             .environment(\.starredItemRefs, Set(starEvents.compactMap(\.itemRef)))
             .environment(\.starredCardIds, Set(cardStarEvents.map(\.cardId)))
             .environment(\.doneItemRefs, UserEventWriter.doneRefs(from: doneEvents))
+            .toolbar {
+                if let telemetryCoordinator {
+                    ToolbarItem {
+                        Menu {
+                            AIDashTelemetrySettingsView(coordinator: telemetryCoordinator)
+                        } label: {
+                            Label(
+                                String(
+                                    localized: "telemetry.settings.title",
+                                    defaultValue: "Usage data",
+                                    bundle: .main
+                                ),
+                                systemImage: "gearshape"
+                            )
+                        }
+                    }
+                }
+            }
     }
 }
 
