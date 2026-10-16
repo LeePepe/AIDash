@@ -36,7 +36,13 @@ forbidden.
 
 ## Reader interpretation
 
-The reader accepts only the exact five-segment object layout and complete gzip NDJSON unit. It derives a deterministic source-event key from canonical object path plus line ordinal, retains product/build/time and sanitized object provenance, and advances completion state only after the whole unit succeeds.
+The manual reader treats every downloaded gzip object and relative Blob path as
+opaque bytes inside one immutable L1 completion directory. It does not parse
+the five-segment producer path, NDJSON, event keys, install ID, product/build,
+or properties. Its complete behavior is defined only by
+[`manual-batch-collector.md`](manual-batch-collector.md); the writer request,
+producer host configuration, and lifecycle sections in this file remain
+unchanged.
 
 ## Lifecycle and rollback
 
