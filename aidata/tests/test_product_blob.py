@@ -1,6 +1,5 @@
 import json
 import os
-import signal
 import stat
 import sys
 from pathlib import Path
