@@ -1,246 +1,249 @@
-# Implementation Plan: Product Telemetry Blob Pipeline
+# Implementation Plan: Manual Product Blob Batch Landing
 
 **Feature**: `007-product-telemetry-blob`
-**Base**: `bdf1435fe7d3d9c4da43ed4297cbc24482447b46`
-**Accepted input**: MY-1816 planning v6, SHA-256 `97dc0822f4ade9f6e70a5c070e9860c6eeb57076e0744f1cdd7744750e8c55f2`
+**Base**: `eb292dc041dab6c5722e270f0f138ecd35949509`
+**Status**: Planning gate
 
 ## Summary
 
-Adopt the accepted central telemetry scope into AIDash's native Spec Kit and constitution 1.14.0 amendment. Later implementation adds an explicit-consent GUI-only LokiKit producer and a single-mode read-only `aidata` Blob source through L4/operations. This plan records OA-002 as Azure CLI-only `DefaultAzureCredential`, fixes the AIDash event/consent and reader-bound contracts, activates the source only after all prerequisites are ready, splits every implementation packet at repository layer boundaries, and keeps E2E-05 as external evidence rather than repository product code.
+Preserve the merged explicit-consent AIDash producer and replace only the
+unshipped product Blob reader plan. A later authorized human runs one bounded
+Azure CLI `download-batch`; after successful nonempty download, aidata publishes
+the entire opaque gzip tree as one immutable L1 completion directory. The sole
+behavioral authority is
+`contracts/manual-batch-collector.md`.
+
+There is no Python Azure dependency, token parser, per-Blob registration,
+custom cap, resume/checkpoint/deduplication, generic source activation,
+unattended operation, scheduler, or L2-L5 product path.
+
+## Existing behavior, compatibility, and removed planned behavior
+
+### Existing behavior retained
+
+- Live-main producer/consent behavior remains governed by Constitution 1.14.0,
+  ADR-004, `contracts/aidash-events.md`, and the producer/lifecycle portions of
+  `contracts/blob-wire.md`; none is an implementation target here.
+- Generic `collect`, existing source registries, runner, cron behavior, all
+  existing tests, CloudKit/UserEvent behavior, and the rest of aidata L1-L5
+  remain unchanged.
+- Empty tracked configuration and an absent local override remain hermetic
+  no-op behavior. Real endpoint/prefix and identity state remain local and
+  private.
+
+### Compatibility
+
+- The new command is additive and unregistered. It cannot be reached through
+  generic `collect`, a source registry, runner, cron, or scheduler.
+- Completion batches live under the existing ignored `RAW_DIR`; no database,
+  state-file, schema, query, or migration compatibility is introduced.
+- Existing producer object bytes and paths are not changed. The reader stores
+  them as an opaque relative file tree.
+
+### Removed planned behavior
+
+The unshipped Python `DefaultAzureCredential`/stdlib LIST+GET reader,
+`azure-identity` lock/CI installation, page/object cursors, per-event raw IDs,
+8 MiB/64 MiB custom caps, NDJSON parsing, L2-L4 product rows/query, registry
+activation, Ops runner/scheduler, and cross-run resume/deduplication are
+superseded by MB-020. No live-main production behavior or existing test is
+deleted or weakened.
 
 ## Technical context
 
-**Languages**: Swift 6; Python 3
-**Project generation**: XcodeGen through `project.yml`
-**Swift dependency**: LokiKit/shared-telemetry at an immutable REL-001-approved identity
-**Python dependency**: `azure-identity` with a fully exact audited lock; stdlib HTTP/gzip/JSON for Blob data
-**Storage**: LokiKit-isolated durable queue/sidecars; append-only aidata raw; SQLite source-clean/warehouse
-**Verification**: resolver-selected pre-commit/pre-push hook receipts; hostless `AIDashAppLogicTests` and focused pytest/Ruff owned by hooks/CI; context audit; CI macOS+iOS builds
-**Platforms**: existing AIDash macOS/iOS targets only; headless/CLI/test-host telemetry disabled
-**Privacy**: public repository; no real endpoint, personal principal metadata, token, SAS, account key, or raw free text
-**Scope**: AIDash producer plus aidata L1–L4/Ops; no L5, fixed-install entitlement change, Azure mutation, VitalStride edit, or VoxPocket/T3
+**Language**: Python 3.14 for the manual command
+**External runtime**: pinned Azure CLI `2.91.0`; GNU `gtimeout` is an operator boundary
+**Repository dependencies**: none added
+**Storage**: private same-filesystem staging plus immutable L1 completion directories under `RAW_DIR`
+**Verification**: normal layer-owned commit/push hook receipts, required aidata CI, context audit, and one executable fake `az`
+**Privacy**: no endpoint, account/container/prefix, identity, token, actual Blob name, absolute local path, or payload in public output/evidence
+**Scope**: RepoInfra authority, then AidataFoundation → AidataL1L2 implementation; no other layer
 
 ## Constitution check
 
-| Gate | Planning result |
+| Gate | Result |
 |---|---|
-| §Principle I + §GUI Product Telemetry | PASS after amendment merge — telemetry is default-off, explicit-consent, GUI-only, typed, and not a briefing authoring channel |
-| §Principle II + §Persistence | PASS after amendment merge — isolated telemetry queue/Blob is the sole narrow third-party exception; briefing/UserEvent CloudKit and SwiftData rules are unchanged |
-| Append-only / durable state | PASS — writer retry state and the lifetime-stable install ID are retained across disable/re-enable; aidata raw is append-only; L3 rerun is idempotent |
-| Dependency ADR | PASS — ADR-004 covers LokiKit; ADR-005 covers `azure-identity` |
-| Layer direction | PASS — RepoInfra, XcodeWorkspace, AIDashApp, and each aidata leaf have separate tasks |
-| Swift concurrency | PASS — no unsafe escape is authorized; app coordinator owns structured lifecycle |
-| URL/config validation | PASS — first opt-in may persist UUID/established marker/consent, but producer config validates before telemetry service/store/uploader/timer/network work; invalid established preferences fail closed; reader validates before credential/network work |
-| §Testing → Who runs tests | PASS — tasks require hook/CI-owned acceptance and receipt inspection, never direct suite execution; every new test is routed |
-| Public-repository privacy | PASS — tracked selectors are empty/neutral; actual endpoint and identity metadata remain external/ignored |
-| Fresh clone | PASS by contract — empty config and absent local identity produce no-op; dependency install is explicit in CI |
-| Fixed install | PASS — ADR-003 remains unchanged; no telemetry claim is made for its current no-network entitlement |
+| §Principles I-II / merged producer | PASS — producer, consent, CloudKit, and UserEvent authority are unchanged |
+| §A Scope Discipline | PASS — each future task has one owning layer, exact paths, exclusions, contract, and dependency |
+| §B CLI Surface | PASS — MB-014 and MB-015 use the Constitution success/error envelopes; the failure message is fixed and neutral |
+| §D Error Handling | PASS — all config/process/filesystem failures degrade without crash or private interpolation |
+| §G Test Coverage | PASS — the dedicated command has real success and validation/failure evidence through its public seam |
+| §Dependencies | PASS — accepted ADR-005 records the external installed-binary/runtime cost and the zero repository-build/Swift-concurrency cost |
+| §Testing / Quality Gates | PASS — hooks/CI own tests; the Planner runs only documented static planning checks |
+| §No Identity in Version Control | PASS — both selectors are empty when tracked; fixtures and evidence are neutral/hermetic |
+| Layer direction | PASS — RepoInfra authority precedes separate AidataFoundation and AidataL1L2 commits |
 
-The constitution amendment is part of this planning change and must be
-published and merged through `constitution: authorize explicit-consent GUI
-telemetry` before any T001–T010 implementation. Its migration note records: no
-Briefing/UserEvent/CloudKit migration; existing installs start off; no install
-ID/store/network before first opt-in; spec 007 adopts the consent and hook-owned
-verification contracts.
+No Constitution or gate change is planned.
 
-## Project structure
-
-### Planning artifacts
+## Canonical artifacts
 
 ```text
-.specify/feature.json
+docs/adr/005-azure-cli-reader-identity.md       # accepted direct-CLI/operator boundary
 specs/007-product-telemetry-blob/
 ├── spec.md
 ├── plan.md
+├── tasks.md
 ├── research.md
 ├── data-model.md
 ├── quickstart.md
-├── tasks.md
 ├── checklists/requirements.md
 └── contracts/
-    ├── aidash-events.md
-    ├── blob-wire.md
-    ├── e2e-evidence.md
-    └── reader-auth.md
-docs/adr/
-├── 004-gui-scoped-lokikit-telemetry.md
-└── 005-azure-cli-reader-identity.md
+    ├── manual-batch-collector.md               # sole reader authority
+    ├── reader-auth.md                          # superseded pointer
+    ├── blob-wire.md                            # producer retained; reader pointer
+    ├── e2e-evidence.md                         # T7 batch/Blob-scoped proof
+    └── aidash-events.md                        # unchanged producer authority
 ```
 
-### Planned implementation paths
+All planning paths resolve to `RepoInfra`. ADR-004 and
+`contracts/aidash-events.md` remain byte-identical.
+
+## Module and seam design
+
+The deep module interface is one dedicated `product-blob` CLI command. Callers
+know only disabled/empty/completed/failure outcomes; configuration validation,
+Azure preflight/argv/privacy, tempfile staging, fsync, and atomic publication
+stay behind that interface.
+
+The external Azure seam has two concrete adapters: the installed Azure CLI in
+production and one scenario-driven executable fake `az` in tests. Tests call
+the same real CLI/adapter/filesystem path and observe invoked argv plus final
+filesystem state; they do not expose internal helper choreography or fabricate
+completion.
+
+The completion-directory rename is the commit point. A kill before it leaves
+no completion; after it, the whole batch is complete even if the caller loses
+the success response. Tests must delegate to the real rename before inducing
+that response loss/post-commit interruption and observe the retained whole
+directory. This is atomic completion, not partial recovery state.
+
+## Future implementation paths and commits
+
+### Commit 1 — `MANUAL-FOUND` / AidataFoundation
+
+Exact owned paths:
+
+- `aidata/config.py`
+- `aidata/config_local.example.py`
+- `aidata/cli.py`
+- `aidata/tech-context.md`
+- `aidata/CONTEXT.foundation.md`
+- matching Foundation test-routing hunk in `aidata/CONTEXT.md`
+- `aidata/tests/test_config_m3.py`
+- `aidata/tests/test_product_blob_cli.py` (new)
+
+Outcome: two empty selectors, additive unregistered command, Constitution JSON
+success/error envelopes, fixed neutral failure message, config/import/return validation, and
+Foundation routing. It does not add an adapter, registry entry, dependency,
+runner, schedule, or generic-collect behavior.
+
+The Foundation context change must say URL plus one prefix are the only
+noncredential `product_blob` selectors, tracked defaults stay empty, the one
+configured prefix is the Owner-allow-listed VoxPocket value, real values remain
+ignored/local, and no credential/auth-mode field is tracked. Foundation-owned
+`aidata/tech-context.md` must record `product_blob` as the sole manual opaque
+immutable-L1/no-normalize exception. Every other source retains its existing
+selectors/config defaults and paired collect→normalize/append-only-redaction
+behavior.
+
+### Commit 2 — `MANUAL-L12` / AidataL1L2
+
+Exact owned paths:
+
+- `aidata/adapters/product_blob.py` (new)
+- `aidata/adapters/CONTEXT.md`
+- matching L1/L2 test-routing hunk in `aidata/CONTEXT.md`
+- `aidata/tests/test_product_blob.py` (new)
+
+Outcome: the MB-001–MB-003, MB-005–MB-012, MB-016, and MB-018–MB-020 adapter
+behind the command, consuming T101's MB-004 and MB-013–MB-015 boundary while
+leaving MB-017 to external T7; one executable fake `az`; and direct
+argv/privacy/filesystem acceptance. It does not use `rawio.py`, normalize,
+merge, schema, query, L5, scripts, registries, or state.
+
+The L1/L2 context change must say `product_blob` alone lands opaque immutable L1
+without normalize/redacted append-only raw records. Collection remains
+read-only; every other adapter retains the existing paired collect+normalize,
+redacted append-only-raw, dependency-direction, and unconfigured-no-op defaults.
+
+`MANUAL-L12` depends on `MANUAL-FOUND`, matching
+`AidataL1L2 → AidataFoundation`. Each commit is independently hook-verifiable;
+final review binds the descendant chain's exact head.
+
+## Task and dependency graph
 
 ```text
-.github/workflows/build.yml
-.github/workflows/testflight.yml
-scripts/ci/**
-project.yml
-Configs/Identity.xcconfig
-Configs/Identity.local.xcconfig.example
-fastlane/Fastfile
-Apps/AIDashApp/
-├── CONTEXT.md
-├── Info.plist
-├── Sources/AIDashApp.swift
-├── Sources/RunMode.swift
-├── Sources/Scenes/BriefingWindowScene.swift
-├── Sources/Settings/**
-├── Sources/Telemetry/**
-├── Resources/**
-└── Tests/*Telemetry*Tests.swift
-aidata/
-├── CONTEXT.md
-├── CONTEXT.foundation.md
-├── requirements.lock
-├── config.py
-├── config_local.example.py
-├── adapters/product_blob.py
-├── adapters/CONTEXT.md
-├── merge.py
-├── schema/{CONTEXT.md,warehouse.sql}
-├── L4_serve/{CONTEXT.md,queries/product/events.sql}
-├── scripts/aidata_digest_run.sh
-└── tests/
-    ├── test_config_m3.py
-    ├── test_product_blob_adapter.py
-    ├── test_product_event_merge.py
-    ├── test_product_events_query.py
-    └── test_runner_sources.py
+reviewed + merged RepoInfra authority
+  -> T101 MANUAL-FOUND (AidataFoundation)
+  -> T102 MANUAL-L12 (AidataL1L2)
+  -> exact-head implementation review/publication
+  -> separately authorized post-merge T7 evidence
 ```
 
-`AIDash.xcodeproj` remains generated and untracked.
-
-## Design
-
-### Producer
-
-`AIDashApp.init` already fixes run mode once. GUI composition reads the
-`UserDefaults.standard` key `telemetry.sendUsageData` (missing is false) and exposes
-the cross-platform Settings toggle **Send usage data**. First opt-in creates and
-persists one random `telemetry.installID`, then persists the monotonic
-non-identity `telemetry.identityEstablished` marker before consent becomes
-active. Only the exact never-opted state—consent off with both marker and ID
-absent—may generate an ID. Later launches and consent cycles retain the marker
-and reuse the UUID for the app's lifetime, and no device-derived identifier is
-used. Post-opt-in missing/malformed identity or any inconsistent
-marker/UUID/consent combination enters an explicit invalid-established state
-and fails closed rather than rotating. With
-persisted consent, GUI mode, and valid expanded plist values, the app creates
-the direct LokiKit Blob service. CLI, headless/XPC, and test-host production
-paths receive a no-op.
-
-The app-local preferences/coordinator owns service lifetime, consent
-transitions, the lifetime-stable install ID, and the exact contract in
-`contracts/aidash-events.md`. It captures a `ContinuousClock` start at entry to
-the GUI-production app-init branch, before consent/configuration reads and
-bootstrap/service construction, and discards it if eligibility fails. It emits
-`aidash.action(action_name=briefing_viewed)` and
-`aidash.performance.ready_scene(duration_ms)` at the first interactive
-`.ready(container)` appearance, unsampled and at most once. Mid-lifecycle
-opt-in is not retrospective. Disable persists false, closes admission,
-disables/cancels delivery before awaiting quiescence, and retains any
-ambiguous/pending work, established marker, and install ID without continued
-upload. Re-enable resumes eligible retained work under the same install UUID;
-an invalid established state remains disabled and never calls UUID generation.
-Version 1 exposes no Reset/rotation;
-it adds no shared-telemetry reset API and performs no private catalog parsing.
-
-The two release-input names remain `TELEMETRY_BLOB_ENDPOINT` and `TELEMETRY_BLOB_SAS`; their values are never read by agents. XcodeWorkspace owns empty build settings, dependency wiring, and Fastlane path-only xcconfig consumption. RepoInfra owns protected workflow injection, permissions/cleanup, sentinel leak tests, and workflow assertions.
-
-### Reader
-
-AidataFoundation owns the only selector, empty tracked default, exact Azure
-Identity lock, canonical `SCHEDULED_SOURCES` declaration, later atomic source
-activation, and routing metadata. RepoInfra installs the exact lock in aidata
-CI. AidataL1L2 builds a CLI-only DAC and stdlib GET-only transport. It enforces
-30 seconds per request, a 240-second run budget, 100 results/page, 10 pages,
-1,000 references/GETs, and streaming 8 MiB compressed / 64 MiB decompressed
-object limits. It emits append-only redacted raw/source-clean records and
-advances a page marker only after the complete page and every listed reference
-are successful/already complete; an invalid path blocks the marker before GET.
-
-AidataL3 adds one `fact_product_event` row per deterministic object-path/line-ordinal key. AidataL4 exposes an `explore` query with product/event/time filters. AidataOps first changes the runner to consume canonical `SCHEDULED_SOURCES` without changing effective sources; only then does an AidataFoundation activation task atomically add `product_blob` once to `SOURCES`, `MERGE_SOURCES`, and `SCHEDULED_SOURCES`. No delivery boundary contains a registered missing adapter or mismatched runner; no L5 code changes.
-
-### Data and rollback
-
-Writer rollback first persists consent off, closes admission,
-disables/cancels delivery without starting or continuing queued upload, awaits
-quiescence, and proves any ambiguous in-flight batch plus all pending
-files, the monotonic established marker, and the lifetime-stable install ID
-remain. Only then may
-dependency/build/release plumbing be removed. Reader rollback removes scheduled
-registration/config/adapter/fact/query as a coordinated change but never
-deletes append-only raw or accepted warehouse evidence.
-
-## Layer-owned packets
-
-| Packet | Owning layer | Outcome | Depends on |
-|---|---|---|---|
-| `AID-DEP` | RepoInfra | Install exact `aidata` dependency lock in CI and gate it | AID-PLAN, DATA-FOUND manifest |
-| `AID-XCODE` | XcodeWorkspace | Immutable LokiKit wiring, empty host keys, logic-test target, Fastlane path-only xcconfig lifecycle | AID-PLAN, REL-001 |
-| `AID-RELEASE` | RepoInfra | TestFlight secret-to-temp-xcconfig injection, 0600/path-only/ensure+always cleanup and sentinel gates | AID-XCODE, OA-004 for live values only |
-| `AID-APP` | AIDashApp | GUI-only direct producer, Settings consent/lifetime install ID, exact two events, retained disable/re-enable, hostless gate | constitution amendment merged, AID-XCODE |
-| `DATA-FOUND` | AidataFoundation | Exact Azure Identity lock, endpoint selector, current-effective scheduled-source declaration, routing; no `product_blob` activation | AID-PLAN, constitution amendment merged, OA-002 fixed |
-| `DATA-L12` | AidataL1L2 | GET-only CLI-DAC Blob adapter, complete-unit state and provenance | DATA-FOUND, AID-DEP |
-| `DATA-L3` | AidataL3 | Honest idempotent product-event fact | DATA-L12 |
-| `DATA-L4` | AidataL4 | Bounded read-only exploratory query | DATA-L3 |
-| `DATA-OPS` | AidataOps | Runner consumes canonical current-effective `SCHEDULED_SOURCES`; degraded-source behavior | DATA-FOUND |
-| `DATA-ACTIVATE` | AidataFoundation | Atomically add importable/mergeable/scheduled `product_blob` after all reader paths are ready | DATA-L4, DATA-OPS |
-| `E2E-05` | Team Lead external gate | Sanitized two-product/two-event correlation | merged producer/data/VitalStride, REL-001, OA-003/OA-004 |
-
-## Dependency graph
-
-```text
-accepted central plan + native planning PASS
-  + constitution 1.14 merge + REL-001 --> AID-XCODE --> AID-APP ----+--> SL-AID-PRODUCER
-  |                                      `--> AID-RELEASE ----------'
-  |
-  `--> DATA-FOUND --> AID-DEP --> DATA-L12 --> DATA-L3 --> DATA-L4 --+
-           `-----------------------------> DATA-OPS ------------------+--> DATA-ACTIVATE --> SL-DATA
-
-external SL-VITAL + SL-AID-PRODUCER + SL-DATA
-  + REL-001 + OA-001/OA-002/OA-003/OA-004 --> E2E-05
-```
-
-Rollback ordering is compensation, not a reverse dependency edge.
+There is no AidataOps, registry, scheduler, dependency-lock, L3, L4, L5, or
+activation task. The task metadata is in `tasks.md`.
 
 ## Verification strategy
 
-- Planning: static Spec Kit prerequisite/freshness checks, requirements
-  checklist, FR/AC-to-task coverage, and context audit; normal commit supplies
-  the resolver-selected RepoInfra pre-commit receipt.
-- Producer implementation: normal commits/pushes supply resolver-selected
-  hook receipts; required CI owns XcodeWorkspace/AIDashApp builds and tests;
-  generated-project diff is inspected; host-based local app tests are forbidden.
-- Reader implementation: normal commits/pushes supply each changed Aidata
-  leaf's hook receipt; CI owns focused/full pytest/Ruff; context audit follows
-  routing changes.
-- Release plumbing: synthetic raw-plus-shell-escaped sentinel exercises actual Release path and proves 0600, path-only invocation, and both success/failure cleanup without using real values.
-- Security: changed-file scan rejects actual endpoints, identity metadata, tokens, SAS/account keys, credential-bearing URLs, and fixtures/logs containing sentinels.
-- Final: inspect the normal-commit/pre-push hook receipts and required CI at the
-  exact local/pushed/PR revisions, then independent E2E-05 evidence review.
+- Planning: Spec Kit prerequisites, task freshness, context audit, acceptance
+  coverage, privacy scan, and `git diff --check`; a normal commit supplies the
+  resolver-selected RepoInfra hook receipt.
+- Foundation: normal commit/push receipts plus required aidata CI prove config
+  hermeticity, the additive CLI boundary, success envelope, and neutral failure.
+- L1/L2: one fake executable drives exact preflight/batch argv and child
+  environment through the real interface. Tests assert real stage/completion
+  outcomes, byte equality, current-UID/private modes, unsafe terminal and output
+  type/path-escape rejection, fsync/rename calls, no private output, no
+  completion on empty/nonzero/pre-commit interruption, retained completion after
+  real delegated rename plus response loss/post-commit interruption,
+  abandoned-stage ignore, and independent later completion.
+- Existing tests remain present and unweakened; additive assertions within an
+  owning task are allowed. Any deletion, skip, weakening, Constitution change,
+  or gate waiver requires separate Owner approval on the future published final
+  PR head.
 
-## Risks
+## Post-merge T7 milestone
 
-- `azure-identity` changes aidata's stdlib-only baseline. Exact lock, separate ADR, routed manifest, CI install, and dependency audit contain this risk.
-- Release injection spans XcodeWorkspace and RepoInfra; split tasks prevent cross-layer ownership drift.
-- `AIDashApp` currently lacks a hostless resolver test gate; AID-APP must add it before claiming hermetic producer acceptance, including same-ID relaunch and disable/re-enable evidence plus absence of a Reset/rotation surface.
-- Consent and UUID alone cannot distinguish never-opted from a corrupt disabled
-  post-opt-in state. AID-APP must persist the monotonic established marker and
-  prove the full preference-state matrix fails closed without replacement-ID
-  generation.
-- Install-ID Reset is deliberately outside version 1. A future need requires a separately authorized LokiKit SDK feature; this plan adds neither shared API nor private-storage parsing.
-- The LokiKit release identity remains unresolved; REL-001 blocks only AID-XCODE and live proof.
-- The future sandboxed fixed install has no network entitlement; this plan neither edits nor works around ADR-003.
-- Local Azure identity availability is operational state. No-op is correct; implementation must never prompt or choose a substitute principal.
-- Lower-authority README/root tech-context wording remains CloudKit-only at the
-  fixed base; the constitution PR migration must align it before implementation
-  publication without weakening the narrow exception.
+After both producer and collector heads merge, the Owner-authorized workflow 05
+lead/operator confirms the existing live authorization, re-reads the exact
+final merged VoxPocket producer contract/head, and uses the exact MB-016 command
+plus a Codex subagent in the workflow lead's local session for MB-017's temporary
+read-only query. The private evidence associates the real TestFlight build and
+actual Blob name with one completion batch, applies the SDK 0.2.0 wire and final
+VoxPocket producer contract plus build/UTC/batch/relative-Blob filters, counts
+unique source-line locators without content deduplication, and records only
+MB-017's aggregates. Generic `collect`, if separately requested, is labelled
+independently and is not ingestion evidence. No plan or test template is
+represented as a live query result, and no product query/state is created. The
+Multica Team Lead owns neither that local subagent nor personal TestFlight/Azure
+permissions; this plan grants no credential, personal operation, or manual
+dispatch authority.
+
+## Historical evidence boundary
+
+Unpublished implementation evidence `499b40cb84e8c95b3958139c255713aa77d01a5f`,
+the planning chain `a7807696` → `e8b60e9` → `00e01d8` → `4d0738b`, and their
+failed verdict/claim-source history remain preserved external evidence. They
+are not an implementation base for this version. A later implementation, if
+separately dispatched, starts from the exact merged live-main descendant that
+contains this reviewed plan.
+
+## Risks and stop conditions
+
+- A retained/live-main production or test defect discovered during future
+  implementation returns to Team Lead with exact evidence. It is not silently
+  repaired by widening T101/T102.
+- A requested production/test deletion, skip, weakening, Constitution edit, or
+  gate change requires separate Owner approval on the future published final
+  PR head.
+- Actual selectors, Blob names, identity information, credentials, Azure
+  access, TestFlight operations, and live query execution remain outside this
+  planning revision.
 
 ## Planning completion gate
 
-The native planning slice is complete only when all listed artifacts and both
-ADRs are present, task freshness/coverage and context audit have no ERROR or
-CRITICAL finding, the normal commit records its RepoInfra hook receipt, no
-sensitive identifier is tracked, and AI Reviewer returns PASS for one exact
-planning revision. This planning PASS does not waive the separate constitution
-amendment publication/merge gate for implementation.
+The plan is ready for implementation decision only after all canonical
+artifacts agree, every changed path resolves to RepoInfra, static planning
+checks and the normal commit hook pass, the worktree is clean, and an
+independent Reviewer returns Standards + Spec PASS for one exact planning SHA.
+That PASS authorizes no implementation or live operation.

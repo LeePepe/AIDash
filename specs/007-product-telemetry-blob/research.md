@@ -72,87 +72,102 @@ deterministic without expanding shared telemetry vocabulary.
 - Emit after a mid-lifecycle opt-in: a retrospective ready event lacks the
   required launch-to-ready boundary.
 
-## Decision D-02: retain the reviewed immutable Blob contract
+## Decision D-02: retain the writer and replace only the reader contract
 
-**Decision**: Use the exact writer and reader wire/provenance contract in `contracts/blob-wire.md`. No repository-local simplification may weaken pre-store validation, immutable retry, queue retention, or privacy rejection.
+**Decision**: Preserve the producer request, host configuration, immutable
+retry, consent, and rollback rules in `contracts/blob-wire.md`. Replace only
+the unshipped reader interpretation with the single normative contract in
+`contracts/manual-batch-collector.md`.
 
-**Rationale**: The cross-repository E2E gate can correlate an event only if producer object layout and reader provenance agree. Frozen bytes/path/destination prevent ambiguous retries from mutating an already attempted request.
+**Rationale**: Producer durability and privacy are already merged behavior.
+The selected human-operated reader needs only one opaque, immutable L1 batch
+directory; event parsing, per-object provenance/state, and L2-L4 materialization
+would add machinery the accepted T7 outcome does not require.
 
 **Alternatives rejected**:
 
 - Treat `flush()` as receipt: it proves only local control flow.
 - Drop on any 403/409: only one exact ambiguous-retry response proves immutable prior creation.
-- Publish valid lines from a partially malformed object: state and analytical provenance would no longer identify a complete accepted unit.
+- Parse or publish individual events while landing the batch: rejected because
+  the selected L1 unit is the complete opaque directory.
 
-## Decision OA-002: Azure CLI-only DefaultAzureCredential reader
+## Decision OA-002: direct Azure CLI manual batch
 
-**Decision**: `PRODUCT_BLOB_CONTAINER_URL` is the only reader config selector. The reader creates `DefaultAzureCredential` with every leg except Azure CLI disabled, requests the Azure Storage data-plane scope, and uses the resulting bearer token only for list/read requests to that validated container. No interactive login is initiated. Missing endpoint/identity or initial-token failure before listing degrades to zero/no-op with no state advance. Later auth/network failure leaves its incomplete object/page unadvanced while preserving records and object checkpoints completed earlier in the run.
+**Decision**: `PRODUCT_BLOB_CONTAINER_URL` plus one
+`PRODUCT_BLOB_PREFIX` are the only reader selectors. The repository invokes the
+installed Azure CLI directly for one manual
+`storage blob download-batch --auth-mode login --overwrite false` and never
+parses a token. Configuration, preflight, argv, environment/privacy, staging,
+publication, CLI output, timeout, tests, and T7 evidence are defined only by
+`contracts/manual-batch-collector.md`.
 
-**Rationale**: This persists the Owner-selected `aad-owner-local` identity while keeping secrets and personal metadata out of the public repository. It makes one authentication mechanism mechanically testable and prevents accidental SAS or ambient-credential fallback.
+**Rationale**: This retains the Owner-selected existing read-only Azure AD
+identity while delegating listing/downloading to the already installed CLI.
+The direct batch removes the first non-stdlib Python dependency, hand-built
+pagination/GET/token handling, custom caps, checkpoints, and cross-run recovery.
+The batch and real selectors remain private local operational state.
 
-**Dependency consequence**: `azure-identity` becomes a Python runtime dependency for `aidata`. DATA-FOUND must add one exact audited pin and route its manifest to AidataFoundation. RepoInfra must install that lock in aidata CI. A version range or unreviewed transitive change is not acceptable. This version resolution is implementation work, not a new auth-mode decision.
+**Dependency consequence**: none. Azure CLI is an external operator/runtime
+tool with a real operator-machine installation, runtime, subprocess/preflight,
+and disk cost. It adds zero repository/product binary bytes, build-system work,
+Swift-concurrency surface, or Python-lock cost. Accepted ADR-005 records the
+architecture, alternatives, and cost; the contract pins the mechanics and
+accepted CLI version/cloud preflight.
 
 **Alternatives rejected**:
 
 - Dedicated service/workload principal: superseded by the Owner decision for this version.
 - Read/list SAS or the existing `local-read` policy: explicitly inactive.
-- Raw `az account get-access-token` subprocess parsing: it is not the authorized `DefaultAzureCredential` path and increases output-leak risk.
-- Default multi-leg credential chain: it silently changes principal/mechanism when Azure CLI is unavailable.
-- Azure Storage SDK: stdlib HTTP is sufficient for bounded list/read and avoids another dependency. Reconsider only through a new ADR.
+- Raw `az account get-access-token` subprocess parsing: unnecessary and adds
+  token/output handling.
+- Python `DefaultAzureCredential` plus stdlib LIST/GET: superseded because the
+  direct batch supplies the accepted outcome with materially less code/state.
+- Azure Storage SDK: unnecessary dependency surface for one manual batch.
 
 ## GUI-only dependency placement
 
 LokiKit is wired only into `AIDashApp` and `AIDashAppLogicTests` through `project.yml` and app-local composition. It does not enter AIDashCore, AIDashUI, CLI, headless XPC composition, or host-based local tests. The factory manually reads the two expanded plist values and calls the direct initializer rather than a bundle convenience initializer.
 
-The dependency costs and fixed-install caveat are recorded in ADR-004. `REL-001` remains a final version-resolution gate because the accepted `v0.2.0` tag was not proven at planning time.
+The dependency costs and fixed-install caveat are recorded in ADR-004. This
+manual-reader decision neither changes nor reopens the merged producer
+dependency and consent implementation.
 
-## Reader unit and checkpoint boundary
+## Reader completion boundary
 
-The collection unit is one complete Blob object after a complete pagination/list response identifies it. Every listed reference is selected: the adapter validates path before GET, and an invalid path is an uncheckpointed object failure that blocks its page marker. For a valid path it downloads bytes, verifies gzip, parses every NDJSON line, applies redaction, and prepares deterministic source keys before publishing completion state. A failed unit emits no checkpoint for that object; a failed page does not claim unseen continuation items.
-
-Each list/read request times out after 30 seconds and one `collect()` stops after
-a 240-second monotonic budget. A run is also bounded to 100 results per page,
-10 pages, 1,000 references/GETs, 8,388,608 compressed bytes per object, and
-67,108,864 decompressed bytes per object. Byte limits are streaming-enforced.
-A page marker advances only after the full page and all selected objects are
-complete/already complete. Bound exhaustion after a complete page persists its
-next marker; exhaustion/failure within a page does not. Completed object
-checkpoints remain reusable.
-
-Configuration/credential/initial-token failure before the first list request
-returns zero with no state change. A later auth/network failure leaves the
-incomplete object/page unadvanced but preserves records and object checkpoints
-completed earlier in that run and may return their accepted count.
-
-Deterministic event key:
-
-```text
-sha256(canonical object path + "\n" + zero-based NDJSON line ordinal)
-```
-
-ETag/content fingerprints are provenance, not event identity. No raw SAS, bearer token, real endpoint, or personal identity enters raw records, normalized rows, errors, logs, or facts.
+One invocation has one private `tempfile` stage and at most one immutable L1
+completion directory. The Azure batch exit must be zero and the stage must
+contain at least one safe regular object. Product code keeps bytes opaque,
+fsyncs the staged tree, and uses one same-filesystem atomic directory publish;
+that rename is the completion point. Empty success is a zero-object no-op.
+Failure or interruption before the completion point creates no result, and an
+abandoned stage is never considered one. Later successful invocations produce
+independent directories without resume, checkpoint, deduplication, or
+cross-run idempotency. Full mechanics remain exclusively in the contract.
+Real-filesystem acceptance observes current UID/private modes, unsafe terminal
+and output types/path escape, and completed-directory retention when response
+loss or interruption occurs after the real delegated rename.
 
 ## Layering result
 
 - `XcodeWorkspace`: dependency, empty build settings, plist expansion plumbing, and Fastlane path-only xcconfig consumption/cleanup.
-- `RepoInfra`: TestFlight protected-secret injection/sentinel gate and aidata dependency installation in CI.
+- `RepoInfra`: this canonical planning/contract revision only; no dependency
+  installation or new implementation task.
 - `AIDashApp`: GUI lifecycle, consent, direct construction, action/PLT emission, rollback retention, and hostless-test gate declaration.
-- `AidataFoundation`: fixed configuration schema, exact Python dependency,
-  canonical scheduled-source declaration, later atomic source activation, and
-  dependency-manifest routing.
-- `AidataL1L2`: list/read adapter, redacted append-only raw and source-clean rows.
-- `AidataL3`: honest `fact_product_event` grain.
-- `AidataL4`: exploratory read-only query.
-- `AidataOps`: make the runner consume the canonical current-effective
-  `SCHEDULED_SOURCES` declaration and preserve degrade behavior without source
-  activation.
-- No L5 change.
+- `AidataFoundation`: two empty selectors, dedicated manual CLI surface,
+  neutral JSON output, and matching config/CLI tests and routing.
+- `AidataL1L2`: one direct batch adapter, private completion-directory
+  publication, executable fake-`az` evidence, and matching routing.
+- No AidataL3, AidataL4, AidataL5, AidataOps, registry, scheduler, dependency,
+  or generic-collect change.
 
-## Unresolved implementation gates
+## Remaining gates
 
-- **REL-001**: resolve the approved immutable LokiKit release/revision before AID-XCODE claims an exact dependency.
-- **Constitution publication**: merge the required
-  `constitution: authorize explicit-consent GUI telemetry` amendment with its
-  migration note before AIDash implementation begins.
-- **Python exact pin**: DATA-FOUND selects and reviews one compatible `azure-identity` version and a fully exact transitive lock; this does not reopen OA-002.
-- OA-003/OA-004 remain external gates for live consent, protected injection, and canary authorization. They do not block hermetic implementation.
+- **Manual-batch planning PASS**: the exact RepoInfra planning revision must
+  pass independent review and merge before implementation is dispatched.
+- Separate live-operation authority gates TestFlight, Azure, manual collection,
+  and private T7 evidence. Those operations do not block hermetic
+  implementation and are not authorized by this plan. After both merges, the
+  Owner-authorized workflow 05 lead/operator—not the Multica Team Lead—must
+  re-read the exact final merged VoxPocket producer contract/head, confirm the
+  existing authorization still applies, and use any Codex subagent only in the
+  workflow lead's own local session.

@@ -2,39 +2,61 @@
 
 **Feature Directory**: `007-product-telemetry-blob`
 **Created**: 2026-10-15
-**Status**: Planning gate
-**Input authority**: MY-1816 planning v6, SHA-256 `97dc0822f4ade9f6e70a5c070e9860c6eeb57076e0744f1cdd7744750e8c55f2`, adopted for `LeePepe/AIDash@bdf1435fe7d3d9c4da43ed4297cbc24482447b46`.
+**Status**: Manual-batch planning gate
+**Base**: `eb292dc041dab6c5722e270f0f138ecd35949509`
 
 ## Scope and authority
 
-This package adopts the accepted `SL-AID-PLAN` scope without implementing it. It plans two later delivery slices:
+This package preserves the already merged GUI-only AIDash producer and plans
+one later delivery slice: a human-authorized `aidata` command that lands one
+successful Azure CLI download batch as one opaque immutable L1 completion
+directory. `contracts/manual-batch-collector.md` is the sole reader authority.
 
-- `SL-AID-PRODUCER`: GUI-only AIDash action and performance telemetry through the reviewed Blob writer contract.
-- `SL-DATA`: a read-only `aidata` Blob source through L1/L2, L3, L4, and scheduled-source registration.
-
-It also preserves the cross-repository `SL-E2E` evidence gate. VitalStride implementation, VoxPocket/T3, L5 cards or digests, Azure resource changes, credentials, and live canary execution are outside this repository-planning slice.
+It also preserves the post-merge T7 evidence milestone. Producer changes,
+generic `collect`, source activation, Ops/scheduling, L2-L5 product paths,
+Azure resource changes, credentials, and live TestFlight/Blob/query execution
+are outside this repository-planning slice.
 
 ### Existing behavior and compatibility
 
-- AIDash has no product telemetry. Constitution 1.14.0 authorizes it only after the amendment is published and merged; GUI, headless XPC, CLI, and test-host modes must remain distinguishable.
-- `AIDashCore`, `AIDashUI`, CLI behavior, CloudKit/UserEvent storage, and existing analytics/data sources remain unchanged by this feature.
-- `aidata` is a recursively routed Python subsystem. Its external sources are read-only, raw data is append-only, and an unconfigured source degrades to zero records.
+- AIDash's explicit-consent GUI producer and its consent/identity lifecycle are
+  merged. ADR-004, `contracts/aidash-events.md`, and the producer/lifecycle
+  sections of `contracts/blob-wire.md` remain unchanged.
+- `AIDashCore`, `AIDashUI`, Swift CLI behavior, CloudKit/UserEvent storage,
+  generic aidata collection, existing analytics sources, runner, and cron
+  remain unchanged by this reader slice.
+- `aidata` is recursively routed; empty tracked reader configuration degrades
+  to a hermetic no-op, and L1 raw storage is ignored/private.
 - No accepted behavior or test is removed, skipped, weakened, or reclassified.
 
 ### Removed planned behavior
 
 - Owner decision `no-reset-v1` supersedes the earlier planned install-ID Reset.
-  Telemetry is not implemented at the fixed base, so this removes no production
-  behavior or existing test. Version 1 must expose no Reset/rotation surface,
-  shared-telemetry reset API, or private-catalog parsing. A future Reset requires
-  its own SDK feature and product decision.
+  The producer and consent implementation are present at the fixed base; only
+  the superseded Reset/rotation surface was never implemented. This removes no
+  production behavior or existing test. Version 1 must expose no Reset/rotation
+  surface, shared-telemetry reset API, or private-catalog parsing. A future Reset
+  requires its own SDK feature and product decision.
+- The selected manual-batch decision supersedes the unshipped Python
+  `DefaultAzureCredential`/LIST+GET, page/object cursor, per-file registration,
+  custom cap, L2-L4, source activation, Ops, scheduler, and cross-run
+  resume/deduplication plan. MB-020 removes no live-main behavior or test.
 
 ### Locked decisions
 
 - **D-01 — Product ownership**: action names, performance names, fields, allowlists, sampling, and formulas remain product-local. Shared telemetry owns only generic transport, timing, privacy validation, persistence, and delivery diagnostics.
-- **D-02 — Blob wire/durability contract**: producers and the reader use the exact contract in `contracts/blob-wire.md`. Producer credentials remain the previously approved create-only CI inputs and are never read by planning or implementation agents.
+- **D-02 — Blob wire/durability contract**: producer behavior remains in
+  `contracts/blob-wire.md`; the reader side points exclusively to
+  `contracts/manual-batch-collector.md`. Producer credentials remain the
+  previously approved create-only CI inputs and are never read by planning or
+  implementation agents.
 - **D-03 — Consent, identity, and AIDash events**: `contracts/aidash-events.md` is the normative AIDash event table. The GUI Settings toggle **Send usage data** is the sole consent source and reads/writes app `UserDefaults.standard`. Consent defaults off. The exact never-opted state has no `telemetry.identityEstablished` marker and no install ID; only that state may create one random UUID. First opt-in persists the UUID, then the monotonic non-identity marker, before consent becomes active. Later launches and consent cycles retain the marker and reuse that UUID for the app's lifetime. Disable stops admission/upload but retains pending state, the marker, and the ID; re-enable is fresh consent and resumes under the same ID. Any inconsistent or post-opt-in missing/malformed identity state fails closed without generating or rotating an ID. Version 1 has no install-ID Reset/rotation, shared reset API, or private-catalog parsing. CLI, headless/XPC, and test-host production composition never constructs the telemetry service.
-- **OA-002 / `aad-owner-local` — Reader identity**: the only reader is the Owner's existing Azure AD identity, used locally through the Azure CLI-backed `DefaultAzureCredential` leg. It has read/list authority only. There is no SAS mode, secret field, stored-policy use, or authentication fallback. Missing endpoint/sign-in or initial-token failure before listing returns zero with no state change; a later auth/network failure preserves earlier completed records/object checkpoints and leaves only its incomplete object/page unadvanced. Tracked files use only symbolic identifiers; the real selector belongs only in ignored `aidata/config_local.py`.
+- **OA-002 / `aad-owner-local` — Reader identity**: the only reader is the
+  Owner's existing Azure AD identity, used locally by the installed Azure CLI
+  through exact `download-batch --auth-mode login --overwrite false`. It has
+  externally administered read/list authority only. The repository parses no
+  token, stores no credential, and implements no alternate auth or fallback.
+  Both real selectors belong only in ignored `aidata/config_local.py`.
 
 ## User scenarios and testing
 
@@ -55,31 +77,66 @@ As the Owner, I can explicitly enable AIDash GUI telemetry and receive the two e
 7. Given identity was established but the retained UUID is missing/malformed, or any marker/UUID/consent combination is inconsistent with the explicit state model, when launch or re-enable evaluates preferences, then it enters the established-invalid state, keeps consent inactive, constructs no telemetry service/store/uploader/timer/network work, and never generates a replacement UUID.
 8. Given Settings or production composition in version 1, then no install-ID Reset/rotation action or API exists, no shared-telemetry reset feature is required, and AIDash never parses private telemetry storage to infer identity.
 
-### User Story 2 — Read-only product-event analytics (Priority: P1)
+### User Story 2 — Manual opaque L1 batch landing (Priority: P1)
 
-As the Owner, I can collect authorized product Blob objects into `aidata`, preserve their provenance and event grain through L3, and query bounded product events from L4 without giving the reader write/delete authority or introducing an L5 consumer.
+As the Owner, I can manually collect one authorized VoxPocket Blob prefix into
+one immutable L1 completion directory without giving repository code a
+credential, parser, scheduler, or downstream product pipeline.
 
-**Independent test**: A fake Azure transport paginates neutral Blob fixtures, supplies gzip NDJSON to the adapter, reruns collection and merge, and proves one stable L4 row per event with no duplicate and no partial checkpoint after a failed unit.
-
-**Acceptance scenarios**:
-
-1. Given an empty tracked endpoint selector or unavailable Owner-local Azure CLI identity, when `product_blob` collects, then it returns zero and neither contacts the endpoint nor advances state.
-2. Given a signed-in authorized identity and paginated objects within `contracts/reader-auth.md` limits, when collection succeeds, then every complete object is parsed, redacted, appended, normalized, and checkpointed exactly once.
-3. Given malformed gzip/NDJSON, invalid path, an oversized object, a timeout, a collection-budget/page/object limit, interrupted pagination, or mid-run token/network failure, when a unit cannot complete, then incomplete work emits no record and does not advance its page/object state while previously completed records/checkpoints remain and the wider pipeline continues.
-4. Given normalized product events, when L3 merge and the L4 query rerun, then the honest event grain and object provenance remain stable and no analytical duplicate appears.
-
-### User Story 3 — Correlated least-privilege proof (Priority: P2)
-
-As the Owner, I can review a sanitized evidence bundle that correlates both in-scope products' action and performance canaries from producer to Blob, L1 checkpoint, L3 fact, and L4 query while exposing no credential, raw personal identifier, or unrestricted endpoint.
-
-**Independent test**: After the implementation slices and external authorizations are complete, an authorized operator runs the bounded canary contract in `contracts/e2e-evidence.md`; an independent reviewer reconciles object/event fingerprints and exact merged revisions.
+**Independent test**: One executable fake `az` is selected by the real CLI and
+adapter. It records the exact preflight/batch argv and environment and writes
+neutral synthetic bytes into a real temporary filesystem. Assertions observe
+only public CLI output and staging/completion filesystem outcomes.
 
 **Acceptance scenarios**:
 
-1. Each product's action and performance canary correlates across producer, Blob receipt, L1, L3, and L4 by sanitized stable evidence.
-2. A complete rerun adds no duplicate analytical row.
-3. An event with an unknown/free-text or non-finite property is absent from accepted persistence, Blob, and L4.
-4. Sanitized authorization evidence proves writers cannot list/read/overwrite/delete and the reader cannot write/delete without revealing tokens, SAS, account keys, personal identity metadata, or the real endpoint.
+1. Given both tracked selectors are empty, when `product-blob` runs, then it
+   returns the Constitution JSON `empty` success envelope and creates no Azure
+   child, stage, or completion.
+2. Given current-UID-owned private directory roots and one valid private
+   container URL/prefix with the existing signed-in
+   read-only identity, when the exact Azure batch exits `0` with at least one
+   object, then one byte-identical opaque file tree is fsynced and published by
+   one atomic directory rename; stdout contains only the safe `completed`
+   envelope.
+3. Given invalid/partial config, an unsafe terminal, failed preflight, nonzero
+   batch, an output symlink/special file/path escape,
+   zero objects, or interruption before the atomic commit point, then no
+   completion is published. Catchable failure uses the fixed neutral error;
+   an abandoned private stage is never considered a result.
+4. Given an earlier completion and any later invocation, then the earlier
+   directory is never written, renamed, removed, scanned for identity, or used
+   for deduplication. A later successful batch creates a distinct directory.
+5. Given the production atomic directory rename returns and response delivery
+   then fails or execution is interrupted, the completed private/current-UID
+   directory remains whole, immutable, and classified as completion.
+
+### User Story 3 — Batch/Blob-scoped T7 proof (Priority: P2)
+
+As the Owner, after merge and separate live authorization, I can privately
+associate the real TestFlight build and one actual Blob with one completion
+batch and a query limited to that batch/Blob, without publishing identifiers or
+claiming cross-run idempotency.
+
+**Independent test**: An independent reviewer reconciles the exact merged
+revision, private TestFlight/Blob association, byte-identical L1 file, and real
+batch/Blob-filtered query result/count required by `contracts/e2e-evidence.md`.
+
+**Acceptance scenarios**:
+
+1. Private evidence relates the actual build and Blob name to one immutable
+   completion batch; public evidence exposes neither value nor a local path.
+2. After producer and collector merge, the Owner-authorized workflow 05
+   lead/operator confirms the existing authorization, re-reads the exact final
+   merged VoxPocket producer contract/head, and uses a Codex subagent in the
+   workflow lead's local session to execute MB-017. Unique source locators prove
+   duplicate locator count `0`; identical content lines remain separately
+   counted.
+3. Sanitized authorization evidence proves the producer remains create-only
+   and the Owner's reader identity remains read/list-only without revealing a
+   token, SAS, key, endpoint, or principal metadata.
+4. Generic `collect`, templates, fixture traces, and test counts are labelled
+   separately and cannot satisfy T7.
 
 ### Edge cases
 
@@ -88,9 +145,20 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 - Changed destinations, corrupt sidecars, or source/body mismatches retain and block a producer batch.
 - Consent disabled while work is pending retains the queue, monotonic established marker, and UUID but forbids upload; re-enable uses the same install ID and never rewrites a frozen batch's install-ID-bearing path. An invalid established state fails closed without replacement identity.
 - Ready-scene duration uses a monotonic clock and rejects negative/overflow results; wall-clock adjustment cannot change it.
-- Every listed object reference is selected; a path that does not match the reviewed five-part layout is rejected before GET without an object checkpoint and blocks its page-marker advance.
-- One invalid NDJSON line rejects its containing collection unit; partial facts are not published.
-- Compressed/decompressed byte caps are enforced while streaming; `Content-Length` is only an early-rejection hint.
+- Startup rejects symlink/non-directory product, staging, or completion
+  terminals before Azure use; repeated same-user descriptor confinement is
+  outside the trusted-local threat model.
+- Azure exit `0` with no regular downloaded object is an `empty` no-op and is
+  not ingestion evidence.
+- A kill before the atomic directory rename leaves no completion; a kill after
+  the rename occurs after the batch commit point, so the full directory is
+  completion even if no success envelope reaches the caller.
+- Symlinks/special files in Azure output reject publication. Gzip bytes are
+  otherwise opaque and receive no parse, redaction, per-file cap, or raw ID.
+- Directory roots, stages, and completions must be current-UID-owned with no
+  group/other mode bits; lexical and resolved output paths stay beneath stage.
+- Response loss or interruption after the delegated atomic rename cannot undo
+  or reclassify the already completed directory.
 - The real endpoint or a personal identity accidentally present in a fixture, doc, log, error, or tracked config is a release-blocking failure.
 
 ## Requirements
@@ -101,18 +169,37 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 - **FR-002**: Producers MUST fail closed for missing/unsafe configuration or consent, isolate Blob state and network work, reject an entire unsafe event before persistence/network, freeze exact retry bytes/path/destination, classify receipt exactly, and retain pending work and historical identity on disable or rollback. AIDash consent MUST use the default-off local preference lifecycle in D-03. Only the exact never-opted state MAY generate a UUID; first opt-in MUST persist that UUID and a monotonic non-identity established marker before consent becomes active, even when producer configuration later proves invalid. Invalid configuration or any inconsistent/post-opt-in missing/malformed identity state MUST create no telemetry service/store/uploader/timer/network work. After first opt-in the marker and same install UUID MUST be retained and reused for the app's lifetime; no v1 path may replace, reset, rotate, or infer it from private storage.
 - **FR-003**: VitalStride MUST retain its product-local TelemetryKit and Aptabase behavior and add Blob only through the separately owned VitalStride adapter slice; no AIDash task may edit that repository.
 - **FR-004**: AIDash MUST add the exact approved LokiKit dependency only to consented GUI app composition, manually read the two expanded host keys, use the direct timer-free initializer with `heartbeatVersion: nil`, expose the cross-platform Settings consent surface without Reset/rotation, emit the exact two AIDash events only for an eligible lifecycle, and remain a no-op in CLI/headless/test-host production composition.
-- **FR-005**: `aidata` MUST add a single-mode `product_blob` source using only the `aad-owner-local` contract, paginate and read the reviewed gzip NDJSON Blob format within the exact timeout/page/object/byte limits in `contracts/reader-auth.md`, preserve stable object/event provenance through an honest `fact_product_event`, expose a bounded read-only L4 query, and activate the source atomically in registries and scheduled operations only after adapter/schema/query/runner readiness without adding L5 formulas or cards.
-- **FR-006**: Final acceptance MUST correlate a bounded two-product canary set through producer, Blob, L1, L3, and L4, including rerun/no-duplicate and unsafe-event rejection evidence.
-- **FR-007**: All writer and reader permissions, dependency identities, release inputs, temporary CI injection, evidence, and rollback MUST remain least-privilege and auditable. No agent may create/read/copy a credential or real endpoint, and no tracked artifact may contain personal identity metadata.
+- **FR-005**: `aidata` MUST add only the unregistered manual command and opaque
+  L1 adapter defined by MB-001–MB-020. One successful nonempty Azure batch
+  produces one immutable completion directory; disabled/empty/failure and
+  pre-commit interruption produce none.
+- **FR-006**: Final T7 acceptance MUST privately associate the actual
+  TestFlight build and one Blob with one completion batch and a real query
+  explicitly filtered by build, authorized UTC window, batch ID, and relative
+  Blob path. The query MUST apply MB-017's SDK 0.2.0 schema, exact-final-merged
+  VoxPocket producer-contract authority, one-pass read, source-line locator,
+  and aggregate-only evidence rules; it MUST
+  prove duplicate locator count `0`, count identical lines separately, and MUST
+  NOT claim cross-run incremental idempotency.
+- **FR-007**: Writer and reader permissions, local selectors, output, evidence,
+  and rollback MUST remain least-privilege and private. No agent may
+  create/read/copy a credential, real endpoint/prefix, actual Blob name, or
+  principal metadata into tracked/public artifacts.
 
 ### Configuration and authorization requirements
 
-- Tracked configuration declares only `PRODUCT_BLOB_CONTAINER_URL = ""`; absence means disabled.
-- A real query-free HTTPS container URL may appear only in ignored `aidata/config_local.py`.
+- Tracked configuration declares only `PRODUCT_BLOB_CONTAINER_URL = ""` and
+  `PRODUCT_BLOB_PREFIX = ""`; both empty means disabled.
+- One real query-free HTTPS container URL and one allow-listed VoxPocket prefix
+  may appear only in ignored `aidata/config_local.py`.
 - No tracked or ignored config key exists for token, SAS, account key, tenant, client secret, username, object ID, or alternate auth mode.
-- `DefaultAzureCredential` is configured so Azure CLI is its only enabled leg. Interactive login and every non-CLI credential leg are disabled; failure never falls back to another mechanism.
-- The requested scope is the Azure Storage data-plane audience only. Adapter operations are limited to container list and object read.
-- Reader collection uses a 30-second request timeout and 240-second monotonic run budget, with at most 100 list results per page, 10 pages, 1,000 object references/GETs, 8,388,608 compressed bytes per object, and 67,108,864 decompressed bytes per object.
+- The repository never initiates login or parses a token. The installed Azure
+  CLI uses only `--auth-mode login`; failure never selects another mechanism.
+- Repository code executes exactly one batch and performs no direct list/read,
+  resource-management, write, overwrite, append, metadata, lease, or delete
+  operation.
+- Manual execution is externally bounded by MB-016; no repository scheduler or
+  second supervisor is added.
 
 ### Non-goals
 
@@ -120,8 +207,11 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 - A broker, OAuth service/workload principal, SAS reader, dual-mode auth, or `local-read` policy activation.
 - AIDash fixed-install entitlement changes; ADR-003 remains authoritative.
 - Product metric formulas, dashboards, digests, or any L5 consumer.
-- VoxPocket/T3 or VitalStride source changes.
-- Treating `REL-001` as a planning blocker. It gates AIDash's final dependency pin and live proof only.
+- Generic `collect`, source registries, L2 normalize, L3 merge, L4 query product
+  code, L5, runner, cron, timer, scheduler, or automatic source execution.
+- Per-Blob registry/raw ID, custom byte caps, pagination/checkpoint, resume,
+  recovery, cross-run deduplication, or idempotency.
+- VoxPocket producer/T3 or VitalStride source changes.
 - Install-ID Reset/rotation, a shared-telemetry reset API, or private telemetry-storage parsing. Revisit Reset only as a separately authorized SDK feature.
 
 ### Key entities
@@ -129,24 +219,50 @@ As the Owner, I can review a sanitized evidence bundle that correlates both in-s
 - **Product Event**: Product-owned action or performance record with name, ISO timestamp, and closed properties.
 - **Telemetry Preferences**: Local default-off consent, one lifetime-stable random install UUID created only from the exact never-opted state, and a monotonic non-identity `identityEstablished` marker that distinguishes never-opted from disabled/corrupt post-opt-in state; none is a credential or a source of device/hardware identity.
 - **Frozen Blob Batch**: Immutable gzip NDJSON bytes plus digest, destination, object path, and credential-free sidecar.
-- **Blob Object Cursor**: Stable object path/ETag fingerprint and completed-unit state used for idempotent collection.
-- **Product Event Fact**: One accepted event keyed by deterministic object-path plus line ordinal, retaining sanitized object provenance.
-- **Reader Authorization Contract**: Fixed Azure CLI-only `DefaultAzureCredential` behavior with read/list operations and no config-supplied credential.
-- **Canary Correlation**: Sanitized relationship across product/build, object fingerprint, source event key, L1 checkpoint, L3 fact, and L4 row.
+- **Completion Batch**: One random non-identity directory name plus a nonempty,
+  byte-identical opaque relative Blob file tree, absent before and immutable
+  after one atomic publish.
+- **Reader Authorization Contract**: Direct installed Azure CLI batch using the
+  Owner's existing externally administered read-only identity, with no
+  config-supplied credential or token parsing.
+- **Manual Batch Evidence**: Private association across exact merged revision,
+  actual build/Blob, one completion batch, and MB-017's temporary read-only,
+  aggregate-only batch/Blob-scoped query.
 
 ## Success criteria
 
 - **SC-001**: Hook/CI-owned hermetic producer evidence observes the exact two AIDash events at most once in an eligible lifecycle, exact trigger/properties/timing, default-off/first-opt-in/disable/re-enable behavior with the monotonic established marker and same install UUID across relaunch and consent cycles, fail-closed inconsistent/corrupt post-opt-in states with zero replacement-ID generation or telemetry construction, zero Reset/rotation surface, zero SDK heartbeat events, and zero telemetry construction in every disabled production mode.
-- **SC-002**: Hook/CI-owned hermetic reader evidence covers every request/run/page/object/byte boundary, malformed content, auth/network degradation, exact page/object checkpoint behavior, and idempotent rerun with zero credential material in records or errors.
-- **SC-003**: Temporary-database merge and L4 tests return one stable row per synthetic event after repeated runs and perform no source mutation.
-- **SC-004**: The final evidence bundle correlates both products and both event types across every required stage and proves the unsafe event is absent.
+- **SC-002**: Hook/CI-owned hermetic reader evidence proves exact Azure
+  preflight/batch argv and environment, fixed private output, disabled/empty/
+  failure/interruption behavior, byte-identical completion, fsync plus one
+  atomic directory publish, current-UID/private-mode enforcement,
+  symlink/special/path-escape rejection, post-rename response-loss retention,
+  abandoned-stage ignore, and independent later completion.
+- **SC-003**: Repository scanning and final diff prove no per-file registry,
+  parser, cap, state/checkpoint, dependency, generic activation, Ops, scheduler,
+  or L2-L5 product implementation was added.
+- **SC-004**: The final private evidence bundle associates the actual
+  TestFlight build and Blob with one completion batch and one batch/Blob-scoped
+  MB-017 query result: all product-event counts and property validations
+  required by the exact final merged VoxPocket producer contract, total
+  validated lines, duplicate locator keys `0`, UTC window, and query summary
+  without public identifiers or payload. Records the final contract classifies
+  outside product-event counting do not contribute to those counts.
 - **SC-005**: Repository scanning finds no real endpoint, personal identity metadata, token, SAS, account key, or secret in the planned/implemented change.
 - **SC-006**: All owning layer gates, repository context audit, required CI, dependency identity proof, and independent exact-revision reviews pass.
 
 ## Dependencies and gates
 
-- `SL-AID-PLAN` is closed only by repository-native analysis, a normal-commit RepoInfra hook receipt, accepted ADR-004 and ADR-005, and exact-revision AI Reviewer PASS.
-- Every T001–T010 implementation task is additionally blocked until the constitution 1.14.0 amendment is published and merged in the required `constitution: authorize explicit-consent GUI telemetry` PR with its migration note.
-- `REL-001` gates only the exact LokiKit resolution in `AID-XCODE` and live E2E identity; it does not block this planning package or `SL-DATA`.
-- OA-003/OA-004 gate live producer/canary evidence, not secret-free implementation.
-- E2E-05 begins only after `SL-AID-PRODUCER`, `SL-DATA`, and the separately owned VitalStride slice are merged at recorded immutable revisions.
+- Implementation is blocked until this exact RepoInfra planning revision passes
+  independent review and is merged on a live-main descendant.
+- T101 AidataFoundation precedes T102 AidataL1L2. No other implementation task
+  is authorized by this package.
+- Existing producer/dependency resolution is preserved and is not reopened by
+  this reader plan.
+- Separate explicit live-operation approval gates TestFlight, Azure,
+  collection, and query evidence, not hermetic implementation.
+- T7 begins only after the exact producer and collector heads are merged, the
+  workflow 05 lead verifies the final merged VoxPocket producer contract/head,
+  and the Owner's existing external authorizations still apply. This plan gives
+  the Multica Team Lead no local-session, credential, TestFlight, Azure, or
+  manual-dispatch authority.

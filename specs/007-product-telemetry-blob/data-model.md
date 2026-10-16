@@ -71,11 +71,12 @@ test-host production composition cannot enter `eligible`.
 |---|---|---|
 | `name` | product-local closed string | `aidash.action` or `aidash.performance.ready_scene` only |
 | `timestamp` | ISO-8601 UTC | Required |
-| `properties` | closed scalar map | Exact typed allowlist in `contracts/aidash-events.md` |
+| `properties` | SDK 0.2.0 string-to-string dictionary | Exact semantic allowlist in `contracts/aidash-events.md` |
 
 `aidash.action` carries only `action_name: "briefing_viewed"`.
-`aidash.performance.ready_scene` carries only a finite nonnegative integer
-`duration_ms`, computed as complete monotonic milliseconds from the first
+`aidash.performance.ready_scene` carries only `duration_ms` as a decimal string
+encoding a finite nonnegative integer, computed as complete monotonic
+milliseconds from the first
 instant of the GUI-production app-init branch—before consent/config reads—to
 first interactive `.ready(container)` appearance. The start is discarded when
 the lifecycle is ineligible. Both events are unsampled and at
@@ -96,116 +97,76 @@ before accepted persistence/network.
 
 Retry reuses every frozen field. Only `201`, or exact qualified overwrite response after `ambiguous`, transitions to `confirmed` and permits queue removal.
 
-## Reader configuration and state
+## Manual reader models
 
-### ProductBlobReaderConfiguration
+The complete behavioral authority is
+[`contracts/manual-batch-collector.md`](contracts/manual-batch-collector.md).
+This file names only the durable concepts needed by planning and does not
+restate the collector algorithm.
+
+### ProductBlobManualConfiguration
 
 | Field | Type | Rule |
 |---|---|---|
 | `containerURL` | string | Empty tracked default; real value only in ignored local config |
-| `credentialMode` | constant | `aad-owner-local`; not configurable |
-| `operations` | constant set | `list`, `read` only |
-| `requestTimeoutSeconds` | constant integer | `30` for every list/read request |
-| `collectBudgetSeconds` | constant integer | `240` monotonic seconds per `collect()`; below the outer 300-second runner timeout |
-| `listMaxResults` | constant integer | `100` per list request |
-| `maxListPages` | constant integer | `10` per run |
-| `maxObjectReferences` | constant integer | `1,000` listed references/GET attempts per run |
-| `maxCompressedBytes` | constant integer | `8,388,608` per object, streaming-enforced |
-| `maxDecompressedBytes` | constant integer | `67,108,864` per object, streaming-enforced |
+| `prefix` | string | Empty tracked default; exactly one validated VoxPocket prefix only in ignored local config |
 
-There are deliberately no credential or principal fields.
+Both fields empty is disabled. There is no credential, identity, token, SAS,
+account key, tenant, auth-mode, cap, page, cursor, registry, schedule, or
+checkpoint field.
 
-### BlobObjectReference
+### CompletionBatch
 
 | Field | Type | Rule |
 |---|---|---|
-| `canonicalPath` | string | Validated five-part path; never contains query |
-| `etagFingerprint` | string? | Sanitized provenance; not event identity |
-| `lastModifiedUTC` | timestamp? | Source metadata only |
-| `contentFingerprint` | SHA-256 | Hash of received compressed bytes |
+| `batchId` | random non-identity name | Fresh for one invocation; names one completion directory and is never a cross-run key |
+| `root` | relative private path | `product_blob/batches/<batch-id>` under `RAW_DIR`; absolute paths are not public output |
+| `objects` | nonempty relative file tree | Byte-identical opaque gzip downloads at their relative Blob paths |
+| `state` | filesystem fact | Absent before one atomic directory publish; complete and immutable afterward |
 
-### BlobObjectCursor
+The directory is the L1 unit. The collector creates no per-object raw record,
+parsed event, normalized product row, page/object cursor, event identity, L3
+fact, L4 product query, or L5 consumer. MB-017's later temporary evidence reader
+creates no repository entity, table, state, or reusable product query.
 
-| Field | Type | Rule |
+### CollectionOutcome
+
+| Status | Durable result | CLI result |
 |---|---|---|
-| `canonicalPath` | string | Stable unit identity |
-| `contentFingerprint` | SHA-256 | Detects unexpected same-path drift |
-| `completedAtUTC` | timestamp | Written only after full object validation/publication |
+| `disabled` | No stage and no completion | successful `empty` envelope with count zero |
+| `empty` | Temporary stage removed or ignored; no completion | successful `empty` envelope with count zero |
+| `completed` | Exactly one immutable nonempty `CompletionBatch` | successful `completed` envelope with safe batch ID and positive count |
+| `failed` | No pre-commit-point completion; catchable cleanup is best effort | Constitution error envelope with one fixed neutral message, exit 1 |
 
-### BlobPageCursor
+An uncatchable kill may leave a private staging directory. Staging is not a
+state value and is never consumed as a completion. The atomic rename is the
+commit point: after it the batch is complete even if the caller loses the
+success response.
 
-| Field | Type | Rule |
-|---|---|---|
-| `continuationMarker` | opaque string? | Credential-free service marker; persisted only after the page is completely listed and every listed object is successful or already complete |
-| `completedAtUTC` | timestamp | Observation time for the last completed page |
+## T7 association
 
-A timed-out, failed, malformed, invalid-path, or oversized object emits no
-raw/clean record and receives no object checkpoint. Every listed reference is
-selected; an invalid path is rejected before GET and blocks its page marker.
-Exhausting the page/object/wall budget after
-a complete page is a bounded pause: persist that page's next marker and resume
-next run. Exhaustion or failure within a page leaves the page marker unchanged;
-already completed object checkpoints remain valid so a retry skips them without
-losing failed or later objects. `Content-Length` is only an early-rejection
-hint; compressed and decompressed caps are enforced during streaming. Partial
-decompression/NDJSON and sensitive material never enter records, state, or
-errors.
-
-## L1/L2 records
-
-### ProductBlobRawRecord
-
-Append-only redacted record per accepted event:
-
-| Field | Type | Rule |
-|---|---|---|
-| `source_event_id` | SHA-256 | `sha256(canonicalPath + "\n" + zero-based line ordinal)` |
-| `object_path_fingerprint` | SHA-256 | Never raw install-ID-bearing path in exported evidence |
-| `line_ordinal` | non-negative integer | Exact NDJSON position |
-| `product` | closed string | From validated path/event contract |
-| `build` | closed string | From validated path |
-| `event_name` | closed string | Product-owned name |
-| `event_timestamp_utc` | timestamp | Parsed ISO timestamp |
-| `properties` | closed JSON object | Redacted/validated scalars only |
-| `content_fingerprint` | SHA-256 | Object provenance |
-
-Tokens, real endpoint, principal metadata, SAS, account keys, and raw free text are prohibited.
-
-### NormalizedProductEvent
-
-Same stable event identity and provenance as raw, with typed timestamp/properties and source-clean validation status. Same ID/same content is replay; same ID/different content is rejected/observed without overwrite.
-
-## L3 fact
-
-### fact_product_event
-
-Grain: one accepted product event per `source_event_id`.
-
-| Column | Rule |
-|---|---|
-| `source_event_id` | Primary stable identity |
-| `product`, `build`, `event_name` | Closed source dimensions; no inferred formula |
-| `event_timestamp_utc` | Event time |
-| `properties_json` | Validated closed properties |
-| `object_path_fingerprint`, `content_fingerprint`, `line_ordinal` | Provenance/correlation |
-| `collected_at_utc` | Pipeline observation time |
-
-Merge is idempotent by `source_event_id`; it never invents product KPIs or overwrites a conflicting immutable event.
-
-## L4 query row
-
-`product/events.sql` returns a stable projection of the fact with explicit product, event-name, and UTC range filters. It is `aidata-tier: explore`, has deterministic ordering, returns empty on missing data, and never attaches/mutates a source DB.
-
-## E2E correlation
-
-`CanaryCorrelation` joins only sanitized evidence:
+`ManualBatchEvidence` is private workflow evidence, not a repository table:
 
 ```text
-product/build + event kind + UTC interval
-  -> object path fingerprint/content fingerprint
-  -> source_event_id + L1 completed cursor
-  -> fact_product_event identity/count
-  -> L4 query row
+exact merged revision + actual TestFlight build + UTC interval
+  -> actual Blob relative name
+  -> one completion batch + matching relative file
+  -> query filtered to that completion batch and Blob + scoped count
 ```
 
-It never embeds the actual endpoint, SAS/token/key, raw install UUID, personal principal metadata, or raw payload.
+Its ephemeral source locator is `(batchId, relativeBlobPath,
+ndjsonLineNumber)`. Locator uniqueness, one-pass wire validation, filter rules,
+counting, execution ownership, and privacy are defined only by MB-017; the
+locator is not persisted or reused across batches.
+
+Immediately before T7, the Owner-authorized workflow 05 lead/operator re-reads
+the exact final merged VoxPocket producer contract/head; that external contract,
+not AIDash's unchanged `contracts/aidash-events.md`, governs the temporary event
+counts. Execution uses a Codex subagent in the workflow lead's local session and
+does not give the Multica Team Lead local-session, TestFlight, Azure, credential,
+or manual-dispatch authority.
+
+The public record contains only sanitized labels/counts. It carries no real
+endpoint, principal metadata, token/SAS/key, actual Blob name, install UUID,
+absolute local path, or raw payload, and it makes no cross-run idempotency
+claim.
