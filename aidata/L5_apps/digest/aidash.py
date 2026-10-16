@@ -942,8 +942,20 @@ def _attribution_container(mmdd: str, cost_by_project, model_by_project,
         cards.append(rework_card)
     if not cards:
         return None
+    subtitle = "钱花在哪个项目 · 哪个模型 · 每条输入值多少"
+    if (cost_by_project is not None
+            and getattr(cost_by_project, "health", None) is not None
+            and cost_by_project.health.state == "ok"
+            and getattr(cost_by_project, "residual_total", 0.0) > 0):
+        subtitle = (
+            f"归因覆盖 {cost_by_project.coverage_pct:.1f}%"
+            f"（${cost_by_project.attributed_total:,.2f} / "
+            f"${cost_by_project.headline_total:,.2f}）"
+            f"· 未归因 ${cost_by_project.residual_total:,.2f}"
+            f"（{cost_by_project.residual_pct:.1f}%）"
+        )
     return Container(_cuid(mmdd, 11), "成本归因", 22, tuple(cards),
-                     layout="auto", subtitle="钱花在哪个项目 · 哪个模型 · 每条输入值多少")
+                     layout="auto", subtitle=subtitle)
 
 
 def _time_output_container(mmdd: str, app_focus, commit_by_repo) -> "Container | None":

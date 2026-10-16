@@ -9,14 +9,13 @@
 #
 # 设计成确定性门:
 #   - 无 blocker           → 贴一条 sticky comment,exit 0(check 绿)
-#   - 有 blocker(P0/严重) → 更新 sticky comment,exit 1(check 红 → 挡 auto-merge)
+#   - 有 blocker(P0/严重) → 更新 sticky comment,exit 1(check 红 → 挡 PR Manager 合并)
 #   - 任何工具异常          → exit 1(fail closed,宁可卡住也不放行未审的 diff)
 #
 # 依赖:git, gh(runner 环境自带 GITHUB_TOKEN), jq, python3 >= 3.11, codex。
 # 需要的环境变量(workflow 注入):
 #   PR_NUMBER, BASE_SHA, HEAD_SHA, BASE_REPO, GH_TOKEN
 #
-# Raven 连接元数据取自日常 provider;客户端 key 只从 runner 环境读取。
 # 独立 review home 保留原 model/effort、关闭 hooks/MCP 和只读沙箱配置。
 # 运维与 trusted-base 迁移顺序见 raven-review-operations.md。
 
@@ -24,7 +23,7 @@ set -uo pipefail
 
 # 独立 CODEX_HOME:review 门专用,不碰用户日常的 ~/.codex(raven/cmux)。
 export CODEX_HOME="${CODEX_REVIEW_HOME:-$HOME/.codex-review}"
-# 用标准 codex 二进制;Raven 路由由受信任的 provider helper 显式注入。
+# 用标准 codex 二进制。
 CODEX_BIN="${CODEX_BIN:-/opt/homebrew/bin/codex}"
 command -v "$CODEX_BIN" >/dev/null 2>&1 || CODEX_BIN="codex"
 
@@ -71,7 +70,29 @@ if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || ! git cat-file -e "$HEA
     exit 1
 fi
 DIFF="$(git diff "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff "$BASE_SHA..$HEAD_SHA")"
-CHANGED="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || git diff --name-only "$BASE_SHA..$HEAD_SHA")"
+# NUL-delimited path transport: -z ensures paths with newlines, quotes,
+# backslashes, and non-ASCII are transmitted losslessly from git.
+# Written to a temp file because NUL bytes are stripped by Bash command
+# substitution ($(...)) and scalars — a file preserves them intact.
+CHANGED_FILE="$(mktemp -t codex-review-changed.XXXXXX)"
+if ! git diff -z --name-only "$BASE_SHA...$HEAD_SHA" > "$CHANGED_FILE" 2>/dev/null; then
+    if ! git diff -z --name-only "$BASE_SHA..$HEAD_SHA" > "$CHANGED_FILE" 2>/dev/null; then
+        echo "[codex-review] ❌ git diff -z 生成 changed paths 失败,无法可靠评审 diff"
+        post_sticky "$STICKY
+⚠️ 自动 review 无法生成 changed-file 范围(无法读取 git diff -z 输出)。为安全起见 **暂不放行**,请重跑。"
+        exit 1
+    fi
+fi
+# Newline-separated version for prompt display only. Each path is
+# JSON-encoded (control chars/newlines/backslashes/quotes escaped) so a
+# malicious path containing newlines cannot inject additional lines into
+# the prompt that look like reviewer instructions or structural directives.
+CHANGED_DISPLAY="$(python3 -c "
+import json, sys
+for p in sys.stdin.buffer.read().split(b'\\x00'):
+    if p:
+        sys.stdout.write(json.dumps(p.decode('utf-8','replace'), ensure_ascii=True) + '\\n')
+" < "$CHANGED_FILE")"
 
 # 此处 DIFF 为空 = BASE/HEAD 对象都在但两者间确无差异(罕见但合法)。对象已确认
 # 存在,空 diff 是真·无改动,可安全 pass。
@@ -101,7 +122,7 @@ ERR_FILE="$(mktemp -t codex-review-err.XXXXXX.log)"
 # 截断,而行号必须以完整 diff 为准)。
 DIFF_FILE="$(mktemp -t codex-review-diff.XXXXXX.patch)"
 printf %s "$FULL_DIFF" > "$DIFF_FILE"
-cleanup() { rm -f "$SCHEMA_FILE" "$OUT_FILE" "$ERR_FILE" "$DIFF_FILE"; }
+cleanup() { rm -f "$SCHEMA_FILE" "$OUT_FILE" "$ERR_FILE" "$DIFF_FILE" "$CHANGED_FILE"; }
 trap cleanup EXIT
 
 # 用 printf 写,不用 heredoc:brew bash 5.3 下 body 超过一个 pipe buffer(实测
@@ -133,26 +154,76 @@ printf '%s\n' \
 #
 # fail-closed:分析器失败 = 工具异常,不在缺证据的情况下继续 review。
 SCOPE_EVIDENCE=""
-if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED")"; then
+if ! SCOPE_EVIDENCE="$(build_scope_evidence "$HEAD_SHA" "$DIFF_FILE" "$CHANGED_FILE")"; then
     echo "[codex-review] ❌ scope evidence 生成失败"
     post_sticky "$STICKY
 ⚠️ 自动 review 未能生成 exact-HEAD 作用域证据(分析器异常)。为安全起见 **暂不放行**,请重跑。"
     exit 1
 fi
 
+# ---- exact-HEAD coverage context (MY-1456 / MY-1457) ----------------------
+# When tests are removed, search HEAD for remaining tests covering the same
+# production symbols — prevents false "missing coverage" blockers when
+# equivalent tests exist outside the diff window.
+#
+# fail-closed: like scope evidence, if the analyzer itself fails (python3
+# crash / bug), the gate blocks. An EMPTY result (no tests removed) is the
+# normal success — the distinction is exit code, not output length.
+COVERAGE_CONTEXT=""
+if ! COVERAGE_CONTEXT="$(build_coverage_context "$HEAD_SHA" "$BASE_SHA" "$DIFF_FILE" "$CHANGED_FILE")"; then
+    echo "[codex-review] ❌ coverage context 生成失败"
+    post_sticky "$STICKY
+⚠️ 自动 review 未能生成 exact-HEAD 覆盖上下文(分析器异常)。为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
+
+# ---- nonce-based untrusted-data fence (MY-1456 security fix) ---------------
+# Static delimiter markers (the old hardcoded Chinese/English boundary strings)
+# are vulnerable to delimiter injection: a PR author can embed the exact closing
+# marker in test source code (which gets injected into the prompt via
+# COVERAGE_CONTEXT), escape the untrusted region, and append forged reviewer
+# instructions. The nonce makes the fence unpredictable to the PR author.
+# Python's sanitize_untrusted_content() handles the coverage context itself;
+# the nonce protects the outermost boundary.
+FENCE_NONCE="$(head -c 16 /dev/urandom | xxd -p)"
+if [ -z "$FENCE_NONCE" ] || ! printf '%s' "$FENCE_NONCE" | grep -qE '^[0-9a-f]{32}$'; then
+    echo "[codex-review] ❌ nonce generation failed (empty or malformed)"
+    post_sticky "$STICKY
+⚠️ 自动 review nonce 生成失败,为安全起见 **暂不放行**,请重跑。"
+    exit 1
+fi
+FENCE_OPEN="======== UNTRUSTED_DATA_BEGIN_${FENCE_NONCE} ========"
+FENCE_CLOSE="======== UNTRUSTED_DATA_END_${FENCE_NONCE} ========"
+
 # ---- review prompt ------------------------------------------------------
 # 维度与 claude-review.sh 保持一致（同一套仓库宪法），两个模型交叉验证。
 # Trusted Markdown is rendered as data: no shell evaluation or recursive substitution.
 SECURITY_NOTICE="$(review_security_notice)" || exit 1
 EVIDENCE_RULES="$(review_evidence_rules)" || exit 1
-if ! PROMPT="$(CHANGED="$CHANGED" TRUNCATED="$TRUNCATED" DIFF="$DIFF" \
-    SECURITY_NOTICE="$SECURITY_NOTICE" EVIDENCE_RULES="$EVIDENCE_RULES" SCOPE_EVIDENCE="$SCOPE_EVIDENCE" \
+COVERAGE_RULES="$(review_coverage_rules "$FENCE_NONCE")" || exit 1
+UNTRUSTED_PAYLOAD="$FENCE_OPEN
+改动文件:
+$CHANGED_DISPLAY
+$TRUNCATED
+
+DIFF:
+$DIFF
+
+$SCOPE_EVIDENCE
+
+======== COVERAGE_EVIDENCE_${FENCE_NONCE}_BEGIN ========
+$COVERAGE_CONTEXT
+======== COVERAGE_EVIDENCE_${FENCE_NONCE}_END ========
+$FENCE_CLOSE"
+
+if ! PROMPT="$(SECURITY_NOTICE="$SECURITY_NOTICE" EVIDENCE_RULES="$EVIDENCE_RULES" \
+    COVERAGE_RULES="$COVERAGE_RULES" UNTRUSTED_PAYLOAD="$UNTRUSTED_PAYLOAD" \
     python3 "$REPO_ROOT/scripts/ci/render-review-prompt.py" "$REPO_ROOT/scripts/ci/review-prompt.md")"; then
     echo "[codex-review] prompt render failed; refusing unreviewed diff" >&2
     exit 1
 fi
 
-echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED" | grep -c . | tr -d ' ') files)..."
+echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED_DISPLAY" | grep -c . | tr -d ' ') files)..."
 
 # codex exec：非交互、结构化输出到 --output-last-message 文件。
 # --skip-git-repo-check：checkout 目录是 detached HEAD，跳过 git 仓库信任检查。
@@ -165,7 +236,7 @@ echo "[codex-review] running codex on PR #$PR_NUMBER ($(printf '%s\n' "$CHANGED"
 # 那种"红得说不清原因"。
 CLI_RC=0
 run_with_timeout "$REVIEW_CLI_TIMEOUT_SECONDS" \
-    python3 "$REPO_ROOT/scripts/ci/review-raven.py" "$CODEX_BIN" \
+    "$REPO_ROOT/scripts/ci/review-python311" "$REPO_ROOT/scripts/ci/review-raven.py" "$CODEX_BIN" \
     --output-schema "$SCHEMA_FILE" \
     -o "$OUT_FILE" \
     --skip-git-repo-check \
@@ -197,7 +268,66 @@ if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
     VERDICT_JSON="$(printf %s "$RAW" | sed -n '/{/,/}/p' | jq -c '.' 2>/dev/null | head -1)"
 fi
 if [ -z "$VERDICT_JSON" ] || [ "$VERDICT_JSON" = "null" ]; then
-    echo "[codex-review] ❌ 无法解析 verdict"; printf %s "$RAW" | head -c 2000 >&2
+    echo "[codex-review] ❌ 无法解析 verdict"
+    post_sticky "$STICKY
+⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
+    exit 1
+fi
+
+# 严格校验 terminal schema 与 state consistency:
+# 根对象字段必须恰好为 verdict, summary, blockers, notes;
+# verdict 必须为 pass 或 changes; summary 必须为 string; blockers/notes 必须为 array;
+# blockers 项必须恰好包含 file(str), line(int|null), severity("critical"|"high"), why(str);
+# notes 项必须恰好包含 file(str), line(int|null), note(str);
+# 状态一致性: pass 必须 blockers 长度为 0; changes 必须 blockers 长度 >= 1。
+if ! printf '%s' "$VERDICT_JSON" | python3 -c '
+import json, sys
+
+try:
+    obj = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+if not isinstance(obj, dict):
+    sys.exit(1)
+
+if set(obj.keys()) != {"verdict", "summary", "blockers", "notes"}:
+    sys.exit(1)
+
+if obj["verdict"] not in ("pass", "changes"):
+    sys.exit(1)
+
+if not isinstance(obj["summary"], str):
+    sys.exit(1)
+
+if not isinstance(obj["blockers"], list) or not isinstance(obj["notes"], list):
+    sys.exit(1)
+
+for b in obj["blockers"]:
+    if not isinstance(b, dict) or set(b.keys()) != {"file", "line", "severity", "why"}:
+        sys.exit(1)
+    if not isinstance(b["file"], str) or not isinstance(b["why"], str):
+        sys.exit(1)
+    if b["severity"] not in ("critical", "high"):
+        sys.exit(1)
+    if b["line"] is not None and (isinstance(b["line"], bool) or not isinstance(b["line"], int)):
+        sys.exit(1)
+
+for n in obj["notes"]:
+    if not isinstance(n, dict) or set(n.keys()) != {"file", "line", "note"}:
+        sys.exit(1)
+    if not isinstance(n["file"], str) or not isinstance(n["note"], str):
+        sys.exit(1)
+    if n["line"] is not None and (isinstance(n["line"], bool) or not isinstance(n["line"], int)):
+        sys.exit(1)
+
+if obj["verdict"] == "pass" and len(obj["blockers"]) != 0:
+    sys.exit(1)
+
+if obj["verdict"] == "changes" and len(obj["blockers"]) == 0:
+    sys.exit(1)
+' >/dev/null 2>&1; then
+    echo "[codex-review] ❌ verdict schema 或 state consistency 校验失败"
     post_sticky "$STICKY
 ⚠️ 自动 review 输出无法解析。为安全起见 **暂不放行**,请人工检查或重跑。"
     exit 1

@@ -14,15 +14,18 @@ touched leaves;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gate
 ## 一图
 
 ```
-建 PR ──► auto-merge.yml         → 立即挂上 squash auto-merge(draft 除外)
-       └► build + test (macOS 26) → SPM/App/CLI 构建+测试、frontmatter、tests-with-code
+建 PR ──► build + test (macOS 26) → SPM/App/CLI 构建+测试、frontmatter、tests-with-code
        └► codex-review-target     → self-hosted 本机跑 Codex;required
        └► kimi-review             → self-hosted 本机跑 Kimi;advisory-only
                                       │
         ruleset「main protection」要求:build/aidata + codex-review-target 全绿并与 main 同步
                                       ▼
-                            required 门皆绿 → 自动 squash 合并 + 删分支
+                            required checks 与 approvals 通过
+                                      ▼
+                            PR Manager 用 GitHub App 身份合并 + 删分支
 ```
+
+不使用 `GITHUB_TOKEN` auto-merge：该身份造成的 push 不触发后续 workflows。
 
 ## 三层门
 
@@ -35,7 +38,7 @@ touched leaves;`scripts/context/run <layer>` 执行该 leaf 当前环境的 gate
 | paused legacy review | `.github/workflows/codex-review.yml` | 手动 no-op | — |
 | advisory review | `.github/workflows/kimi-review.yml` + `scripts/ci/kimi-review.sh` | PR | 不阻塞 |
 | paused review | `.github/workflows/claude-review.yml` | 手动 no-op | — |
-| 自动合并 | `.github/workflows/auto-merge.yml` | PR | — |
+| 合并 | PR Manager（GitHub App 身份；required checks 与 approvals 通过后） | PR | — |
 | ruleset(硬门) | `scripts/rulesets/main-protection.json` | main | admin 可 bypass |
 
 ## 自动 review 是怎么工作的
@@ -92,6 +95,30 @@ schema 里的 `pass` / `changes` 也是枚举值。结果是**门无法审查自
 PR #171 上两道门(claude / codex)因此同时误判:`private var labelLine` 里的
 `.padding(.trailing, trailingInset)` 被说成挂在 `BarListRow.body` 的外层 `VStack` 上,
 各自开出一条高危 blocker,卡住了一个本该通过的 PR(MY-1402)。
+
+### 完整谓词证据(invariant: complete deciding predicate)
+
+**“这个值无效 / 被拒绝 / 不应接受”这类 blocker 不能只凭局部 hunk 或一个常量**。
+它必须引用实际决定结论的完整谓词（complete deciding predicate）——包括并集 / union、
+默认值 / default、规范化 / normalization、否定 / negation，以及 material helper
+qualifier / helper 语义。单独一个 `VALID_TIERS = {"explore"}` 常量不能证明后面的
+`tier not in VALID_TIERS | {"production"}` 是错误；如果完整谓词本身未变、只是共享 helper
+被消费,那是可信策略/已存在基础谓词的证据,不是新的 blocker。
+
+同时,**直接证明的 critical/high defect、直接测试 / CI 失败输出、可信基线与不可信数据边界、
+required status 和 fail-closed 工具路径**仍然是独立的 blocker 证据,不能因为“未逐项展开部分谓词”
+或“某个 helper 语义没在该条目里重述”而被抹掉。也就是说,这条规约放宽的是“归属靠猜”与
+“半截谓词”导致的假阳性,不是直接证据型 blocker 的安全门槛。
+
+这条不只是“更严一点”:它防止 PR #199 这类假阳性,把“孤立常量 + 抽离 hunk”当成对完整
+拒绝条件的证据,而它其实只是看到了一个被 helper 拼接的前半句。**不完整的证据只能写
+成 note**, 不能升级成 blocker。遵守这条 invariant 之后,仅当完整谓词和它最终的拒绝/接受
+结论都被实际引用时,才允许判定值无效。
+
+这条只放宽“receiver-ownership guessing”和“incomplete-predicate inference”这两类错误;
+直接证据型 blocker（critical/high defect、直接测试 / CI 失败输出、required status、
+fail-closed 工具路径、可信边界）保持不变。其间未被完整引用的证据仍然只能记为 note,
+不能被升级为 blocker。
 
 现在归属由**可信脚本**先算好再交给模型:
 
