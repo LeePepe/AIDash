@@ -12,9 +12,10 @@ sources below simply collect nothing (ADR-23 degrade-not-crash), so the digest
 still builds on a fresh machine.
 """
 
-# Product telemetry Blob reader. Keep empty unless configuring a local,
-# query-free HTTPS Azure Blob container URL.
+# Product telemetry Blob reader. Keep both empty unless configuring the local,
+# query-free HTTPS container and single allow-listed VoxPocket prefix.
 PRODUCT_BLOB_CONTAINER_URL = ""
+PRODUCT_BLOB_PREFIX = ""
 
 # ---------------------------------------------------------------------------
 # Multica workspaces the digest collects from (ADR-5 / EXT-2).
