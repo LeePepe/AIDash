@@ -1,9 +1,11 @@
 """Prove TestFlight telemetry injection is path-only, private, and self-cleaning."""
 from pathlib import Path
+import json
 import os
 import shlex
 import stat
 import subprocess
+import textwrap
 import unittest
 
 
@@ -35,6 +37,9 @@ class TelemetryReleaseInjectionTests(unittest.TestCase):
     def tearDown(self):
         if self.config.exists():
             self.config.unlink()
+        harness = self.scratch / "fastlane_release_harness.rb"
+        if harness.exists():
+            harness.unlink()
         self.scratch.rmdir()
 
     def run_helper(self, operation):
@@ -42,6 +47,86 @@ class TelemetryReleaseInjectionTests(unittest.TestCase):
             [str(HELPER), operation, str(self.config)],
             cwd=ROOT,
             env=self.env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def run_release(self, force_failure=False):
+        harness = self.scratch / "fastlane_release_harness.rb"
+        harness.write_text(
+            textwrap.dedent(
+                """
+                require "json"
+
+                $lanes = {}
+                $build_options = nil
+
+                def default_platform(*) end
+                def desc(*) end
+                def platform(*)
+                  yield
+                end
+                def lane(name, &block)
+                  $lanes[name] = block
+                end
+                def private_lane(name, &block)
+                  $lanes[name] = block
+                end
+                def app_store_connect_api_key(**)
+                  :key
+                end
+                def sh(*) end
+                def latest_testflight_build_number(**)
+                  41
+                end
+                def get_provisioning_profile(**)
+                  "neutral-profile"
+                end
+                def build_app(**options)
+                  $build_options = options
+                  raise "forced build failure" if ENV["FORCE_RELEASE_FAILURE"] == "1"
+                end
+                def upload_to_testflight(**) end
+                def distribute_to_internal_groups(**) end
+
+                module UI
+                  def self.message(*) end
+                  def self.user_error!(message)
+                    raise message
+                  end
+                end
+
+                load ARGV.fetch(0)
+                begin
+                  $lanes.fetch(:beta).call
+                  status = 0
+                  error_message = nil
+                rescue => error
+                  status = 23
+                  error_message = error.message
+                end
+
+                xcargs = $build_options&.fetch(:xcargs, nil)
+                puts JSON.generate({status: status, xcargs: xcargs, error: error_message})
+                exit status
+                """
+            ),
+            encoding="utf-8",
+        )
+        env = {
+            **self.env,
+            "AIDASH_DEVELOPMENT_TEAM": "NEUTRALTEAM",
+            "ASC_KEY_ID": "neutral-key",
+            "ASC_ISSUER_ID": "neutral-issuer",
+            "ASC_KEY_P8_BASE64": "bmV1dHJhbA==",
+            "TELEMETRY_XCCONFIG_PATH": str(self.config),
+            "FORCE_RELEASE_FAILURE": "1" if force_failure else "0",
+        }
+        return subprocess.run(
+            ["ruby", str(harness), str(FASTFILE)],
+            cwd=ROOT / "fastlane",
+            env=env,
             text=True,
             capture_output=True,
             check=False,
@@ -65,26 +150,27 @@ class TelemetryReleaseInjectionTests(unittest.TestCase):
         self.assertFalse(self.config.exists())
         self.assertEqual(self.run_helper("cleanup").returncode, 0)
 
-    def test_forced_release_failure_still_has_silent_cleanup(self):
-        created = self.run_helper("create")
-        self.assertEqual(created.returncode, 0, created.stderr)
+    def test_actual_release_path_is_path_only_private_and_self_cleaning(self):
+        for force_failure in (False, True):
+            with self.subTest(force_failure=force_failure):
+                created = self.run_helper("create")
+                self.assertEqual(created.returncode, 0, created.stderr)
+                self.assertEqual(stat.S_IMODE(self.config.stat().st_mode), 0o600)
 
-        release = subprocess.run(
-            ["bash", "-c", 'printf "%s\\n" "-xcconfig" "$1"; exit 23', "release", str(self.config)],
-            cwd=ROOT,
-            env=self.env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(release.returncode, 23)
-        self.assertEqual(release.stdout.splitlines(), ["-xcconfig", str(self.config)])
-        self.assert_no_sentinel(release)
-
-        cleaned = self.run_helper("cleanup")
-        self.assertEqual(cleaned.returncode, 0, cleaned.stderr)
-        self.assert_no_sentinel(cleaned)
-        self.assertFalse(self.config.exists())
+                release = self.run_release(force_failure=force_failure)
+                self.assertEqual(
+                    release.returncode,
+                    23 if force_failure else 0,
+                    release.stdout + release.stderr,
+                )
+                self.assert_no_sentinel(release)
+                payload = json.loads(release.stdout)
+                self.assertEqual(payload["status"], 23 if force_failure else 0)
+                self.assertEqual(
+                    shlex.split(payload["xcargs"])[:2],
+                    ["-xcconfig", str(self.config)],
+                )
+                self.assertFalse(self.config.exists())
 
     def test_workflow_uses_protected_names_and_path_only_handoff(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
