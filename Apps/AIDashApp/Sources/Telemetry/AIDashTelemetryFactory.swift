@@ -86,7 +86,7 @@ struct AIDashTelemetryFactory {
             let endpoint = URL(string: endpointString),
             let components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false),
             components.scheme == "https",
-            components.host != nil,
+            components.host?.isEmpty == false,
             components.user == nil,
             components.password == nil,
             components.query == nil,

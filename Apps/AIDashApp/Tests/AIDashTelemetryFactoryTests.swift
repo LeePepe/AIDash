@@ -16,30 +16,77 @@ struct AIDashTelemetryFactoryTests {
             constructions += 1
             return TelemetryServiceSpy()
         }
+        let validSAS = "sv=neutral&sr=c&sp=c&sig=value"
         let invalid = [
-            AIDashTelemetryHostConfiguration(endpoint: nil, sas: nil, app: "aidash", build: "1"),
-            AIDashTelemetryHostConfiguration(endpoint: "", sas: "sig=x", app: "aidash", build: "1"),
+            AIDashTelemetryHostConfiguration(
+                endpoint: nil,
+                sas: validSAS,
+                app: "aidash",
+                build: "1"
+            ),
+            AIDashTelemetryHostConfiguration(
+                endpoint: "",
+                sas: validSAS,
+                app: "aidash",
+                build: "1"
+            ),
             AIDashTelemetryHostConfiguration(
                 endpoint: "$(TELEMETRY_BLOB_ENDPOINT)",
-                sas: "sig=x",
+                sas: validSAS,
                 app: "aidash",
                 build: "1"
             ),
             AIDashTelemetryHostConfiguration(
                 endpoint: "http://example.invalid/container",
-                sas: "sig=x",
+                sas: validSAS,
+                app: "aidash",
+                build: "1"
+            ),
+            AIDashTelemetryHostConfiguration(
+                endpoint: "https:///container",
+                sas: validSAS,
+                app: "aidash",
+                build: "1"
+            ),
+            AIDashTelemetryHostConfiguration(
+                endpoint: "https://user@example.invalid/container",
+                sas: validSAS,
+                app: "aidash",
+                build: "1"
+            ),
+            AIDashTelemetryHostConfiguration(
+                endpoint: "https://example.invalid/container?value=1",
+                sas: validSAS,
+                app: "aidash",
+                build: "1"
+            ),
+            AIDashTelemetryHostConfiguration(
+                endpoint: "https://example.invalid/container#fragment",
+                sas: validSAS,
+                app: "aidash",
+                build: "1"
+            ),
+            AIDashTelemetryHostConfiguration(
+                endpoint: "https://example.invalid/container/nested",
+                sas: validSAS,
                 app: "aidash",
                 build: "1"
             ),
             AIDashTelemetryHostConfiguration(
                 endpoint: "https://example.invalid/not--a-container",
-                sas: "sv=neutral&sr=c&sp=c&sig=value",
+                sas: validSAS,
                 app: "aidash",
                 build: "1"
             ),
             AIDashTelemetryHostConfiguration(
                 endpoint: "https://example.invalid/container",
                 sas: "sv=neutral&sr=c&sp=c&sig=bad%ZZ",
+                app: "aidash",
+                build: "1"
+            ),
+            AIDashTelemetryHostConfiguration(
+                endpoint: "https://example.invalid/container",
+                sas: "sv=neutral&sr=c&sp=c&sig=bad|value",
                 app: "aidash",
                 build: "1"
             ),
