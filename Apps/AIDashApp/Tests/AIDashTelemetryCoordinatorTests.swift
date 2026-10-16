@@ -135,6 +135,63 @@ struct AIDashTelemetryCoordinatorTests {
         #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
     }
 
+    @Test("re-enable resumes retained delivery without identity rotation or retrospective events")
+    func reenableResumesRetainedDelivery() async {
+        let preferenceDefaults = defaults()
+        let identifier = UUID()
+        preferenceDefaults.set(identifier.uuidString, forKey: "telemetry.installID")
+        preferenceDefaults.set(true, forKey: "telemetry.identityEstablished")
+        preferenceDefaults.set(true, forKey: "telemetry.sendUsageData")
+        var generated = 0
+        let service = TelemetryServiceSpy()
+        service.flushHandler = {
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+        }
+        var constructedIDs: [UUID] = []
+        let coordinator = AIDashTelemetryCoordinator(
+            mode: .gui,
+            preferences: AIDashTelemetryPreferences(defaults: preferenceDefaults) {
+                generated += 1
+                return UUID()
+            },
+            configuration: validConfiguration(),
+            factory: AIDashTelemetryFactory {
+                constructedIDs.append($0.installID)
+                return service
+            },
+            launchStart: .zero,
+            monotonicNow: { .milliseconds(5) }
+        )
+
+        coordinator.readySceneAppeared()
+        while service.flushCount == 0 {
+            await Task.yield()
+        }
+        await coordinator.setConsent(false)
+        let originalEvents = service.events
+        service.flushHandler = nil
+
+        await coordinator.setConsent(true)
+        await coordinator.awaitDelivery()
+        coordinator.readySceneAppeared()
+
+        #expect(service.flushCount == 2)
+        #expect(service.events == originalEvents)
+        #expect(service.events.count == 2)
+        #expect(constructedIDs == [identifier])
+        #expect(generated == 0)
+        #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
+    }
+
+    @Test("settings authority is present only for non-headless GUI composition")
+    func settingsAuthorityPlacement() {
+        #expect(AIDashTelemetrySettingsPlacement.isAvailable(headless: false, hasCoordinator: true))
+        #expect(!AIDashTelemetrySettingsPlacement.isAvailable(headless: true, hasCoordinator: true))
+        #expect(!AIDashTelemetrySettingsPlacement.isAvailable(headless: false, hasCoordinator: false))
+    }
+
     @Test("invalid established state and invalid config construct nothing")
     func invalidStateAndConfig() async {
         let preferenceDefaults = defaults()

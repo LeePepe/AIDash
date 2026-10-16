@@ -125,12 +125,12 @@ struct AIDashTelemetryFactory {
         components.percentEncodedQuery = query
         guard let items = components.queryItems else { return false }
         let names = Set(items.map(\.name))
-        let supported = Set(["sv", "sr", "si", "sp", "st", "se", "spr", "sip", "sig"])
+        let supported = Set(["sv", "sr", "sp", "st", "se", "spr", "sip", "sig"])
         return names.count == items.count
             && names.isSubset(of: supported)
             && items.contains { $0.name == "sig" && !($0.value ?? "").isEmpty }
-            && items.contains { $0.name == "sr" && $0.value == "c" }
-            && !items.contains { $0.name == "sp" && $0.value != "c" }
+            && items.filter { $0.name == "sr" && $0.value == "c" }.count == 1
+            && items.filter { $0.name == "sp" && $0.value == "c" }.count == 1
             && !items.contains { $0.name == "spr" && $0.value != "https" }
     }
 

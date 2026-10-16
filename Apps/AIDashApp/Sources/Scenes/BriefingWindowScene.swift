@@ -4,6 +4,12 @@ import AIDashCore
 import AIDashUI
 import DesignKit
 
+enum AIDashTelemetrySettingsPlacement {
+    static func isAvailable(headless: Bool, hasCoordinator: Bool) -> Bool {
+        !headless && hasCoordinator
+    }
+}
+
 /// The main briefing window scene. Hosts BriefingView when the
 /// CloudKit container is ready, or shows an error state on failure.
 ///
@@ -64,6 +70,27 @@ public struct BriefingWindowScene: Scene {
             #if os(macOS)
             .windowDismissBehavior(.disabled)
             #endif
+            .toolbar {
+                if AIDashTelemetrySettingsPlacement.isAvailable(
+                    headless: headless,
+                    hasCoordinator: telemetryCoordinator != nil
+                ), let telemetryCoordinator {
+                    ToolbarItem {
+                        Menu {
+                            AIDashTelemetrySettingsView(coordinator: telemetryCoordinator)
+                        } label: {
+                            Label(
+                                String(
+                                    localized: "telemetry.settings.title",
+                                    defaultValue: "Usage data",
+                                    bundle: .main
+                                ),
+                                systemImage: "gearshape"
+                            )
+                        }
+                    }
+                }
+            }
         }
         #if os(macOS)
         .defaultSize(width: 1024, height: 720)
@@ -131,24 +158,6 @@ private struct StarFeedbackScope: View {
             .environment(\.starredItemRefs, Set(starEvents.compactMap(\.itemRef)))
             .environment(\.starredCardIds, Set(cardStarEvents.map(\.cardId)))
             .environment(\.doneItemRefs, UserEventWriter.doneRefs(from: doneEvents))
-            .toolbar {
-                if let telemetryCoordinator {
-                    ToolbarItem {
-                        Menu {
-                            AIDashTelemetrySettingsView(coordinator: telemetryCoordinator)
-                        } label: {
-                            Label(
-                                String(
-                                    localized: "telemetry.settings.title",
-                                    defaultValue: "Usage data",
-                                    bundle: .main
-                                ),
-                                systemImage: "gearshape"
-                            )
-                        }
-                    }
-                }
-            }
     }
 }
 

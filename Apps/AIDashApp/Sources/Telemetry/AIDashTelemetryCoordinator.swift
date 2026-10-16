@@ -95,8 +95,12 @@ final class AIDashTelemetryCoordinator {
         guard case .establishedEnabled(let identifier) = state else { return }
         if let service {
             service.isEnabled = true
+            resumeDelivery(using: service)
         } else {
             service = factory.make(configuration: configuration, installID: identifier)
+            if let service {
+                resumeDelivery(using: service)
+            }
         }
     }
 
@@ -118,6 +122,11 @@ final class AIDashTelemetryCoordinator {
 
     func awaitDelivery() async {
         await deliveryTask?.value
+    }
+
+    private func resumeDelivery(using service: AIDashTelemetryServicing) {
+        deliveryTask?.cancel()
+        deliveryTask = Task { await service.flush() }
     }
 
     private static func completeMilliseconds(_ duration: Duration) -> Int64? {

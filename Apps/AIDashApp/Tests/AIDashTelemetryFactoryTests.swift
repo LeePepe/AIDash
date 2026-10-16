@@ -51,6 +51,49 @@ struct AIDashTelemetryFactoryTests {
         #expect(constructions == 0)
     }
 
+    @Test("SAS requires one container resource and one exact create permission")
+    func sasCapabilityBoundary() {
+        var constructions = 0
+        let factory = AIDashTelemetryFactory { _ in
+            constructions += 1
+            return TelemetryServiceSpy()
+        }
+        let invalidSASValues = [
+            "sv=neutral&sr=c&sig=value",
+            "sv=neutral&sr=c&sp=&sig=value",
+            "sv=neutral&sr=c&sp=r&sig=value",
+            "sv=neutral&sr=c&sp=a&sig=value",
+            "sv=neutral&sr=c&sp=w&sig=value",
+            "sv=neutral&sr=c&sp=d&sig=value",
+            "sv=neutral&sr=c&sp=l&sig=value",
+            "sv=neutral&sr=c&sp=t&sig=value",
+            "sv=neutral&sr=c&sp=m&sig=value",
+            "sv=neutral&sr=c&sp=e&sig=value",
+            "sv=neutral&sr=c&sp=o&sig=value",
+            "sv=neutral&sr=c&sp=p&sig=value",
+            "sv=neutral&sr=c&sp=i&sig=value",
+            "sv=neutral&sr=c&sp=cc&sig=value",
+            "sv=neutral&sr=c&sp=cr&sig=value",
+            "sv=neutral&sr=c&sp=C&sig=value",
+            "sv=neutral&sr=c&sp=c&si=policy&sig=value",
+            "sv=neutral&sr=c&sr=c&sp=c&sig=value",
+            "sv=neutral&sr=c&sp=c&sp=c&sig=value",
+            "sv=neutral&sr=b&sp=c&sig=value",
+            "sv=neutral&sr=c&sp=c&unsupported=value&sig=value",
+        ]
+
+        for sas in invalidSASValues {
+            let configuration = AIDashTelemetryHostConfiguration(
+                endpoint: "https://example.invalid/container",
+                sas: sas,
+                app: "aidash",
+                build: "1"
+            )
+            #expect(factory.make(configuration: configuration, installID: UUID()) == nil)
+        }
+        #expect(constructions == 0)
+    }
+
     @Test("valid configuration reaches the direct builder once")
     func validConfiguration() {
         var received: AIDashTelemetryValidatedConfiguration?
@@ -78,6 +121,7 @@ final class TelemetryServiceSpy: AIDashTelemetryServicing {
     var isEnabled = true
     var events: [AIDashTelemetryEvent] = []
     var flushCount = 0
+    var flushHandler: (() async -> Void)?
 
     func track(_ event: AIDashTelemetryEvent) {
         events.append(event)
@@ -85,5 +129,6 @@ final class TelemetryServiceSpy: AIDashTelemetryServicing {
 
     func flush() async {
         flushCount += 1
+        await flushHandler?()
     }
 }
