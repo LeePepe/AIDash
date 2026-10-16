@@ -140,7 +140,9 @@ platform :ios do
 
     distribute_to_internal_groups(next_build: next_build)
     ensure
-      File.unlink(telemetry_xcconfig_path) if File.lexist?(telemetry_xcconfig_path)
+      if File.exist?(telemetry_xcconfig_path) || File.symlink?(telemetry_xcconfig_path)
+        File.unlink(telemetry_xcconfig_path)
+      end
     end
   end
 
