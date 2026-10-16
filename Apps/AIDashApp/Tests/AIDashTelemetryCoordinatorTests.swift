@@ -343,6 +343,7 @@ struct AIDashTelemetryCoordinatorTests {
         var cancellationObserved = false
         var allowCancelledGenerationToExit = false
         var observedIntermediateEnable = false
+        var observedFinalDisable = false
         var activeWorkers = 0
         var maximumActiveWorkers = 0
         var factoryCalls = 0
@@ -378,7 +379,9 @@ struct AIDashTelemetryCoordinatorTests {
                 case .desiredConsentChanged(true):
                     observedIntermediateEnable = true
                 case .desiredConsentChanged(false):
-                    break
+                    if observedIntermediateEnable {
+                        observedFinalDisable = true
+                    }
                 case .workerStarted:
                     activeWorkers += 1
                     maximumActiveWorkers = max(maximumActiveWorkers, activeWorkers)
@@ -402,7 +405,9 @@ struct AIDashTelemetryCoordinatorTests {
             await Task.yield()
         }
         let latestDisable = Task { await coordinator.setConsent(false) }
-        await Task.yield()
+        while !observedFinalDisable {
+            await Task.yield()
+        }
 
         #expect(!service.isEnabled)
         #expect(!preferenceDefaults.bool(forKey: "telemetry.sendUsageData"))
