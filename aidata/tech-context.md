@@ -32,6 +32,7 @@ AIDash 每日 briefing 的**唯一内容生产方**。把散落在本机的 AI �
 ```
 aidata (本层,Python)
   L1_collect   adapters/<source>.py      → L1_collect/raw/<source>/<date>.jsonl   (append-only,已脱敏)
+               adapters/product_blob.py → manual opaque immutable L1 batch only
   L2_normalize (同一个 adapter 清洗)      → L2_normalize/clean/<source>.db        (每源独立)
   L3_merge     merge.py + schema/warehouse.sql → L3_merge/warehouse.db (fact_*/dim_*;仅可合并的源)
   L4_serve     L4_serve/queries/*.sql     → 具名查询
@@ -70,6 +71,11 @@ Python 产出端和 Swift 渲染端,契约不再跨 repo 漂移。
   `from config_local import *` 做覆盖,所以本地文件只需写要改的项。
 - 没有 `config_local.py` 的机器(全新 clone / CI)也能跑:相关源降级为 0,
   测试全绿。模板见 `config_local.example.py`。
+- `product_blob` 是唯一 manual opaque immutable-L1/no-normalize 例外。它只用
+  `PRODUCT_BLOB_CONTAINER_URL` 与一个 Owner allow-listed
+  `PRODUCT_BLOB_PREFIX`;tracked defaults 均为空,真实值只在 ignored
+  `config_local.py`。其他源继续使用既有 selectors/defaults 与
+  collect→normalize、redacted append-only raw 规则。
 
 ## 测试
 

@@ -243,8 +243,10 @@ MANUAL_SOURCES = (
 TEAM_AUDIT_IMPORT_ROOT = ""
 
 # Product telemetry Blob reader. Empty keeps the source disabled; a real
-# query-free container URL belongs only in config_local.py.
+# query-free container URL and the single Owner-allow-listed VoxPocket prefix
+# belong only in config_local.py.
 PRODUCT_BLOB_CONTAINER_URL = ""
+PRODUCT_BLOB_PREFIX = ""
 
 # ---------------------------------------------------------------------------
 # Source registry: canonical source names -> whether they feed L3 merge.
