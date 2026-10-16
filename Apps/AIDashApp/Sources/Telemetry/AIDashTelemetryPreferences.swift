@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 enum AIDashTelemetryPreferenceState: Equatable {
@@ -29,12 +30,12 @@ final class AIDashTelemetryPreferences {
     var state: AIDashTelemetryPreferenceState {
         let markerObject = defaults.object(forKey: Key.identityEstablished)
         let identifierObject = defaults.object(forKey: Key.installID)
-        let consent = defaults.object(forKey: Key.consent) as? Bool ?? false
+        let consent = storedBool(forKey: Key.consent) ?? false
 
         if markerObject == nil, identifierObject == nil {
             return consent ? .establishedInvalid : .neverOpted
         }
-        guard let marker = markerObject as? Bool, marker,
+        guard let marker = storedBool(forKey: Key.identityEstablished), marker,
               let identifierString = identifierObject as? String,
               let identifier = UUID(uuidString: identifierString),
               identifier.uuidString == identifierString else {
@@ -69,6 +70,14 @@ final class AIDashTelemetryPreferences {
             defaults.set(false, forKey: Key.consent)
         }
         return state
+    }
+
+    private func storedBool(forKey key: String) -> Bool? {
+        guard let value = defaults.object(forKey: key) as? NSNumber,
+              CFGetTypeID(value) == CFBooleanGetTypeID() else {
+            return nil
+        }
+        return value.boolValue
     }
 
     private func preserveInvalidState() {

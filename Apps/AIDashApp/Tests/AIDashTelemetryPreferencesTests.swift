@@ -47,12 +47,16 @@ struct AIDashTelemetryPreferencesTests {
 
     @Test("every inconsistent established identity fails closed without replacement")
     func invalidStateMatrix() {
+        let identifier = UUID().uuidString
         let malformedValues: [(Any?, Any?, Any?)] = [
             (true, nil, true),
             ("true", nil, true),
             (true, "not-a-uuid", false),
-            (false, UUID().uuidString, false),
-            (nil, UUID().uuidString, false),
+            (false, identifier, false),
+            (nil, identifier, false),
+            (0, identifier, false),
+            (1, identifier, false),
+            (42, identifier, false),
             (nil, nil, true),
             (false, nil, true),
         ]
@@ -77,7 +81,7 @@ struct AIDashTelemetryPreferencesTests {
 
     @Test("missing or malformed consent is disabled after identity establishment")
     func malformedConsentIsOff() {
-        for consent in [nil, "yes"] as [Any?] {
+        for consent in [nil, "yes", 0, 1, 42] as [Any?] {
             let defaults = makeDefaults()
             let identifier = UUID()
             defaults.set(true, forKey: "telemetry.identityEstablished")
