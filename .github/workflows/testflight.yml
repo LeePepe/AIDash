@@ -123,6 +123,18 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" "$KC" >/dev/null 2>&1 || true
 
+      - name: Prepare telemetry xcconfig
+        id: telemetry
+        if: steps.gate.outputs.release == 'true'
+        env:
+          TELEMETRY_BLOB_ENDPOINT: ${{ secrets.TELEMETRY_BLOB_ENDPOINT }}
+          TELEMETRY_BLOB_SAS: ${{ secrets.TELEMETRY_BLOB_SAS }}
+        run: |
+          set -euo pipefail
+          path="${RUNNER_TEMP}/aidash-telemetry-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.xcconfig"
+          scripts/ci/telemetry_xcconfig.sh create "$path"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
       - name: fastlane ios beta
         if: steps.gate.outputs.release == 'true'
         env:
@@ -137,7 +149,12 @@ jobs:
           # fastlane 默认 3s 超时(重试到 24s 仍不够)导致 build_app 直接放弃。
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
           FASTLANE_XCODEBUILD_SETTINGS_RETRIES: "6"
+          TELEMETRY_XCCONFIG_PATH: ${{ steps.telemetry.outputs.path }}
         run: fastlane ios beta
+
+      - name: Cleanup telemetry xcconfig
+        if: always()
+        run: scripts/ci/telemetry_xcconfig.sh cleanup "${{ steps.telemetry.outputs.path }}"
 
       - name: Move last-released tag
         if: steps.gate.outputs.release == 'true'
