@@ -16,7 +16,7 @@ struct AIDashTelemetryHostConfiguration: Equatable {
         storeDirectory: URL = (FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
-        ).first ?? FileManager.default.homeDirectoryForCurrentUser)
+        ).first ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("AIDash/Telemetry", isDirectory: true)
     ) {
         self.endpoint = endpoint
@@ -125,12 +125,16 @@ struct AIDashTelemetryFactory {
         components.percentEncodedQuery = query
         guard let items = components.queryItems else { return false }
         let names = Set(items.map(\.name))
-        let supported = Set(["sv", "sr", "sp", "st", "se", "spr", "sip", "sig"])
+        let supported = Set(["sv", "sr", "sp", "si", "st", "se", "spr", "sip", "sig"])
+        let storedPolicy = items.first { $0.name == "si" }?.value
+        let permissions = items.first { $0.name == "sp" }?.value
         return names.count == items.count
             && names.isSubset(of: supported)
             && items.contains { $0.name == "sig" && !($0.value ?? "").isEmpty }
             && items.filter { $0.name == "sr" && $0.value == "c" }.count == 1
-            && items.filter { $0.name == "sp" && $0.value == "c" }.count == 1
+            && (storedPolicy?.isEmpty == false || permissions == "c")
+            && (storedPolicy == nil || storedPolicy?.isEmpty == false)
+            && (permissions == nil || permissions == "c")
             && !items.contains { $0.name == "spr" && $0.value != "https" }
     }
 
