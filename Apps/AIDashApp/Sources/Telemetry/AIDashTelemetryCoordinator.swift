@@ -37,6 +37,7 @@ final class AIDashTelemetryCoordinator {
     private let wallNow: () -> Date
     private var service: AIDashTelemetryServicing?
     private var deliveryTask: Task<Void, Never>?
+    private var consentTransition: Task<Void, Never>?
     private var acceptsReadyEvent = false
     private var didRecordReady = false
 
@@ -79,6 +80,16 @@ final class AIDashTelemetryCoordinator {
     }
 
     func setConsent(_ enabled: Bool) async {
+        let previousTransition = consentTransition
+        let transition = Task { @MainActor [weak self] in
+            await previousTransition?.value
+            await self?.applyConsent(enabled)
+        }
+        consentTransition = transition
+        await transition.value
+    }
+
+    private func applyConsent(_ enabled: Bool) async {
         if !enabled {
             _ = preferences.setConsent(false)
             acceptsReadyEvent = false

@@ -59,6 +59,34 @@ struct AIDashTelemetryCoordinatorTests {
         #expect(service.events.count == 2)
     }
 
+    @Test("negative and overflowing elapsed durations are rejected")
+    func invalidReadyDurations() {
+        for readyTime in [Duration.milliseconds(-1), Duration.seconds(Int64.max)] {
+            let preferenceDefaults = defaults()
+            let identifier = UUID()
+            preferenceDefaults.set(identifier.uuidString, forKey: "telemetry.installID")
+            preferenceDefaults.set(true, forKey: "telemetry.identityEstablished")
+            preferenceDefaults.set(true, forKey: "telemetry.sendUsageData")
+            let service = TelemetryServiceSpy()
+            let coordinator = AIDashTelemetryCoordinator(
+                mode: .gui,
+                preferences: AIDashTelemetryPreferences(
+                    defaults: preferenceDefaults,
+                    uuidGenerator: UUID.init
+                ),
+                configuration: validConfiguration(),
+                factory: AIDashTelemetryFactory { _ in service },
+                launchStart: .zero,
+                monotonicNow: { readyTime }
+            )
+
+            coordinator.readySceneAppeared()
+
+            #expect(service.events.isEmpty)
+            #expect(service.flushCount == 0)
+        }
+    }
+
     @Test("disabled modes and mid-lifecycle opt-in never emit retrospective events")
     func disabledModesAndLateOptIn() async {
         for mode in [RunMode.agent, .testHost] {
@@ -135,6 +163,41 @@ struct AIDashTelemetryCoordinatorTests {
         #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
     }
 
+    @Test("cold-start established-disabled re-enable reuses retained identity")
+    func coldStartDisabledReenable() async {
+        let preferenceDefaults = defaults()
+        let identifier = UUID()
+        preferenceDefaults.set(identifier.uuidString, forKey: "telemetry.installID")
+        preferenceDefaults.set(true, forKey: "telemetry.identityEstablished")
+        preferenceDefaults.set(false, forKey: "telemetry.sendUsageData")
+        var generated = 0
+        var constructedIDs: [UUID] = []
+        let service = TelemetryServiceSpy()
+        let coordinator = AIDashTelemetryCoordinator(
+            mode: .gui,
+            preferences: AIDashTelemetryPreferences(defaults: preferenceDefaults) {
+                generated += 1
+                return UUID()
+            },
+            configuration: validConfiguration(),
+            factory: AIDashTelemetryFactory {
+                constructedIDs.append($0.installID)
+                return service
+            },
+            launchStart: .zero,
+            monotonicNow: { .milliseconds(5) }
+        )
+
+        #expect(constructedIDs.isEmpty)
+        await coordinator.setConsent(true)
+        await coordinator.awaitDelivery()
+
+        #expect(generated == 0)
+        #expect(constructedIDs == [identifier])
+        #expect(service.flushCount == 1)
+        #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
+    }
+
     @Test("re-enable resumes retained delivery without identity rotation or retrospective events")
     func reenableResumesRetainedDelivery() async {
         let preferenceDefaults = defaults()
@@ -181,6 +244,76 @@ struct AIDashTelemetryCoordinatorTests {
         #expect(service.events == originalEvents)
         #expect(service.events.count == 2)
         #expect(constructedIDs == [identifier])
+        #expect(generated == 0)
+        #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
+    }
+
+    @Test("rapid off-on waits for cancelled delivery before retained resume")
+    func rapidOffOnSerializesDeliveryGenerations() async {
+        let preferenceDefaults = defaults()
+        let identifier = UUID()
+        preferenceDefaults.set(identifier.uuidString, forKey: "telemetry.installID")
+        preferenceDefaults.set(true, forKey: "telemetry.identityEstablished")
+        preferenceDefaults.set(true, forKey: "telemetry.sendUsageData")
+        var generated = 0
+        var cancellationObserved = false
+        var allowCancelledGenerationToExit = false
+        var order: [String] = []
+        let service = TelemetryServiceSpy()
+        service.flushHandler = {
+            if service.flushCount == 1 {
+                order.append("generation-1-start")
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+                cancellationObserved = true
+                order.append("generation-1-cancelled")
+                while !allowCancelledGenerationToExit {
+                    await Task.yield()
+                }
+                order.append("generation-1-ended")
+            } else {
+                order.append("generation-2-start")
+            }
+        }
+        let coordinator = AIDashTelemetryCoordinator(
+            mode: .gui,
+            preferences: AIDashTelemetryPreferences(defaults: preferenceDefaults) {
+                generated += 1
+                return UUID()
+            },
+            configuration: validConfiguration(),
+            factory: AIDashTelemetryFactory { _ in service },
+            launchStart: .zero,
+            monotonicNow: { .milliseconds(5) }
+        )
+
+        coordinator.readySceneAppeared()
+        while service.flushCount == 0 {
+            await Task.yield()
+        }
+        let disable = Task { await coordinator.setConsent(false) }
+        while !cancellationObserved {
+            await Task.yield()
+        }
+        let enable = Task { await coordinator.setConsent(true) }
+        await Task.yield()
+
+        #expect(service.flushCount == 1)
+        #expect(!service.isEnabled)
+        allowCancelledGenerationToExit = true
+        await disable.value
+        await enable.value
+        await coordinator.awaitDelivery()
+
+        #expect(service.flushCount == 2)
+        #expect(order == [
+            "generation-1-start",
+            "generation-1-cancelled",
+            "generation-1-ended",
+            "generation-2-start",
+        ])
+        #expect(service.isEnabled)
         #expect(generated == 0)
         #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
     }

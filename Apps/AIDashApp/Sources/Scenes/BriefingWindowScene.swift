@@ -96,16 +96,24 @@ public struct BriefingWindowScene: Scene {
             Menu {
                 AIDashTelemetrySettingsView(coordinator: telemetryCoordinator)
             } label: {
-                Label(
-                    String(
-                        localized: "telemetry.settings.title",
-                        defaultValue: "Usage data",
-                        bundle: .main
-                    ),
-                    systemImage: "gearshape"
-                )
+                telemetrySettingsLabel
             }
         }
+    }
+
+    private var telemetrySettingsLabel: some View {
+        Label(
+            String(
+                localized: "telemetry.settings.title",
+                defaultValue: "Usage data",
+                bundle: .main
+            ),
+            systemImage: "gearshape"
+        )
+        #if !os(macOS)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Rectangle())
+        #endif
     }
 }
 
