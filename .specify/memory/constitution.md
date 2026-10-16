@@ -14,13 +14,16 @@ repository. It is intentionally short. When in doubt, re-read it.
 ### I. Agent-Authored, User-Read (NON-NEGOTIABLE)
 
 The app contains **no input fields, no chat, no compose surface**. Agents are
-the sole authors of all displayed content. The user's only outbound channel is
-a small set of structured UI events (done / undone / star / hide, plus Team
-Workflow Audit finding acknowledgement and remediation-approval receipts) that
-are append-only and consumed by agents on their own schedule. An audit approval
-records Owner intent only: it never authorizes AIDash to remediate, mutate a
-source issue or run, create work, or dispatch an agent. The app never modifies
-or interprets briefing content — it only renders what agents have published.
+the sole authors of all displayed content. The user's only briefing-content
+outbound channel is a small set of structured UI events (done / undone / star /
+hide, plus Team Workflow Audit finding acknowledgement and remediation-approval
+receipts) that are append-only and consumed by agents on their own schedule. An
+audit approval records Owner intent only: it never authorizes AIDash to
+remediate, mutate a source issue or run, create work, or dispatch an agent. The
+optional, explicit-consent GUI product telemetry defined by §GUI Product
+Telemetry is operational measurement, not briefing content or a new authoring
+channel. The app never modifies or interprets briefing content — it only
+renders what agents have published.
 
 This principle constrains every design decision downstream. If a feature
 requires the user to type content, it does not belong in this app.
@@ -232,8 +235,47 @@ its `contract_check.sh` lint.
 - **Events**: CloudKit Private DB, custom record type `UserEvent`, append-only.
 - **App-local cache**: SwiftData mirror of the last fetched briefing for
   offline display. Cache is disposable; CloudKit is source of truth.
-- **No third-party storage** (no Firebase, no Realm, no local SQLite outside
-  SwiftData).
+- **No third-party storage**, except the isolated telemetry storage authorized
+  by §GUI Product Telemetry (no Firebase, no Realm, and no local SQLite outside
+  SwiftData or that exception).
+
+### GUI Product Telemetry (explicit-consent exception)
+
+AIDash MAY report a narrow, typed set of GUI action and performance events to
+an isolated Azure Blob telemetry store only under all of these conditions:
+
+- The sole consent authority is a GUI Settings toggle labelled **Send usage
+  data**. Consent defaults to off and is persisted locally in `UserDefaults`.
+  Existing installs also begin off. Missing or malformed consent is off.
+- The first opt-in creates a random install UUID and persists it locally.
+  Later launches and consent cycles reuse it for the app's lifetime. Version 1
+  exposes no install-ID Reset or rotation. Adding one is a separate future SDK
+  feature and product decision; it MUST NOT be approximated by parsing private
+  telemetry storage.
+- Turning consent off first persists the false value, closes new event
+  admission immediately, disables/cancels active delivery, and only then awaits
+  quiescence. No queued or later upload may start or continue while consent is
+  off. Any in-flight request made ambiguous by cancellation remains retained
+  and unconfirmed. The isolated local telemetry store and pending work remain
+  intact. Turning the toggle on again is fresh consent and resumes eligible
+  retained work under the same install UUID.
+- Only GUI app composition may construct the service. CLI, headless/XPC, and
+  test-host production composition never constructs the service, telemetry
+  store, uploader, or timer. Hostless tests may construct isolated preference
+  and coordinator fakes; they never use the user's defaults or data.
+- Event names, triggers, typed property allowlists, sampling, and cardinality
+  are product-local closed contracts. Free text, briefing/UserEvent content,
+  user-entered values, device/hardware identity, file paths, and unknown or
+  non-finite properties are forbidden. The whole unsafe event is rejected
+  before accepted persistence or network transmission.
+- The telemetry dependency's isolated queue/sidecars and the Azure Blob
+  telemetry store are the sole third-party storage exception. They MUST NOT
+  contain briefings or CloudKit `UserEvent` records, and they do not change the
+  CLI-write/app-read/CloudKit rules in Principle II.
+- No install identity, telemetry store, uploader, or network work exists before
+  first opt-in. Invalid producer configuration may still leave the authorized
+  local consent and install-ID preferences, but creates no telemetry service,
+  store, uploader, timer, or network work.
 
 ### Dependencies
 
@@ -245,8 +287,9 @@ its `contract_check.sh` lint.
   `docs/adr/`) that answers: what problem, what alternatives, what binary-size
   / build-time / Swift 6 concurrency cost. Do not introduce dependencies
   speculatively.
-- **Networking**: `URLSession` + async/await for any HTTP, if needed. The app
-  has no current HTTP requirements; CloudKit is not HTTP. Adding an HTTP
+- **Networking**: `URLSession` + async/await for HTTP. The explicit-consent GUI
+  telemetry channel in §GUI Product Telemetry is the app's only current HTTP
+  requirement; CloudKit is not HTTP. Adding another HTTP purpose or an HTTP
   client (Alamofire or similar) requires an ADR.
 - **App-side LLMs**: not implemented in v1. If we add on-device summarization
   later, use Apple's `FoundationModels` framework, not third-party SDKs.
@@ -295,9 +338,10 @@ incidents in this repo happened.
   2. Code that resolves the real home operates on the user's live data. A
      test once moved the developer's SwiftData store into a temp directory
      and deleted it on teardown.
-- **Local verification uses the hostless target**, which runs as `xctest`
-  with no app launch and no access to the real home:
-  `xcodebuild -scheme AIDashAppLogicTests -destination 'platform=macOS' test`
+- **Hook-owned local verification may use the hostless target**, which runs as
+  `xctest` with no app launch and no access to the real home. The leaf gate
+  declares `AIDashAppLogicTests`; humans and agents inspect the hook receipt and
+  do not invoke its `xcodebuild` test command directly.
 - **Host-based targets belong to CI** (and to an explicit, human-authorized
   local run). CI machines have nobody to prompt and no live user data.
 
@@ -849,15 +893,16 @@ Every PR must pass before merge:
 
 1. Workspace builds for all four platform/target combinations (macOS app,
    iPadOS app, iPhone app, CLI).
-2. `swift test` on `AIDashCore` passes.
+2. The CI-owned `AIDashCore` Swift unit-test gate passes.
 3. If the PR introduces a new third-party dependency, it includes the
    corresponding ADR under `docs/adr/`.
 4. If the PR adds or changes a card type, both the strongly-typed payload
    struct and the round-trip test exist.
 5. The `aidata (pytest + ruff)` CI job passes — pytest, `ruff check`, and a
    degrade-not-crash probe that imports every source with no `config_local.py`
-   present. Run it locally before pushing with
-   `/usr/bin/python3 -m pytest aidata/tests/ -q`.
+   present. Local verification is owned by the resolver-selected pre-commit and
+   pre-push hooks; agents inspect those receipts rather than invoking pytest
+   directly.
    Integration tests needing the gitignored `warehouse.db` skip themselves in
    CI; the hermetic unit tests — including the digest golden — must pass.
 
@@ -925,7 +970,27 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.13.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-08-30
+**Version**: 1.14.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-10-15
+
+<!--
+1.14.0 — MINOR (material expansion with no principle removed or inverted).
+Authorizes one explicit-consent GUI action/performance telemetry channel and
+isolated telemetry storage exception. Consent defaults off in UserDefaults;
+the first opt-in creates a random install UUID; disable stops admission/upload
+while retaining pending state; re-enable resumes with the same lifetime-stable
+identity, and version 1 has no install-ID Reset or rotation. CLI,
+headless, and test-host composition remain excluded. Briefing/UserEvent
+CloudKit and SwiftData rules are unchanged.
+
+Migration note: no Briefing, UserEvent, CloudKit, or existing app-cache data is
+migrated. Existing installs start with telemetry off, and no install ID,
+telemetry store, or network work may exist before first opt-in. In-flight spec
+007 must adopt the consent/identity lifecycle and hook-owned verification
+contract, including same-ID relaunch and disable/re-enable evidence. Its
+implementation remains blocked until the constitution amendment
+is published and merged through a PR titled
+`constitution: authorize explicit-consent GUI telemetry`.
+-->
 
 <!--
 1.13.0 — MINOR (material expansion of Principle I's structured feedback

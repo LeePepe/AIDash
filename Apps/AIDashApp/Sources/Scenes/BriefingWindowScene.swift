@@ -4,6 +4,12 @@ import AIDashCore
 import AIDashUI
 import DesignKit
 
+enum AIDashTelemetrySettingsPlacement {
+    static func isAvailable(headless: Bool, hasCoordinator: Bool) -> Bool {
+        !headless && hasCoordinator
+    }
+}
+
 /// The main briefing window scene. Hosts BriefingView when the
 /// CloudKit container is ready, or shows an error state on failure.
 ///
@@ -15,10 +21,16 @@ import DesignKit
 public struct BriefingWindowScene: Scene {
     let state: CloudKitContainer.InitState
     let headless: Bool
+    let telemetryCoordinator: AIDashTelemetryCoordinator?
 
-    public init(state: CloudKitContainer.InitState, headless: Bool = false) {
+    init(
+        state: CloudKitContainer.InitState,
+        headless: Bool = false,
+        telemetryCoordinator: AIDashTelemetryCoordinator? = nil
+    ) {
         self.state = state
         self.headless = headless
+        self.telemetryCoordinator = telemetryCoordinator
     }
 
     public var body: some Scene {
@@ -40,9 +52,15 @@ public struct BriefingWindowScene: Scene {
                         ProgressView()
                             .controlSize(.large)
                     case .ready(let container):
-                        StarFeedbackScope(container: container)
+                        StarFeedbackScope(
+                            container: container,
+                            telemetryCoordinator: telemetryCoordinator
+                        )
                             .designTheme(seed: .lime, neutral: .slate)
                             .modelContainer(container)
+                            .onAppear {
+                                telemetryCoordinator?.readySceneAppeared()
+                            }
                     case .failed(let reason):
                         ICloudUnavailableView(reason: reason)
                     }
@@ -51,11 +69,50 @@ public struct BriefingWindowScene: Scene {
             .frame(minWidth: 720, minHeight: 480)
             #if os(macOS)
             .windowDismissBehavior(.disabled)
+            .toolbar {
+                ToolbarItem {
+                    telemetrySettingsMenu
+                }
+            }
+            #else
+            .overlay(alignment: .topTrailing) {
+                telemetrySettingsMenu
+                    .padding()
+            }
             #endif
         }
         #if os(macOS)
         .defaultSize(width: 1024, height: 720)
         .windowResizability(.contentMinSize)
+        #endif
+    }
+
+    @ViewBuilder
+    private var telemetrySettingsMenu: some View {
+        if AIDashTelemetrySettingsPlacement.isAvailable(
+            headless: headless,
+            hasCoordinator: telemetryCoordinator != nil
+        ), let telemetryCoordinator {
+            Menu {
+                AIDashTelemetrySettingsView(coordinator: telemetryCoordinator)
+            } label: {
+                telemetrySettingsLabel
+            }
+        }
+    }
+
+    private var telemetrySettingsLabel: some View {
+        Label(
+            String(
+                localized: "telemetry.settings.title",
+                defaultValue: "Usage data",
+                bundle: .main
+            ),
+            systemImage: "gearshape"
+        )
+        #if !os(macOS)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Rectangle())
         #endif
     }
 }
@@ -69,6 +126,7 @@ public struct BriefingWindowScene: Scene {
 /// comes back empty rather than crashing.
 private struct StarFeedbackScope: View {
     let container: ModelContainer
+    let telemetryCoordinator: AIDashTelemetryCoordinator?
 
     /// Every persisted star event that targets a specific item. Filled state
     /// is inferred from emitted events (spec 002 D2: append-only, no unstar
@@ -87,8 +145,12 @@ private struct StarFeedbackScope: View {
     /// latest-wins reducer (spec 003 §8, spec 005 D3).
     @Query private var doneEvents: [UserEventModel]
 
-    init(container: ModelContainer) {
+    init(
+        container: ModelContainer,
+        telemetryCoordinator: AIDashTelemetryCoordinator? = nil
+    ) {
         self.container = container
+        self.telemetryCoordinator = telemetryCoordinator
         let starRaw = UserEventAction.star.rawValue
         _starEvents = Query(filter: #Predicate {
             $0.actionRaw == starRaw && $0.itemRef != nil

@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 /// Run mode decided once at launch:
 /// - `agent`   = the headless process launchd spawned to serve XPC on-demand
 ///   (flagged by `AIDASH_XPC_AGENT=1` in the LaunchAgent plist).
@@ -19,7 +18,9 @@ enum RunMode: Equatable {
     /// Pure decision from the environment — unit-testable without launching.
     /// Agent takes precedence (a launchd spawn is never a test host).
     static func decide(env: [String: String]) -> RunMode {
+        #if os(macOS)
         if env[LaunchdAgentInstaller.agentEnvVar] == "1" { return .agent }
+        #endif
         if env["XCTestConfigurationFilePath"] != nil
             || env["XCTestBundlePath"] != nil { return .testHost }
         return .gui
@@ -44,4 +45,3 @@ enum RunMode: Equatable {
         }
     }
 }
-#endif

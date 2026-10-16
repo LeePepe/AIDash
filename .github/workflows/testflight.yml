@@ -212,6 +212,18 @@ jobs:
           STATE_DIR="$RUNNER_TEMP/aidash-testflight-$GITHUB_RUN_ID"
           mkdir -p "$STATE_DIR"
 
+      - name: Prepare telemetry xcconfig
+        id: telemetry
+        if: steps.gate.outputs.release == 'true'
+        env:
+          TELEMETRY_BLOB_ENDPOINT: ${{ secrets.TELEMETRY_BLOB_ENDPOINT }}
+          TELEMETRY_BLOB_SAS: ${{ secrets.TELEMETRY_BLOB_SAS }}
+        run: |
+          set -euo pipefail
+          path="${RUNNER_TEMP}/aidash-telemetry-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.xcconfig"
+          scripts/ci/telemetry_xcconfig.sh create "$path"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
       - name: fastlane ios beta
         id: upload
         if: steps.gate.outputs.release == 'true'
@@ -224,6 +236,7 @@ jobs:
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
           FASTLANE_XCODEBUILD_SETTINGS_RETRIES: "6"
           SIGH_OUTPUT_PATH: ${{ runner.temp }}/aidash-testflight-${{ github.run_id }}
+          TELEMETRY_XCCONFIG_PATH: ${{ steps.telemetry.outputs.path }}
         run: fastlane ios beta
 
       - name: Compare-and-swap last-released marker
@@ -241,6 +254,17 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "${CANDIDATE_SHA}:${MARKER_REF}"
 
+      - name: Cleanup telemetry xcconfig
+        if: always()
+        id: telemetry_cleanup
+        env:
+          TELEMETRY_XCCONFIG_PATH: ${{ steps.telemetry.outputs.path }}
+        run: |
+          if ! scripts/ci/telemetry_xcconfig.sh cleanup "$TELEMETRY_XCCONFIG_PATH"; then
+            echo "::warning::Could not remove the telemetry xcconfig"
+            echo "warning=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Cleanup and summarize
         if: always()
         env:
@@ -251,9 +275,10 @@ jobs:
           GATE_OUTCOME: ${{ steps.gate.outputs.outcome }}
           MARKER_OUTCOME: ${{ steps.marker.outcome }}
           KEYCHAIN_ATTEMPTED: ${{ steps.keychain.outputs.attempted }}
+          TELEMETRY_CLEANUP_WARNING: ${{ steps.telemetry_cleanup.outputs.warning }}
         run: |
           set -u
-          cleanup_warning=false
+          cleanup_warning="${TELEMETRY_CLEANUP_WARNING:-false}"
           STATE_DIR="$RUNNER_TEMP/aidash-testflight-$GITHUB_RUN_ID"
 
           if [ "$KEYCHAIN_ATTEMPTED" = "true" ]; then
@@ -299,7 +324,6 @@ jobs:
             echo "::warning::Could not remove the local release marker"
             cleanup_warning=true
           fi
-
           if [ "$MARKER_OUTCOME" = "success" ]; then
             FINAL_OUTCOME=success
             CAS_RESULT=success

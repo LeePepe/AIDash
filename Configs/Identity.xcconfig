@@ -52,6 +52,16 @@ AIDASH_CLOUDKIT_CONTAINER = iCloud.$(AIDASH_BUNDLE_ID)
 AIDASH_DEVELOPMENT_TEAM = REPLACE_ME
 
 // ---------------------------------------------------------------------------
+// 5. GUI product telemetry host configuration.
+//
+// Tracked values stay empty. Release automation supplies protected values
+// through a run-owned xcconfig passed by path; local development may override
+// them in Identity.local.xcconfig.
+// ---------------------------------------------------------------------------
+TELEMETRY_BLOB_ENDPOINT =
+TELEMETRY_BLOB_SAS =
+
+// ---------------------------------------------------------------------------
 // 本地覆盖 —— 必须放在最后(见文件顶部说明:后定义覆盖先定义)。
 // 文件不存在时静默跳过。
 // ---------------------------------------------------------------------------

@@ -15,6 +15,16 @@ execution surface.
 
 ## Existing behavior
 
+- Current AIDash `main` at
+  `bdf1435fe7d3d9c4da43ed4297cbc24482447b46` contains the completed T001
+  manual-source registry, but it contains no Team Audit decoder, bundle
+  reader, identity index, collector implementation, or AidataL1L2 routes for
+  their tests.
+- Accepted planning package
+  `1ba0062bb2597efd91c46b8de9080b53b8484da1` defines the contract-first
+  T022–T026 replacement for the former monolithic T002. The cancelled T022
+  delivery and its unpublished candidates are evidence only, not accepted
+  behavior or a reusable implementation base.
 - At recovery parent `fdace13d20ee0b28759c4853c82445fd4d913dcc`,
   AIDashCore exposes ten card types; `teamAudit` has not shipped.
 - Agent-authored URL safety is centralized in the AIDashCore Validation
@@ -29,6 +39,10 @@ execution surface.
 
 ## Compatibility
 
+- T001's explicit-only `team_audit_snapshot` source and its no-configuration
+  degradation remain unchanged. T022 adds only the pure decoder/model seam;
+  it does not wire collection, read files, persist state, or expose a second
+  public adapter entry point.
 - All ten existing card types, their payload validation, and their structured
   error/fallback behavior remain unchanged.
 - Existing optional artifact and grill strings remain round-trippable as
@@ -41,6 +55,9 @@ execution surface.
 ## Removed behavior
 
 - None. This revision removes or weakens no accepted-base behavior or test.
+- The former executable T002 row is retired only as a planning shape and
+  replaced by T022–T026; this removes no shipped product behavior. No existing
+  test is deleted or weakened.
 - The frozen candidate is not treated as an accepted baseline, and no finding
   is closed merely because that candidate attempted an implementation.
 
@@ -61,6 +78,9 @@ As the Owner, I can read the latest baseline or incremental Team Workflow Audit 
 3. **US1/AC3** — **Given** missing or redacted evidence, **When** the snapshot is rendered, **Then** the affected conclusion is shown as insufficient evidence and the UI does not infer a result from another axis.
 4. **US1/AC4** — **Given** a publishable snapshot with mandatory findings and artifacts, **When** the final briefing parts are packed, **Then** publication coverage is computed from those final parts and the Owner can read every mandatory finding/link with matching required/published counts.
 5. **US1/AC5** — **Given** each of the three core axes has an `insufficientEvidence` verdict, **When** the payload round-trips, **Then** each verdict remains bound to its enclosing axis and none decodes as Workflow Conformance by ordering accident.
+6. **US1/AC6** — **Given** a decoded case timeline, **When** its events and attempts are validated, **Then** their exact source order, matching case back-pointers, UTC timestamps, and non-decreasing event chronology with source-order ties are preserved or the bundle is rejected.
+7. **US1/AC7** — **Given** artifact evidence bindings, **When** the sidecar is decoded, **Then** every artifact event reference resolves, every non-null case binding owns the referenced events, and every finding chain belongs to the bound finding's case/event membership or the bundle is rejected.
+8. **US1/AC8** — **Given** a syntactically valid JSON integer of arbitrary size in any typed numeric field, **When** the decoder validates it, **Then** it returns either the exact field-valid decoded value or a structured rejection and never lets a numeric conversion exception escape.
 
 ---
 
@@ -131,7 +151,7 @@ As the Owner, I can acknowledge a finding or approve it for a separately governe
 - **FR-016**: A remediation approval MUST mean only that approval was recorded. The system MUST NOT auto-remediate, mutate source issues or runs, create tasks, or dispatch agents.
 - **FR-017**: Optional grill-me and grill-with-docs entry points MUST be typed fields in a publisher-supplied hosted-artifact sidecar with stable sidecar identity and exact sidecar content SHA-256; the sidecar identity/hash and untrusted link strings MUST persist through L1–L5 and payload provenance. AIDash MUST open only centrally validated HTTPS links and MUST NOT execute the workflow.
 - **FR-018**: Invalid, incomplete, future-incompatible, or oversized payloads MUST fail or externalize according to the published size contract and MUST NOT crash, truncate an entity, silently coerce an unknown locked enum/evidence value, or exceed the 262,144-byte final serialized UTF-8 card limit. The received 262,144-byte value is accepted and 262,145-byte mandatory value is rejected. Mandatory overview/P0/P1/artifact records are non-externalizable; optional oversized details require a typed full-report reference.
-- **FR-019**: Automated tests MUST cover immutable ingestion, sidecar identity/hash preservation and collision, stable-identity deduplication, accepted-snapshot-parented collision observations, overlap replay, explicit finding subject/responsibility, feedback lineage, complete per-role repeat metrics, payload round trips and exact size boundaries, mandatory-link rejection/reservation, optional-link degradation/externalization, all finding states, baseline and incremental rendering, decision idempotency, manual-only invocation, and no-dispatch/no-remediation behavior.
+- **FR-019**: Automated tests MUST cover strict nested decoding before storage; exact case event/attempt order, back-pointers, chronology, and source-order ties; complete artifact event/case/finding-chain binding; arbitrary-size JSON integer handling through structured rejection; raw-versus-enriched artifact schemas, duplicate/nullable-key handling, independent artifact/sidecar hashes, and exact 65,536/65,537 canonical entry boundaries; single-read atomic snapshot/sidecar handling and filesystem races; restart/crash/corrupt-index recovery; immutable ingestion; sidecar identity/hash preservation and collision; independently indexed snapshot/child/sidecar deduplication and accepted-snapshot-parented collision observations; overlap replay; explicit finding subject/responsibility; feedback lineage; complete per-role repeat metrics; payload round trips and exact size boundaries; mandatory-link rejection/reservation; optional-link degradation/externalization; all finding states; baseline and incremental rendering; decision idempotency; manual-only invocation; and no-dispatch/no-remediation behavior.
 - **FR-020**: Each core-axis verdict MUST decode in the context of its enclosing axis. The shared `insufficientEvidence` wire value MUST round-trip independently for Workflow Conformance, Workflow Fitness, and Outcome Integrity.
 - **FR-021**: Every finding case/event/evidence reference MUST be non-empty and unique within the finding and MUST resolve exactly once through the payload's typed snapshot reference catalog. Duplicate or unresolved references MUST reject the payload.
 - **FR-022**: Feedback-lineage identity MUST equal the lowercase SHA-256 of its canonical problem/origin/delivery tuple. A supplied merge revision MUST be exactly one lowercase 40-hex Git SHA-1 object ID, matching this repository's object format; malformed lineage or merge identities MUST reject the payload.
@@ -165,7 +185,8 @@ As the Owner, I can acknowledge a finding or approve it for a separately governe
 - **SC-004**: Repeating acknowledgement or approval on the same finding produces one displayed decision receipt per decision kind and leaves the original snapshot byte-for-byte unchanged.
 - **SC-005**: Automated boundary tests observe zero audit invocations, scheduled registrations, source mutations, issue/run mutations, agent dispatches, or remediation calls.
 - **SC-006**: Every missing/invalid mandatory artifact URL produces zero published snapshot/card output, every invalid optional artifact/grill URL remains non-actionable text, and every valid HTTPS Archify/grill URL opens through the central URL policy.
-- **SC-007**: Boundary fixtures prove an encoded card at 262,144 bytes is accepted, 262,145 bytes is rejected or externally referenced only when optional, `publishedP0P1FindingCount` exactly equals `requiredP0P1FindingCount`, and each published mandatory workflow/relationship/P0/P1-chain count exactly equals its corresponding required count.
+- **SC-007**: Boundary fixtures prove a canonical raw mandatory artifact entry at 65,536 bytes is accepted and 65,537 is rejected before raw append; independently, an encoded card at 262,144 bytes is accepted, 262,145 bytes is rejected or externally referenced only when optional, `publishedP0P1FindingCount` exactly equals `requiredP0P1FindingCount`, and each published mandatory workflow/relationship/P0/P1-chain count exactly equals its corresponding required count.
+- **SC-008**: Decoder fixtures prove exact timeline order/back-pointer/UTC chronology, complete artifact event/case/finding-chain ownership, and structured handling of arbitrary-size JSON integers with zero escaped numeric conversion exceptions.
 
 ## Assumptions
 
