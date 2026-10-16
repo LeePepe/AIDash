@@ -1,4 +1,10 @@
-# Quickstart: Product Telemetry Blob Pipeline
+# Quickstart: Manual Product Blob Batch Landing
+
+The normative collector behavior is
+[`contracts/manual-batch-collector.md`](contracts/manual-batch-collector.md). This
+quickstart records delivery order and verification entry points only. It does not
+duplicate or extend that contract. The merged producer, consent, and generic
+`collect` behavior remain unchanged and are not evidence for this collector.
 
 ## Planning verification
 
@@ -11,64 +17,83 @@ scripts/context/audit
 git diff --check
 ```
 
-These are static planning/audit commands, not test-suite invocations. The normal
-planning commit invokes the resolver-selected RepoInfra pre-commit gate; retain
-and inspect its receipt. Then verify the changed planning tree contains no real
-endpoint, personal identity metadata, token, SAS, account key, secret, or
-credential-bearing URL. Planning never requires Azure sign-in or live values.
+These are static planning checks, not product test-suite invocations. Commit the
+RepoInfra planning revision normally so the resolver-selected pre-commit gate
+runs, and retain its receipt. The planning tree must contain no endpoint,
+resource identifier, personal identity metadata, token, SAS, account key,
+secret, credential-bearing URL, or absolute private path.
 
-## Implementation order
+## Delivery order
 
-1. Confirm the exact reviewed planning revision.
-2. Resolve REL-001 before editing LokiKit dependency wiring.
-3. Confirm the constitution 1.14.0 amendment and migration note are merged before any T001–T010 implementation.
-4. Deliver DATA-FOUND and its exact Azure Identity lock plus current-effective `SCHEDULED_SOURCES`; do not activate `product_blob`. Add RepoInfra CI install before DATA-L12 imports Azure Identity.
-5. Assemble AID-XCODE, AID-RELEASE, and AID-APP as one producer candidate tree; do not publish a partial producer slice.
-6. Deliver DATA-L12 → DATA-L3 → DATA-L4 with the source inactive; DATA-OPS may canonicalize the runner after DATA-FOUND without activating it.
-7. Only after adapter/schema/query/runner readiness, deliver DATA-ACTIVATE to add `product_blob` atomically to all three registries.
-8. Commit and push normally so hooks select each changed layer; inspect receipts and required CI rather than invoking test suites directly. Run only static context audit after routing changes.
-9. Freeze and independently review each implementation candidate at one exact revision before publication.
-10. Only after merged slices and OA-003/OA-004 authorization, Team Lead performs E2E-05.
+1. Independently review and merge the exact RepoInfra planning revision.
+2. Deliver T101 as one AidataFoundation commit. It owns the manual CLI,
+   configuration seam, Azure CLI adapter, executable fake-`az` boundary, and
+   matching parent/leaf routing.
+3. After T101 is green, deliver T102 as one AidataL1L2 commit. It owns opaque
+   staging and immutable completion-directory publication, real-filesystem
+   acceptance, and matching parent/leaf routing.
+4. Bind implementation review to the final head of that two-commit descendant
+   chain. Hooks and required CI own suite execution; do not bypass them.
+5. Treat T7 as a later, separately authorized post-merge operator milestone,
+   not as an implementation task or a substitute for hermetic acceptance.
 
-## Local reader configuration
+No AidataOps, registry, scheduler, activation, L2-L5 transformation, dependency,
+or automatic source-execution task belongs to this graph. If retained production
+cannot satisfy the reviewed contract, stop and return exact evidence to Team
+Lead instead of widening either implementation task.
 
-The tracked default and example stay empty:
+## Local manual configuration
+
+Tracked defaults and examples keep both selectors empty:
 
 ```python
 PRODUCT_BLOB_CONTAINER_URL = ""
+PRODUCT_BLOB_PREFIX = ""
 ```
 
-An authorized operator may set the real query-free HTTPS container URL only in ignored `aidata/config_local.py`. Do not add a token, SAS, account key, tenant/client/principal field, or auth-mode switch. The repository never performs `az login`; unavailable Azure CLI identity is a valid no-op result.
+Only ignored `aidata/config_local.py` may contain the Owner-authorized, query-free
+HTTPS container URL and the single allow-listed VoxPocket prefix. Do not add a
+token, SAS, account key, tenant/client/principal selector, credential field, or
+authentication switch. The product never runs `az login`; it uses the already
+authenticated read-only AAD identity through `--auth-mode login`.
 
-## Hook/CI-owned acceptance evidence
+## Hermetic acceptance
 
-- A normal commit must produce the pre-commit receipt for every
-  resolver-selected changed leaf; a normal push must produce the corresponding
-  pre-push receipt. Do not bypass hooks.
-- Inspect the receipts to confirm the intended leaf and declared gates. Do not
-  invoke pytest, Swift tests, context-run test modes, or Xcode test schemes
-  directly.
-- The AIDashApp local declaration must remain hostless
-  (`AIDashAppLogicTests`). Never run host-based `AIDashAppTests` locally.
-- Required CI owns macOS/iOS app/workspace builds, hostless logic tests, full
-  aidata pytest/Ruff, and structural workflow tests at the pushed revision.
-- `scripts/context/audit`, task freshness, clean generated-project diff,
-  dependency/license review, shell syntax inspection, and changed-file privacy
-  scans are static evidence and may be run directly.
+Apply MB-018–MB-019 through the production CLI and adapter with one executable
+fake `az` and real temporary filesystem state. The fake may record only commands
+actually invoked and cannot manufacture the expected completion result.
 
-## Safe synthetic verification
+Normal commits and pushes must produce the resolver-selected hook receipts for
+their changed layer. Required CI owns the corresponding suites. Static context
+audit, task freshness, shell syntax inspection, changed-file privacy scans, and
+`git diff --check` may be run directly.
 
-- Use neutral fake URLs and fake token providers in hermetic tests.
-- Exercise raw and shell-escaped sentinel strings through the Release injection seam; never use a real secret.
-- Refuse redirects and assert requests are GET-only for the reader.
-- Use temporary raw/clean/warehouse/state paths; never point tests at the operator's real aidata state.
-- Use generated project output only for diff evidence; do not track it.
+## Later manual operator and T7 evidence
 
-## Rollback
+After the reviewed implementation is merged and Team Lead separately authorizes
+the live operation, the bounded collector invocation is exactly:
 
-Producer: persist consent off, close admission, disable/cancel delivery without
-starting or continuing pending upload, await quiescence, and verify ambiguous
-in-flight/pending files, the install ID, and SDK history remain before removing
-release and dependency wiring. Reader: stop scheduled registration and code paths without
-deleting accepted append-only raw or warehouse evidence. Any requested
-deletion/migration is a separate decision.
+```bash
+gtimeout --signal=KILL 300s python3.14 aidata/cli.py product-blob
+```
+
+The external GNU timeout is an operator boundary, not a scheduler or product
+supervisor. A separately requested one-time
+`python3.14 aidata/cli.py collect` remains generic producer evidence and must not
+be presented as Blob ingestion evidence.
+
+Real Blob names and the completion-directory association stay only in the
+Owner's private workflow evidence file. T7 must associate the real TestFlight
+build, the selected Blob, and the published completion batch, then run a query
+explicitly limited to that batch and Blob to prove no duplicate counting within
+that result. It must not claim cross-run incremental or idempotent behavior, and
+no real endpoint, Blob name, resource identifier, credential, payload, or
+absolute private path may enter the repository or issue.
+
+## Rollback boundary
+
+Before the atomic directory rename, failure, empty success, or interruption
+produces no completion. An abandoned private stage is never a result. After the
+rename, the whole immutable directory is complete even if the caller loses the
+success response. Completed batches are preserved; deletion or migration is a
+separate Owner decision.

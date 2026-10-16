@@ -1,22 +1,19 @@
-# Contract: E2E-05 Sanitized Evidence
+# Contract Pointer: Manual-Batch T7 Evidence
 
-This is a post-merge, cross-repository acceptance gate owned by Team Lead. It is not authority for a repository implementer to edit another repository, read credentials, change roles, or run a live canary before OA-003/OA-004 approval.
+## Status
 
-For each of VitalStride and AIDash, the bounded evidence set must contain:
+The former cross-product E2E-05 reader path through per-object L1 state, L3,
+and L4 is superseded for this feature by
+[`manual-batch-collector.md`](manual-batch-collector.md) MB-017. That contract is
+the sole authority for the later private batch/Blob-scoped T7 evidence and its
+public privacy boundary.
 
-1. Exact merged repository revision and recorded UTC interval.
-2. One allowlisted action canary and one allowlisted performance canary from actual product composition. For AIDash these are exactly `aidash.action` with `action_name=briefing_viewed` and `aidash.performance.ready_scene` with finite nonnegative integer `duration_ms`.
-3. Product/build plus sanitized object-path fingerprint, ETag or content hash, and observed receipt time.
-4. Matching deterministic `aidata` source-event key and L1 completion checkpoint.
-5. Matching `fact_product_event` grain/count and bounded L4 query row.
-6. Rerun proof with no duplicate fact/query row.
-7. One deliberately unsafe event rejected before accepted persistence/network and absent from Blob and L4.
-8. Sanitized authorization evidence that each writer is create-only and the reader is read/list-only, without exposing the real endpoint, principal metadata, token, SAS, or account key.
+Existing producer, consent, event-wire, and rollback acceptance remains governed
+by [`aidash-events.md`](aidash-events.md) and the producer/lifecycle sections of
+[`blob-wire.md`](blob-wire.md); this pointer changes none of it. Generic
+`python3.14 aidata/cli.py collect`, templates, fake traces, and test counts are
+not manual Blob-ingestion evidence.
 
-AIDash's expected set contains only those two event names, each no more than
-once in the eligible GUI lifecycle, and zero SDK-owned heartbeat events. Object
-count is proven by correlated keys, not inferred from event count or `flush()`.
-
-Evidence uses fingerprints/redactions for install IDs and paths. Raw event payloads, personal identifiers, unrestricted endpoints, credentials, and local paths are prohibited.
-
-E2E-05 passes only when both products and both event types correlate through producer, Blob, L1, L3, and L4 and the independent reviewer verifies the exact merged revisions.
+T7 remains a post-merge milestone requiring separate live authorization. This
+file authorizes no source change, credential access, Azure role/resource change,
+live command, TestFlight operation, or query-product implementation.
