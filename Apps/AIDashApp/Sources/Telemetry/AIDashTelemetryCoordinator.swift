@@ -26,6 +26,12 @@ struct AIDashTelemetryEvent: Equatable, Sendable {
     }
 }
 
+enum AIDashTelemetryReconciliationEvent {
+    case desiredConsentChanged(Bool)
+    case workerStarted
+    case workerFinished
+}
+
 @MainActor
 final class AIDashTelemetryCoordinator {
     private let preferences: AIDashTelemetryPreferences
@@ -35,9 +41,11 @@ final class AIDashTelemetryCoordinator {
     private let launchStart: Duration?
     private let monotonicNow: () -> Duration
     private let wallNow: () -> Date
+    private let reconciliationObserver: (AIDashTelemetryReconciliationEvent) -> Void
     private var service: AIDashTelemetryServicing?
     private var deliveryTask: Task<Void, Never>?
-    private var consentTransition: Task<Void, Never>?
+    private var quiescingDeliveryTask: Task<Void, Never>?
+    private var reconciliationWorker: Task<Void, Never>?
     private var consentRevision = 0
     private var desiredConsent = false
     private var acceptsReadyEvent = false
@@ -50,7 +58,8 @@ final class AIDashTelemetryCoordinator {
         factory: AIDashTelemetryFactory = .live,
         launchStart: Duration?,
         monotonicNow: @escaping () -> Duration,
-        wallNow: @escaping () -> Date = Date.init
+        wallNow: @escaping () -> Date = Date.init,
+        reconciliationObserver: @escaping (AIDashTelemetryReconciliationEvent) -> Void = { _ in }
     ) {
         self.mode = mode
         self.preferences = preferences
@@ -59,6 +68,7 @@ final class AIDashTelemetryCoordinator {
         self.launchStart = launchStart
         self.monotonicNow = monotonicNow
         self.wallNow = wallNow
+        self.reconciliationObserver = reconciliationObserver
 
         guard mode == .gui,
               case .establishedEnabled(let identifier) = preferences.state,
@@ -84,34 +94,53 @@ final class AIDashTelemetryCoordinator {
 
     func setConsent(_ enabled: Bool) async {
         consentRevision &+= 1
-        let revision = consentRevision
         desiredConsent = enabled
-        let quiescingDelivery: Task<Void, Never>?
+        reconciliationObserver(.desiredConsentChanged(enabled))
         if enabled {
-            quiescingDelivery = nil
+            startReconciliationWorkerIfNeeded()
         } else {
             _ = preferences.setConsent(false)
             acceptsReadyEvent = false
             service?.isEnabled = false
-            quiescingDelivery = deliveryTask
-            deliveryTask = nil
-            quiescingDelivery?.cancel()
+            if let deliveryTask {
+                self.deliveryTask = nil
+                deliveryTask.cancel()
+                quiescingDeliveryTask = deliveryTask
+            }
+            startReconciliationWorkerIfNeeded()
         }
 
-        let previousTransition = consentTransition
-        let transition = Task { @MainActor [weak self] in
-            await previousTransition?.value
-            await quiescingDelivery?.value
-            guard enabled,
-                  let self,
-                  self.desiredConsent,
-                  self.consentRevision == revision else {
-                return
+        await reconciliationWorker?.value
+    }
+
+    private func startReconciliationWorkerIfNeeded() {
+        guard reconciliationWorker == nil else { return }
+        reconciliationWorker = Task { @MainActor [weak self] in
+            guard let self else { return }
+            reconciliationObserver(.workerStarted)
+            defer {
+                reconciliationObserver(.workerFinished)
+                reconciliationWorker = nil
             }
-            self.applyConsentEnabled()
+            await reconcileConsent()
         }
-        consentTransition = transition
-        await transition.value
+    }
+
+    private func reconcileConsent() async {
+        while true {
+            let revision = consentRevision
+            let desiredConsent = desiredConsent
+            if let quiescingDeliveryTask {
+                await quiescingDeliveryTask.value
+                self.quiescingDeliveryTask = nil
+            }
+
+            guard revision == consentRevision else { continue }
+            guard desiredConsent, self.desiredConsent else { return }
+            applyConsentEnabled()
+            guard revision == consentRevision, self.desiredConsent else { continue }
+            return
+        }
     }
 
     private func applyConsentEnabled() {

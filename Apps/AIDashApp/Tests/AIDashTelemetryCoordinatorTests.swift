@@ -259,6 +259,8 @@ struct AIDashTelemetryCoordinatorTests {
         var cancellationObserved = false
         var allowCancelledGenerationToExit = false
         var order: [String] = []
+        var activeWorkers = 0
+        var maximumActiveWorkers = 0
         let service = TelemetryServiceSpy()
         service.flushHandler = {
             if service.flushCount == 1 {
@@ -285,7 +287,18 @@ struct AIDashTelemetryCoordinatorTests {
             configuration: validConfiguration(),
             factory: AIDashTelemetryFactory { _ in service },
             launchStart: .zero,
-            monotonicNow: { .milliseconds(5) }
+            monotonicNow: { .milliseconds(5) },
+            reconciliationObserver: { event in
+                switch event {
+                case .desiredConsentChanged:
+                    break
+                case .workerStarted:
+                    activeWorkers += 1
+                    maximumActiveWorkers = max(maximumActiveWorkers, activeWorkers)
+                case .workerFinished:
+                    activeWorkers -= 1
+                }
+            }
         )
 
         coordinator.readySceneAppeared()
@@ -315,6 +328,8 @@ struct AIDashTelemetryCoordinatorTests {
         ])
         #expect(service.isEnabled)
         #expect(generated == 0)
+        #expect(maximumActiveWorkers == 1)
+        #expect(activeWorkers == 0)
         #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
     }
 
@@ -327,6 +342,9 @@ struct AIDashTelemetryCoordinatorTests {
         preferenceDefaults.set(true, forKey: "telemetry.sendUsageData")
         var cancellationObserved = false
         var allowCancelledGenerationToExit = false
+        var observedIntermediateEnable = false
+        var activeWorkers = 0
+        var maximumActiveWorkers = 0
         let service = TelemetryServiceSpy()
         service.flushHandler = {
             if service.flushCount == 1 {
@@ -350,7 +368,20 @@ struct AIDashTelemetryCoordinatorTests {
             configuration: validConfiguration(),
             factory: AIDashTelemetryFactory { _ in service },
             launchStart: .zero,
-            monotonicNow: { .milliseconds(5) }
+            monotonicNow: { .milliseconds(5) },
+            reconciliationObserver: { event in
+                switch event {
+                case .desiredConsentChanged(true):
+                    observedIntermediateEnable = true
+                case .desiredConsentChanged(false):
+                    break
+                case .workerStarted:
+                    activeWorkers += 1
+                    maximumActiveWorkers = max(maximumActiveWorkers, activeWorkers)
+                case .workerFinished:
+                    activeWorkers -= 1
+                }
+            }
         )
 
         coordinator.readySceneAppeared()
@@ -362,11 +393,16 @@ struct AIDashTelemetryCoordinatorTests {
             await Task.yield()
         }
         let staleEnable = Task { await coordinator.setConsent(true) }
+        while !observedIntermediateEnable {
+            await Task.yield()
+        }
         let latestDisable = Task { await coordinator.setConsent(false) }
         await Task.yield()
 
         #expect(!service.isEnabled)
         #expect(!preferenceDefaults.bool(forKey: "telemetry.sendUsageData"))
+        #expect(maximumActiveWorkers == 1)
+        #expect(activeWorkers == 1)
         allowCancelledGenerationToExit = true
         await firstDisable.value
         await staleEnable.value
@@ -376,7 +412,10 @@ struct AIDashTelemetryCoordinatorTests {
         #expect(service.flushCount == 1)
         #expect(!service.isEnabled)
         #expect(!preferenceDefaults.bool(forKey: "telemetry.sendUsageData"))
+        #expect(maximumActiveWorkers == 1)
+        #expect(activeWorkers == 0)
         #expect(preferenceDefaults.string(forKey: "telemetry.installID") == identifier.uuidString)
+        #expect(preferenceDefaults.bool(forKey: "telemetry.identityEstablished"))
     }
 
     @Test("settings authority is present only for non-headless GUI composition")
