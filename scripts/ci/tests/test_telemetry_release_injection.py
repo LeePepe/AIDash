@@ -52,7 +52,7 @@ class TelemetryReleaseInjectionTests(unittest.TestCase):
             check=False,
         )
 
-    def run_release(self, force_failure=False):
+    def run_release(self, force_failure=False, env_overrides=None):
         harness = self.scratch / "fastlane_release_harness.rb"
         harness.write_text(
             textwrap.dedent(
@@ -123,6 +123,11 @@ class TelemetryReleaseInjectionTests(unittest.TestCase):
             "TELEMETRY_XCCONFIG_PATH": str(self.config),
             "FORCE_RELEASE_FAILURE": "1" if force_failure else "0",
         }
+        for key, value in (env_overrides or {}).items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
         return subprocess.run(
             ["ruby", str(harness), str(FASTFILE)],
             cwd=ROOT / "fastlane",
@@ -171,6 +176,28 @@ class TelemetryReleaseInjectionTests(unittest.TestCase):
                     ["-xcconfig", str(self.config)],
                 )
                 self.assertFalse(self.config.exists())
+
+    def test_actual_release_path_cleans_up_after_wrong_mode(self):
+        created = self.run_helper("create")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.config.chmod(0o644)
+
+        release = self.run_release()
+
+        self.assertEqual(release.returncode, 23, release.stdout + release.stderr)
+        self.assert_no_sentinel(release)
+        self.assertIn("private runner-temp file", release.stdout)
+        self.assertFalse(self.config.exists())
+
+    def test_actual_release_path_cleans_up_after_preflight_failure(self):
+        created = self.run_helper("create")
+        self.assertEqual(created.returncode, 0, created.stderr)
+
+        release = self.run_release(env_overrides={"ASC_KEY_ID": None})
+
+        self.assertEqual(release.returncode, 23, release.stdout + release.stderr)
+        self.assert_no_sentinel(release)
+        self.assertFalse(self.config.exists())
 
     def test_workflow_uses_protected_names_and_path_only_handoff(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
