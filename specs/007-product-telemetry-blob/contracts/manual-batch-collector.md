@@ -16,9 +16,12 @@ reference this contract rather than restating its mechanics.
 - **MB-003 — Trusted local host**: The Owner's local filesystem and same-user
   processes are trusted. At startup the collector rejects symlink and
   non-directory terminal paths for the product root, staging root, and
-  completion root, and requires current-UID private directories. Same-user
-  replacement after those checks is outside the threat model; descriptor
-  confinement and repeated metadata-call choreography are not required.
+  completion root, and requires each directory's `st_uid` to equal the current
+  effective UID with no group/other permission bits (`st_mode & 0o077 == 0`).
+  New private directories are created mode `0700`; every stage and completion
+  remains current-UID-owned and private. Same-user replacement after those
+  checks is outside the threat model; descriptor confinement and repeated
+  metadata-call choreography are not required.
 
 ## Configuration and preflight
 
@@ -34,6 +37,9 @@ reference this contract rather than restating its mechanics.
   values exist only in ignored `aidata/config_local.py`.
   That local prefix is the Owner-approved single VoxPocket allowlist value; the
   command accepts no selector argument or per-run override.
+  The future AidataFoundation context migration records URL plus this single
+  prefix as the only noncredential selector exception for `product_blob`; its
+  URL-only/default-empty rule remains unchanged for every other source.
 - **MB-005 — Azure CLI preflight**: the implementation resolves one external
   `az` executable and invokes these exact argv sequences with MB-006's child
   environment:
@@ -96,16 +102,23 @@ reference this contract rather than restating its mechanics.
   paths remain byte-for-byte opaque. The collector does not decompress,
   parse, redact, hash for identity, normalize, rename individual leaves, or
   enforce custom per-file/run byte caps. After exit `0`, it checks only the
-  filesystem shape needed for safe publication: no symlink or special object,
-  no path escape, and at least one regular downloaded object.
+  filesystem shape needed for safe publication: every entry is a real directory
+  or regular file, no entry is a symlink or another special type, every lexical
+  and resolved entry remains beneath the run stage, and at least one regular
+  downloaded object exists. `product_blob` is the sole opaque immutable-L1,
+  no-normalize exception to the AidataL1L2 collect+normalize and redacted
+  append-only-raw defaults; those defaults remain unchanged for every other
+  adapter.
 - **MB-010 — One atomic publication**: after a successful nonempty batch, the
   collector fsyncs every downloaded regular file and the staged directory tree,
   performs exactly one same-filesystem atomic directory rename/`os.replace`
   from the run stage to an absent `batches/<batch-id>`, then fsyncs the
   completion parent. The rename is the commit point. Before it there is no
   completion; after it the entire immutable batch is complete even if the
-  caller loses the success response. Existing completion directories are never
-  overwritten or mutated.
+  caller loses the success response or execution is interrupted. Once the real
+  delegated rename returns, later response construction/return failure or
+  post-commit interruption must not clean, mutate, or reclassify the completed
+  directory. Existing completion directories are never overwritten or mutated.
 - **MB-011 — Empty, failure, and interruption**: Azure exit `0` with zero
   regular objects is an `empty` no-op and publishes no completion. Invalid
   config, preflight failure, nonzero batch exit, unsafe output, or any
@@ -152,15 +165,45 @@ reference this contract rather than restating its mechanics.
   timeout is an operator boundary, not repository scheduling or a second
   product supervisor. The repository adds no timer, process-tree manager, or
   unattended wrapper.
-- **MB-017 — Private T7 evidence**: only after merge and separate live
-  authorization, the operator associates the actual TestFlight build, actual
-  Blob relative name, completion batch ID/relative path, and a query explicitly
-  filtered to that completion batch and Blob. The query proves the scoped
-  result/count contains no duplicate within that batch; it does not claim
-  cross-run incremental idempotency. Actual Blob names and local paths stay in
-  the Owner's private workflow evidence file, never in the public repository or
-  issue. Generic `collect` is separately labelled and is not Blob-ingestion
-  evidence.
+- **MB-017 — Temporary private T7 query**: only after both the final VoxPocket
+  producer and collector heads are merged, the Owner-authorized workflow 05
+  lead/operator verifies that the existing live-operation authorization still
+  applies and starts one manual collection/query through a Codex subagent in
+  that workflow lead's local session. The Multica Team Lead neither owns that
+  local subagent nor gains personal TestFlight/Azure authority from this plan.
+  This is not collector behavior, product query/state-machine code, L2-L5
+  state, credential authority, personal TestFlight authority, an unauthorized
+  manual dispatch, or current authorization to execute a live operation.
+
+  The subagent opens each selected gzip file exactly once, streams its NDJSON in
+  source order, and validates the SDK 0.2.0 wire before counting: `name` is a
+  string, `properties` is a string-to-string dictionary, and `timestamp` is a
+  UTC timestamp. Immediately before execution, the workflow lead re-reads the
+  exact final merged VoxPocket
+  `specs/012-azure-blob-telemetry/contracts/product-telemetry-contract.md` and
+  records its exact head. That final merged contract is the sole authority for
+  event names, property/value constraints, and which records contribute to
+  product-event counts; this collector contract deliberately copies no producer
+  vocabulary. AIDash's `aidash-events.md` remains unchanged AIDash producer
+  authority and does not govern this VoxPocket query. Input and records are
+  limited by the selected TestFlight build from the producer path, authorized
+  UTC window, completion batch ID, and exact relative Blob path.
+
+  Each source line is located by `(batch-id, relative Blob path, NDJSON line
+  number)`. Locator keys must be unique; identical content on different lines is
+  counted separately and is never content-deduplicated. The query makes no
+  cross-batch or cross-run incremental/idempotency claim.
+
+  Evidence is aggregate-only: the product-event counts and property-validation
+  results required by the exact final merged producer contract, total validated
+  lines, duplicate locator keys exactly `0`, the
+  selected TestFlight build/Blob/completion-relative L1 association, the UTC
+  window, and query summary/output. Real build, Blob, and L1 path values remain
+  only in the Owner's local workflow evidence file; public evidence uses
+  sanitized labels/counts. It prints no payload, free text, install identity,
+  endpoint, principal metadata, credential, token, SAS, key, or absolute local
+  path, and no plan/template may prefill or fabricate live values. Generic
+  `collect` is separately labelled and is not Blob-ingestion evidence.
 
 ## Hermetic acceptance
 
@@ -176,6 +219,11 @@ reference this contract rather than restating its mechanics.
   pre-commit-point completion, zero-object no-op, byte-identical nonempty
   completion, fsync plus one directory publish plus parent fsync, ignored
   abandoned stages, untouched earlier completions, and a distinct later batch.
+  Real-filesystem cases also observe current-UID ownership and private modes for
+  roots/stage/completion; reject terminal symlink/non-directory, output symlink,
+  special file, and lexical/resolved path escape; and delegate to the real
+  atomic rename before inducing response loss/post-commit interruption, proving
+  the full immutable completion remains. The fixture never creates that final.
   Assertions use invoked argv and real filesystem outcomes, not generic traces
   or test counts.
 
@@ -183,7 +231,10 @@ reference this contract rather than restating its mechanics.
 
 - **MB-020 — Superseded reader model**: the earlier Python
   `DefaultAzureCredential` plus hand-built LIST/GET reader, page/object cursors,
-  per-object raw IDs, custom 8 MiB/64 MiB caps, NDJSON parsing, L2-L4 product
-  rows/query, registry activation, Ops runner, scheduler, and cross-run
-  resume/deduplication are not part of this feature. No existing live-main
-  product behavior or test is deleted or weakened by this planning decision.
+  per-object raw IDs, custom 8 MiB/64 MiB caps, collector-side NDJSON parsing,
+  durable/product L2-L4 rows/query, registry activation, Ops runner, scheduler,
+  and cross-run resume/deduplication are not part of this feature. MB-017's
+  temporary read-only evidence query is the sole parsing exception and creates
+  no repository entity, table, product state, or reusable query surface. No
+  existing live-main product behavior or test is deleted or weakened by this
+  planning decision.

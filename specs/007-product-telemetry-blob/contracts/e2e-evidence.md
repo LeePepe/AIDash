@@ -14,6 +14,10 @@ by [`aidash-events.md`](aidash-events.md) and the producer/lifecycle sections of
 `python3.14 aidata/cli.py collect`, templates, fake traces, and test counts are
 not manual Blob-ingestion evidence.
 
+Those AIDash producer documents do not define the VoxPocket events counted by
+T7. MB-017 requires the workflow 05 lead/operator to re-read the exact final
+merged VoxPocket producer contract/head immediately before the temporary query.
+
 T7 remains a post-merge milestone requiring separate live authorization. This
 file authorizes no source change, credential access, Azure role/resource change,
 live command, TestFlight operation, or query-product implementation.

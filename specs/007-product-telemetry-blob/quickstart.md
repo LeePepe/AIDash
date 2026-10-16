@@ -27,11 +27,12 @@ secret, credential-bearing URL, or absolute private path.
 
 1. Independently review and merge the exact RepoInfra planning revision.
 2. Deliver T101 as one AidataFoundation commit. It owns the manual CLI,
-   configuration seam, Azure CLI adapter, executable fake-`az` boundary, and
-   matching parent/leaf routing.
+   configuration, adapter-import/return seam, and matching parent/leaf routing;
+   it owns no Azure child or filesystem proof.
 3. After T101 is green, deliver T102 as one AidataL1L2 commit. It owns opaque
-   staging and immutable completion-directory publication, real-filesystem
-   acceptance, and matching parent/leaf routing.
+   Azure CLI adapter, executable fake-`az` boundary, staging and immutable
+   completion-directory publication, real-filesystem acceptance, and matching
+   parent/leaf routing.
 4. Bind implementation review to the final head of that two-commit descendant
    chain. Hooks and required CI own suite execution; do not bypass them.
 5. Treat T7 as a later, separately authorized post-merge operator milestone,
@@ -70,8 +71,10 @@ audit, task freshness, shell syntax inspection, changed-file privacy scans, and
 
 ## Later manual operator and T7 evidence
 
-After the reviewed implementation is merged and Team Lead separately authorizes
-the live operation, the bounded collector invocation is exactly:
+After the reviewed producer and collector implementations are merged, the
+Owner-authorized workflow 05 lead/operator re-checks the exact final VoxPocket
+producer contract/head and confirms that the existing live authorization still
+applies. The bounded collector invocation is exactly:
 
 ```bash
 gtimeout --signal=KILL 300s python3.14 aidata/cli.py product-blob
@@ -83,10 +86,15 @@ supervisor. A separately requested one-time
 be presented as Blob ingestion evidence.
 
 Real Blob names and the completion-directory association stay only in the
-Owner's private workflow evidence file. T7 must associate the real TestFlight
-build, the selected Blob, and the published completion batch, then run a query
-explicitly limited to that batch and Blob to prove no duplicate counting within
-that result. It must not claim cross-run incremental or idempotent behavior, and
+Owner's private workflow evidence file. The workflow 05 lead/operator uses a
+Codex subagent in the workflow lead's local session to perform MB-017's temporary
+read-only query for the real TestFlight build, selected Blob, and published
+completion batch. It validates the one-pass source-line stream against the exact
+final merged VoxPocket producer contract, applies the required filters, and
+emits only the required aggregates. The Multica Team Lead does not own that
+local subagent or acquire personal TestFlight/Azure authority. The query must
+not create product query state or claim cross-run incremental/idempotent
+behavior, and
 no real endpoint, Blob name, resource identifier, credential, payload, or
 absolute private path may enter the repository or issue.
 

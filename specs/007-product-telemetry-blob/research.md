@@ -108,8 +108,11 @@ pagination/GET/token handling, custom caps, checkpoints, and cross-run recovery.
 The batch and real selectors remain private local operational state.
 
 **Dependency consequence**: none. Azure CLI is an external operator/runtime
-tool with zero repository binary, build-time, Swift-concurrency, or Python-lock
-cost. The contract pins the accepted CLI version/cloud preflight.
+tool with a real operator-machine installation, runtime, subprocess/preflight,
+and disk cost. It adds zero repository/product binary bytes, build-system work,
+Swift-concurrency surface, or Python-lock cost. Accepted ADR-005 records the
+architecture, alternatives, and cost; the contract pins the mechanics and
+accepted CLI version/cloud preflight.
 
 **Alternatives rejected**:
 
@@ -140,6 +143,9 @@ Failure or interruption before the completion point creates no result, and an
 abandoned stage is never considered one. Later successful invocations produce
 independent directories without resume, checkpoint, deduplication, or
 cross-run idempotency. Full mechanics remain exclusively in the contract.
+Real-filesystem acceptance observes current UID/private modes, unsafe terminal
+and output types/path escape, and completed-directory retention when response
+loss or interruption occurs after the real delegated rename.
 
 ## Layering result
 
@@ -160,4 +166,8 @@ cross-run idempotency. Full mechanics remain exclusively in the contract.
   pass independent review and merge before implementation is dispatched.
 - Separate live-operation authority gates TestFlight, Azure, manual collection,
   and private T7 evidence. Those operations do not block hermetic
-  implementation and are not authorized by this plan.
+  implementation and are not authorized by this plan. After both merges, the
+  Owner-authorized workflow 05 lead/operator—not the Multica Team Lead—must
+  re-read the exact final merged VoxPocket producer contract/head, confirm the
+  existing authorization still applies, and use any Codex subagent only in the
+  workflow lead's own local session.

@@ -32,10 +32,11 @@ are outside this repository-planning slice.
 ### Removed planned behavior
 
 - Owner decision `no-reset-v1` supersedes the earlier planned install-ID Reset.
-  Telemetry is not implemented at the fixed base, so this removes no production
-  behavior or existing test. Version 1 must expose no Reset/rotation surface,
-  shared-telemetry reset API, or private-catalog parsing. A future Reset requires
-  its own SDK feature and product decision.
+  The producer and consent implementation are present at the fixed base; only
+  the superseded Reset/rotation surface was never implemented. This removes no
+  production behavior or existing test. Version 1 must expose no Reset/rotation
+  surface, shared-telemetry reset API, or private-catalog parsing. A future Reset
+  requires its own SDK feature and product decision.
 - The selected manual-batch decision supersedes the unshipped Python
   `DefaultAzureCredential`/LIST+GET, page/object cursor, per-file registration,
   custom cap, L2-L4, source activation, Ops, scheduler, and cross-run
@@ -92,18 +93,23 @@ only public CLI output and staging/completion filesystem outcomes.
 1. Given both tracked selectors are empty, when `product-blob` runs, then it
    returns the Constitution JSON `empty` success envelope and creates no Azure
    child, stage, or completion.
-2. Given one valid private container URL/prefix and the existing signed-in
+2. Given current-UID-owned private directory roots and one valid private
+   container URL/prefix with the existing signed-in
    read-only identity, when the exact Azure batch exits `0` with at least one
    object, then one byte-identical opaque file tree is fsynced and published by
    one atomic directory rename; stdout contains only the safe `completed`
    envelope.
-3. Given invalid/partial config, failed preflight, nonzero batch, unsafe output,
+3. Given invalid/partial config, an unsafe terminal, failed preflight, nonzero
+   batch, an output symlink/special file/path escape,
    zero objects, or interruption before the atomic commit point, then no
    completion is published. Catchable failure uses the fixed neutral error;
    an abandoned private stage is never considered a result.
 4. Given an earlier completion and any later invocation, then the earlier
    directory is never written, renamed, removed, scanned for identity, or used
    for deduplication. A later successful batch creates a distinct directory.
+5. Given the production atomic directory rename returns and response delivery
+   then fails or execution is interrupted, the completed private/current-UID
+   directory remains whole, immutable, and classified as completion.
 
 ### User Story 3 — Batch/Blob-scoped T7 proof (Priority: P2)
 
@@ -120,8 +126,12 @@ batch/Blob-filtered query result/count required by `contracts/e2e-evidence.md`.
 
 1. Private evidence relates the actual build and Blob name to one immutable
    completion batch; public evidence exposes neither value nor a local path.
-2. The real query is explicitly filtered to that batch and Blob and proves no
-   duplicate within that scope only.
+2. After producer and collector merge, the Owner-authorized workflow 05
+   lead/operator confirms the existing authorization, re-reads the exact final
+   merged VoxPocket producer contract/head, and uses a Codex subagent in the
+   workflow lead's local session to execute MB-017. Unique source locators prove
+   duplicate locator count `0`; identical content lines remain separately
+   counted.
 3. Sanitized authorization evidence proves the producer remains create-only
    and the Owner's reader identity remains read/list-only without revealing a
    token, SAS, key, endpoint, or principal metadata.
@@ -145,6 +155,10 @@ batch/Blob-filtered query result/count required by `contracts/e2e-evidence.md`.
   completion even if no success envelope reaches the caller.
 - Symlinks/special files in Azure output reject publication. Gzip bytes are
   otherwise opaque and receive no parse, redaction, per-file cap, or raw ID.
+- Directory roots, stages, and completions must be current-UID-owned with no
+  group/other mode bits; lexical and resolved output paths stay beneath stage.
+- Response loss or interruption after the delegated atomic rename cannot undo
+  or reclassify the already completed directory.
 - The real endpoint or a personal identity accidentally present in a fixture, doc, log, error, or tracked config is a release-blocking failure.
 
 ## Requirements
@@ -161,8 +175,12 @@ batch/Blob-filtered query result/count required by `contracts/e2e-evidence.md`.
   pre-commit interruption produce none.
 - **FR-006**: Final T7 acceptance MUST privately associate the actual
   TestFlight build and one Blob with one completion batch and a real query
-  explicitly filtered to that batch/Blob. It MUST prove only in-batch scoped
-  count/nonduplication and MUST NOT claim cross-run incremental idempotency.
+  explicitly filtered by build, authorized UTC window, batch ID, and relative
+  Blob path. The query MUST apply MB-017's SDK 0.2.0 schema, exact-final-merged
+  VoxPocket producer-contract authority, one-pass read, source-line locator,
+  and aggregate-only evidence rules; it MUST
+  prove duplicate locator count `0`, count identical lines separately, and MUST
+  NOT claim cross-run incremental idempotency.
 - **FR-007**: Writer and reader permissions, local selectors, output, evidence,
   and rollback MUST remain least-privilege and private. No agent may
   create/read/copy a credential, real endpoint/prefix, actual Blob name, or
@@ -208,7 +226,8 @@ batch/Blob-filtered query result/count required by `contracts/e2e-evidence.md`.
   Owner's existing externally administered read-only identity, with no
   config-supplied credential or token parsing.
 - **Manual Batch Evidence**: Private association across exact merged revision,
-  actual build/Blob, one completion batch, and one batch/Blob-scoped query.
+  actual build/Blob, one completion batch, and MB-017's temporary read-only,
+  aggregate-only batch/Blob-scoped query.
 
 ## Success criteria
 
@@ -216,14 +235,19 @@ batch/Blob-filtered query result/count required by `contracts/e2e-evidence.md`.
 - **SC-002**: Hook/CI-owned hermetic reader evidence proves exact Azure
   preflight/batch argv and environment, fixed private output, disabled/empty/
   failure/interruption behavior, byte-identical completion, fsync plus one
-  atomic directory publish, abandoned-stage ignore, and independent later
-  completion.
+  atomic directory publish, current-UID/private-mode enforcement,
+  symlink/special/path-escape rejection, post-rename response-loss retention,
+  abandoned-stage ignore, and independent later completion.
 - **SC-003**: Repository scanning and final diff prove no per-file registry,
   parser, cap, state/checkpoint, dependency, generic activation, Ops, scheduler,
   or L2-L5 product implementation was added.
 - **SC-004**: The final private evidence bundle associates the actual
   TestFlight build and Blob with one completion batch and one batch/Blob-scoped
-  query result/count without public identifiers.
+  MB-017 query result: all product-event counts and property validations
+  required by the exact final merged VoxPocket producer contract, total
+  validated lines, duplicate locator keys `0`, UTC window, and query summary
+  without public identifiers or payload. Records the final contract classifies
+  outside product-event counting do not contribute to those counts.
 - **SC-005**: Repository scanning finds no real endpoint, personal identity metadata, token, SAS, account key, or secret in the planned/implemented change.
 - **SC-006**: All owning layer gates, repository context audit, required CI, dependency identity proof, and independent exact-revision reviews pass.
 
@@ -237,5 +261,8 @@ batch/Blob-filtered query result/count required by `contracts/e2e-evidence.md`.
   this reader plan.
 - Separate explicit live-operation approval gates TestFlight, Azure,
   collection, and query evidence, not hermetic implementation.
-- T7 begins only after the exact implementation head is merged and those
-  external authorizations exist.
+- T7 begins only after the exact producer and collector heads are merged, the
+  workflow 05 lead verifies the final merged VoxPocket producer contract/head,
+  and the Owner's existing external authorizations still apply. This plan gives
+  the Multica Team Lead no local-session, credential, TestFlight, Azure, or
+  manual-dispatch authority.

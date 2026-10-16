@@ -68,7 +68,7 @@ deleted or weakened.
 | §B CLI Surface | PASS — MB-014 and MB-015 use the Constitution success/error envelopes; the failure message is fixed and neutral |
 | §D Error Handling | PASS — all config/process/filesystem failures degrade without crash or private interpolation |
 | §G Test Coverage | PASS — the dedicated command has real success and validation/failure evidence through its public seam |
-| §Dependencies | PASS — external Azure CLI/GNU timeout add no repository or Swift dependency |
+| §Dependencies | PASS — accepted ADR-005 records the external installed-binary/runtime cost and the zero repository-build/Swift-concurrency cost |
 | §Testing / Quality Gates | PASS — hooks/CI own tests; the Planner runs only documented static planning checks |
 | §No Identity in Version Control | PASS — both selectors are empty when tracked; fixtures and evidence are neutral/hermetic |
 | Layer direction | PASS — RepoInfra authority precedes separate AidataFoundation and AidataL1L2 commits |
@@ -78,7 +78,7 @@ No Constitution or gate change is planned.
 ## Canonical artifacts
 
 ```text
-docs/adr/005-azure-cli-reader-identity.md       # superseded pointer
+docs/adr/005-azure-cli-reader-identity.md       # accepted direct-CLI/operator boundary
 specs/007-product-telemetry-blob/
 ├── spec.md
 ├── plan.md
@@ -113,7 +113,9 @@ completion.
 
 The completion-directory rename is the commit point. A kill before it leaves
 no completion; after it, the whole batch is complete even if the caller loses
-the success response. This is atomic completion, not partial recovery state.
+the success response. Tests must delegate to the real rename before inducing
+that response loss/post-commit interruption and observe the retained whole
+directory. This is atomic completion, not partial recovery state.
 
 ## Future implementation paths and commits
 
@@ -135,6 +137,15 @@ success/error envelopes, fixed neutral failure message, config/import/return val
 Foundation routing. It does not add an adapter, registry entry, dependency,
 runner, schedule, or generic-collect behavior.
 
+The Foundation context change must say URL plus one prefix are the only
+noncredential `product_blob` selectors, tracked defaults stay empty, the one
+configured prefix is the Owner-allow-listed VoxPocket value, real values remain
+ignored/local, and no credential/auth-mode field is tracked. Foundation-owned
+`aidata/tech-context.md` must record `product_blob` as the sole manual opaque
+immutable-L1/no-normalize exception. Every other source retains its existing
+selectors/config defaults and paired collect→normalize/append-only-redaction
+behavior.
+
 ### Commit 2 — `MANUAL-L12` / AidataL1L2
 
 Exact owned paths:
@@ -144,9 +155,16 @@ Exact owned paths:
 - matching L1/L2 test-routing hunk in `aidata/CONTEXT.md`
 - `aidata/tests/test_product_blob.py` (new)
 
-Outcome: the complete MB-001–MB-020 adapter behind the command, one executable
-fake `az`, and direct argv/privacy/filesystem acceptance. It does not use
-`rawio.py`, normalize, merge, schema, query, L5, scripts, registries, or state.
+Outcome: the MB-001–MB-003, MB-005–MB-012, MB-016, and MB-018–MB-020 adapter
+behind the command, consuming T101's MB-004 and MB-013–MB-015 boundary while
+leaving MB-017 to external T7; one executable fake `az`; and direct
+argv/privacy/filesystem acceptance. It does not use `rawio.py`, normalize,
+merge, schema, query, L5, scripts, registries, or state.
+
+The L1/L2 context change must say `product_blob` alone lands opaque immutable L1
+without normalize/redacted append-only raw records. Collection remains
+read-only; every other adapter retains the existing paired collect+normalize,
+redacted append-only-raw, dependency-direction, and unconfigured-no-op defaults.
 
 `MANUAL-L12` depends on `MANUAL-FOUND`, matching
 `AidataL1L2 → AidataFoundation`. Each commit is independently hook-verifiable;
@@ -174,9 +192,11 @@ activation task. The task metadata is in `tasks.md`.
   hermeticity, the additive CLI boundary, success envelope, and neutral failure.
 - L1/L2: one fake executable drives exact preflight/batch argv and child
   environment through the real interface. Tests assert real stage/completion
-  outcomes, byte equality, fsync/rename calls, no private output, no completion
-  on empty/nonzero/pre-commit interruption, abandoned-stage ignore, and
-  independent later completion.
+  outcomes, byte equality, current-UID/private modes, unsafe terminal and output
+  type/path-escape rejection, fsync/rename calls, no private output, no
+  completion on empty/nonzero/pre-commit interruption, retained completion after
+  real delegated rename plus response loss/post-commit interruption,
+  abandoned-stage ignore, and independent later completion.
 - Existing tests remain present and unweakened; additive assertions within an
   owning task are allowed. Any deletion, skip, weakening, Constitution change,
   or gate waiver requires separate Owner approval on the future published final
@@ -184,12 +204,20 @@ activation task. The task metadata is in `tasks.md`.
 
 ## Post-merge T7 milestone
 
-After separate live authorization, the operator uses the exact MB-016 command.
-The private evidence file associates the real TestFlight build and actual Blob
-name with one completion batch. A real read-only query is explicitly scoped to
-that batch and Blob and records its filtered result/count. Generic `collect`,
-if separately requested, is labelled independently and is not ingestion
-evidence. No plan or test template is represented as a live query result.
+After both producer and collector heads merge, the Owner-authorized workflow 05
+lead/operator confirms the existing live authorization, re-reads the exact
+final merged VoxPocket producer contract/head, and uses the exact MB-016 command
+plus a Codex subagent in the workflow lead's local session for MB-017's temporary
+read-only query. The private evidence associates the real TestFlight build and
+actual Blob name with one completion batch, applies the SDK 0.2.0 wire and final
+VoxPocket producer contract plus build/UTC/batch/relative-Blob filters, counts
+unique source-line locators without content deduplication, and records only
+MB-017's aggregates. Generic `collect`, if separately requested, is labelled
+independently and is not ingestion evidence. No plan or test template is
+represented as a live query result, and no product query/state is created. The
+Multica Team Lead owns neither that local subagent nor personal TestFlight/Azure
+permissions; this plan grants no credential, personal operation, or manual
+dispatch authority.
 
 ## Historical evidence boundary
 

@@ -71,11 +71,12 @@ test-host production composition cannot enter `eligible`.
 |---|---|---|
 | `name` | product-local closed string | `aidash.action` or `aidash.performance.ready_scene` only |
 | `timestamp` | ISO-8601 UTC | Required |
-| `properties` | closed scalar map | Exact typed allowlist in `contracts/aidash-events.md` |
+| `properties` | SDK 0.2.0 string-to-string dictionary | Exact semantic allowlist in `contracts/aidash-events.md` |
 
 `aidash.action` carries only `action_name: "briefing_viewed"`.
-`aidash.performance.ready_scene` carries only a finite nonnegative integer
-`duration_ms`, computed as complete monotonic milliseconds from the first
+`aidash.performance.ready_scene` carries only `duration_ms` as a decimal string
+encoding a finite nonnegative integer, computed as complete monotonic
+milliseconds from the first
 instant of the GUI-production app-init branch—before consent/config reads—to
 first interactive `.ready(container)` appearance. The start is discarded when
 the lifecycle is ineligible. Both events are unsampled and at
@@ -123,9 +124,10 @@ checkpoint field.
 | `objects` | nonempty relative file tree | Byte-identical opaque gzip downloads at their relative Blob paths |
 | `state` | filesystem fact | Absent before one atomic directory publish; complete and immutable afterward |
 
-The directory is the L1 unit. There is no per-object raw record, parsed event,
-normalized product row, page/object cursor, event identity, L3 fact, L4 product
-query, or L5 consumer in this feature.
+The directory is the L1 unit. The collector creates no per-object raw record,
+parsed event, normalized product row, page/object cursor, event identity, L3
+fact, L4 product query, or L5 consumer. MB-017's later temporary evidence reader
+creates no repository entity, table, state, or reusable product query.
 
 ### CollectionOutcome
 
@@ -151,6 +153,18 @@ exact merged revision + actual TestFlight build + UTC interval
   -> one completion batch + matching relative file
   -> query filtered to that completion batch and Blob + scoped count
 ```
+
+Its ephemeral source locator is `(batchId, relativeBlobPath,
+ndjsonLineNumber)`. Locator uniqueness, one-pass wire validation, filter rules,
+counting, execution ownership, and privacy are defined only by MB-017; the
+locator is not persisted or reused across batches.
+
+Immediately before T7, the Owner-authorized workflow 05 lead/operator re-reads
+the exact final merged VoxPocket producer contract/head; that external contract,
+not AIDash's unchanged `contracts/aidash-events.md`, governs the temporary event
+counts. Execution uses a Codex subagent in the workflow lead's local session and
+does not give the Multica Team Lead local-session, TestFlight, Azure, credential,
+or manual-dispatch authority.
 
 The public record contains only sanitized labels/counts. It carries no real
 endpoint, principal metadata, token/SAS/key, actual Blob name, install UUID,
