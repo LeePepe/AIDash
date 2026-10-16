@@ -353,6 +353,21 @@ class TestFlightReleaseTests(unittest.TestCase):
         self.assertIn("manual-only regression was removed", handoff)
         self.assertIn("shadow-policy suite was intentionally discarded", handoff)
 
+    def test_handoff_lists_all_required_release_secrets(self):
+        handoff = HANDOFF.read_text(encoding="utf-8")
+        self.assertIn("configure the seven repository secrets", handoff)
+        for secret in (
+            "ASC_KEY_ID",
+            "ASC_ISSUER_ID",
+            "ASC_KEY_P8_BASE64",
+            "ASC_TEAM_ID",
+            "KEYCHAIN_PASSWORD",
+            "TELEMETRY_BLOB_ENDPOINT",
+            "TELEMETRY_BLOB_SAS",
+        ):
+            self.assertIn(f"| `{secret}` |", handoff)
+            self.assertIn(f"gh secret set {secret}", handoff)
+
 
 if __name__ == "__main__":
     unittest.main()

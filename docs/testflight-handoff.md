@@ -5,7 +5,7 @@ merged to protected `main`. A manual dispatch remains available for authorized
 releases and recovery from a missing initial marker.
 
 The workflow uses the existing `fastlane ios beta` lane. Before the first real
-upload, configure the five repository secrets and the Apple account resources
+upload, configure the seven repository secrets and the Apple account resources
 below.
 
 The single release job has `contents: write` permission so it can move the
@@ -21,6 +21,8 @@ the job token is exposed only to that marker compare-and-swap step.
 | `ASC_KEY_P8_BASE64` | Base64-encoded `.p8` private key |
 | `ASC_TEAM_ID` | Apple Developer Team ID |
 | `KEYCHAIN_PASSWORD` | Login password for the self-hosted runner account |
+| `TELEMETRY_BLOB_ENDPOINT` | HTTPS endpoint for the protected telemetry blob container |
+| `TELEMETRY_BLOB_SAS` | Write-only SAS query for release telemetry uploads |
 
 Create an App Store Connect API key with the App Manager role, download its
 `.p8` file, and configure the secrets:
@@ -31,6 +33,8 @@ gh secret set ASC_KEY_ID
 gh secret set ASC_ISSUER_ID
 gh secret set ASC_TEAM_ID
 gh secret set KEYCHAIN_PASSWORD
+gh secret set TELEMETRY_BLOB_ENDPOINT
+gh secret set TELEMETRY_BLOB_SAS
 ```
 
 The public repository must not contain the Apple Developer Team ID. CI passes
