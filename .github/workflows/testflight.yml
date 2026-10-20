@@ -1,20 +1,23 @@
 name: testflight
 
-# 仅通过 workflow_dispatch 手动构建 main 并上传 TestFlight（内部测试）。
-# 自动发布已暂停。force=true 可忽略“无新提交”检查；发布标记仍记录成功版本。
+# 每 12 小时构建 main 并上传 TestFlight（内部测试），保留 workflow_dispatch 兜底。
+# 仅手动 force=true 可忽略“无新提交”检查；发布标记仍记录成功版本。
 #
 # 跑在 self-hosted `aidash-mac`(复用 claude-review / codex-review 那台):
 # Apple Distribution 证书已在登录钥匙串,所以不需要把 .p12 塞进 Secret。
 # 需要的 Secrets: ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8_BASE64 / ASC_TEAM_ID /
 # KEYCHAIN_PASSWORD。前置条件与配置步骤见 docs/testflight-handoff.md。
 #
-# 安全:本 workflow 只在 workflow_dispatch 上触发,永远 checkout main
+# 安全:只允许 schedule / workflow_dispatch 的 main ref,永远 checkout main
 # ——不存在 fork PR 的代码在维护者本机执行的路径(与 claude-review.yml 的可信
 # 边界同理,只是这里更简单:根本不碰 PR 内容)。
 #
 # push tag 不触发 build.yml(其 push 过滤是 branches: [main]),无副作用。
 
 on:
+  schedule:
+    # UTC 08:17 / 20:17 = Asia/Shanghai 16:17 / 次日 04:17。
+    - cron: '17 8,20 * * *'
   workflow_dispatch:
     inputs:
       force:
@@ -32,7 +35,7 @@ permissions:
 jobs:
   release:
     name: Build & upload to TestFlight
-    if: github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, aidash-mac]
     timeout-minutes: 40
     steps:
@@ -45,11 +48,16 @@ jobs:
 
       - name: Decide whether to release
         id: gate
+        env:
+          FORCE_INPUT: ${{ github.event.inputs.force }}
         run: |
           set -euo pipefail
           LATEST="$(git rev-parse HEAD)"
           RELEASED="$(git rev-parse -q --verify refs/tags/testflight/last-released || echo none)"
-          FORCE="${{ github.event.inputs.force }}"
+          FORCE=false
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$FORCE_INPUT" = "true" ]; then
+            FORCE=true
+          fi
           echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
           echo "HEAD=$LATEST  last-released=$RELEASED  force=$FORCE"
           if [ "$FORCE" = "true" ] || [ "$LATEST" != "$RELEASED" ]; then
