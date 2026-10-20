@@ -1,4 +1,7 @@
-# TestFlight 手动分发 — 交接与前置条件(spec 004 / T205)
+# TestFlight 定时分发与手动兜底 — 交接与前置条件(spec 004 / T205)
+
+2026-10-20:日常发布改为每 12 小时定时检查,保留手动入口。此节奏取代此前
+「仅手动、自动发布暂停」的操作约定;凭据、签名与分发边界不变。
 
 `.github/workflows/testflight.yml` + `fastlane/` 已经落地,但**首次真实上传前需要
 用户做一次性人工配置**:5 个 GitHub Secret + Developer Portal / App Store Connect
@@ -93,10 +96,10 @@ Settings → Accounts → Manage Certificates 里加。
 
 ## 三、首次验证(用户手动,非 CI 阻塞)
 
-前置配完后,手动触发一次强制发布:
+前置配完后,如需手动验证真实上传,可触发一次强制发布:
 
 ```bash
-gh workflow run testflight.yml -f force=true
+gh workflow run testflight.yml --ref main -f force=true
 gh run watch
 ```
 
@@ -104,18 +107,26 @@ gh run watch
 且已分发到 Internal 群组,测试员的 TestFlight app 里能看到。
 
 真实上传**不是 CI 阻塞项** —— `build.yml` 的 iOS 构建门(T204)才是每个 PR 都跑的
-硬门;TestFlight 仅在用户明确要求后手动触发,失败后先诊断,再按授权重试。
+硬门。TestFlight 按下述定时节奏运行,也可手动兜底;无需为了证明定时配置生效
+额外强制上传。失败后先诊断,定时检查仍遵循同一个发布标记。
 
 ---
 
 ## 四、日常运转
 
-- **仅手动**:自动发布已暂停。用户明确要求后,使用 Actions → testflight → Run workflow
-  或 `gh workflow run testflight.yml --ref main`；合并 PR 不会自动发布。
+- **每 12 小时检查**:北京时间(Asia/Shanghai)每天 **04:17 / 16:17**,
+  对应 UTC cron `17 8,20 * * *`。GitHub 调度可能延迟,不保证准点启动;
+  合并 PR 本身不会立即发布。
+- **手动兜底**:使用 Actions → testflight → Run workflow(选择 `main`),
+  或 `gh workflow run testflight.yml --ref main`。两个入口都只接纳 main ref,
+  checkout 官方 `main` 一次,以该 checkout 的 HEAD 作为本次候选和成功标记;
+  只有手动 `force=true` 可绕过「无新提交」检查,定时运行不启用 force。
 - **只在有新提交时才 build**:上次发布点记在 moving tag
   `testflight/last-released`。累积式 —— build 失败或机器关机期间不丢 commit,
-  下次获授权的手动发布会包含累积改动。
-- **runner 离线 = 暂不可发布**:确认恢复后再按用户授权处理,不自动补发。
+  下次定时检查或手动运行会包含累积改动;上传 lane 成功后才推进标记。
+- **runner 离线 = 暂不可执行**:已有运行可能排队;恢复后由排队运行、后续定时
+  检查或手动兜底继续检查累积提交。串行队列不打断进行中的上传,不保证补齐每个
+  错过的时点;没有新提交则跳过。
 - **build number 全局单调递增**:`latest_testflight_build_number` 刻意**不传**
   `version:`,查的是该 app 所有版本的最大 build number,next = latest + 1。
   传了 version 会把查询限定在当前 marketing version 内,bump 版本后 build 从 1
