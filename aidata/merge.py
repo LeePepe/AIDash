@@ -58,6 +58,14 @@ def run_merge() -> dict[str, int]:
 
         # --- fact_request (raven) ---
         if _attach(conn, "raven", "rv"):
+            # Clean databases are derived artifacts and may predate the cache
+            # columns.  Keep those inputs compatible while making the absence
+            # explicit as NULL rather than treating it as zero usage.
+            rv_columns = {
+                row[1] for row in conn.execute("PRAGMA rv.table_info(req)")
+            }
+            cache_read = "cache_read" if "cache_read" in rv_columns else "NULL"
+            cache_write = "cache_write" if "cache_write" in rv_columns else "NULL"
             conn.execute("""
                 INSERT INTO fact_request
                   (request_id, ts, client, version, model, model_canon,
@@ -65,11 +73,12 @@ def run_merge() -> dict[str, int]:
                    cache_write, total_tokens, latency_ms, ttft_ms, status,
                    cost_usd, session_uuid, has_session, tool_call_count)
                 SELECT request_id, ts, client, version, model, model_canon,
-                       resolved_model, input_tokens, output_tokens, NULL, NULL,
+                       resolved_model, input_tokens, output_tokens,
+                       {cache_read}, {cache_write},
                        total_tokens, latency_ms, ttft_ms, status, cost_usd,
                        session_uuid, has_session, tool_call_count
                 FROM rv.req
-            """)
+            """.format(cache_read=cache_read, cache_write=cache_write))
             counts["fact_request"] = conn.execute(
                 "SELECT count(*) FROM fact_request").fetchone()[0]
 
