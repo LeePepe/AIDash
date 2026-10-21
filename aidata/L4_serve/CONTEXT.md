@@ -6,7 +6,7 @@
   "group": "aidata",
   "parent": "aidata/CONTEXT.md",
   "scope": ["serve.py", "L4_serve/**"],
-  "test_paths": ["tests/test_card_interest_query.py", "tests/test_query_tiers.py", "tests/test_serve_attach.py"],
+  "test_paths": ["tests/test_card_interest_query.py", "tests/test_query_tiers.py", "tests/test_serve_attach.py", "tests/test_l4_*.py"],
   "dependencies": ["AidataFoundation", "AidataL3"],
   "dependents": ["AidataL5", "AidataIntegrationTests"],
   "red_lines": [

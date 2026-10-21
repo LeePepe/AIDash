@@ -6,7 +6,7 @@
   "group": "aidata",
   "parent": "aidata/CONTEXT.md",
   "scope": ["merge.py", "schema/**"],
-  "test_paths": ["tests/test_warehouse_integrity.py", "tests/test_warehouse_quality.py"],
+  "test_paths": ["tests/test_warehouse_integrity.py", "tests/test_warehouse_quality.py", "tests/test_l3_*.py"],
   "dependencies": ["AidataFoundation", "AidataL1L2"],
   "dependents": ["AidataL4", "AidataOps", "AidataIntegrationTests"],
   "red_lines": [
