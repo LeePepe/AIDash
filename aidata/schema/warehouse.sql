@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS fact_turn (
     cache_creation      INTEGER,
     tool_calls          TEXT,               -- JSON array of tool names
     finish_reason       TEXT,               -- message.stop_reason: end_turn/tool_use/max_tokens (quality signal; max_tokens = truncated). NULL on streaming/control frames.
+    skill_names         TEXT,               -- JSON array of named Skill tool uses; NULL when absent
     -- CST calendar day of `ts` (ISO-Z text). See the header note on CST bucketing.
     cst_day             TEXT GENERATED ALWAYS AS
                         (date(ts, '+8 hours')) STORED
@@ -275,6 +276,18 @@ CREATE TABLE IF NOT EXISTS dim_model (
     output_per_mtok     REAL,
     cache_read_per_mtok REAL,
     cache_write_per_mtok REAL
+);
+
+-- dim_automation_rule — precedence-ordered seed for L4 automation attribution.
+-- cwd_prefix matches are expanded from `~` during merge; client and originator
+-- matches remain literal values.  The default class is interactive when no rule
+-- matches, so only explicit exceptions belong in this dimension.
+CREATE TABLE IF NOT EXISTS dim_automation_rule (
+    kind  TEXT NOT NULL,
+    match TEXT NOT NULL,
+    class TEXT NOT NULL,
+    note  TEXT NOT NULL,
+    PRIMARY KEY (kind, match)
 );
 
 -- ---------------------------------------------------------------------------
