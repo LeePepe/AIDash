@@ -28,6 +28,7 @@ SOURCE = "raven"
 _KEEP = (
     "id", "timestamp", "path", "client_format", "model", "resolved_model",
     "stream", "input_tokens", "output_tokens", "total_tokens",
+    "cache_read_tokens", "cache_write_tokens",
     "latency_ms", "ttft_ms", "status", "status_code", "upstream_status",
     "error_message", "account_name", "session_id", "client_name",
     "processing_ms", "strategy", "copilot_model", "routing_path",
@@ -129,6 +130,7 @@ CREATE TABLE req (
     request_id TEXT PRIMARY KEY, ts INTEGER, client TEXT, version TEXT,
     model TEXT, model_canon TEXT, resolved_model TEXT,
     input_tokens INTEGER, output_tokens INTEGER,
+    cache_read INTEGER, cache_write INTEGER,
     total_tokens INTEGER, latency_ms INTEGER, ttft_ms INTEGER, status TEXT,
     cost_usd REAL, session_uuid TEXT, has_session INTEGER, tool_call_count INTEGER,
     strategy TEXT, path TEXT
@@ -137,6 +139,7 @@ CREATE TABLE req (
 _CLEAN_COLS = (
     "request_id", "ts", "client", "version", "model", "model_canon",
     "resolved_model", "input_tokens", "output_tokens", "total_tokens",
+    "cache_read", "cache_write",
     "latency_ms", "ttft_ms", "status", "cost_usd", "session_uuid",
     "has_session", "tool_call_count", "strategy", "path",
 )
@@ -166,6 +169,8 @@ def normalize() -> int:
             "resolved_model": resolved_model,
             "input_tokens": rec.get("input_tokens"),
             "output_tokens": rec.get("output_tokens"),
+            "cache_read": rec.get("cache_read_tokens"),
+            "cache_write": rec.get("cache_write_tokens"),
             "total_tokens": rec.get("total_tokens"),
             "latency_ms": rec.get("latency_ms"),
             "ttft_ms": rec.get("ttft_ms"),
