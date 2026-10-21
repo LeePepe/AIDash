@@ -446,8 +446,9 @@ The icon tint colors above come from the Strata classification role
 calibrated light/dark hex pair chosen to be visually distinguishable at a
 glance, follow Apple Settings app icon coding conventions, and carry a
 dark-mode variant. Views MUST read the tint from the token (never inline a
-`.blue`/`Color(hex:)` literal); the raw hex lives only in Strata's
-`ColorSystem` token source.
+`.blue`/`Color(hex:)` literal). During the transition, the raw hex remains
+owned by the current DesignKit implementation; the concrete Strata mapping
+is a migration input, not an API assertion in this constitution.
 
 #### Size = Geometry Only (geometry ladders)
 
@@ -516,8 +517,10 @@ content (signal direction), not card chrome.
 
 #### Content-Level Status Pills
 
-Card **content** may express status with a colored pill (Strata's
-`StatusPill`: `Capsule()` filled at `color.opacity(0.16)` with
+Card **content** may express status with a colored pill (the current
+DesignKit `StatusPill` during the transition; its concrete Strata mapping is
+specified by spec 008 and the Goal B component specification): `Capsule()`
+filled at `color.opacity(0.16)` with
 full-saturation text/icon). This is the same "content, not chrome"
 exception the trend arrow already carries — the pill is driven by
 **payload fields**, never by the card's `style` dimension:
@@ -552,9 +555,11 @@ value to give numbers visual context (north-star §6/§7):
 Both are optional content: absent → nothing drawn. The chart's fixed
 render height is geometry-neutral — it MUST NOT branch on the card's
 `size` dimension (that would conflate size with type; §Size = Geometry
-Only). Data-viz components live in Strata (`Sparkline`, `Sparkbars`,
-`RingGauge`, `SegmentedGauge`); which trend/ratio form is drawn is a theme
-choice, not a payload or `size` concern. (Cockpit theme, constitution 1.7.0.)
+Only). The current DesignKit implementation supplies the data-viz components
+during the transition; their concrete Strata mapping is specified by spec 008
+and the Goal B component specification. Which trend/ratio form is drawn
+remains a theme choice, not a payload or `size` concern. (Cockpit theme,
+constitution 1.7.0.)
 
 #### Card Chrome (shared structure, size-scaled geometry)
 
@@ -565,8 +570,10 @@ across cards are geometry (corner radius, padding — both driven by
 frame is drawn at all (driven by the container's card COUNT — see
 §Container Chrome Modes below).
 
-- Background: `theme.neutrals.card` — the middle luminance tier of the
-  Strata neutral system (page `bg` < card `card` < inner `inner`).
+- Background: `theme.neutrals.card` — the middle luminance tier of the current
+  DesignKit neutral system during the transition (page `bg` < card `card` <
+  inner `inner`). Its concrete Strata mapping is specified by spec 008 and the
+  Goal B component specification.
   Cards float via luminance tiers, not shadow. (Supersedes the earlier
   `.background.secondary` material approach; see 1.6.0 migration note.)
 - Corner radius: per §Size = Geometry Only ladder (10 / 14 / 14 / 20).
@@ -823,10 +830,11 @@ orthogonality contract:
 4. A **view** that inlines a color literal — raw hex (`Color(hex:)`,
    `Color(red:green:blue:)`) OR a system color (`.blue`, `.green`,
    `.accentColor`, …) used as a signal channel — instead of consuming a
-   package token. Raw hex inside a Strata token source or an approved AIDashUI
-   alias is compliant; inlining in a `CardView` / layout is the violation.
-   Type icon tints MUST come from the Strata classification role per the
-   §Per-Type Visual Recipes table, not freshly chosen. (Text roles
+   package token. A local AIDashUI alias is compliant only when it references
+   an actual Strata role and token ID; it MUST NOT define or contain a new
+   color value. Inlining in a `CardView` / layout is the violation. Type icon
+   tints MUST come from the actual Strata classification role and token ID per
+   the §Per-Type Visual Recipes table, not freshly chosen. (Text roles
    `.primary` / `.secondary` / `.tertiary` are allowed.)
 5. `Container` view wrapping its child cards in its own
    `RoundedRectangle` / `background` — containers are typography +
@@ -843,8 +851,11 @@ For any PR touching `Packages/AIDashUI/Sources/AIDashUI/**`:
    System & Tokens.
 2. For each modified view, walk the per-type recipe table and confirm
    typography matches the CardType row.
-3. Confirm size-switches do not change font / padding / chrome.
-4. Confirm style-switches only toggle the left stripe. (Content-level
+3. Confirm the view consumes the actual Strata role and token ID required by
+   the recipe; an AIDashUI alias may reference that role/ID but may not define
+   a color value of its own.
+4. Confirm size-switches do not change font / padding / chrome.
+5. Confirm style-switches only toggle the left stripe. (Content-level
    `StatusPill`s and `metric` sparkline/ring data-viz are driven by
    payload fields, not `style` — they are content signals, not chrome;
    see §Content-Level Status Pills, §Metric Data-Viz.)
@@ -1000,8 +1011,9 @@ Sync Impact Report — 1.15.0 (MINOR):
 - §Dependencies and §Design System & Tokens adopt the exact-pinned Strata
   shared-design-system products NativeDesignKit and DesignTokens, with the
   strata-blue brand role and token-role/token-ID compliance evidence.
-- §Quality Bar I evaluates design compliance against Strata roles and token
-  IDs rather than hard-coded hex values.
+- §Quality Bar I requires checking the actual Strata roles and token IDs used;
+  aliases may reference those roles/IDs but may not define colors, and
+  compliance is not established by merely avoiding hard-coded hex values.
 - §Spec-Driven Multica-Executed and §Git Workflow record the bounded Goal C
   GTT CLI execution exception and GTT Task ID PR reference.
 

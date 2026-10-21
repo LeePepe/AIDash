@@ -64,3 +64,18 @@ claimed as resolved.
   migration from this ADR alone.
 - The missing north-star §11 source remains a documentation gap and must not
   be silently resolved by implementation inference.
+
+## Cost assessment
+
+- **Binary size:** No binary-size measurement was made for this governance
+  ADR. The incremental Strata binary impact is unmeasured and will be measured
+  by AP2a after the exact dependency pin is integrated; no number is asserted
+  here.
+- **Build time:** No build-time measurement was made for this governance ADR.
+  The dependency-resolution and compile impact is unmeasured and will be
+  measured by AP2a with its required build evidence; no number is asserted
+  here.
+- **Swift 6 concurrency:** This ADR changes no Swift source and introduces no
+  concurrency boundary. The integration's Swift 6 strict-concurrency impact
+  is unmeasured and will be checked by AP2a's package/app builds; no claim of
+  `Sendable` behavior is made here.
