@@ -310,3 +310,17 @@ def test_normalize_dedupes_on_uuid(monkeypatch):
 @pytest.mark.unit
 def test_source_name_matches_module():
     assert cp.SOURCE == "claude_prompts"
+
+
+def test_prompt_row_carries_repo(monkeypatch):
+    monkeypatch.setattr(cp, "repo_for_path", lambda path: "owner/project")
+    row = cp._prompt_row({
+        "uuid": "p1", "sessionId": "s1", "timestamp": "2026-10-20T00:00:00Z",
+        "cwd": "/work/project", "gitBranch": "main", "text": "hello",
+    })
+    assert row["repo"] == "owner/project"
+
+
+def test_prompt_schema_and_columns_include_repo():
+    assert "repo" in cp._PROMPT_DDL
+    assert cp._PROMPT_COLS[-2:] == ("repo", "git_branch")
