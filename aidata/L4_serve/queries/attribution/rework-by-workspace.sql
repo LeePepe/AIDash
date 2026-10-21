@@ -25,7 +25,9 @@ WITH per_issue AS (
            min(t.ts_start)                                       AS first_ts,
            max(CASE WHEN t.status = 'cancelled' THEN 1 ELSE 0 END) AS has_cancelled,
            max(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS has_completed,
-           sum(COALESCE(t.tokens, 0))                            AS tokens
+           -- tokens is an issue-wide value repeated on each run row. MAX
+           -- removes that duplication before workspace aggregation.
+           max(t.tokens)                                          AS tokens
     FROM fact_task t
     JOIN fact_issue i ON i.issue_id = t.issue_id
     WHERE t.source = 'multica_run'

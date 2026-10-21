@@ -9,9 +9,8 @@ break it.
 
 import json
 
-import pytest
-
 import adapters.codex_prompts as cx
+import pytest
 
 
 def _meta(originator="codex-tui", session="sess-1"):
@@ -31,23 +30,156 @@ def _user_msg(text, ts="2026-08-03T04:01:00.000Z"):
     })
 
 
+def _item_completed(text, turn_id="turn-1", item_id="item-1"):
+    return {
+        "timestamp": "2026-08-03T04:02:00.000Z",
+        "type": "event_msg",
+        "turn_id": turn_id,
+        "payload": {"type": "item_completed", "turn_id": turn_id,
+                     "item": {"type": "UserMessage", "id": item_id,
+                               "content": [{"type": "text", "text": text}]}},
+    }
+
+
+def _response_user(text, message_id="message-1"):
+    return {
+        "timestamp": "2026-08-03T04:03:00.000Z", "type": "response_item",
+        "payload": {"type": "message", "role": "user", "id": message_id,
+                     "content": [{"type": "input_text", "text": text}]},
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Reading the right record type
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
 def test_user_message_only_matches_the_event():
     assert cx._user_message(json.loads(_user_msg("hi"))) == "hi"
-    # response_item also carries user text but includes AGENTS.md dumps and
-    # <environment_context> injections — deliberately not read here.
-    assert cx._user_message({
-        "type": "response_item",
-        "payload": {"type": "message", "role": "user", "content": "injected"},
-    }) is None
+    assert cx._user_message(_response_user("injected")) == "injected"
+    assert cx._user_message(_item_completed("completed")) == "completed"
     assert cx._user_message({"type": "event_msg",
                              "payload": {"type": "token_count"}}) is None
     assert cx._user_message({"type": "event_msg",
                              "payload": {"type": "user_message",
                                          "message": ""}}) is None
+
+
+@pytest.mark.unit
+def test_prompt_formats_extract_turn_identity():
+    item = cx._prompt_candidate(_item_completed("a"), {"session_id": "s1"},
+                                "file.jsonl", 10)
+    response = cx._prompt_candidate(_response_user("b"), {"session_id": "s1"},
+                                    "file.jsonl", 20)
+    legacy = cx._prompt_candidate(json.loads(_user_msg("c")),
+                                  {"session_id": "s1"}, "file.jsonl", 30)
+    assert (item["format"], item["turn_id"]) == ("item_completed", "turn-1")
+    assert (response["format"], response["turn_id"]) == ("response_item", "message-1")
+    assert (legacy["format"], legacy["turn_id"]) == ("legacy", None)
+
+
+@pytest.mark.unit
+def test_file_format_precedence_discards_lower_priority_candidates(monkeypatch, tmp_path):
+    records = [
+        {"id": "file.jsonl:1", "file_id": "file.jsonl", "format": "legacy",
+         "turn_id": "legacy-turn", "session_id": "s1", "text": "legacy",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+        {"id": "file.jsonl:2", "file_id": "file.jsonl", "format": "response_item",
+         "turn_id": "response-turn", "session_id": "s1", "text": "response",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+        {"id": "file.jsonl:3", "file_id": "file.jsonl", "format": "item_completed",
+         "turn_id": "item-turn", "session_id": "s1", "text": "item",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+    ]
+    captured = {}
+    monkeypatch.setattr(cx, "read_raw", lambda source: records)
+    monkeypatch.setattr(cx, "write_clean",
+                        lambda s, t, d, rows, c: captured.setdefault("rows", rows)
+                        and 0 or len(rows))
+    monkeypatch.setattr(cx, "clean_path", lambda source: tmp_path / "codex.db")
+    assert cx.normalize() == 1
+    assert [row["text_preview"] for row in captured["rows"]] == ["item"]
+
+
+@pytest.mark.unit
+def test_file_format_precedence_keeps_all_winning_item_completed_prompts(
+        monkeypatch, tmp_path):
+    records = [
+        {"id": "file.jsonl:1", "file_id": "file.jsonl", "format": "legacy",
+         "turn_id": "same-turn", "session_id": "s1", "text": "legacy",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+        {"id": "file.jsonl:2", "file_id": "file.jsonl", "format": "item_completed",
+         "turn_id": "same-turn", "session_id": "s1", "text": "item one",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+        {"id": "file.jsonl:3", "file_id": "file.jsonl", "format": "item_completed",
+         "turn_id": "same-turn", "session_id": "s1", "text": "item two",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+    ]
+    captured = {}
+    monkeypatch.setattr(cx, "read_raw", lambda source: records)
+    monkeypatch.setattr(cx, "write_clean",
+                        lambda s, t, d, rows, c: captured.setdefault("rows", rows)
+                        and 0 or len(rows))
+    monkeypatch.setattr(cx, "clean_path", lambda source: tmp_path / "codex.db")
+
+    assert cx.normalize() == 2
+    assert [row["text_preview"] for row in captured["rows"]] == [
+        "item one", "item two"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("fmt,records", [
+    ("item_completed", [
+        {"id": "file.jsonl:1", "format": "item_completed", "turn_id": "same",
+         "session_id": "s1", "text": "item one"},
+        {"id": "file.jsonl:2", "format": "item_completed", "turn_id": "same",
+         "session_id": "s1", "text": "item two"},
+    ]),
+    ("response_item", [
+        {"id": "file.jsonl:1", "format": "response_item", "turn_id": "same",
+         "session_id": "s1", "text": "response one"},
+        {"id": "file.jsonl:2", "format": "response_item", "turn_id": "same",
+         "session_id": "s1", "text": "response two"},
+    ]),
+    ("legacy", [
+        {"id": "file.jsonl:1", "format": "legacy", "turn_id": "same",
+         "session_id": "s1", "text": "legacy one"},
+        {"id": "file.jsonl:2", "format": "legacy", "turn_id": "same",
+         "session_id": "s1", "text": "legacy two"},
+    ]),
+])
+def test_single_format_file_keeps_distinct_prompts_sharing_turn_id(
+        monkeypatch, tmp_path, fmt, records):
+    captured = {}
+    monkeypatch.setattr(cx, "read_raw", lambda source: [
+        {**record, "file_id": "file.jsonl", "originator": "codex-tui",
+         "timestamp": "2026-08-03T04:00:00Z"}
+        for record in records
+    ])
+    monkeypatch.setattr(cx, "write_clean",
+                        lambda s, t, d, rows, c: captured.setdefault("rows", rows)
+                        and 0 or len(rows))
+    monkeypatch.setattr(cx, "clean_path", lambda source: tmp_path / "codex.db")
+
+    assert cx.normalize() == len(records)
+    assert {row["text_preview"] for row in captured["rows"]} == {
+        record["text"] for record in records
+    }
+
+
+@pytest.mark.unit
+def test_skill_use_keeps_name_and_call_metadata_only():
+    call = {
+        "timestamp": "2026-08-03T04:02:00Z", "type": "response_item",
+        "payload": {"type": "custom_tool_call", "call_id": "call-1",
+                     "name": "exec",
+                     "input": "cat /Users/lee/.codex/skills/goal-target-task/SKILL.md"},
+    }
+    rows = cx._skill_candidates(call, {"session_id": "s1"}, "file.jsonl", 9)
+    assert len(rows) == 1
+    assert rows[0]["skill"] == "goal-target-task"
+    assert rows[0]["call_id"] == "call-1"
+    assert "input" not in rows[0]
 
 
 @pytest.mark.unit
@@ -219,7 +351,7 @@ def test_collect_rereads_meta_when_resuming(monkeypatch, tmp_path):
 # normalize
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
-def test_normalize_dedupes_and_counts(monkeypatch):
+def test_normalize_dedupes_and_counts(monkeypatch, tmp_path):
     records = [
         {"id": "p1", "text": "old", "originator": "codex-tui",
          "timestamp": "2026-08-03T04:00:00Z", "session_id": "s1"},
@@ -233,6 +365,7 @@ def test_normalize_dedupes_and_counts(monkeypatch):
     monkeypatch.setattr(cx, "write_clean",
                         lambda s, t, d, rows, c: captured.setdefault("rows", rows)
                         and 0 or len(rows))
+    monkeypatch.setattr(cx, "clean_path", lambda source: tmp_path / "codex.db")
     assert cx.normalize() == 2
     by_id = {r["prompt_id"]: r for r in captured["rows"]}
     assert by_id["p1"]["text_preview"] == "new", "last write must win"

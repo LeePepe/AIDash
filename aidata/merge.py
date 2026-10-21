@@ -11,10 +11,13 @@ clean/ each run, so merge is idempotent.
 from __future__ import annotations
 
 import csv
+import os
 import sqlite3
 
 from config import (
-    WAREHOUSE_DB, SCHEMA_DIR, clean_path,
+    SCHEMA_DIR,
+    WAREHOUSE_DB,
+    clean_path,
 )
 
 
@@ -30,6 +33,22 @@ def _load_prices(conn: sqlite3.Connection) -> None:
         ]
     conn.executemany(
         "INSERT OR REPLACE INTO dim_model VALUES (?, ?, ?, ?, ?)", rows
+    )
+
+
+def _load_automation_rules(conn: sqlite3.Connection) -> None:
+    csv_path = SCHEMA_DIR / "automation_rules.csv"
+    if not csv_path.exists():
+        return
+    rows = []
+    with csv_path.open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            match = row["match"]
+            if row["kind"] == "cwd_prefix":
+                match = os.path.expanduser(match)
+            rows.append((row["kind"], match, row["class"], row["note"]))
+    conn.executemany(
+        "INSERT OR REPLACE INTO dim_automation_rule VALUES (?, ?, ?, ?)", rows
     )
 
 
@@ -55,6 +74,10 @@ def run_merge() -> dict[str, int]:
     try:
         conn.executescript((SCHEMA_DIR / "warehouse.sql").read_text(encoding="utf-8"))
         _load_prices(conn)
+        _load_automation_rules(conn)
+        counts["dim_automation_rule"] = conn.execute(
+            "SELECT count(*) FROM dim_automation_rule"
+        ).fetchone()[0]
 
         # --- fact_request (raven) ---
         if _attach(conn, "raven", "rv"):
@@ -66,7 +89,7 @@ def run_merge() -> dict[str, int]:
             }
             cache_read = "cache_read" if "cache_read" in rv_columns else "NULL"
             cache_write = "cache_write" if "cache_write" in rv_columns else "NULL"
-            conn.execute("""
+            conn.execute(f"""
                 INSERT INTO fact_request
                   (request_id, ts, client, version, model, model_canon,
                    resolved_model, input_tokens, output_tokens, cache_read,
@@ -78,22 +101,26 @@ def run_merge() -> dict[str, int]:
                        total_tokens, latency_ms, ttft_ms, status, cost_usd,
                        session_uuid, has_session, tool_call_count
                 FROM rv.req
-            """.format(cache_read=cache_read, cache_write=cache_write))
+            """)
             counts["fact_request"] = conn.execute(
                 "SELECT count(*) FROM fact_request").fetchone()[0]
 
         # --- fact_turn (claude_jsonl) ---
         if _attach(conn, "claude_jsonl", "cj"):
-            conn.execute("""
+            cj_columns = {
+                row[1] for row in conn.execute("PRAGMA cj.table_info(turn)")
+            }
+            skill_names = "skill_names" if "skill_names" in cj_columns else "NULL"
+            conn.execute(f"""
                 INSERT INTO fact_turn
                   (turn_uuid, session_id, parent_session_id, ts, project,
                    git_branch, role, model, attribution_skill, input_tokens,
                    output_tokens, cache_read, cache_creation, tool_calls,
-                   finish_reason)
+                   finish_reason, skill_names)
                 SELECT turn_uuid, session_id, parent_session_id, ts, project,
                        git_branch, role, model, attribution_skill, input_tokens,
                        output_tokens, cache_read, cache_creation, tool_calls,
-                       finish_reason
+                       finish_reason, {skill_names}
                 FROM cj.turn
             """)
             counts["fact_turn"] = conn.execute(

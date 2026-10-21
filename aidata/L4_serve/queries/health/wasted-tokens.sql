@@ -1,17 +1,15 @@
 -- aidata-tier: explore
 -- health/wasted-tokens — tokens burned on runs that did not complete.
--- Uses multica_run tokens (the corrected, populated field). Shows each terminal
--- status's token share so cancelled/failed waste is explicit.
-WITH totals AS (
-  SELECT sum(COALESCE(tokens, 0)) AS all_tokens
-  FROM fact_task WHERE source = 'multica_run'
-)
+-- unavailable: fact_task.tokens is issue-wide, merge.py:116. It is not
+-- run-wide, so it cannot
+-- be attributed to a terminal status without inventing a split. Keep the
+-- token-shaped output columns for the explore query's stable contract, but
+-- return NULL rather than double-counting or fabricating attribution.
 SELECT status,
        count(*)                                        AS runs,
-       sum(COALESCE(tokens, 0))                        AS tokens,
-       round(100.0 * sum(COALESCE(tokens, 0)) /
-             (SELECT all_tokens FROM totals), 1)        AS pct_of_tokens
+       CAST(NULL AS INTEGER)                            AS tokens,
+       CAST(NULL AS REAL)                               AS pct_of_tokens
 FROM fact_task
 WHERE source = 'multica_run'
 GROUP BY status
-ORDER BY tokens DESC;
+ORDER BY runs DESC, status ASC;
