@@ -60,7 +60,7 @@ repository buys atomic commits across the producer/renderer seam — it grants n
 new privileges. Any change that lets Python touch CloudKit, the app's storage,
 or an internal API directly is a constitutional violation.
 
-### III. Glanceable Daily Briefing (NON-NEGOTIABLE)
+### III. Glanceable Daily Briefing and Favorites (NON-NEGOTIABLE)
 
 The product unit is a single day's briefing. Hierarchy is flat: `Briefing →
 Container → Card`, exactly two levels of nesting, no deeper. Containers must
@@ -70,7 +70,12 @@ use a `sectionHeader` card, not a nested container. This matches Apple HIG
 Fitness, and Google Discover.
 
 The intended reading time is five minutes. Any feature that pushes users into
-a navigation tree, search, or drill-down is suspect.
+a navigation tree, search, history, detail page, or drill-down is suspect.
+
+Favorites are a peer view to the daily briefing, not a deeper level of
+briefing hierarchy. Favorites may show local card snapshots and their current
+favorite state, but MUST NOT become an archive, search, or detail-navigation
+surface.
 
 ### IV. Schema-Locked Card Types, Data-Driven Layout
 
@@ -195,12 +200,12 @@ AIDash/
 │   │                     place.
 │   ├── AIDashUI/         Cross-platform SwiftUI views: type renderers,
 │   │                     container layouts, briefing scaffold. Depends on
-│   │                     Core + DesignKit.
-│   └── DesignKit/        Seed color system + shared SwiftUI component
-│                         vocabulary. Zero local deps.
+│   │                     Core + shared-design-system.
+│   └── shared-design-system/  Strata native products: NativeDesignKit and
+│                              DesignTokens. Exact-pinned external dependency.
 ├── Apps/
 │   └── AIDashApp/        macOS + iPadOS + iPhone app target (XcodeGen
-│                         managed). Depends on UI + Core + DesignKit.
+│                         managed). Depends on UI + Core + shared-design-system.
 ├── CLI/
 │   └── aidash/           Swift Argument Parser CLI, macOS-only.
 │                         Depends on Core. Does not depend on UI.
@@ -214,10 +219,12 @@ AIDash/
 └── project.yml           XcodeGen config for app + CLI targets.
 ```
 
-Dependency direction is unidirectional: `UI → Core`, `UI → DesignKit`,
-`App → UI + Core + DesignKit`, `CLI → Core`. The app's direct DesignKit
-dependency supplies theme injection used by app lifecycle code. The CLI may
-never import UI. The package boundary enforces this.
+Dependency direction is unidirectional: `UI → Core`, `UI → shared-design-system`,
+`App → UI + Core + shared-design-system`, `CLI → Core`. The shared design
+system is an ADR-006-approved dependency pinned to an exact revision. Its
+native products are `NativeDesignKit` and `DesignTokens`, and they are the
+sole design-system source for the AIDash pilot. The CLI may never import UI.
+The package boundary enforces this.
 
 `aidata/` sits **outside** that graph. It couples to the Swift side by a
 one-way **data flow**, not a compile-time dependency: it emits card payloads
@@ -235,6 +242,12 @@ its `contract_check.sh` lint.
 - **Events**: CloudKit Private DB, custom record type `UserEvent`, append-only.
 - **App-local cache**: SwiftData mirror of the last fetched briefing for
   offline display. Cache is disposable; CloudKit is source of truth.
+- **Favorite snapshots**: one independent local SwiftData store and storage
+  file for cards explicitly favorited by the user. This local-only snapshot
+  exception is not a mirror of previous briefings: it MUST NOT be included in
+  any CloudKit schema or synchronized between devices. If unavailable, the
+  Favorites view shows the item as unavailable; the underlying event remains
+  authoritative.
 - **No third-party storage**, except the isolated telemetry storage authorized
   by §GUI Product Telemetry (no Firebase, no Realm, and no local SQLite outside
   SwiftData or that exception).
@@ -285,7 +298,10 @@ an isolated Azure Blob telemetry store only under all of these conditions:
   for the CLI).
 - **Any other third-party dependency** requires a short ADR (under
   `docs/adr/`) that answers: what problem, what alternatives, what binary-size
-  / build-time / Swift 6 concurrency cost. Do not introduce dependencies
+  / build-time / Swift 6 concurrency cost. ADR-006 approves the exact-pinned
+  Strata shared-design-system dependency for the AIDash Goal C pilot; its
+  native products are `NativeDesignKit` and `DesignTokens`. No floating range
+  or additional design-system source is allowed. Do not introduce dependencies
   speculatively.
 - **Networking**: `URLSession` + async/await for HTTP. The explicit-consent GUI
   telemetry channel in §GUI Product Telemetry is the app's only current HTTP
@@ -390,7 +406,7 @@ discriminator — reader sees the glyph first) AND the detail-tier
 typography recipe. `size` MUST NOT mutate either; size only controls how
 many items / how much of the payload the renderer chooses to show.
 
-| CardType | Icon (SF Symbol) | Icon tint (DesignKit `Classification`) | Primary font | Secondary font | Notes |
+| CardType | Icon (SF Symbol) | Icon tint (Strata classification role) | Primary font | Secondary font | Notes |
 |---|---|---|---|---|---|
 | `metric` | `chart.bar.fill` | `.metric` (blue hue) | `.system(size: 36, weight: .bold, design: .rounded)` | `.caption` `.secondary` for label | Hero number always large; unit + trend arrow inline |
 | `insight` | `sparkles` | `.insight` (purple hue) | `.title3.weight(.semibold)` | `.body` `.primary` for body | Title first, body wraps |
@@ -425,12 +441,12 @@ ZStack {
 .frame(width: 32, height: 32)
 ```
 
-The icon tint colors above come from the DesignKit `Classification` token
+The icon tint colors above come from the Strata classification role
 (one case per CardType, resolved via the injected `Theme`). Each is a
 calibrated light/dark hex pair chosen to be visually distinguishable at a
 glance, follow Apple Settings app icon coding conventions, and carry a
 dark-mode variant. Views MUST read the tint from the token (never inline a
-`.blue`/`Color(hex:)` literal); the raw hex lives only in DesignKit's
+`.blue`/`Color(hex:)` literal); the raw hex lives only in Strata's
 `ColorSystem` token source.
 
 #### Size = Geometry Only (geometry ladders)
@@ -500,7 +516,7 @@ content (signal direction), not card chrome.
 
 #### Content-Level Status Pills
 
-Card **content** may express status with a colored pill (DesignKit's
+Card **content** may express status with a colored pill (Strata's
 `StatusPill`: `Capsule()` filled at `color.opacity(0.16)` with
 full-saturation text/icon). This is the same "content, not chrome"
 exception the trend arrow already carries — the pill is driven by
@@ -536,7 +552,7 @@ value to give numbers visual context (north-star §6/§7):
 Both are optional content: absent → nothing drawn. The chart's fixed
 render height is geometry-neutral — it MUST NOT branch on the card's
 `size` dimension (that would conflate size with type; §Size = Geometry
-Only). Data-viz components live in DesignKit (`Sparkline`, `Sparkbars`,
+Only). Data-viz components live in Strata (`Sparkline`, `Sparkbars`,
 `RingGauge`, `SegmentedGauge`); which trend/ratio form is drawn is a theme
 choice, not a payload or `size` concern. (Cockpit theme, constitution 1.7.0.)
 
@@ -550,7 +566,7 @@ frame is drawn at all (driven by the container's card COUNT — see
 §Container Chrome Modes below).
 
 - Background: `theme.neutrals.card` — the middle luminance tier of the
-  DesignKit neutral system (page `bg` < card `card` < inner `inner`).
+  Strata neutral system (page `bg` < card `card` < inner `inner`).
   Cards float via luminance tiers, not shadow. (Supersedes the earlier
   `.background.secondary` material approach; see 1.6.0 migration note.)
 - Corner radius: per §Size = Geometry Only ladder (10 / 14 / 14 / 20).
@@ -634,10 +650,10 @@ headers act as anchors; cards carry the content.
 - Grid column gap: 16pt.
 - Page horizontal padding: see §Page Chrome.
 - **Colors MUST come from a package token source**, never inlined in a
-  view. The token sources are: DesignKit's `ColorSystem` (seed-derived
-  `PrimaryPalette`), `Semantic` (success/warning/danger), and
-  `Classification` (per-CardType icon tints); plus AIDashUI's
-  `DesignTokens` for card-domain aliases. Text uses the system semantic
+  view. The canonical source is Strata's `DesignTokens` and
+  `NativeDesignKit` role system, including semantic and classification roles;
+  AIDashUI may define only aliases that resolve to those roles. The product
+  brand role is `strata-blue`. Text uses the system semantic
   roles `.primary` / `.secondary` / `.tertiary` (these are roles, not
   literals, and remain allowed). **Raw hex (`Color(hex:)`,
   `Color(red:green:blue:)`) is permitted ONLY inside these token
@@ -807,10 +823,9 @@ orthogonality contract:
 4. A **view** that inlines a color literal — raw hex (`Color(hex:)`,
    `Color(red:green:blue:)`) OR a system color (`.blue`, `.green`,
    `.accentColor`, …) used as a signal channel — instead of consuming a
-   package token. Raw hex inside a token source (DesignKit `ColorSystem`
-   / `Semantic` / `Classification`, or AIDashUI `DesignTokens`) is
-   compliant; inlining in a `CardView` / layout is the violation. Type
-   icon tints MUST come from the DesignKit `Classification` token per the
+   package token. Raw hex inside a Strata token source or an approved AIDashUI
+   alias is compliant; inlining in a `CardView` / layout is the violation.
+   Type icon tints MUST come from the Strata classification role per the
    §Per-Type Visual Recipes table, not freshly chosen. (Text roles
    `.primary` / `.secondary` / `.tertiary` are allowed.)
 5. `Container` view wrapping its child cards in its own
@@ -860,12 +875,14 @@ burn run-count guards on stylistic findings.
 ### Spec-Driven, Multica-Executed
 
 This project uses Spec Kit (`/speckit-constitution`, `/speckit-specify`,
-`/speckit-plan`, `/speckit-tasks`) inside Hermes for spec and plan
-authoring. **Implementation is handed off to Multica**: each task from
-`tasks.md` becomes a Multica issue, dispatched to the TL → Planner →
-Fullstack → Reviewer pipeline.
+`/speckit-plan`, `/speckit-tasks`) inside Hermes for spec and plan authoring.
+The Strata × AIDash Goal C pilot is the bounded exception: its implementation
+is executed by assigned GTT CLI writers and MUST NOT create Multica issues.
+That exception applies only until Goal C is closed; all other work remains on
+the normal Multica path.
 
-This means `tasks.md` must be written for Multica consumption:
+For the normal Multica path, `tasks.md` must be written for Multica
+consumption:
 
 - Every task is self-contained and lists touched files, acceptance criteria,
   and dependencies on other tasks.
@@ -880,7 +897,9 @@ This means `tasks.md` must be written for Multica consumption:
   isolate parallel agent work and prevent branch contamination.
 - **Conventional commits**: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`,
   `test:`. The CI auto-reviewer parses these.
-- **PR is the unit of merge**. `main` is protected. Each PR closes one
+- **PR is the unit of merge**. `main` is protected. Each normal-work PR
+  closes one Multica issue. A PR belonging to the Strata × AIDash Goal C
+  instead cites its GTT Goal/Target/Task ID and does not create or close a
   Multica issue. CI runs the build gate and the Core test gate; both must
   pass.
 - **CI auto-review** is enabled — review comments come from GitHub Actions,
@@ -970,7 +989,37 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.14.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-10-15
+**Version**: 1.15.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-10-21
+
+<!--
+Sync Impact Report — 1.15.0 (MINOR):
+- §Persistence authorizes the local-only SwiftData favorite snapshot store
+  and keeps it outside CloudKit synchronization.
+- Principle III makes Favorites a peer view and preserves the no-history,
+  no-search, no-detail, no-drill-down boundary.
+- §Dependencies and §Design System & Tokens adopt the exact-pinned Strata
+  shared-design-system products NativeDesignKit and DesignTokens, with the
+  strata-blue brand role and token-role/token-ID compliance evidence.
+- §Quality Bar I evaluates design compliance against Strata roles and token
+  IDs rather than hard-coded hex values.
+- §Spec-Driven Multica-Executed and §Git Workflow record the bounded Goal C
+  GTT CLI execution exception and GTT Task ID PR reference.
+
+Migration note: in-flight Goal C work must use ADR-006, migrate the package
+and theme dependency in AP2, and update affected UI specs, design references,
+token-compliance tests, and GTT execution records. During the transition,
+existing DesignKit consumers remain unchanged until their layer-owned task
+lands; no mixed source may be introduced in a migrated surface. Favorite
+snapshots are newly local-only and require no CloudKit data migration. The
+north-star §11 conflict table was unavailable for this amendment; its
+row-level dispositions remain a documented input to the UI migration spec and
+may not be inferred from this amendment.
+-->
+
+<!--
+1.15.0 — MINOR (material governance and product-scope expansion; no core
+principle removed or inverted). See the Sync Impact Report immediately above.
+-->
 
 <!--
 1.14.0 — MINOR (material expansion with no principle removed or inverted).
