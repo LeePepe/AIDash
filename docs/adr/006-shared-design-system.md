@@ -35,16 +35,16 @@ synchronized.
   file. The snapshot model is excluded from every CloudKit schema and does
   not sync between devices. CloudKit remains authoritative for user events.
 
-## North-star conflict-table boundary
+## North-star §11 alignment
 
-The referenced design source `/workspace/aidash-design/north-star.md`,
-including its §11 conflict table, was unavailable when this ADR was written.
-This ADR therefore records only directly confirmed rules: the two Strata
-products, the `strata-blue` brand role, token-only color consumption, and
-compliance evidence by Strata role/token ID. The §11 table's individual rows,
-precedence decisions, and migration dispositions remain explicit follow-up
-input and must be copied into the UI migration spec before those rows are
-claimed as resolved.
+The §11 conflict table was supplied by
+`/Users/lee/Development/handoff/aidash-design/north-star.md` (sha256
+`6c57b00d42201426fa8e9df5e2a4b73c956721e08dbd0408721e7b533c197ab3`). The
+constitution's Design System & Tokens section is amended from that table:
+geometry, spacing, badge transition behavior, semantic stripe roles, metric
+typography, low-priority pill tone, and Strata token-source ownership now
+follow its revised values. The principle III row was already handled by the
+companion Favorites amendment and is unchanged here.
 
 ## Alternatives considered
 
@@ -62,8 +62,9 @@ claimed as resolved.
 - Compliance evidence names Strata roles and token IDs, not hard-coded colors.
 - Existing briefings, CloudKit records, and user-event semantics require no
   migration from this ADR alone.
-- The missing north-star §11 source remains a documentation gap and must not
-  be silently resolved by implementation inference.
+- The north-star §11 source and its hash are recorded above; later UI work
+  must preserve the row-level transition notes and must not infer a different
+  mapping.
 
 ## Cost assessment
 

@@ -406,15 +406,15 @@ discriminator — reader sees the glyph first) AND the detail-tier
 typography recipe. `size` MUST NOT mutate either; size only controls how
 many items / how much of the payload the renderer chooses to show.
 
-| CardType | Icon (SF Symbol) | Icon tint (Strata classification role) | Primary font | Secondary font | Notes |
+| CardType | Icon (SF Symbol) | Icon tint (transition: chart-family color + glyph; later Strata role) | Primary font | Secondary font | Notes |
 |---|---|---|---|---|---|
-| `metric` | `chart.bar.fill` | `.metric` (blue hue) | `.system(size: 36, weight: .bold, design: .rounded)` | `.caption` `.secondary` for label | Hero number always large; unit + trend arrow inline |
-| `insight` | `sparkles` | `.insight` (purple hue) | `.title3.weight(.semibold)` | `.body` `.primary` for body | Title first, body wraps |
-| `digest` | `doc.text.fill` | `.digest` (teal hue) | `.headline` for section heading | `.body` `lineSpacing: 4` for paragraphs | Prose; section list expands `body` paragraphs |
-| `agentSummary` | `bubble.left.and.bubble.right.fill` | `.agentSummary` (indigo hue) | `.headline` for agent name | `.callout` for completed; `.caption.monospaced()` for refs | Refs render as capsule chips |
-| `todoList` | `checklist` | `.todoList` (green hue) | `.body` per row | `.caption2` for priority dot label | Each row leads with a priority color dot |
-| `trending` | `chart.line.uptrend.xyaxis` | `.trending` (orange hue) | `.callout.monospaced()` for score | `.body` for title | Scores right-aligned mono |
-| `relationship` | `point.3.connected.trianglepath.dotted` | `.relationship` (cyan) | `.headline` for conclusion | `.caption.monospaced()` for axes/sample/window | Scatter/heatmap/slope; wide uses chart + evidence rail |
+| `metric` | `chart.bar.fill` | chart-family color + glyph (transition) | `largeTitle` with monospaced digits | `.caption` `.secondary` for label | Hero number always large; unit + trend arrow inline |
+| `insight` | `sparkles` | chart-family color + glyph (transition) | `.title3.weight(.semibold)` | `.body` `.primary` for body | Title first, body wraps |
+| `digest` | `doc.text.fill` | chart-family color + glyph (transition) | `.headline` for section heading | `.body` `lineSpacing: 4` for paragraphs | Prose; section list expands `body` paragraphs |
+| `agentSummary` | `bubble.left.and.bubble.right.fill` | chart-family color + glyph (transition) | `.headline` for agent name | `.callout` for completed; `.caption.monospaced()` for refs | Refs render as capsule chips |
+| `todoList` | `checklist` | chart-family color + glyph (transition) | `.body` per row | `.caption2` for priority dot label | Each row leads with a priority color dot |
+| `trending` | `chart.line.uptrend.xyaxis` | chart-family color + glyph (transition) | `.callout.monospaced()` for score | `.body` for title | Scores right-aligned mono |
+| `relationship` | `point.3.connected.trianglepath.dotted` | chart-family color + glyph (transition) | `.headline` for conclusion | `.caption.monospaced()` for axes/sample/window | Scatter/heatmap/slope; wide uses chart + evidence rail |
 | `sectionHeader` | (no badge, no chrome) | — | `.title3.weight(.semibold)` | `.subheadline` `.secondary` | Renders with NO card chrome (raw header inside container) |
 
 #### Relationship visualization
@@ -450,6 +450,11 @@ dark-mode variant. Views MUST read the tint from the token (never inline a
 owned by the current DesignKit implementation; the concrete Strata mapping
 is a migration input, not an API assertion in this constitution.
 
+Per north-star §11, the transition uses three chart-family colors plus the
+type glyph. After the transition, the badge uses the applicable Strata
+classification color role; the concrete role mapping is not defined here.
+The 32×32 badge remains mandatory (P0.5).
+
 #### Size = Geometry Only (geometry ladders)
 
 `size` is a layout instruction, never a typography hint. Geometry
@@ -458,10 +463,10 @@ together so a small card feels tight and a hero feels editorial.
 
 | size | Grid span | Min height | Corner radius | Padding |
 |---|---|---|---|---|
-| `small` | 1 column (target 200-260pt) | 96pt | 10pt | 12 / 14pt |
-| `medium` | 2 columns (target 400-520pt) | 140pt | 14pt | 16pt |
-| `wide` | full row (all columns) | 140pt (intrinsic) | 14pt | 16 / 20pt |
-| `hero` | full row, double height | 280pt | 20pt | 24pt |
+| `small` | 1 column (target 200-260pt) | 96pt | 16pt | 12pt |
+| `medium` | 2 columns (target 400-520pt) | 140pt | 24pt | 16pt |
+| `wide` | full row (all columns) | 140pt (intrinsic) | 24pt | 16 / 24pt |
+| `hero` | full row, double height | 280pt | 24pt | 24pt |
 
 Container grid columns adapt by viewport: iPhone = 1 col, iPad portrait
 = 2 col, iPad landscape / Mac small window = 3 col, Mac large window = 4
@@ -508,9 +513,9 @@ are identical across all four `style` values.
 | style | Stripe color | When agents use it |
 |---|---|---|
 | `neutral` | none | default; informational |
-| `success` | `.green` | positive outcomes (PR merged, goal hit) |
-| `warning` | `.orange` | attention needed (PR stuck, deadline near) |
-| `accent` | `.accentColor` | spotlight / call to action |
+| `success` | `status.success` | positive outcomes (PR merged, goal hit) |
+| `warning` | `status.warning` | attention needed (PR stuck, deadline near) |
+| `accent` | `brand.primary` | spotlight / call to action |
 
 Trend arrows inside `metric` cards may still use red / green — these are
 content (signal direction), not card chrome.
@@ -526,7 +531,7 @@ exception the trend arrow already carries — the pill is driven by
 **payload fields**, never by the card's `style` dimension:
 
 - `todoList` item `priority` → tone (high=danger, medium=warning,
-  low=primary).
+  low=neutral).
 - `metric` item `trend` → optional tone (up=success, down=danger,
   flat=neutral).
 - `trending` item `score` → neutral tone.
@@ -576,7 +581,7 @@ frame is drawn at all (driven by the container's card COUNT — see
   Goal B component specification.
   Cards float via luminance tiers, not shadow. (Supersedes the earlier
   `.background.secondary` material approach; see 1.6.0 migration note.)
-- Corner radius: per §Size = Geometry Only ladder (10 / 14 / 14 / 20).
+- Corner radius: per §Size = Geometry Only ladder (16 / 24 / 24 / 24).
 - Inner padding: per §Size = Geometry Only ladder.
 - Shadow: none (flat, luminance-tier depth).
 - Border: 1px `theme.neutrals.border` overlay at `0.08` opacity for edge
@@ -629,9 +634,9 @@ disappear into the canvas (the failure mode observed on 2026-06-29).
 - Content max width: page content is capped at `1200pt` and horizontally
   centered (`Space.contentMaxWidth`), so ultra-wide windows do not
   stretch cards into sparse strips.
-- Page horizontal padding: 24pt (Mac) / 20pt (iOS / iPad).
+- Page horizontal padding: 24pt (Mac) / 16pt (iOS / iPad).
 - Page vertical padding (top of briefing, bottom of last container):
-  28pt.
+  24pt.
 
 #### Container Chrome
 
@@ -640,7 +645,7 @@ container is rendered as:
 
 1. An overview-tier title line (and optional subtitle line), preceded by
    the 3pt `style` bar when the container is in `bare` mode.
-2. 12pt vertical spacing (10pt in `bare` mode — no card padding is left
+2. 12pt vertical spacing (8pt in `bare` mode — no card padding is left
    to absorb the gap).
 3. The cards laid out by the container's `layout` (auto/list/grid/hero).
 4. 32pt vertical spacing before the next container.
@@ -652,10 +657,10 @@ headers act as anchors; cards carry the content.
 #### Spacing & Color Tokens
 
 - Container vertical spacing: 32pt between containers; 12pt between
-  container header and first card (10pt when the container is `bare`).
-- Card vertical spacing inside a container: 14pt.
+  container header and first card (8pt when the container is `bare`).
+- Card vertical spacing inside a container: 12pt.
 - Grid column gap: 16pt.
-- Page horizontal padding: see §Page Chrome.
+- Page horizontal padding: see §Page Chrome; iPhone/iPad use 16pt.
 - **Colors MUST come from a package token source**, never inlined in a
   view. The canonical source is Strata's `DesignTokens` and
   `NativeDesignKit` role system, including semantic and classification roles;
@@ -664,7 +669,8 @@ headers act as anchors; cards carry the content.
   roles `.primary` / `.secondary` / `.tertiary` (these are roles, not
   literals, and remain allowed). **Raw hex (`Color(hex:)`,
   `Color(red:green:blue:)`) is permitted ONLY inside these token
-  sources.** A view MUST NOT inline a hex literal, nor a system color
+  sources. There is no local copied DesignKit palette.** A view MUST NOT inline
+  a hex literal, nor a system color
   (`.blue` / `.green` / …) as a signal channel — it consumes the token
   instead (Quality Bar §I P1.4).
 
@@ -1011,6 +1017,11 @@ Sync Impact Report — 1.15.0 (MINOR):
 - §Dependencies and §Design System & Tokens adopt the exact-pinned Strata
   shared-design-system products NativeDesignKit and DesignTokens, with the
   strata-blue brand role and token-role/token-ID compliance evidence.
+- §Design System & Tokens now follows north-star §11 (source sha256
+  `6c57b00d42201426fa8e9df5e2a4b73c956721e08dbd0408721e7b533c197ab3`):
+  16/24/24/24 geometry, 12/8/16/24 spacing, the three chart-family-color
+  badge transition, semantic stripe roles, monospaced large-title metrics,
+  neutral low-priority pills, and Strata token-source ownership.
 - §Quality Bar I requires checking the actual Strata roles and token IDs used;
   aliases may reference those roles/IDs but may not define colors, and
   compliance is not established by merely avoiding hard-coded hex values.
@@ -1020,12 +1031,11 @@ Sync Impact Report — 1.15.0 (MINOR):
 Migration note: in-flight Goal C work must use ADR-006, migrate the package
 and theme dependency in AP2, and update affected UI specs, design references,
 token-compliance tests, and GTT execution records. During the transition,
-existing DesignKit consumers remain unchanged until their layer-owned task
-lands; no mixed source may be introduced in a migrated surface. Favorite
-snapshots are newly local-only and require no CloudKit data migration. The
-north-star §11 conflict table was unavailable for this amendment; its
-row-level dispositions remain a documented input to the UI migration spec and
-may not be inferred from this amendment.
+existing DesignKit consumers retain only the explicitly documented transition
+behavior until their layer-owned task lands; no mixed source may be introduced
+in a migrated surface. Favorite snapshots are newly local-only and require no
+CloudKit data migration. The north-star §11 row-level transition notes are
+now incorporated in the Design System & Tokens section and ADR-006.
 -->
 
 <!--
