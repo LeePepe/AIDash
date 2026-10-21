@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 
 import pytest
-
 
 ROOT = Path(__file__).resolve().parent.parent
 QUERIES = ROOT / "L4_serve" / "queries"
@@ -19,6 +19,35 @@ GUARDS = {
     "attribution/rework-by-workspace": (
         QUERIES / "attribution" / "rework-by-workspace.sql"
     ),
+}
+
+# Every non-comment ``tokens`` use in an L4 query that reads fact_task must be
+# one of these reviewed shapes.  The cause picker is intentionally allowed:
+# it is not an output value and is only used to choose the dominant cause;
+# rework-relationship.sql documents that contract immediately above it.
+TOKEN_USAGE_ALLOWLIST = {
+    "issues/drill.sql": {
+        "t.tokens                                    AS issue_tokens":
+            "per-run detail projection",
+    },
+    "issues/trend.sql": {
+        "max(t.tokens)": "per-issue de-duplication",
+    },
+    "attribution/rework-relationship.sql": {
+        "max(t.tokens)": "per-issue de-duplication",
+        "sum(COALESCE(t.tokens, 0))": "non-output dominant-cause picker",
+        "r.tokens": "post-dedup projection",
+        "sum(tokens)                                     AS rework_tokens":
+            "post-dedup output aggregation",
+    },
+    "attribution/rework-by-workspace.sql": {
+        "max(t.tokens)": "per-issue de-duplication",
+        "THEN tokens ELSE 0 END": "post-dedup output aggregation",
+    },
+    "health/wasted-tokens.sql": {
+        "CAST(NULL AS INTEGER)                            AS tokens":
+            "stable unavailable output column",
+    },
 }
 
 WS = "workspace-a"
@@ -118,3 +147,38 @@ def test_guard_sql_documents_issue_level_deduplication():
     assert "max(t.tokens)" in workspace
     assert "max(t.tokens)                                          AS tokens" in workspace
     assert "max(t.tokens)                                           AS tokens" in relationship
+
+
+@pytest.mark.unit
+def test_all_l4_fact_task_token_uses_are_reviewed():
+    """Reject new fact_task token uses outside the reviewed allow-list."""
+    observed = set()
+    violations = []
+    for path in sorted(QUERIES.rglob("*.sql")):
+        text = path.read_text(encoding="utf-8")
+        code_lines = [line.split("--", 1)[0] for line in text.splitlines()]
+        code_text = "\n".join(code_lines)
+        if not re.search(r"\b(?:FROM|JOIN)\s+fact_task\b", code_text, re.IGNORECASE):
+            continue
+        relative = path.relative_to(QUERIES).as_posix()
+        allowed = TOKEN_USAGE_ALLOWLIST.get(relative, {})
+        for line_number, (line, code) in enumerate(
+            zip(text.splitlines(), code_lines), start=1
+        ):
+            if not re.search(r"\btokens\b", code, re.IGNORECASE):
+                continue
+            matches = [fragment for fragment in allowed if fragment in code]
+            if not matches:
+                violations.append(f"{relative}:{line_number}: {line.strip()}")
+            else:
+                observed.update((relative, fragment) for fragment in matches)
+
+    expected = {
+        (relative, fragment)
+        for relative, entries in TOKEN_USAGE_ALLOWLIST.items()
+        for fragment in entries
+    }
+    assert not violations, "unreviewed fact_task token use(s): " + "; ".join(
+        violations
+    )
+    assert observed == expected
