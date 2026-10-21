@@ -97,10 +97,20 @@ def test_daily_by_client_unions_sources_and_keeps_cache_separate(tmp_path, monke
     assert by_client["multica-agent-sdk"]["input"] == 100
     assert by_client["multica-agent-sdk"]["output"] == 50
     assert by_client["multica-agent-sdk"]["cache_read"] == 7
-    assert by_client["multica-agent-sdk"]["cost_usd"] == 1.25
-    assert by_client["codex_exec"]["cost_usd"] is None
-    assert by_client["codex_exec"]["unpriced_rows"] == 1
     assert round(sum(row["share_pct"] for row in by_client.values()), 2) == 100.0
+
+
+def test_token_queries_have_no_cost_columns(tmp_path, monkeypatch):
+    _fixture(tmp_path, monkeypatch)
+    for name in (
+        "tokens/daily-by-client",
+        "tokens/share-by-model",
+        "tokens/automated-share",
+    ):
+        _, cols = _run(name)
+        assert not {column.lower() for column in cols} & {
+            "cost_usd", "unpriced_rows", "actual_cost_usd", "estimated_cost_usd"
+        }
 
 
 def test_share_by_model_conserves_input_output_and_excludes_raven_exclusions(

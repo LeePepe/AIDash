@@ -5,7 +5,7 @@
 -- prompt_id ascending tie-break (or the session's earliest prompt if none is
 -- before the turn); cwd_prefix outranks client/originator, then interactive.
 -- Raven codex-tui cannot be session-linked and therefore remains interactive.
--- The denominator and share_pct use input+output only; cache is never priced.
+-- The denominator and share_pct use input+output only; cache is separate.
 -- aidata-attach: claude_prompts state_db
 
 WITH raven AS (
@@ -18,8 +18,7 @@ WITH raven AS (
            COALESCE(input_tokens, 0) AS input_tokens,
            COALESCE(output_tokens, 0) AS output_tokens,
            COALESCE(cache_read, 0) AS cache_read,
-           COALESCE(cache_write, 0) AS cache_write,
-           cost_usd
+           COALESCE(cache_write, 0) AS cache_write
     FROM fact_request f
     WHERE client IN ('multica-agent-sdk', 'codex_exec', 'codex-tui')
       AND (:day_from IS NULL OR cst_day >= :day_from)
@@ -51,8 +50,7 @@ WITH raven AS (
            COALESCE(c.input_tokens, 0) AS input_tokens,
            COALESCE(c.output_tokens, 0) AS output_tokens,
            COALESCE(c.cache_read, 0) AS cache_read,
-           COALESCE(c.cache_creation, 0) AS cache_write,
-           c.cost_usd
+           COALESCE(c.cache_creation, 0) AS cache_write
     FROM claude_base c
     LEFT JOIN claude_prompts.prompt p ON p.prompt_id = (
         SELECT q.prompt_id
@@ -71,8 +69,7 @@ WITH raven AS (
            COALESCE(input_tokens, 0) AS input_tokens,
            COALESCE(output_tokens, 0) AS output_tokens,
            COALESCE(cache_read_tokens, 0) AS cache_read,
-           COALESCE(cache_write_tokens, 0) AS cache_write,
-           COALESCE(actual_cost_usd, estimated_cost_usd) AS cost_usd
+           COALESCE(cache_write_tokens, 0) AS cache_write
     FROM state_db.session
     WHERE (:day_from IS NULL OR date(started_at, 'unixepoch', '+8 hours') >= :day_from)
       AND (:day_to IS NULL OR date(started_at, 'unixepoch', '+8 hours') <= :day_to)
@@ -80,13 +77,10 @@ WITH raven AS (
     SELECT * FROM raven UNION ALL SELECT * FROM claude UNION ALL SELECT * FROM hermes
 ), grouped AS (
     SELECT cst_day, class, sum(input_tokens) AS input, sum(output_tokens) AS output,
-           sum(cache_read) AS cache_read, sum(cache_write) AS cache_write,
-           CASE WHEN count(cost_usd) > 0 THEN sum(cost_usd) END AS cost_usd,
-           sum(cost_usd IS NULL) AS unpriced_rows
+           sum(cache_read) AS cache_read, sum(cache_write) AS cache_write
     FROM unioned GROUP BY cst_day, class
 )
-SELECT cst_day, class, input, output, cache_read, cache_write, cost_usd,
-       unpriced_rows,
+SELECT cst_day, class, input, output, cache_read, cache_write,
        round(100.0 * (input + output) /
              NULLIF(sum(input + output) OVER (PARTITION BY cst_day), 0), 2)
          AS share_pct
