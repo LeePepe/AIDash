@@ -93,6 +93,11 @@ CREATE TABLE skill_day (
 _CLEAN_COLS = ("day", "skill", "n")
 
 
+def _cst_day(ts: Any) -> str | None:
+    """Compatibility seam for the adapter's fixed-CST conversion."""
+    return epoch_s_to_cst_day(ts)
+
+
 def normalize() -> int:
     """Rebuild daily skill counts from raw history, deduping call ids."""
     calls: dict[str, dict[str, Any]] = {}
@@ -103,7 +108,7 @@ def normalize() -> int:
             calls[call_id] = record
     counts: dict[tuple[str, str], int] = {}
     for record in calls.values():
-        day = epoch_s_to_cst_day(record.get("timestamp"))
+        day = _cst_day(record.get("timestamp"))
         if day is None:
             continue
         key = (day, record["skill"])
