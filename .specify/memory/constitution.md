@@ -859,7 +859,7 @@ For any PR touching `Packages/AIDashUI/Sources/AIDashUI/**`:
    `StatusPill`s and `metric` sparkline/ring data-viz are driven by
    payload fields, not `style` — they are content signals, not chrome;
    see §Content-Level Status Pills, §Metric Data-Viz.)
-5. Confirm spacing constants come from the §Spacing & Color Tokens
+6. Confirm spacing constants come from the §Spacing & Color Tokens
    list, not freshly-invented numbers.
 
 ### Verdict Aggregation Rules
