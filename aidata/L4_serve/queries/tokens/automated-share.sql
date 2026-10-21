@@ -53,14 +53,19 @@ WITH raven AS (
            COALESCE(c.cache_creation, 0) AS cache_write
     FROM claude_base c
     LEFT JOIN claude_prompts.prompt p ON p.prompt_id = (
-        SELECT q.prompt_id
-        FROM claude_prompts.prompt q
-        WHERE q.session_id = c.session_id
-        ORDER BY CASE WHEN q.ts <= c.turn_epoch THEN 0 ELSE 1 END,
-                 CASE WHEN q.ts <= c.turn_epoch THEN q.ts END DESC,
-                 CASE WHEN q.ts <= c.turn_epoch THEN q.prompt_id END DESC,
-                 q.ts ASC, q.prompt_id ASC
-        LIMIT 1
+        COALESCE(
+            (SELECT q.prompt_id
+             FROM claude_prompts.prompt q
+             WHERE q.session_id = c.session_id
+               AND q.ts <= c.turn_epoch
+             ORDER BY q.ts DESC, q.prompt_id DESC
+             LIMIT 1),
+            (SELECT q.prompt_id
+             FROM claude_prompts.prompt q
+             WHERE q.session_id = c.session_id
+             ORDER BY q.ts ASC, q.prompt_id ASC
+             LIMIT 1)
+        )
     )
 ), hermes AS (
     SELECT date(started_at, 'unixepoch', '+8 hours') AS cst_day,
