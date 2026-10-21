@@ -34,12 +34,14 @@ Multica workspace...`, seen 80x); the divergence is the trailing per-issue
 detail. Hashing the full body would put nearly every prompt in its own group
 and destroy the comparison this tier exists for.
 
-**Read `event_msg`, not `response_item`.** Both carry user text, but
-`response_item(role=user)` also contains injected AGENTS.md dumps,
-`<environment_context>`, and `<turn_aborted>` markers. Measured across 63
-interactive sessions: 583 `user_message` vs 613 `response_item`, and 576 of the
-613 matched a `user_message` exactly — the 37 extras were pure injection. So
-`event_msg/user_message` is already the submitted prompt, no filtering needed.
+**Read supported user-message formats with file-local precedence.** The
+adapter accepts `item_completed`, `response_item(role=user)`, and the legacy
+`event_msg/user_message` format. A file uses the highest-priority format it
+contains (`item_completed`, then `response_item`, then legacy), so duplicate
+representations do not produce duplicate prompts while distinct prompts in
+the winning format are retained. `response_item(role=user)` can contain
+injected AGENTS.md dumps, `<environment_context>`, and `<turn_aborted>`
+markers; those records are still classified by the normal wrapper/tier rules.
 
 **Known blind spot, stated rather than guessed:** the 699 `codex_exec` sessions
 are undecidable. A human typing `codex exec "..."` at a terminal produces a log
@@ -409,17 +411,15 @@ def normalize() -> int:
             candidates_by_file.setdefault(file_id, []).append(row)
 
     precedence = (_FORMAT_ITEM_COMPLETED, _FORMAT_RESPONSE_ITEM, _FORMAT_LEGACY)
-    selected: dict[tuple[str, str], dict[str, Any]] = {}
+    selected: list[dict[str, Any]] = []
     for file_rows in candidates_by_file.values():
         available = {row["_format"] for row in file_rows}
         chosen = next((fmt for fmt in precedence if fmt in available), _FORMAT_LEGACY)
         for row in file_rows:
             if row["_format"] != chosen:
                 continue
-            key = (str(row.get("session_id") or row["_file_id"]),
-                   str(row.get("_turn_id") or row["prompt_id"]))
-            selected[key] = row
-    for row in selected.values():
+            selected.append(row)
+    for row in selected:
         row.pop("_format", None)
         row.pop("_turn_id", None)
         row.pop("_file_id", None)

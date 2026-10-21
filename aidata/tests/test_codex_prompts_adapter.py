@@ -30,13 +30,13 @@ def _user_msg(text, ts="2026-08-03T04:01:00.000Z"):
     })
 
 
-def _item_completed(text, turn_id="turn-1"):
+def _item_completed(text, turn_id="turn-1", item_id="item-1"):
     return {
         "timestamp": "2026-08-03T04:02:00.000Z",
         "type": "event_msg",
         "turn_id": turn_id,
         "payload": {"type": "item_completed", "turn_id": turn_id,
-                     "item": {"type": "UserMessage", "id": "item-1",
+                     "item": {"type": "UserMessage", "id": item_id,
                                "content": [{"type": "text", "text": text}]}},
     }
 
@@ -98,6 +98,73 @@ def test_file_format_precedence_discards_lower_priority_candidates(monkeypatch, 
     monkeypatch.setattr(cx, "clean_path", lambda source: tmp_path / "codex.db")
     assert cx.normalize() == 1
     assert [row["text_preview"] for row in captured["rows"]] == ["item"]
+
+
+@pytest.mark.unit
+def test_file_format_precedence_keeps_all_winning_item_completed_prompts(
+        monkeypatch, tmp_path):
+    records = [
+        {"id": "file.jsonl:1", "file_id": "file.jsonl", "format": "legacy",
+         "turn_id": "same-turn", "session_id": "s1", "text": "legacy",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+        {"id": "file.jsonl:2", "file_id": "file.jsonl", "format": "item_completed",
+         "turn_id": "same-turn", "session_id": "s1", "text": "item one",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+        {"id": "file.jsonl:3", "file_id": "file.jsonl", "format": "item_completed",
+         "turn_id": "same-turn", "session_id": "s1", "text": "item two",
+         "originator": "codex-tui", "timestamp": "2026-08-03T04:00:00Z"},
+    ]
+    captured = {}
+    monkeypatch.setattr(cx, "read_raw", lambda source: records)
+    monkeypatch.setattr(cx, "write_clean",
+                        lambda s, t, d, rows, c: captured.setdefault("rows", rows)
+                        and 0 or len(rows))
+    monkeypatch.setattr(cx, "clean_path", lambda source: tmp_path / "codex.db")
+
+    assert cx.normalize() == 2
+    assert [row["text_preview"] for row in captured["rows"]] == [
+        "item one", "item two"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("fmt,records", [
+    ("item_completed", [
+        {"id": "file.jsonl:1", "format": "item_completed", "turn_id": "same",
+         "session_id": "s1", "text": "item one"},
+        {"id": "file.jsonl:2", "format": "item_completed", "turn_id": "same",
+         "session_id": "s1", "text": "item two"},
+    ]),
+    ("response_item", [
+        {"id": "file.jsonl:1", "format": "response_item", "turn_id": "same",
+         "session_id": "s1", "text": "response one"},
+        {"id": "file.jsonl:2", "format": "response_item", "turn_id": "same",
+         "session_id": "s1", "text": "response two"},
+    ]),
+    ("legacy", [
+        {"id": "file.jsonl:1", "format": "legacy", "turn_id": "same",
+         "session_id": "s1", "text": "legacy one"},
+        {"id": "file.jsonl:2", "format": "legacy", "turn_id": "same",
+         "session_id": "s1", "text": "legacy two"},
+    ]),
+])
+def test_single_format_file_keeps_distinct_prompts_sharing_turn_id(
+        monkeypatch, tmp_path, fmt, records):
+    captured = {}
+    monkeypatch.setattr(cx, "read_raw", lambda source: [
+        {**record, "file_id": "file.jsonl", "originator": "codex-tui",
+         "timestamp": "2026-08-03T04:00:00Z"}
+        for record in records
+    ])
+    monkeypatch.setattr(cx, "write_clean",
+                        lambda s, t, d, rows, c: captured.setdefault("rows", rows)
+                        and 0 or len(rows))
+    monkeypatch.setattr(cx, "clean_path", lambda source: tmp_path / "codex.db")
+
+    assert cx.normalize() == len(records)
+    assert {row["text_preview"] for row in captured["rows"]} == {
+        record["text"] for record in records
+    }
 
 
 @pytest.mark.unit
@@ -284,7 +351,7 @@ def test_collect_rereads_meta_when_resuming(monkeypatch, tmp_path):
 # normalize
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
-def test_normalize_dedupes_and_counts(monkeypatch):
+def test_normalize_dedupes_and_counts(monkeypatch, tmp_path):
     records = [
         {"id": "p1", "text": "old", "originator": "codex-tui",
          "timestamp": "2026-08-03T04:00:00Z", "session_id": "s1"},
@@ -298,6 +365,7 @@ def test_normalize_dedupes_and_counts(monkeypatch):
     monkeypatch.setattr(cx, "write_clean",
                         lambda s, t, d, rows, c: captured.setdefault("rows", rows)
                         and 0 or len(rows))
+    monkeypatch.setattr(cx, "clean_path", lambda source: tmp_path / "codex.db")
     assert cx.normalize() == 2
     by_id = {r["prompt_id"]: r for r in captured["rows"]}
     assert by_id["p1"]["text_preview"] == "new", "last write must win"
