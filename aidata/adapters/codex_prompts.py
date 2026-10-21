@@ -34,12 +34,14 @@ Multica workspace...`, seen 80x); the divergence is the trailing per-issue
 detail. Hashing the full body would put nearly every prompt in its own group
 and destroy the comparison this tier exists for.
 
-**Read `event_msg`, not `response_item`.** Both carry user text, but
-`response_item(role=user)` also contains injected AGENTS.md dumps,
-`<environment_context>`, and `<turn_aborted>` markers. Measured across 63
-interactive sessions: 583 `user_message` vs 613 `response_item`, and 576 of the
-613 matched a `user_message` exactly — the 37 extras were pure injection. So
-`event_msg/user_message` is already the submitted prompt, no filtering needed.
+**Read supported user-message formats with file-local precedence.** The
+adapter accepts `item_completed`, `response_item(role=user)`, and the legacy
+`event_msg/user_message` format. A file uses the highest-priority format it
+contains (`item_completed`, then `response_item`, then legacy), so duplicate
+representations do not produce duplicate prompts while distinct prompts in
+the winning format are retained. `response_item(role=user)` can contain
+injected AGENTS.md dumps, `<environment_context>`, and `<turn_aborted>`
+markers; those records are still classified by the normal wrapper/tier rules.
 
 **Known blind spot, stated rather than guessed:** the 699 `codex_exec` sessions
 are undecidable. A human typing `codex exec "..."` at a terminal produces a log
@@ -61,12 +63,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from config import CODEX_SESSIONS_DIR
-from rawio import write_raw, read_raw
 from cleanio import write_clean
+from config import CODEX_SESSIONS_DIR, clean_path
+from rawio import read_raw, write_raw
 from state import get_watermark, set_watermark
 from timeutil import CST
 
@@ -74,6 +77,11 @@ SOURCE = "codex_prompts"
 
 _PREVIEW_CHARS = 500
 _PREFIX_CHARS = 100
+
+_FORMAT_ITEM_COMPLETED = "item_completed"
+_FORMAT_RESPONSE_ITEM = "response_item"
+_FORMAT_LEGACY = "legacy"
+_SKILL_PATH = re.compile(r"(?:^|[/\\])([^/\\\s\"'`()<>]+)/SKILL\.md(?:$|[\s\"'`()<>])")
 
 # Originators that mean a human was at the keyboard. Everything else is TIER B.
 HUMAN_ORIGINATORS = frozenset({"codex-tui", "Codex Desktop"})
@@ -126,11 +134,11 @@ def _iso_to_epoch(ts: Any) -> float | None:
     if not isinstance(ts, str) or not ts:
         return None
     try:
-        parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))  # noqa: FURB162
     except (ValueError, TypeError):
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=timezone.utc)  # noqa: UP017
     return parsed.timestamp()
 
 
@@ -139,7 +147,7 @@ def _cst_day(ts: Any) -> str | None:
     epoch = _iso_to_epoch(ts)
     if epoch is None:
         return None
-    return datetime.fromtimestamp(epoch, timezone.utc).astimezone(CST).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(epoch, timezone.utc).astimezone(CST).strftime("%Y-%m-%d")  # noqa: UP017
 
 
 def _session_meta(first_line: str) -> dict[str, Any]:
@@ -159,15 +167,92 @@ def _session_meta(first_line: str) -> dict[str, Any]:
     }
 
 
-def _user_message(obj: dict[str, Any]) -> str | None:
-    """The submitted prompt text, or None if this record is not one."""
-    if obj.get("type") != "event_msg":
+def _content_text(content: Any) -> str | None:
+    if isinstance(content, str):
+        return content or None
+    if not isinstance(content, list):
         return None
+    parts = [item.get("text") for item in content
+             if isinstance(item, dict) and isinstance(item.get("text"), str)]
+    text = "".join(parts)
+    return text or None
+
+
+def _prompt_candidate(obj: dict[str, Any], meta: dict[str, Any],
+                      rel_path: str, offset: int) -> dict[str, Any] | None:
+    """Extract one candidate without deciding which format wins for the file."""
     payload = obj.get("payload") or {}
-    if payload.get("type") != "user_message":
+    fmt = None
+    text = None
+    turn_id = obj.get("turn_id") or payload.get("turn_id")
+    if obj.get("type") == "event_msg" and payload.get("type") == "item_completed":
+        item = payload.get("item") or {}
+        if item.get("type") == "UserMessage":
+            fmt = _FORMAT_ITEM_COMPLETED
+            text = _content_text(item.get("content"))
+            turn_id = turn_id or item.get("turn_id") or item.get("id")
+    elif (obj.get("type") == "response_item" and
+          payload.get("type") == "message" and payload.get("role") == "user"):
+        fmt = _FORMAT_RESPONSE_ITEM
+        text = _content_text(payload.get("content"))
+        turn_id = turn_id or payload.get("id")
+    elif obj.get("type") == "event_msg" and payload.get("type") == "user_message":
+        fmt = _FORMAT_LEGACY
+        text = payload.get("message")
+    if not isinstance(text, str) or not text:
         return None
-    message = payload.get("message")
-    return message if isinstance(message, str) and message else None
+    return {
+        "id": f"{rel_path}:{offset}", "timestamp": obj.get("timestamp"),
+        "text": text, "format": fmt, "turn_id": turn_id,
+        "file_id": rel_path, **meta,
+    }
+
+
+def _user_message(obj: dict[str, Any]) -> str | None:
+    """Compatibility seam returning text for any supported prompt format."""
+    candidate = _prompt_candidate(obj, {}, "", 0)
+    return candidate["text"] if candidate else None
+
+
+def _skill_names(value: Any) -> set[str]:
+    """Return only names from argument values ending in ``/<skill>/SKILL.md``."""
+    found: set[str] = set()
+    if isinstance(value, str):
+        found.update(match.group(1) for match in _SKILL_PATH.finditer(value))
+    elif isinstance(value, dict):
+        for child in value.values():
+            found.update(_skill_names(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.update(_skill_names(child))
+    return found
+
+
+def _skill_candidates(obj: dict[str, Any], meta: dict[str, Any],
+                      rel_path: str, offset: int) -> list[dict[str, Any]]:
+    payload = obj.get("payload") or {}
+    if obj.get("type") != "response_item" or payload.get("type") not in {
+        "custom_tool_call", "function_call"
+    }:
+        return []
+    arguments = payload.get("arguments", payload.get("input"))
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            parsed = arguments
+        arguments = parsed
+    names = _skill_names(arguments)
+    if not names:
+        return []
+    call_id = payload.get("call_id") or payload.get("id")
+    if not call_id:
+        call_id = f"{rel_path}:{offset}"
+    return [{
+        "_kind": "skill_use", "id": f"skill:{rel_path}:{offset}:{call_id}:{name}",
+        "timestamp": obj.get("timestamp"), "call_id": str(call_id),
+        "skill": name, "file_id": rel_path, **meta,
+    } for name in sorted(names)]
 
 
 def collect() -> int:
@@ -244,19 +329,10 @@ def collect() -> int:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                text = _user_message(obj)
-                if text is None:
-                    continue
-                batch.append({
-                    # Absolute file offset, NOT a batch index: an index
-                    # restarts at 0 on every resume, so one file collected in
-                    # two passes can mint duplicate ids and let normalize's
-                    # last-write-wins silently drop a row.
-                    "id": f"{rel_path}:{current_offset}",
-                    "timestamp": obj.get("timestamp"),
-                    "text": text,
-                    **meta,
-                })
+                prompt = _prompt_candidate(obj, meta, rel_path, current_offset)
+                if prompt is not None:
+                    batch.append(prompt)
+                batch.extend(_skill_candidates(obj, meta, rel_path, current_offset))
             new_offsets[key] = line_offset
         if batch:
             total += write_raw(SOURCE, batch)
@@ -315,11 +391,61 @@ def _row(rec: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def normalize() -> int:
-    """One row per prompt, keyed by prompt_id (last write wins)."""
+    """Rebuild prompts and skill uses, applying deterministic file precedence."""
     rows: dict[str, dict[str, Any]] = {}
+    raw_skills: dict[tuple[str, str], dict[str, Any]] = {}
+    candidates_by_file: dict[str, list[dict[str, Any]]] = {}
     for rec in read_raw(SOURCE):
+        if rec.get("_kind") == "skill_use":
+            call_id = rec.get("call_id")
+            skill = rec.get("skill")
+            if call_id and skill:
+                raw_skills[(str(call_id), str(skill))] = rec
+            continue
         row = _row(rec)
         if row:
-            rows[row["prompt_id"]] = row
-    return write_clean(SOURCE, "prompt", _CLEAN_DDL, list(rows.values()),
-                       _CLEAN_COLS)
+            file_id = str(rec.get("file_id") or str(rec["id"]).split(":", 1)[0])
+            row["_format"] = rec.get("format", _FORMAT_LEGACY)
+            row["_turn_id"] = rec.get("turn_id")
+            row["_file_id"] = file_id
+            candidates_by_file.setdefault(file_id, []).append(row)
+
+    precedence = (_FORMAT_ITEM_COMPLETED, _FORMAT_RESPONSE_ITEM, _FORMAT_LEGACY)
+    selected: list[dict[str, Any]] = []
+    for file_rows in candidates_by_file.values():
+        available = {row["_format"] for row in file_rows}
+        chosen = next((fmt for fmt in precedence if fmt in available), _FORMAT_LEGACY)
+        for row in file_rows:
+            if row["_format"] != chosen:
+                continue
+            selected.append(row)
+    for row in selected:
+        row.pop("_format", None)
+        row.pop("_turn_id", None)
+        row.pop("_file_id", None)
+        rows[row["prompt_id"]] = row
+
+    prompt_count = write_clean(SOURCE, "prompt", _CLEAN_DDL, list(rows.values()),
+                               _CLEAN_COLS)
+    skill_rows = []
+    for rec in raw_skills.values():
+        day = _cst_day(rec.get("timestamp"))
+        if day and rec.get("session_id") and rec.get("call_id") and rec.get("skill"):
+            skill_rows.append({
+                "day": day, "session_id": rec["session_id"],
+                "ts": _iso_to_epoch(rec.get("timestamp")),
+                "call_id": rec["call_id"], "skill": rec["skill"],
+            })
+    db_path = clean_path(SOURCE)
+    if skill_rows or db_path.exists():
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("""CREATE TABLE IF NOT EXISTS skill_use (
+                day TEXT, session_id TEXT, ts REAL, call_id TEXT, skill TEXT,
+                PRIMARY KEY (call_id, skill)
+            )""")
+            conn.execute("DELETE FROM skill_use")
+            conn.executemany(
+                "INSERT OR IGNORE INTO skill_use (day, session_id, ts, call_id, skill) "
+                "VALUES (:day, :session_id, :ts, :call_id, :skill)", skill_rows)
+            conn.commit()
+    return prompt_count
