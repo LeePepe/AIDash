@@ -20,8 +20,10 @@ def _dbs(tmp_path):
           ('2026-10-15', 'claude-1', 'deep-research', '["web"]'),
           ('2026-10-15', 'claude-2', NULL, '["web", "pdf"]');
     """)
-    con.commit(); con.close()
-    clean = tmp_path / "clean"; clean.mkdir()
+    con.commit()
+    con.close()
+    clean = tmp_path / "clean"
+    clean.mkdir()
     for name, ddl, rows in (
         ("claude_prompts", "CREATE TABLE prompt (day TEXT, source_kind TEXT, text_preview TEXT, session_id TEXT)",
          [("2026-10-15", "slash_command", "<command-name>commit</command-name>", "claude-1")]),
@@ -39,7 +41,8 @@ def _dbs(tmp_path):
             db.execute("INSERT INTO prompt VALUES (?, ?, ?)", ("2026-10-15", "slash_command", "codex-1"))
         else:
             db.executemany("INSERT INTO skill_day VALUES (?, ?, ?)", rows)
-        db.commit(); db.close()
+        db.commit()
+        db.close()
     return warehouse, clean
 
 
