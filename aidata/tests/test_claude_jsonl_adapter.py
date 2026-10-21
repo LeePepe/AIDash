@@ -5,9 +5,8 @@ message.stop_reason through collect's _slim into the clean `turn` row) is proven
 deterministically, alongside the existing token/tool columns.
 """
 
-import pytest
-
 import adapters.claude_jsonl as cj
+import pytest
 
 
 def _assistant_line(uuid, stop_reason, **usage):
@@ -34,6 +33,12 @@ def _assistant_line(uuid, stop_reason, **usage):
     }
 
 
+def _skill_line(uuid, blocks):
+    line = _assistant_line(uuid, "end_turn")
+    line["message"]["content"] = blocks
+    return line
+
+
 @pytest.mark.unit
 def test_slim_keeps_stop_reason():
     slim = cj._slim(_assistant_line("u1", "max_tokens"))
@@ -54,6 +59,61 @@ def test_slim_stop_reason_nullable():
     del line["message"]["stop_reason"]
     slim = cj._slim(line)
     assert slim["stop_reason"] is None
+
+
+@pytest.mark.unit
+def test_slim_keeps_only_redacted_skill_inputs():
+    slim = cj._slim(
+        _skill_line(
+            "skills-1",
+            [
+                {
+                    "type": "tool_use",
+                    "name": "Skill",
+                    "input": {
+                        "skill": "  $goal-target-task\n",
+                        "args": "private prompt text that must not persist",
+                    },
+                },
+                {
+                    "type": "tool_use",
+                    "name": "Read",
+                    "input": {"skill": "not-a-skill-tool"},
+                },
+                {
+                    "type": "tool_use",
+                    "name": "Skill",
+                    "input": {"skill": "x" * 200, "secret": "drop me"},
+                },
+            ],
+        )
+    )
+
+    assert slim["skill_names"] == ["$goal-target-task", "x" * 128]
+    assert all(len(skill) <= 128 for skill in slim["skill_names"])
+    assert "args" not in slim
+    assert "secret" not in slim
+    assert "not-a-skill-tool" not in slim["skill_names"]
+
+
+@pytest.mark.unit
+def test_normalize_serializes_skill_names_as_json(monkeypatch):
+    raw = [cj._slim(_skill_line("skills-1", [{
+        "type": "tool_use",
+        "name": "Skill",
+        "input": {"skill": "alpha"},
+    }]))]
+    monkeypatch.setattr(cj, "read_raw", lambda source: raw)
+    captured = {}
+    monkeypatch.setattr(
+        cj,
+        "write_clean",
+        lambda source, table, ddl, rows, cols: captured.setdefault("rows", rows),
+    )
+
+    cj.normalize()
+
+    assert captured["rows"][0]["skill_names"] == '["alpha"]'
 
 
 @pytest.mark.unit

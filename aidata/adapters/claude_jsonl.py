@@ -25,9 +25,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from config import CLAUDE_PROJECTS_DIR
-from rawio import write_raw, read_raw
 from cleanio import write_clean
+from config import CLAUDE_PROJECTS_DIR
+from rawio import read_raw, write_raw
 from state import get_watermark, set_watermark
 
 SOURCE = "claude_jsonl"
@@ -82,6 +82,23 @@ def _slim(obj: dict[str, Any]) -> dict[str, Any]:
         b.get("name") for b in (msg.get("content") or [])
         if isinstance(b, dict) and b.get("type") == "tool_use"
     ]
+    skill_names = []
+    for block in msg.get("content") or []:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        if block.get("name") != "Skill":
+            continue
+        tool_input = block.get("input")
+        if not isinstance(tool_input, dict):
+            continue
+        skill = tool_input.get("skill")
+        if not isinstance(skill, str):
+            continue
+        # Keep the named skill only; discard all other tool-input fields and
+        # bound/control-normalize the value before it reaches raw storage.
+        skill = " ".join(skill.split())[:128]
+        if skill:
+            skill_names.append(skill)
     # snake_case session_id (resume/fork parent) may sit at top level or in
     # message; it is rare in practice. Capture wherever present, but never
     # confuse it with camelCase sessionId (the current session / join key).
@@ -104,6 +121,7 @@ def _slim(obj: dict[str, Any]) -> dict[str, Any]:
             "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
         },
         "tool_calls": tool_names,
+        "skill_names": skill_names or None,
     }
 
 
@@ -113,14 +131,14 @@ CREATE TABLE turn (
     ts TEXT, project TEXT, git_branch TEXT, role TEXT, model TEXT,
     attribution_skill TEXT, input_tokens INTEGER, output_tokens INTEGER,
     cache_read INTEGER, cache_creation INTEGER, tool_calls TEXT,
-    finish_reason TEXT
+    finish_reason TEXT, skill_names TEXT
 )
 """
 _CLEAN_COLS = (
     "turn_uuid", "session_id", "parent_session_id", "ts", "project",
     "git_branch", "role", "model", "attribution_skill", "input_tokens",
     "output_tokens", "cache_read", "cache_creation", "tool_calls",
-    "finish_reason",
+    "finish_reason", "skill_names",
 )
 
 
@@ -143,6 +161,7 @@ def normalize() -> int:
             continue
         u = rec.get("usage") or {}
         tc = rec.get("tool_calls") or []
+        skills = rec.get("skill_names") or []
         rows[uuid] = {
             "turn_uuid": uuid,
             "session_id": rec.get("sessionId"),
@@ -159,5 +178,6 @@ def normalize() -> int:
             "cache_creation": u.get("cache_creation_input_tokens"),
             "tool_calls": json.dumps(tc, ensure_ascii=False),
             "finish_reason": rec.get("stop_reason"),
+            "skill_names": json.dumps(skills, ensure_ascii=False) if skills else None,
         }
     return write_clean(SOURCE, "turn", _CLEAN_DDL, list(rows.values()), _CLEAN_COLS)
