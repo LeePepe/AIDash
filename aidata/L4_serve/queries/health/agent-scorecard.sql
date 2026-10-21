@@ -2,6 +2,9 @@
 -- health/agent-scorecard — reliability + speed + token burn per multica agent.
 -- Cycle time from ISO ts_start/ts_end (julianday diff -> seconds). Only
 -- multica_run rows carry agent_id; claude_job rows are excluded.
+-- unavailable: fact_task.tokens is issue-wide, merge.py:116, and is not
+-- attributable to an agent;
+-- keep the token-shaped column but return NULL rather than fabricate a split.
 SELECT agent_id,
        count(*)                                              AS runs,
        sum(status = 'completed')                             AS completed,
@@ -10,7 +13,7 @@ SELECT agent_id,
        round(100.0 * sum(status = 'completed') / count(*), 1) AS completion_pct,
        round(avg((julianday(ts_end) - julianday(ts_start)) * 86400.0), 0)
                                                              AS avg_seconds,
-       round(avg(tokens), 0)                                 AS avg_tokens
+       CAST(NULL AS REAL)                                    AS avg_tokens
 FROM fact_task
 WHERE source = 'multica_run' AND agent_id IS NOT NULL
 GROUP BY agent_id
