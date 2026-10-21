@@ -58,6 +58,7 @@ from rawio import write_raw, read_raw
 from cleanio import write_clean
 from state import get_watermark, set_watermark
 from timeutil import CST
+from adapters._repo import repo_for_path
 
 SOURCE = "claude_prompts"
 
@@ -278,12 +279,13 @@ CREATE TABLE prompt (
     prompt_sha    TEXT,
     prefix_100    TEXT,
     cwd           TEXT,
+    repo          TEXT,
     git_branch    TEXT
 )
 """
 _PROMPT_COLS = ("prompt_id", "agent", "session_id", "day", "ts", "source_kind",
                 "text_len", "text_preview", "prompt_sha", "prefix_100",
-                "cwd", "git_branch")
+                "cwd", "repo", "git_branch")
 
 _ASK_DDL = """
 CREATE TABLE ask (
@@ -324,6 +326,7 @@ def _prompt_row(rec: dict[str, Any]) -> dict[str, Any] | None:
         "prompt_sha": hashlib.sha256(prefix.encode("utf-8")).hexdigest()[:16],
         "prefix_100": prefix,
         "cwd": rec.get("cwd"),
+        "repo": repo_for_path(rec.get("cwd")),
         "git_branch": rec.get("gitBranch"),
     }
 

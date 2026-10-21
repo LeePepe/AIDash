@@ -212,3 +212,18 @@ def test_normalize_started_at_is_epoch_seconds_float(monkeypatch):
 @pytest.mark.unit
 def test_automated_sources_definition():
     assert sdb.AUTOMATED_SOURCES == frozenset({"cron", "subagent"})
+
+
+@pytest.mark.unit
+def test_normalize_resolves_git_repo_root_before_cwd(monkeypatch):
+    row = {**_ROWS[0], "git_repo_root": "/repo/root", "cwd": "/repo/root/work"}
+    monkeypatch.setattr(sdb, "read_raw", lambda source: [row])
+    monkeypatch.setattr(sdb, "repo_for_path", lambda path: path)
+    captured = {}
+    monkeypatch.setattr(
+        sdb, "write_clean",
+        lambda source, table, ddl, rows, cols: captured.setdefault("row", rows[0]),
+    )
+    sdb.normalize()
+    assert captured["row"]["repo"] == "/repo/root"
+    assert "repo" in sdb._CLEAN_COLS

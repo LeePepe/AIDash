@@ -47,6 +47,7 @@ from rawio import write_raw, read_raw
 from cleanio import write_clean
 from sqlite_ro import query_ro
 from state import get_watermark, set_watermark
+from adapters._repo import repo_for_path
 
 SOURCE = "state_db"
 
@@ -97,7 +98,7 @@ CREATE TABLE session (
     -- missed a model. Never substitute one for the other silently.
     estimated_cost_usd REAL, actual_cost_usd REAL, cost_status TEXT,
     billing_mode TEXT,
-    git_branch TEXT, git_repo_root TEXT, cwd TEXT
+    git_branch TEXT, git_repo_root TEXT, cwd TEXT, repo TEXT
 )
 """
 _CLEAN_COLS = ("session_id", "started_at", "ended_at", "message_count",
@@ -107,7 +108,7 @@ _CLEAN_COLS = ("session_id", "started_at", "ended_at", "message_count",
                "system_prompt_sha", "system_prompt_preview", "system_prompt_len",
                "reasoning_effort", "reasoning_enabled", "max_iterations",
                "estimated_cost_usd", "actual_cost_usd", "cost_status",
-               "billing_mode", "git_branch", "git_repo_root", "cwd")
+               "billing_mode", "git_branch", "git_repo_root", "cwd", "repo")
 
 # Preview length — enough to tell two prompts apart in a query result, short
 # enough that the clean DB stays small.
@@ -185,5 +186,6 @@ def normalize() -> int:
             "git_branch": rec.get("git_branch"),
             "git_repo_root": rec.get("git_repo_root"),
             "cwd": rec.get("cwd"),
+            "repo": repo_for_path(rec.get("git_repo_root") or rec.get("cwd")),
         }
     return write_clean(SOURCE, "session", _CLEAN_DDL, list(rows.values()), _CLEAN_COLS)
