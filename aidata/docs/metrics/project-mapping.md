@@ -12,5 +12,6 @@ The common `repo` key is resolved at L2 from a source working directory:
 - Raven Codex/Multica rows have no project bridge and are `(unattributed)`.
 
 `tokens/by-project` groups by CST day and repo and reports input, output,
-cache-read, cache-write, cost, and input-plus-output share. Unattributed and
-unresolved rows remain in the denominator; cache tokens do not.
+cache-read, cache-write, and input-plus-output share. Cost is out of scope for
+v1 (Owner 2026-10-21). Unattributed and unresolved rows remain in the
+denominator; cache tokens do not.
