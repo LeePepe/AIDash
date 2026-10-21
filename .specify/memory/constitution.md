@@ -133,8 +133,9 @@ constitutional violation and the Reviewer MUST 🔴 FAIL.
 - **`style` = semantic signal tint only.** `style` MUST NOT change card
   chrome structure (background material, padding) or the size-driven
   geometry (corner radius). The only permitted style affordance is a
-  left-edge accent stripe (3pt hairline; success=green, warning=orange,
-  accent=accentColor; `neutral` = no stripe). Filling the whole card
+  left-edge accent stripe (3pt hairline; success=`status.success`,
+  warning=`status.warning`, accent=`brand.primary`; `neutral` = no stripe).
+  Filling the whole card
   with a colored background tint is forbidden — it cannot be
   distinguished at low opacity and dominates the visual at high opacity.
   A colored status pill (`StatusPill`) is NOT a `style` affordance — it
@@ -465,7 +466,7 @@ together so a small card feels tight and a hero feels editorial.
 |---|---|---|---|---|
 | `small` | 1 column (target 200-260pt) | 96pt | 16pt | 12pt |
 | `medium` | 2 columns (target 400-520pt) | 140pt | 24pt | 16pt |
-| `wide` | full row (all columns) | 140pt (intrinsic) | 24pt | 16 / 24pt |
+| `wide` | full row (all columns) | 140pt (intrinsic) | 24pt | 16pt |
 | `hero` | full row, double height | 280pt | 24pt | 24pt |
 
 Container grid columns adapt by viewport: iPhone = 1 col, iPad portrait
@@ -606,7 +607,7 @@ container's effective card count — and on NOTHING else:
 - **count == 1 → `bare`.** The card draws no background, no hairline, no
   corner radius, no padding, and no min height. Its content sits directly
   on the page background, left-aligned with the container title, and the
-  header gap tightens from 12pt to 10pt. `style` is not lost: it moves to
+  header gap tightens from 12pt to 8pt. `style` is not lost: it moves to
   a 3pt vertical bar at the LEFT OF THE TITLE, the height of the title
   line. A card's whole-BODY inner panel (`InnerSurfaceRole.body`) also
   collapses here — keeping it would regrow the removed frame one level
@@ -831,7 +832,7 @@ orthogonality contract:
 2. Hardcoded padding / spacing values that disagree with the
    §Size = Geometry Only ladder or the §Spacing & Color Tokens list.
 3. Corner radius that disagrees with the §Size = Geometry Only ladder
-   (small=10 / medium=14 / wide=14 / hero=20), or shadow added to a
+   (small=16 / medium=24 / wide=24 / hero=24), or shadow added to a
    card.
 4. A **view** that inlines a color literal — raw hex (`Color(hex:)`,
    `Color(red:green:blue:)`) OR a system color (`.blue`, `.green`,
@@ -840,7 +841,11 @@ orthogonality contract:
    an actual Strata role and token ID; it MUST NOT define or contain a new
    color value. Inlining in a `CardView` / layout is the violation. Type icon
    tints MUST come from the actual Strata classification role and token ID per
-   the §Per-Type Visual Recipes table, not freshly chosen. (Text roles
+   the §Per-Type Visual Recipes table, not freshly chosen. Per north-star §11,
+   the transition uses three chart-family colors plus the type glyph. After
+   the transition, the badge uses the applicable Strata classification color
+   role; the concrete role mapping is not defined here. The 32×32 badge
+   remains mandatory (P0.5). (Text roles
    `.primary` / `.secondary` / `.tertiary` are allowed.)
 5. `Container` view wrapping its child cards in its own
    `RoundedRectangle` / `background` — containers are typography +
