@@ -21,14 +21,13 @@ claude_turn_repo AS (
                 ORDER BY p.ts ASC, p.prompt_id ASC LIMIT 1),
                '(unresolved)') AS repo,
            t.input_tokens AS input, t.output_tokens AS output,
-           t.cache_read AS cache_read, t.cache_creation AS cache_write,
-           COALESCE(t.cost_usd, 0) AS cost_usd
+           t.cache_read AS cache_read, t.cache_creation AS cache_write
     FROM fact_turn t
 ),
 raven AS (
     SELECT cst_day, '(unattributed)' AS repo,
            input_tokens AS input, output_tokens AS output,
-           cache_read, cache_write, COALESCE(cost_usd, 0) AS cost_usd
+           cache_read, cache_write
     FROM fact_request
     WHERE client IN ('multica-agent-sdk', 'codex_exec', 'codex-tui')
 ),
@@ -36,8 +35,7 @@ hermes AS (
     SELECT date(started_at, 'unixepoch', '+8 hours') AS cst_day,
            COALESCE(repo, '(unresolved)') AS repo,
            input_tokens AS input, output_tokens AS output,
-           cache_read_tokens AS cache_read, cache_write_tokens AS cache_write,
-           COALESCE(actual_cost_usd, estimated_cost_usd, 0) AS cost_usd
+           cache_read_tokens AS cache_read, cache_write_tokens AS cache_write
     FROM state_db.session
 ),
 all_rows AS (
@@ -49,8 +47,7 @@ grouped AS (
     SELECT cst_day, repo, SUM(COALESCE(input, 0)) AS input,
            SUM(COALESCE(output, 0)) AS output,
            SUM(COALESCE(cache_read, 0)) AS cache_read,
-           SUM(COALESCE(cache_write, 0)) AS cache_write,
-           SUM(cost_usd) AS cost_usd
+           SUM(COALESCE(cache_write, 0)) AS cache_write
     FROM all_rows
     WHERE (:day_from IS NULL OR cst_day >= :day_from)
       AND (:day_to IS NULL OR cst_day <= :day_to)
@@ -61,7 +58,6 @@ day_totals AS (
     FROM grouped GROUP BY cst_day
 )
 SELECT g.cst_day, g.repo, g.input, g.output, g.cache_read, g.cache_write,
-       round(g.cost_usd, 6) AS cost_usd,
        round(100.0 * (g.input + g.output) / NULLIF(d.total_io, 0), 4)
            AS share_pct
 FROM grouped g JOIN day_totals d ON d.cst_day = g.cst_day

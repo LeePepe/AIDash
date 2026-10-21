@@ -13,22 +13,21 @@ def _dbs(tmp_path: Path):
     con.executescript("""
         CREATE TABLE fact_request (
             cst_day TEXT, client TEXT, input_tokens INTEGER, output_tokens INTEGER,
-            cache_read INTEGER, cache_write INTEGER, cost_usd REAL
+            cache_read INTEGER, cache_write INTEGER
         );
         CREATE TABLE fact_turn (
             cst_day TEXT, session_id TEXT, ts TEXT, input_tokens INTEGER,
-            output_tokens INTEGER, cache_read INTEGER, cache_creation INTEGER,
-            cost_usd REAL
+                output_tokens INTEGER, cache_read INTEGER, cache_creation INTEGER
         );
     """)
-    con.executemany("INSERT INTO fact_request VALUES (?, ?, ?, ?, ?, ?, ?)", [
-        ("2026-10-20", "codex_exec", 10, 5, 2, 1, 1.0),
-        ("2026-10-20", "Claude", 999, 999, 0, 0, 99.0),  # excluded client
+    con.executemany("INSERT INTO fact_request VALUES (?, ?, ?, ?, ?, ?)", [
+        ("2026-10-20", "codex_exec", 10, 5, 2, 1),
+        ("2026-10-20", "Claude", 999, 999, 0, 0),  # excluded client
     ])
-    con.executemany("INSERT INTO fact_turn VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
-        ("2026-10-20", "s1", "1970-01-01T00:16:40Z", 20, 10, 3, 4, 2.0),
-        ("2026-10-20", "s2", "1970-01-01T00:08:20Z", 4, 1, 0, 0, 0.5),
-        ("2026-10-20", "s3", "1970-01-01T00:25:00Z", 2, 3, 0, 0, 0.2),
+    con.executemany("INSERT INTO fact_turn VALUES (?, ?, ?, ?, ?, ?, ?)", [
+        ("2026-10-20", "s1", "1970-01-01T00:16:40Z", 20, 10, 3, 4),
+        ("2026-10-20", "s2", "1970-01-01T00:08:20Z", 4, 1, 0, 0),
+        ("2026-10-20", "s3", "1970-01-01T00:25:00Z", 2, 3, 0, 0),
     ])
     con.commit()
     con.close()
@@ -49,10 +48,9 @@ def _dbs(tmp_path: Path):
     con = sqlite3.connect(state)
     con.execute("""CREATE TABLE session (
         started_at REAL, repo TEXT, input_tokens INTEGER, output_tokens INTEGER,
-        cache_read_tokens INTEGER, cache_write_tokens INTEGER,
-        actual_cost_usd REAL, estimated_cost_usd REAL
+        cache_read_tokens INTEGER, cache_write_tokens INTEGER
     )""")
-    con.execute("INSERT INTO session VALUES (1792454400, 'owner/hermes', 6, 4, 1, 2, 3.0, 4.0)")
+    con.execute("INSERT INTO session VALUES (1792454400, 'owner/hermes', 6, 4, 1, 2)")
     con.commit()
     con.close()
     return warehouse, prompts, state
@@ -69,7 +67,7 @@ def test_project_query_allocates_prompts_and_conserves_share(tmp_path, monkeypat
     assert by_repo["owner/fallback"][2:4] == (4, 1)
     assert by_repo["(unresolved)"][2:4] == (2, 3)
     assert by_repo["(unattributed)"][2:4] == (10, 5)
-    assert sum(row[7] for row in rows) == pytest.approx(100.0, abs=0.001)
+    assert sum(row[6] for row in rows) == pytest.approx(100.0, abs=0.001)
     assert cols == ["cst_day", "repo", "input", "output", "cache_read",
-                    "cache_write", "cost_usd", "share_pct"]
+                    "cache_write", "share_pct"]
 
