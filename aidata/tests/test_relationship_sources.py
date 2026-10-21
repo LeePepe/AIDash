@@ -14,7 +14,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from L5_apps.digest import sources as s
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,21 +99,22 @@ def test_one_issue_is_never_counted_under_two_root_causes(tmp_path):
     issues = [("i1", WS_A), ("i2", WS_A)]
     tasks = [
         # i1 failed twice, for two DIFFERENT reasons, then completed.
+        # merge.py:116 writes the issue-wide total on every run row.
         _task("t1a", "i1", "2026-08-10", "cancelled", 1000, "runtime went offline"),
-        _task("t1b", "i1", "2026-08-10", "cancelled", 100, "task expired abc"),
-        _task("t1c", "i1", "2026-08-10", "completed", 900),
-        _task("t2a", "i2", "2026-08-10", "cancelled", 40, "task expired abc"),
+        _task("t1b", "i1", "2026-08-10", "cancelled", 1000, "task expired abc"),
+        _task("t1c", "i1", "2026-08-10", "completed", 1000),
+        _task("t2a", "i2", "2026-08-10", "cancelled", 60, "runtime went offline"),
         _task("t2b", "i2", "2026-08-10", "completed", 60),
     ]
     rows, idx = _run(_warehouse(tmp_path, issues, tasks))
     assert sum(r[idx["issues"]] for r in rows) == 2, "issue counted twice"
-    assert sum(r[idx["rework_tokens"]] for r in rows) == 2100, (
+    assert sum(r[idx["rework_tokens"]] for r in rows) == 1060, (
         "token total must equal the sum over issues, not over (issue, cause)"
     )
-    # And the surviving cause for i1 is the dominant one, deterministically.
+    # Equal issue-wide values tie the causes; SQL breaks that tie alphabetically.
     i1_row = [r for r in rows if r[idx["issues"]] == 1
-              and r[idx["rework_tokens"]] == 2000]
-    assert i1_row and i1_row[0][idx["root_cause"]] == "runtime-offline"
+              and r[idx["rework_tokens"]] == 1000]
+    assert i1_row and i1_row[0][idx["root_cause"]] == "queue-timeout"
 
 
 @pytest.mark.unit
