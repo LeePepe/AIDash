@@ -1,10 +1,9 @@
-"""Hermes skill-view usage from ``~/.hermes/state.db``.
+"""Hermes tool and skill-view usage from ``~/.hermes/state.db``.
 
-Only assistant ``tool_calls`` for the ``skill_view`` function are collected.
-The raw record deliberately keeps the call id, timestamp, and skill name only;
-tool arguments and message bodies never leave Hermes.  Normalization produces
-one row per fixed-CST day and skill, and deduplicates repeated observations by
-tool-call id.
+The legacy tool stream remains a per-tool daily rollup in ``tool_day``.  The
+skill stream is collected alongside it with its own watermark and produces
+``skill_day``.  Only tool metadata, or a skill name plus call id and timestamp,
+leaves Hermes; message bodies and arguments do not.
 """
 
 from __future__ import annotations
@@ -17,11 +16,17 @@ from config import HERMES_STATE_DB
 from rawio import read_raw, write_raw
 from sqlite_ro import query_ro
 from state import get_watermark, set_watermark
+from timeutil import CST as _CST  # noqa: F401 (re-export seam)
 from timeutil import epoch_s_to_cst_day
 
 SOURCE = "hermes_tools"
+SKILL_SOURCE = "hermes_tools_skill"
 
-_SELECT = (
+_TOOL_SELECT = (
+    "SELECT tool_name, timestamp FROM messages "
+    "WHERE tool_name IS NOT NULL AND timestamp > ? ORDER BY timestamp ASC"
+)
+_SKILL_SELECT = (
     "SELECT timestamp, tool_calls FROM messages "
     "WHERE role = 'assistant' AND tool_calls IS NOT NULL AND timestamp > ? "
     "ORDER BY timestamp ASC"
@@ -64,22 +69,32 @@ def _skill_calls(tool_calls: Any, timestamp: Any) -> list[dict[str, Any]]:
 
 
 def collect() -> int:
-    """Collect newly observed skill calls; missing Hermes degrades to zero."""
+    """Collect legacy tools and named skills with independent watermarks."""
     if not HERMES_STATE_DB.exists():
         return 0
-    watermark = float(get_watermark(SOURCE) or 0)
-    rows = query_ro(HERMES_STATE_DB, _SELECT, (watermark,))
+
+    tool_watermark = float(get_watermark(SOURCE) or 0)
+    tool_rows = query_ro(HERMES_STATE_DB, _TOOL_SELECT, (tool_watermark,))
+    if tool_rows:
+        tool_written = write_raw(SOURCE, tool_rows)
+        set_watermark(SOURCE, max(float(row["timestamp"]) for row in tool_rows))
+    else:
+        tool_written = 0
+
+    skill_watermark = float(get_watermark(SKILL_SOURCE) or 0)
+    skill_rows = query_ro(HERMES_STATE_DB, _SKILL_SELECT, (skill_watermark,))
     records: list[dict[str, Any]] = []
-    for row in rows:
+    for row in skill_rows:
         records.extend(_skill_calls(row.get("tool_calls"), row.get("timestamp")))
     if records:
-        written = write_raw(SOURCE, records)
+        skill_written = write_raw(SOURCE, records)
     else:
-        written = 0
-    timestamps = [r.get("timestamp") for r in rows if r.get("timestamp") is not None]
+        skill_written = 0
+    timestamps = [row.get("timestamp") for row in skill_rows
+                  if row.get("timestamp") is not None]
     if timestamps:
-        set_watermark(SOURCE, max(float(ts) for ts in timestamps))
-    return written
+        set_watermark(SKILL_SOURCE, max(float(ts) for ts in timestamps))
+    return tool_written + skill_written
 
 
 _CLEAN_DDL = """
@@ -92,6 +107,14 @@ CREATE TABLE skill_day (
 """
 _CLEAN_COLS = ("day", "skill", "n")
 
+_TOOL_CLEAN_DDL = """
+CREATE TABLE tool_day (
+    day TEXT, tool_name TEXT, n INTEGER,
+    PRIMARY KEY (day, tool_name)
+)
+"""
+_TOOL_CLEAN_COLS = ("day", "tool_name", "n")
+
 
 def _cst_day(ts: Any) -> str | None:
     """Compatibility seam for the adapter's fixed-CST conversion."""
@@ -99,9 +122,16 @@ def _cst_day(ts: Any) -> str | None:
 
 
 def normalize() -> int:
-    """Rebuild daily skill counts from raw history, deduping call ids."""
+    """Rebuild both legacy tool counts and deduplicated skill counts."""
+    tool_counts: dict[tuple[str, str], int] = {}
     calls: dict[str, dict[str, Any]] = {}
     for record in read_raw(SOURCE):
+        tool_name = record.get("tool_name")
+        if isinstance(tool_name, str) and tool_name:
+            day = _cst_day(record.get("timestamp"))
+            if day is not None:
+                key = (day, tool_name)
+                tool_counts[key] = tool_counts.get(key, 0) + 1
         call_id = record.get("call_id")
         skill = record.get("skill")
         if isinstance(call_id, str) and call_id and isinstance(skill, str) and skill:
@@ -115,4 +145,7 @@ def normalize() -> int:
         counts[key] = counts.get(key, 0) + 1
     rows = [{"day": day, "skill": skill, "n": n}
             for (day, skill), n in counts.items()]
+    tool_rows = [{"day": day, "tool_name": tool_name, "n": n}
+                 for (day, tool_name), n in tool_counts.items()]
+    write_clean(SOURCE, "tool_day", _TOOL_CLEAN_DDL, tool_rows, _TOOL_CLEAN_COLS)
     return write_clean(SOURCE, "skill_day", _CLEAN_DDL, rows, _CLEAN_COLS)
