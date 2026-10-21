@@ -277,6 +277,18 @@ CREATE TABLE IF NOT EXISTS dim_model (
     cache_write_per_mtok REAL
 );
 
+-- dim_automation_rule — precedence-ordered seed for L4 automation attribution.
+-- cwd_prefix matches are expanded from `~` during merge; client and originator
+-- matches remain literal values.  The default class is interactive when no rule
+-- matches, so only explicit exceptions belong in this dimension.
+CREATE TABLE IF NOT EXISTS dim_automation_rule (
+    kind  TEXT NOT NULL,
+    match TEXT NOT NULL,
+    class TEXT NOT NULL,
+    note  TEXT NOT NULL,
+    PRIMARY KEY (kind, match)
+);
+
 -- ---------------------------------------------------------------------------
 -- dim_session — per-session rollup (populated during merge from facts).
 --
