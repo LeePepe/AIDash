@@ -107,16 +107,20 @@ def run_merge() -> dict[str, int]:
 
         # --- fact_turn (claude_jsonl) ---
         if _attach(conn, "claude_jsonl", "cj"):
-            conn.execute("""
+            cj_columns = {
+                row[1] for row in conn.execute("PRAGMA cj.table_info(turn)")
+            }
+            skill_names = "skill_names" if "skill_names" in cj_columns else "NULL"
+            conn.execute(f"""
                 INSERT INTO fact_turn
                   (turn_uuid, session_id, parent_session_id, ts, project,
                    git_branch, role, model, attribution_skill, input_tokens,
                    output_tokens, cache_read, cache_creation, tool_calls,
-                   finish_reason)
+                   finish_reason, skill_names)
                 SELECT turn_uuid, session_id, parent_session_id, ts, project,
                        git_branch, role, model, attribution_skill, input_tokens,
                        output_tokens, cache_read, cache_creation, tool_calls,
-                       finish_reason
+                       finish_reason, {skill_names}
                 FROM cj.turn
             """)
             counts["fact_turn"] = conn.execute(
