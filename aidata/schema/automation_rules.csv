@@ -1,0 +1,8 @@
+kind,match,class,note
+client,multica-agent-sdk,automated,agent SDK sessions are automated
+client,codex_exec,automated,Codex CLI execution sessions are automated
+client,codex-tui,interactive,Codex TUI sessions are interactive
+originator,codex_exec,automated,Codex execution originator is automated
+cwd_prefix,~/Development/worktrees/,automated,worktree sessions are automated
+cwd_prefix,~/Development/handoff/,automated,handoff sessions are automated
+cwd_prefix,/private/tmp/herdr-,automated,herdr temporary sessions are automated
