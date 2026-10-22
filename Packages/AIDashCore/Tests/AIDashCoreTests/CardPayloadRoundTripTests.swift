@@ -399,6 +399,52 @@ struct CardPayloadRoundTripTests {
         #expect(decoded.segments.count == 2)
     }
 
+    // MARK: TeamAuditPayload
+
+    @Test func teamAuditPayloadOverviewRoundTrip() throws {
+        let sampleSHA = String(repeating: "a", count: 64)
+        let sidecarSHA = String(repeating: "b", count: 64)
+        let payload = TeamAuditPayload(
+            snapshotID: "snap-1",
+            capturedAt: Date(),
+            scope: AuditScope(owner: "Owner", projectID: "proj-1", repository: "repo-1"),
+            mode: .baseline,
+            section: .overview,
+            partIndex: 0,
+            partCount: 1,
+            contentSHA256: sampleSHA,
+            artifactSidecarID: "sidecar-1",
+            artifactSidecarSHA256: sidecarSHA,
+            overview: DetailedOverview(
+                cohort: AuditCohort(cohortID: "c1", caseIDs: (1...20).map { "case-\($0)" }),
+                instructionVersions: [InstructionVersion(sourceID: "src-1", updatedAt: Date(), sha256: sampleSHA)],
+                evidenceCoverage: EvidenceCoverage(requiredEvidenceCount: 1, availableEvidenceCount: 1),
+                axisSummaries: [
+                    CoreAxisSummary(axis: .workflowConformance, verdict: .workflowConformance(.conformant), totalCases: 1, positive: 1),
+                    CoreAxisSummary(axis: .workflowFitness, verdict: .workflowFitness(.fit), totalCases: 1, positive: 1),
+                    CoreAxisSummary(axis: .outcomeIntegrity, verdict: .outcomeIntegrity(.intact), totalCases: 1, positive: 1)
+                ],
+                taskEffectiveness: TaskEffectivenessSummary(totalEvaluated: 1, effective: 1),
+                publicationCoverage: PublicationCoverage(
+                    requiredGenericWorkflowCount: 1, publishedGenericWorkflowCount: 1,
+                    requiredTeamRelationshipCount: 1, publishedTeamRelationshipCount: 1,
+                    requiredP0P1FindingCount: 1, publishedP0P1FindingCount: 1,
+                    requiredP0P1ChainCount: 1, publishedP0P1ChainCount: 1
+                ),
+                limitations: []
+            )
+        )
+        let decoded = try roundTrip(payload)
+        #expect(decoded.snapshotID == "snap-1")
+        #expect(decoded.overview?.cohort?.cohortID == "c1")
+        #expect(decoded.overview?.axisSummaries.count == 3)
+
+        // CardType.decode dispatch
+        let data = try encoder.encode(payload)
+        let dispatched = try CardType.teamAudit.decode(data)
+        #expect(dispatched is TeamAuditPayload)
+    }
+
     // MARK: Protocol conformance
 
     @Test func allTypesConformToCardPayloadProtocol() throws {
@@ -413,8 +459,20 @@ struct CardPayloadRoundTripTests {
             SectionHeaderPayload(title: "t"),
             BarListPayload(items: [BarListPayload.Item(label: "x", value: 1)]),
             StackedBarPayload(segments: [StackedBarPayload.Segment(label: "x", value: 1)]),
+            TeamAuditPayload(
+                snapshotID: "snap-1",
+                capturedAt: Date(),
+                scope: AuditScope(owner: "Owner"),
+                mode: .baseline,
+                section: .overview,
+                partIndex: 0,
+                partCount: 1,
+                contentSHA256: String(repeating: "a", count: 64),
+                artifactSidecarID: "sidecar-1",
+                artifactSidecarSHA256: String(repeating: "b", count: 64)
+            ),
         ]
-        #expect(payloads.count == 9)
+        #expect(payloads.count == 10)
     }
 
     // MARK: Dispatch mismatch

@@ -152,10 +152,11 @@ struct DesignTokensFoundationTests {
 
     @Test("CardType.hasIconBadge true for content cards, false for sectionHeader")
     func hasIconBadge() {
-        for type in CardType.allCases where type != .sectionHeader {
+        for type in CardType.allCases where type != .sectionHeader && type != .teamAudit {
             #expect(type.hasIconBadge, "\(type) must render a badge")
         }
         #expect(!CardType.sectionHeader.hasIconBadge)
+        #expect(!CardType.teamAudit.hasIconBadge)
     }
 
     @Test("Every content card type has a symbol AND a classification, sectionHeader has neither")
@@ -163,7 +164,7 @@ struct DesignTokensFoundationTests {
         for type in CardType.allCases {
             let symbol = type.iconSymbol
             let classification = type.classification
-            if type == .sectionHeader {
+            if type == .sectionHeader || type == .teamAudit {
                 #expect(symbol == nil && classification == nil)
             } else {
                 #expect(symbol != nil && classification != nil, "\(type) must define both icon and classification")

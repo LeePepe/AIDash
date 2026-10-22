@@ -11,6 +11,7 @@ public enum CardType: String, Codable, Sendable, CaseIterable {
     case barList
     case stackedBar
     case relationship
+    case teamAudit
 }
 
 extension CardType {
@@ -28,10 +29,20 @@ extension CardType {
         case .barList:       return try decoder.decode(BarListPayload.self, from: data)
         case .stackedBar:    return try decoder.decode(StackedBarPayload.self, from: data)
         case .relationship:  return try decoder.decode(RelationshipPayload.self, from: data)
+        case .teamAudit:     return try decoder.decode(TeamAuditPayload.self, from: data)
         }
     }
 
     public func validate(_ data: Data) throws {
+        if self == .teamAudit {
+            guard data.count <= 262_144 else {
+                throw XPCError(
+                    code: "schema.payload_decode_failed",
+                    message: "Payload size (\(data.count) bytes) exceeds maximum limit of 262,144 bytes",
+                    field: "payload"
+                )
+            }
+        }
         let payload = try decode(data)
         try payload.validateInvariants()
     }
