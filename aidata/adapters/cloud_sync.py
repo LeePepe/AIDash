@@ -112,7 +112,7 @@ def _blob_parts(name: str) -> tuple[str, str] | None:
     filename = Path(tail).name
     if not re.fullmatch(r"[A-Za-z0-9._-]+\.jsonl", filename):
         return None
-    return device_id, filename
+    return device_id, tail
 
 
 def pull_remote_batches() -> int:
@@ -125,7 +125,7 @@ def pull_remote_batches() -> int:
         return 0
     # Scheduled collectors run in separate processes. Share a short successful
     # refresh window so all three adapters consume one listing/download pass.
-    scope = [AIDATA_SYNC_STORAGE_ACCOUNT, AIDATA_SYNC_CONTAINER, AIDATA_SYNC_PREFIX, str(GTT_XFER_DIR.resolve())]
+    scope = [AIDATA_SYNC_STORAGE_ACCOUNT, AIDATA_SYNC_CONTAINER, AIDATA_SYNC_PREFIX, str(GTT_XFER_DIR.resolve()), "dated-path-v2"]
     refresh = get_watermark("cloud_sync_refresh") or {}
     now = time.time()
     if refresh.get("scope") == scope and 0 <= now - refresh.get("completed_at", 0) < _REFRESH_SECONDS:
@@ -155,26 +155,31 @@ def pull_remote_batches() -> int:
         if not parts:
             continue
         marker = item.get("etag") or item.get("contentMd5") or item.get("properties", {}).get("etag")
-        if not marker or watermark.get(name) == marker:
+        if not marker:
             continue
-        device_id, filename = parts
+        device_id, relative_path = parts
+        filename = Path(relative_path).name
         sync_root = (GTT_XFER_DIR / "azure").resolve()
-        target_dir = sync_root / device_id
-        if (
-            target_dir.is_symlink()
-            or not target_dir.resolve().is_relative_to(sync_root)
-        ):
+        target = sync_root / device_id / relative_path
+        # Validate every directory, including the optional date component.
+        parents = [sync_root / device_id, target.parent]
+        if any(path.is_symlink() or not path.resolve().is_relative_to(sync_root) for path in parents):
             complete = False
             continue
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / filename
-        if (
-            target.is_symlink()
-            or not target.resolve().is_relative_to(sync_root)
-        ):
+        if target.is_symlink() or not target.resolve().is_relative_to(sync_root):
             complete = False
             continue
-        fd, temp_name = tempfile.mkstemp(prefix=f".{filename}.", dir=target_dir)
+        # Old watermarks may describe files overwritten by the flattened
+        # layout. Recover missing dated targets even if the ETag is unchanged.
+        if watermark.get(name) == marker and target.is_file():
+            continue
+        target_dir = target.parent
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            fd, temp_name = tempfile.mkstemp(prefix=f".{filename}.", dir=target_dir)
+        except OSError:
+            complete = False
+            continue
         os.close(fd)
         temp_path = Path(temp_name)
         try:

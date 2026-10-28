@@ -95,10 +95,6 @@ def _local_records() -> list[dict[str, Any]]:
                 text = ledger.read_text(encoding="utf-8")
             except OSError:
                 text = ""
-            try:
-                ledger_ts = datetime.fromtimestamp(ledger.stat().st_mtime, timezone.utc).isoformat()  # noqa: UP017
-            except OSError:
-                ledger_ts = ""
             for line in text.splitlines():
                 match = _EVENT.match(line)
                 if match:
@@ -110,7 +106,7 @@ def _local_records() -> list[dict[str, Any]]:
                     ts, rest, evt = match.group("ts"), match.group("rest"), match.group("evt")
                 elif re.search(r"\b(?:TL_PROFILE|quota_precheck)\b", line, re.IGNORECASE):
                     ts_match = re.search(r"\b\d{4}-\d{2}-\d{2}T\S+", line)
-                    ts, rest, evt = (ts_match.group(0) if ts_match else ledger_ts), line, (
+                    ts, rest, evt = (ts_match.group(0) if ts_match else ""), line, (
                         "QUOTA_PRECHECK" if "quota_precheck" in line.lower() else "SPAWN_TL"
                     )
                 else:
@@ -121,11 +117,12 @@ def _local_records() -> list[dict[str, Any]]:
                     fields["action_kind"] = "UNBLOCK_CMD_CONFIRM"
                 elif "DESIGN_ROUTE_ARTIST" in line or "艺术家" in line:
                     fields["action_kind"] = "DESIGN_ROUTE_ARTIST"
-                elif re.search(r"\bS[1-4]_[A-Z_]+\b", line):
-                    fields["action_kind"] = re.search(r"\b(S[1-4]_[A-Z_]+)\b", line).group(1)
-                if ts:
+                elif stage := re.search(r"\bS[1-4]_[A-Z_]+\b", line):
+                    fields["action_kind"] = stage.group(0)
+                if ts or not match:
                     event = {
                         "ts": ts,
+                        "timestamp_source": "inline" if ts else "unknown",
                         "evt": evt,
                         **fields,
                         "goal_id": goal.name,
@@ -399,6 +396,8 @@ def normalize() -> int:
                        "ts": _iso_ts(payload.get("measured_at") or payload.get("observed_at") or ts)}
             ts = payload["ts"]
         action = _action(payload.get("action_kind") or payload.get("evt"), record_type)
+        if record_type == "bot_tl_event" and payload.get("timestamp_source") == "unknown":
+            continue
         if not action or not ts:
             continue
         goal = str(payload.get("goal_id") or record.get("goal_id") or "unknown")

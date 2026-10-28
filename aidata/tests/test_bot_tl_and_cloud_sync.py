@@ -104,7 +104,7 @@ def test_cloud_sync_blob_parts_and_hash_suffix():
     name = "aidata-sync/v1/machines/device-1/batches/2026-10-28_deadbeef1234.jsonl"
     assert cloud_sync._blob_parts(name) == ("device-1", "2026-10-28_deadbeef1234.jsonl")
     dated = "aidata-sync/v1/machines/device-1/batches/2026-10-28/010203_deadbeef1234.jsonl"
-    assert cloud_sync._blob_parts(dated) == ("device-1", "010203_deadbeef1234.jsonl")
+    assert cloud_sync._blob_parts(dated) == ("device-1", "2026-10-28/010203_deadbeef1234.jsonl")
     traversal = "aidata-sync/v1/machines/../../outside/batches/data.jsonl"
     assert cloud_sync._blob_parts(traversal) is None
     assert cloud_sync._sha_suffix(Path(name).name) == "deadbeef1234"
@@ -421,3 +421,135 @@ def test_bot_tl_snapshot_rollback_and_bounded_replay(monkeypatch, tmp_path, wate
     assert bot_tl.collect() == 0
     monkeypatch.setattr(bot_tl, "_remote_records", lambda: events[:1])
     assert bot_tl.collect() == 1  # Evicted events can replay; L2 deduplicates.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("legacy_watermark", [False, True])
+def test_cloud_sync_keeps_same_named_batches_on_different_dates(monkeypatch, tmp_path, watermarks, legacy_watermark):
+    monkeypatch.setattr(cloud_sync, "AIDATA_SYNC_STORAGE_ACCOUNT", "testaccount")
+    monkeypatch.setattr(cloud_sync, "GTT_XFER_DIR", tmp_path)
+    monkeypatch.setattr(bot_tl, "GTT_XFER_DIR", tmp_path)
+    monkeypatch.setattr(cloud_sync.shutil, "which", lambda *_args, **_kwargs: "/test/az")
+    names = [f"aidata-sync/v1/machines/device-1/batches/{day}/batch.jsonl"
+             for day in ("2026-10-27", "2026-10-28")]
+    contents = {name: json.dumps({"collector": "prmon", "record_type": "prmon_heartbeat",
+                                "payload": {"ts": f"2026-10-{27 + index}T01:00:00Z"}}) + "\n"
+                for index, name in enumerate(names)}
+    monkeypatch.setattr(cloud_sync, "_run_json", lambda *_args: [
+        {"name": name, "etag": "same-etag"} for name in names
+    ])
+    if legacy_watermark:
+        watermarks["cloud_sync_batches"] = dict.fromkeys(names, "same-etag")
+        watermarks["cloud_sync_refresh"] = {
+            "scope": ["testaccount", cloud_sync.AIDATA_SYNC_CONTAINER,
+                      cloud_sync.AIDATA_SYNC_PREFIX, str(tmp_path.resolve())],
+            "completed_at": cloud_sync.time.time(),
+        }
+        old = tmp_path / "azure/device-1/batch.jsonl"
+        old.parent.mkdir(parents=True)
+        old.write_text(contents[names[-1]], encoding="utf-8")
+    calls = []
+    def download(_executable, _env, name, target):
+        calls.append(name)
+        target.write_text(contents[name], encoding="utf-8")
+        return True
+    monkeypatch.setattr(cloud_sync, "_download", download)
+    assert cloud_sync.pull_remote_batches() == 2
+    for name in names:
+        relative = name.split("/batches/", 1)[1]
+        assert (tmp_path / "azure/device-1" / relative).read_text() == contents[name]
+        assert watermarks["cloud_sync_batches"][name] == "same-etag"
+    assert {row["payload"]["ts"] for row in bot_tl._remote_records()} == {
+        "2026-10-27T01:00:00Z", "2026-10-28T01:00:00Z",
+    }
+    watermarks.pop("cloud_sync_refresh")
+    assert cloud_sync.pull_remote_batches() == 0
+    assert calls == names
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", ["symlink-device", "symlink-date", "symlink-file", "hash"])
+def test_cloud_sync_failed_target_never_advances_watermark(monkeypatch, tmp_path, watermarks, failure):
+    monkeypatch.setattr(cloud_sync, "AIDATA_SYNC_STORAGE_ACCOUNT", "testaccount")
+    monkeypatch.setattr(cloud_sync, "GTT_XFER_DIR", tmp_path / "xfer")
+    monkeypatch.setattr(cloud_sync.shutil, "which", lambda *_args, **_kwargs: "/test/az")
+    name = "aidata-sync/v1/machines/device-1/batches/2026-10-28/batch_deadbeef1234.jsonl"
+    monkeypatch.setattr(cloud_sync, "_run_json", lambda *_args: [{"name": name, "etag": "v1"}])
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root = tmp_path / "xfer/azure"
+    root.mkdir(parents=True)
+    target = root / "device-1/2026-10-28/batch_deadbeef1234.jsonl"
+    if failure.startswith("symlink"):
+        link = {"symlink-device": target.parent.parent,
+                "symlink-date": target.parent, "symlink-file": target}[failure]
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside / "file" if failure == "symlink-file" else outside)
+    def download(_executable, _env, _name, target):
+        target.write_bytes(b"corrupt")
+        return True
+    monkeypatch.setattr(cloud_sync, "_download", download)
+    assert cloud_sync.pull_remote_batches() == 0
+    assert name not in watermarks.get("cloud_sync_batches", {})
+    assert "cloud_sync_refresh" not in watermarks
+    assert list(outside.iterdir()) == []
+    assert not list(root.rglob(".*.jsonl.*"))
+
+
+@pytest.mark.unit
+def test_untimed_ledger_header_does_not_acquire_rewrite_time(monkeypatch, tmp_path):
+    goal = tmp_path / "goal"
+    goal.mkdir()
+    ledger = goal / "ledger.md"
+    ledger.write_text("TL_PROFILE=example quota_precheck=pass\n", encoding="utf-8")
+    monkeypatch.setattr(bot_tl, "GTT_HANDOFF_ROOTS", [tmp_path])
+    monkeypatch.setattr(bot_tl, "CLAUDE_QUOTA_CACHE", tmp_path / "missing")
+    before = bot_tl._local_records()
+    os.utime(ledger, (ledger.stat().st_atime, ledger.stat().st_mtime + 100))
+    after = bot_tl._local_records()
+    assert before[0]["payload"] == after[0]["payload"]
+    assert after[0]["payload"]["ts"] == ""
+    monkeypatch.setattr(bot_tl, "read_raw", lambda _source: after)
+    captured = {}
+    def capture(_source, table, _ddl, rows, _columns):
+        captured[table] = rows
+        return len(rows)
+    monkeypatch.setattr(bot_tl, "write_clean", capture)
+    assert bot_tl.normalize() == 0
+    assert captured["supervision"] == []
+
+
+@pytest.mark.unit
+def test_bot_tl_normalize_merge_preserves_all_fact_columns(monkeypatch, tmp_path):
+    import cleanio
+    import config
+    import merge
+
+    clean = tmp_path / "clean"
+    monkeypatch.setattr(cleanio, "CLEAN_DIR", clean)
+    monkeypatch.setattr(config, "CLEAN_DIR", clean)
+    monkeypatch.setattr(merge, "WAREHOUSE_DB", tmp_path / "warehouse.db")
+    raw = [
+        {"record_type": "bot_tl_event", "device_id": "device-1", "machine_alias": "example",
+         "goal_id": "goal-1", "payload": {
+             "ts": "2026-10-28T01:00:00Z", "action_kind": "S3_CI_FIX",
+             "bot_name": "example-bot", "tl_agent": "example-tl", "result": "pass",
+             "weekly_remaining_pct": 80, "repo_key": "example/repo", "pr_number": 1,
+             "head_sha": "abc123", "status": "done", "detail": "example detail"}},
+        {"record_type": "prmon_heartbeat", "device_id": "device-1", "machine_alias": "example",
+         "payload": {"ts": "2026-10-28T01:00:00Z", "checked_pr_count": 3,
+                     "stuck_pr_count": 2, "repair_queued_count": 1, "status": "complete"}},
+    ]
+    monkeypatch.setattr(bot_tl, "read_raw", lambda _source: raw)
+    assert bot_tl.normalize() == 1
+    for _ in range(2):
+        counts = merge.run_merge()
+        assert counts["fact_bot_tl_supervision"] == counts["fact_prmon_heartbeat"] == 1
+        with sqlite3.connect(merge.WAREHOUSE_DB) as warehouse, sqlite3.connect(clean / "bot_tl.db") as source:
+            for table, fact in (("supervision", "fact_bot_tl_supervision"),
+                                ("prmon_heartbeat", "fact_prmon_heartbeat")):
+                columns = [row[1] for row in source.execute(f"PRAGMA table_info({table})")]
+                projection = ", ".join(columns)
+                assert warehouse.execute(f"SELECT {projection} FROM {fact}").fetchall() == source.execute(
+                    f"SELECT {projection} FROM {table}").fetchall()
+                assert warehouse.execute(f"SELECT cst_day FROM {fact}").fetchone() == ("2026-10-28",)
