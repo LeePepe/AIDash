@@ -101,7 +101,7 @@ public enum EffectiveCardSize {
         payload: (any CardPayloadProtocol)?
     ) -> CardSize? {
         switch type {
-        case .metric, .trending, .sectionHeader, .barList, .stackedBar:
+        case .metric, .trending, .sectionHeader, .barList, .stackedBar, .teamAudit:
             return nil // deliberate sizing — never downgrade
 
         case .digest:

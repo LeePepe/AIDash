@@ -382,6 +382,46 @@ struct SchemaValidatorTests {
         )
     }
 
+    @Test func cardPut_validTeamAudit_doesNotThrow() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let sampleSHA = String(repeating: "a", count: 64)
+        let sidecarSHA = String(repeating: "b", count: 64)
+        let payload = try encoder.encode(
+            TeamAuditPayload(
+                snapshotID: "snap-1",
+                capturedAt: Date(),
+                scope: AuditScope(owner: "Owner"),
+                mode: .baseline,
+                section: .overview,
+                partIndex: 0,
+                partCount: 1,
+                contentSHA256: sampleSHA,
+                artifactSidecarID: "sidecar-1",
+                artifactSidecarSHA256: sidecarSHA,
+                overview: DetailedOverview(
+                    cohort: AuditCohort(cohortID: "c1", caseIDs: (1...20).map { "case-\($0)" }),
+                    evidenceCoverage: EvidenceCoverage(requiredEvidenceCount: 1, availableEvidenceCount: 1),
+                    axisSummaries: [
+                        CoreAxisSummary(axis: .workflowConformance, verdict: .workflowConformance(.conformant), totalCases: 1, positive: 1),
+                        CoreAxisSummary(axis: .workflowFitness, verdict: .workflowFitness(.fit), totalCases: 1, positive: 1),
+                        CoreAxisSummary(axis: .outcomeIntegrity, verdict: .outcomeIntegrity(.intact), totalCases: 1, positive: 1)
+                    ],
+                    taskEffectiveness: TaskEffectivenessSummary(totalEvaluated: 1, effective: 1),
+                    limitations: []
+                )
+            )
+        )
+        try SchemaValidator.validateCardPut(
+            containerId: "550E8400-E29B-41D4-A716-446655440000",
+            id: "660E8400-E29B-41D4-A716-446655440000",
+            type: "teamAudit",
+            size: "wide",
+            style: "neutral",
+            payload: payload
+        )
+    }
+
     @Test func cardPut_unknownType_throws() {
         do {
             try SchemaValidator.validateCardPut(
