@@ -38,7 +38,6 @@ CLAUDE_QUOTA_CACHE = HOME / ".config" / "claude" / "gtt-weekly-remaining-pct.jso
 AIDATA_SYNC_STORAGE_ACCOUNT = ""
 AIDATA_SYNC_CONTAINER = "telemetry-raw"
 AIDATA_SYNC_PREFIX = "aidata-sync/v1"
-AIDATA_SYNC_TABLE = "AidataSyncIndex"
 GTT_RUNTIME_PROFILES_YAML = (
     HOME / "Development" / "user-skills" / "skills" / "goal-task"
     / "references" / "runtime-profiles.yaml"
