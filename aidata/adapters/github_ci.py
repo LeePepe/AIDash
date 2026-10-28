@@ -11,6 +11,7 @@ import json
 import shutil
 import subprocess  # nosec B404 - fixed read-only gh api calls
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from cleanio import write_clean
@@ -19,6 +20,10 @@ from rawio import read_raw, write_raw_snapshot
 
 SOURCE = "github_ci"
 _TIMEOUT_S = 60
+_EVIDENCE_PATHS = (
+    Path("/Users/lee/Development/handoff/retro1027/data/03-ci-runs-evidence.md"),
+    Path("/Users/lee/Development/handoff/retro1027/data/04-tf-release-evidence.md"),
+)
 
 
 def _gh_api(path: str) -> Any:
@@ -51,6 +56,8 @@ def _seconds(start: str | None, end: str | None) -> int | None:
 
 def _category(name: str, event: str | None, path: str | None = None) -> str:
     text = " ".join((name, event or "", path or "")).lower()
+    if any(token in text for token in ("review", "codex-review", "kimi-review")):
+        return "ai_review_gate"
     if "testflight" in text or "release" in text:
         return "release_tf"
     if "stuck-pr" in text or "cron" in text or event == "schedule":
@@ -66,15 +73,71 @@ def _failure_category(job_name: str, conclusion: str | None, step_name: str | No
         return "config_drift_missing_secret"
     if "var" in text or "environment" in text or "config" in text:
         return "config_drift_missing_var"
-    if "runner" in text or "simulator" in text:
+    if any(token in text for token in ("simulator boot", "simulator timeout", "runner capacity",
+                                       "runner unavailable", "no space left")):
         return "runner_capacity_or_sim"
-    if "review" in text or "test" in text or "lint" in text or "gate" in text:
+    if any(token in text for token in ("app target runner", "swift test", "xcodebuild",
+                                       "unit test", "ui test", "build + test", "test failure")):
+        return "build_or_test_failure"
+    if any(token in text for token in ("review", "lint", "policy", "frontmatter",
+                                       "require-tests", "gate")):
         return "true_positive_gate"
     return "build_or_test_failure"
 
 
+def _evidence_runs() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for path in _EVIDENCE_PATHS:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        header: list[str] | None = None
+        for line in lines:
+            if not line.startswith("|"):
+                continue
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            if header is None and any("run id" in cell.lower() for cell in cells):
+                header = [cell.lower() for cell in cells]
+                continue
+            if header is None or not cells or set(cells) <= {"---", ":---"}:
+                continue
+            if len(cells) != len(header):
+                continue
+            row = dict(zip(header, cells))
+            raw_id = row.get("run id")
+            try:
+                run_id = int(raw_id or "")
+            except ValueError:
+                continue
+            repo = row.get("repo", "")
+            workflow = row.get("workflow", "")
+            if not repo or not workflow:
+                continue
+            conclusion = (row.get("conclusion") or row.get("result") or "").lower() or None
+            records.append({
+                "record_type": "workflow_run",
+                "run_id": run_id,
+                "repo_key": repo if "/" in repo else f"LeePepe/{repo}",
+                "workflow_name": workflow,
+                "workflow_category": _category(workflow, None),
+                "event_trigger": None,
+                "head_branch": row.get("branch"),
+                "head_sha": row.get("sha") or "evidence",
+                "status": "completed",
+                "conclusion": conclusion,
+                "run_attempt": 1,
+                "created_at": row.get("timestamp") or row.get("time") or "",
+                "updated_at": row.get("timestamp") or row.get("time"),
+                "duration_sec": None,
+                "html_url": None,
+            })
+    return records
+
+
 def collect() -> int:
     records: list[dict[str, Any]] = []
+    live_run_ids: set[int] = set()
     for repo in GITHUB_CI_REPOS:
         payload = _gh_api(f"repos/{repo}/actions/runs?per_page=100")
         runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
@@ -82,6 +145,7 @@ def collect() -> int:
             if not isinstance(run, dict) or run.get("id") is None:
                 continue
             run_id = int(run["id"])
+            live_run_ids.add(run_id)
             run_record = {
                 "record_type": "workflow_run",
                 "run_id": run_id,
@@ -102,7 +166,11 @@ def collect() -> int:
                 "html_url": run.get("html_url"),
             }
             records.append(run_record)
-            if run.get("conclusion") in {"success", "skipped"}:
+            should_sample = (
+                run.get("conclusion") not in {"success", "skipped"}
+                or run_record["workflow_category"] in {"ci_build", "release_tf"}
+            )
+            if not should_sample:
                 continue
             jobs = _gh_api(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")
             for job in (jobs or {}).get("jobs", []) if isinstance(jobs, dict) else []:
@@ -136,6 +204,11 @@ def collect() -> int:
                     ),
                     "error_excerpt": None,
                 })
+    if not records:
+        records = _evidence_runs()
+    else:
+        records.extend(record for record in _evidence_runs()
+                       if record["run_id"] not in live_run_ids)
     return write_raw_snapshot(SOURCE, records) if records else 0
 
 

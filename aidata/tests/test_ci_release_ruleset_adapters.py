@@ -93,3 +93,73 @@ def test_new_tables_are_present_in_warehouse_schema():
         "fact_release_delivery",
     ):
         assert f"CREATE TABLE IF NOT EXISTS {table}" in text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("codex-review-target", "ai_review_gate"),
+        ("TestFlight", "release_tf"),
+        ("nightly cron", "cron_bot"),
+        ("CI", "ci_build"),
+    ],
+)
+def test_github_ci_categories(name, expected):
+    assert github_ci._category(name, None) == expected
+
+
+@pytest.mark.unit
+def test_github_ci_failure_category_prefers_build_test_and_runner_capacity():
+    assert github_ci._failure_category("App target runner", "failure", "swift test") == (
+        "build_or_test_failure"
+    )
+    assert github_ci._failure_category("CI", "timed_out", "Simulator boot timeout") == (
+        "runner_capacity_or_sim"
+    )
+    assert github_ci._failure_category("review", "failure", "require-tests gate") == (
+        "true_positive_gate"
+    )
+
+
+@pytest.mark.unit
+def test_release_classification_covers_success_and_failure_paths():
+    run = {"conclusion": "success", "head_sha": "new"}
+    steps = [
+        {"name": "Archive", "conclusion": "success"},
+        {"name": "Upload to TestFlight", "conclusion": "success"},
+        {"name": "Move last-released tag", "conclusion": "success"},
+    ]
+    assert release_tf._release_classification(steps, run, "old")[0] == "uploaded_verified"
+    assert release_tf._release_classification(
+        [{"name": "ASC secret preflight", "conclusion": "failure"}],
+        {"conclusion": "failure", "head_sha": "new"},
+        "old",
+    )[0] == "failed_config"
+    assert release_tf._release_classification(
+        [{"name": "Archive", "conclusion": "failure"}],
+        {"conclusion": "failure", "head_sha": "new"},
+        "old",
+    )[0] == "failed_signing_or_upload"
+
+
+@pytest.mark.unit
+def test_ruleset_helpers_parse_workflow_metadata(tmp_path):
+    workflow = tmp_path / "review.yml"
+    workflow.write_text("name: Review Gate\ntimeout-minutes: 17\n", encoding="utf-8")
+    assert github_ruleset._yaml_value(workflow.read_text(), "name") == "Review Gate"
+    assert github_ruleset._workflow_category(workflow, workflow.read_text()) == "ai_review_gate"
+    assert github_ruleset._required_checks(
+        {"required_status_checks": {"contexts": ["Review Gate"]}}
+    ) == (1, {"Review Gate"})
+
+
+@pytest.mark.unit
+def test_retro_queries_encode_grain_and_null_rules():
+    root = Path(__file__).parents[1] / "L4_serve" / "queries" / "retro"
+    hygiene = (root / "workspace_hygiene_reclaim.sql").read_text(encoding="utf-8")
+    release = (root / "tf_release_deliveries.sql").read_text(encoding="utf-8")
+    ci = (root / "ci_health_and_noise.sql").read_text(encoding="utf-8")
+    assert "MAX(snapshot_date)" in hygiene
+    assert "delivery_outcome != 'noop_skipped'" in release
+    assert "event_trigger IS r.event_trigger" in ci

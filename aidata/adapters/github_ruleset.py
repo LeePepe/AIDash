@@ -16,22 +16,62 @@ from rawio import read_raw, write_raw_snapshot
 SOURCE = "github_ruleset"
 
 
-def _gh_rules(repo: str) -> Any:
+def _gh_rules(repo: str, default_branch: str = "main") -> Any:
     if not shutil.which("gh"):
         return None
     try:
         proc = subprocess.run(
-            ["gh", "api", f"repos/{repo}/rulesets"], capture_output=True,
+            ["gh", "api", f"repos/{repo}/rules/branches/{default_branch}"], capture_output=True,
             text=True, timeout=30, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:
-        return None
+        try:
+            proc = subprocess.run(
+                ["gh", "api", f"repos/{repo}/rulesets"], capture_output=True,
+                text=True, timeout=30, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if proc.returncode != 0:
+            return None
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError:
         return None
+
+
+def _required_checks(rules: Any) -> tuple[int, set[str]]:
+    if not rules:
+        return 0, set()
+    if isinstance(rules, list):
+        return 0, {
+            str(name)
+            for rule in rules if isinstance(rule, dict)
+            for name in rule.get("required_status_checks", {}).get("contexts", [])
+        }
+    required = rules.get("required_status_checks") or {}
+    contexts = set(required.get("contexts") or [])
+    return int(bool(required or rules.get("rules"))), contexts
+
+
+def _yaml_value(text: str, key: str) -> str | None:
+    match = re.search(rf"(?m)^\s*{re.escape(key)}\s*:\s*[\"']?([^\"'#\n]+)", text)
+    return match.group(1).strip() if match else None
+
+
+def _workflow_category(workflow: Path, text: str) -> str:
+    haystack = f"{workflow.name} {text}".lower()
+    if any(token in haystack for token in ("codex-review", "kimi-review", "review")):
+        return "ai_review_gate"
+    if "testflight" in haystack or "release" in haystack:
+        return "release_tf"
+    if "stuck-pr" in haystack or "cron" in haystack:
+        return "cron_bot"
+    if workflow.name in {"release.yml", "release.yaml"}:
+        return "release_04"
+    return "ci_build"
 
 
 def _repo_path(repo: str) -> Path | None:
@@ -47,7 +87,7 @@ def collect() -> int:
         path = _repo_path(repo)
         workflows = sorted(path.glob(".github/workflows/*")) if path else []
         rules = _gh_rules(repo)
-        ruleset_required = int(bool(rules))
+        ruleset_strict, required_checks = _required_checks(rules)
         shared_pin = None
         for workflow in workflows:
             if workflow.suffix not in {".yml", ".yaml"}:
@@ -62,19 +102,24 @@ def collect() -> int:
                 "workflow_gate_key": f"{repo}:{workflow.name}",
                 "repo_key": repo,
                 "workflow_file": workflow.name,
-                "workflow_name": workflow.stem,
-                "workflow_category": "release_tf" if "testflight" in text.lower() else "ci_build",
+                "workflow_name": _yaml_value(text, "name") or workflow.stem,
+                "workflow_category": _workflow_category(workflow, text),
                 "uses_shared_ci": int("LeePepe/shared-ci/" in text),
                 "pinned_shared_ci_ref": pin.group(1) if pin else None,
-                "is_required_check": ruleset_required,
-                "timeout_minutes": None,
+                "is_required_check": int(
+                    workflow.stem in required_checks
+                    or (workflow.name in required_checks)
+                    or any(check in {workflow.stem, workflow.name}
+                           for check in required_checks)
+                ),
+                "timeout_minutes": int(_yaml_value(text, "timeout-minutes") or 0) or None,
             })
         repos.append({
             "repo_key": repo,
             "owner": repo.split("/", 1)[0],
             "repo_name": repo.split("/", 1)[1],
             "domain_group": "shared" if repo.split("/", 1)[1].startswith("shared-") else "product",
-            "local_main_path": str(path) if path else None,
+            "local_main_path": str(path).replace(str(HOME), "~", 1) if path else None,
             "default_branch": "main",
             "head_sha": None,
             "is_dirty": None,
@@ -84,7 +129,7 @@ def collect() -> int:
             "has_verify_script": int(bool(path and (path / "scripts" / "verify").exists())),
             "has_design_contract": int(bool(path and (path / "docs" / "design-contract.md").exists())),
             "shared_ci_pinned_sha": shared_pin,
-            "ruleset_strict": ruleset_required,
+            "ruleset_strict": ruleset_strict,
             "updated_at": None,
         })
     return write_raw_snapshot(SOURCE, repos + gates) if repos or gates else 0

@@ -20,7 +20,7 @@ SELECT
               SELECT run_id FROM fact_ci_workflow_run
               WHERE repo_key = r.repo_key
                 AND workflow_category = r.workflow_category
-                AND event_trigger = r.event_trigger
+                AND event_trigger IS r.event_trigger
           )
     ), 0) AS avg_queue_wait_sec,
     COALESCE((
@@ -32,7 +32,7 @@ SELECT
               SELECT run_id FROM fact_ci_workflow_run
               WHERE repo_key = r.repo_key
                 AND workflow_category = r.workflow_category
-                AND event_trigger = r.event_trigger
+                AND event_trigger IS r.event_trigger
           )
     ), 0) AS config_noise_job_count
 FROM fact_ci_workflow_run AS r

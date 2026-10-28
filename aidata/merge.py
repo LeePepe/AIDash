@@ -65,6 +65,13 @@ def _detach(conn: sqlite3.Connection, alias: str) -> None:
     conn.execute(f"DETACH DATABASE {alias}")
 
 
+def _has_table(conn: sqlite3.Connection, alias: str, table: str) -> bool:
+    return conn.execute(
+        f"SELECT 1 FROM {alias}.sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone() is not None
+
+
 def run_merge() -> dict[str, int]:
     WAREHOUSE_DB.parent.mkdir(parents=True, exist_ok=True)
     # Fresh rebuild — derived artifact.
@@ -128,22 +135,15 @@ def run_merge() -> dict[str, int]:
             _detach(conn, "grt")
 
         if _attach(conn, "workspace_hygiene", "wh"):
-            conn.execute("""
-                INSERT OR REPLACE INTO dim_repo
-                SELECT repo_key, owner, repo_name, domain_group, local_main_path,
-                       default_branch, head_sha, is_dirty, dirty_count, has_agents_md,
-                       has_layer_map, has_verify_script, has_design_contract,
-                       shared_ci_pinned_sha, ruleset_strict, updated_at
-                FROM wh.repo
-            """)
-            conn.execute("""
-                INSERT OR REPLACE INTO dim_repo
-                SELECT repo_key, owner, repo_name, domain_group, local_main_path,
-                       default_branch, head_sha, is_dirty, dirty_count, has_agents_md,
-                       has_layer_map, has_verify_script, has_design_contract,
-                       shared_ci_pinned_sha, ruleset_strict, updated_at
-                FROM wh.repo
-            """)
+            if _has_table(conn, "wh", "repo"):
+                conn.execute("""
+                    INSERT OR REPLACE INTO dim_repo
+                    SELECT repo_key, owner, repo_name, domain_group, local_main_path,
+                           default_branch, head_sha, is_dirty, dirty_count, has_agents_md,
+                           has_layer_map, has_verify_script, has_design_contract,
+                           shared_ci_pinned_sha, ruleset_strict, updated_at
+                    FROM wh.repo
+                """)
             conn.execute("""
                 INSERT OR REPLACE INTO fact_workspace_hygiene_snapshot
                 SELECT snapshot_date, machine_id, entity_type, canonical_path, repo_key,
@@ -173,6 +173,7 @@ def run_merge() -> dict[str, int]:
                        has_design_contract, shared_ci_pinned_sha, ruleset_strict,
                        updated_at
                 FROM grs.repo
+                WHERE 1 = 1
                 ON CONFLICT(repo_key) DO UPDATE SET
                     owner = COALESCE(excluded.owner, dim_repo.owner),
                     repo_name = COALESCE(excluded.repo_name, dim_repo.repo_name),
