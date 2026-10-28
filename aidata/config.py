@@ -5,6 +5,7 @@ AIDATA_HOME (this package's parent) and the user's real data locations.
 Immutable module-level constants — never mutated at runtime.
 """
 
+# ruff: noqa: RUF100
 from __future__ import annotations
 
 import os
@@ -27,6 +28,16 @@ STATE_FILE = AIDATA_HOME / "state.json"
 # across machines but grounded in the real paths found during design.
 # ---------------------------------------------------------------------------
 HOME = Path(os.path.expanduser("~"))
+GTT_HANDOFF_ROOTS = (
+    HOME / "Development" / "handoff",
+    HOME / "Development" / "handoffs",
+)
+GTT_XFER_DIR = HOME / "Development" / "handoff" / "_box-xfer"
+GTT_RUNTIME_PROFILES_YAML = (
+    HOME / "Development" / "user-skills" / "skills" / "goal-task"
+    / "references" / "runtime-profiles.yaml"
+)
+WORKTREES_ROOT = HOME / "Development" / "worktrees"
 
 RAVEN_DB = HOME / "Library" / "Application Support" / "raven" / "raven.db"
 CLAUDE_PROJECTS_DIR = HOME / ".claude" / "projects"
@@ -277,6 +288,9 @@ SOURCES = (
     "local_git",
     "browser_history",
     "gecko",
+    "gtt_ledger",
+    "gtt_receipt",
+    "workspace_hygiene",
 )
 
 # Current effective 04:00 runner order. The runner will consume this canonical
@@ -306,6 +320,9 @@ SCHEDULED_SOURCES = (
     "local_git",
     "browser_history",
     "gecko",
+    "gtt_ledger",
+    "gtt_receipt",
+    "workspace_hygiene",
 )
 
 MERGE_SOURCES = (
@@ -318,6 +335,9 @@ MERGE_SOURCES = (
     "ado_pr",
     "github_repo",
     "github_pr",
+    "gtt_ledger",
+    "gtt_receipt",
+    "workspace_hygiene",
 )
 
 

@@ -290,6 +290,60 @@ CREATE TABLE IF NOT EXISTS dim_automation_rule (
     PRIMARY KEY (kind, match)
 );
 
+-- P0 GTT and workspace hygiene dimensions/facts. These remain separate grains:
+-- a goal, an event, a receipt round, and a workspace snapshot are not rows of
+-- one flattened table.
+CREATE TABLE IF NOT EXISTS dim_repo (
+    repo_key TEXT PRIMARY KEY, owner TEXT, repo_name TEXT, domain_group TEXT,
+    local_main_path TEXT, default_branch TEXT, head_sha TEXT, is_dirty INTEGER,
+    dirty_count INTEGER, has_agents_md INTEGER, has_layer_map INTEGER,
+    has_verify_script INTEGER, has_design_contract INTEGER,
+    shared_ci_pinned_sha TEXT, ruleset_strict INTEGER, updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS dim_goal (
+    goal_uid TEXT PRIMARY KEY, machine_id TEXT NOT NULL, goal_id TEXT NOT NULL,
+    title TEXT, owner TEXT, coordinator_bot TEXT, tl_agent TEXT, tl_model TEXT,
+    contract_sha TEXT, static_header_status TEXT, derived_actual_status TEXT,
+    is_status_drifted INTEGER, task_total_count INTEGER, task_done_count INTEGER,
+    task_blocked_count INTEGER, created_at TEXT, last_event_at TEXT, ledger_sha256 TEXT
+);
+
+CREATE TABLE IF NOT EXISTS dim_model_role (
+    role_model_key TEXT PRIMARY KEY, role_name TEXT, tier TEXT, cli_tool TEXT,
+    model_id TEXT, vendor TEXT, is_escalated INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS fact_gtt_event (
+    event_uid TEXT PRIMARY KEY, goal_uid TEXT NOT NULL, machine_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL, line_no INTEGER NOT NULL, event_id TEXT NOT NULL,
+    ts TEXT NOT NULL, evt_type TEXT NOT NULL, task_id TEXT, actor_from TEXT,
+    actor_to TEXT, ref_artifact TEXT, head_sha TEXT, pr_number INTEGER,
+    model_id TEXT, contract_sha TEXT, is_bot_bypass INTEGER, blocker_class TEXT,
+    note_preview TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_gtt_event_cst_day ON fact_gtt_event(cst_day);
+
+CREATE TABLE IF NOT EXISTS fact_gtt_task_run (
+    receipt_uid TEXT PRIMARY KEY, goal_uid TEXT NOT NULL, machine_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL, task_id TEXT NOT NULL, role_name TEXT NOT NULL,
+    round_no INTEGER NOT NULL, agent_name TEXT, cli_tool TEXT, model_id TEXT,
+    vendor TEXT, status TEXT, v5_verdict TEXT, head_sha TEXT,
+    receipt_sha256 TEXT NOT NULL, completed_at TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(completed_at, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_gtt_task_run_cst_day ON fact_gtt_task_run(cst_day);
+
+CREATE TABLE IF NOT EXISTS fact_workspace_hygiene_snapshot (
+    snapshot_date TEXT NOT NULL, machine_id TEXT NOT NULL, entity_type TEXT NOT NULL,
+    canonical_path TEXT NOT NULL, repo_key TEXT, goal_id TEXT, branch_name TEXT,
+    head_sha TEXT, is_dirty INTEGER, dirty_count INTEGER, is_merged_to_default INTEGER,
+    has_active_pane INTEGER, has_implicit_dep INTEGER, safe_to_reclaim INTEGER NOT NULL,
+    reclaim_block_reason TEXT,
+    PRIMARY KEY (snapshot_date, machine_id, entity_type, canonical_path)
+);
+
 -- ---------------------------------------------------------------------------
 -- dim_session — per-session rollup (populated during merge from facts).
 --
