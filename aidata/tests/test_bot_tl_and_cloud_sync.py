@@ -85,6 +85,8 @@ def test_cloud_sync_blob_parts_and_hash_suffix():
     assert cloud_sync._blob_parts(name) == ("device-1", "2026-10-28_deadbeef1234.jsonl")
     dated = "aidata-sync/v1/machines/device-1/batches/2026-10-28/010203_deadbeef1234.jsonl"
     assert cloud_sync._blob_parts(dated) == ("device-1", "010203_deadbeef1234.jsonl")
+    traversal = "aidata-sync/v1/machines/../../outside/batches/data.jsonl"
+    assert cloud_sync._blob_parts(traversal) is None
     assert cloud_sync._sha_suffix(Path(name).name) == "deadbeef1234"
 
 

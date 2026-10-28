@@ -98,14 +98,19 @@ def _blob_parts(name: str) -> tuple[str, str] | None:
     device_id, separator, tail = relative.partition("/batches/")
     if not separator or not device_id or not tail:
         return None
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", device_id):
+        return None
     segments = tail.split("/")
-    if any(not segment or segment == ".." for segment in segments):
+    if any(not segment or segment in {".", ".."} for segment in segments):
         return None
     if len(segments) == 2 and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", segments[0]):
         return None
     if len(segments) not in {1, 2}:
         return None
-    return device_id, Path(tail).name
+    filename = Path(tail).name
+    if not re.fullmatch(r"[A-Za-z0-9._-]+\.jsonl", filename):
+        return None
+    return device_id, filename
 
 
 def pull_remote_batches() -> int:
@@ -143,8 +148,20 @@ def pull_remote_batches() -> int:
         if not marker or watermark.get(name) == marker:
             continue
         device_id, filename = parts
-        target_dir = GTT_XFER_DIR / "azure" / device_id
+        sync_root = (GTT_XFER_DIR / "azure").resolve()
+        target_dir = sync_root / device_id
+        if (
+            target_dir.is_symlink()
+            or not target_dir.resolve().is_relative_to(sync_root)
+        ):
+            continue
         target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / filename
+        if (
+            target.is_symlink()
+            or not target.resolve().is_relative_to(sync_root)
+        ):
+            continue
         fd, temp_name = tempfile.mkstemp(prefix=f".{filename}.", dir=target_dir)
         os.close(fd)
         temp_path = Path(temp_name)
@@ -156,7 +173,7 @@ def pull_remote_batches() -> int:
                 digest = hashlib.sha256(temp_path.read_bytes()).hexdigest()[:12]
                 if digest != expected:
                     continue
-            os.replace(temp_path, target_dir / filename)
+            os.replace(temp_path, target)
             watermark[name] = str(marker)
             set_watermark("cloud_sync_batches", watermark)
             downloaded += 1
