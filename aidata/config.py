@@ -33,6 +33,12 @@ GTT_HANDOFF_ROOTS = (
     HOME / "Development" / "handoffs",
 )
 GTT_XFER_DIR = HOME / "Development" / "handoff" / "_box-xfer"
+PRMON_WATCH_DIR = HOME / "Development" / "handoff" / "_watch" / "prmon"
+CLAUDE_QUOTA_CACHE = HOME / ".config" / "claude" / "gtt-weekly-remaining-pct.json"
+AIDATA_SYNC_STORAGE_ACCOUNT = ""
+AIDATA_SYNC_CONTAINER = "telemetry-raw"
+AIDATA_SYNC_PREFIX = "aidata-sync/v1"
+AIDATA_SYNC_TABLE = "AidataSyncIndex"
 GTT_RUNTIME_PROFILES_YAML = (
     HOME / "Development" / "user-skills" / "skills" / "goal-task"
     / "references" / "runtime-profiles.yaml"
@@ -308,6 +314,7 @@ SOURCES = (
     "gecko",
     "gtt_ledger",
     "gtt_receipt",
+    "bot_tl",
     "workspace_hygiene",
     "github_ci",
     "github_ruleset",
@@ -343,6 +350,7 @@ SCHEDULED_SOURCES = (
     "gecko",
     "gtt_ledger",
     "gtt_receipt",
+    "bot_tl",
     "workspace_hygiene",
     "github_ci",
     "github_ruleset",
@@ -361,6 +369,7 @@ MERGE_SOURCES = (
     "github_pr",
     "gtt_ledger",
     "gtt_receipt",
+    "bot_tl",
     "workspace_hygiene",
     "github_ci",
     "github_ruleset",

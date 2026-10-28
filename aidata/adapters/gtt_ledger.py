@@ -65,7 +65,11 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                     item = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if item.get("record_type") in {"ledger", "goal", "queue"} and item.get("content"):
+                if (
+                    item.get("collector") in (None, "gtt")
+                    and item.get("record_type") in {"ledger", "goal", "queue"}
+                    and item.get("content")
+                ):
                     yield {
                         "machine_id": item.get("machine_id") or "unknown",
                         "goal_id": item.get("goal_id") or Path(item.get("rel_path", "")).parts[0],
@@ -100,10 +104,13 @@ def _local_records() -> Iterable[dict[str, Any]]:
 
 
 def collect() -> int:
+    from adapters import cloud_sync
+
+    cloud_sync.pull_remote_batches()
     records = list(_local_records())
     try:
-        bundles = sorted(GTT_XFER_DIR.glob("gtt-bundle-*.jsonl"))
-        bundles.extend(sorted(GTT_XFER_DIR.glob("*.tgz")))
+        bundles = sorted(GTT_XFER_DIR.rglob("*.jsonl"))
+        bundles.extend(sorted(GTT_XFER_DIR.rglob("*.tgz")))
     except OSError:
         bundles = []
     for bundle in bundles:
@@ -189,7 +196,8 @@ def _parse_event(line: str, line_number: int, goal_id: str) -> dict[str, Any] | 
     sha = re.search(r"\b[0-9a-f]{7,40}\b", text, re.IGNORECASE)
     pr = re.search(r"\bPR#?(\d+)\b", text, re.IGNORECASE)
     return {
-        "event_uid": f"L{line_number}:{event_id or 'none'}",
+        "event_uid": f"{event_id or 'none'}:"
+        f"{hashlib.sha256(line.encode()).hexdigest()[:8]}",
         "goal_uid": goal_id,
         "machine_id": fields.get("machine", "unknown"),
         "goal_id": goal_id,
@@ -259,7 +267,14 @@ def normalize() -> int:
     for record in read_raw(SOURCE):
         if record.get("record_type") != "ledger" or not record.get("goal_id"):
             continue
-        latest[(record.get("machine_id", "unknown"), record["goal_id"])] = record
+        key = (record.get("machine_id", "unknown"), record["goal_id"])
+        candidate_ts = str(record.get("last_event_at") or record.get("mtime_iso")
+                           or record.get("exported_at") or "")
+        existing_ts = str(latest.get(key, {}).get("last_event_at")
+                          or latest.get(key, {}).get("mtime_iso")
+                          or latest.get(key, {}).get("exported_at") or "")
+        if candidate_ts >= existing_ts:
+            latest[key] = record
     goals: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     for (machine_id, goal_id), record in latest.items():

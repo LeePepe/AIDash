@@ -93,13 +93,34 @@ def run_merge() -> dict[str, int]:
         # --- P0 GTT dimensions/facts ---
         if _attach(conn, "gtt_ledger", "gl"):
             conn.execute("""
-                INSERT OR REPLACE INTO dim_goal
+                INSERT INTO dim_goal
                 SELECT goal_uid, machine_id, goal_id, title, owner, coordinator_bot,
                        tl_agent, tl_model, contract_sha, static_header_status,
                        derived_actual_status, is_status_drifted, task_total_count,
                        task_done_count, task_blocked_count, created_at, last_event_at,
                        ledger_sha256
                 FROM gl.goal
+                WHERE 1 = 1
+                ON CONFLICT(goal_uid) DO UPDATE SET
+                    machine_id = excluded.machine_id,
+                    goal_id = excluded.goal_id,
+                    title = excluded.title,
+                    owner = excluded.owner,
+                    coordinator_bot = excluded.coordinator_bot,
+                    tl_agent = excluded.tl_agent,
+                    tl_model = excluded.tl_model,
+                    contract_sha = excluded.contract_sha,
+                    static_header_status = excluded.static_header_status,
+                    derived_actual_status = excluded.derived_actual_status,
+                    is_status_drifted = excluded.is_status_drifted,
+                    task_total_count = excluded.task_total_count,
+                    task_done_count = excluded.task_done_count,
+                    task_blocked_count = excluded.task_blocked_count,
+                    created_at = excluded.created_at,
+                    last_event_at = excluded.last_event_at,
+                    ledger_sha256 = excluded.ledger_sha256
+                WHERE COALESCE(excluded.last_event_at, '') >=
+                      COALESCE(dim_goal.last_event_at, '')
             """)
             conn.execute("""
                 INSERT OR REPLACE INTO fact_gtt_event
@@ -133,6 +154,27 @@ def run_merge() -> dict[str, int]:
             counts["fact_gtt_task_run"] = conn.execute(
                 "SELECT count(*) FROM fact_gtt_task_run").fetchone()[0]
             _detach(conn, "grt")
+
+        if _attach(conn, "bot_tl", "btl"):
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_bot_tl_supervision
+                SELECT supervision_uid, device_id, machine_alias, goal_id, bot_name,
+                       tl_agent, action_kind, quota_precheck_result,
+                       weekly_remaining_pct, repo_key, pr_number, head_sha, status,
+                       detail_preview, ts
+                FROM btl.supervision
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_prmon_heartbeat
+                SELECT heartbeat_uid, device_id, machine_alias, ts,
+                       checked_pr_count, stuck_pr_count, repair_queued_count, status
+                FROM btl.prmon_heartbeat
+            """)
+            counts["fact_bot_tl_supervision"] = conn.execute(
+                "SELECT count(*) FROM fact_bot_tl_supervision").fetchone()[0]
+            counts["fact_prmon_heartbeat"] = conn.execute(
+                "SELECT count(*) FROM fact_prmon_heartbeat").fetchone()[0]
+            _detach(conn, "btl")
 
         if _attach(conn, "workspace_hygiene", "wh"):
             if _has_table(conn, "wh", "repo"):

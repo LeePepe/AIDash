@@ -342,6 +342,26 @@ CREATE TABLE IF NOT EXISTS fact_gtt_task_run (
 );
 CREATE INDEX IF NOT EXISTS idx_gtt_task_run_cst_day ON fact_gtt_task_run(cst_day);
 
+CREATE TABLE IF NOT EXISTS fact_bot_tl_supervision (
+    supervision_uid TEXT PRIMARY KEY, device_id TEXT NOT NULL,
+    machine_alias TEXT, goal_id TEXT NOT NULL, bot_name TEXT, tl_agent TEXT,
+    action_kind TEXT NOT NULL, quota_precheck_result TEXT,
+    weekly_remaining_pct INTEGER, repo_key TEXT, pr_number INTEGER,
+    head_sha TEXT, status TEXT, detail_preview TEXT, ts TEXT NOT NULL,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_bot_tl_supervision_cst_day
+    ON fact_bot_tl_supervision(cst_day);
+
+CREATE TABLE IF NOT EXISTS fact_prmon_heartbeat (
+    heartbeat_uid TEXT PRIMARY KEY, device_id TEXT NOT NULL,
+    machine_alias TEXT, ts TEXT NOT NULL, checked_pr_count INTEGER,
+    stuck_pr_count INTEGER, repair_queued_count INTEGER, status TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_prmon_heartbeat_cst_day
+    ON fact_prmon_heartbeat(cst_day);
+
 CREATE TABLE IF NOT EXISTS fact_workspace_hygiene_snapshot (
     snapshot_date TEXT NOT NULL, machine_id TEXT NOT NULL, entity_type TEXT NOT NULL,
     canonical_path TEXT NOT NULL, repo_key TEXT, goal_id TEXT, branch_name TEXT,
