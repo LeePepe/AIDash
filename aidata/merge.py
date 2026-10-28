@@ -11,7 +11,10 @@ clean/ each run, so merge is idempotent.
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import os
+import re
 import sqlite3
 
 from config import (
@@ -72,6 +75,50 @@ def _has_table(conn: sqlite3.Connection, alias: str, table: str) -> bool:
     ).fetchone() is not None
 
 
+def _merge_gtt_events(conn: sqlite3.Connection) -> None:
+    """Migrate legacy clean keys without modifying the source database.
+
+    Normalize rebuilds clean tables from immutable raw lines. Merge can also
+    encounter an old or mixed clean DB before normalize has run. Match legacy
+    rows to canonical rows using all stored event fields except their location.
+    Legacy-only rows lack the original line: hash those stored fields instead.
+    The next normalize/merge rebuild replaces that fallback with the raw hash.
+    """
+    cursor = conn.execute("""
+        SELECT event_uid, goal_uid, machine_id, goal_id, line_no, event_id, ts,
+               evt_type, task_id, actor_from, actor_to, ref_artifact, head_sha,
+               pr_number, model_id, contract_sha, is_bot_bypass, blocker_class,
+               note_preview
+        FROM gl.gtt_event
+    """)
+    columns = [column[0] for column in cursor.description]
+    rows = [{column: values[index] for index, column in enumerate(columns)} for values in cursor]
+    canonical = {}
+    canonical_rows = []
+    legacy = []
+    for row in rows:
+        identity = tuple(row[column] for column in columns if column not in {"event_uid", "line_no"})
+        prefix = f"{row['machine_id']}:{row['goal_id']}:"
+        suffix = str(row["event_uid"]).removeprefix(prefix)
+        if re.fullmatch(r"L\d+:" + re.escape(row["event_id"]), suffix):
+            legacy.append((row, identity, prefix))
+        else:
+            canonical.setdefault(identity, row["event_uid"])
+            canonical_rows.append(row)
+    for row, identity, prefix in legacy:
+        digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:8]
+        row["event_uid"] = canonical.get(identity) or f"{prefix}{row['event_id']}:{digest}"
+    # Canonical rows win over legacy aliases, including their line_no metadata.
+    ordered = [row for row, _, _ in legacy]
+    ordered.extend(canonical_rows)
+    names = ", ".join(columns)
+    placeholders = ", ".join("?" for _ in columns)
+    conn.executemany(
+        f"INSERT OR REPLACE INTO fact_gtt_event ({names}) VALUES ({placeholders})",
+        [tuple(row[column] for column in columns) for row in ordered],
+    )
+
+
 def run_merge() -> dict[str, int]:
     WAREHOUSE_DB.parent.mkdir(parents=True, exist_ok=True)
     # Fresh rebuild — derived artifact.
@@ -122,14 +169,7 @@ def run_merge() -> dict[str, int]:
                 WHERE COALESCE(excluded.last_event_at, '') >=
                       COALESCE(dim_goal.last_event_at, '')
             """)
-            conn.execute("""
-                INSERT OR REPLACE INTO fact_gtt_event
-                SELECT event_uid, goal_uid, machine_id, goal_id, line_no, event_id, ts,
-                       evt_type, task_id, actor_from, actor_to, ref_artifact, head_sha,
-                       pr_number, model_id, contract_sha, is_bot_bypass, blocker_class,
-                       note_preview
-                FROM gl.gtt_event
-            """)
+            _merge_gtt_events(conn)
             counts["dim_goal"] = conn.execute("SELECT count(*) FROM dim_goal").fetchone()[0]
             counts["fact_gtt_event"] = conn.execute(
                 "SELECT count(*) FROM fact_gtt_event").fetchone()[0]
