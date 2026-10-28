@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 
 from config import (
     SCHEMA_DIR,
@@ -119,6 +120,17 @@ def _merge_gtt_events(conn: sqlite3.Connection) -> None:
     )
 
 
+def _goal_timestamp_key(value: str | None) -> str:
+    """Order heterogeneous goal timestamps in UTC, including legacy naive ones."""
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))  # noqa: FURB162
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)  # noqa: UP017
+        return stamp.astimezone(timezone.utc).isoformat(timespec="microseconds")  # noqa: UP017
+    except (ValueError, OverflowError):
+        return ""
+
+
 def run_merge() -> dict[str, int]:
     WAREHOUSE_DB.parent.mkdir(parents=True, exist_ok=True)
     # Fresh rebuild — derived artifact.
@@ -130,6 +142,7 @@ def run_merge() -> dict[str, int]:
     conn = sqlite3.connect(WAREHOUSE_DB, isolation_level=None)
     counts: dict[str, int] = {}
     try:
+        conn.create_function("goal_timestamp_key", 1, _goal_timestamp_key, deterministic=True)
         conn.executescript((SCHEMA_DIR / "warehouse.sql").read_text(encoding="utf-8"))
         _load_prices(conn)
         _load_automation_rules(conn)
@@ -166,8 +179,8 @@ def run_merge() -> dict[str, int]:
                     created_at = excluded.created_at,
                     last_event_at = excluded.last_event_at,
                     ledger_sha256 = excluded.ledger_sha256
-                WHERE COALESCE(excluded.last_event_at, '') >=
-                      COALESCE(dim_goal.last_event_at, '')
+                WHERE goal_timestamp_key(excluded.last_event_at) >=
+                      goal_timestamp_key(dim_goal.last_event_at)
             """)
             _merge_gtt_events(conn)
             counts["dim_goal"] = conn.execute("SELECT count(*) FROM dim_goal").fetchone()[0]
