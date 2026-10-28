@@ -430,10 +430,11 @@ def test_cloud_sync_keeps_same_named_batches_on_different_dates(monkeypatch, tmp
     monkeypatch.setattr(cloud_sync, "GTT_XFER_DIR", tmp_path)
     monkeypatch.setattr(bot_tl, "GTT_XFER_DIR", tmp_path)
     monkeypatch.setattr(cloud_sync.shutil, "which", lambda *_args, **_kwargs: "/test/az")
-    names = [f"aidata-sync/v1/machines/device-1/batches/{day}/batch.jsonl"
-             for day in ("2026-10-27", "2026-10-28")]
+    names = ["aidata-sync/v1/machines/device-1/batches/batch.jsonl",
+             *[f"aidata-sync/v1/machines/device-1/batches/{day}/batch.jsonl"
+               for day in ("2026-10-27", "2026-10-28")]]
     contents = {name: json.dumps({"collector": "prmon", "record_type": "prmon_heartbeat",
-                                "payload": {"ts": f"2026-10-{27 + index}T01:00:00Z"}}) + "\n"
+                                "payload": {"ts": f"2026-10-{26 + index}T01:00:00Z"}}) + "\n"
                 for index, name in enumerate(names)}
     monkeypatch.setattr(cloud_sync, "_run_json", lambda *_args: [
         {"name": name, "etag": "same-etag"} for name in names
@@ -454,13 +455,13 @@ def test_cloud_sync_keeps_same_named_batches_on_different_dates(monkeypatch, tmp
         target.write_text(contents[name], encoding="utf-8")
         return True
     monkeypatch.setattr(cloud_sync, "_download", download)
-    assert cloud_sync.pull_remote_batches() == 2
+    assert cloud_sync.pull_remote_batches() == 3
     for name in names:
         relative = name.split("/batches/", 1)[1]
         assert (tmp_path / "azure/device-1" / relative).read_text() == contents[name]
-        assert watermarks["cloud_sync_batches"][name] == "same-etag"
+        assert watermarks["cloud_sync_batches_v2"][name] == "same-etag"
     assert {row["payload"]["ts"] for row in bot_tl._remote_records()} == {
-        "2026-10-27T01:00:00Z", "2026-10-28T01:00:00Z",
+        "2026-10-26T01:00:00Z", "2026-10-27T01:00:00Z", "2026-10-28T01:00:00Z",
     }
     watermarks.pop("cloud_sync_refresh")
     assert cloud_sync.pull_remote_batches() == 0
@@ -490,7 +491,7 @@ def test_cloud_sync_failed_target_never_advances_watermark(monkeypatch, tmp_path
         return True
     monkeypatch.setattr(cloud_sync, "_download", download)
     assert cloud_sync.pull_remote_batches() == 0
-    assert name not in watermarks.get("cloud_sync_batches", {})
+    assert name not in watermarks.get("cloud_sync_batches_v2", {})
     assert "cloud_sync_refresh" not in watermarks
     assert list(outside.iterdir()) == []
     assert not list(root.rglob(".*.jsonl.*"))

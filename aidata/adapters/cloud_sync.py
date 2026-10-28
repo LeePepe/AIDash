@@ -144,7 +144,9 @@ def pull_remote_batches() -> int:
     )
     if not isinstance(listed, list):
         return 0
-    watermark = dict(get_watermark("cloud_sync_batches") or {})
+    # Invalidate flattened-layout watermarks, including undated files that
+    # may have been overwritten by a dated batch with the same basename.
+    watermark = dict(get_watermark("cloud_sync_batches_v2") or {})
     downloaded = 0
     complete = True
     for item in listed:
@@ -169,8 +171,7 @@ def pull_remote_batches() -> int:
         if target.is_symlink() or not target.resolve().is_relative_to(sync_root):
             complete = False
             continue
-        # Old watermarks may describe files overwritten by the flattened
-        # layout. Recover missing dated targets even if the ETag is unchanged.
+        # Recover deleted local targets even if their ETag is unchanged.
         if watermark.get(name) == marker and target.is_file():
             continue
         target_dir = target.parent
@@ -194,7 +195,7 @@ def pull_remote_batches() -> int:
                     continue
             os.replace(temp_path, target)
             watermark[name] = str(marker)
-            set_watermark("cloud_sync_batches", watermark)
+            set_watermark("cloud_sync_batches_v2", watermark)
             downloaded += 1
         except (OSError, ValueError):
             complete = False

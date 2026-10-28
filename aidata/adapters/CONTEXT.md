@@ -38,8 +38,9 @@ missing CLI, or unsuccessful cloud calls degrade to no new batches; they do not
 block local collection. No credentials belong in tracked configuration.
 
 Downloaded batches preserve the optional date directory under
-`_box-xfer/azure/<device_id>/`. Missing dated targets are downloaded again even
-with an existing ETag watermark, recovering the former flattened layout.
+`_box-xfer/azure/<device_id>/`. Versioned watermarks force a one-time re-download from the former flattened
+layout, including undated batches overwritten by dated namesakes. Missing local
+targets are downloaded again even with an existing ETag watermark.
 Collectors scan recursively. Only filenames with a 12-character SHA suffix
 provide content-digest verification; other batches rely on the authenticated
 storage service. Failed checks never advance a watermark and retry on the next
