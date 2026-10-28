@@ -79,6 +79,60 @@ def run_merge() -> dict[str, int]:
             "SELECT count(*) FROM dim_automation_rule"
         ).fetchone()[0]
 
+        # --- P0 GTT dimensions/facts ---
+        if _attach(conn, "gtt_ledger", "gl"):
+            conn.execute("""
+                INSERT OR REPLACE INTO dim_goal
+                SELECT goal_uid, machine_id, goal_id, title, owner, coordinator_bot,
+                       tl_agent, tl_model, contract_sha, static_header_status,
+                       derived_actual_status, is_status_drifted, task_total_count,
+                       task_done_count, task_blocked_count, created_at, last_event_at,
+                       ledger_sha256
+                FROM gl.goal
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_gtt_event
+                SELECT event_uid, goal_uid, machine_id, goal_id, line_no, event_id, ts,
+                       evt_type, task_id, actor_from, actor_to, ref_artifact, head_sha,
+                       pr_number, model_id, contract_sha, is_bot_bypass, blocker_class,
+                       note_preview
+                FROM gl.gtt_event
+            """)
+            counts["dim_goal"] = conn.execute("SELECT count(*) FROM dim_goal").fetchone()[0]
+            counts["fact_gtt_event"] = conn.execute(
+                "SELECT count(*) FROM fact_gtt_event").fetchone()[0]
+
+        if _attach(conn, "gtt_receipt", "grt"):
+            conn.execute("""
+                INSERT OR REPLACE INTO dim_model_role
+                SELECT role_model_key, role_name, tier, cli_tool, model_id, vendor,
+                       is_escalated
+                FROM grt.model_role
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_gtt_task_run
+                SELECT receipt_uid, goal_uid, machine_id, goal_id, task_id, role_name,
+                       round_no, agent_name, cli_tool, model_id, vendor, status,
+                       v5_verdict, head_sha, receipt_sha256, completed_at
+                FROM grt.task_run
+            """)
+            counts["dim_model_role"] = conn.execute(
+                "SELECT count(*) FROM dim_model_role").fetchone()[0]
+            counts["fact_gtt_task_run"] = conn.execute(
+                "SELECT count(*) FROM fact_gtt_task_run").fetchone()[0]
+
+        if _attach(conn, "workspace_hygiene", "wh"):
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_workspace_hygiene_snapshot
+                SELECT snapshot_date, machine_id, entity_type, canonical_path, repo_key,
+                       goal_id, branch_name, head_sha, is_dirty, dirty_count,
+                       is_merged_to_default, has_active_pane, has_implicit_dep,
+                       safe_to_reclaim, reclaim_block_reason
+                FROM wh.hygiene_snapshot
+            """)
+            counts["fact_workspace_hygiene_snapshot"] = conn.execute(
+                "SELECT count(*) FROM fact_workspace_hygiene_snapshot").fetchone()[0]
+
         # --- fact_request (raven) ---
         if _attach(conn, "raven", "rv"):
             # Clean databases are derived artifacts and may predate the cache
