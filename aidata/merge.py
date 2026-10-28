@@ -106,7 +106,7 @@ def _merge_gtt_events(conn: sqlite3.Connection) -> None:
             canonical.setdefault(identity, row["event_uid"])
             canonical_rows.append(row)
     for row, identity, prefix in legacy:
-        digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:8]
+        digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
         row["event_uid"] = canonical.get(identity) or f"{prefix}{row['event_id']}:{digest}"
     # Canonical rows win over legacy aliases, including their line_no metadata.
     ordered = [row for row, _, _ in legacy]

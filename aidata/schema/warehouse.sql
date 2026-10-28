@@ -359,6 +359,7 @@ CREATE TABLE IF NOT EXISTS fact_prmon_heartbeat (
     stuck_pr_count INTEGER, repair_queued_count INTEGER, status TEXT,
     cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
 );
+CREATE INDEX IF NOT EXISTS idx_prmon_heartbeat_ts ON fact_prmon_heartbeat(ts DESC, heartbeat_uid DESC);
 CREATE INDEX IF NOT EXISTS idx_prmon_heartbeat_cst_day
     ON fact_prmon_heartbeat(cst_day);
 
