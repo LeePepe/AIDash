@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import socket
 import tarfile
@@ -43,7 +44,7 @@ def _safe(value: str) -> str:
 
 def _payload(path: Path, record_type: str, content: str) -> dict[str, Any]:
     try:
-        value: Any = json.loads(content)
+        value: Any = json.loads(_safe(content))
     except json.JSONDecodeError:
         value = {"content": _safe(content)}
     try:
@@ -58,7 +59,7 @@ def _payload(path: Path, record_type: str, content: str) -> dict[str, Any]:
         "device_id": _machine_id(),
         "machine_alias": _machine_id(),
         "goal_id": path.parts[-2] if len(path.parts) > 1 else None,
-        "rel_path": str(path),
+        "rel_path": _safe(str(path)),
         "mtime_iso": mtime_iso,
         "observed_at": value.get("observed_at") or value.get("generated_at") if isinstance(value, dict) else mtime_iso,
         "payload": value,
@@ -139,17 +140,27 @@ def _prmon_records() -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     history = PRMON_WATCH_DIR / "heartbeat-history.jsonl"
     try:
-        stat = history.stat()
         old = get_watermark("bot_tl_prmon_history") or {}
-        offset = int(old.get("offset", 0)) if old.get("inode") == stat.st_ino else 0
-        with history.open(encoding="utf-8") as fh:
+        with history.open("rb") as fh:
+            stat = os.fstat(fh.fileno())
+            offset = int(old.get("offset", 0)) if old.get("inode") == stat.st_ino else 0
+            if not 0 <= offset <= stat.st_size:
+                offset = 0
+            if offset:
+                fh.seek(offset - 1)
+                if fh.read(1) != b"\n":
+                    # Recover cursors left mid-line by an older reader.
+                    offset = 0
             fh.seek(offset)
-            for line in fh:
+            while line := fh.readline():
+                if not line.endswith(b"\n"):
+                    break  # An append may still be writing this UTF-8 line.
+                offset = fh.tell()
                 try:
-                    records.append(_payload(history, "prmon_heartbeat", line))
-                except OSError:
-                    break
-            set_watermark("bot_tl_prmon_history", {"inode": stat.st_ino, "offset": fh.tell()})
+                    records.append(_payload(history, "prmon_heartbeat", line.decode("utf-8")))
+                except UnicodeDecodeError:
+                    continue
+            set_watermark("bot_tl_prmon_history", {"inode": stat.st_ino, "offset": offset})
     except OSError:
         pass
     for path, kind in (
@@ -178,7 +189,7 @@ def _remote_records() -> list[dict[str, Any]]:
         return records
     def add_line(line: str) -> None:
         try:
-            item = json.loads(line)
+            item = json.loads(_safe(line))
         except json.JSONDecodeError:
             return
         if item.get("collector") in {"bot_tl", "prmon"} or item.get("record_type") in {
@@ -213,16 +224,18 @@ def collect() -> int:
     records = _local_records() + _prmon_records() + _remote_records()
     old = dict(get_watermark(SOURCE) or {})
     changed: list[dict[str, Any]] = []
-    current: dict[str, str] = {}
+    # History records disappear from the incremental read after one collect;
+    # retain their digests so a rotation/replay does not ingest them again.
+    current: dict[str, str] = dict(old)
     for record in records:
-        discriminator = hashlib.sha256(
+        digest = hashlib.sha256(
             json.dumps(record.get("payload", record), sort_keys=True, ensure_ascii=False).encode()
-        ).hexdigest()[:12]
+        ).hexdigest()
+        discriminator = digest[:12]
         key = f"{record.get('device_id', 'unknown')}:{record.get('record_type')}:{record.get('rel_path', '')}:{discriminator}"
-        digest = hashlib.sha256(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        current[key] = digest
-        if old.get(key) != digest:
+        if current.get(key) != digest:
             changed.append(record)
+        current[key] = digest
     count = write_raw(SOURCE, changed)
     set_watermark(SOURCE, current)
     return count

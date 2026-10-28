@@ -303,7 +303,9 @@ def normalize() -> int:
     for (machine_id, goal_id), record in latest.items():
         content = str(record.get("content", ""))
         parsed = [_parse_event(line, no, goal_id) for no, line in enumerate(content.splitlines(), 1)]
-        parsed_events = [event for event in parsed if event]
+        # A ledger may repeat a line after a replay/export. Its content hash is
+        # the event identity; line_no is only the latest source location.
+        parsed_events = list({event["event_uid"]: event for event in parsed if event}.values())
         for event in parsed_events:
             event["machine_id"] = machine_id
             event["event_uid"] = f"{machine_id}:{goal_id}:{event['event_uid']}"

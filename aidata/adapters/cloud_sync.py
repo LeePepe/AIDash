@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess  # nosec B404 - fixed executable and argument vectors only
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ _INHERITED_ENVIRONMENT = (
     "PATH", "HOME", "AZURE_CONFIG_DIR", "TMPDIR", "TMP", "TEMP",
     "LANG", "LC_ALL", "LC_CTYPE", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
 )
+_REFRESH_SECONDS = 60
 
 
 def _child_environment() -> dict[str, str]:
@@ -121,6 +123,13 @@ def pull_remote_batches() -> int:
     executable = shutil.which("az", path=env.get("PATH"))
     if not executable:
         return 0
+    # Scheduled collectors run in separate processes. Share a short successful
+    # refresh window so all three adapters consume one listing/download pass.
+    scope = [AIDATA_SYNC_STORAGE_ACCOUNT, AIDATA_SYNC_CONTAINER, AIDATA_SYNC_PREFIX, str(GTT_XFER_DIR.resolve())]
+    refresh = get_watermark("cloud_sync_refresh") or {}
+    now = time.time()
+    if refresh.get("scope") == scope and 0 <= now - refresh.get("completed_at", 0) < _REFRESH_SECONDS:
+        return 0
     prefix = f"{AIDATA_SYNC_PREFIX}/machines/"
     listed = _run_json(
         executable,
@@ -137,6 +146,7 @@ def pull_remote_batches() -> int:
         return 0
     watermark = dict(get_watermark("cloud_sync_batches") or {})
     downloaded = 0
+    complete = True
     for item in listed:
         if not isinstance(item, dict):
             continue
@@ -154,6 +164,7 @@ def pull_remote_batches() -> int:
             target_dir.is_symlink()
             or not target_dir.resolve().is_relative_to(sync_root)
         ):
+            complete = False
             continue
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / filename
@@ -161,24 +172,30 @@ def pull_remote_batches() -> int:
             target.is_symlink()
             or not target.resolve().is_relative_to(sync_root)
         ):
+            complete = False
             continue
         fd, temp_name = tempfile.mkstemp(prefix=f".{filename}.", dir=target_dir)
         os.close(fd)
         temp_path = Path(temp_name)
         try:
             if not _download(executable, env, name, temp_path):
+                complete = False
                 continue
             expected = _sha_suffix(filename)
             if expected:
                 digest = hashlib.sha256(temp_path.read_bytes()).hexdigest()[:12]
                 if digest != expected:
+                    complete = False
                     continue
             os.replace(temp_path, target)
             watermark[name] = str(marker)
             set_watermark("cloud_sync_batches", watermark)
             downloaded += 1
         except (OSError, ValueError):
+            complete = False
             continue
         finally:
             temp_path.unlink(missing_ok=True)
+    if complete:
+        set_watermark("cloud_sync_refresh", {"scope": scope, "completed_at": time.time()})
     return downloaded
