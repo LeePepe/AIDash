@@ -11,8 +11,12 @@ clean/ each run, so merge is idempotent.
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import os
+import re
 import sqlite3
+from datetime import datetime, timezone
 
 from config import (
     SCHEMA_DIR,
@@ -72,6 +76,61 @@ def _has_table(conn: sqlite3.Connection, alias: str, table: str) -> bool:
     ).fetchone() is not None
 
 
+def _merge_gtt_events(conn: sqlite3.Connection) -> None:
+    """Migrate legacy clean keys without modifying the source database.
+
+    Normalize rebuilds clean tables from immutable raw lines. Merge can also
+    encounter an old or mixed clean DB before normalize has run. Match legacy
+    rows to canonical rows using all stored event fields except their location.
+    Legacy-only rows lack the original line: hash those stored fields instead.
+    The next normalize/merge rebuild replaces that fallback with the raw hash.
+    """
+    cursor = conn.execute("""
+        SELECT event_uid, goal_uid, machine_id, goal_id, line_no, event_id, ts,
+               evt_type, task_id, actor_from, actor_to, ref_artifact, head_sha,
+               pr_number, model_id, contract_sha, is_bot_bypass, blocker_class,
+               note_preview
+        FROM gl.gtt_event
+    """)
+    columns = [column[0] for column in cursor.description]
+    rows = [{column: values[index] for index, column in enumerate(columns)} for values in cursor]
+    canonical = {}
+    canonical_rows = []
+    legacy = []
+    for row in rows:
+        identity = tuple(row[column] for column in columns if column not in {"event_uid", "line_no"})
+        prefix = f"{row['machine_id']}:{row['goal_id']}:"
+        suffix = str(row["event_uid"]).removeprefix(prefix)
+        if re.fullmatch(r"L\d+:" + re.escape(row["event_id"]), suffix):
+            legacy.append((row, identity, prefix))
+        else:
+            canonical.setdefault(identity, row["event_uid"])
+            canonical_rows.append(row)
+    for row, identity, prefix in legacy:
+        digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
+        row["event_uid"] = canonical.get(identity) or f"{prefix}{row['event_id']}:{digest}"
+    # Canonical rows win over legacy aliases, including their line_no metadata.
+    ordered = [row for row, _, _ in legacy]
+    ordered.extend(canonical_rows)
+    names = ", ".join(columns)
+    placeholders = ", ".join("?" for _ in columns)
+    conn.executemany(
+        f"INSERT OR REPLACE INTO fact_gtt_event ({names}) VALUES ({placeholders})",
+        [tuple(row[column] for column in columns) for row in ordered],
+    )
+
+
+def _goal_timestamp_key(value: str | None) -> str:
+    """Order heterogeneous goal timestamps in UTC, including legacy naive ones."""
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))  # noqa: FURB162
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)  # noqa: UP017
+        return stamp.astimezone(timezone.utc).isoformat(timespec="microseconds")  # noqa: UP017
+    except (ValueError, OverflowError):
+        return ""
+
+
 def run_merge() -> dict[str, int]:
     WAREHOUSE_DB.parent.mkdir(parents=True, exist_ok=True)
     # Fresh rebuild — derived artifact.
@@ -83,6 +142,7 @@ def run_merge() -> dict[str, int]:
     conn = sqlite3.connect(WAREHOUSE_DB, isolation_level=None)
     counts: dict[str, int] = {}
     try:
+        conn.create_function("goal_timestamp_key", 1, _goal_timestamp_key, deterministic=True)
         conn.executescript((SCHEMA_DIR / "warehouse.sql").read_text(encoding="utf-8"))
         _load_prices(conn)
         _load_automation_rules(conn)
@@ -93,22 +153,36 @@ def run_merge() -> dict[str, int]:
         # --- P0 GTT dimensions/facts ---
         if _attach(conn, "gtt_ledger", "gl"):
             conn.execute("""
-                INSERT OR REPLACE INTO dim_goal
+                INSERT INTO dim_goal
                 SELECT goal_uid, machine_id, goal_id, title, owner, coordinator_bot,
                        tl_agent, tl_model, contract_sha, static_header_status,
                        derived_actual_status, is_status_drifted, task_total_count,
                        task_done_count, task_blocked_count, created_at, last_event_at,
                        ledger_sha256
                 FROM gl.goal
+                WHERE 1 = 1
+                ON CONFLICT(goal_uid) DO UPDATE SET
+                    machine_id = excluded.machine_id,
+                    goal_id = excluded.goal_id,
+                    title = excluded.title,
+                    owner = excluded.owner,
+                    coordinator_bot = excluded.coordinator_bot,
+                    tl_agent = excluded.tl_agent,
+                    tl_model = excluded.tl_model,
+                    contract_sha = excluded.contract_sha,
+                    static_header_status = excluded.static_header_status,
+                    derived_actual_status = excluded.derived_actual_status,
+                    is_status_drifted = excluded.is_status_drifted,
+                    task_total_count = excluded.task_total_count,
+                    task_done_count = excluded.task_done_count,
+                    task_blocked_count = excluded.task_blocked_count,
+                    created_at = excluded.created_at,
+                    last_event_at = excluded.last_event_at,
+                    ledger_sha256 = excluded.ledger_sha256
+                WHERE goal_timestamp_key(excluded.last_event_at) >=
+                      goal_timestamp_key(dim_goal.last_event_at)
             """)
-            conn.execute("""
-                INSERT OR REPLACE INTO fact_gtt_event
-                SELECT event_uid, goal_uid, machine_id, goal_id, line_no, event_id, ts,
-                       evt_type, task_id, actor_from, actor_to, ref_artifact, head_sha,
-                       pr_number, model_id, contract_sha, is_bot_bypass, blocker_class,
-                       note_preview
-                FROM gl.gtt_event
-            """)
+            _merge_gtt_events(conn)
             counts["dim_goal"] = conn.execute("SELECT count(*) FROM dim_goal").fetchone()[0]
             counts["fact_gtt_event"] = conn.execute(
                 "SELECT count(*) FROM fact_gtt_event").fetchone()[0]
@@ -133,6 +207,27 @@ def run_merge() -> dict[str, int]:
             counts["fact_gtt_task_run"] = conn.execute(
                 "SELECT count(*) FROM fact_gtt_task_run").fetchone()[0]
             _detach(conn, "grt")
+
+        if _attach(conn, "bot_tl", "btl"):
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_bot_tl_supervision
+                SELECT supervision_uid, device_id, machine_alias, goal_id, bot_name,
+                       tl_agent, action_kind, quota_precheck_result,
+                       weekly_remaining_pct, repo_key, pr_number, head_sha, status,
+                       detail_preview, ts
+                FROM btl.supervision
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_prmon_heartbeat
+                SELECT heartbeat_uid, device_id, machine_alias, ts,
+                       checked_pr_count, stuck_pr_count, repair_queued_count, status
+                FROM btl.prmon_heartbeat
+            """)
+            counts["fact_bot_tl_supervision"] = conn.execute(
+                "SELECT count(*) FROM fact_bot_tl_supervision").fetchone()[0]
+            counts["fact_prmon_heartbeat"] = conn.execute(
+                "SELECT count(*) FROM fact_prmon_heartbeat").fetchone()[0]
+            _detach(conn, "btl")
 
         if _attach(conn, "workspace_hygiene", "wh"):
             if _has_table(conn, "wh", "repo"):

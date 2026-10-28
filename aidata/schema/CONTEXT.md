@@ -26,3 +26,9 @@
 
 Owns the warehouse schema, dimensions, and merge implementation that combines
 normalized source stores into the local analytical warehouse.
+
+Goal upserts compare `last_event_at` using a deterministic UTC timestamp key
+with microsecond precision, treating legacy naive timestamps as UTC. Invalid or
+missing timestamps sort before valid ones; original timestamp text is preserved
+for provenance. The attached-source merge regression covers offset, Z, naive,
+fractional, invalid and missing timestamps in either row order.

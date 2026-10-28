@@ -6,7 +6,7 @@
   "group": "aidata",
   "parent": "aidata/CONTEXT.md",
   "scope": ["adapters/**"],
-  "test_paths": ["tests/test_ado_pr_adapter.py", "tests/test_aidash_events_adapter.py", "tests/test_browser_history_adapter.py", "tests/test_claude_jsonl_adapter.py", "tests/test_claude_prompts_adapter.py", "tests/test_codex_prompts_adapter.py", "tests/test_gecko_adapter.py", "tests/test_github_pr_adapter.py", "tests/test_github_repo_adapter.py", "tests/test_hermes_messages_adapter.py", "tests/test_hermes_tools_adapter.py", "tests/test_kimi_prompts_adapter.py", "tests/test_local_git_adapter.py", "tests/test_model_canon.py", "tests/test_multica_comment_adapter.py", "tests/test_multica_issue_collect.py", "tests/test_multica_run_collect.py", "tests/test_multica_shared.py", "tests/test_news_adapter.py", "tests/test_product_blob.py", "tests/test_raven_cost.py", "tests/test_state_db_adapter.py", "tests/test_gtt_and_hygiene_adapters.py", "tests/test_ci_release_ruleset_adapters.py"],
+  "test_paths": ["tests/test_ado_pr_adapter.py", "tests/test_aidash_events_adapter.py", "tests/test_browser_history_adapter.py", "tests/test_claude_jsonl_adapter.py", "tests/test_claude_prompts_adapter.py", "tests/test_codex_prompts_adapter.py", "tests/test_gecko_adapter.py", "tests/test_github_pr_adapter.py", "tests/test_github_repo_adapter.py", "tests/test_hermes_messages_adapter.py", "tests/test_hermes_tools_adapter.py", "tests/test_kimi_prompts_adapter.py", "tests/test_local_git_adapter.py", "tests/test_model_canon.py", "tests/test_multica_comment_adapter.py", "tests/test_multica_issue_collect.py", "tests/test_multica_run_collect.py", "tests/test_multica_shared.py", "tests/test_news_adapter.py", "tests/test_product_blob.py", "tests/test_raven_cost.py", "tests/test_state_db_adapter.py", "tests/test_gtt_and_hygiene_adapters.py", "tests/test_bot_tl_and_cloud_sync.py", "tests/test_ci_release_ruleset_adapters.py"],
   "dependencies": ["AidataFoundation"],
   "dependents": ["AidataL3", "AidataOps"],
   "red_lines": [
@@ -29,3 +29,31 @@
 Owns all source adapters, including collection into raw records and the paired
 normalization into source-clean data. Splitting these files into fictional L1
 and L2 leaves would misstate the implementation.
+
+## Cross-machine telemetry operations
+
+`cloud_sync` requires an installed Azure CLI (`az`) with an existing login and
+read access to the configured account/container. Empty account configuration,
+missing CLI, or unsuccessful cloud calls degrade to no new batches; they do not
+block local collection. No credentials belong in tracked configuration.
+
+Downloaded batches preserve the optional date directory under
+`_box-xfer/azure/<device_id>/`. Versioned watermarks force a one-time re-download from the former flattened
+layout, including undated batches overwritten by dated namesakes. Missing local
+targets are downloaded again even with an existing ETag watermark.
+Collectors scan recursively. Only filenames with a 12-character SHA suffix
+provide content-digest verification; other batches rely on the authenticated
+storage service. Failed checks never advance a watermark and retry on the next
+refresh; no permanent quarantine is imposed on potentially repaired blobs.
+
+`bot_tl` retains at most 2048 replay hashes to bound state. A history rotation or
+cursor reset can reappend older events outside that window to immutable raw;
+L2 content identities deduplicate them. Mutable snapshots retain their latest
+digest so A → B → A remains observable. Ledger headers without inline timestamps
+remain in raw with `timestamp_source=unknown`; they do not become timed warehouse
+events from a ledger file's rewrite time.
+
+The repository digest runner includes `bot_tl` in its explicit sources list,
+checked against `config.SOURCES` by `test_runner_sources`. Deployment must keep
+the independent `~/.hermes/scripts/aidata_digest_run.sh` copy synchronized; this
+repository does not install or change a host cron runner.

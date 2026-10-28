@@ -55,7 +55,7 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                 item = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if item.get("record_type") == "receipt" and item.get("content"):
+            if item.get("collector") in (None, "gtt") and item.get("record_type") == "receipt" and item.get("content"):
                 yield {
                     "machine_id": item.get("machine_id") or "unknown",
                     "goal_id": item.get("goal_id") or "unknown",
@@ -68,6 +68,9 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
 
 
 def collect() -> int:
+    from adapters import cloud_sync
+
+    cloud_sync.pull_remote_batches()
     records: list[dict[str, Any]] = []
     for root in GTT_HANDOFF_ROOTS:
         try:
@@ -88,8 +91,8 @@ def collect() -> int:
                                 "rel_path": f"{goal.name}/receipts/{path.name}",
                                 "record_type": "receipt", "content": _normalize_path(content)})
     try:
-        bundles = sorted(GTT_XFER_DIR.glob("gtt-bundle-*.jsonl"))
-        bundles.extend(sorted(GTT_XFER_DIR.glob("*.tgz")))
+        bundles = sorted(GTT_XFER_DIR.rglob("*.jsonl"))
+        bundles.extend(sorted(GTT_XFER_DIR.rglob("*.tgz")))
     except OSError:
         bundles = []
     for bundle in bundles:

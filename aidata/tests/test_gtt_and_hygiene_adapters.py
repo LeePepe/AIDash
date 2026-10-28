@@ -6,7 +6,7 @@ from adapters import gtt_ledger, gtt_receipt, workspace_hygiene
 
 
 @pytest.mark.unit
-def test_gtt_ledger_normalizes_events_with_line_based_uid(monkeypatch):
+def test_gtt_ledger_normalizes_events_with_content_uid(monkeypatch):
     raw = [{
         "machine_id": "mac-mini",
         "goal_id": "demo",
@@ -28,7 +28,10 @@ def test_gtt_ledger_normalizes_events_with_line_based_uid(monkeypatch):
 
     monkeypatch.setattr(gtt_ledger, "write_clean", capture)
     assert gtt_ledger.normalize() == 1
-    assert captured["gtt_event"][0][0]["event_uid"] == "mac-mini:demo:L4:E1"
+    digest = __import__("hashlib").sha256(
+        b"- 2026-10-28T01:00:00+08:00 | EVT=DONE | id=E1 task=tk1 ref=PR#12 note=finished"
+    ).hexdigest()
+    assert captured["gtt_event"][0][0]["event_uid"] == f"mac-mini:demo:E1:{digest}"
     assert captured["gtt_event"][0][0]["pr_number"] == 12
 
 
@@ -127,7 +130,7 @@ def test_run_merge_wires_p0_tables(tmp_path, monkeypatch):
     monkeypatch.setattr(merge, "SCHEMA_DIR", Path(config.SCHEMA_DIR))
     for source, ddl, table, row in (
         ("gtt_ledger", "CREATE TABLE goal (goal_uid TEXT, machine_id TEXT, goal_id TEXT, title TEXT, owner TEXT, coordinator_bot TEXT, tl_agent TEXT, tl_model TEXT, contract_sha TEXT, static_header_status TEXT, derived_actual_status TEXT, is_status_drifted INTEGER, task_total_count INTEGER, task_done_count INTEGER, task_blocked_count INTEGER, created_at TEXT, last_event_at TEXT, ledger_sha256 TEXT)", "goal", ("m:g", "m", "g", None, None, None, None, None, None, "unknown", "in_progress", 1, 0, 0, 0, None, None, "x")),
-        ("gtt_ledger", "CREATE TABLE gtt_event (event_uid TEXT, goal_uid TEXT, machine_id TEXT, goal_id TEXT, line_no INTEGER, event_id TEXT, ts TEXT, evt_type TEXT, task_id TEXT, actor_from TEXT, actor_to TEXT, ref_artifact TEXT, head_sha TEXT, pr_number INTEGER, model_id TEXT, contract_sha TEXT, is_bot_bypass INTEGER, blocker_class TEXT, note_preview TEXT)", "gtt_event", ("m:L1:none", "m:g", "m", "g", 1, "none", "2026-01-01", "READY", None, None, None, None, None, None, None, None, 0, None, None)),
+        ("gtt_ledger", "CREATE TABLE gtt_event (event_uid TEXT, goal_uid TEXT, machine_id TEXT, goal_id TEXT, line_no INTEGER, event_id TEXT, ts TEXT, evt_type TEXT, task_id TEXT, actor_from TEXT, actor_to TEXT, ref_artifact TEXT, head_sha TEXT, pr_number INTEGER, model_id TEXT, contract_sha TEXT, is_bot_bypass INTEGER, blocker_class TEXT, note_preview TEXT)", "gtt_event", ("m:g:none:deadbeef", "m:g", "m", "g", 1, "none", "2026-01-01", "READY", None, None, None, None, None, None, None, None, 0, None, None)),
         ("gtt_receipt", "CREATE TABLE model_role (role_model_key TEXT, role_name TEXT, tier TEXT, cli_tool TEXT, model_id TEXT, vendor TEXT, is_escalated INTEGER)", "model_role", ("r", "writer", "standard", "copilot", "gpt", "openai", 0)),
         ("gtt_receipt", "CREATE TABLE task_run (receipt_uid TEXT, goal_uid TEXT, machine_id TEXT, goal_id TEXT, task_id TEXT, role_name TEXT, round_no INTEGER, agent_name TEXT, cli_tool TEXT, model_id TEXT, vendor TEXT, status TEXT, v5_verdict TEXT, head_sha TEXT, receipt_sha256 TEXT, completed_at TEXT)", "task_run", ("r", "m:g", "m", "g", "t", "writer", 1, None, "copilot", "gpt", None, "completed", None, None, "x", None)),
         ("workspace_hygiene", "CREATE TABLE hygiene_snapshot (snapshot_date TEXT, machine_id TEXT, entity_type TEXT, canonical_path TEXT, repo_key TEXT, goal_id TEXT, branch_name TEXT, head_sha TEXT, is_dirty INTEGER, dirty_count INTEGER, is_merged_to_default INTEGER, has_active_pane INTEGER, has_implicit_dep INTEGER, safe_to_reclaim INTEGER, reclaim_block_reason TEXT)", "hygiene_snapshot", ("2026-01-01", "m", "worktree", "/tmp/w", "local:w", None, "main", "h", 0, 0, 1, 0, 0, 1, None)),

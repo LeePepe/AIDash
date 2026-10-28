@@ -8,6 +8,7 @@ import re
 import socket
 import tarfile
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,10 @@ def _normalize_path(value: str) -> str:
 
 def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
     machine_id = path.stem.removeprefix("gtt-bundle-") or "bundle"
+    try:
+        mtime_iso = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()  # noqa: UP017
+    except OSError:
+        mtime_iso = None
     if path.suffix == ".tgz":
         try:
             with tarfile.open(path, "r:gz") as archive:
@@ -54,6 +59,8 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                         "rel_path": rel_path,
                         "record_type": record_type,
                         "content": _normalize_path(content.read().decode("utf-8")),
+                        "mtime_iso": mtime_iso,
+                        "exported_at": mtime_iso,
                     }
         except (OSError, tarfile.TarError, UnicodeDecodeError):
             return
@@ -65,13 +72,22 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                     item = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if item.get("record_type") in {"ledger", "goal", "queue"} and item.get("content"):
+                if (
+                    item.get("collector") in (None, "gtt")
+                    and item.get("record_type") in {"ledger", "goal", "queue"}
+                    and item.get("content")
+                ):
                     yield {
                         "machine_id": item.get("machine_id") or "unknown",
                         "goal_id": item.get("goal_id") or Path(item.get("rel_path", "")).parts[0],
                         "rel_path": item.get("rel_path", ""),
                         "record_type": item["record_type"],
                         "content": _normalize_path(str(item["content"])),
+                        "last_event_at": item.get("last_event_at"),
+                        "mtime_iso": item.get("mtime_iso") or mtime_iso,
+                        "exported_at": item.get("exported_at"),
+                        "machine_alias": item.get("machine_alias"),
+                        "device_id": item.get("device_id"),
                     }
     except OSError:
         return
@@ -96,14 +112,20 @@ def _local_records() -> Iterable[dict[str, Any]]:
                     "rel_path": f"{goal_dir.name}/{name}",
                     "record_type": record_type,
                     "content": content,
+                    "mtime_iso": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),  # noqa: UP017
+                    "machine_alias": _machine_id(),
+                    "device_id": _machine_id(),
                 }
 
 
 def collect() -> int:
+    from adapters import cloud_sync
+
+    cloud_sync.pull_remote_batches()
     records = list(_local_records())
     try:
-        bundles = sorted(GTT_XFER_DIR.glob("gtt-bundle-*.jsonl"))
-        bundles.extend(sorted(GTT_XFER_DIR.glob("*.tgz")))
+        bundles = sorted(GTT_XFER_DIR.rglob("*.jsonl"))
+        bundles.extend(sorted(GTT_XFER_DIR.rglob("*.tgz")))
     except OSError:
         bundles = []
     for bundle in bundles:
@@ -189,7 +211,8 @@ def _parse_event(line: str, line_number: int, goal_id: str) -> dict[str, Any] | 
     sha = re.search(r"\b[0-9a-f]{7,40}\b", text, re.IGNORECASE)
     pr = re.search(r"\bPR#?(\d+)\b", text, re.IGNORECASE)
     return {
-        "event_uid": f"L{line_number}:{event_id or 'none'}",
+        "event_uid": f"{event_id or 'none'}:"
+        f"{hashlib.sha256(line.encode()).hexdigest()}",
         "goal_uid": goal_id,
         "machine_id": fields.get("machine", "unknown"),
         "goal_id": goal_id,
@@ -254,18 +277,48 @@ CREATE TABLE gtt_event (
 """
 
 
+def _record_epoch(record: dict[str, Any], fallback: str) -> float:
+    # Preserve source precedence, skipping malformed values. Naive source
+    # timestamps mean UTC, independent of the collector host timezone.
+    for value in (record.get("last_event_at"), record.get("mtime_iso"),
+                  record.get("exported_at"), fallback):
+        try:
+            stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))  # noqa: FURB162
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)  # noqa: UP017
+            return stamp.timestamp()
+        except (ValueError, OverflowError, OSError):
+            continue
+    return float("-inf")
+
+
 def normalize() -> int:
+    latest_epochs: dict[tuple[str, str], float] = {}
     latest: dict[tuple[str, str], dict[str, Any]] = {}
     for record in read_raw(SOURCE):
         if record.get("record_type") != "ledger" or not record.get("goal_id"):
             continue
-        latest[(record.get("machine_id", "unknown"), record["goal_id"])] = record
+        key = (record.get("machine_id", "unknown"), record["goal_id"])
+        content = str(record.get("content", ""))
+        parsed_for_ts = [
+            event for event in (
+                _parse_event(line, no, record["goal_id"])
+                for no, line in enumerate(content.splitlines(), 1)
+            ) if event
+        ]
+        fallback_ts = parsed_for_ts[-1]["ts"] if parsed_for_ts else ""
+        candidate_epoch = _record_epoch(record, fallback_ts)
+        if candidate_epoch >= latest_epochs.get(key, float("-inf")):
+            latest[key] = record
+            latest_epochs[key] = candidate_epoch
     goals: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     for (machine_id, goal_id), record in latest.items():
         content = str(record.get("content", ""))
         parsed = [_parse_event(line, no, goal_id) for no, line in enumerate(content.splitlines(), 1)]
-        parsed_events = [event for event in parsed if event]
+        # A ledger may repeat a line after a replay/export. Its content hash is
+        # the event identity; line_no is only the latest source location.
+        parsed_events = list({event["event_uid"]: event for event in parsed if event}.values())
         for event in parsed_events:
             event["machine_id"] = machine_id
             event["event_uid"] = f"{machine_id}:{goal_id}:{event['event_uid']}"
