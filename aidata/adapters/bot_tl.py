@@ -23,6 +23,7 @@ from rawio import read_raw, write_raw
 from state import get_watermark, set_watermark
 
 SOURCE = "bot_tl"
+_REPLAY_LIMIT = 2048
 _HOME = re.compile(r"(?<![\w-])(?:/Users|/home)/[^/\s]+")
 _EVENT = re.compile(r"^\s*-\s*(?P<ts>\S+)\s*\|\s*EVT=(?P<evt>\S+)\s*\|\s*(?P<rest>.*)$")
 _KV = re.compile(r"(?P<key>[A-Za-z_]+)=(?P<value>.*?)(?=\s+[A-Za-z_]+=|$)")
@@ -136,8 +137,9 @@ def _local_records() -> list[dict[str, Any]]:
     return records
 
 
-def _prmon_records() -> list[dict[str, Any]]:
+def _prmon_records() -> tuple[list[dict[str, Any]], dict[str, int] | None]:
     records: list[dict[str, Any]] = []
+    cursor = None
     history = PRMON_WATCH_DIR / "heartbeat-history.jsonl"
     try:
         old = get_watermark("bot_tl_prmon_history") or {}
@@ -160,7 +162,7 @@ def _prmon_records() -> list[dict[str, Any]]:
                     records.append(_payload(history, "prmon_heartbeat", line.decode("utf-8")))
                 except UnicodeDecodeError:
                     continue
-            set_watermark("bot_tl_prmon_history", {"inode": stat.st_ino, "offset": offset})
+            cursor = {"inode": stat.st_ino, "offset": offset}
     except OSError:
         pass
     for path, kind in (
@@ -177,7 +179,7 @@ def _prmon_records() -> list[dict[str, Any]]:
                 records.append(record)
     except OSError:
         pass
-    return records
+    return records, cursor
 
 
 def _remote_records() -> list[dict[str, Any]]:
@@ -191,6 +193,8 @@ def _remote_records() -> list[dict[str, Any]]:
         try:
             item = json.loads(_safe(line))
         except json.JSONDecodeError:
+            return
+        if not isinstance(item, dict):
             return
         if item.get("collector") in {"bot_tl", "prmon"} or item.get("record_type") in {
             "pr_dag", "pr_watch_state", "bot_tl_event", "quota_precheck",
@@ -221,23 +225,44 @@ def collect() -> int:
     from adapters import cloud_sync
 
     cloud_sync.pull_remote_batches()
-    records = _local_records() + _prmon_records() + _remote_records()
-    old = dict(get_watermark(SOURCE) or {})
+    prmon_records, history_cursor = _prmon_records()
+    records = _local_records() + prmon_records + _remote_records()
+    old = get_watermark(SOURCE) or {}
+    # Versioned state drops the old unbounded digest-in-key map. A migration
+    # may replay records once; normalization uses content identities.
+    old_files = old.get("files", {})
+    replay = list(dict.fromkeys(old.get("replay", [])))[-_REPLAY_LIMIT:]
+    seen = set(replay)
+    files: dict[str, str] = {}
     changed: list[dict[str, Any]] = []
-    # History records disappear from the incremental read after one collect;
-    # retain their digests so a rotation/replay does not ingest them again.
-    current: dict[str, str] = dict(old)
     for record in records:
         digest = hashlib.sha256(
             json.dumps(record.get("payload", record), sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()
-        discriminator = digest[:12]
-        key = f"{record.get('device_id', 'unknown')}:{record.get('record_type')}:{record.get('rel_path', '')}:{discriminator}"
-        if current.get(key) != digest:
-            changed.append(record)
-        current[key] = digest
+        key = json.dumps([record.get("device_id", "unknown"), record.get("record_type"),
+                          record.get("rel_path", "")])
+        # Ledger events and heartbeat histories are append-only. Mutable
+        # snapshots keep only the latest digest so A -> B -> A is observable.
+        is_event = record.get("record_type") == "bot_tl_event" or (
+            record.get("record_type") == "prmon_heartbeat"
+            and Path(record.get("rel_path", "")).name != "heartbeat.json"
+        )
+        if is_event:
+            replay_key = hashlib.sha256(f"{key}:{digest}".encode()).hexdigest()
+            if replay_key not in seen:
+                changed.append(record)
+                seen.add(replay_key)
+                replay.append(replay_key)
+        else:
+            if files.get(key, old_files.get(key)) != digest:
+                changed.append(record)
+            files[key] = digest
     count = write_raw(SOURCE, changed)
-    set_watermark(SOURCE, current)
+    # Neither cursor may advance until raw append succeeds. A later state
+    # failure can replay data, but cannot skip unwritten history.
+    set_watermark(SOURCE, {"files": files, "replay": replay[-_REPLAY_LIMIT:]})
+    if history_cursor is not None:
+        set_watermark("bot_tl_prmon_history", history_cursor)
     return count
 
 

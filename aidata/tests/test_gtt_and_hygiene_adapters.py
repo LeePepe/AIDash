@@ -30,7 +30,7 @@ def test_gtt_ledger_normalizes_events_with_content_uid(monkeypatch):
     assert gtt_ledger.normalize() == 1
     digest = __import__("hashlib").sha256(
         b"- 2026-10-28T01:00:00+08:00 | EVT=DONE | id=E1 task=tk1 ref=PR#12 note=finished"
-    ).hexdigest()[:8]
+    ).hexdigest()
     assert captured["gtt_event"][0][0]["event_uid"] == f"mac-mini:demo:E1:{digest}"
     assert captured["gtt_event"][0][0]["pr_number"] == 12
 

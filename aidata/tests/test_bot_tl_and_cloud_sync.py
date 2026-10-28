@@ -10,6 +10,13 @@ import pytest
 from adapters import bot_tl, cloud_sync, gtt_ledger
 
 
+def _read_and_commit_prmon(module):
+    records, cursor = module._prmon_records()
+    if cursor is not None:
+        module.set_watermark("bot_tl_prmon_history", cursor)
+    return records
+
+
 @pytest.fixture
 def watermarks(monkeypatch):
     values = {}
@@ -114,6 +121,8 @@ def test_remote_records_scans_tgz_jsonl(monkeypatch, tmp_path):
     monkeypatch.setattr(bot_tl, "GTT_XFER_DIR", tmp_path)
     records = bot_tl._remote_records()
     assert records[0]["record_type"] == "prmon_heartbeat"
+    (tmp_path / "scalars.jsonl").write_text('null\n[]\n42\n"text"\n', encoding="utf-8")
+    assert bot_tl._remote_records() == records
 
 
 @pytest.mark.unit
@@ -131,14 +140,21 @@ def test_local_ledger_headers_are_collected(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
-def test_gtt_ledger_keeps_newer_goal_record(monkeypatch):
+@pytest.mark.parametrize("new_ts,old_ts", [
+    ("2026-10-28T02:00:00+00:00", "2026-10-28T01:00:00+00:00"),
+    ("2026-10-28T02:00:00Z", "2026-10-28T09:00:00+08:00"),
+    ("2026-10-28T02:00:00.500Z", "2026-10-28T02:00:00Z"),
+    ("2026-10-28T02:00:00", "2026-10-28T01:00:00Z"),
+    (None, None),
+])
+def test_gtt_ledger_keeps_newer_goal_record(monkeypatch, new_ts, old_ts):
     raw = [
         {"record_type": "ledger", "machine_id": "m", "goal_id": "g",
          "content": "- 2026-10-28T02:00:00Z | EVT=DONE | id=B2\n",
-         "mtime_iso": "2026-10-28T02:00:00+00:00"},
+         "mtime_iso": new_ts},
         {"record_type": "ledger", "machine_id": "m", "goal_id": "g",
          "content": "- 2026-10-28T01:00:00Z | EVT=START | id=B1\n",
-         "mtime_iso": "2026-10-28T01:00:00+00:00"},
+         "mtime_iso": old_ts},
     ]
     captured = {}
     monkeypatch.setattr(gtt_ledger, "read_raw", lambda _source: raw)
@@ -159,15 +175,15 @@ def test_prmon_history_uses_complete_utf8_byte_offsets(monkeypatch, tmp_path, wa
     second = (json.dumps({"status": "中文", "ts": "2026-10-28T02:00:00Z"}, ensure_ascii=False) + "\n").encode()
     split = second.index("中".encode()) + 1
     history.write_bytes(first + second[:split])
-    records = bot_tl._prmon_records()
+    records = _read_and_commit_prmon(bot_tl)
     assert [record["payload"]["status"] for record in records] == ["正常"]
     assert watermarks["bot_tl_prmon_history"]["offset"] == len(first)
-    assert bot_tl._prmon_records() == []
+    assert _read_and_commit_prmon(bot_tl) == []
     with history.open("ab") as fh:
         fh.write(second[split:])
-    assert bot_tl._prmon_records()[0]["payload"]["status"] == "中文"
+    assert _read_and_commit_prmon(bot_tl)[0]["payload"]["status"] == "中文"
     assert watermarks["bot_tl_prmon_history"]["offset"] == len(first + second)
-    assert bot_tl._prmon_records() == []
+    assert _read_and_commit_prmon(bot_tl) == []
 
 
 @pytest.mark.unit
@@ -176,7 +192,7 @@ def test_prmon_history_recovers_changed_file_or_bad_cursor(monkeypatch, tmp_path
     monkeypatch.setattr(bot_tl, "PRMON_WATCH_DIR", tmp_path)
     history = tmp_path / "heartbeat-history.jsonl"
     history.write_bytes(b'{"status":"original long heartbeat"}\n')
-    assert len(bot_tl._prmon_records()) == 1
+    assert len(_read_and_commit_prmon(bot_tl)) == 1
     expected = b'{"status":"new"}\n'
     if change == "rotate":
         replacement = tmp_path / "replacement"
@@ -186,18 +202,18 @@ def test_prmon_history_recovers_changed_file_or_bad_cursor(monkeypatch, tmp_path
         history.write_bytes(expected)
         if change == "midline":
             watermarks["bot_tl_prmon_history"]["offset"] = 3
-    assert bot_tl._prmon_records()[0]["payload"] == {"status": "new"}
+    assert _read_and_commit_prmon(bot_tl)[0]["payload"] == {"status": "new"}
     assert watermarks["bot_tl_prmon_history"]["offset"] == len(expected)
-    assert bot_tl._prmon_records() == []
+    assert _read_and_commit_prmon(bot_tl) == []
 
 
 @pytest.mark.unit
 def test_bot_tl_collect_ignores_mtime_and_remembers_replayed_history(monkeypatch, tmp_path, watermarks):
-    path = tmp_path / "heartbeat.json"
+    path = tmp_path / "heartbeat-history.jsonl"
     path.write_text('{"status":"ok"}', encoding="utf-8")
     monkeypatch.setattr(cloud_sync, "pull_remote_batches", lambda: 0)
     monkeypatch.setattr(bot_tl, "_local_records", list)
-    monkeypatch.setattr(bot_tl, "_prmon_records", list)
+    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: ([], None))
     monkeypatch.setattr(bot_tl, "_remote_records", list)
     written = []
     def write(_source, rows):
@@ -205,18 +221,18 @@ def test_bot_tl_collect_ignores_mtime_and_remembers_replayed_history(monkeypatch
         return len(rows)
     monkeypatch.setattr(bot_tl, "write_raw", write)
     record = bot_tl._file_record(path, "prmon_heartbeat")
-    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: [record, record])
+    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: ([record, record], None))
     assert bot_tl.collect() == 1
-    monkeypatch.setattr(bot_tl, "_prmon_records", list)
+    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: ([], None))
     assert bot_tl.collect() == 0
     os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 10))
     touched = bot_tl._file_record(path, "prmon_heartbeat")
     assert touched["mtime_iso"] != record["mtime_iso"]
-    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: [touched])
+    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: ([touched], None))
     assert bot_tl.collect() == 0
     path.write_text('{"status":"changed"}', encoding="utf-8")
     changed = bot_tl._file_record(path, "prmon_heartbeat")
-    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: [changed])
+    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: ([changed], None))
     assert bot_tl.collect() == 1
     assert len(written) == 2
 
@@ -303,6 +319,13 @@ def test_gtt_legacy_merge_and_historical_raw_replay(monkeypatch, tmp_path, mixed
     cleanio.write_clean("gtt_ledger", "goal", gtt_ledger._GOAL_DDL, [], ())
     cleanio.write_clean("gtt_ledger", "gtt_event", gtt_ledger._EVENT_DDL, rows, tuple(rows[0]))
 
+    def source_event_count():
+        with sqlite3.connect(clean / "gtt_ledger.db") as conn:
+            return conn.execute("SELECT COUNT(*) FROM gtt_event").fetchone()[0]
+
+    expected_source_count = 6 if mixed_keys else 4
+    assert source_event_count() == expected_source_count
+
     def merged_events():
         assert merge.run_merge()["fact_gtt_event"] == 2
         with sqlite3.connect(warehouse) as conn:
@@ -314,6 +337,7 @@ def test_gtt_legacy_merge_and_historical_raw_replay(monkeypatch, tmp_path, mixed
     # Covers old clean-only and mixed clean databases, including shifted rows.
     initial = merged_events()
     assert merged_events() == initial
+    assert source_event_count() == expected_source_count
     if mixed_keys:
         assert [event[1] for event in initial] == [1, 2]
     raw = {"record_type": "ledger", "machine_id": "m", "goal_id": "g"}
@@ -323,9 +347,77 @@ def test_gtt_legacy_merge_and_historical_raw_replay(monkeypatch, tmp_path, mixed
                                     "mtime_iso": "2026-10-28T03:00:00Z"}], "2026-10-28")
     before = rawio.read_raw("gtt_ledger")
     assert gtt_ledger.normalize() == 2
+    assert source_event_count() == 2
     normalized = merged_events()
     expected = [f"m:g:{gtt_ledger._parse_event(line, 1, 'g')['event_uid']}" for line in lines]
     assert [event[0] for event in normalized] == expected
     assert gtt_ledger.normalize() == 2
     assert merged_events() == normalized
     assert rawio.read_raw("gtt_ledger") == before
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", ["raw", "remote", "state"])
+def test_history_cursor_commits_after_raw_and_retries(monkeypatch, tmp_path, watermarks, failure):
+    import config
+    import rawio
+
+    monkeypatch.setattr(config, "RAW_DIR", tmp_path / "raw")
+    monkeypatch.setattr(bot_tl, "PRMON_WATCH_DIR", tmp_path)
+    monkeypatch.setattr(bot_tl, "GTT_XFER_DIR", tmp_path / "remote")
+    monkeypatch.setattr(bot_tl, "_local_records", list)
+    monkeypatch.setattr(cloud_sync, "pull_remote_batches", lambda: 0)
+    history = tmp_path / "heartbeat-history.jsonl"
+    first = b'{"ts":"2026-10-28T01:00:00Z"}\n'
+    second = b'{"ts":"2026-10-28T02:00:00Z"}\n'
+    history.write_bytes(first)
+    assert bot_tl.collect() == 1
+    old = dict(watermarks["bot_tl_prmon_history"])
+    history.write_bytes(first + second)
+
+    def fail(*_args):
+        raise OSError("injected failure")
+
+    target = {"raw": "write_raw", "remote": "_remote_records", "state": "set_watermark"}[failure]
+    with monkeypatch.context() as patch:
+        patch.setattr(bot_tl, target, fail)
+        with pytest.raises(OSError, match="injected failure"):
+            bot_tl.collect()
+    assert watermarks["bot_tl_prmon_history"] == old
+    assert bot_tl.collect() == 1
+    assert watermarks["bot_tl_prmon_history"]["offset"] == len(first + second)
+    assert bot_tl.collect() == 0
+    rows = rawio.read_raw("bot_tl")
+    # A failed state write may replay an already durable record, never lose it.
+    assert {row["payload"]["ts"] for row in rows} == {
+        "2026-10-28T01:00:00Z", "2026-10-28T02:00:00Z",
+    }
+    assert len(rows) == (3 if failure == "state" else 2)
+
+
+@pytest.mark.unit
+def test_bot_tl_snapshot_rollback_and_bounded_replay(monkeypatch, tmp_path, watermarks):
+    monkeypatch.setattr(bot_tl, "_REPLAY_LIMIT", 3)
+    monkeypatch.setattr(bot_tl, "_local_records", list)
+    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: ([], None))
+    monkeypatch.setattr(cloud_sync, "pull_remote_batches", lambda: 0)
+    monkeypatch.setattr(bot_tl, "write_raw", lambda _source, rows: len(rows))
+    # Legacy unbounded maps are discarded safely on the first successful write.
+    watermarks["bot_tl"] = {f"old:{i}": "digest" for i in range(10)}
+    record = bot_tl._payload(tmp_path / "heartbeat.json", "prmon_heartbeat", '{"status":"A"}')
+    monkeypatch.setattr(bot_tl, "_remote_records", lambda: [record])
+    assert bot_tl.collect() == 1
+    for status in ("B", "A"):
+        record["payload"]["status"] = status
+        assert bot_tl.collect() == 1
+    assert bot_tl.collect() == 0
+    assert len(watermarks["bot_tl"]["files"]) == 1
+    events = [{**record, "rel_path": "heartbeat-history.jsonl", "payload": {"ts": i}} for i in range(10)]
+    monkeypatch.setattr(bot_tl, "_remote_records", lambda: events)
+    assert bot_tl.collect() == 10
+    assert len(watermarks["bot_tl"]["replay"]) == 3
+    assert watermarks["bot_tl"]["files"] == {}
+    monkeypatch.setattr(bot_tl, "_remote_records", lambda: events[-3:])
+    assert bot_tl.collect() == 0
+    monkeypatch.setattr(bot_tl, "_remote_records", lambda: events[:1])
+    assert bot_tl.collect() == 1  # Evicted events can replay; L2 deduplicates.

@@ -212,7 +212,7 @@ def _parse_event(line: str, line_number: int, goal_id: str) -> dict[str, Any] | 
     pr = re.search(r"\bPR#?(\d+)\b", text, re.IGNORECASE)
     return {
         "event_uid": f"{event_id or 'none'}:"
-        f"{hashlib.sha256(line.encode()).hexdigest()[:8]}",
+        f"{hashlib.sha256(line.encode()).hexdigest()}",
         "goal_uid": goal_id,
         "machine_id": fields.get("machine", "unknown"),
         "goal_id": goal_id,
@@ -277,7 +277,23 @@ CREATE TABLE gtt_event (
 """
 
 
+def _record_epoch(record: dict[str, Any], fallback: str) -> float:
+    # Preserve source precedence, skipping malformed values. Naive source
+    # timestamps mean UTC, independent of the collector host timezone.
+    for value in (record.get("last_event_at"), record.get("mtime_iso"),
+                  record.get("exported_at"), fallback):
+        try:
+            stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))  # noqa: FURB162
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)  # noqa: UP017
+            return stamp.timestamp()
+        except (ValueError, OverflowError, OSError):
+            continue
+    return float("-inf")
+
+
 def normalize() -> int:
+    latest_epochs: dict[tuple[str, str], float] = {}
     latest: dict[tuple[str, str], dict[str, Any]] = {}
     for record in read_raw(SOURCE):
         if record.get("record_type") != "ledger" or not record.get("goal_id"):
@@ -291,13 +307,10 @@ def normalize() -> int:
             ) if event
         ]
         fallback_ts = parsed_for_ts[-1]["ts"] if parsed_for_ts else ""
-        candidate_ts = str(record.get("last_event_at") or record.get("mtime_iso")
-                           or record.get("exported_at") or fallback_ts)
-        existing_ts = str(latest.get(key, {}).get("last_event_at")
-                          or latest.get(key, {}).get("mtime_iso")
-                          or latest.get(key, {}).get("exported_at") or "")
-        if candidate_ts >= existing_ts:
+        candidate_epoch = _record_epoch(record, fallback_ts)
+        if candidate_epoch >= latest_epochs.get(key, float("-inf")):
             latest[key] = record
+            latest_epochs[key] = candidate_epoch
     goals: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     for (machine_id, goal_id), record in latest.items():
