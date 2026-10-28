@@ -61,6 +61,17 @@ def _attach(conn: sqlite3.Connection, source: str, alias: str) -> bool:
     return True
 
 
+def _detach(conn: sqlite3.Connection, alias: str) -> None:
+    conn.execute(f"DETACH DATABASE {alias}")
+
+
+def _has_table(conn: sqlite3.Connection, alias: str, table: str) -> bool:
+    return conn.execute(
+        f"SELECT 1 FROM {alias}.sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone() is not None
+
+
 def run_merge() -> dict[str, int]:
     WAREHOUSE_DB.parent.mkdir(parents=True, exist_ok=True)
     # Fresh rebuild — derived artifact.
@@ -101,6 +112,7 @@ def run_merge() -> dict[str, int]:
             counts["dim_goal"] = conn.execute("SELECT count(*) FROM dim_goal").fetchone()[0]
             counts["fact_gtt_event"] = conn.execute(
                 "SELECT count(*) FROM fact_gtt_event").fetchone()[0]
+            _detach(conn, "gl")
 
         if _attach(conn, "gtt_receipt", "grt"):
             conn.execute("""
@@ -120,16 +132,18 @@ def run_merge() -> dict[str, int]:
                 "SELECT count(*) FROM dim_model_role").fetchone()[0]
             counts["fact_gtt_task_run"] = conn.execute(
                 "SELECT count(*) FROM fact_gtt_task_run").fetchone()[0]
+            _detach(conn, "grt")
 
         if _attach(conn, "workspace_hygiene", "wh"):
-            conn.execute("""
-                INSERT OR REPLACE INTO dim_repo
-                SELECT repo_key, owner, repo_name, domain_group, local_main_path,
-                       default_branch, head_sha, is_dirty, dirty_count, has_agents_md,
-                       has_layer_map, has_verify_script, has_design_contract,
-                       shared_ci_pinned_sha, ruleset_strict, updated_at
-                FROM wh.repo
-            """)
+            if _has_table(conn, "wh", "repo"):
+                conn.execute("""
+                    INSERT OR REPLACE INTO dim_repo
+                    SELECT repo_key, owner, repo_name, domain_group, local_main_path,
+                           default_branch, head_sha, is_dirty, dirty_count, has_agents_md,
+                           has_layer_map, has_verify_script, has_design_contract,
+                           shared_ci_pinned_sha, ruleset_strict, updated_at
+                    FROM wh.repo
+                """)
             conn.execute("""
                 INSERT OR REPLACE INTO fact_workspace_hygiene_snapshot
                 SELECT snapshot_date, machine_id, entity_type, canonical_path, repo_key,
@@ -141,6 +155,110 @@ def run_merge() -> dict[str, int]:
             counts["fact_workspace_hygiene_snapshot"] = conn.execute(
                 "SELECT count(*) FROM fact_workspace_hygiene_snapshot").fetchone()[0]
             counts["dim_repo"] = conn.execute("SELECT count(*) FROM dim_repo").fetchone()[0]
+
+            _detach(conn, "wh")
+
+        # --- governance fingerprints (github_ruleset) ---
+        if _attach(conn, "github_ruleset", "grs"):
+            conn.execute("""
+                INSERT INTO dim_repo
+                  (repo_key, owner, repo_name, domain_group, local_main_path,
+                   default_branch, head_sha, is_dirty, dirty_count,
+                   has_agents_md, has_layer_map, has_verify_script,
+                   has_design_contract, shared_ci_pinned_sha, ruleset_strict,
+                   updated_at)
+                SELECT repo_key, owner, repo_name, domain_group, local_main_path,
+                       default_branch, head_sha, is_dirty, dirty_count,
+                       has_agents_md, has_layer_map, has_verify_script,
+                       has_design_contract, shared_ci_pinned_sha, ruleset_strict,
+                       updated_at
+                FROM grs.repo
+                WHERE 1 = 1
+                ON CONFLICT(repo_key) DO UPDATE SET
+                    owner = COALESCE(excluded.owner, dim_repo.owner),
+                    repo_name = COALESCE(excluded.repo_name, dim_repo.repo_name),
+                    domain_group = COALESCE(excluded.domain_group, dim_repo.domain_group),
+                    local_main_path = COALESCE(excluded.local_main_path, dim_repo.local_main_path),
+                    default_branch = COALESCE(excluded.default_branch, dim_repo.default_branch),
+                    head_sha = COALESCE(excluded.head_sha, dim_repo.head_sha),
+                    is_dirty = COALESCE(excluded.is_dirty, dim_repo.is_dirty),
+                    dirty_count = COALESCE(excluded.dirty_count, dim_repo.dirty_count),
+                    has_agents_md = COALESCE(excluded.has_agents_md, dim_repo.has_agents_md),
+                    has_layer_map = COALESCE(excluded.has_layer_map, dim_repo.has_layer_map),
+                    has_verify_script = COALESCE(excluded.has_verify_script, dim_repo.has_verify_script),
+                    has_design_contract = COALESCE(excluded.has_design_contract, dim_repo.has_design_contract),
+                    shared_ci_pinned_sha = COALESCE(excluded.shared_ci_pinned_sha, dim_repo.shared_ci_pinned_sha),
+                    ruleset_strict = COALESCE(excluded.ruleset_strict, dim_repo.ruleset_strict),
+                    updated_at = COALESCE(excluded.updated_at, dim_repo.updated_at)
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO dim_workflow_gate
+                  (workflow_gate_key, repo_key, workflow_file, workflow_name,
+                   workflow_category, uses_shared_ci, pinned_shared_ci_ref,
+                   is_required_check, timeout_minutes)
+                SELECT workflow_gate_key, repo_key, workflow_file, workflow_name,
+                       workflow_category, uses_shared_ci, pinned_shared_ci_ref,
+                       is_required_check, timeout_minutes
+                FROM grs.workflow_gate
+            """)
+            counts["dim_repo"] = conn.execute("SELECT count(*) FROM dim_repo").fetchone()[0]
+            counts["dim_workflow_gate"] = conn.execute(
+                "SELECT count(*) FROM dim_workflow_gate").fetchone()[0]
+            _detach(conn, "grs")
+
+        # --- GitHub Actions run/job facts ---
+        if _attach(conn, "github_ci", "gci"):
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_ci_workflow_run
+                  (run_id, repo_key, workflow_name, workflow_category, event_trigger,
+                   head_branch, head_sha, status, conclusion, run_attempt,
+                   created_at, updated_at, duration_sec, html_url)
+                SELECT run_id, repo_key, workflow_name, workflow_category, event_trigger,
+                       head_branch, head_sha, status, conclusion, run_attempt,
+                       created_at, updated_at, duration_sec, html_url
+                FROM gci.workflow_run
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_ci_job_run
+                  (job_id, run_id, repo_key, job_name, status, conclusion,
+                   runner_labels, is_self_hosted, created_at, started_at,
+                   completed_at, queue_wait_sec, exec_sec, failed_step_name,
+                   failure_category, error_excerpt)
+                SELECT job_id, run_id, repo_key, job_name, status, conclusion,
+                       runner_labels, is_self_hosted, created_at, started_at,
+                       completed_at, queue_wait_sec, exec_sec, failed_step_name,
+                       failure_category, error_excerpt
+                FROM gci.job_run
+            """)
+            counts["fact_ci_workflow_run"] = conn.execute(
+                "SELECT count(*) FROM fact_ci_workflow_run").fetchone()[0]
+            counts["fact_ci_job_run"] = conn.execute(
+                "SELECT count(*) FROM fact_ci_job_run").fetchone()[0]
+            _detach(conn, "gci")
+
+        # --- TestFlight / 04 delivery facts ---
+        if _attach(conn, "release_tf", "rtf"):
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_release_delivery
+                  (delivery_uid, repo_key, run_id, workflow_name, trigger_event,
+                   target_platform, head_sha, marketing_version, build_number,
+                   gate_step_conclusion, archive_step_conclusion,
+                   upload_step_conclusion, tag_step_conclusion, marker_tag_name,
+                   marker_sha_before, marker_sha_after, is_marker_advanced,
+                   asc_build_verified, delivery_outcome, total_duration_sec,
+                   started_at, completed_at, failure_stage)
+                SELECT delivery_uid, repo_key, run_id, workflow_name, trigger_event,
+                       target_platform, head_sha, marketing_version, build_number,
+                       gate_step_conclusion, archive_step_conclusion,
+                       upload_step_conclusion, tag_step_conclusion, marker_tag_name,
+                       marker_sha_before, marker_sha_after, is_marker_advanced,
+                       asc_build_verified, delivery_outcome, total_duration_sec,
+                       started_at, completed_at, failure_stage
+                FROM rtf.delivery
+            """)
+            counts["fact_release_delivery"] = conn.execute(
+                "SELECT count(*) FROM fact_release_delivery").fetchone()[0]
+            _detach(conn, "rtf")
 
         # --- fact_request (raven) ---
         if _attach(conn, "raven", "rv"):
@@ -167,6 +285,7 @@ def run_merge() -> dict[str, int]:
             """)
             counts["fact_request"] = conn.execute(
                 "SELECT count(*) FROM fact_request").fetchone()[0]
+            _detach(conn, "rv")
 
         # --- fact_turn (claude_jsonl) ---
         if _attach(conn, "claude_jsonl", "cj"):
@@ -188,6 +307,7 @@ def run_merge() -> dict[str, int]:
             """)
             counts["fact_turn"] = conn.execute(
                 "SELECT count(*) FROM fact_turn").fetchone()[0]
+            _detach(conn, "cj")
 
         # --- fact_issue (multica_issue) ---
         if _attach(conn, "multica_issue", "mi"):
@@ -201,6 +321,7 @@ def run_merge() -> dict[str, int]:
             """)
             counts["fact_issue"] = conn.execute(
                 "SELECT count(*) FROM fact_issue").fetchone()[0]
+            _detach(conn, "mi")
 
         # --- fact_task: multica runs + claude jobs ---
         n_task = 0
@@ -218,6 +339,7 @@ def run_merge() -> dict[str, int]:
                 FROM mr.run
             """)
             n_task = conn.execute("SELECT count(*) FROM fact_task").fetchone()[0]
+            _detach(conn, "mr")
         if _attach(conn, "claude_job", "cjob"):
             conn.execute("""
                 INSERT OR IGNORE INTO fact_task
@@ -230,6 +352,7 @@ def run_merge() -> dict[str, int]:
                 FROM cjob.job
             """)
             n_task = conn.execute("SELECT count(*) FROM fact_task").fetchone()[0]
+            _detach(conn, "cjob")
         counts["fact_task"] = n_task
 
         # --- fact_pr (pr_cache + job children) ---
@@ -242,6 +365,7 @@ def run_merge() -> dict[str, int]:
                        checks_pending, additions, deletions
                 FROM pc.pr
             """)
+            _detach(conn, "pc")
         # backfill PR urls referenced by tasks but absent from cache (state unknown)
         conn.execute("""
             INSERT OR IGNORE INTO fact_pr (pr_url, state)
@@ -262,6 +386,7 @@ def run_merge() -> dict[str, int]:
             """)
             counts["fact_ado_pr"] = conn.execute(
                 "SELECT count(*) FROM fact_ado_pr").fetchone()[0]
+            _detach(conn, "ap")
 
         # --- fact_repo_snapshot (github_repo) — daily star snapshots (radar) ---
         if _attach(conn, "github_repo", "gr"):
@@ -275,6 +400,7 @@ def run_merge() -> dict[str, int]:
             """)
             counts["fact_repo_snapshot"] = conn.execute(
                 "SELECT count(*) FROM fact_repo_snapshot").fetchone()[0]
+            _detach(conn, "gr")
 
         # --- fact_github_pr (github_pr) — my GitHub PRs, separate table (ADR-13) ---
         if _attach(conn, "github_pr", "gp"):
@@ -286,6 +412,7 @@ def run_merge() -> dict[str, int]:
                        closed_date, url, is_draft
                 FROM gp.github_pr
             """)
+            _detach(conn, "gp")
             counts["fact_github_pr"] = conn.execute(
                 "SELECT count(*) FROM fact_github_pr").fetchone()[0]
 

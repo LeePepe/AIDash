@@ -301,6 +301,13 @@ CREATE TABLE IF NOT EXISTS dim_repo (
     shared_ci_pinned_sha TEXT, ruleset_strict INTEGER, updated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS dim_workflow_gate (
+    workflow_gate_key TEXT PRIMARY KEY, repo_key TEXT NOT NULL,
+    workflow_file TEXT NOT NULL, workflow_name TEXT, workflow_category TEXT,
+    uses_shared_ci INTEGER, pinned_shared_ci_ref TEXT,
+    is_required_check INTEGER, timeout_minutes INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS dim_goal (
     goal_uid TEXT PRIMARY KEY, machine_id TEXT NOT NULL, goal_id TEXT NOT NULL,
     title TEXT, owner TEXT, coordinator_bot TEXT, tl_agent TEXT, tl_model TEXT,
@@ -343,6 +350,40 @@ CREATE TABLE IF NOT EXISTS fact_workspace_hygiene_snapshot (
     reclaim_block_reason TEXT,
     PRIMARY KEY (snapshot_date, machine_id, entity_type, canonical_path)
 );
+
+CREATE TABLE IF NOT EXISTS fact_ci_workflow_run (
+    run_id INTEGER PRIMARY KEY, repo_key TEXT NOT NULL, workflow_name TEXT NOT NULL,
+    workflow_category TEXT NOT NULL, event_trigger TEXT, head_branch TEXT,
+    head_sha TEXT NOT NULL, status TEXT NOT NULL, conclusion TEXT,
+    run_attempt INTEGER DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT,
+    duration_sec INTEGER, html_url TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(created_at, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_ci_workflow_run_cst_day ON fact_ci_workflow_run(cst_day);
+
+CREATE TABLE IF NOT EXISTS fact_ci_job_run (
+    job_id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, repo_key TEXT NOT NULL,
+    job_name TEXT NOT NULL, status TEXT NOT NULL, conclusion TEXT,
+    runner_labels TEXT, is_self_hosted INTEGER, created_at TEXT, started_at TEXT,
+    completed_at TEXT, queue_wait_sec INTEGER, exec_sec INTEGER,
+    failed_step_name TEXT, failure_category TEXT, error_excerpt TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(COALESCE(started_at, created_at), '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_ci_job_run_cst_day ON fact_ci_job_run(cst_day);
+
+CREATE TABLE IF NOT EXISTS fact_release_delivery (
+    delivery_uid TEXT PRIMARY KEY, repo_key TEXT NOT NULL, run_id INTEGER,
+    workflow_name TEXT NOT NULL, trigger_event TEXT, target_platform TEXT,
+    head_sha TEXT NOT NULL, marketing_version TEXT, build_number TEXT,
+    gate_step_conclusion TEXT, archive_step_conclusion TEXT,
+    upload_step_conclusion TEXT, tag_step_conclusion TEXT, marker_tag_name TEXT,
+    marker_sha_before TEXT, marker_sha_after TEXT, is_marker_advanced INTEGER,
+    asc_build_verified INTEGER DEFAULT 0, delivery_outcome TEXT NOT NULL,
+    total_duration_sec INTEGER, started_at TEXT NOT NULL, completed_at TEXT,
+    failure_stage TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(started_at, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_release_delivery_cst_day ON fact_release_delivery(cst_day);
 
 -- ---------------------------------------------------------------------------
 -- dim_session — per-session rollup (populated during merge from facts).
