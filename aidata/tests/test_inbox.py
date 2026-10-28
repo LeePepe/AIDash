@@ -5,7 +5,6 @@ Covers bucket aggregation, per-bucket quotas, priority sort, and degradation.
 """
 
 import pytest
-
 from L5_apps.digest import inbox as inbox_mod
 from L5_apps.digest.inbox import build_inbox
 from L5_apps.digest.proposals import Proposal
@@ -120,3 +119,55 @@ def test_sorted_high_before_medium(fake_queries):
     items = build_inbox(3403.0, proposals_reader=_no_proposals, log_reader=_no_logs)
     prios = [inbox_mod._PRIO_RANK[it.priority] for it in items]
     assert prios == sorted(prios)        # non-decreasing priority rank
+
+
+def test_retro_signals_surface_and_build_inbox(monkeypatch):
+    queries = {
+        "retro/gtt_scorecard": (
+            [
+                ("goal-1", "blocked", 2),
+                ("goal-1", "blocked", 2),
+                ("goal-2", "active", 1),
+            ],
+            ["goal_id", "actual_status", "task_blocked_count"],
+        ),
+        "retro/ci_health_and_noise": (
+            [("repo-a", 3), ("repo-b", 1)],
+            ["repo_key", "config_noise_job_count"],
+        ),
+        "retro/workspace_hygiene_reclaim": (
+            [("repo-a", 2), ("repo-b", 1)],
+            ["repo_key", "reclaimable_count"],
+        ),
+    }
+
+    def run_query(name, params=None):
+        return queries.get(name, ([], []))
+
+    monkeypatch.setattr(inbox_mod.serve, "run_query", run_query)
+
+    signals = inbox_mod._retro_signals()
+    titles = " ".join(item.title for item in signals)
+    assert "GTT 阻塞：goal-1（2 项阻塞）" in titles
+    assert "CI 配置噪音 4 次（如 repo-a）" in titles
+    assert "3 个已合并洁净 Worktree" in titles
+    assert len([item for item in signals if item.ref == "goal-1"]) == 1
+
+    items = build_inbox(
+        proposals_reader=_no_proposals, log_reader=_no_logs)
+    assert any("GTT 阻塞" in item.title for item in items)
+
+
+def test_retro_signals_degrade_cleanly(monkeypatch):
+    def run_query(name, params=None):
+        if name == "retro/gtt_scorecard":
+            raise RuntimeError("missing table")
+        if name == "retro/ci_health_and_noise":
+            return ([], [])
+        raise ValueError("unavailable")
+
+    monkeypatch.setattr(inbox_mod.serve, "run_query", run_query)
+
+    assert inbox_mod._retro_signals() == []
+    assert inbox_mod.build_inbox(
+        proposals_reader=_no_proposals, log_reader=_no_logs) == []
