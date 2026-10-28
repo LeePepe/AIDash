@@ -8,6 +8,7 @@ import re
 import socket
 import tarfile
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,10 @@ def _normalize_path(value: str) -> str:
 
 def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
     machine_id = path.stem.removeprefix("gtt-bundle-") or "bundle"
+    try:
+        mtime_iso = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()  # noqa: UP017
+    except OSError:
+        mtime_iso = None
     if path.suffix == ".tgz":
         try:
             with tarfile.open(path, "r:gz") as archive:
@@ -54,6 +59,8 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                         "rel_path": rel_path,
                         "record_type": record_type,
                         "content": _normalize_path(content.read().decode("utf-8")),
+                        "mtime_iso": mtime_iso,
+                        "exported_at": mtime_iso,
                     }
         except (OSError, tarfile.TarError, UnicodeDecodeError):
             return
@@ -76,6 +83,11 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                         "rel_path": item.get("rel_path", ""),
                         "record_type": item["record_type"],
                         "content": _normalize_path(str(item["content"])),
+                        "last_event_at": item.get("last_event_at"),
+                        "mtime_iso": item.get("mtime_iso") or mtime_iso,
+                        "exported_at": item.get("exported_at"),
+                        "machine_alias": item.get("machine_alias"),
+                        "device_id": item.get("device_id"),
                     }
     except OSError:
         return
@@ -100,6 +112,9 @@ def _local_records() -> Iterable[dict[str, Any]]:
                     "rel_path": f"{goal_dir.name}/{name}",
                     "record_type": record_type,
                     "content": content,
+                    "mtime_iso": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),  # noqa: UP017
+                    "machine_alias": _machine_id(),
+                    "device_id": _machine_id(),
                 }
 
 
@@ -268,8 +283,16 @@ def normalize() -> int:
         if record.get("record_type") != "ledger" or not record.get("goal_id"):
             continue
         key = (record.get("machine_id", "unknown"), record["goal_id"])
+        content = str(record.get("content", ""))
+        parsed_for_ts = [
+            event for event in (
+                _parse_event(line, no, record["goal_id"])
+                for no, line in enumerate(content.splitlines(), 1)
+            ) if event
+        ]
+        fallback_ts = parsed_for_ts[-1]["ts"] if parsed_for_ts else ""
         candidate_ts = str(record.get("last_event_at") or record.get("mtime_iso")
-                           or record.get("exported_at") or "")
+                           or record.get("exported_at") or fallback_ts)
         existing_ts = str(latest.get(key, {}).get("last_event_at")
                           or latest.get(key, {}).get("mtime_iso")
                           or latest.get(key, {}).get("exported_at") or "")

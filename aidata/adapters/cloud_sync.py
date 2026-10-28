@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404 - fixed executable and argument vectors only
 import tempfile
@@ -94,10 +95,17 @@ def _blob_parts(name: str) -> tuple[str, str] | None:
     if not name.startswith(marker) or not name.endswith(".jsonl"):
         return None
     relative = name[len(marker):]
-    device_id, separator, filename = relative.partition("/batches/")
-    if not separator or not device_id or not filename or "/" in filename:
+    device_id, separator, tail = relative.partition("/batches/")
+    if not separator or not device_id or not tail:
         return None
-    return device_id, filename
+    segments = tail.split("/")
+    if any(not segment or segment == ".." for segment in segments):
+        return None
+    if len(segments) == 2 and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", segments[0]):
+        return None
+    if len(segments) not in {1, 2}:
+        return None
+    return device_id, Path(tail).name
 
 
 def pull_remote_batches() -> int:
