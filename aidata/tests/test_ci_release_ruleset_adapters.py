@@ -148,6 +148,10 @@ def test_ruleset_helpers_parse_workflow_metadata(tmp_path):
     workflow = tmp_path / "review.yml"
     workflow.write_text("name: Review Gate\ntimeout-minutes: 17\n", encoding="utf-8")
     assert github_ruleset._yaml_value(workflow.read_text(), "name") == "Review Gate"
+    assert github_ruleset._yaml_value(
+        "on:\n  workflow_call:\n    inputs:\n      timeout-minutes:\n        type: number\n",
+        "timeout-minutes",
+    ) is None
     assert github_ruleset._workflow_category(workflow, workflow.read_text()) == "ai_review_gate"
     assert github_ruleset._required_checks(
         {"required_status_checks": {"contexts": ["Review Gate"]}}

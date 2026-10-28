@@ -67,7 +67,7 @@ def _required_checks(rules: Any) -> tuple[int, set[str]]:
 
 
 def _yaml_value(text: str, key: str) -> str | None:
-    match = re.search(rf"(?m)^\s*{re.escape(key)}\s*:\s*[\"']?([^\"'#\n]+)", text)
+    match = re.search(rf"(?m)^[ \t]*{re.escape(key)}[ \t]*:[ \t]*[\"']?([^\"'#\n]+)", text)
     return match.group(1).strip() if match else None
 
 
@@ -108,6 +108,7 @@ def collect() -> int:
                 continue
             pin = re.search(r"uses:\s*LeePepe/shared-ci/[^@\s]+@([0-9a-fA-F]{7,40}|v[\w.-]+)", text)
             shared_pin = shared_pin or (pin.group(1) if pin else None)
+            timeout_raw = _yaml_value(text, "timeout-minutes")
             gates.append({
                 "workflow_gate_key": f"{repo}:{workflow.name}",
                 "repo_key": repo,
@@ -122,7 +123,7 @@ def collect() -> int:
                     or any(check in {workflow.stem, workflow.name}
                            for check in required_checks)
                 ),
-                "timeout_minutes": int(_yaml_value(text, "timeout-minutes") or 0) or None,
+                "timeout_minutes": int(timeout_raw) if timeout_raw and timeout_raw.isdigit() else None,
             })
         repos.append({
             "repo_key": repo,
