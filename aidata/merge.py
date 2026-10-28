@@ -123,6 +123,14 @@ def run_merge() -> dict[str, int]:
 
         if _attach(conn, "workspace_hygiene", "wh"):
             conn.execute("""
+                INSERT OR REPLACE INTO dim_repo
+                SELECT repo_key, owner, repo_name, domain_group, local_main_path,
+                       default_branch, head_sha, is_dirty, dirty_count, has_agents_md,
+                       has_layer_map, has_verify_script, has_design_contract,
+                       shared_ci_pinned_sha, ruleset_strict, updated_at
+                FROM wh.repo
+            """)
+            conn.execute("""
                 INSERT OR REPLACE INTO fact_workspace_hygiene_snapshot
                 SELECT snapshot_date, machine_id, entity_type, canonical_path, repo_key,
                        goal_id, branch_name, head_sha, is_dirty, dirty_count,
@@ -132,6 +140,7 @@ def run_merge() -> dict[str, int]:
             """)
             counts["fact_workspace_hygiene_snapshot"] = conn.execute(
                 "SELECT count(*) FROM fact_workspace_hygiene_snapshot").fetchone()[0]
+            counts["dim_repo"] = conn.execute("SELECT count(*) FROM dim_repo").fetchone()[0]
 
         # --- fact_request (raven) ---
         if _attach(conn, "raven", "rv"):

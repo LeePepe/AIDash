@@ -14,10 +14,13 @@ from typing import Any
 from cleanio import write_clean
 from config import GTT_HANDOFF_ROOTS, GTT_RUNTIME_PROFILES_YAML, GTT_XFER_DIR
 from rawio import read_raw, write_raw
+from state import get_watermark, set_watermark
 
 SOURCE = "gtt_receipt"
-_FILE = re.compile(r"^(?P<task>.+?)-(?P<role>[a-zA-Z][\w-]*)-r(?P<round>\d+)\.md$")
-_KV = re.compile(r"(?im)^\s*(?:[-*]\s*)?(?P<key>Role|Model|Status|PR|head|V5|Axis 1|Axis 2|Timestamp)\s*[:|]\s*(?P<value>.+?)\s*$")
+_FILE = re.compile(r"^(?P<prefix>.+?)-r(?P<round>\d+)\.md$")
+_KEY_RE = re.compile(
+    r"(?im)^\s*(?:[-*]\s*)?(?:\*\*)?(?P<key>[^:|]+?)(?:\*\*)?\s*[:|]\s*(?P<value>.+?)\s*$"
+)
 
 
 def _machine_id() -> str:
@@ -25,6 +28,7 @@ def _machine_id() -> str:
 
 
 def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
+    machine_id = path.stem.removeprefix("gtt-bundle-") or "bundle"
     if path.suffix == ".tgz":
         try:
             with tarfile.open(path, "r:gz") as archive:
@@ -36,7 +40,7 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                         continue
                     rel_path = member.name.lstrip("./")
                     yield {
-                        "machine_id": "bundle",
+                        "machine_id": machine_id,
                         "goal_id": Path(rel_path).parts[0],
                         "rel_path": rel_path,
                         "record_type": "receipt",
@@ -82,7 +86,7 @@ def collect() -> int:
                     continue
                 records.append({"machine_id": _machine_id(), "goal_id": goal.name,
                                 "rel_path": f"{goal.name}/receipts/{path.name}",
-                                "record_type": "receipt", "content": content})
+                                "record_type": "receipt", "content": _normalize_path(content)})
     try:
         bundles = sorted(GTT_XFER_DIR.glob("gtt-bundle-*.jsonl"))
         bundles.extend(sorted(GTT_XFER_DIR.glob("*.tgz")))
@@ -90,12 +94,32 @@ def collect() -> int:
         bundles = []
     for bundle in bundles:
         records.extend(_bundle_records(bundle))
-    return write_raw(SOURCE, records)
+    old = dict(get_watermark(SOURCE) or {})
+    changed = []
+    current: dict[str, str] = {}
+    for record in records:
+        key = f"{record['machine_id']}:{record['rel_path']}"
+        digest = hashlib.sha256(str(record["content"]).encode()).hexdigest()
+        current[key] = digest
+        if old.get(key) != digest:
+            changed.append(record)
+    count = write_raw(SOURCE, changed)
+    set_watermark(SOURCE, current)
+    return count
+
+
+_HOME = re.compile(r"(?<![\w-])(?:/Users|/home)/[^/\s]+")
+
+
+def _normalize_path(value: str) -> str:
+    return _HOME.sub("~", value)
 
 
 def _field(text: str, names: tuple[str, ...]) -> str | None:
-    for match in _KV.finditer(text):
-        if match.group("key").lower() in {name.lower() for name in names}:
+    wanted = {name.lower().replace("_", " ") for name in names}
+    for match in _KEY_RE.finditer(text):
+        key = re.sub(r"\s+", " ", match.group("key").strip().lower().replace("_", " "))
+        if key in wanted or any(name in key for name in wanted):
             return match.group("value").strip().strip("`")
     return None
 
@@ -124,21 +148,35 @@ CREATE TABLE model_role (
 
 
 def _profiles() -> list[dict[str, Any]]:
+    fallback = [
+        ("writer", "copilot", "gpt-5.6-luna", "openai"),
+        ("explorer", "copilot", "mai-code-2-flash", "microsoft"),
+        ("pr_monitor", "copilot", "mai-code-2-flash", "microsoft"),
+        ("planner", "codex", "gpt-6.1-sol", "openai"),
+        ("planner_reviewer", "copilot", "gemini-4-argon", "google"),
+        ("code_reviewer", "copilot", "gemini-4-argon", "google"),
+        ("writer_escalated", "codex", "gpt-6.1-sol", "openai"),
+        ("research_primary", "copilot", "gemini-4-argon", "google"),
+    ]
     try:
         text = GTT_RUNTIME_PROFILES_YAML.read_text(encoding="utf-8")
     except OSError:
-        return []
+        text = ""
     rows: list[dict[str, Any]] = []
-    role = None
-    for line in text.splitlines():
-        role_match = re.match(r"\s{2,}([A-Za-z0-9_.-]+):\s*$", line)
-        model_match = re.search(r"\b(gpt-[\w.-]+|gemini-[\w.-]+|claude-[\w.-]+|mai-[\w.-]+)\b", line)
-        if role_match:
-            role = role_match.group(1)
-        if role and model_match:
-            model = model_match.group(1)
-            cli = "copilot" if "mai-" in model or "gemini-" in model else "codex" if model.startswith("gpt-") else "claude"
-            vendor = "google" if model.startswith("gemini-") else "openai" if model.startswith("gpt-") else "microsoft" if model.startswith("mai-") else "anthropic"
+    for role, cli, model, vendor in fallback:
+        rows.append({"role_model_key": f"{role}:{cli}:{model}", "role_name": role,
+                     "tier": "escalated" if "escalated" in role else "standard",
+                     "cli_tool": cli, "model_id": model, "vendor": vendor,
+                     "is_escalated": int("escalated" in role)})
+    if not text:
+        return rows
+    for role, body in re.findall(
+        r"(?m)^\s{6}([A-Za-z0-9_.-]+):\s*(.*)$", text
+    ):
+        for cli, model, vendor in re.findall(
+            r"cli:\s*([A-Za-z0-9_.-]+).*?model:\s*([A-Za-z0-9_.-]+).*?vendor:\s*([A-Za-z0-9_.-]+)",
+            body,
+        ):
             rows.append({"role_model_key": f"{role}:{cli}:{model}", "role_name": role,
                          "tier": "escalated" if "escalated" in role else "standard",
                          "cli_tool": cli, "model_id": model, "vendor": vendor,
@@ -160,16 +198,24 @@ def normalize() -> int:
         model = _field(content, ("Model",))
         head = _field(content, ("head", "PR"))
         head_match = re.search(r"\b[0-9a-f]{7,40}\b", head or "", re.IGNORECASE)
-        role = _field(content, ("Role",)) or _role_from_name(match.group("role"))
+        prefix = match.group("prefix")
+        role_from_name = prefix.rsplit("-", 1)[-1] if "-" in prefix else prefix
+        task_id = prefix.rsplit("-", 1)[0] if "-" in prefix else prefix
+        known_roles = {"writer", "explorer", "reviewer", "pr-monitor", "planner", "code-reviewer"}
+        if role_from_name not in known_roles:
+            role_from_name = "unknown"
+            task_id = prefix
+        role = _field(content, ("Role", "Role / Model")) or _role_from_name(role_from_name)
         status = (_field(content, ("Status",)) or "completed").lower()
         v5 = _field(content, ("V5",))
         goal = str(record.get("goal_id", "unknown"))
-        uid = f"{goal}/{rel or name}"
+        machine_id = str(record.get("machine_id", "unknown"))
+        uid = f"{machine_id}:{rel or name}"
         task_rows[uid] = {
             "receipt_uid": uid, "goal_uid": f"{record.get('machine_id', 'unknown')}:{goal}",
-            "machine_id": record.get("machine_id", "unknown"), "goal_id": goal,
-            "task_id": match.group("task"), "role_name": role, "round_no": int(match.group("round")),
-            "agent_name": _field(content, ("Agent",)), "cli_tool": _field(content, ("CLI",)),
+            "machine_id": machine_id, "goal_id": goal,
+            "task_id": task_id, "role_name": role, "round_no": int(match.group("round")),
+            "agent_name": _field(content, ("Agent",)),             "cli_tool": _field(content, ("CLI", "Role / Model")),
             "model_id": model, "vendor": None, "status": status, "v5_verdict": v5,
             "head_sha": head_match.group(0) if head_match else None,
             "receipt_sha256": hashlib.sha256(content.encode()).hexdigest(),

@@ -5,6 +5,7 @@ AIDATA_HOME (this package's parent) and the user's real data locations.
 Immutable module-level constants — never mutated at runtime.
 """
 
+# ruff: noqa: RUF100
 from __future__ import annotations
 
 import os
@@ -371,6 +372,6 @@ PROPOSALS_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "proposals.jsonl
 # above it, so a local file only has to state what it overrides.
 # ---------------------------------------------------------------------------
 try:
-    from config_local import *
+    from config_local import *  # noqa: F401,F403  (intentional override hook)
 except ImportError:
     pass

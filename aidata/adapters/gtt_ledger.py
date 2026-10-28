@@ -15,6 +15,7 @@ from cleanio import write_clean
 from config import GTT_HANDOFF_ROOTS, GTT_XFER_DIR
 from rawio import read_raw, write_raw
 from redaction import redact
+from state import get_watermark, set_watermark
 
 SOURCE = "gtt_ledger"
 _EVENT = re.compile(r"^\s*-\s*(?P<ts>\S+)\s*\|\s*EVT=(?P<evt>\S+)\s*\|\s*(?P<rest>.*)$")
@@ -31,6 +32,7 @@ def _normalize_path(value: str) -> str:
 
 
 def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
+    machine_id = path.stem.removeprefix("gtt-bundle-") or "bundle"
     if path.suffix == ".tgz":
         try:
             with tarfile.open(path, "r:gz") as archive:
@@ -47,7 +49,7 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                         "queue.json": "queue",
                     }[Path(rel_path).name]
                     yield {
-                        "machine_id": "bundle",
+                        "machine_id": machine_id,
                         "goal_id": Path(rel_path).parts[0],
                         "rel_path": rel_path,
                         "record_type": record_type,
@@ -106,14 +108,51 @@ def collect() -> int:
         bundles = []
     for bundle in bundles:
         records.extend(_bundle_records(bundle))
-    return write_raw(SOURCE, records)
+    old = dict(get_watermark(SOURCE) or {})
+    changed = []
+    current: dict[str, str] = {}
+    for record in records:
+        key = f"{record['machine_id']}:{record['rel_path']}"
+        digest = hashlib.sha256(str(record["content"]).encode()).hexdigest()
+        current[key] = digest
+        if old.get(key) != digest:
+            changed.append(record)
+    count = write_raw(SOURCE, changed)
+    set_watermark(SOURCE, current)
+    return count
 
 
 def _pairs(text: str) -> dict[str, str]:
-    return {m.group("key"): m.group("value").strip() for m in _KV.finditer(text)}
+    fields: dict[str, str] = {}
+    if "|" in text:
+        for segment in text.split("|"):
+            matches = list(_KV.finditer(segment))
+            if matches:
+                for match in matches:
+                    fields[match.group("key")] = match.group("value").strip()
+            else:
+                match = re.match(r"\s*([A-Za-z_]+)=(.*?)\s*$", segment)
+                if match:
+                    fields[match.group(1)] = match.group(2).strip()
+        return fields
+    return {m.group("key"): m.group("value").strip().rstrip("|").strip() for m in _KV.finditer(text)}
 
 
 def _static_status(content: str) -> str:
+    statuses = [
+        match.group(2).strip().lower()
+        for match in re.finditer(
+            r"(?im)^\s*\|\s*([A-Za-z][\w-]*)\s*\|\s*([^|]+)\|", content
+        )
+        if match.group(1).lower() not in {"task", "id", "tasks", "goal"}
+        and match.group(2).strip().lower() not in {"status", "state"}
+    ]
+    if statuses:
+        if all(status in {"done", "completed", "merged"} for status in statuses):
+            return "done"
+        if any(status in {"blocked", "paused", "hold"} for status in statuses):
+            return "blocked"
+        return "active"
     match = re.search(r"(?im)^\s*[-*]?\s*(?:status|状态)\s*[:|：]\s*`?([A-Za-z_]+)", content)
     if not match:
         match = re.search(r"(?im)^\s*\|\s*status\s*\|\s*([A-Za-z_]+)", content)
@@ -124,9 +163,18 @@ def _static_status(content: str) -> str:
 def _task_ids(content: str) -> set[str]:
     return {
         match.group(1)
-        for match in re.finditer(r"(?im)^\s*\|\s*([A-Za-z][\w-]*)\s*\|.*$", content)
-        if match.group(1).lower() not in {"id", "task", "tasks"}
+        for match in re.finditer(r"(?im)^\s*\|\s*([A-Za-z][\w-]*)\s*\|", content)
+        if match.group(1).lower() not in {"id", "task", "tasks", "goal"}
     }
+
+
+def _header_value(content: str, *names: str) -> str | None:
+    wanted = {name.lower() for name in names}
+    for line in content.splitlines():
+        match = re.match(r"\s*[-*]?\s*(?:\*\*)?([^:*|]+)(?:\*\*)?\s*[:|]\s*(.+)", line)
+        if match and match.group(1).strip().lower() in wanted:
+            return match.group(2).strip().strip("`")
+    return None
 
 
 def _parse_event(line: str, line_number: int, goal_id: str) -> dict[str, Any] | None:
@@ -158,7 +206,7 @@ def _parse_event(line: str, line_number: int, goal_id: str) -> dict[str, Any] | 
         "model_id": fields.get("model"),
         "contract_sha": fields.get("contract"),
         "is_bot_bypass": 1 if fields.get("bypass", "").lower() in {"1", "true", "yes"} else 0,
-        "blocker_class": None,
+        "blocker_class": fields.get("blocker_class") or fields.get("blocker"),
         "note_preview": redact(note or "")[:300] or None,
     }
 
@@ -169,6 +217,11 @@ def _derived_status(content: str, events: list[dict[str, Any]]) -> str:
         task = event["task_id"]
         if event["evt_type"] in {"TASK_BLOCKED", "REVIEW_FAIL", "PAUSE", "HOLD"}:
             open_blockers.add(task)
+        elif event["evt_type"] == "RESOLVED":
+            if task:
+                open_blockers.discard(task)
+            else:
+                open_blockers.clear()
         elif event["evt_type"] in {"DONE", "MERGED", "REVIEW_PASS"}:
             open_blockers.discard(task)
     if open_blockers:
@@ -225,8 +278,11 @@ def normalize() -> int:
         done_count = len({e["task_id"] for e in parsed_events if e["task_id"] and e["evt_type"] in {"DONE", "MERGED"}})
         goals.append({
             "goal_uid": f"{machine_id}:{goal_id}", "machine_id": machine_id, "goal_id": goal_id,
-            "title": title, "owner": None, "coordinator_bot": None, "tl_agent": None,
-            "tl_model": None, "contract_sha": next((e["contract_sha"] for e in parsed_events if e["contract_sha"]), None),
+            "title": title, "owner": _header_value(content, "owner"),
+            "coordinator_bot": _header_value(content, "coordinator", "coordinator_bot"),
+            "tl_agent": _header_value(content, "tl_agent", "tl agent"),
+            "tl_model": _header_value(content, "tl_model", "tl model"),
+            "contract_sha": next((e["contract_sha"] for e in parsed_events if e["contract_sha"]), None),
             "static_header_status": static, "derived_actual_status": derived,
             "is_status_drifted": int(static != derived), "task_total_count": len(task_ids),
             "task_done_count": done_count,

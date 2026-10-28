@@ -6,13 +6,13 @@ import json
 import shutil
 import socket
 import subprocess  # nosec B404 - fixed read-only git/herdr commands
-from datetime import date
 from pathlib import Path
 from typing import Any
 
 from cleanio import write_clean
 from config import HOME, WORKTREES_ROOT
 from rawio import write_raw_snapshot
+from timeutil import cst_today
 
 from adapters._repo import repo_for_path
 
@@ -41,7 +41,7 @@ def _is_ancestor(path: Path, default_branch: str) -> bool:
     return True
 
 
-def _git_row(path: Path, entity_type: str, panes: set[str]) -> dict[str, Any] | None:
+def _git_row(path: Path, entity_type: str, panes: set[Path]) -> dict[str, Any] | None:
     if not (path / ".git").exists() and not _run(["rev-parse", "--git-dir"], path):
         return None
     branch = _run(["branch", "--show-current"], path) or "(detached)"
@@ -51,17 +51,30 @@ def _git_row(path: Path, entity_type: str, panes: set[str]) -> dict[str, Any] | 
     default = _run(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], path)
     default_branch = default.removeprefix("origin/") if default else "main"
     merged = _is_ancestor(path, default_branch)
-    active = any(str(path) in pane for pane in panes)
+    resolved = path.resolve()
+    active = any(pane == resolved or resolved in pane.parents for pane in panes)
     implicit = "AppleUITesting" in path.name or "AppleUITesting" in str(path)
     safe, reason = _safe_to_reclaim(entity_type, dirty, int(merged), int(active), int(implicit))
     return {
-        "snapshot_date": date.today().isoformat(), "machine_id": socket.gethostname().split(".", 1)[0],
+        "snapshot_date": cst_today(), "machine_id": socket.gethostname().split(".", 1)[0],
         "entity_type": entity_type, "canonical_path": str(path.resolve()),
         "repo_key": repo_for_path(path), "goal_id": None, "branch_name": branch,
         "head_sha": head, "is_dirty": int(dirty > 0), "dirty_count": dirty,
         "is_merged_to_default": int(merged), "has_active_pane": int(active),
         "has_implicit_dep": int(implicit), "safe_to_reclaim": safe,
         "reclaim_block_reason": reason,
+        "repo_owner": (repo_for_path(path) or "").split("/", 1)[0] or None,
+        "repo_name": (repo_for_path(path) or "").split("/", 1)[-1] or None,
+        "domain_group": None,
+        "local_main_path": str(resolved),
+        "default_branch": default_branch,
+        "has_agents_md": int((path / "AGENTS.md").exists()),
+        "has_layer_map": int((path / "CONTEXT.md").exists()),
+        "has_verify_script": int((path / "scripts" / "verify").exists()),
+        "has_design_contract": int((path / "docs" / "design-contract.md").exists()),
+        "shared_ci_pinned_sha": None,
+        "ruleset_strict": None,
+        "updated_at": cst_today(),
     }
 
 
@@ -80,7 +93,7 @@ def _safe_to_reclaim(entity_type: str, dirty_count: int, merged: int,
     return 1, None
 
 
-def _herdr_panes() -> set[str]:
+def _herdr_panes() -> set[Path]:
     herdr = shutil.which("herdr")
     if not herdr:
         return set()
@@ -90,13 +103,27 @@ def _herdr_panes() -> set[str]:
         payload = json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return set()
-    if not isinstance(payload, list):
-        return set()
-    return {
-        str(item.get("path"))
-        for item in payload
-        if isinstance(item, dict) and item.get("path")
+    result = payload.get("result", {}) if isinstance(payload, dict) else {}
+    panes = result.get("panes", []) if isinstance(result, dict) else []
+    paths = {
+        str(item.get(key))
+        for item in panes
+        if isinstance(item, dict)
+        for key in ("cwd", "foreground_cwd")
+        if item.get(key)
     }
+    try:
+        workspaces = subprocess.run([herdr, "workspace", "list", "--json"], check=True,
+                                    capture_output=True, text=True, timeout=5)
+        workspace_payload = json.loads(workspaces.stdout)
+        workspace_result = workspace_payload.get("result", {})
+        for item in workspace_result.get("workspaces", []):
+            checkout = item.get("worktree", {}).get("checkout_path")
+            if checkout:
+                paths.add(str(checkout))
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        pass
+    return {Path(path).expanduser().resolve() for path in paths}
 
 
 def _paths() -> list[tuple[Path, str]]:
@@ -145,5 +172,39 @@ def normalize() -> int:
     rows: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for row in read_raw(SOURCE):
         key = tuple(str(row.get(name, "")) for name in _COLS[:4])
-        rows[key] = {name: row.get(name) for name in _COLS}
-    return write_clean(SOURCE, "hygiene_snapshot", _DDL, list(rows.values()), _COLS)
+        rows[key] = dict(row)
+    snapshot_rows = list(rows.values())
+    snapshot_result = write_clean(SOURCE, "hygiene_snapshot", _DDL, snapshot_rows, _COLS)
+    repo_cols = ("repo_key", "owner", "repo_name", "domain_group", "local_main_path",
+                 "default_branch", "head_sha", "is_dirty", "dirty_count", "has_agents_md",
+                 "has_layer_map", "has_verify_script", "has_design_contract",
+                 "shared_ci_pinned_sha", "ruleset_strict", "updated_at")
+    repo_rows = []
+    seen = set()
+    for row in snapshot_rows:
+        key = row.get("repo_key")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        repo_rows.append({
+            "repo_key": key, "owner": row.get("repo_owner"), "repo_name": row.get("repo_name"),
+            "domain_group": row.get("domain_group"), "local_main_path": row.get("local_main_path"),
+            "default_branch": row.get("default_branch"), "head_sha": row.get("head_sha"),
+            "is_dirty": row.get("is_dirty"), "dirty_count": row.get("dirty_count"),
+            "has_agents_md": row.get("has_agents_md"), "has_layer_map": row.get("has_layer_map"),
+            "has_verify_script": row.get("has_verify_script"),
+            "has_design_contract": row.get("has_design_contract"),
+            "shared_ci_pinned_sha": row.get("shared_ci_pinned_sha"),
+            "ruleset_strict": row.get("ruleset_strict"), "updated_at": row.get("updated_at"),
+        })
+    repo_ddl = """
+    CREATE TABLE repo (
+        repo_key TEXT PRIMARY KEY, owner TEXT, repo_name TEXT, domain_group TEXT,
+        local_main_path TEXT, default_branch TEXT, head_sha TEXT, is_dirty INTEGER,
+        dirty_count INTEGER, has_agents_md INTEGER, has_layer_map INTEGER,
+        has_verify_script INTEGER, has_design_contract INTEGER,
+        shared_ci_pinned_sha TEXT, ruleset_strict INTEGER, updated_at TEXT
+    )
+    """
+    write_clean(SOURCE, "repo", repo_ddl, repo_rows, repo_cols)
+    return snapshot_result
