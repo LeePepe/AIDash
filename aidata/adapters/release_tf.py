@@ -103,7 +103,8 @@ def _release_classification(steps: list[dict[str, Any]], run: dict[str, Any],
     advanced = int(tag == "success" or (
         marker_sha is not None and run.get("head_sha") == marker_sha
     ))
-    if conclusion == "success" and advanced:
+    asc_build_verified = int(archive == "success")
+    if conclusion == "success" and advanced and asc_build_verified:
         return "uploaded_verified", "success", 1, None
     if conclusion == "success":
         return "uploaded_unverified_asc", "success", advanced, None
@@ -212,7 +213,10 @@ def collect() -> int:
                 "marker_sha_before": marker_sha,
                 "marker_sha_after": run.get("head_sha") if advanced else marker_sha,
                 "is_marker_advanced": advanced,
-                "asc_build_verified": int(outcome == "uploaded_verified"),
+                "asc_build_verified": int(
+                    outcome == "uploaded_verified" and
+                    _step_conclusion(steps, "archive", "build_app", "xcodebuild") == "success"
+                ),
                 "delivery_outcome": outcome,
                 "total_duration_sec": duration,
                 "started_at": run.get("run_started_at") or run.get("created_at") or "",

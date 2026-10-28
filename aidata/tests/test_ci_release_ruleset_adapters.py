@@ -155,6 +155,26 @@ def test_ruleset_helpers_parse_workflow_metadata(tmp_path):
 
 
 @pytest.mark.unit
+def test_ruleset_helpers_parse_branch_rule_parameters():
+    rules = [
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "strict_required_status_checks_policy": True,
+                "required_status_checks": [
+                    {"context": "build + test (macOS 26)"},
+                    {"context": "codex-review-target"},
+                ],
+            },
+        }
+    ]
+    assert github_ruleset._required_checks(rules) == (
+        1,
+        {"build + test (macOS 26)", "codex-review-target"},
+    )
+
+
+@pytest.mark.unit
 def test_retro_queries_encode_grain_and_null_rules():
     root = Path(__file__).parents[1] / "L4_serve" / "queries" / "retro"
     hygiene = (root / "workspace_hygiene_reclaim.sql").read_text(encoding="utf-8")

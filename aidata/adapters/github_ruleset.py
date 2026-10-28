@@ -46,11 +46,21 @@ def _required_checks(rules: Any) -> tuple[int, set[str]]:
     if not rules:
         return 0, set()
     if isinstance(rules, list):
-        return 0, {
-            str(name)
-            for rule in rules if isinstance(rule, dict)
-            for name in rule.get("required_status_checks", {}).get("contexts", [])
-        }
+        strict = 0
+        contexts: set[str] = set()
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            parameters = rule.get("parameters") or {}
+            strict |= int(bool(parameters.get("strict_required_status_checks_policy")))
+            legacy = rule.get("required_status_checks") or {}
+            contexts.update(str(name) for name in legacy.get("contexts") or [])
+            contexts.update(
+                str(check.get("context"))
+                for check in parameters.get("required_status_checks") or []
+                if isinstance(check, dict) and check.get("context")
+            )
+        return strict, contexts
     required = rules.get("required_status_checks") or {}
     contexts = set(required.get("contexts") or [])
     return int(bool(required or rules.get("rules"))), contexts
