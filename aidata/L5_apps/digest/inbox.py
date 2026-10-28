@@ -19,12 +19,13 @@ the unit suite is hermetic.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import serve
-from L5_apps.digest.proposals import read_pending, Proposal
+
+from L5_apps.digest.proposals import Proposal, read_pending
 
 # Error logs written by the AIDash push path / snapshot cron (类3c signals).
 _AIDASH_STATE = Path(os.path.expanduser("~")) / "Development" / "AIDash" / ".aidash-state"
@@ -50,7 +51,7 @@ class InboxItem:
 def _stalled_prs() -> list[InboxItem]:
     try:
         rows, cols = serve.run_query("inbox/stalled-prs")
-    except Exception:
+    except Exception:  # noqa: BLE001 - inbox sources degrade independently
         return []
     if not rows or not cols:
         return []
@@ -67,7 +68,7 @@ def _stalled_prs() -> list[InboxItem]:
 def _pending_issues(cap: int = 6) -> list[InboxItem]:
     try:
         rows, cols = serve.run_query("inbox/pending-issues")
-    except Exception:
+    except Exception:  # noqa: BLE001 - inbox sources degrade independently
         return []
     if not rows or not cols:
         return []
@@ -79,7 +80,7 @@ def _pending_issues(cap: int = 6) -> list[InboxItem]:
         status = str(r[si])
         blocked = status == "blocked"
         out.append(InboxItem(
-            f"[{status}] {str(r[ii])} {str(r[ti])[:44]}",
+            f"[{status}] {r[ii]!s} {str(r[ti])[:44]}",
             "high" if blocked else "medium",
             "卡顿" if blocked else "计划",
             str(r[ii])))
@@ -126,13 +127,66 @@ def _proposals(read: Callable[[], list[Proposal]] | None = None) -> list[InboxIt
     reader = read or read_pending
     try:
         pending = reader()
-    except Exception:
+    except Exception:  # noqa: BLE001 - proposal source degrades independently
         return []
     out = []
     for p in pending:
         prio = p.priority if p.priority in _PRIO_RANK else "high"
         out.append(InboxItem(
             f"待决策（{p.agent}）：{p.title[:56]}", prio, "待决策", p.id))
+    return out
+
+
+def _retro_signals() -> list[InboxItem]:
+    """Surface operational signals from the retro L4 query family."""
+    out: list[InboxItem] = []
+
+    try:
+        rows, cols = serve.run_query("retro/gtt_scorecard")
+        goal_i = cols.index("goal_id")
+        status_i = cols.index("actual_status")
+        blocked_i = cols.index("task_blocked_count")
+        seen_goals: set[str] = set()
+        for row in rows:
+            goal_id = str(row[goal_i])
+            if (row[status_i] != "blocked"
+                    and (row[blocked_i] or 0) <= 0) or goal_id in seen_goals:
+                continue
+            seen_goals.add(goal_id)
+            blocked_count = row[blocked_i] or 0
+            out.append(InboxItem(
+                f"GTT 阻塞：{goal_id}（{blocked_count} 项阻塞）",
+                "high", "卡顿", goal_id))
+            if len(out) == 2:
+                break
+    except Exception:  # noqa: BLE001, S110 - one retro source must not block others
+        pass
+
+    try:
+        rows, cols = serve.run_query("retro/ci_health_and_noise")
+        repo_i = cols.index("repo_key")
+        noise_i = cols.index("config_noise_job_count")
+        total_noise = sum((row[noise_i] or 0) for row in rows)
+        if total_noise > 0:
+            top_repo = max(rows, key=lambda row: row[noise_i] or 0)[repo_i]
+            out.append(InboxItem(
+                f"发现：CI 配置噪音 {total_noise} 次（如 {top_repo}），"
+                "建议补齐变量或停用空跑任务",
+                "medium", "发现", str(top_repo)))
+    except Exception:  # noqa: BLE001, S110 - one retro source must not block others
+        pass
+
+    try:
+        rows, cols = serve.run_query("retro/workspace_hygiene_reclaim")
+        reclaim_i = cols.index("reclaimable_count")
+        total_reclaimable = sum((row[reclaim_i] or 0) for row in rows)
+        if total_reclaimable > 0:
+            out.append(InboxItem(
+                f"发现：{total_reclaimable} 个已合并洁净 Worktree 可安全回收",
+                "medium", "发现", "workspace_hygiene"))
+    except Exception:  # noqa: BLE001, S110 - one retro source must not block others
+        pass
+
     return out
 
 
@@ -160,6 +214,7 @@ def build_inbox(
     raw += _proposals(proposals_reader)
     raw += _pending_issues()
     raw += _downgrade_finding(downgrade_usd if downgrade_usd is not None else 0.0)
+    raw += _retro_signals()
 
     # Apply per-bucket quota, preserving each bucket's internal (urgency) order.
     kept: list[InboxItem] = []
