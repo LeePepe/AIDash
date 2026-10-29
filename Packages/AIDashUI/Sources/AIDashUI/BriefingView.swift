@@ -84,30 +84,7 @@ public struct BriefingView: View {
     private func header(for briefing: BriefingModel, isFallback: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             // Terminal masthead top line: product mark + live sync status.
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(verbatim: "AIDASH")
-                    .font(AIDashTypography.mastheadStatus)
-                    .tracking(2)
-                    .foregroundStyle(theme.primary.primary)
-                Text(verbatim: "// DAILY BRIEFING")
-                    .font(AIDashTypography.mastheadStatus)
-                    .tracking(1.4)
-                    .foregroundStyle(theme.neutrals.text3)
-                Spacer()
-                if let publishedAt = briefing.publishedAt {
-                    HStack(spacing: 6) {
-                        Circle().fill(theme.success).frame(width: 7, height: 7)
-                        Text(
-                            "briefing.published.relative \(publishedAt.formatted(.relative(presentation: .named)))",
-                            tableName: "Localizable",
-                            bundle: .module,
-                            comment: "Caption showing how long ago the briefing was published. Parameter: a localized relative time string like 'yesterday'."
-                        )
-                        .font(AIDashTypography.mastheadStatus)
-                        .foregroundStyle(theme.neutrals.text2)
-                    }
-                }
-            }
+            mastheadStatusLine(for: briefing)
 
             if isFallback {
                 HStack(spacing: 8) {
@@ -136,6 +113,51 @@ public struct BriefingView: View {
             Rectangle()
                 .fill(theme.neutrals.border)
                 .frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func mastheadStatusLine(for briefing: BriefingModel) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                mastheadIdentity
+                Spacer()
+                publishedStatus(for: briefing)
+            }
+            VStack(alignment: .leading, spacing: AIDashSpace.s8) {
+                mastheadIdentity
+                publishedStatus(for: briefing)
+            }
+        }
+    }
+
+    private var mastheadIdentity: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(verbatim: "AIDASH")
+                .font(AIDashTypography.mastheadStatus)
+                .tracking(2)
+                .foregroundStyle(theme.primary.primary)
+            Text(verbatim: "// DAILY BRIEFING")
+                .font(AIDashTypography.mastheadStatus)
+                .tracking(1.4)
+                .foregroundStyle(theme.neutrals.text3)
+        }
+    }
+
+    @ViewBuilder
+    private func publishedStatus(for briefing: BriefingModel) -> some View {
+        if let publishedAt = briefing.publishedAt {
+            HStack(spacing: 6) {
+                Circle().fill(theme.success).frame(width: 7, height: 7)
+                Text(
+                    "briefing.published.relative \(publishedAt.formatted(.relative(presentation: .named)))",
+                    tableName: "Localizable",
+                    bundle: .module,
+                    comment: "Caption showing how long ago the briefing was published. Parameter: a localized relative time string like 'yesterday'."
+                )
+                .font(AIDashTypography.mastheadStatus)
+                .foregroundStyle(theme.neutrals.text2)
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import SwiftUI
 import AIDashCore
@@ -219,5 +220,56 @@ struct MetricCardViewTests {
             let v = MetricCardView(payload: payload, size: size, style: .neutral)
             _ = v.body
         }
+    }
+
+    @Test("metric KPI layouts provide width-safe medium and wide fallbacks")
+    func responsiveLayouts() throws {
+        let source = try Self.metricRendererSource()
+        #expect(source.contains("private func mediumGrid()"))
+        #expect(source.contains("private func wideGrid()"))
+        #expect(source.contains("ViewThatFits(in: .horizontal)"))
+        #expect(source.contains(".frame(minWidth: 110)"))
+        #expect(source.contains("kpiGrid(maxColumns: 4, minCellWidth: 170)"))
+        #expect(source.contains("kpiGrid(maxColumns: 3, minCellWidth: 150)"))
+        #expect(source.contains("kpiGrid(maxColumns: 2, minCellWidth: 120)"))
+        #expect(source.contains("kpiGrid(maxColumns: 1, minCellWidth: 0)"))
+
+        let items = [
+            MetricPayload.Item(label: "One", value: 1),
+            MetricPayload.Item(label: "Two", value: 2),
+            MetricPayload.Item(label: "Three", value: 3),
+            MetricPayload.Item(label: "Four", value: 4),
+        ]
+        for width in [285.0, 393.0, 768.0, 1_024.0] {
+            let medium = MetricCardView(
+                payload: MetricPayload(items: items),
+                size: .medium,
+                style: .neutral
+            )
+            _ = medium.body
+            _ = medium.frame(width: width)
+
+            let wide = MetricCardView(
+                payload: MetricPayload(items: items),
+                size: .wide,
+                style: .neutral
+            )
+            _ = wide.body
+            _ = wide.frame(width: width)
+        }
+    }
+
+    private static func metricRendererSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let packageRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = packageRoot
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("AIDashUI")
+            .appendingPathComponent("CardView")
+            .appendingPathComponent("MetricCardView.swift")
+        return try String(contentsOf: sourceURL, encoding: .utf8)
     }
 }

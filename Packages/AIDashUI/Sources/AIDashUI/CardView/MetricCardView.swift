@@ -19,9 +19,9 @@ public struct MetricCardView: View {
         // Collapse the card to a compact height when empty so the "no data"
         // caption reads as intentional, not a broken tall box (review P1).
         let emptyHeight: CGFloat? = isEmpty ? AIDashSize.emptyMinHeight : nil
-        return HStack(alignment: isEmpty ? .center : .top, spacing: 12) {
+        return HStack(alignment: isEmpty ? .center : .top, spacing: AIDashSpace.s12) {
             CardTypeBadge(type: .metric)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 content
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -52,28 +52,60 @@ public struct MetricCardView: View {
             // Up to 3 KPIs so a 2-up medium card reads as a dense mini-table
             // (e.g. a breakdown) rather than two numbers floating in a wide box
             // (product register: density is earned, not avoided).
-            HStack(alignment: .top, spacing: 16) {
+            mediumGrid()
+        case .wide:
+            wideGrid()
+        case .hero:
+            VStack(alignment: .leading, spacing: AIDashSpace.s12) {
+                ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
+                    kpiCell(item)
+                }
+            }
+        }
+    }
+
+    /// Keeps medium-card KPI cells readable by stacking them when three
+    /// minimum-width cells cannot fit in the available card width.
+    private func mediumGrid() -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: AIDashSpace.s16) {
+                ForEach(Array(payload.items.prefix(3).enumerated()), id: \.offset) { _, item in
+                    kpiCell(item)
+                        .frame(minWidth: 110)
+                }
+            }
+            VStack(alignment: .leading, spacing: AIDashSpace.s12) {
                 ForEach(Array(payload.items.prefix(3).enumerated()), id: \.offset) { _, item in
                     kpiCell(item)
                 }
             }
-        case .wide:
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.flexible(), spacing: AIDashSpace.s16),
-                    count: AIDashSize.kpiColumnCount(forItems: payload.items.count)
-                ),
-                spacing: AIDashSpace.s16
-            ) {
-                ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
-                    kpiCell(item)
-                }
-            }
-        case .hero:
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
-                    kpiCell(item)
-                }
+        }
+    }
+
+    /// Tries progressively denser KPI grids from spacious iPad/Mac layouts to
+    /// a single-column fallback for compact Slide Over widths.
+    private func wideGrid() -> some View {
+        ViewThatFits(in: .horizontal) {
+            kpiGrid(maxColumns: 4, minCellWidth: 170)
+            kpiGrid(maxColumns: 3, minCellWidth: 150)
+            kpiGrid(maxColumns: 2, minCellWidth: 120)
+            kpiGrid(maxColumns: 1, minCellWidth: 0)
+        }
+    }
+
+    private func kpiGrid(maxColumns: Int, minCellWidth: CGFloat) -> some View {
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(minimum: minCellWidth), spacing: AIDashSpace.s16),
+                count: AIDashSize.kpiColumnCount(
+                    forItems: payload.items.count,
+                    maxColumns: maxColumns
+                )
+            ),
+            spacing: AIDashSpace.s16
+        ) {
+            ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
+                kpiCell(item)
             }
         }
     }
