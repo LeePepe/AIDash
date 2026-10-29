@@ -290,6 +290,19 @@ public enum AIDashSize {
         return Int((Double(count) / Double(rows)).rounded(.up))
     }
 
+    /// Maximum internal KPI columns for a card at the given available width.
+    public static func kpiMaxColumns(forWidth width: CGFloat) -> Int {
+        if width < 340 { return 1 }
+        if width < 620 { return 2 }
+        if width < 900 { return 3 }
+        return 4
+    }
+
+    /// Internal KPI columns balanced for the given available width.
+    public static func kpiColumnCount(forItems count: Int, width: CGFloat) -> Int {
+        kpiColumnCount(forItems: count, maxColumns: kpiMaxColumns(forWidth: width))
+    }
+
 }
 
 // MARK: - Spacing

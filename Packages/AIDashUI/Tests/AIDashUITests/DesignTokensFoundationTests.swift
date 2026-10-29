@@ -120,6 +120,31 @@ struct DesignTokensFoundationTests {
         }
     }
 
+    @Test("AIDashSize KPI columns adapt across iPhone and iPad widths")
+    func responsiveKPIColumns() {
+        let cases: [(width: CGFloat, maxColumns: Int, fourItemColumns: Int)] = [
+            (320, 1, 1),   // iPhone compact / Slide Over
+            (393, 2, 2),   // iPhone portrait
+            (500, 2, 2),   // iPad Split View
+            (600, 2, 2),
+            (768, 3, 2),   // iPad portrait
+            (820, 3, 2),
+            (1024, 4, 4),  // iPad landscape
+            (1280, 4, 4),  // Mac / wide iPad
+        ]
+
+        for testCase in cases {
+            #expect(
+                AIDashSize.kpiMaxColumns(forWidth: testCase.width) == testCase.maxColumns,
+                "width \(testCase.width) should allow \(testCase.maxColumns) KPI columns"
+            )
+            #expect(
+                AIDashSize.kpiColumnCount(forItems: 4, width: testCase.width) == testCase.fourItemColumns,
+                "width \(testCase.width) should balance four KPIs into \(testCase.fourItemColumns) columns"
+            )
+        }
+    }
+
     // MARK: - Icon badge contract
 
     @Test("CardType.iconSymbol matches the Per-Type Visual Recipes table")
