@@ -1,69 +1,152 @@
 #if os(macOS)
 import AppKit
+import SwiftUI
 
 @MainActor
-public final class MenuBarController: NSObject {
+public final class MenuBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
+    private let statusProvider: any MenuBarSystemStatusProviding
+    private var statusState: MenuBarStatusViewState = .loading
+    private weak var panelItem: NSMenuItem?
 
-    /// Test-only accessor: lets `MenuBarControllerTests` inspect the
-    /// installed `NSStatusItem` to assert layout-recursion guarantees
-    /// (fixed length, sized template image). Not part of the public API
-    /// surface used by production code.
     internal var statusItemForTesting: NSStatusItem? { statusItem }
 
-    public override init() {
+    public convenience override init() {
+        self.init(statusProvider: LiveMenuBarSystemStatusProvider())
+    }
+
+    public init(statusProvider: any MenuBarSystemStatusProviding) {
+        self.statusProvider = statusProvider
         super.init()
         installStatusItem()
     }
 
     private func installStatusItem() {
-        // Use a fixed square length and a sized template image. On macOS 26
-        // a variable-length NSStatusItem combined with an SF Symbol image
-        // whose `size` is the symbol's intrinsic size triggers an AppKit
-        // `_NSDetectedLayoutRecursion` warning during the initial layout
-        // pass: the status-item host view runs `-layoutSubtreeIfNeeded` to
-        // measure the icon while it is already inside its own layout pass.
-        // Pinning `length` and giving the image a stable size + template
-        // flag breaks that recursion before AppKit ever enters it.
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let icon = NSImage(systemSymbolName: "chart.bar.doc.horizontal",
-                              accessibilityDescription: Self.appName) {
+        if let icon = NSImage(
+            systemSymbolName: "chart.bar.doc.horizontal",
+            accessibilityDescription: Self.appName
+        ) {
             icon.isTemplate = true
             icon.size = NSSize(width: 18, height: 18)
             item.button?.image = icon
         }
 
         let menu = NSMenu()
+        menu.delegate = self
+        refreshStatus()
 
-        let openItem = NSMenuItem(title: Self.openBriefingTitle,
-                                   action: #selector(openBriefing),
-                                   keyEquivalent: "")
-        openItem.target = self
-        menu.addItem(openItem)
+        let panel = NSMenuItem()
+        panel.view = hostedStatusView()
+        panel.view?.frame.size = NSSize(width: 340, height: 1)
+        menu.addItem(panel)
+        panelItem = panel
 
+        menu.addItem(summaryMenuItem(title: Self.cpuStatusTitle))
+        menu.addItem(summaryMenuItem(title: Self.memoryStatusTitle))
+        menu.addItem(summaryMenuItem(title: Self.storageStatusTitle))
+        menu.addItem(summaryMenuItem(title: Self.tokenStatusTitle))
+
+        let refreshItem = NSMenuItem(
+            title: Self.refreshTitle,
+            action: #selector(refreshStatusAction),
+            keyEquivalent: "r"
+        )
+        refreshItem.target = self
+        menu.addItem(refreshItem)
         menu.addItem(.separator())
 
-        let aboutItem = NSMenuItem(title: Self.aboutTitle,
-                                    action: #selector(showAbout),
-                                    keyEquivalent: "")
+        let openItem = NSMenuItem(
+            title: Self.openBriefingTitle,
+            action: #selector(openBriefing),
+            keyEquivalent: ""
+        )
+        openItem.target = self
+        menu.addItem(openItem)
+        menu.addItem(.separator())
+
+        let aboutItem = NSMenuItem(
+            title: Self.aboutTitle,
+            action: #selector(showAbout),
+            keyEquivalent: ""
+        )
         aboutItem.target = self
         menu.addItem(aboutItem)
 
-        // Quit: target NSApp directly so NSApplication.terminate(_:) dispatches correctly.
-        let quitItem = NSMenuItem(title: Self.quitTitle,
-                                   action: #selector(NSApplication.terminate(_:)),
-                                   keyEquivalent: "q")
+        let quitItem = NSMenuItem(
+            title: Self.quitTitle,
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
         quitItem.target = NSApp
         menu.addItem(quitItem)
 
         item.menu = menu
-        self.statusItem = item
+        statusItem = item
+        updateMenuPresentation()
+    }
+
+    private func hostedStatusView() -> NSView {
+        NSHostingView(rootView: MenuBarStatusView(state: statusState, onRefresh: { [weak self] in
+            self?.refreshStatus()
+        }))
+    }
+
+    private func summaryMenuItem(title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    public func menuWillOpen(_ menu: NSMenu) {
+        refreshStatus()
+    }
+
+    @objc private func refreshStatusAction() {
+        refreshStatus()
+    }
+
+    private func refreshStatus() {
+        statusState = statusProvider.captureStatusState()
+        updateMenuPresentation()
+    }
+
+    private func updateMenuPresentation() {
+        guard let item = statusItem else { return }
+        panelItem?.view = hostedStatusView()
+        panelItem?.view?.frame.size = NSSize(width: 340, height: 1)
+        item.button?.toolTip = summaryText
+        let summaryItems = item.menu?.items.filter { $0 !== panelItem && $0.isEnabled == false } ?? []
+        for (summaryItem, title) in zip(summaryItems, summaryTitles) {
+            summaryItem.title = title
+        }
+    }
+
+    private var summaryText: String {
+        guard case let .populated(snapshot) = statusState else {
+            return Self.unavailableSummary
+        }
+        return [
+            Self.cpuSummary(snapshot.cpu),
+            Self.memorySummary(snapshot.memory),
+            Self.storageSummary(snapshot.storage),
+            Self.tokenSummary(snapshot.tokenUsage)
+        ].joined(separator: ", ")
+    }
+
+    private var summaryTitles: [String] {
+        guard case let .populated(snapshot) = statusState else {
+            return Array(repeating: Self.unavailableSummary, count: 4)
+        }
+        return [
+            Self.cpuSummary(snapshot.cpu),
+            Self.memorySummary(snapshot.memory),
+            Self.storageSummary(snapshot.storage),
+            Self.tokenSummary(snapshot.tokenUsage)
+        ]
     }
 
     @objc private func openBriefing() {
-        // Activate app and always post the briefing-open notification.
-        // The scene/window owner (T082) is the source of truth for which
-        // window represents the briefing; we do not guess by title.
         NSApp.activate(ignoringOtherApps: true)
         NotificationCenter.default.post(name: .openBriefingWindow, object: nil)
     }
@@ -73,47 +156,83 @@ public final class MenuBarController: NSObject {
         NSApp.orderFrontStandardAboutPanel(nil)
     }
 
-    // MARK: - Localized strings
-    //
-    // All user-visible strings are resolved through the app's String Catalog
-    // (`Apps/AIDashApp/Resources/Localizable.xcstrings`) per Constitution §F.1.
-    // The `defaultValue` keeps the English string available even before a
-    // translator fills in the catalog entry.
-
     static var appName: String {
-        String(
-            localized: "menubar.app_name",
-            defaultValue: "AIDash",
-            bundle: .main,
-            comment: "Accessibility label for the AIDash menu bar status item icon."
-        )
+        localized("menubar.app_name", "AIDash")
     }
 
     static var openBriefingTitle: String {
-        String(
-            localized: "menubar.open_briefing",
-            defaultValue: "Open Briefing",
-            bundle: .main,
-            comment: "Menu bar item that opens the briefing window."
-        )
+        localized("menubar.open_briefing", "Open Briefing")
     }
 
     static var aboutTitle: String {
-        String(
-            localized: "menubar.about",
-            defaultValue: "About AIDash",
-            bundle: .main,
-            comment: "Menu bar item that opens the standard About panel."
-        )
+        localized("menubar.about", "About AIDash")
     }
 
     static var quitTitle: String {
+        localized("menubar.quit", "Quit AIDash")
+    }
+
+    static var refreshTitle: String {
+        localized("menubar.status.refresh", "Refresh Status")
+    }
+
+    static var cpuStatusTitle: String {
+        localized("menubar.status.cpu_status", "CPU status")
+    }
+
+    static var memoryStatusTitle: String {
+        localized("menubar.status.memory_status", "Memory status")
+    }
+
+    static var storageStatusTitle: String {
+        localized("menubar.status.storage_status", "Storage status")
+    }
+
+    static var tokenStatusTitle: String {
+        localized("menubar.status.token_status", "Agent token status")
+    }
+
+    static var unavailableSummary: String {
+        localized("menubar.status.unavailable_summary", "Status unavailable")
+    }
+
+    static func cpuSummary(_ cpu: CPUStatusSnapshot) -> String {
         String(
-            localized: "menubar.quit",
-            defaultValue: "Quit AIDash",
-            bundle: .main,
-            comment: "Menu bar item that quits the AIDash app."
+            format: localized("menubar.status.cpu_summary", "CPU %@ · %@ user · %@ system"),
+            "\(Int(cpu.usage * 100))%",
+            "\(Int(cpu.user * 100))%",
+            "\(Int(cpu.system * 100))%"
         )
+    }
+
+    static func memorySummary(_ memory: MemoryStatusSnapshot) -> String {
+        String(
+            format: localized("menubar.status.memory_summary", "Memory %@ used · %@"),
+            "\(Int(memory.usageFraction * 100))%",
+            memory.pressure.rawValue
+        )
+    }
+
+    static func storageSummary(_ storage: StorageStatusSnapshot) -> String {
+        let ssd = storage.ssdVolume.isMounted
+            ? "\(Int(storage.ssdVolume.usageFraction * 100))%"
+            : localized("menubar.status.not_mounted", "Not Mounted")
+        return String(
+            format: localized("menubar.status.storage_summary", "Storage %@ · SSD %@"),
+            "\(Int(storage.systemVolume.usageFraction * 100))%",
+            ssd
+        )
+    }
+
+    static func tokenSummary(_ usage: CLITokenUsageSnapshot) -> String {
+        String(
+            format: localized("menubar.status.token_summary", "Agent tokens %@ active"),
+            usage.totalActiveTokens.formatted(.number)
+        )
+    }
+
+    private static func localized(_ key: String, _ value: String) -> String {
+        Bundle.main.localizedString(forKey: key, value: value, table: nil)
     }
 }
 

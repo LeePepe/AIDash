@@ -73,6 +73,186 @@
         }
       }
     },
+    "menubar.status.active" : {
+      "comment" : "Label for active input plus output agent tokens.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Active" } } }
+    },
+    "menubar.status.available" : {
+      "comment" : "Unit label for available storage.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "available" } } }
+    },
+    "menubar.status.compressed" : {
+      "comment" : "Memory compressed amount label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Compressed" } } }
+    },
+    "menubar.status.cpu" : {
+      "comment" : "CPU section label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "CPU" } } }
+    },
+    "menubar.status.cpu_status" : {
+      "comment" : "Accessible CPU summary menu item fallback.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "CPU status" } } }
+    },
+    "menubar.status.cpu_summary" : {
+      "comment" : "Compact CPU status summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "CPU %@ · %@ user · %@ system" } } }
+    },
+    "menubar.status.cores" : {
+      "comment" : "CPU core count.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld cores" } } }
+    },
+    "menubar.status.empty_title" : {
+      "comment" : "Empty telemetry state title.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No Telemetry Available" } } }
+    },
+    "menubar.status.error_title" : {
+      "comment" : "Error telemetry state title.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Status Unavailable" } } }
+    },
+    "menubar.status.free" : {
+      "comment" : "Free memory label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Free" } } }
+    },
+    "menubar.status.in_out" : {
+      "comment" : "Input and output token label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "In+Out" } } }
+    },
+    "menubar.status.load_fifteen" : {
+      "comment" : "Fifteen-minute CPU load label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "15m load" } } }
+    },
+    "menubar.status.load_five" : {
+      "comment" : "Five-minute CPU load label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "5m load" } } }
+    },
+    "menubar.status.load_one" : {
+      "comment" : "One-minute CPU load label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "1m load" } } }
+    },
+    "menubar.status.memory" : {
+      "comment" : "Memory section label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Memory" } } }
+    },
+    "menubar.status.memory_status" : {
+      "comment" : "Accessible memory summary menu item fallback.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Memory status" } } }
+    },
+    "menubar.status.memory_summary" : {
+      "comment" : "Compact memory status summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Memory %@ used · %@" } } }
+    },
+    "menubar.status.not_mounted" : {
+      "comment" : "Degraded state for an unavailable external SSD mount.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Not Mounted" } } }
+    },
+    "menubar.status.refresh" : {
+      "comment" : "Action that refreshes menu bar telemetry.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh Status" } } }
+    },
+    "menubar.status.storage" : {
+      "comment" : "Storage section label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Storage" } } }
+    },
+    "menubar.status.storage_status" : {
+      "comment" : "Accessible storage summary menu item fallback.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Storage status" } } }
+    },
+    "menubar.status.storage_summary" : {
+      "comment" : "Compact storage status summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Storage %@ · SSD %@" } } }
+    },
+    "menubar.status.system" : {
+      "comment" : "CPU system time label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "System" } } }
+    },
+    "menubar.status.title" : {
+      "comment" : "Menu bar telemetry panel title.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "System Status" } } }
+    },
+    "menubar.status.token_status" : {
+      "comment" : "Accessible token summary menu item fallback.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent token status" } } }
+    },
+    "menubar.status.token_summary" : {
+      "comment" : "Compact agent token status summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent tokens %@ active" } } }
+    },
+    "menubar.status.tokens" : {
+      "comment" : "Agent token section label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent Token Usage" } } }
+    },
+    "menubar.status.total" : {
+      "comment" : "Total token label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Total %@" } } }
+    },
+    "menubar.status.unavailable" : {
+      "comment" : "Unavailable telemetry value.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unavailable" } } }
+    },
+    "menubar.status.unavailable_summary" : {
+      "comment" : "Unavailable compact menu summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Status unavailable" } } }
+    },
+    "menubar.status.updated" : {
+      "comment" : "Status freshness label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Updated %@" } } }
+    },
+    "menubar.status.updating" : {
+      "comment" : "Loading telemetry status.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Updating status…" } } }
+    },
+    "menubar.status.usage" : {
+      "comment" : "CPU usage label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Usage" } } }
+    },
+    "menubar.status.user" : {
+      "comment" : "CPU user time label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "User" } } }
+    },
+    "menubar.status.wired" : {
+      "comment" : "Memory wired amount label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Wired" } } }
+    },
+    "menubar.status.cache" : {
+      "comment" : "Cache token label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cache" } } }
+    },
     "telemetry.settings.send_usage_data" : {
         "comment" : "The sole opt-in control for anonymous product telemetry.",
         "extractionState" : "manual",

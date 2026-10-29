@@ -2,6 +2,7 @@
 import Testing
 import Foundation
 import AppKit
+import SwiftUI
 #if AIDASHAPP_LOGIC_TESTS
 @testable import AIDashAppLogic
 #else
@@ -68,5 +69,159 @@ import AppKit
     #expect(icon.isTemplate)
     #expect(icon.size == NSSize(width: 18, height: 18))
     #expect(icon.accessibilityDescription == MenuBarController.appName)
+}
+
+@MainActor
+@Test func statusSnapshotsCalculateUsageAndShares() async throws {
+    let cpu = CPUStatusSnapshot(
+        usage: 0.5,
+        user: 0.3,
+        system: 0.2,
+        idle: 0.5,
+        coreCount: 8,
+        loadOneMinute: 1,
+        loadFiveMinutes: 0.8,
+        loadFifteenMinutes: 0.6
+    )
+    let memory = MemoryStatusSnapshot(
+        usedBytes: 75,
+        totalBytes: 100,
+        freeBytes: 25,
+        wiredBytes: 10,
+        compressedBytes: 5,
+        pressure: .warning
+    )
+    let root = StorageVolumeSnapshot(
+        id: "root",
+        name: "Macintosh HD",
+        mountPoint: "/",
+        isMounted: true,
+        isExternalSSD: false,
+        usedBytes: 75,
+        availableBytes: 25,
+        totalBytes: 100
+    )
+    let ssd = StorageVolumeSnapshot(
+        id: "ssd",
+        name: "SSD",
+        mountPoint: "/Volumes/SSD",
+        isMounted: false,
+        isExternalSSD: true,
+        usedBytes: 0,
+        availableBytes: 0,
+        totalBytes: 0
+    )
+    let usage = CLITokenUsageSnapshot(items: [
+        CLITokenUsageItem(cli: .claude, inputTokens: 10, outputTokens: 20, cacheTokens: 5, isAvailable: true),
+        CLITokenUsageItem(cli: .codex, inputTokens: 30, outputTokens: 0, cacheTokens: 10, isAvailable: true),
+        CLITokenUsageItem(cli: .copilot, inputTokens: 0, outputTokens: 0, cacheTokens: 0, isAvailable: false)
+    ])
+    let snapshot = MenuBarSystemSnapshot(
+        capturedAt: Date(),
+        cpu: cpu,
+        memory: memory,
+        storage: StorageStatusSnapshot(systemVolume: root, ssdVolume: ssd),
+        tokenUsage: usage
+    )
+
+    #expect(snapshot.cpu.usage == 0.5)
+    #expect(snapshot.memory.usageFraction == 0.75)
+    #expect(snapshot.storage.ssdVolume.isMounted == false)
+    #expect(snapshot.tokenUsage.totalActiveTokens == 60)
+    #expect(snapshot.tokenUsage.grandTotalTokens == 75)
+    #expect(snapshot.tokenUsage.shareFraction(for: .codex) == 0.5)
+}
+
+@MainActor
+@Test func statusProviderUsesExplicitDatabasePathsInTests() async throws {
+    let provider = LiveMenuBarSystemStatusProvider(
+        tokenDatabasePaths: CLITokenDatabasePaths(
+            claude: [URL(fileURLWithPath: "/does-not-exist/claude.db")],
+            codex: [URL(fileURLWithPath: "/does-not-exist/codex.db")],
+            copilot: [URL(fileURLWithPath: "/does-not-exist/copilot.db")]
+        ),
+        ssdMountPath: "/does-not-exist/SSD"
+    )
+    guard case let .populated(snapshot) = provider.captureStatusState() else {
+        Issue.record("Expected a populated snapshot from system telemetry.")
+        return
+    }
+
+    #expect(snapshot.tokenUsage.items.allSatisfy { !$0.isAvailable })
+    #expect(snapshot.storage.ssdVolume.isMounted == false)
+}
+
+@MainActor
+@Test func statusViewRendersAllPolymorphicStates() async throws {
+    let root = StorageVolumeSnapshot(
+        id: "root",
+        name: "Macintosh HD",
+        mountPoint: "/",
+        isMounted: true,
+        isExternalSSD: false,
+        usedBytes: 75,
+        availableBytes: 25,
+        totalBytes: 100
+    )
+    let ssd = StorageVolumeSnapshot(
+        id: "ssd",
+        name: "SSD",
+        mountPoint: "/Volumes/SSD",
+        isMounted: false,
+        isExternalSSD: true,
+        usedBytes: 0,
+        availableBytes: 0,
+        totalBytes: 0
+    )
+    let snapshot = MenuBarSystemSnapshot(
+        capturedAt: Date(),
+        cpu: CPUStatusSnapshot(
+            usage: 0.42,
+            user: 0.25,
+            system: 0.17,
+            idle: 0.58,
+            coreCount: 8,
+            loadOneMinute: 1.1,
+            loadFiveMinutes: 0.9,
+            loadFifteenMinutes: 0.7
+        ),
+        memory: MemoryStatusSnapshot(
+            usedBytes: 75,
+            totalBytes: 100,
+            freeBytes: 25,
+            wiredBytes: 10,
+            compressedBytes: 5,
+            pressure: .normal
+        ),
+        storage: StorageStatusSnapshot(systemVolume: root, ssdVolume: ssd),
+        tokenUsage: CLITokenUsageSnapshot(items: AgentCLIKind.allCases.map {
+            CLITokenUsageItem(cli: $0, inputTokens: 100, outputTokens: 50, cacheTokens: 25, isAvailable: true)
+        })
+    )
+    let states: [(String, MenuBarStatusViewState)] = [
+        ("populated", .populated(snapshot)),
+        ("empty", .empty(reason: "No local sources")),
+        ("loading", .loading),
+        ("error", .error(message: "Try again"))
+    ]
+    let outputDirectory = URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-sb/screenshots", isDirectory: true)
+    try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+    for (name, state) in states {
+        for isDark in [false, true] {
+            let view = MenuBarStatusView(state: state)
+                .environment(\.colorScheme, isDark ? .dark : .light)
+            let hostingView = NSHostingView(rootView: view)
+            hostingView.frame = NSRect(x: 0, y: 0, width: 340, height: 900)
+            hostingView.layoutSubtreeIfNeeded()
+            let bounds = hostingView.bounds
+            let bitmap = try #require(hostingView.bitmapImageRepForCachingDisplay(in: bounds))
+            hostingView.cacheDisplay(in: bounds, to: bitmap)
+            let data = try #require(bitmap.representation(using: .png, properties: [:]))
+            #expect(!data.isEmpty)
+            let suffix = isDark ? "dark" : "light"
+            try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
+        }
+    }
 }
 #endif
