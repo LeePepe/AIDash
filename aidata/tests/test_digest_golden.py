@@ -9,6 +9,7 @@ from L5_apps.digest.sources import (
     RepoRadar, CostImprovement, ValueEfficiency, WorkByProject, AiEfficiency,
     RankBundle, SegmentBundle, NewsRadar, ModelTier, CardInterest, Leverage,
     ReworkRelationship,
+    RetroOpsTrends,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -134,6 +135,10 @@ def frozen_trends(monkeypatch):
     # it — its own rendering is covered by test_briefing_budget.
     monkeypatch.setattr(app, "fetch_rework_relationship",
                         lambda *a, **k: ReworkRelationship.empty("skipped:未取"))
+    monkeypatch.setattr(app, "fetch_retro_ops_trends",
+                        lambda: RetroOpsTrends(
+                            (), (), (), (), None, None, None, None,
+                            _skipped("retro_ops")))
 
 
 @pytest.mark.unit

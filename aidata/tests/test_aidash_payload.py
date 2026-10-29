@@ -13,6 +13,7 @@ from L5_apps.digest.aidash import (
 from L5_apps.digest.sources import (
     DigestSources, RavenTrends, MulticaTrends, AdoPrTrends, AutomationTrends,
     SourceHealth,
+    RetroOpsTrends,
 )
 
 from tests.test_digest_golden import (
@@ -309,3 +310,30 @@ def test_work_container_uses_human_unit_and_neutral_direction():
     assert all(it["higherIsBetter"] is False for it in items)
     # value preserved
     assert items[0]["value"] == 3185
+
+
+@pytest.mark.unit
+def test_retro_ops_container_maps_chart_cards_and_degrades():
+    from L5_apps.digest.aidash import _retro_ops_container
+
+    retro = RetroOpsTrends(
+        ci_segments=(("通过", 8.0, "success"), ("配置异常", 2.0, "warning")),
+        ci_repo_bars=(("AIDash", 10.0, "10次", None),),
+        gtt_segments=(("已完成", 3.0, "success"), ("阻塞", 1.0, "warning")),
+        bot_tl_bars=(("NEED_GO", 2.0, "2次", "warning"),),
+        ci_pass_ratio=0.8, gtt_done_ratio=0.75,
+        prmon_checked=5, prmon_stuck=1,
+        health=SourceHealth("retro_ops", "ok"),
+    )
+    container = _retro_ops_container("0709", retro)
+    assert container is not None
+    assert [card.type for card in container.cards] == [
+        "stackedBar", "stackedBar", "barList", "barList", "metric",
+    ]
+    assert container.cards[0].payload["segments"][1]["semantic"] == "warning"
+    metric_items = container.cards[-1].payload["items"]
+    assert next(item for item in metric_items if item["label"] == "CI 通过率")["ratio"] == 0.8
+    assert _retro_ops_container(
+        "0709", RetroOpsTrends((), (), (), (), None, None, None, None,
+                               SourceHealth("retro_ops", "skipped:未采集"))
+    ) is None

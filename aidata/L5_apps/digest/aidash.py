@@ -973,6 +973,68 @@ def _time_output_container(mmdd: str, app_focus, commit_by_repo) -> "Container |
                      layout="auto")
 
 
+def _retro_ops_container(mmdd: str, retro_ops) -> "Container | None":
+    """工程与编排图表: real CI, GTT, Bot-TL and PR monitor signals."""
+    if (retro_ops is None or retro_ops.health.state != "ok"
+            or not (retro_ops.ci_segments or retro_ops.gtt_segments
+                    or retro_ops.ci_repo_bars or retro_ops.bot_tl_bars
+                    or retro_ops.ci_pass_ratio is not None
+                    or retro_ops.gtt_done_ratio is not None)):
+        return None
+    cards: list[Card] = []
+    if retro_ops.ci_segments:
+        cards.append(Card(_kuid(mmdd, 41), "stackedBar", "wide", {
+            "title": "CI 与发布门禁分布",
+            "segments": [{"label": label, "value": value, **({"semantic": semantic}
+                        if semantic else {})}
+                         for label, value, semantic in retro_ops.ci_segments],
+        }))
+    if retro_ops.gtt_segments:
+        cards.append(Card(_kuid(mmdd, 42), "stackedBar", "wide", {
+            "title": "GTT Goal 状态分布",
+            "segments": [{"label": label, "value": value, **({"semantic": semantic}
+                        if semantic else {})}
+                         for label, value, semantic in retro_ops.gtt_segments],
+        }))
+    if retro_ops.ci_repo_bars:
+        cards.append(Card(_kuid(mmdd, 43), "barList", "wide", {
+            "title": "各仓 CI 运行与配置异常排行",
+            "items": [{"label": label, "value": value, "valueText": value_text,
+                       **({"semantic": semantic} if semantic else {})}
+                      for label, value, value_text, semantic in retro_ops.ci_repo_bars],
+        }))
+    if retro_ops.bot_tl_bars:
+        cards.append(Card(_kuid(mmdd, 44), "barList", "wide", {
+            "title": "Bot-TL 编排与巡检动作",
+            "items": [{"label": label, "value": value, "valueText": value_text,
+                       **({"semantic": semantic} if semantic else {})}
+                      for label, value, value_text, semantic in retro_ops.bot_tl_bars],
+        }))
+    metric_items: list[dict] = []
+    if retro_ops.ci_pass_ratio is not None:
+        ratio = max(0.0, min(1.0, float(retro_ops.ci_pass_ratio)))
+        metric_items.append({"label": "CI 通过率", "value": round(ratio * 100, 1),
+                             "unit": "%", "ratio": ratio,
+                             "higherIsBetter": True})
+    if retro_ops.gtt_done_ratio is not None:
+        ratio = max(0.0, min(1.0, float(retro_ops.gtt_done_ratio)))
+        metric_items.append({"label": "GTT 非阻塞率", "value": round(ratio * 100, 1),
+                             "unit": "%", "ratio": ratio,
+                             "higherIsBetter": True})
+    if retro_ops.prmon_checked is not None:
+        metric_items.append({"label": "PR monitor 检查", "value": retro_ops.prmon_checked,
+                             "unit": "个"})
+    if retro_ops.prmon_stuck is not None:
+        metric_items.append({"label": "PR monitor 卡住", "value": retro_ops.prmon_stuck,
+                             "unit": "个", "higherIsBetter": False})
+    if metric_items:
+        cards.append(Card(_kuid(mmdd, 45), "metric", "wide", {"items": metric_items}))
+    if not cards:
+        return None
+    return Container(_cuid(mmdd, 14), "工程与编排图表", 28, tuple(cards),
+                     layout="auto", style="neutral")
+
+
 # Friendly topic → display label + chart-pill hint for the news radar.
 _NEWS_TOPIC_LABEL = {
     "ai-tech": "AI · 科技",
@@ -1389,6 +1451,10 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         getattr(sources, "commit_by_repo", None))
     if time_container:
         containers.append(time_container)
+    retro_ops_container = _retro_ops_container(
+        mmdd, getattr(sources, "retro_ops", None))
+    if retro_ops_container:
+        containers.append(retro_ops_container)
 
     # 可改良 gains the 模型分层 stackedBar (§design: 融进现有, not a standalone card).
     model_tier_card = _model_tier_card(mmdd, getattr(sources, "model_tier", None))
