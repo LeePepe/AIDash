@@ -149,6 +149,19 @@ import SwiftUI
 }
 
 @MainActor
+@Test func cpuUsageBreakdownUsesDarwinTickOrder() async throws {
+    let breakdown = LiveMenuBarSystemStatusProvider.computeCPUUsageBreakdown(
+        currentTicks: [60, 30, 900, 10],
+        previousTicks: nil
+    )
+
+    #expect(breakdown.usage == 0.10)
+    #expect(breakdown.user == 0.07)
+    #expect(breakdown.system == 0.03)
+    #expect(breakdown.idle == 0.90)
+}
+
+@MainActor
 @Test func statusProviderUsesExplicitDatabasePathsInTests() async throws {
     let provider = LiveMenuBarSystemStatusProvider(
         tokenDatabasePaths: CLITokenDatabasePaths(
@@ -222,7 +235,9 @@ import SwiftUI
         ("loading", .loading),
         ("error", .error(message: "Try again"))
     ]
-    let outputDirectory = URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-sb/screenshots", isDirectory: true)
+    let outputDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("aidash-menubar-shots-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: outputDirectory) }
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
     var renderedData: [String: Data] = [:]
 

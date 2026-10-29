@@ -8,6 +8,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusProvider: any MenuBarSystemStatusProviding
     private var statusState: MenuBarStatusViewState = .loading
     private weak var panelItem: NSMenuItem?
+    private var statusHostingView: NSHostingView<AnyView>?
 
     internal var statusItemForTesting: NSStatusItem? { statusItem }
 
@@ -41,12 +42,14 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(panel)
         panelItem = panel
 
-        menu.addItem(summaryMenuItem(title: Self.cpuStatusTitle))
-        menu.addItem(summaryMenuItem(title: Self.memoryStatusTitle))
-        menu.addItem(summaryMenuItem(title: Self.storageStatusTitle))
-        menu.addItem(summaryMenuItem(title: Self.tokenStatusTitle))
+        menu.addItem(summaryMenuItem(title: Self.cpuStatusTitle, tag: 1001))
+        menu.addItem(summaryMenuItem(title: Self.memoryStatusTitle, tag: 1002))
+        menu.addItem(summaryMenuItem(title: Self.storageStatusTitle, tag: 1003))
+        menu.addItem(summaryMenuItem(title: Self.tokenStatusTitle, tag: 1004))
+        var tag = 1005
         for cli in AgentCLIKind.allCases {
-            menu.addItem(summaryMenuItem(title: Self.cliTokenSummary(cli: cli, usage: nil)))
+            menu.addItem(summaryMenuItem(title: Self.cliTokenSummary(cli: cli, usage: nil), tag: tag))
+            tag += 1
         }
 
         let refreshItem = NSMenuItem(
@@ -88,10 +91,17 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         updateMenuPresentation()
     }
 
-    private func hostedStatusView() -> NSView {
-        NSHostingView(rootView: MenuBarStatusView(state: statusState, onRefresh: { [weak self] in
+    private func hostedStatusView() -> NSHostingView<AnyView> {
+        let rootView = AnyView(MenuBarStatusView(state: statusState, onRefresh: { [weak self] in
             self?.refreshStatus()
         }))
+        if let statusHostingView {
+            statusHostingView.rootView = rootView
+            return statusHostingView
+        }
+        let statusHostingView = NSHostingView(rootView: rootView)
+        self.statusHostingView = statusHostingView
+        return statusHostingView
     }
 
     private func sizedHostedStatusView() -> NSView {
@@ -102,9 +112,10 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         return view
     }
 
-    private func summaryMenuItem(title: String) -> NSMenuItem {
+    private func summaryMenuItem(title: String, tag: Int) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
+        item.tag = tag
         return item
     }
 
@@ -125,9 +136,8 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         guard let item = statusItem else { return }
         panelItem?.view = sizedHostedStatusView()
         item.button?.toolTip = summaryText
-        let summaryItems = item.menu?.items.filter { $0 !== panelItem && $0.isEnabled == false } ?? []
-        for (summaryItem, title) in zip(summaryItems, summaryTitles) {
-            summaryItem.title = title
+        for (tag, title) in zip(1001...1007, summaryTitles) {
+            item.menu?.item(withTag: tag)?.title = title
         }
     }
 

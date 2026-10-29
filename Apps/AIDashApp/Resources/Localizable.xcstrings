@@ -218,6 +218,11 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "System Status" } } }
     },
+    "menubar.status.used" : {
+      "comment" : "Memory used amount label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Used" } } }
+    },
     "menubar.status.token_status" : {
       "comment" : "Accessible token summary menu item fallback.",
       "extractionState" : "manual",

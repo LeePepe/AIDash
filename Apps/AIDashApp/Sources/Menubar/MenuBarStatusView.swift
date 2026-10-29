@@ -350,33 +350,33 @@ public struct MenuBarStatusView: View {
     }
 
     private enum Copy {
-        static let title = localized("menubar.status.title", "System Status")
-        static let cpu = localized("menubar.status.cpu", "CPU")
-        static let memory = localized("menubar.status.memory", "Memory")
-        static let storage = localized("menubar.status.storage", "Storage")
-        static let tokens = localized("menubar.status.tokens", "Agent Token Usage")
-        static let usage = localized("menubar.status.usage", "Usage")
-        static let user = localized("menubar.status.user", "User")
-        static let system = localized("menubar.status.system", "System")
-        static let loadOne = localized("menubar.status.load_one", "1m load")
-        static let loadFive = localized("menubar.status.load_five", "5m load")
-        static let loadFifteen = localized("menubar.status.load_fifteen", "15m load")
-        static let coresFormat = localized("menubar.status.cores", "%lld cores")
-        static let used = localized("menubar.status.used", "Used")
-        static let free = localized("menubar.status.free", "Free")
-        static let wired = localized("menubar.status.wired", "Wired")
-        static let compressed = localized("menubar.status.compressed", "Compressed")
-        static let active = localized("menubar.status.active", "Active")
-        static let totalFormat = localized("menubar.status.total", "Total %@")
-        static let inOut = localized("menubar.status.in_out", "In+Out")
-        static let cache = localized("menubar.status.cache", "Cache")
-        static let available = localized("menubar.status.available", "available")
-        static let notMounted = localized("menubar.status.not_mounted", "Not Mounted")
-        static let unavailable = localized("menubar.status.unavailable", "Unavailable")
-        static let refresh = localized("menubar.status.refresh", "Refresh Status")
-        static let emptyTitle = localized("menubar.status.empty_title", "No Telemetry Available")
-        static let errorTitle = localized("menubar.status.error_title", "Status Unavailable")
-        static let updating = localized("menubar.status.updating", "Updating status…")
+        static var title: String { localized("menubar.status.title", "System Status") }
+        static var cpu: String { localized("menubar.status.cpu", "CPU") }
+        static var memory: String { localized("menubar.status.memory", "Memory") }
+        static var storage: String { localized("menubar.status.storage", "Storage") }
+        static var tokens: String { localized("menubar.status.tokens", "Agent Token Usage") }
+        static var usage: String { localized("menubar.status.usage", "Usage") }
+        static var user: String { localized("menubar.status.user", "User") }
+        static var system: String { localized("menubar.status.system", "System") }
+        static var loadOne: String { localized("menubar.status.load_one", "1m load") }
+        static var loadFive: String { localized("menubar.status.load_five", "5m load") }
+        static var loadFifteen: String { localized("menubar.status.load_fifteen", "15m load") }
+        static var coresFormat: String { localized("menubar.status.cores", "%lld cores") }
+        static var used: String { localized("menubar.status.used", "Used") }
+        static var free: String { localized("menubar.status.free", "Free") }
+        static var wired: String { localized("menubar.status.wired", "Wired") }
+        static var compressed: String { localized("menubar.status.compressed", "Compressed") }
+        static var active: String { localized("menubar.status.active", "Active") }
+        static var totalFormat: String { localized("menubar.status.total", "Total %@") }
+        static var inOut: String { localized("menubar.status.in_out", "In+Out") }
+        static var cache: String { localized("menubar.status.cache", "Cache") }
+        static var available: String { localized("menubar.status.available", "available") }
+        static var notMounted: String { localized("menubar.status.not_mounted", "Not Mounted") }
+        static var unavailable: String { localized("menubar.status.unavailable", "Unavailable") }
+        static var refresh: String { localized("menubar.status.refresh", "Refresh Status") }
+        static var emptyTitle: String { localized("menubar.status.empty_title", "No Telemetry Available") }
+        static var errorTitle: String { localized("menubar.status.error_title", "Status Unavailable") }
+        static var updating: String { localized("menubar.status.updating", "Updating status…") }
 
         static func pressureTitle(_ pressure: MemoryPressureLevel) -> String {
             switch pressure {

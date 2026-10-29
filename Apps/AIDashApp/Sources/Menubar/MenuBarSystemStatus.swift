@@ -227,15 +227,9 @@ public protocol MenuBarSystemStatusProviding {
 
 @MainActor
 public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding {
-    private struct CPUTicks {
-        let user: UInt64
-        let system: UInt64
-        let idle: UInt64
-    }
-
     private let tokenDatabasePaths: CLITokenDatabasePaths
     private let ssdMountPath: String
-    private var previousCPUTicks: CPUTicks?
+    private var previousCPUTicks: [UInt64]?
 
     public init(
         tokenDatabasePaths: CLITokenDatabasePaths? = nil,
@@ -261,6 +255,37 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         )
     }
 
+    // swiftlint:disable large_tuple
+    public static func computeCPUUsageBreakdown(
+        currentTicks: [UInt64],
+        previousTicks: [UInt64]?
+    ) -> (usage: Double, user: Double, system: Double, idle: Double) {
+        guard currentTicks.count == 4 else {
+            return (0, 0, 0, 1)
+        }
+
+        let ticks: [UInt64]
+        if let previousTicks, previousTicks.count == 4 {
+            ticks = zip(currentTicks, previousTicks).map { current, previous in
+                current >= previous ? current - previous : 0
+            }
+        } else {
+            ticks = currentTicks
+        }
+
+        let total = ticks.reduce(0, +)
+        guard total > 0 else {
+            return (0, 0, 0, 1)
+        }
+
+        let user = Double(ticks[Int(CPU_STATE_USER)] + ticks[Int(CPU_STATE_NICE)]) / Double(total)
+        let system = Double(ticks[Int(CPU_STATE_SYSTEM)]) / Double(total)
+        let idle = Double(ticks[Int(CPU_STATE_IDLE)]) / Double(total)
+        let usage = min(max(user + system, 0), 1)
+        return (usage, user, system, idle)
+    }
+    // swiftlint:enable large_tuple
+
     private func captureCPU() -> CPUStatusSnapshot {
         var loadInfo = host_cpu_load_info()
         var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info_data_t>.size / MemoryLayout<integer_t>.size)
@@ -284,34 +309,22 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
             )
         }
 
-        let user = UInt64(loadInfo.cpu_ticks.0)
-        let system = UInt64(loadInfo.cpu_ticks.1 + loadInfo.cpu_ticks.2)
-        let idle = UInt64(loadInfo.cpu_ticks.3)
-        let usage: Double
-        let userFraction: Double
-        let systemFraction: Double
-        let idleFraction: Double
-        if let previous = previousCPUTicks {
-            let userDelta = user >= previous.user ? user - previous.user : 0
-            let systemDelta = system >= previous.system ? system - previous.system : 0
-            let idleDelta = idle >= previous.idle ? idle - previous.idle : 0
-            let deltaTotal = userDelta + systemDelta + idleDelta
-            usage = deltaTotal > 0 ? Double(userDelta + systemDelta) / Double(deltaTotal) : min(max(loads.one / Double(coreCount), 0), 1)
-            userFraction = deltaTotal > 0 ? Double(userDelta) / Double(deltaTotal) : usage * 0.7
-            systemFraction = deltaTotal > 0 ? Double(systemDelta) / Double(deltaTotal) : usage * 0.3
-            idleFraction = deltaTotal > 0 ? Double(idleDelta) / Double(deltaTotal) : 1 - usage
-        } else {
-            usage = min(max(loads.one / Double(coreCount), 0), 1)
-            userFraction = usage * 0.7
-            systemFraction = usage * 0.3
-            idleFraction = 1 - usage
-        }
-        previousCPUTicks = CPUTicks(user: user, system: system, idle: idle)
+        let currentTicks = [
+            UInt64(loadInfo.cpu_ticks.0),
+            UInt64(loadInfo.cpu_ticks.1),
+            UInt64(loadInfo.cpu_ticks.2),
+            UInt64(loadInfo.cpu_ticks.3)
+        ]
+        let breakdown = Self.computeCPUUsageBreakdown(
+            currentTicks: currentTicks,
+            previousTicks: previousCPUTicks
+        )
+        previousCPUTicks = currentTicks
         return CPUStatusSnapshot(
-            usage: min(max(usage, 0), 1),
-            user: min(max(userFraction, 0), 1),
-            system: min(max(systemFraction, 0), 1),
-            idle: min(max(idleFraction, 0), 1),
+            usage: breakdown.usage,
+            user: breakdown.user,
+            system: breakdown.system,
+            idle: breakdown.idle,
             coreCount: coreCount,
             loadOneMinute: loads.one,
             loadFiveMinutes: loads.five,
