@@ -31,7 +31,11 @@ public struct MenuBarStatusView: View {
         .designTheme(seed: .lime, neutral: .slate)
     }
 
-    @Environment(\.theme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var theme: Theme {
+        Theme(seed: .lime, neutral: .slate, isDark: colorScheme == .dark)
+    }
 
     private var loadingView: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -73,7 +77,7 @@ public struct MenuBarStatusView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 12))
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(theme.neutrals.border, lineWidth: 1)
@@ -113,7 +117,11 @@ public struct MenuBarStatusView: View {
                 (Copy.wired, formatBytes(memory.wiredBytes)),
                 (Copy.compressed, formatBytes(memory.compressedBytes))
             ])
-            statusPill(memory.pressure.rawValue.capitalized, color: pressureColor(memory.pressure))
+            statusPill(
+                Copy.pressureTitle(memory.pressure),
+                fill: pressureColor(memory.pressure),
+                text: pressureTextColor(memory.pressure)
+            )
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Copy.memorySummary(memory))
@@ -219,13 +227,11 @@ public struct MenuBarStatusView: View {
                         .monospacedDigit()
                         .foregroundStyle(theme.text(.heading))
                 } else {
-                    statusPill(Copy.notMounted, color: theme.warning)
+                    statusPill(Copy.notMounted, fill: theme.warning, text: theme.warningOnSubtle)
                 }
             }
             if volume.isMounted {
-                ProgressView(value: volume.usageFraction)
-                    .tint(volume.usageFraction >= 0.9 ? theme.danger : theme.primary.primary)
-                    .accessibilityValue(percent(volume.usageFraction))
+                progressBar(value: volume.usageFraction, label: Copy.storage)
                 Text("\(formatBytes(volume.usedBytes)) / \(formatBytes(volume.totalBytes)) · \(formatBytes(volume.availableBytes)) \(Copy.available)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(theme.text(.meta))
@@ -236,25 +242,55 @@ public struct MenuBarStatusView: View {
 
     private func tokenRow(_ item: CLITokenUsageItem, share: Double) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(item.cli.rawValue)
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.text(.body))
-                Spacer(minLength: 4)
-                Text(item.isAvailable ? formatCount(item.totalTokens) : Copy.unavailable)
-                    .font(.system(size: 12, design: .monospaced))
-                    .monospacedDigit()
-                    .foregroundStyle(item.isAvailable ? theme.text(.heading) : theme.text(.meta))
-            }
-            HStack(spacing: 8) {
-                ProgressView(value: share)
-                    .tint(theme.primary.primary)
-                Text("\(Copy.inOut) \(formatCount(item.activeTokens)) · \(Copy.cache) \(formatCount(item.cacheTokens))")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(theme.text(.meta))
+            if item.isAvailable {
+                HStack(spacing: 8) {
+                    Text(item.cli.rawValue)
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.text(.body))
+                    Spacer(minLength: 4)
+                    Text(formatCount(item.totalTokens))
+                        .font(.system(size: 12, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(theme.text(.heading))
+                }
+                HStack(spacing: 8) {
+                    progressBar(value: share, label: item.cli.rawValue)
+                    Text("\(Copy.inOut) \(formatCount(item.activeTokens)) · \(Copy.cache) \(formatCount(item.cacheTokens))")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.text(.meta))
+                }
+            } else {
+                HStack(spacing: 8) {
+                    Text(item.cli.rawValue)
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.text(.body))
+                    Spacer(minLength: 4)
+                    statusPill(Copy.unavailable, fill: theme.danger, text: theme.dangerOnSubtle)
+                }
             }
         }
         .frame(minHeight: 24)
+    }
+
+    private func progressBar(value: Double, label: String) -> some View {
+        GeometryReader { proxy in
+            let clamped = min(max(value, 0), 1)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(theme.neutrals.inner)
+                    .overlay {
+                        Capsule()
+                            .stroke(theme.neutrals.border, lineWidth: 1)
+                    }
+                Capsule()
+                    .fill(theme.primary.primary)
+                    .frame(width: proxy.size.width * clamped)
+            }
+        }
+        .frame(height: 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(percent(value))
     }
 
     private var skeletonSection: some View {
@@ -276,17 +312,18 @@ public struct MenuBarStatusView: View {
             Button(Copy.refresh, action: onRefresh)
                 .buttonStyle(.borderedProminent)
                 .tint(theme.primary.primary)
+                .frame(minHeight: 28)
                 .accessibilityLabel(Copy.refresh)
         }
     }
 
-    private func statusPill(_ title: String, color: Color) -> some View {
+    private func statusPill(_ title: String, fill: Color, text: Color) -> some View {
         Text(title)
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(color)
+            .foregroundStyle(text)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(color.opacity(0.12), in: Capsule())
+            .background(fill.opacity(0.14), in: Capsule())
     }
 
     private func pressureColor(_ pressure: MemoryPressureLevel) -> Color {
@@ -294,6 +331,14 @@ public struct MenuBarStatusView: View {
         case .normal: return theme.success
         case .warning: return theme.warning
         case .critical: return theme.danger
+        }
+    }
+
+    private func pressureTextColor(_ pressure: MemoryPressureLevel) -> Color {
+        switch pressure {
+        case .normal: return theme.successOnSubtle
+        case .warning: return theme.warningOnSubtle
+        case .critical: return theme.dangerOnSubtle
         }
     }
 
@@ -333,6 +378,14 @@ public struct MenuBarStatusView: View {
         static let errorTitle = localized("menubar.status.error_title", "Status Unavailable")
         static let updating = localized("menubar.status.updating", "Updating status…")
 
+        static func pressureTitle(_ pressure: MemoryPressureLevel) -> String {
+            switch pressure {
+            case .normal: return localized("menubar.status.pressure_normal", "Normal")
+            case .warning: return localized("menubar.status.pressure_warning", "Warning")
+            case .critical: return localized("menubar.status.pressure_critical", "Critical")
+            }
+        }
+
         static func updated(_ date: Date) -> String {
             let formatter = DateFormatter()
             formatter.timeStyle = .short
@@ -344,7 +397,7 @@ public struct MenuBarStatusView: View {
             String(format: localized("menubar.status.cpu_summary", "CPU %@, %@ user, %@ system"), "\(Int(cpu.usage * 100))%", "\(Int(cpu.user * 100))%", "\(Int(cpu.system * 100))%")
         }
         static func memorySummary(_ memory: MemoryStatusSnapshot) -> String {
-            String(format: localized("menubar.status.memory_summary", "Memory %@ used, %@"), "\(Int(memory.usageFraction * 100))%", memory.pressure.rawValue)
+            String(format: localized("menubar.status.memory_summary", "Memory %@ used, %@"), "\(Int(memory.usageFraction * 100))%", pressureTitle(memory.pressure))
         }
         static func storageSummary(_ storage: StorageStatusSnapshot) -> String {
             let ssd = storage.ssdVolume.isMounted ? "\(Int(storage.ssdVolume.usageFraction * 100))%" : notMounted

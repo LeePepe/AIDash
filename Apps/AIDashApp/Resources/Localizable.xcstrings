@@ -103,6 +103,16 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "CPU %@ · %@ user · %@ system" } } }
     },
+    "menubar.status.cli_token_summary" : {
+      "comment" : "Compact per-CLI token status summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ %@ active · %@ cache" } } }
+    },
+    "menubar.status.cli_unavailable_summary" : {
+      "comment" : "Unavailable per-CLI token status summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ unavailable" } } }
+    },
     "menubar.status.cores" : {
       "comment" : "CPU core count.",
       "extractionState" : "manual",
@@ -157,6 +167,21 @@
       "comment" : "Compact memory status summary.",
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Memory %@ used · %@" } } }
+    },
+    "menubar.status.pressure_critical" : {
+      "comment" : "Critical memory pressure label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Critical" } } }
+    },
+    "menubar.status.pressure_normal" : {
+      "comment" : "Normal memory pressure label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Normal" } } }
+    },
+    "menubar.status.pressure_warning" : {
+      "comment" : "Warning memory pressure label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Warning" } } }
     },
     "menubar.status.not_mounted" : {
       "comment" : "Degraded state for an unavailable external SSD mount.",

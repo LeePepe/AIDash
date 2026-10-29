@@ -130,6 +130,22 @@ import SwiftUI
     #expect(snapshot.tokenUsage.totalActiveTokens == 60)
     #expect(snapshot.tokenUsage.grandTotalTokens == 75)
     #expect(snapshot.tokenUsage.shareFraction(for: .codex) == 0.5)
+    #expect(MenuBarController.cliTokenSummary(cli: .claude, usage: usage).contains("Claude Code"))
+    #expect(MenuBarController.cliTokenSummary(cli: .claude, usage: usage).contains("30"))
+    #expect(MenuBarController.cliTokenSummary(cli: .copilot, usage: usage).contains("unavailable"))
+
+    let mountedSSD = StorageVolumeSnapshot(
+        id: "ssd",
+        name: "SSD",
+        mountPoint: "/Volumes/SSD",
+        isMounted: true,
+        isExternalSSD: true,
+        usedBytes: 120 * 1_000_000_000,
+        availableBytes: 380 * 1_000_000_000,
+        totalBytes: 500 * 1_000_000_000
+    )
+    #expect(mountedSSD.isMounted)
+    #expect(mountedSSD.usageFraction == 0.24)
 }
 
 @MainActor
@@ -159,9 +175,9 @@ import SwiftUI
         mountPoint: "/",
         isMounted: true,
         isExternalSSD: false,
-        usedBytes: 75,
-        availableBytes: 25,
-        totalBytes: 100
+        usedBytes: 180 * 1_000_000_000,
+        availableBytes: 280 * 1_000_000_000,
+        totalBytes: 460 * 1_000_000_000
     )
     let ssd = StorageVolumeSnapshot(
         id: "ssd",
@@ -186,17 +202,19 @@ import SwiftUI
             loadFifteenMinutes: 0.7
         ),
         memory: MemoryStatusSnapshot(
-            usedBytes: 75,
-            totalBytes: 100,
-            freeBytes: 25,
-            wiredBytes: 10,
-            compressedBytes: 5,
+            usedBytes: 18 * 1_073_741_824,
+            totalBytes: 24 * 1_073_741_824,
+            freeBytes: 6 * 1_073_741_824,
+            wiredBytes: 4 * 1_073_741_824,
+            compressedBytes: 2 * 1_073_741_824,
             pressure: .normal
         ),
         storage: StorageStatusSnapshot(systemVolume: root, ssdVolume: ssd),
-        tokenUsage: CLITokenUsageSnapshot(items: AgentCLIKind.allCases.map {
-            CLITokenUsageItem(cli: $0, inputTokens: 100, outputTokens: 50, cacheTokens: 25, isAvailable: true)
-        })
+        tokenUsage: CLITokenUsageSnapshot(items: [
+            CLITokenUsageItem(cli: .claude, inputTokens: 1_250_000, outputTokens: 350_000, cacheTokens: 2_400_000, isAvailable: true),
+            CLITokenUsageItem(cli: .codex, inputTokens: 840_000, outputTokens: 160_000, cacheTokens: 500_000, isAvailable: true),
+            CLITokenUsageItem(cli: .copilot, inputTokens: 620_000, outputTokens: 95_000, cacheTokens: 310_000, isAvailable: true)
+        ])
     )
     let states: [(String, MenuBarStatusViewState)] = [
         ("populated", .populated(snapshot)),
@@ -206,21 +224,26 @@ import SwiftUI
     ]
     let outputDirectory = URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-sb/screenshots", isDirectory: true)
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+    var renderedData: [String: Data] = [:]
 
     for (name, state) in states {
         for isDark in [false, true] {
+            let scheme: ColorScheme = isDark ? .dark : .light
             let view = MenuBarStatusView(state: state)
-                .environment(\.colorScheme, isDark ? .dark : .light)
-            let hostingView = NSHostingView(rootView: view)
-            hostingView.frame = NSRect(x: 0, y: 0, width: 340, height: 900)
-            hostingView.layoutSubtreeIfNeeded()
-            let bounds = hostingView.bounds
-            let bitmap = try #require(hostingView.bitmapImageRepForCachingDisplay(in: bounds))
-            hostingView.cacheDisplay(in: bounds, to: bitmap)
-            let data = try #require(bitmap.representation(using: .png, properties: [:]))
+                .designTheme(seed: .lime, neutral: .slate)
+                .environment(\.colorScheme, scheme)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 2.0
+            let tiff = try #require(renderer.nsImage?.tiffRepresentation)
+            let data = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
             #expect(!data.isEmpty)
             let suffix = isDark ? "dark" : "light"
             try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
+            if !isDark {
+                renderedData[name] = data
+            } else {
+                #expect(renderedData[name] != data)
+            }
         }
     }
 }

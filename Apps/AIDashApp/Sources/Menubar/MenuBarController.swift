@@ -37,8 +37,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         refreshStatus()
 
         let panel = NSMenuItem()
-        panel.view = hostedStatusView()
-        panel.view?.frame.size = NSSize(width: 340, height: 1)
+        panel.view = sizedHostedStatusView()
         menu.addItem(panel)
         panelItem = panel
 
@@ -46,6 +45,9 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(summaryMenuItem(title: Self.memoryStatusTitle))
         menu.addItem(summaryMenuItem(title: Self.storageStatusTitle))
         menu.addItem(summaryMenuItem(title: Self.tokenStatusTitle))
+        for cli in AgentCLIKind.allCases {
+            menu.addItem(summaryMenuItem(title: Self.cliTokenSummary(cli: cli, usage: nil)))
+        }
 
         let refreshItem = NSMenuItem(
             title: Self.refreshTitle,
@@ -92,6 +94,14 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         }))
     }
 
+    private func sizedHostedStatusView() -> NSView {
+        let view = hostedStatusView()
+        view.layoutSubtreeIfNeeded()
+        let fitting = view.fittingSize
+        view.frame.size = NSSize(width: 340, height: max(fitting.height, 1))
+        return view
+    }
+
     private func summaryMenuItem(title: String) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
@@ -113,8 +123,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func updateMenuPresentation() {
         guard let item = statusItem else { return }
-        panelItem?.view = hostedStatusView()
-        panelItem?.view?.frame.size = NSSize(width: 340, height: 1)
+        panelItem?.view = sizedHostedStatusView()
         item.button?.toolTip = summaryText
         let summaryItems = item.menu?.items.filter { $0 !== panelItem && $0.isEnabled == false } ?? []
         for (summaryItem, title) in zip(summaryItems, summaryTitles) {
@@ -130,19 +139,25 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             Self.cpuSummary(snapshot.cpu),
             Self.memorySummary(snapshot.memory),
             Self.storageSummary(snapshot.storage),
-            Self.tokenSummary(snapshot.tokenUsage)
+            Self.tokenSummary(snapshot.tokenUsage),
+            Self.cliTokenSummary(cli: .claude, usage: snapshot.tokenUsage),
+            Self.cliTokenSummary(cli: .codex, usage: snapshot.tokenUsage),
+            Self.cliTokenSummary(cli: .copilot, usage: snapshot.tokenUsage)
         ].joined(separator: ", ")
     }
 
     private var summaryTitles: [String] {
         guard case let .populated(snapshot) = statusState else {
-            return Array(repeating: Self.unavailableSummary, count: 4)
+            return Array(repeating: Self.unavailableSummary, count: 7)
         }
         return [
             Self.cpuSummary(snapshot.cpu),
             Self.memorySummary(snapshot.memory),
             Self.storageSummary(snapshot.storage),
-            Self.tokenSummary(snapshot.tokenUsage)
+            Self.tokenSummary(snapshot.tokenUsage),
+            Self.cliTokenSummary(cli: .claude, usage: snapshot.tokenUsage),
+            Self.cliTokenSummary(cli: .codex, usage: snapshot.tokenUsage),
+            Self.cliTokenSummary(cli: .copilot, usage: snapshot.tokenUsage)
         ]
     }
 
@@ -209,8 +224,16 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         String(
             format: localized("menubar.status.memory_summary", "Memory %@ used · %@"),
             "\(Int(memory.usageFraction * 100))%",
-            memory.pressure.rawValue
+            pressureTitle(memory.pressure)
         )
+    }
+
+    static func pressureTitle(_ pressure: MemoryPressureLevel) -> String {
+        switch pressure {
+        case .normal: return localized("menubar.status.pressure_normal", "Normal")
+        case .warning: return localized("menubar.status.pressure_warning", "Warning")
+        case .critical: return localized("menubar.status.pressure_critical", "Critical")
+        }
     }
 
     static func storageSummary(_ storage: StorageStatusSnapshot) -> String {
@@ -228,6 +251,24 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         String(
             format: localized("menubar.status.token_summary", "Agent tokens %@ active"),
             usage.totalActiveTokens.formatted(.number)
+        )
+    }
+
+    static func cliTokenSummary(cli: AgentCLIKind, usage: CLITokenUsageSnapshot?) -> String {
+        guard let usage, let item = usage.items.first(where: { $0.cli == cli }) else {
+            return localized("menubar.status.unavailable_summary", "Status unavailable")
+        }
+        guard item.isAvailable else {
+            return String(
+                format: localized("menubar.status.cli_unavailable_summary", "%@ unavailable"),
+                cli.rawValue
+            )
+        }
+        return String(
+            format: localized("menubar.status.cli_token_summary", "%@ %@ active · %@ cache"),
+            cli.rawValue,
+            item.activeTokens.formatted(.number),
+            item.cacheTokens.formatted(.number)
         )
     }
 
