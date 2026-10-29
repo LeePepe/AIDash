@@ -475,6 +475,7 @@ class DigestSources:
     rework_relationship: "ReworkRelationship" = field(
         default_factory=lambda: ReworkRelationship.empty()
     )
+    retro_ops: RetroOpsTrends | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -651,6 +652,124 @@ class ModelTier:
     """🔍 可改良: model-tier token mix as stackedBar segments (pure category)."""
     segments: list[Segment]
     health: SourceHealth
+
+
+@dataclass(frozen=True)
+class RetroOpsTrends:
+    """Operational retro signals shaped for the chart-card briefing section."""
+
+    ci_segments: tuple[tuple[str, float, str | None], ...]
+    ci_repo_bars: tuple[tuple[str, float, str, str | None], ...]
+    gtt_segments: tuple[tuple[str, float, str | None], ...]
+    bot_tl_bars: tuple[tuple[str, float, str, str | None], ...]
+    ci_pass_ratio: float | None
+    gtt_done_ratio: float | None
+    prmon_checked: int | None
+    prmon_stuck: int | None
+    health: SourceHealth
+
+
+def fetch_retro_ops_trends() -> RetroOpsTrends:
+    """Fetch the retro operational query family; degrade as one source."""
+    empty = RetroOpsTrends((), (), (), (), None, None, None, None,
+                           SourceHealth("retro_ops", "skipped:未采集"))
+    try:
+        ci_rows, ci_cols = serve.run_query("retro/ci_health_and_noise")
+        gtt_rows, gtt_cols = serve.run_query("retro/gtt_scorecard")
+        bot_rows, bot_cols = serve.run_query("retro/bot_tl_operations")
+        # These queries are part of the same retro snapshot. Their values are
+        # intentionally not charted yet, but running them keeps source health
+        # tied to the complete L4 contract consumed by this card family.
+        serve.run_query("retro/tf_release_deliveries")
+        serve.run_query("retro/workspace_hygiene_reclaim")
+        if not (ci_rows or gtt_rows or bot_rows):
+            return empty
+
+        ci = {name: ci_cols.index(name) for name in (
+            "repo_key", "run_count", "success_count", "failure_count",
+            "cancelled_or_timeout_count", "pass_rate", "config_noise_job_count",
+        )}
+        success = sum(int(r[ci["success_count"]] or 0) for r in ci_rows)
+        failures = sum(int(r[ci["failure_count"]] or 0) for r in ci_rows)
+        noise = sum(int(r[ci["config_noise_job_count"]] or 0) for r in ci_rows)
+        cancelled = sum(int(r[ci["cancelled_or_timeout_count"]] or 0) for r in ci_rows)
+        real_failures = max(0, failures - noise)
+        ci_segments = tuple(
+            (label, float(value), semantic)
+            for label, value, semantic in (
+                ("通过", success, "success"),
+                ("门禁拦截", real_failures, None),
+                ("配置异常", noise, "warning"),
+                ("取消/超时", cancelled, None),
+            )
+            if value > 0
+        )
+        repo_totals: dict[str, list[float]] = {}
+        for row in ci_rows:
+            repo = str(row[ci["repo_key"]] or "unknown")
+            bucket = repo_totals.setdefault(repo, [0.0, 0.0, 0.0, 0.0])
+            bucket[0] += float(row[ci["run_count"]] or 0)
+            bucket[1] += float(row[ci["success_count"]] or 0)
+            bucket[2] += float(row[ci["failure_count"]] or 0)
+            bucket[3] += float(row[ci["config_noise_job_count"]] or 0)
+        ci_repo_bars = tuple(
+            (repo, total, f"{int(total)}次",
+             "warning" if noise_count > 0
+             or (success_count / (success_count + failure_count) < 0.7
+                 if success_count + failure_count else False) else None)
+            for repo, (total, success_count, failure_count, noise_count)
+            in sorted(repo_totals.items(), key=lambda item: (-item[1][0], item[0]))
+        )
+
+        gtt = {name: gtt_cols.index(name)
+               for name in ("goal_id", "actual_status")}
+        statuses: dict[str, str] = {}
+        for row in gtt_rows:
+            statuses.setdefault(str(row[gtt["goal_id"]] or "unknown"),
+                                str(row[gtt["actual_status"]] or "unknown").lower())
+        done = sum(status in {"done", "completed", "complete"} for status in statuses.values())
+        blocked = sum(status in {"blocked", "stalled"} for status in statuses.values())
+        active = max(0, len(statuses) - done - blocked)
+        gtt_segments = tuple(
+            (label, float(value), semantic)
+            for label, value, semantic in (
+                ("已完成", done, "success"),
+                ("进行中", active, None),
+                ("阻塞", blocked, "warning"),
+            )
+            if value > 0
+        )
+
+        bot = {name: bot_cols.index(name)
+               for name in ("action_kind", "action_count",
+                            "latest_checked_pr_count", "latest_stuck_pr_count")}
+        action_counts: dict[str, float] = {}
+        checked = stuck = None
+        for row in bot_rows:
+            action = str(row[bot["action_kind"]] or "unknown")
+            action_counts[action] = action_counts.get(action, 0.0) + float(
+                row[bot["action_count"]] or 0
+            )
+            if checked is None and row[bot["latest_checked_pr_count"]] is not None:
+                checked = int(row[bot["latest_checked_pr_count"]])
+            if stuck is None and row[bot["latest_stuck_pr_count"]] is not None:
+                stuck = int(row[bot["latest_stuck_pr_count"]])
+        bot_tl_bars = tuple(
+            (action, count, f"{int(count)}次",
+             "warning" if action == "NEED_GO" else None)
+            for action, count in sorted(action_counts.items(),
+                                        key=lambda item: (-item[1], item[0]))
+        )
+        total_runs = sum(int(r[ci["run_count"]] or 0) for r in ci_rows)
+        total_goals = len(statuses)
+        return RetroOpsTrends(
+            ci_segments, ci_repo_bars, gtt_segments, bot_tl_bars,
+            (success / total_runs if total_runs else None),
+            ((done + active) / total_goals if total_goals else None),
+            checked, stuck, SourceHealth("retro_ops", "ok"),
+        )
+    except Exception:  # noqa: BLE001 - retro source degrades as one bundle
+        return empty
 
 
 def _rows(name: str, params: dict | None = None):
