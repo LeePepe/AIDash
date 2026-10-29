@@ -10,6 +10,15 @@ enum AIDashTelemetrySettingsPlacement {
     }
 }
 
+enum AIDashWindowGeometry {
+    static let macMinWidth: CGFloat = 720
+    static let macMinHeight: CGFloat = 480
+
+    static func requiresDesktopMinFrame(isMacOS: Bool) -> Bool {
+        isMacOS
+    }
+}
+
 /// The main briefing window scene. Hosts BriefingView when the
 /// CloudKit container is ready, or shows an error state on failure.
 ///
@@ -66,8 +75,11 @@ public struct BriefingWindowScene: Scene {
                     }
                 }
             }
-            .frame(minWidth: 720, minHeight: 480)
             #if os(macOS)
+            .frame(
+                minWidth: AIDashWindowGeometry.macMinWidth,
+                minHeight: AIDashWindowGeometry.macMinHeight
+            )
             .windowDismissBehavior(.disabled)
             .toolbar {
                 ToolbarItem {

@@ -15,3 +15,10 @@ import Foundation
     #expect(!value.isEmpty)
     #expect(value == "iCloud unavailable")
 }
+
+@Test func desktopWindowMinimumFrameIsMacOSOnly() {
+    #expect(AIDashWindowGeometry.requiresDesktopMinFrame(isMacOS: true))
+    #expect(!AIDashWindowGeometry.requiresDesktopMinFrame(isMacOS: false))
+    #expect(AIDashWindowGeometry.macMinWidth == 720)
+    #expect(AIDashWindowGeometry.macMinHeight == 480)
+}
