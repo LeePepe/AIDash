@@ -51,7 +51,7 @@ public struct MenuBarStatusView: View {
             Card { storageCard(snapshot.storage) }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(Copy.storage)
-            groupHeader(Copy.tokens, icon: "sparkles", cadence: Copy.every1m, date: snapshot.tokenCapturedAt, quota: snapshot.tokenUsage.claudeWeeklyRemainingPercent)
+            groupHeader(Copy.tokens, icon: "sparkles", cadence: Copy.every1m, date: snapshot.tokenCapturedAt)
             Card { tokenCard(snapshot.tokenUsage) }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(Copy.tokens)
@@ -84,10 +84,9 @@ public struct MenuBarStatusView: View {
             .accessibilityHidden(true)
     }
 
-    private func groupHeader(_ title: String, icon: String, cadence: String, date: Date, quota: Int? = nil) -> some View {
+    private func groupHeader(_ title: String, icon: String, cadence: String, date: Date) -> some View {
         HStack(spacing: 8) {
             SectionHeader(title, icon: icon); Spacer()
-            if let quota { StatusPill(String(format: Copy.claudeQuotaFormat, quota), tone: quota > 60 ? .success : quota > 25 ? .warning : .danger) }
             StatusPill(cadence, tone: .primary)
             Text(time(date)).font(.system(size: 10, design: .monospaced)).foregroundStyle(theme.neutrals.text2)
         }
@@ -194,19 +193,46 @@ public struct MenuBarStatusView: View {
     }
     private func tokenCard(_ usage: CLITokenUsageSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack { Text(String(format: Copy.activeFormat, formatCount(usage.totalActiveTokens))).font(.system(size: 13, weight: .semibold, design: .monospaced)); Spacer(); Text(String(format: Copy.totalFormat, formatCount(usage.grandTotalTokens))).font(.system(size: 11, design: .monospaced)); Text(String(format: Copy.turnsReqsFormat, formatCount(usage.totalInteractions))).font(.system(size: 10, design: .monospaced)).foregroundStyle(theme.neutrals.text2) }
-            ForEach(usage.items) { item in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(Copy.cliName(item.cli)).font(.system(size: 12, weight: .semibold))
+            CardInner {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Copy.active).font(.system(size: 10)).foregroundStyle(theme.neutrals.text2)
+                    Text(compactCount(usage.totalActiveTokens))
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Copy.totalLabel).font(.system(size: 10)).foregroundStyle(theme.neutrals.text2)
+                    Text(compactCount(usage.grandTotalTokens))
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(theme.neutrals.text2)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let quota = usage.claudeWeeklyRemainingPercent {
+                        StatusPill(String(format: Copy.claudeQuotaFormat, quota), tone: quota > 60 ? .success : quota > 25 ? .warning : .danger)
+                    }
+                    Text(String(format: Copy.turnsReqsFormat, compactCount(usage.totalInteractions)))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.neutrals.text2)
+                        .lineLimit(1)
+                }
+            }
+            ForEach(Array(usage.items.enumerated()), id: \.element.id) { index, item in
+                if index > 0 {
+                    Rectangle().fill(theme.neutrals.border).frame(height: 1)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(Copy.cliName(item.cli)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                         if item.isAvailable {
-                            Text(String(format: Copy.interactionFormat, formatCount(item.interactionCount), item.cli == .codex ? Copy.reqs : Copy.turns))
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(theme.neutrals.text2)
+                            StatusPill(String(format: Copy.interactionFormat, compactCount(item.interactionCount), item.cli == .codex ? Copy.reqs : Copy.turns), tone: .neutral)
                         }
-                        Spacer()
+                        Spacer(minLength: 4)
                         if item.isAvailable {
-                            Text(formatCount(item.totalTokens)).font(.system(size: 11, design: .monospaced))
+                            Text(compactCount(item.totalTokens))
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .lineLimit(1)
                         } else {
                             StatusPill(Copy.unavailable, tone: .danger)
                         }
@@ -214,9 +240,9 @@ public struct MenuBarStatusView: View {
                     if item.isAvailable {
                         progress(value: usage.shareFraction(for: item.cli), label: Copy.cliName(item.cli))
                         HStack {
-                            Text(String(format: Copy.inOutFormat, formatCount(item.activeTokens))).lineLimit(1)
+                            Text(String(format: Copy.inOutFormat, compactCount(item.activeTokens))).lineLimit(1)
                             Spacer()
-                            Text(String(format: Copy.cacheFormat, formatCount(item.cacheTokens))).lineLimit(1)
+                            Text(String(format: Copy.cacheFormat, compactCount(item.cacheTokens))).lineLimit(1)
                         }
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(theme.neutrals.text2)
@@ -281,7 +307,17 @@ public struct MenuBarStatusView: View {
         guard used > 0 || total > 0 else { return "0 / 0 GB" }
         return String(format: "%.1f / %.1f GB", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
     }
-    private func formatCount(_ value: UInt64) -> String { value.formatted(.number) }
+    private func compactCount(_ value: UInt64) -> String {
+        if value >= 1_000_000_000 {
+            return String(format: "%.2fB", Double(value) / 1_000_000_000.0)
+        } else if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000.0)
+        } else if value >= 10_000 {
+            return String(format: "%.1fK", Double(value) / 1_000.0)
+        } else {
+            return value.formatted(.number)
+        }
+    }
     private func formatBytes(_ value: UInt64) -> String { ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary) }
     private func rate(_ value: Double) -> String { "\(ByteCountFormatter.string(fromByteCount: Int64(max(value, 0)), countStyle: .binary))/s" }
     private func uptime(_ value: TimeInterval) -> String { "\(Int(value / 3600))h \(Int(value.truncatingRemainder(dividingBy: 3600) / 60))m" }
@@ -310,6 +346,8 @@ public struct MenuBarStatusView: View {
         static let free = localized("menubar.status.free", "Free")
         static let swap = localized("menubar.status.swap", "Swap")
         static let available = localized("menubar.status.available", "available")
+        static let active = localized("menubar.status.active", "Active")
+        static let totalLabel = localized("menubar.status.total_label", "Total")
         static let activeFormat = localized("menubar.status.active_format", "Active %@")
         static let totalFormat = localized("menubar.status.total", "Total %@")
         static let turnsReqsFormat = localized("menubar.status.turns_reqs", "%@ turns/reqs")
@@ -335,7 +373,15 @@ public struct MenuBarStatusView: View {
             case .copilot: return localized("menubar.status.cli_copilot", "Copilot CLI")
             }
         }
-        private static func localized(_ key: String, _ value: String) -> String { Bundle.main.localizedString(forKey: key, value: value, table: nil) }
+        internal static func resolveLocalized(_ key: String, _ value: String) -> String {
+            let resolved = Bundle.main.localizedString(forKey: key, value: value, table: nil)
+            return (resolved.isEmpty || resolved == key || resolved.hasPrefix("menubar.")) ? value : resolved
+        }
+        private static func localized(_ key: String, _ value: String) -> String { resolveLocalized(key, value) }
+    }
+
+    internal static func resolveLocalized(_ key: String, _ value: String) -> String {
+        Copy.resolveLocalized(key, value)
     }
 }
 #endif

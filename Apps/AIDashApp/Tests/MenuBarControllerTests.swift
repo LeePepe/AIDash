@@ -267,9 +267,9 @@ import SQLite3
         ),
         storage: StorageStatusSnapshot(systemVolume: root, ssdVolume: ssd),
         tokenUsage: CLITokenUsageSnapshot(items: [
-            CLITokenUsageItem(cli: .claude, inputTokens: 1_250_000, outputTokens: 350_000, cacheTokens: 2_400_000, isAvailable: true, interactionCount: 9_705),
-            CLITokenUsageItem(cli: .codex, inputTokens: 840_000, outputTokens: 160_000, cacheTokens: 500_000, isAvailable: true, interactionCount: 38_644),
-            CLITokenUsageItem(cli: .copilot, inputTokens: 620_000, outputTokens: 95_000, cacheTokens: 310_000, isAvailable: true, interactionCount: 101_210)
+            CLITokenUsageItem(cli: .claude, inputTokens: 135_736, outputTokens: 6_445_523, cacheTokens: 2_875_353_916, isAvailable: true, interactionCount: 9_705),
+            CLITokenUsageItem(cli: .codex, inputTokens: 209_568_635, outputTokens: 26_303_166, cacheTokens: 0, isAvailable: true, interactionCount: 38_644),
+            CLITokenUsageItem(cli: .copilot, inputTokens: 25_826_997_826, outputTokens: 25_409_302, cacheTokens: 24_963_105_519, isAvailable: true, interactionCount: 101_210)
         ], claudeWeeklyRemainingPercent: 91)
     )
     let states: [(String, MenuBarStatusViewState)] = [
@@ -312,9 +312,34 @@ import SQLite3
                 #expect(renderedData[name] != data)
             }
         }
+
         #expect(MenuBarStatusView.formatLoadAverages(one: 11.26, five: 27.40, fifteen: 25.14) == "11.3 / 27.4 / 25.1")
         #expect(MenuBarStatusView.compactMemoryPair(used: 18 * 1_073_741_824, total: 24 * 1_073_741_824) == "18.0 / 24.0 GB")
     }
+}
+
+@MainActor
+@Test func menuBarLocalizationNeverLeaksRawKeys() async throws {
+    let keys = [
+        "menubar.status.active_format",
+        "menubar.status.claude_quota",
+        "menubar.status.total",
+        "menubar.status.turns_reqs",
+        "menubar.status.interaction",
+        "menubar.status.in_out_format",
+        "menubar.status.cache_format",
+        "menubar.status.uptime",
+        "menubar.status.storage_detail"
+    ]
+    for key in keys {
+        #expect(!MenuBarController.resolveLocalized(key, "fallback").contains("menubar."))
+        #expect(!MenuBarStatusView.resolveLocalized(key, "fallback").contains("menubar."))
+    }
+    let usage = CLITokenUsageSnapshot(items: [
+        CLITokenUsageItem(cli: .claude, inputTokens: 135_736, outputTokens: 6_445_523, cacheTokens: 2_875_353_916, isAvailable: true, interactionCount: 9_705)
+    ])
+    #expect(!MenuBarController.tokenSummary(usage).contains("menubar."))
+    #expect(!MenuBarController.cliTokenSummary(cli: .claude, usage: usage).contains("menubar."))
 }
 
 @MainActor
