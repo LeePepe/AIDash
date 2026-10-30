@@ -361,8 +361,13 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         )
     }
 
+    internal static func resolveLocalized(_ key: String, _ value: String) -> String {
+        let resolved = Bundle.main.localizedString(forKey: key, value: value, table: nil)
+        return (resolved.isEmpty || resolved == key || resolved.hasPrefix("menubar.")) ? value : resolved
+    }
+
     private static func localized(_ key: String, _ value: String) -> String {
-        Bundle.main.localizedString(forKey: key, value: value, table: nil)
+        resolveLocalized(key, value)
     }
 }
 
