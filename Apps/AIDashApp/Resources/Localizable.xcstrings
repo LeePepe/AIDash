@@ -333,6 +333,11 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Active %@" } } }
     },
+    "menubar.status.total_label" : {
+      "comment" : "Total token label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Total" } } }
+    },
     "menubar.status.turns_reqs" : {
       "comment" : "Combined interaction count.",
       "extractionState" : "manual",
@@ -367,8 +372,7 @@
       "comment" : "Short CPU load row label.",
       "extractionState" : "manual",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Load" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "负载" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Load" } }
       }
     },
     "menubar.status.claude_quota" : {
