@@ -343,23 +343,38 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         guard getifaddrs(&pointer) == 0, let first = pointer else { return NetworkStatusSnapshot() }
         defer { freeifaddrs(first) }
         var cursor: UnsafeMutablePointer<ifaddrs>? = first
-        var selected = "en0"; var address: String?; var received: UInt64 = 0; var sent: UInt64 = 0; var connected = false
+        struct InterfaceStats {
+            var ipv4: String?
+            var received: UInt64 = 0
+            var sent: UInt64 = 0
+        }
+        var interfaces: [String: InterfaceStats] = [:]
         while let item = cursor?.pointee {
             let name = String(cString: item.ifa_name)
             if name.hasPrefix("en"), (item.ifa_flags & UInt32(IFF_LOOPBACK)) == 0 {
+                var stats = interfaces[name, default: InterfaceStats()]
                 if let addr = item.ifa_addr {
                     if addr.pointee.sa_family == UInt8(AF_INET) {
                         var storage = sockaddr_in(); memcpy(&storage, addr, MemoryLayout<sockaddr_in>.size)
                         var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
                         let value = withUnsafePointer(to: &storage.sin_addr) { inet_ntop(AF_INET, $0, &buffer, socklen_t(INET_ADDRSTRLEN)) }
-                        address = value.map { String(cString: $0) }; selected = name; connected = true
+                        stats.ipv4 = value.map { String(cString: $0) }
                     } else if addr.pointee.sa_family == UInt8(AF_LINK), let data = item.ifa_data?.assumingMemoryBound(to: if_data.self) {
-                        received = UInt64(data.pointee.ifi_ibytes); sent = UInt64(data.pointee.ifi_obytes)
+                        stats.received = UInt64(data.pointee.ifi_ibytes); stats.sent = UInt64(data.pointee.ifi_obytes)
                     }
                 }
+                interfaces[name] = stats
             }
             cursor = item.ifa_next
         }
+        let selected = interfaces["en0"]?.ipv4 != nil
+            ? "en0"
+            : interfaces.keys.sorted().first(where: { interfaces[$0]?.ipv4 != nil }) ?? "en0"
+        let selectedStats = interfaces[selected] ?? InterfaceStats()
+        let address = selectedStats.ipv4
+        let received = selectedStats.received
+        let sent = selectedStats.sent
+        let connected = address != nil
         let now = Date(); var down = 0.0; var up = 0.0
         if let previous = previousNetworkSample {
             let elapsed = max(now.timeIntervalSince(previous.at), 0.001)

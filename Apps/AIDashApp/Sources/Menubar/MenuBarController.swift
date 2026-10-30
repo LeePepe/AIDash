@@ -15,6 +15,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     private var tokenRefreshTimer: Timer?
 
     internal var statusItemForTesting: NSStatusItem? { statusItem }
+    internal var statusStateForTesting: MenuBarStatusViewState { statusState }
 
     public convenience override init() {
         self.init(statusProvider: LiveMenuBarSystemStatusProvider())
@@ -158,11 +159,23 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func startPeriodicRefresh() {
         stopPeriodicRefresh()
-        computerRefreshTimer = Timer(timeInterval: Self.computerRefreshInterval, repeats: true) { [weak self] _ in
-            self?.refreshComputerSections()
+        computerRefreshTimer = Timer(timeInterval: Self.computerRefreshInterval, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            MainActor.assumeIsolated {
+                self.refreshComputerSections()
+            }
         }
-        tokenRefreshTimer = Timer(timeInterval: Self.tokenRefreshInterval, repeats: true) { [weak self] _ in
-            self?.refreshTokenSection()
+        tokenRefreshTimer = Timer(timeInterval: Self.tokenRefreshInterval, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            MainActor.assumeIsolated {
+                self.refreshTokenSection()
+            }
         }
         if let computerRefreshTimer {
             RunLoop.main.add(computerRefreshTimer, forMode: .common)
@@ -208,7 +221,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
 
     private var summaryTitles: [String] {
         guard case let .populated(snapshot) = statusState else {
-            return Array(repeating: Self.unavailableSummary, count: 7)
+            return Array(repeating: Self.unavailableSummary, count: 8)
         }
         return [
             Self.cpuSummary(snapshot.cpu),
