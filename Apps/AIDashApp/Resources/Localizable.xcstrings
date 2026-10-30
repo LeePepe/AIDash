@@ -283,6 +283,131 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cache" } } }
     },
+    "menubar.status.computer_group" : {
+      "comment" : "Computer telemetry group header.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Computer Info" } } }
+    },
+    "menubar.status.every_5s" : {
+      "comment" : "Computer telemetry refresh cadence.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Every 5s" } } }
+    },
+    "menubar.status.every_1m" : {
+      "comment" : "Agent token telemetry refresh cadence.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Every 1m" } } }
+    },
+    "menubar.status.network_status" : {
+      "comment" : "Accessible network summary menu item.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Network status" } } }
+    },
+    "menubar.status.network_summary" : {
+      "comment" : "Compact network status summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Network %@ · ↓ %@/s · ↑ %@/s" } } }
+    },
+    "menubar.status.network" : {
+      "comment" : "Network section label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Network" } } }
+    },
+    "menubar.status.idle" : {
+      "comment" : "CPU idle time label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Idle" } } }
+    },
+    "menubar.status.swap" : {
+      "comment" : "Memory swap label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Swap" } } }
+    },
+    "menubar.status.cadence_badge" : {
+      "comment" : "Combined refresh cadence badge.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "5s / 1m" } } }
+    },
+    "menubar.status.active_format" : {
+      "comment" : "Active token total.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Active %@" } } }
+    },
+    "menubar.status.turns_reqs" : {
+      "comment" : "Combined interaction count.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ turns/reqs" } } }
+    },
+    "menubar.status.interaction" : {
+      "comment" : "Per-CLI interaction count.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ %@" } } }
+    },
+    "menubar.status.in_out_format" : {
+      "comment" : "Input and output token count.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "In+Out %@" } } }
+    },
+    "menubar.status.cache_format" : {
+      "comment" : "Cache token count.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cache %@" } } }
+    },
+    "menubar.status.storage_detail" : {
+      "comment" : "Storage usage detail.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ / %@ · %@ %@" } } }
+    },
+    "menubar.status.uptime" : {
+      "comment" : "Machine uptime and update time.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Up %@ · %@" } } }
+    },
+    "menubar.status.load_compact" : {
+      "comment" : "Compact CPU load row label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Load 1/5/15m" } } }
+    },
+    "menubar.status.claude_quota" : {
+      "comment" : "Claude weekly quota remaining.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude %lld%%" } } }
+    },
+    "menubar.status.thermal_nominal" : {
+      "comment" : "Nominal thermal state.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Nominal" } } }
+    },
+    "menubar.status.thermal_fair" : {
+      "comment" : "Fair thermal state.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Fair" } } }
+    },
+    "menubar.status.thermal_serious" : {
+      "comment" : "Serious thermal state.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Serious" } } }
+    },
+    "menubar.status.thermal_critical" : {
+      "comment" : "Critical thermal state.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Critical" } } }
+    },
+    "menubar.status.cli_claude" : {
+      "comment" : "Claude CLI name.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code" } } }
+    },
+    "menubar.status.cli_codex" : {
+      "comment" : "Codex CLI name.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Codex CLI" } } }
+    },
+    "menubar.status.cli_copilot" : {
+      "comment" : "Copilot CLI name.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Copilot CLI" } } }
+    },
     "telemetry.settings.send_usage_data" : {
         "comment" : "The sole opt-in control for anonymous product telemetry.",
         "extractionState" : "manual",

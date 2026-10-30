@@ -4,13 +4,18 @@ import SwiftUI
 
 @MainActor
 public final class MenuBarController: NSObject, NSMenuDelegate {
+    public static let computerRefreshInterval: TimeInterval = 5
+    public static let tokenRefreshInterval: TimeInterval = 60
     private var statusItem: NSStatusItem?
     private let statusProvider: any MenuBarSystemStatusProviding
     private var statusState: MenuBarStatusViewState = .loading
     private weak var panelItem: NSMenuItem?
     private var statusHostingView: NSHostingView<AnyView>?
+    private var computerRefreshTimer: Timer?
+    private var tokenRefreshTimer: Timer?
 
     internal var statusItemForTesting: NSStatusItem? { statusItem }
+    internal var statusStateForTesting: MenuBarStatusViewState { statusState }
 
     public convenience override init() {
         self.init(statusProvider: LiveMenuBarSystemStatusProvider())
@@ -51,6 +56,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(summaryMenuItem(title: Self.cliTokenSummary(cli: cli, usage: nil), tag: tag))
             tag += 1
         }
+        menu.addItem(summaryMenuItem(title: Self.networkStatusTitle, tag: 1008))
 
         let refreshItem = NSMenuItem(
             title: Self.refreshTitle,
@@ -89,6 +95,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         item.menu = menu
         statusItem = item
         updateMenuPresentation()
+        startPeriodicRefresh()
     }
 
     private func hostedStatusView() -> NSHostingView<AnyView> {
@@ -108,7 +115,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         let view = hostedStatusView()
         view.layoutSubtreeIfNeeded()
         let fitting = view.fittingSize
-        view.frame.size = NSSize(width: 340, height: max(fitting.height, 1))
+        view.frame.size = NSSize(width: 380, height: max(fitting.height, 1))
         return view
     }
 
@@ -121,6 +128,61 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
 
     public func menuWillOpen(_ menu: NSMenu) {
         refreshStatus()
+    }
+
+    public func refreshComputerSections() {
+        guard case let .populated(snapshot) = statusState else {
+            refreshStatus()
+            return
+        }
+        let computer = statusProvider.captureComputerStatus()
+        statusState = .populated(snapshot.updatingComputer(computer))
+        updateMenuPresentation()
+    }
+
+    public func refreshTokenSection() {
+        guard case let .populated(snapshot) = statusState else {
+            refreshStatus()
+            return
+        }
+        let token = statusProvider.captureTokenStatus()
+        statusState = .populated(snapshot.updatingTokenUsage(token.usage, capturedAt: token.capturedAt))
+        updateMenuPresentation()
+    }
+
+    public func stopPeriodicRefresh() {
+        computerRefreshTimer?.invalidate()
+        tokenRefreshTimer?.invalidate()
+        computerRefreshTimer = nil
+        tokenRefreshTimer = nil
+    }
+
+    private func startPeriodicRefresh() {
+        stopPeriodicRefresh()
+        computerRefreshTimer = Timer(timeInterval: Self.computerRefreshInterval, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            MainActor.assumeIsolated {
+                self.refreshComputerSections()
+            }
+        }
+        tokenRefreshTimer = Timer(timeInterval: Self.tokenRefreshInterval, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            MainActor.assumeIsolated {
+                self.refreshTokenSection()
+            }
+        }
+        if let computerRefreshTimer {
+            RunLoop.main.add(computerRefreshTimer, forMode: .common)
+        }
+        if let tokenRefreshTimer {
+            RunLoop.main.add(tokenRefreshTimer, forMode: .common)
+        }
     }
 
     @objc private func refreshStatusAction() {
@@ -136,7 +198,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         guard let item = statusItem else { return }
         panelItem?.view = sizedHostedStatusView()
         item.button?.toolTip = summaryText
-        for (tag, title) in zip(1001...1007, summaryTitles) {
+        for (tag, title) in zip(1001...1008, summaryTitles) {
             item.menu?.item(withTag: tag)?.title = title
         }
     }
@@ -152,13 +214,14 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             Self.tokenSummary(snapshot.tokenUsage),
             Self.cliTokenSummary(cli: .claude, usage: snapshot.tokenUsage),
             Self.cliTokenSummary(cli: .codex, usage: snapshot.tokenUsage),
-            Self.cliTokenSummary(cli: .copilot, usage: snapshot.tokenUsage)
+            Self.cliTokenSummary(cli: .copilot, usage: snapshot.tokenUsage),
+            Self.networkSummary(snapshot.network)
         ].joined(separator: ", ")
     }
 
     private var summaryTitles: [String] {
         guard case let .populated(snapshot) = statusState else {
-            return Array(repeating: Self.unavailableSummary, count: 7)
+            return Array(repeating: Self.unavailableSummary, count: 8)
         }
         return [
             Self.cpuSummary(snapshot.cpu),
@@ -167,7 +230,8 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             Self.tokenSummary(snapshot.tokenUsage),
             Self.cliTokenSummary(cli: .claude, usage: snapshot.tokenUsage),
             Self.cliTokenSummary(cli: .codex, usage: snapshot.tokenUsage),
-            Self.cliTokenSummary(cli: .copilot, usage: snapshot.tokenUsage)
+            Self.cliTokenSummary(cli: .copilot, usage: snapshot.tokenUsage),
+            Self.networkSummary(snapshot.network)
         ]
     }
 
@@ -213,6 +277,10 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         localized("menubar.status.storage_status", "Storage status")
     }
 
+    static var networkStatusTitle: String {
+        localized("menubar.status.network_status", "Network status")
+    }
+
     static var tokenStatusTitle: String {
         localized("menubar.status.token_status", "Agent token status")
     }
@@ -254,6 +322,15 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             format: localized("menubar.status.storage_summary", "Storage %@ · SSD %@"),
             "\(Int(storage.systemVolume.usageFraction * 100))%",
             ssd
+        )
+    }
+
+    static func networkSummary(_ network: NetworkStatusSnapshot) -> String {
+        String(
+            format: localized("menubar.status.network_summary", "Network %@ · ↓ %@/s · ↑ %@/s"),
+            network.interfaceName,
+            ByteCountFormatter.string(fromByteCount: Int64(max(network.downloadBytesPerSecond, 0)), countStyle: .binary),
+            ByteCountFormatter.string(fromByteCount: Int64(max(network.uploadBytesPerSecond, 0)), countStyle: .binary)
         )
     }
 
