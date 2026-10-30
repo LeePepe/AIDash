@@ -46,6 +46,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         panel.view = sizedHostedStatusView()
         menu.addItem(panel)
         panelItem = panel
+        menu.addItem(.separator())
 
         menu.addItem(summaryMenuItem(title: Self.cpuStatusTitle, tag: 1001))
         menu.addItem(summaryMenuItem(title: Self.memoryStatusTitle, tag: 1002))
@@ -122,6 +123,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     private func summaryMenuItem(title: String, tag: Int) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
+        item.isHidden = true
         item.tag = tag
         return item
     }

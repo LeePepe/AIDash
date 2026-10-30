@@ -74,6 +74,26 @@ import SQLite3
 }
 
 @MainActor
+@Test func summaryMenuItemsAreHiddenButRemainTaggedAndUpdated() async throws {
+    let controller = MenuBarController(statusProvider: MenuBarStatusProviderSpy())
+    defer {
+        controller.stopPeriodicRefresh()
+        if let item = controller.statusItemForTesting {
+            NSStatusBar.system.removeStatusItem(item)
+        }
+    }
+
+    let menu = try #require(controller.statusItemForTesting?.menu)
+    let summaryItems = (1001...1008).compactMap { menu.item(withTag: $0) }
+    #expect(summaryItems.count == 8)
+    #expect(summaryItems.allSatisfy { $0.isHidden && !$0.isEnabled })
+    #expect(menu.items.first?.isSeparatorItem == false)
+    #expect(menu.items.dropFirst().first?.isSeparatorItem == true)
+    controller.refreshComputerSections()
+    #expect(menu.item(withTag: 1001)?.title.contains("CPU") == true)
+}
+
+@MainActor
 @Test func statusSnapshotsCalculateUsageAndShares() async throws {
     let cpu = CPUStatusSnapshot(
         usage: 0.5,
@@ -220,9 +240,9 @@ import SQLite3
             system: 0.17,
             idle: 0.58,
             coreCount: 12,
-            loadOneMinute: 1.85,
-            loadFiveMinutes: 1.42,
-            loadFifteenMinutes: 1.18,
+            loadOneMinute: 11.26,
+            loadFiveMinutes: 27.40,
+            loadFifteenMinutes: 25.14,
             history: [0.18, 0.24, 0.31, 0.28, 0.35, 0.48, 0.52, 0.44, 0.39, 0.46, 0.38, 0.42]
         ),
         memory: MemoryStatusSnapshot(
@@ -262,11 +282,11 @@ import SQLite3
         .appendingPathComponent("aidash-menubar-shots-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: outputDirectory) }
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
-    let exportDirectory = ProcessInfo.processInfo.environment["AIDASH_SCREENSHOT_EXPORT_DIR"]
-        .map { URL(fileURLWithPath: $0, isDirectory: true) }
-    if let exportDirectory {
-        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
-    }
+    let exportDirectory = ProcessInfo.processInfo.environment["AIDASH_SCREENSHOT_EXPORT_DIR"].map {
+        URL(fileURLWithPath: $0, isDirectory: true)
+    } ?? FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Development/handoff/aidash-sb/screenshots", isDirectory: true)
+    try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
     var renderedData: [String: Data] = [:]
 
     for (name, state) in states {
@@ -280,17 +300,20 @@ import SQLite3
             let tiff = try #require(renderer.nsImage?.tiffRepresentation)
             let data = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
             #expect(!data.isEmpty)
+            let bitmap = try #require(NSBitmapImageRep(data: data))
+            #expect(bitmap.pixelsWide == 760)
+            #expect(bitmap.pixelsHigh > 0)
             let suffix = isDark ? "dark" : "light"
             try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
-            if let exportDirectory {
-                try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
-            }
+            try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
             if !isDark {
                 renderedData[name] = data
             } else {
                 #expect(renderedData[name] != data)
             }
         }
+        #expect(MenuBarStatusView.formatLoadAverages(one: 11.26, five: 27.40, fifteen: 25.14) == "11.3 / 27.4 / 25.1")
+        #expect(MenuBarStatusView.compactMemoryPair(used: 18 * 1_073_741_824, total: 24 * 1_073_741_824) == "18.0 / 24.0 GB")
     }
 }
 

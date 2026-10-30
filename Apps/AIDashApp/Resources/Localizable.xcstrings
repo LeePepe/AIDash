@@ -363,10 +363,13 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Up %@ · %@" } } }
     },
-    "menubar.status.load_compact" : {
-      "comment" : "Compact CPU load row label.",
+    "menubar.status.load_short" : {
+      "comment" : "Short CPU load row label.",
       "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Load 1/5/15m" } } }
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Load" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "负载" } }
+      }
     },
     "menubar.status.claude_quota" : {
       "comment" : "Claude weekly quota remaining.",
