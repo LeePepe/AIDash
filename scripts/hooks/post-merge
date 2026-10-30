@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+[ "$branch" = "main" ] || exit 0
+[ "${AIDASH_SKIP_POST_MERGE_INSTALL:-0}" != "1" ] || exit 0
+
+repo_root="$(git rev-parse --show-toplevel)"
+changed="$(git diff --name-only ORIG_HEAD HEAD 2>/dev/null || true)"
+if printf '%s\n' "$changed" | grep -Eq '^(Apps|Packages|CLI|Configs)/|^project\.yml$|^scripts/dev/'; then
+  "$repo_root/scripts/dev/install-fixed-build.sh"
+fi

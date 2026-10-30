@@ -20,6 +20,8 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT" || { echo "[install-fixed] repo root not found" >&2; exit 1; }
+HAD_XCODEPROJ=0
+[ -d "$REPO_ROOT/AIDash.xcodeproj" ] && HAD_XCODEPROJ=1
 
 # Bundle ID / launchd label —— 从 Configs/Identity.xcconfig(+ 可选的本地覆盖)
 # 解析,所以改了配置这里自动跟随。AIDASH_BUNDLE_ID 的约定是 <prefix>.aidash。
@@ -45,8 +47,21 @@ BIN_DST="$BIN_DIR/aidash"
 TMP_DD="$(mktemp -d "${TMPDIR:-/tmp}/aidash-fixed-build.XXXXXX")"
 PRODUCTS="$TMP_DD/Build/Products/Release"
 
-cleanup() { rm -rf "$TMP_DD"; }
+cleanup() {
+  rm -rf "$TMP_DD"
+  if [ "$HAD_XCODEPROJ" -eq 0 ]; then
+    rm -rf "$REPO_ROOT/AIDash.xcodeproj"
+  fi
+}
 trap cleanup EXIT
+
+if [ ! -d "$REPO_ROOT/AIDash.xcodeproj" ]; then
+  echo "[install-fixed] generating Xcode project"
+  xcodegen generate || {
+    echo "[install-fixed] ERROR: xcodegen generate failed" >&2
+    exit 1
+  }
+fi
 
 # Shared xcodebuild flags: ad-hoc sign, no Distribution cert, no sandbox churn.
 COMMON_FLAGS=(
@@ -54,6 +69,8 @@ COMMON_FLAGS=(
   -configuration Release
   -destination 'generic/platform=macOS'
   -derivedDataPath "$TMP_DD"
+  SYMROOT="$TMP_DD/Build/Products"
+  CONFIGURATION_BUILD_DIR="$PRODUCTS"
   CODE_SIGN_IDENTITY=-
   CODE_SIGN_STYLE=Manual
   CODE_SIGNING_REQUIRED=NO
@@ -384,6 +401,10 @@ rm -f "$p2_out" "$p2_err"
 echo "[install-fixed] probe 2 passed: briefing get exit $p2_rc (store reachable)"
 
 # --- Success ----------------------------------------------------------------
+if [ "${AIDASH_SKIP_OPEN:-0}" != "1" ]; then
+  echo "[install-fixed] launching GUI app → $APP_DST"
+  open -g "$APP_DST" 2>/dev/null || true
+fi
 echo
 echo "[install-fixed] done — XPC healthy, brokered to fixed build, store reachable"
 echo "    app     : $APP_DST"
