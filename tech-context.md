@@ -96,13 +96,12 @@ canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
 - 改跨 2+ 层 → 任务太大,按层拆成独立可 build/test 的 commit
 - 收尾遗留 → 记为新任务,不扩展原任务
 
-## Fixed Install Packaging (ADR-003) — Planned
+## Fixed Install Packaging (ADR-003) — Implemented
 
-> **Status: Accepted decision, not yet implemented.** The entitlements file,
-> inside-out signing, and installer self-check described below are the
-> approved target posture (ADR-003). Implementation lands in MY-1453 after
-> the ADR merges. Until then, the fixed install remains unsandboxed with no
-> entitlements.
+> **Status: Implemented.** /Applications/AIDash.app is ad-hoc signed with
+> Apps/AIDashApp/AIDashApp.macOS.fixed.entitlements
+> (com.apple.security.app-sandbox = true) via
+> scripts/dev/install-fixed-build.sh.
 
 `scripts/dev/install-fixed-build.sh` builds a Release binary for
 `/Applications/AIDash.app` + `~/.local/bin/aidash`, ad-hoc signed (`-`).
@@ -110,11 +109,22 @@ canonical_roles: [Types, Config, Repo, Service, Runtime, UI]
 | Posture | Entitlements | Sandbox | CloudKit |
 |---------|-------------|---------|----------|
 | Xcode dev / Release | `AIDashApp.macOS.entitlements` | Yes | Yes (provisioned) |
-| Fixed install (planned) | `AIDashApp.macOS.fixed.entitlements` | Yes | No (no profile) |
+| Fixed install (active) | `AIDashApp.macOS.fixed.entitlements` | Yes | No (no profile) |
 
-Key constraints (apply once implemented):
+Key constraints:
 - **Minimal entitlements**: `app-sandbox` only. No `network.client`, no CloudKit
   entitlements (would crash without provisioning profile).
+- **Host-Home Read-Only Telemetry under App Sandbox**: Inside App Sandbox,
+  `NSHomeDirectory()` and `FileManager.default.homeDirectoryForCurrentUser`
+  resolve to `~/Library/Containers/<bundleID>/Data`, not the user's host home
+  directory. Code that reads allowed host telemetry files must resolve
+  `getpwuid(getuid())?.pointee.pw_dir`, guarded by
+  `XCTestConfigurationFilePath == nil` so tests never touch the live home,
+  declare `com.apple.security.temporary-exception.files.home-relative-path.read-only`
+  in both `AIDashApp.macOS.entitlements` and
+  `AIDashApp.macOS.fixed.entitlements`, and include a
+  `file:...?mode=ro&immutable=1` (`SQLITE_OPEN_URI`) fallback when opening
+  WAL-mode SQLite databases read-only.
 - **Inside-out signing**: the signing contract specifies three phases
   (leaf Mach-O → nested bundles deepest-first → outer app). **Today the
   repo ships no nested XPC helper or LaunchAgent executable** — the
