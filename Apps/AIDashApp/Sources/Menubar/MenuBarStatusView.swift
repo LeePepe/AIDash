@@ -18,8 +18,8 @@ public struct MenuBarStatusView: View {
             case let .populated(snapshot): populated(snapshot)
             }
         }
-        .frame(width: 380)
         .padding(16)
+        .frame(width: 380)
         .background(theme.neutrals.bg)
         .designTheme(seed: .lime, neutral: .slate)
     }
@@ -94,33 +94,80 @@ public struct MenuBarStatusView: View {
     }
     private func cpuCard(_ cpu: CPUStatusSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            cardTitle(Copy.cpu, badge: "\(cpu.coreCount)C")
+            HStack {
+                Text(Copy.cpu).font(.system(size: 13, weight: .semibold))
+                Spacer()
+                StatusPill("\(cpu.coreCount)C", tone: .neutral)
+            }
+            .frame(height: 22)
             HStack(spacing: 10) {
                 RingGauge(value: cpu.usage, size: 44, stroke: 5, color: theme.primary.primary, showLabel: true)
-                Sparkbars(data: cpu.history.isEmpty ? [cpu.usage, cpu.usage] : cpu.history, color: theme.primary.primary, height: 32, baseline: theme.neutrals.border)
+                Sparkbars(data: cpu.history.isEmpty ? [cpu.usage, cpu.usage] : cpu.history, color: theme.primary.primary, height: 34, baseline: theme.neutrals.border)
             }
-            metricLines([(Copy.user, percent(cpu.user)), (Copy.system, percent(cpu.system)), (Copy.idle, percent(cpu.idle)), (Copy.loadCompact, "\(decimal(cpu.loadOneMinute)) · \(decimal(cpu.loadFiveMinutes)) · \(decimal(cpu.loadFifteenMinutes))")])
+            .frame(height: 44)
+            metricLines([
+                (Copy.user, percent(cpu.user)),
+                (Copy.system, percent(cpu.system)),
+                (Copy.idle, percent(cpu.idle)),
+                (Copy.loadShort, Self.formatLoadAverages(one: cpu.loadOneMinute, five: cpu.loadFiveMinutes, fifteen: cpu.loadFifteenMinutes))
+            ])
         }
     }
     private func memoryCard(_ memory: MemoryStatusSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack { cardTitle(Copy.memory); Spacer(); StatusPill(pressure(memory.pressure), tone: pressureTone(memory.pressure)) }
-            HStack { Text("\(formatBytes(memory.usedBytes)) / \(formatBytes(memory.totalBytes))").font(.system(size: 15, weight: .semibold, design: .monospaced)); Spacer(); Text(percent(memory.usageFraction)).font(.system(size: 12, design: .monospaced)) }
-            SegmentedGauge(value: memory.usageFraction, segments: 16, color: pressureColor(memory.pressure), height: 22)
-            metricLines([(Copy.wired, formatBytes(memory.wiredBytes)), (Copy.compressed, formatBytes(memory.compressedBytes)), (Copy.free, formatBytes(memory.freeBytes)), (Copy.swap, "\(formatBytes(memory.swapUsedBytes)) / \(formatBytes(memory.swapTotalBytes))")])
+            HStack {
+                Text(Copy.memory).font(.system(size: 13, weight: .semibold))
+                Spacer()
+                StatusPill(pressure(memory.pressure), tone: pressureTone(memory.pressure))
+            }
+            .frame(height: 22)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Text(Self.compactMemoryPair(used: memory.usedBytes, total: memory.totalBytes))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Spacer(minLength: 2)
+                    Text(percent(memory.usageFraction))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(theme.neutrals.text2)
+                }
+                SegmentedGauge(value: memory.usageFraction, segments: 16, color: pressureColor(memory.pressure), height: 18)
+            }
+            .frame(height: 44, alignment: .center)
+            metricLines([
+                (Copy.wired, formatBytes(memory.wiredBytes)),
+                (Copy.compressed, formatBytes(memory.compressedBytes)),
+                (Copy.free, formatBytes(memory.freeBytes)),
+                (Copy.swap, Self.compactMemoryPair(used: memory.swapUsedBytes, total: memory.swapTotalBytes))
+            ])
         }
     }
     private func networkCard(_ network: NetworkStatusSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 6) {
                 Image(systemName: "network").foregroundStyle(theme.primary.primary).accessibilityHidden(true)
                 Text(Copy.network).font(.system(size: 13, weight: .semibold))
-                Text("\(network.interfaceName) · \(network.ipAddress ?? "—")").font(.system(size: 10, design: .monospaced)).foregroundStyle(theme.neutrals.text2)
-                Spacer()
-                Text("↓ \(rate(network.downloadBytesPerSecond)) · ↑ \(rate(network.uploadBytesPerSecond))").font(.system(size: 10, design: .monospaced))
+                StatusPill(network.interfaceName, tone: .neutral)
+                Spacer(minLength: 4)
+                Text("↓ \(rate(network.downloadBytesPerSecond)) · ↑ \(rate(network.uploadBytesPerSecond))")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            Sparkline(data: network.throughputHistory.isEmpty ? [0, 0] : network.throughputHistory, color: theme.primary.primary).frame(height: 28)
-            Text("↓ \(formatBytes(network.totalReceivedBytes)) · ↑ \(formatBytes(network.totalSentBytes))").font(.system(size: 10, design: .monospaced)).foregroundStyle(theme.neutrals.text2)
+            Sparkline(data: network.throughputHistory.isEmpty ? [0, 0] : network.throughputHistory, color: theme.primary.primary)
+                .frame(height: 28)
+            HStack {
+                Text(network.ipAddress ?? "—")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(1)
+                Spacer()
+                Text("↓ \(formatBytes(network.totalReceivedBytes)) · ↑ \(formatBytes(network.totalSentBytes))")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(1)
+            }
         }
     }
     private func storageCard(_ storage: StorageStatusSnapshot) -> some View {
@@ -179,7 +226,7 @@ public struct MenuBarStatusView: View {
         }
     }
     private func cardTitle(_ title: String, badge: String? = nil) -> some View { HStack { Text(title).font(.system(size: 13, weight: .semibold)); if let badge { StatusPill(badge, tone: .neutral) }; Spacer() } }
-    private func metricLines(_ values: [(String, String)]) -> some View { VStack(spacing: 4) { ForEach(Array(values.enumerated()), id: \.offset) { _, value in HStack { Text(value.0).font(.system(size: 10)).foregroundStyle(theme.neutrals.text2).lineLimit(1).minimumScaleFactor(0.85); Spacer(); Text(value.1).font(.system(size: 10, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.85) } } } }
+    private func metricLines(_ values: [(String, String)]) -> some View { VStack(spacing: 4) { ForEach(Array(values.enumerated()), id: \.offset) { _, value in HStack { Text(value.0).font(.system(size: 10)).foregroundStyle(theme.neutrals.text2).lineLimit(1).minimumScaleFactor(0.85); Spacer(); Text(value.1).font(.system(size: 10, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.85) }.frame(height: 16) } } }
     private func progress(value: Double, label: String) -> some View {
         GeometryReader { proxy in
             Capsule().fill(theme.neutrals.border).overlay(alignment: .leading) {
@@ -226,7 +273,14 @@ public struct MenuBarStatusView: View {
     private func pressureTone(_ value: MemoryPressureLevel) -> PillTone { value == .normal ? .success : value == .warning ? .warning : .danger }
     private func pressureColor(_ value: MemoryPressureLevel) -> Color { value == .normal ? theme.success : value == .warning ? theme.warning : theme.danger }
     private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
-    private func decimal(_ value: Double) -> String { String(format: "%.2f", value) }
+    internal static func formatLoadAverages(one: Double, five: Double, fifteen: Double) -> String {
+        "\(loadDecimal(one)) / \(loadDecimal(five)) / \(loadDecimal(fifteen))"
+    }
+    private static func loadDecimal(_ value: Double) -> String { String(format: "%.1f", value) }
+    internal static func compactMemoryPair(used: UInt64, total: UInt64) -> String {
+        guard used > 0 || total > 0 else { return "0 / 0 GB" }
+        return String(format: "%.1f / %.1f GB", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
+    }
     private func formatCount(_ value: UInt64) -> String { value.formatted(.number) }
     private func formatBytes(_ value: UInt64) -> String { ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary) }
     private func rate(_ value: Double) -> String { "\(ByteCountFormatter.string(fromByteCount: Int64(max(value, 0)), countStyle: .binary))/s" }
@@ -266,7 +320,7 @@ public struct MenuBarStatusView: View {
         static let cacheFormat = localized("menubar.status.cache_format", "Cache %@")
         static let storageDetailFormat = localized("menubar.status.storage_detail", "%@ / %@ · %@ %@")
         static let uptimeFormat = localized("menubar.status.uptime", "Up %@ · %@")
-        static let loadCompact = localized("menubar.status.load_compact", "Load 1/5/15m")
+        static let loadShort = localized("menubar.status.load_short", "Load")
         static let claudeQuotaFormat = localized("menubar.status.claude_quota", "Claude %lld%%")
         static let nominal = localized("menubar.status.thermal_nominal", "Nominal")
         static let fair = localized("menubar.status.thermal_fair", "Fair")

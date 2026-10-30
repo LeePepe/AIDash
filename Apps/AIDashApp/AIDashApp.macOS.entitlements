@@ -20,5 +20,13 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>/Development/AIDash/aidata/</string>
+		<string>/.copilot/</string>
+		<string>/.claude/</string>
+		<string>/.codex/</string>
+		<string>/.config/claude/</string>
+	</array>
 </dict>
 </plist>

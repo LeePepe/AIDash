@@ -412,8 +412,22 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     }
     // swiftlint:disable large_tuple
     private func readSQLite(path: String, query: String) -> (UInt64, UInt64, UInt64, UInt64)? {
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
+        if let result = runSQLiteQuery(target: path, flags: flags, query: query) {
+            return result
+        }
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+        return runSQLiteQuery(
+            target: "file:\(encodedPath)?mode=ro&immutable=1",
+            flags: flags | SQLITE_OPEN_URI,
+            query: query
+        )
+    }
+
+    private func runSQLiteQuery(target: String, flags: Int32, query: String) -> (UInt64, UInt64, UInt64, UInt64)? {
         var database: OpaquePointer?
-        guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK, let database else { if let database { sqlite3_close(database) }; return nil }
+        guard sqlite3_open_v2(target, &database, flags, nil) == SQLITE_OK, let database else { if let database { sqlite3_close(database) }; return nil }
         defer { sqlite3_close(database) }; sqlite3_busy_timeout(database, 100)
         var statement: OpaquePointer?; guard sqlite3_prepare_v2(database, query, -1, &statement, nil) == SQLITE_OK, let statement else { if let statement { sqlite3_finalize(statement) }; return nil }
         defer { sqlite3_finalize(statement) }; guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
@@ -426,7 +440,7 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     }
     private static func defaultTokenDatabasePaths() -> CLITokenDatabasePaths {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return CLITokenDatabasePaths() }
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let home = realUserHomeDirectoryURL()
         let warehouse = home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
         return CLITokenDatabasePaths(
             claude: [warehouse, home.appendingPathComponent("Development/AIDash/aidata/L2_normalize/clean/claude_jsonl.db"), home.appendingPathComponent(".claude/warehouse.db"), home.appendingPathComponent(".claude/claude_jsonl.db")],
@@ -434,6 +448,12 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
             copilot: [home.appendingPathComponent(".copilot/session-store.db")],
             claudeQuotaFileURL: home.appendingPathComponent(".config/claude/gtt-weekly-remaining-pct.json")
         )
+    }
+    internal static func realUserHomeDirectoryURL() -> URL {
+        if let passwd = getpwuid(getuid()), let pwDir = passwd.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: pwDir), isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
     }
     private func sysctlString(_ name: String) -> String? {
         var size = 0; guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 1 else { return nil }
