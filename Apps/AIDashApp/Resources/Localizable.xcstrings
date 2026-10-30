@@ -283,6 +283,31 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cache" } } }
     },
+    "menubar.status.computer_group" : {
+      "comment" : "Computer telemetry group header.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Computer Info" } } }
+    },
+    "menubar.status.every_5s" : {
+      "comment" : "Computer telemetry refresh cadence.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Every 5s" } } }
+    },
+    "menubar.status.every_1m" : {
+      "comment" : "Agent token telemetry refresh cadence.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Every 1m" } } }
+    },
+    "menubar.status.network_status" : {
+      "comment" : "Accessible network summary menu item.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Network status" } } }
+    },
+    "menubar.status.network_summary" : {
+      "comment" : "Compact network status summary.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Network %@ · ↓ %@/s · ↑ %@/s" } } }
+    },
     "telemetry.settings.send_usage_data" : {
         "comment" : "The sole opt-in control for anonymous product telemetry.",
         "extractionState" : "manual",

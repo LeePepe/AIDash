@@ -235,9 +235,7 @@ import SwiftUI
         ("loading", .loading),
         ("error", .error(message: "Try again"))
     ]
-    let outputDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("aidash-menubar-shots-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: outputDirectory) }
+    let outputDirectory = URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-sb/screenshots", isDirectory: true)
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
     var renderedData: [String: Data] = [:]
 
@@ -261,5 +259,20 @@ import SwiftUI
             }
         }
     }
+}
+
+@MainActor
+@Test func sectionalRefreshCadencesAndNewMetrics() async throws {
+    #expect(MenuBarStatusSection.machine.refreshIntervalSeconds == 5)
+    #expect(MenuBarStatusSection.storage.isComputerSection)
+    #expect(MenuBarStatusSection.tokenUsage.refreshIntervalSeconds == 60)
+    #expect(!MenuBarStatusSection.tokenUsage.isComputerSection)
+    let memory = MemoryStatusSnapshot(usedBytes: 80, totalBytes: 100, freeBytes: 20, wiredBytes: 10, compressedBytes: 5, pressure: .warning, swapUsedBytes: 25, swapTotalBytes: 100)
+    #expect(memory.swapUsageFraction == 0.25)
+    let usage = CLITokenUsageSnapshot(items: [CLITokenUsageItem(cli: .claude, inputTokens: 10, outputTokens: 5, cacheTokens: 2, isAvailable: true, interactionCount: 9)], claudeWeeklyRemainingPercent: 91)
+    #expect(usage.totalInteractions == 9)
+    #expect(usage.claudeWeeklyRemainingPercent == 91)
+    let machine = MachineStatusSnapshot(chipName: "Apple M6", modelIdentifier: "Mac18,5", totalCores: 12, performanceCores: 8, uptimeSeconds: 3660, thermalState: .nominal)
+    #expect(machine.performanceCores == 8)
 }
 #endif
