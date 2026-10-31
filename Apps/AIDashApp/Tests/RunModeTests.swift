@@ -60,5 +60,12 @@ struct RunModeTests {
     func testHostLoaderStrategy() {
         #expect(RunMode.testHost.loaderStrategy == .none)
     }
+
+    @Test("showsAppChrome: true for GUI and agent, false for test host")
+    func showsAppChromeMapping() {
+        #expect(RunMode.gui.showsAppChrome == true)
+        #expect(RunMode.agent.showsAppChrome == true)
+        #expect(RunMode.testHost.showsAppChrome == false)
+    }
 }
 #endif

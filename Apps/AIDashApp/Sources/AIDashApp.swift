@@ -39,8 +39,9 @@ struct AIDashApp: App {
             )
             : nil
 
-        // GUI chrome only in GUI mode.
-        self.menuBarController = mode == .gui ? MenuBarController() : nil
+        // Install status bar chrome in both GUI and launchd-brokered app modes;
+        // skip only in test-host mode.
+        self.menuBarController = mode.showsAppChrome ? MenuBarController() : nil
 
         // Install/refresh the launchd LaunchAgent so launchd brokers the mach
         // service to THIS build. Only from a real GUI launch — never the agent
@@ -116,11 +117,11 @@ struct AIDashApp: App {
     @SceneBuilder
     var body: some Scene {
         #if os(macOS)
-        // Present the window only in a real GUI launch; agent + test-host are
-        // headless (LSUIElement already hides the Dock).
+        // Present the briefing window content in both GUI and launchd-brokered
+        // app modes; only test-host mode is headless.
         BriefingWindowScene(
             state: bootstrap.containerState,
-            headless: runMode != .gui,
+            headless: !runMode.showsAppChrome,
             telemetryCoordinator: telemetryCoordinator
         )
         #else

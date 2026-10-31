@@ -1,19 +1,32 @@
 import Foundation
 
 /// Run mode decided once at launch:
-/// - `agent`   = the headless process launchd spawned to serve XPC on-demand
-///   (flagged by `AIDASH_XPC_AGENT=1` in the LaunchAgent plist).
+/// - `agent`   = the process launchd spawned to serve XPC on-demand (flagged by
+///   `AIDASH_XPC_AGENT=1` in the LaunchAgent plist). It uses the local-only
+///   loader and skips launchd registration and telemetry, but still presents
+///   app chrome because LaunchServices reuses this process for GUI launches.
 /// - `testHost`= the app is loaded only to host an XCTest bundle (detected via
 ///   the `XCTestConfigurationFilePath` env var Xcode injects). Skips the launchd
 ///   install + the machService listener resume, which have side effects / trap
 ///   inside a test process.
-/// - `gui`     = a normal user/Xcode launch.
+/// - `gui`     = a normal user/Xcode launch with app chrome and telemetry.
 enum RunMode: Equatable {
     case gui
     case agent
     case testHost
 
     var isAgent: Bool { self == .agent }
+
+    /// Whether this process should install the status bar item and render the
+    /// main briefing window content.
+    var showsAppChrome: Bool {
+        switch self {
+        case .gui, .agent:
+            return true
+        case .testHost:
+            return false
+        }
+    }
 
     /// Pure decision from the environment — unit-testable without launching.
     /// Agent takes precedence (a launchd spawn is never a test host).
