@@ -285,7 +285,7 @@ import SQLite3
     let exportDirectory = ProcessInfo.processInfo.environment["AIDASH_SCREENSHOT_EXPORT_DIR"].map {
         URL(fileURLWithPath: $0, isDirectory: true)
     } ?? FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Development/handoff/aidash-sb/screenshots", isDirectory: true)
+        .appendingPathComponent("Development/handoff/sbar-ui-r1/evidence", isDirectory: true)
     try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
     var renderedData: [String: Data] = [:]
 
