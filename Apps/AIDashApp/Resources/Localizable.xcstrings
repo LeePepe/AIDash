@@ -243,6 +243,41 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Total %@" } } }
     },
+    "menubar.status.total_label" : {
+      "comment" : "Compact total token metric label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Total" } } }
+    },
+    "menubar.status.cache" : {
+      "comment" : "Cached token metric label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cache" } } }
+    },
+    "menubar.status.interactions" : {
+      "comment" : "Aggregate interaction metric label.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Interactions" } } }
+    },
+    "menubar.status.connected" : {
+      "comment" : "Connected network status pill.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Online" } } }
+    },
+    "menubar.status.connected_short" : {
+      "comment" : "Compact connected network status pill.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "UP" } } }
+    },
+    "menubar.status.disconnected" : {
+      "comment" : "Disconnected network status pill.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline" } } }
+    },
+    "menubar.status.disconnected_short" : {
+      "comment" : "Compact disconnected network status pill.",
+      "extractionState" : "manual",
+      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "OFF" } } }
+    },
     "menubar.status.unavailable" : {
       "comment" : "Unavailable telemetry value.",
       "extractionState" : "manual",
