@@ -21,9 +21,9 @@ public struct MenuBarStatusView: View {
             case .loading:
                 loadingView
             case let .empty(reason):
-                message(title: Copy.emptyTitle, detail: reason, symbol: "chart.bar.xaxis")
+                message(title: Copy.emptyTitle, detail: reason, symbol: "chart.bar.xaxis", symbolColor: theme.primary.primary)
             case let .error(errorMessage):
-                message(title: Copy.errorTitle, detail: errorMessage, symbol: "exclamationmark.triangle")
+                message(title: Copy.errorTitle, detail: errorMessage, symbol: "exclamationmark.triangle", symbolColor: theme.warning)
             case let .populated(snapshot):
                 populated(snapshot)
             }
@@ -39,26 +39,34 @@ public struct MenuBarStatusView: View {
             header(snapshot)
             sectionHeader(Copy.computerGroup, icon: "gauge.with.dots.needle.33percent", cadence: Copy.every5s, date: snapshot.computerCapturedAt)
             HStack(alignment: .top, spacing: 12) {
-                Card { cpuCard(snapshot.cpu) }
+                Card {
+                    cpuCard(snapshot.cpu)
+                        .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 220, alignment: .top)
+                }
                     .frame(maxWidth: .infinity, alignment: .top)
-                    .frame(height: 228, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.cpu)
-                Card { memoryCard(snapshot.memory) }
+                Card {
+                    memoryCard(snapshot.memory)
+                        .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 220, alignment: .top)
+                }
                     .frame(maxWidth: .infinity, alignment: .top)
-                    .frame(height: 228, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.memory)
             }
             HStack(alignment: .top, spacing: 12) {
-                Card { networkCard(snapshot.network) }
+                Card {
+                    networkCard(snapshot.network)
+                        .frame(maxWidth: .infinity, minHeight: 188, maxHeight: 188, alignment: .top)
+                }
                     .frame(maxWidth: .infinity, alignment: .top)
-                    .frame(height: 165, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.network)
-                Card { storageCard(snapshot.storage) }
+                Card {
+                    storageCard(snapshot.storage)
+                        .frame(maxWidth: .infinity, minHeight: 188, maxHeight: 188, alignment: .top)
+                }
                     .frame(maxWidth: .infinity, alignment: .top)
-                    .frame(height: 165, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.storage)
             }
@@ -81,7 +89,7 @@ public struct MenuBarStatusView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                 Text("\(snapshot.machine.totalCores)C · \(snapshot.machine.performanceCores)P · \(Copy.uptime(snapshot.machine.uptimeSeconds))")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(theme.neutrals.text2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
@@ -97,20 +105,6 @@ public struct MenuBarStatusView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .accessibilityLabel(Copy.refresh)
-                }
-                HStack(spacing: 4) {
-                    StatusPill("5s", tone: .primary)
-                    Text(time(snapshot.computerCapturedAt))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(theme.neutrals.text2)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                    StatusPill("60s", tone: .neutral)
-                    Text(time(snapshot.tokenCapturedAt))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(theme.neutrals.text2)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
                 }
             }
         }
@@ -150,7 +144,7 @@ public struct MenuBarStatusView: View {
             Spacer(minLength: 4)
             StatusPill(cadence, tone: .primary)
             Text(time(date))
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.neutrals.text2)
                 .lineLimit(1)
         }
@@ -162,19 +156,13 @@ public struct MenuBarStatusView: View {
             cardTitle(Copy.cpu, badge: "\(cpu.coreCount)C")
             HStack(spacing: 10) {
                 RingGauge(value: cpu.usage, size: 48, stroke: 5, color: theme.primary.primary, showLabel: true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(percent(cpu.usage))
-                        .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                        .layoutPriority(1)
-                    Text(Copy.loadShort)
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.neutrals.text2)
-                }
+                Text(Copy.loadShort)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.neutrals.text2)
             }
             Text(Self.formatLoadAverages(one: cpu.loadOneMinute, five: cpu.loadFiveMinutes, fifteen: cpu.loadFifteenMinutes))
                 .font(.system(size: 11, design: .monospaced))
                 .lineLimit(1)
-                .minimumScaleFactor(0.85)
                 .layoutPriority(1)
             Sparkline(data: cpu.history.isEmpty ? [cpu.usage, cpu.usage] : cpu.history, color: theme.primary.primary)
                 .frame(height: 28)
@@ -218,10 +206,11 @@ public struct MenuBarStatusView: View {
                 Spacer(minLength: 2)
                 StatusPill(network.isConnected ? Copy.connectedShort : Copy.disconnectedShort, tone: network.isConnected ? .success : .warning)
             }
-            Text(network.ipAddress ?? "—")
-                .font(.system(size: 10, design: .monospaced))
+            Text("\(network.interfaceName) · \(network.ipAddress ?? "—")")
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.neutrals.text2)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
             VStack(alignment: .leading, spacing: 2) {
                 Text("↓ \(rate(network.downloadBytesPerSecond))")
                 Text("↑ \(rate(network.uploadBytesPerSecond))")
@@ -230,11 +219,13 @@ public struct MenuBarStatusView: View {
             .lineLimit(1)
             Sparkline(data: network.throughputHistory.isEmpty ? [0, 0] : network.throughputHistory, color: theme.primary.primary)
                 .frame(height: 28)
-            Text("↓ \(formatBytes(network.totalReceivedBytes)) · ↑ \(formatBytes(network.totalSentBytes))")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(theme.neutrals.text2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("↓ \(formatBytes(network.totalReceivedBytes))")
+                Text("↑ \(formatBytes(network.totalSentBytes))")
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(theme.neutrals.text2)
+            .lineLimit(1)
             Spacer(minLength: 0)
         }
     }
@@ -255,18 +246,24 @@ public struct MenuBarStatusView: View {
                         Spacer(minLength: 2)
                         if volume.isMounted {
                             Text(percent(volume.usageFraction))
-                                .font(.system(size: 10, design: .monospaced))
-                        } else {
-                            StatusPill(Copy.notMounted, tone: .warning)
+                                .font(.system(size: 11, design: .monospaced))
                         }
                     }
                     if volume.isMounted {
                         SegmentedGauge(value: volume.usageFraction, segments: 16, color: theme.primary.primary, height: 14)
                         Text("\(formatBytes(volume.usedBytes)) / \(formatBytes(volume.totalBytes))")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(theme.neutrals.text2)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
+                        Text("\(formatBytes(volume.availableBytes)) \(Copy.available.lowercased())")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(theme.neutrals.text2)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    } else {
+                        StatusPill(Copy.notMounted, tone: .warning)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
@@ -276,15 +273,18 @@ public struct MenuBarStatusView: View {
 
     private func tokenCard(_ usage: CLITokenUsageSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let quota = usage.claudeWeeklyRemainingPercent {
+                HStack {
+                    Spacer(minLength: 0)
+                    StatusPill(String(format: Copy.claudeQuotaFormat, quota), tone: quota > 60 ? .success : quota > 25 ? .warning : .danger)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
             HStack(spacing: 8) {
                 tokenMetric(Copy.active, value: compactCount(usage.totalActiveTokens))
                 tokenMetric(Copy.totalLabel, value: compactCount(usage.grandTotalTokens))
                 tokenMetric(Copy.cache, value: compactCount(usage.totalCacheTokens))
                 tokenMetric(Copy.interactions, value: compactCount(usage.totalInteractions))
-                Spacer(minLength: 2)
-                if let quota = usage.claudeWeeklyRemainingPercent {
-                    StatusPill(String(format: Copy.claudeQuotaFormat, quota), tone: quota > 60 ? .success : quota > 25 ? .warning : .danger)
-                }
             }
             ForEach(Array(usage.items.enumerated()), id: \.element.id) { index, item in
                 if index > 0 {
@@ -298,7 +298,7 @@ public struct MenuBarStatusView: View {
     private func tokenMetric(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 9))
+                .font(.system(size: 11))
                 .foregroundStyle(theme.neutrals.text2)
                 .lineLimit(1)
             Text(value)
@@ -331,7 +331,7 @@ public struct MenuBarStatusView: View {
                     Text(String(format: Copy.cacheFormat, compactCount(item.cacheTokens)))
                     Text(String(format: Copy.interactionFormat, compactCount(item.interactionCount), item.cli == .codex ? Copy.reqs : Copy.turns))
                 }
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.neutrals.text2)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
@@ -357,12 +357,12 @@ public struct MenuBarStatusView: View {
             ForEach(Array(values.enumerated()), id: \.offset) { _, value in
                 HStack {
                     Text(value.0)
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(theme.neutrals.text2)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     Text(value.1)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 11, design: .monospaced))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                         .layoutPriority(1)
@@ -388,26 +388,28 @@ public struct MenuBarStatusView: View {
         .accessibilityValue(percent(value))
     }
 
-    private func message(title: String, detail: String? = nil, symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CardInner {
-                Image(systemName: symbol)
-                    .foregroundStyle(theme.primary.primary)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 15, weight: .semibold))
-                    if let detail {
-                        Text(detail)
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.neutrals.text2)
+    private func message(title: String, detail: String? = nil, symbol: String, symbolColor: Color) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                CardInner {
+                    Image(systemName: symbol)
+                        .foregroundStyle(symbolColor)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.system(size: 15, weight: .semibold))
+                        if let detail {
+                            Text(detail)
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.neutrals.text2)
+                        }
                     }
                 }
+                Button(Copy.refresh, action: onRefresh)
+                    .buttonStyle(.borderedProminent)
+                    .tint(theme.primary.primary)
+                    .controlSize(.small)
+                    .accessibilityLabel(Copy.refresh)
             }
-            Button(Copy.refresh, action: onRefresh)
-                .buttonStyle(.borderedProminent)
-                .tint(theme.primary.primary)
-                .controlSize(.small)
-                .accessibilityLabel(Copy.refresh)
         }
     }
 

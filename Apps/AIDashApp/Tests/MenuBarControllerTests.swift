@@ -272,8 +272,46 @@ import SQLite3
             CLITokenUsageItem(cli: .copilot, inputTokens: 25_826_997_826, outputTokens: 25_409_302, cacheTokens: 24_963_105_519, isAvailable: true, interactionCount: 101_210)
         ], claudeWeeklyRemainingPercent: 91)
     )
+    let worstCaseSnapshot = MenuBarSystemSnapshot(
+        capturedAt: snapshot.capturedAt,
+        machine: MachineStatusSnapshot(
+            chipName: "Apple M6", modelIdentifier: "Mac18,5", totalCores: 12,
+            performanceCores: 6, uptimeSeconds: 9 * 86_400, thermalState: .serious
+        ),
+        cpu: CPUStatusSnapshot(
+            usage: 0.88, user: 0.61, system: 0.27, idle: 0.12, coreCount: 12,
+            loadOneMinute: 11.3, loadFiveMinutes: 27.4, loadFifteenMinutes: 25.1,
+            history: [0.62, 0.73, 0.81, 0.88]
+        ),
+        memory: MemoryStatusSnapshot(
+            usedBytes: 18_049_600_061, totalBytes: 20_510_909_160,
+            freeBytes: 2_461_309_099, wiredBytes: 4_811_101_573,
+            compressedBytes: 3_339_337_073, pressure: .critical,
+            swapUsedBytes: 3_881_877_504, swapTotalBytes: 5_368_709_120
+        ),
+        network: snapshot.network,
+        storage: StorageStatusSnapshot(
+            systemVolume: StorageVolumeSnapshot(
+                id: "root", name: "Macintosh HD", mountPoint: "/", isMounted: true,
+                isExternalSSD: false, usedBytes: 18_049_600_061,
+                availableBytes: 1_049_958_442_599, totalBytes: 1_068_008_042_660
+            ),
+            ssdVolume: ssd
+        ),
+        tokenUsage: CLITokenUsageSnapshot(items: [
+            CLITokenUsageItem(cli: .claude, inputTokens: 235_900_000, outputTokens: 9_700,
+                              cacheTokens: 50_910_000_000, isAvailable: true, interactionCount: 9_700),
+            CLITokenUsageItem(cli: .codex, inputTokens: 235_900_000, outputTokens: 9_700,
+                              cacheTokens: 0, isAvailable: true, interactionCount: 9_700),
+            CLITokenUsageItem(cli: .copilot, inputTokens: 50_910_000_000, outputTokens: 235_900_000,
+                              cacheTokens: 235_900_000, isAvailable: true, interactionCount: 9_700)
+        ], claudeWeeklyRemainingPercent: 24)
+    )
+    #expect(worstCaseSnapshot != snapshot)
+    #expect(abs(worstCaseSnapshot.memory.usageFraction - 0.88) < 0.001)
     let states: [(String, MenuBarStatusViewState)] = [
         ("populated", .populated(snapshot)),
+        ("worst-case", .populated(worstCaseSnapshot)),
         ("empty", .empty(reason: "No local sources")),
         ("loading", .loading),
         ("error", .error(message: "Try again"))
@@ -287,7 +325,15 @@ import SQLite3
     } ?? FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Development/handoff/sbar-ui-r1/evidence", isDirectory: true)
     try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
-    var renderedData: [String: Data] = [:]
+    var lightLuminances: [String: CGFloat] = [:]
+    var lightHeights: [String: Int] = [:]
+    let minimumHeights: [String: Int] = [
+        "populated": 1_200,
+        "worst-case": 1_200,
+        "loading": 1_200,
+        "empty": 200,
+        "error": 200
+    ]
 
     for (name, state) in states {
         for isDark in [false, true] {
@@ -302,14 +348,23 @@ import SQLite3
             #expect(!data.isEmpty)
             let bitmap = try #require(NSBitmapImageRep(data: data))
             #expect(bitmap.pixelsWide == 760)
-            #expect(bitmap.pixelsHigh > 0)
+            #expect(bitmap.pixelsHigh > minimumHeights[name, default: 0])
             let suffix = isDark ? "dark" : "light"
             try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
             try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
+            // Sample the opaque panel background, away from text and card edges.
+            let background = try #require(bitmap.colorAt(x: 2, y: 2)?.usingColorSpace(.sRGB))
+            let luminance = 0.2126 * background.redComponent
+                + 0.7152 * background.greenComponent + 0.0722 * background.blueComponent
+            #expect(background.alphaComponent > 0.99)
             if !isDark {
-                renderedData[name] = data
+                #expect(luminance > 0.75)
+                lightLuminances[name] = luminance
+                lightHeights[name] = bitmap.pixelsHigh
             } else {
-                #expect(renderedData[name] != data)
+                #expect(luminance < 0.25)
+                #expect(try #require(lightLuminances[name]) > luminance)
+                #expect(lightHeights[name] == bitmap.pixelsHigh)
             }
         }
 
@@ -324,6 +379,12 @@ import SQLite3
         "menubar.status.active_format",
         "menubar.status.claude_quota",
         "menubar.status.total",
+        "menubar.status.total_label",
+        "menubar.status.cache",
+        "menubar.status.available",
+        "menubar.status.interactions",
+        "menubar.status.connected_short",
+        "menubar.status.disconnected_short",
         "menubar.status.turns_reqs",
         "menubar.status.interaction",
         "menubar.status.in_out_format",
