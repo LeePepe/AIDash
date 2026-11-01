@@ -288,6 +288,12 @@ import SQLite3
         .appendingPathComponent("Development/handoff/sbar-ui-r1/evidence", isDirectory: true)
     try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
     var renderedData: [String: Data] = [:]
+    let minimumHeights: [String: Int] = [
+        "populated": 1_200,
+        "loading": 1_200,
+        "empty": 200,
+        "error": 200
+    ]
 
     for (name, state) in states {
         for isDark in [false, true] {
@@ -302,7 +308,7 @@ import SQLite3
             #expect(!data.isEmpty)
             let bitmap = try #require(NSBitmapImageRep(data: data))
             #expect(bitmap.pixelsWide == 760)
-            #expect(bitmap.pixelsHigh > 0)
+            #expect(bitmap.pixelsHigh > minimumHeights[name, default: 0])
             let suffix = isDark ? "dark" : "light"
             try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
             try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
@@ -316,6 +322,23 @@ import SQLite3
         #expect(MenuBarStatusView.formatLoadAverages(one: 11.26, five: 27.40, fifteen: 25.14) == "11.3 / 27.4 / 25.1")
         #expect(MenuBarStatusView.compactMemoryPair(used: 18 * 1_073_741_824, total: 24 * 1_073_741_824) == "18.0 / 24.0 GB")
     }
+
+    for isDark in [false, true] {
+        let scheme: ColorScheme = isDark ? .dark : .light
+        let view = MenuBarStatusView(state: .populated(snapshot))
+            .designTheme(seed: .lime, neutral: .slate)
+            .environment(\.colorScheme, scheme)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2.0
+        let tiff = try #require(renderer.nsImage?.tiffRepresentation)
+        let data = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+        let bitmap = try #require(NSBitmapImageRep(data: data))
+        #expect(!data.isEmpty)
+        #expect(bitmap.pixelsWide == 760)
+        let suffix = isDark ? "dark" : "light"
+        try data.write(to: outputDirectory.appendingPathComponent("worst-case-\(suffix).png"))
+        try data.write(to: exportDirectory.appendingPathComponent("worst-case-\(suffix).png"))
+    }
 }
 
 @MainActor
@@ -324,6 +347,11 @@ import SQLite3
         "menubar.status.active_format",
         "menubar.status.claude_quota",
         "menubar.status.total",
+        "menubar.status.total_label",
+        "menubar.status.cache",
+        "menubar.status.interactions",
+        "menubar.status.connected_short",
+        "menubar.status.disconnected_short",
         "menubar.status.turns_reqs",
         "menubar.status.interaction",
         "menubar.status.in_out_format",
