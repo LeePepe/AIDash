@@ -57,14 +57,14 @@ public struct MenuBarStatusView: View {
             HStack(alignment: .top, spacing: 12) {
                 Card {
                     networkCard(snapshot.network)
-                        .frame(maxWidth: .infinity, minHeight: 168, maxHeight: 168, alignment: .top)
+                        .frame(maxWidth: .infinity, minHeight: 188, maxHeight: 188, alignment: .top)
                 }
                     .frame(maxWidth: .infinity, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.network)
                 Card {
                     storageCard(snapshot.storage)
-                        .frame(maxWidth: .infinity, minHeight: 168, maxHeight: 168, alignment: .top)
+                        .frame(maxWidth: .infinity, minHeight: 188, maxHeight: 188, alignment: .top)
                 }
                     .frame(maxWidth: .infinity, alignment: .top)
                     .accessibilityElement(children: .combine)
@@ -155,7 +155,7 @@ public struct MenuBarStatusView: View {
         VStack(alignment: .leading, spacing: 8) {
             cardTitle(Copy.cpu, badge: "\(cpu.coreCount)C")
             HStack(spacing: 10) {
-                RingGauge(value: cpu.usage, size: 48, stroke: 5, color: theme.primary.primary, showLabel: false)
+                RingGauge(value: cpu.usage, size: 48, stroke: 5, color: theme.primary.primary, showLabel: true)
                 Text(Copy.loadShort)
                     .font(.system(size: 11))
                     .foregroundStyle(theme.neutrals.text2)
@@ -247,9 +247,6 @@ public struct MenuBarStatusView: View {
                         if volume.isMounted {
                             Text(percent(volume.usageFraction))
                                 .font(.system(size: 11, design: .monospaced))
-                        } else {
-                            StatusPill(Copy.notMounted, tone: .warning)
-                                .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                     if volume.isMounted {
@@ -259,11 +256,14 @@ public struct MenuBarStatusView: View {
                             .foregroundStyle(theme.neutrals.text2)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
-                        Text("\(formatBytes(volume.availableBytes)) available")
+                        Text("\(formatBytes(volume.availableBytes)) \(Copy.available.lowercased())")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(theme.neutrals.text2)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
+                    } else {
+                        StatusPill(Copy.notMounted, tone: .warning)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
