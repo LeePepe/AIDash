@@ -14,8 +14,15 @@ struct SnapshotRenderTests {
     @Test("exports the locked desktop and compact state matrix")
     func exportsStateMatrix() throws {
         #if canImport(AppKit)
-        let output = URL(fileURLWithPath: "/Users/lee/Development/handoff/main-ui-r1/inputs/snapshots",
-                         isDirectory: true)
+        let customDir = ProcessInfo.processInfo.environment["AIDASH_SNAPSHOT_DIR"]
+            .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        let output = customDir ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-ui-snapshots-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if customDir == nil {
+                try? FileManager.default.removeItem(at: output)
+            }
+        }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
 
         let desktop: [(String, BriefingViewState)] = [

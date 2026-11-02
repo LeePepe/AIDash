@@ -36,7 +36,7 @@ public struct BriefingView: View {
         explicitState = nil
     }
 
-    public init(state: BriefingViewState) {
+    init(state: BriefingViewState) {
         self.init()
         explicitState = state
     }
@@ -278,39 +278,39 @@ public struct BriefingView: View {
             RoundedRectangle(cornerRadius: AIDashSpace.s4)
                 .fill(theme.neutrals.inner)
                 .frame(height: AIDashSpace.s12)
-                HStack(spacing: AIDashSpace.s16) {
-                    skeletonCard
-                    skeletonCard
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: AIDashSpace.s16) {
-                    skeletonCard
-                    skeletonCard
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: AIDashSpace.s16) {
+                skeletonCard
+                skeletonCard
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: AIDashSpace.s16) {
+                skeletonCard
+                skeletonCard
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(theme.neutrals.border)
-                    .frame(height: AIDashChrome.hairlineWidth)
-                    .offset(y: AIDashSpace.s16)
+            Rectangle()
+                .fill(theme.neutrals.border)
+                .frame(height: AIDashChrome.hairlineWidth)
+                .offset(y: AIDashSpace.s16)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-                Text("briefing.loading", tableName: "Localizable", bundle: .module,
-                     comment: "Accessibility label for the briefing loading state.")
+            Text("briefing.loading", tableName: "Localizable", bundle: .module,
+                 comment: "Accessibility label for the briefing loading state.")
         )
     }
 
     private var skeletonCard: some View {
         RoundedRectangle(cornerRadius: AIDashSize.cornerRadius(.medium))
-                .fill(theme.neutrals.card)
-                .frame(maxWidth: .infinity, minHeight: AIDashSize.minHeight(.medium))
-                .overlay {
-                    RoundedRectangle(cornerRadius: AIDashSize.cornerRadius(.medium))
-                        .stroke(theme.neutrals.border, lineWidth: AIDashChrome.hairlineWidth)
-                }
+            .fill(theme.neutrals.card)
+            .frame(maxWidth: .infinity, minHeight: AIDashSize.minHeight(.medium))
+            .overlay {
+                RoundedRectangle(cornerRadius: AIDashSize.cornerRadius(.medium))
+                    .stroke(theme.neutrals.border, lineWidth: AIDashChrome.hairlineWidth)
+            }
     }
 
     private var errorState: some View {
