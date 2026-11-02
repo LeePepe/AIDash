@@ -180,7 +180,7 @@ public struct InsightCardView: View {
             title: "Atlas test suite is the bottleneck",
             body: "Over the past week, 64% of CI time was spent in Atlas integration tests. Splitting these into a separate workflow would reduce average PR feedback time by ~40s.",
             citations: [
-                .init(label: "PR #2104 timing", url: "https://github.com/example/atlas/pull/2104/checks"),
+                .init(label: "PR 2104 timing", url: "https://github.com/example/atlas/pull/2104/checks"),
                 .init(label: "Workflow runs", url: "https://github.com/example/atlas/actions"),
             ]
         ),
@@ -197,7 +197,7 @@ public struct InsightCardView: View {
             title: "Atlas test suite is the bottleneck",
             body: "Over the past week, 64% of CI time was spent in Atlas integration tests. Splitting these into a separate workflow would reduce average PR feedback time by ~40s.",
             citations: [
-                .init(label: "PR #2104 timing", url: "https://github.com/example/atlas/pull/2104/checks"),
+                .init(label: "PR 2104 timing", url: "https://github.com/example/atlas/pull/2104/checks"),
                 .init(label: "Workflow runs", url: "https://github.com/example/atlas/actions"),
             ]
         ),

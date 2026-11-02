@@ -57,6 +57,12 @@
             "state": "translated",
             "value": "Use the aidash CLI to publish your first one."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 aidash CLI 发布第一期简报。"
+          }
         }
       }
     },
@@ -67,6 +73,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "No briefings yet"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无简报"
           }
         }
       }
@@ -80,6 +92,12 @@
             "state": "translated",
             "value": "Daily Briefing"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每日简报"
+          }
         }
       }
     },
@@ -90,6 +108,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "This briefing was published without any sections."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此简报发布时没有包含任何分区。"
           }
         }
       }
@@ -102,6 +126,12 @@
             "state": "translated",
             "value": "No sections in this briefing"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此简报没有分区"
+          }
         }
       }
     },
@@ -112,6 +142,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "No new briefing today — showing latest (%1$@)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天没有新的简报 — 显示最近一期（%1$@）"
           }
         }
       }
@@ -483,6 +519,159 @@
           "stringUnit": {
             "state": "translated",
             "value": "Uncategorized"
+          }
+        }
+      }
+    },
+    "briefing.telemetry.accessibility %@ %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Briefing has %1$@ sections and %2$@ cards."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "简报包含 %1$@ 个分区和 %2$@ 张卡片。"
+          }
+        }
+      }
+    },
+    "briefing.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading daily briefing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载每日简报"
+          }
+        }
+      }
+    },
+    "briefing.error.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Briefing unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "简报暂不可用"
+          }
+        }
+      }
+    },
+    "briefing.error.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The briefing could not be loaded. Try again after the host is available."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "简报无法加载。请在主机可用后重试。"
+          }
+        }
+      }
+    },
+    "container.card_count %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ cards in this section."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此分区有 %1$@ 张卡片。"
+          }
+        }
+      }
+    },
+    "briefing.status.live": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LIVE"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时"
+          }
+        }
+      }
+    },
+    "briefing.status.cached": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CACHED"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缓存"
+          }
+        }
+      }
+    },
+    "briefing.status.error": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ERROR"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "错误"
+          }
+        }
+      }
+    },
+    "briefing.status.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EMPTY"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空"
           }
         }
       }

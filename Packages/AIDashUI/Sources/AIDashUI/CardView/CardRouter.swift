@@ -95,14 +95,17 @@ public struct CardRouter: View {
 
     private var fallbackView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(theme.warning)
-                .accessibilityHidden(true)
+            HStack(spacing: AIDashSpace.s8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(theme.warning)
+                    .accessibilityHidden(true)
+                StatusPill("DECODE WARNING", tone: .warning)
+            }
             Text(Self.fallbackTitle)
                 .font(.headline)
             Text(String(format: Self.fallbackDetailFormat, card.type.rawValue))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.neutrals.text2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardChrome(size: card.size, style: card.style)

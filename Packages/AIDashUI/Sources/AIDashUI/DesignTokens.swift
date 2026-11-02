@@ -18,6 +18,7 @@ public enum AIDashTypography {
     /// Overview tier — container titles, section dividers, briefing date header.
     /// `.caption2 / rounded / semibold`, color `.secondary`, letter spacing +0.6pt.
     public static let section: Font = .system(.caption2, design: .rounded, weight: .semibold)
+    public static let overview: Font = section
 
     /// Overview-tier color. Apply with `.foregroundStyle(AIDashTypography.sectionColor)`.
     public static let sectionColor: Color = .secondary

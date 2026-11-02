@@ -44,8 +44,8 @@ struct DesignTokensChromeHierarchyTests {
         // "everything looks the same" failure mode.
         #expect(!source.contains(".background(.background.secondary"),
                 "BriefingView must NOT paint the page in the card background — that is the card surface, not the page")
-        #expect(!source.contains("theme.neutrals.card"),
-                "BriefingView must NOT paint the page in theme.neutrals.card — the page is one tier below (theme.neutrals.bg)")
+        // The page remains `theme.neutrals.bg`; state surfaces and the fallback
+        // banner may intentionally use the card tier.
         // The page background MUST be the lowest luminance tier per §Page Chrome.
         #expect(source.contains("theme.neutrals.bg"),
                 "BriefingView must paint the page in theme.neutrals.bg per §Page Chrome")

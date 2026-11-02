@@ -54,6 +54,28 @@ public enum AIDashContainerChrome {
         count == 1 ? .bare : .framed
     }
 
+    struct ContainerCountBadge: View {
+        let count: Int
+        @Environment(\.theme) private var theme
+
+        var body: some View {
+            Text(String(format: "%02d", count))
+                .font(AIDashTypography.mastheadStatus)
+                .foregroundStyle(theme.neutrals.text2)
+                .padding(.horizontal, AIDashSpace.s8)
+                .padding(.vertical, AIDashSpace.s4)
+                .background(theme.neutrals.inner, in: Capsule())
+                .accessibilityLabel(
+                    Text(
+                        "container.card_count \(count)",
+                        tableName: "Localizable",
+                        bundle: .module,
+                        comment: "Accessibility label for a container's card count."
+                    )
+                )
+        }
+    }
+
     /// Whether an `innerSurface` panel still paints its fill under `mode`.
     /// A whole-card `.body` panel collapses in a bare card; local `.emphasis`
     /// panels stay in both modes.

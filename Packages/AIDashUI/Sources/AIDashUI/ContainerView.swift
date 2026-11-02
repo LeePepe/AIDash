@@ -1,9 +1,11 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 @MainActor
 public struct ContainerView: View {
     let container: ContainerModel
+    @Environment(\.theme) private var theme
 
     public init(container: ContainerModel) {
         self.container = container
@@ -52,19 +54,27 @@ public struct ContainerView: View {
 
     @ViewBuilder
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(container.title)
-                .font(AIDashTypography.section)
-                .tracking(AIDashTypography.sectionTracking)
-                .foregroundStyle(AIDashTypography.sectionColor)
-                .textCase(.uppercase)
-                .containerStyleBar(titleBarStyle)
-            if let subtitle = container.subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(AIDashTypography.section)
-                    .tracking(AIDashTypography.sectionTracking)
-                    .foregroundStyle(AIDashTypography.sectionColor)
+        VStack(alignment: .leading, spacing: AIDashSpace.s8) {
+            HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s8) {
+                VStack(alignment: .leading, spacing: AIDashSpace.s4) {
+                    Text(container.title)
+                        .font(AIDashTypography.overview)
+                        .tracking(AIDashTypography.sectionTracking)
+                        .foregroundStyle(AIDashTypography.sectionColor)
+                        .textCase(.uppercase)
+                        .containerStyleBar(titleBarStyle)
+                    if let subtitle = container.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(AIDashTypography.section)
+                            .tracking(AIDashTypography.sectionTracking)
+                            .foregroundStyle(AIDashTypography.sectionColor)
+                    }
+                }
+                Spacer(minLength: AIDashSpace.s8)
+                AIDashContainerChrome.ContainerCountBadge(count: effectiveCardCount)
             }
+            Divider()
+                .overlay(theme.neutrals.border)
         }
     }
 
