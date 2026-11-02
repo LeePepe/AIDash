@@ -3,10 +3,18 @@ import SwiftData
 import AIDashCore
 import DesignKit
 
+public enum BriefingViewState {
+    case populated(date: String, containers: [ContainerModel], isFallback: Bool, publishedAt: Date?)
+    case loading
+    case empty
+    case error
+}
+
 public struct BriefingView: View {
     @Environment(\.theme) private var theme
     @Query private var todaysBriefings: [BriefingModel]
     @Query private var latestPublished: [BriefingModel]
+    private var explicitState: BriefingViewState?
 
     public init() {
         let today = Self.localTodayString()
@@ -25,6 +33,12 @@ public struct BriefingView: View {
         )
         fallbackDescriptor.fetchLimit = 1
         _latestPublished = Query(fallbackDescriptor)
+        explicitState = nil
+    }
+
+    init(state: BriefingViewState) {
+        self.init()
+        explicitState = state
     }
 
     public var body: some View {
@@ -34,7 +48,7 @@ public struct BriefingView: View {
         // longer drifts into the status bar. macOS keeps its titlebar
         // overlay via the existing safeAreaInset — chrome untouched.
         NavigationStack {
-            scrollBody
+            renderBody
                 .navigationTitle(
                     Text(
                         "briefing.navigation.title",
@@ -46,24 +60,50 @@ public struct BriefingView: View {
                 .navigationBarTitleDisplayMode(.inline)
         }
         #else
-        scrollBody
+        renderBody
         #endif
+    }
+
+    @ViewBuilder
+    private var renderBody: some View {
+        if explicitState != nil {
+            pageContent
+        } else {
+            scrollBody
+        }
+    }
+
+    @ViewBuilder
+    private var pageContent: some View {
+        VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
+            switch resolvedState {
+            case let .populated(date, containers, isFallback, publishedAt):
+                masthead(date: date, isFallback: isFallback, publishedAt: publishedAt,
+                         containerCount: containers.count, cardCount: containers.reduce(0) { $0 + $1.cards.count })
+                if containers.isEmpty {
+                    emptyContainersState
+                } else {
+                    ForEach(containers.sorted { $0.order < $1.order }) {
+                        ContainerView(container: $0)
+                    }
+                }
+            case .loading:
+                stateMasthead
+                loadingState
+            case .empty:
+                stateMasthead
+                emptyState
+            case .error:
+                stateMasthead
+                errorState
+            }
+        }
     }
 
     @ViewBuilder
     private var scrollBody: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
-                if let briefing = todaysBriefings.first {
-                    header(for: briefing, isFallback: false)
-                    containers(for: briefing)
-                } else if let fallback = latestPublished.first {
-                    header(for: fallback, isFallback: true)
-                    containers(for: fallback)
-                } else {
-                    emptyState
-                }
-            }
+            pageContent
             .padding(.horizontal, Self.pageHorizontalPadding)
             .padding(.vertical, AIDashSpacing.pageVertical)
             .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
@@ -80,32 +120,47 @@ public struct BriefingView: View {
         .background(theme.neutrals.bg)
     }
 
+    private var stateMasthead: some View {
+        masthead(date: Self.localTodayString(), isFallback: false, publishedAt: nil,
+                 containerCount: 0, cardCount: 0)
+    }
+
     @ViewBuilder
-    private func header(for briefing: BriefingModel, isFallback: Bool) -> some View {
+    private func masthead(date: String, isFallback: Bool, publishedAt: Date?,
+                          containerCount: Int, cardCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Terminal masthead top line: product mark + live sync status.
-            mastheadStatusLine(for: briefing)
+            mastheadStatusLine(isFallback: isFallback, publishedAt: publishedAt,
+                               containerCount: containerCount, cardCount: cardCount)
 
             if isFallback {
                 HStack(spacing: 8) {
+                    Rectangle()
+                        .fill(theme.warning)
+                        .frame(width: AIDashChrome.stripeWidth)
                     Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(theme.warning)
                     Text(
-                        "briefing.fallback.banner \(briefing.date)",
-                        tableName: "Localizable",
-                        bundle: .module,
-                        comment: "Banner shown above the latest published briefing when no briefing exists for today. Parameter: the date string of the briefing being shown."
+                        String(
+                            localized: "briefing.fallback.banner %@",
+                            defaultValue: "No new briefing today — showing latest (\(date))",
+                            bundle: .module,
+                            comment: "Banner shown above the latest published briefing when no briefing exists for today."
+                        )
                     )
                 }
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(12)
+                .foregroundStyle(theme.neutrals.text2)
+                .padding(AIDashSpace.s12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8))
+                .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: AIDashSpace.s8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AIDashSpace.s8)
+                        .stroke(theme.neutrals.border, lineWidth: AIDashChrome.hairlineWidth)
+                }
                 .accessibilityElement(children: .combine)
             }
 
-            // The date reads as a terminal display value.
-            Text(briefing.date)
+            Text(date)
                 .font(AIDashTypography.masthead)
                 .foregroundStyle(theme.neutrals.text1)
 
@@ -117,16 +172,21 @@ public struct BriefingView: View {
     }
 
     @ViewBuilder
-    private func mastheadStatusLine(for briefing: BriefingModel) -> some View {
+    private func mastheadStatusLine(isFallback: Bool, publishedAt: Date?,
+                                    containerCount: Int, cardCount: Int) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 mastheadIdentity
                 Spacer()
-                publishedStatus(for: briefing)
+                publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
+                telemetryPill(containerCount: containerCount, cardCount: cardCount)
             }
             VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 mastheadIdentity
-                publishedStatus(for: briefing)
+                HStack(spacing: AIDashSpace.s8) {
+                    publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
+                    telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                }
             }
         }
     }
@@ -145,85 +205,187 @@ public struct BriefingView: View {
     }
 
     @ViewBuilder
-    private func publishedStatus(for briefing: BriefingModel) -> some View {
-        if let publishedAt = briefing.publishedAt {
-            HStack(spacing: 6) {
-                Circle().fill(theme.success).frame(width: 7, height: 7)
+    private func publishedStatus(isFallback: Bool, publishedAt: Date?) -> some View {
+        if !isFallback, let publishedAt {
+            HStack(spacing: AIDashSpace.s4) {
+                StatusPill(Self.liveLabel, tone: .success)
                 Text(
-                    "briefing.published.relative \(publishedAt.formatted(.relative(presentation: .named)))",
-                    tableName: "Localizable",
-                    bundle: .module,
-                    comment: "Caption showing how long ago the briefing was published. Parameter: a localized relative time string like 'yesterday'."
+                    String(
+                        localized: "briefing.published.relative %@",
+                        defaultValue: "Published \(publishedAt.formatted(.relative(presentation: .named)))",
+                        bundle: .module,
+                        comment: "Caption showing how long ago the briefing was published."
+                    )
                 )
                 .font(AIDashTypography.mastheadStatus)
                 .foregroundStyle(theme.neutrals.text2)
             }
+        } else {
+            StatusPill(Self.cachedLabel, tone: .warning)
         }
     }
 
-    @ViewBuilder
-    private func containers(for briefing: BriefingModel) -> some View {
-        let sorted = briefing.containers.sorted(by: { $0.order < $1.order })
-        if sorted.isEmpty {
-            emptyContainersState
-        } else {
-            ForEach(sorted) { container in
-                ContainerView(container: container)
-            }
+    private func telemetryPill(containerCount: Int, cardCount: Int) -> some View {
+        let format = String(
+            localized: "briefing.telemetry.pill",
+            defaultValue: "%1$02d SEC · %2$02d CARDS",
+            bundle: .module,
+            comment: "Compact telemetry readout showing container and card counts."
+        )
+        return Text(String(format: format, containerCount, cardCount))
+            .font(AIDashTypography.mastheadStatus)
+            .foregroundStyle(theme.neutrals.text2)
+            .padding(.horizontal, AIDashSpace.s8)
+            .padding(.vertical, AIDashSpace.s4)
+            .background(theme.neutrals.inner, in: Capsule())
+            .accessibilityLabel(
+                Text(
+                    "briefing.telemetry.accessibility \(containerCount) \(cardCount)",
+                    tableName: "Localizable",
+                    bundle: .module,
+                    comment: "Accessibility label for briefing container and card counts."
+                )
+            )
+    }
+
+    private var resolvedState: BriefingViewState {
+        if let explicitState {
+            return explicitState
         }
+        if let briefing = todaysBriefings.first {
+            return .populated(date: briefing.date, containers: briefing.containers,
+                              isFallback: false, publishedAt: briefing.publishedAt)
+        }
+        if let fallback = latestPublished.first {
+            return .populated(date: fallback.date, containers: fallback.containers,
+                              isFallback: true, publishedAt: fallback.publishedAt)
+        }
+        return .empty
     }
 
     private var emptyContainersState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "square.dashed")
-                .font(.system(size: 40))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-            Text(
-                "briefing.empty_containers.title",
-                tableName: "Localizable",
-                bundle: .module,
-                comment: "Shown when a published briefing exists but has no containers."
-            )
-            .font(.headline)
-            Text(
-                "briefing.empty_containers.subtitle",
-                tableName: "Localizable",
-                bundle: .module,
-                comment: "Subtitle explaining that the briefing was published without any content sections."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, minHeight: 160)
-        .padding()
+        diagnosticCard(icon: "square.dashed", titleKey: "briefing.empty_containers.title",
+                       detailKey: "briefing.empty_containers.subtitle", tone: .neutral)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "tray")
-                .font(.system(size: 56))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-            Text(
-                "briefing.empty.title",
-                tableName: "Localizable",
-                bundle: .module,
-                comment: "Title shown when no briefings have been published yet."
-            )
-            .font(.title2)
-            Text(
-                "briefing.empty.subtitle",
-                tableName: "Localizable",
-                bundle: .module,
-                comment: "Subtitle directing the user to use the aidash CLI to publish their first briefing."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
+        diagnosticCard(icon: "tray", titleKey: "briefing.empty.title",
+                       detailKey: "briefing.empty.subtitle", tone: .neutral)
     }
+
+    private var loadingState: some View {
+        VStack(alignment: .leading, spacing: AIDashSpace.s16) {
+            RoundedRectangle(cornerRadius: AIDashSpace.s4)
+                .fill(theme.neutrals.inner)
+                .frame(height: AIDashSpace.s12)
+            HStack(spacing: AIDashSpace.s16) {
+                skeletonCard
+                skeletonCard
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: AIDashSpace.s16) {
+                skeletonCard
+                skeletonCard
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(theme.neutrals.border)
+                .frame(height: AIDashChrome.hairlineWidth)
+                .offset(y: AIDashSpace.s16)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            Text("briefing.loading", tableName: "Localizable", bundle: .module,
+                 comment: "Accessibility label for the briefing loading state.")
+        )
+    }
+
+    private var skeletonCard: some View {
+        RoundedRectangle(cornerRadius: AIDashSize.cornerRadius(.medium))
+            .fill(theme.neutrals.card)
+            .frame(maxWidth: .infinity, minHeight: AIDashSize.minHeight(.medium))
+            .overlay {
+                RoundedRectangle(cornerRadius: AIDashSize.cornerRadius(.medium))
+                    .stroke(theme.neutrals.border, lineWidth: AIDashChrome.hairlineWidth)
+            }
+    }
+
+    private var errorState: some View {
+        diagnosticCard(icon: "exclamationmark.triangle", titleKey: "briefing.error.title",
+                       detailKey: "briefing.error.subtitle", tone: .danger)
+    }
+
+    private func diagnosticCard(icon: String, titleKey: String, detailKey: String,
+                                tone: PillTone) -> some View {
+        VStack(alignment: .leading, spacing: AIDashSpace.s12) {
+            StatusPill(titleKey == "briefing.error.title" ? Self.errorLabel : Self.emptyLabel, tone: tone)
+            Image(systemName: icon)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(icon == "exclamationmark.triangle" ? theme.danger : theme.neutrals.text2)
+                .accessibilityHidden(true)
+            Text(localizedStateText(for: titleKey))
+                .font(.title3.weight(.semibold))
+            Text(localizedStateText(for: detailKey))
+                .font(.callout)
+                .foregroundStyle(theme.neutrals.text2)
+        }
+        .padding(AIDashSpace.s20)
+        .frame(maxWidth: .infinity, minHeight: 220, alignment: .leading)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: AIDashSpace.s12))
+        .overlay {
+            RoundedRectangle(cornerRadius: AIDashSpace.s12)
+                .stroke(theme.neutrals.border, lineWidth: AIDashChrome.hairlineWidth)
+        }
+    }
+
+    private func localizedStateText(for key: String) -> String {
+        switch key {
+        case "briefing.empty.title":
+            return String(localized: "briefing.empty.title", defaultValue: "No briefings yet",
+                          bundle: .module, comment: "Briefing empty-state title.")
+        case "briefing.empty.subtitle":
+            return String(localized: "briefing.empty.subtitle",
+                          defaultValue: "Use the aidash CLI to publish your first one.",
+                          bundle: .module, comment: "Briefing empty-state detail.")
+        case "briefing.empty_containers.title":
+            return String(localized: "briefing.empty_containers.title",
+                          defaultValue: "No sections in this briefing",
+                          bundle: .module, comment: "Empty-container state title.")
+        case "briefing.empty_containers.subtitle":
+            return String(localized: "briefing.empty_containers.subtitle",
+                          defaultValue: "This briefing was published without any sections.",
+                          bundle: .module, comment: "Empty-container state detail.")
+        case "briefing.error.title":
+            return String(localized: "briefing.error.title", defaultValue: "Briefing unavailable",
+                          bundle: .module, comment: "Briefing error-state title.")
+        case "briefing.error.subtitle":
+            return String(localized: "briefing.error.subtitle",
+                          defaultValue: "The briefing could not be loaded. Try again after the host is available.",
+                          bundle: .module, comment: "Briefing error-state detail.")
+        default:
+            return key
+        }
+    }
+
+    private static let liveLabel = String(
+        localized: "briefing.status.live", defaultValue: "LIVE", bundle: .module,
+        comment: "Freshness status shown for a current briefing."
+    )
+    private static let cachedLabel = String(
+        localized: "briefing.status.cached", defaultValue: "CACHED", bundle: .module,
+        comment: "Freshness status shown for a fallback briefing."
+    )
+    private static let errorLabel = String(
+        localized: "briefing.status.error", defaultValue: "ERROR", bundle: .module,
+        comment: "Status label shown for the briefing error state."
+    )
+    private static let emptyLabel = String(
+        localized: "briefing.status.empty", defaultValue: "EMPTY", bundle: .module,
+        comment: "Status label shown for the briefing empty state."
+    )
 
     // MARK: - Page chrome tokens
     //

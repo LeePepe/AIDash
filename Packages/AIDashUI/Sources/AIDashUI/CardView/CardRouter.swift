@@ -95,14 +95,17 @@ public struct CardRouter: View {
 
     private var fallbackView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(theme.warning)
-                .accessibilityHidden(true)
+            HStack(spacing: AIDashSpace.s8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(theme.warning)
+                    .accessibilityHidden(true)
+                StatusPill(Self.fallbackBadge, tone: .warning)
+            }
             Text(Self.fallbackTitle)
                 .font(.headline)
             Text(String(format: Self.fallbackDetailFormat, card.type.rawValue))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.neutrals.text2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardChrome(size: card.size, style: card.style)
@@ -120,6 +123,13 @@ public struct CardRouter: View {
         defaultValue: "Card unavailable",
         bundle: .module,
         comment: "Headline shown in the CardRouter fallback placeholder when a card payload cannot be decoded."
+    )
+
+    private static let fallbackBadge = String(
+        localized: "card_router.fallback.badge",
+        defaultValue: "DECODE WARNING",
+        bundle: .module,
+        comment: "Badge shown when a card payload cannot be decoded."
     )
 
     private static let fallbackDetailFormat = String(

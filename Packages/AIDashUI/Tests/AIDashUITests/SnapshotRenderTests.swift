@@ -1,238 +1,118 @@
-import Testing
-import SwiftUI
 import Foundation
+import SwiftUI
+import Testing
 import AIDashCore
+import DesignKit
 @testable import AIDashUI
-@testable import DesignKit
+#if canImport(AppKit)
+import AppKit
+#endif
 
-// Off-screen snapshot renderer. Uses SwiftUI's ImageRenderer (no screen-
-// recording permission needed) to rasterize the modernized cards with the
-// sample-briefing data, so the rendered result can be inspected directly.
-// Gated behind AIDASH_SNAPSHOT=1 so it never runs in the normal test gate.
 @MainActor
-@Suite("Snapshot render (manual)")
+@Suite("Main page snapshots")
 struct SnapshotRenderTests {
+    @Test("exports the locked desktop and compact state matrix")
+    func exportsStateMatrix() throws {
+        #if canImport(AppKit)
+        let customDir = ProcessInfo.processInfo.environment["AIDASH_SNAPSHOT_DIR"]
+            .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        let output = customDir ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-ui-snapshots-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if customDir == nil {
+                try? FileManager.default.removeItem(at: output)
+            }
+        }
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
 
-    private func render(_ view: some View, width: CGFloat, to name: String) {
-        for (suffix, scheme) in [("", ColorScheme.light), ("-dark", ColorScheme.dark)] {
-            let host = view
-                .frame(width: width)
-                .designTheme(seed: .lime, neutral: .slate)
+        let desktop: [(String, BriefingViewState)] = [
+            ("desktop-populated", .populated(
+                date: "2026-11-02", containers: Self.sampleContainers, isFallback: true,
+                publishedAt: Date(timeIntervalSinceNow: -3600))),
+            ("desktop-loading", .loading),
+            ("desktop-empty", .empty),
+            ("desktop-error", .error),
+        ]
+        let compact: [(String, BriefingViewState)] = [
+            ("compact-populated", .populated(
+                date: "2026-11-02", containers: Self.sampleContainers, isFallback: false,
+                publishedAt: Date(timeIntervalSinceNow: -120))),
+            ("compact-empty", .empty),
+        ]
+
+        for (name, state) in desktop {
+            try render(state: state, name: name, width: 1200, padding: 24, output: output)
+        }
+        for (name, state) in compact {
+            try render(state: state, name: name, width: 390, padding: 20, output: output)
+        }
+        #else
+        Issue.record("Snapshots require AppKit's ImageRenderer on macOS.")
+        #endif
+    }
+
+    #if canImport(AppKit)
+    private func render(
+        state: BriefingViewState,
+        name: String,
+        width: CGFloat,
+        padding: CGFloat,
+        output: URL
+    ) throws {
+        for (suffix, scheme) in [("-light", ColorScheme.light), ("-dark", ColorScheme.dark)] {
+            let theme = Theme(seed: .lime, neutral: .slate, isDark: scheme == .dark)
+            let host = BriefingView(state: state)
+                .padding(.horizontal, padding)
+                .padding(.vertical, AIDashSpacing.pageVertical)
+                .frame(width: width, alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(theme.neutrals.bg)
+                .environment(\.theme, theme)
                 .environment(\.colorScheme, scheme)
             let renderer = ImageRenderer(content: host)
             renderer.scale = 2
-            #if canImport(AppKit)
-            guard let nsImage = renderer.nsImage,
-                  let tiff = nsImage.tiffRepresentation,
-                  let rep = NSBitmapImageRep(data: tiff),
-                  let png = rep.representation(using: .png, properties: [:]) else {
-                Issue.record("ImageRenderer produced no image for \(name)\(suffix)")
-                continue
-            }
-            let url = URL(fileURLWithPath: "/tmp/aidash-shots/\(name)\(suffix).png")
-            try? png.write(to: url)
-            #endif
+            let nsImage = try #require(renderer.nsImage)
+            let tiff = try #require(nsImage.tiffRepresentation)
+            let rep = try #require(NSBitmapImageRep(data: tiff))
+            let png = try #require(rep.representation(using: .png, properties: [:]))
+            #expect(rep.pixelsWide == Int(width * 2))
+            let uniqueColors = Set((0..<rep.pixelsHigh).flatMap { y in
+                (0..<rep.pixelsWide).map { x in
+                    rep.colorAt(x: x, y: y)?.cgColor.components?.prefix(3).map { Int($0 * 255) } ?? []
+                }
+            })
+            #expect(uniqueColors.count > 20)
+            let url = output.appendingPathComponent("\(name)\(suffix).png")
+            try png.write(to: url)
         }
     }
 
-    @Test("render OVERVIEW KPI grid + prose cards to /tmp/aidash-shots")
-    func renderSample() {
-        guard ProcessInfo.processInfo.environment["AIDASH_SNAPSHOT"] == "1" else { return }
-
-        let overview = container("Overview", .grid, [
-            card(.metric, .small, .neutral, #"{"items":[{"label":"PRs merged","value":12,"trend":"up","higherIsBetter":true,"context":"Atlas · this week","series":[4,6,5,8,7,10,9,12]}]}"#),
-            card(.metric, .small, .neutral, #"{"items":[{"label":"Build time","value":124,"unit":"s","trend":"down","higherIsBetter":false,"context":"CI median · 7d","series":[180,170,165,150,148,140,132,124]}]}"#),
-            card(.metric, .small, .neutral, #"{"items":[{"label":"Coverage","value":87,"unit":"%","ratio":0.87,"context":"Atlas"}]}"#),
-            card(.metric, .small, .neutral, #"{"items":[{"label":"Open incidents","value":3,"trend":"up","higherIsBetter":false,"context":"all repos · today","series":[0,1,1,2,1,2,2,3]}]}"#),
-        ])
-
-        let today = container("Today", .grid, [
-            card(.digest, .wide, .neutral, #"{"title":"A strong, incident-light day","subtitle":"All repos · yesterday","body":"Twelve PRs merged across Atlas and Basalt, with the v9-blocking crash finally resolved. The design-system migration crossed 70%. Build times are trending down.","sections":[{"heading":"Shipped","paragraphs":["PROJ-301 crash fix (unblocks v9).","Cache rework cut CI 30%."]},{"heading":"Blocking today","paragraphs":["Perf review feedback due 5pm."]}]}"#),
-            card(.insight, .medium, .accent, #"{"title":"Build-cache rework is paying off","subtitle":"Atlas CI · this week","body":"Median CI dropped 180s to 124s over the week — the single biggest developer-time win this sprint."}"#),
-            card(.agentSummary, .medium, .success, #"{"agentName":"Multica","completed":[{"title":"Merged 3 Atlas PRs"},{"title":"Regenerated changelog"}],"stats":[{"label":"PRs","value":3},{"label":"Reviews","value":9},{"label":"Hours","value":6.5}]}"#),
-            card(.todoList, .medium, .warning, #"{"items":[{"title":"Reply to perf review","priority":"high"},{"title":"Decide Q3 priorities","priority":"high"},{"title":"Review changelog","priority":"medium"},{"title":"Archive branches","priority":"low"}]}"#),
-        ])
-
-        render(
-            VStack(alignment: .leading, spacing: 32) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("2026-07-08").font(.largeTitle.bold())
-                    Text("Published just now").font(.caption).foregroundStyle(.secondary)
-                }
-                ContainerView(container: overview)
-                ContainerView(container: today)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading),
-            width: 1000,
-            to: "render"
+    private static var sampleContainers: [ContainerModel] {
+        let overview = ContainerModel(
+            id: "overview", title: "运行状态与交付信号", subtitle: "今日 · 多工作区",
+            order: 0, layout: .grid, style: .accent
         )
-
-        // Variant: EVERYTHING in one grid container, mixed sizes only. Proves
-        // TokenGrid packs 4 small KPIs + a wide digest + medium prose into a
-        // single greedy-packed grid without separate containers.
-        let unified = container("Today", .grid, [
-            card(.metric, .small, .neutral, #"{"items":[{"label":"PRs merged","value":12,"trend":"up","higherIsBetter":true,"context":"Atlas","series":[4,6,5,8,7,10,9,12]}]}"#),
-            card(.metric, .small, .neutral, #"{"items":[{"label":"Build time","value":124,"unit":"s","trend":"down","higherIsBetter":false,"context":"CI · 7d","series":[180,170,165,150,148,140,132,124]}]}"#),
-            card(.metric, .small, .neutral, #"{"items":[{"label":"Coverage","value":87,"unit":"%","ratio":0.87,"context":"Atlas"}]}"#),
-            card(.metric, .small, .neutral, #"{"items":[{"label":"Open incidents","value":3,"trend":"up","higherIsBetter":false,"context":"today","series":[0,1,1,2,1,2,2,3]}]}"#),
-            card(.digest, .wide, .neutral, #"{"title":"A strong, incident-light day","subtitle":"All repos · yesterday","body":"Twelve PRs merged across Atlas and Basalt, with the v9-blocking crash finally resolved. Build times are trending down.","sections":[{"heading":"Shipped","paragraphs":["PROJ-301 crash fix.","Cache rework cut CI 30%."]},{"heading":"Blocking","paragraphs":["Perf review due 5pm."]}]}"#),
-            card(.insight, .medium, .accent, #"{"title":"Build-cache rework is paying off","subtitle":"Atlas CI","body":"Median CI dropped 180s to 124s — the biggest developer-time win this sprint."}"#),
-            card(.todoList, .medium, .warning, #"{"items":[{"title":"Reply to perf review","priority":"high"},{"title":"Decide Q3 priorities","priority":"high"},{"title":"Review changelog","priority":"medium"}]}"#),
-        ])
-        render(
-            VStack(alignment: .leading, spacing: 16) {
-                Text("2026-07-08").font(.largeTitle.bold())
-                ContainerView(container: unified)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading),
-            width: 1000,
-            to: "render-unified"
+        overview.cards = [
+            card("metric-a", .metric, #"{"items":[{"label":"已合并 PR","value":1284,"trend":"up","series":[820,940,1100,1180,1284],"higherIsBetter":true,"context":"本周"}]}"#),
+            card("metric-b", .metric, #"{"items":[{"label":"构建时间","value":124,"unit":"s","trend":"down","ratio":0.76,"higherIsBetter":false,"context":"CI 中位数"}]}"#),
+            card("todos", .todoList, #"{"items":[{"title":"回复性能复核","priority":"high"},{"title":"归档分支","priority":"low"}]}"#),
+        ]
+        let evidence = ContainerModel(
+            id: "evidence", title: "本日证据与待处理事项", subtitle: "Agent authored briefing",
+            order: 1, layout: .grid, style: .neutral
         )
-
-        // Variant: REAL agent data (large magnitudes + a 9-item wide metric +
-        // sparse hero/list cards) — the case that broke on live data. Proves
-        // formattedValue abbreviates (217836228 → 218M) and nothing overflows.
-        let trends = container("趋势指标", .auto, [
-            // A single 9-item metric payload is one irreducible JSON literal;
-            // it can't wrap, so exempt just this line from line_length.
-            // swiftlint:disable:next line_length
-            card(.metric, .wide, .neutral, #"{"items":[{"label":"成本","value":1013.79,"unit":"$","trend":"down","higherIsBetter":false,"series":[1408.19,728.46,1063.87,833.82,491.59,1837.16,698.83,2493.94,4523.19,2180.19,2854.52,2717.9,2013.81,1013.79]},{"label":"Token","value":217836228,"trend":"down","series":[325255254,142186521,209118076,175099598,106793163,405750768,176161328,685800284,1236175928,498605887,720861036,767046007,511537245,217836228]},{"label":"请求数","value":1301,"trend":"down","series":[6136,4440,2240,2232,1459,3883,2439,7066,12657,4595,8604,6990,4428,1301]},{"label":"浪费额","value":112.3,"unit":"$","trend":"down","higherIsBetter":false,"series":[228.16,187.96,147.7,113.22,50.05,185.56,90.72,104.87,123.18,55.67,286.45,312.23,267.49,112.3]},{"label":"完成任务","value":0,"trend":"down","higherIsBetter":true,"series":[49,6,2,13,14,75,45,247,394,37,143,92,26,0]},{"label":"会话数","value":4,"trend":"down","higherIsBetter":true,"series":[24,9,23,18,7,26,13,78,121,19,78,19,12,4]},{"label":"完成 issue","value":1,"trend":"down","higherIsBetter":true,"series":[10,1,1,5,2,5,11,49,72,5,26,9,7,1]},{"label":"开 PR","value":1,"trend":"flat","higherIsBetter":true,"series":[2,2,2,1,2,2,3,0,0,2,0,7,1,1]},{"label":"自动化占比","value":100,"unit":"%","ratio":1.0,"trend":"flat","higherIsBetter":true}]}"#),
-        ])
-        render(
-            VStack(alignment: .leading, spacing: 16) {
-                Text("2026-07-12").font(.largeTitle.bold())
-                ContainerView(container: trends)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading),
-            width: 1000,
-            to: "render-realdata"
-        )
-
-        // Variant: SPARSE / EMPTY cards mixed into a grid — a valid-but-empty
-        // metric payload (a quiet day) must render the neutral empty state, not
-        // a bare-badge box. Sits beside a populated small KPI for contrast.
-        let sparse = container("Sparse", .grid, [
-            card(.metric, .small, .neutral, #"{"items":[{"label":"完成任务","value":0,"trend":"flat","higherIsBetter":true}]}"#),
-            card(.metric, .small, .neutral, #"{"items":[]}"#),
-            card(.metric, .medium, .neutral, #"{"items":[]}"#),
-            card(.metric, .wide, .neutral, #"{"items":[]}"#),
-        ])
-        render(
-            VStack(alignment: .leading, spacing: 16) {
-                Text("2026-07-12").font(.largeTitle.bold())
-                ContainerView(container: sparse)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading),
-            width: 1000,
-            to: "render-sparse"
-        )
-
-        // Variant: GitHub 工具雷达 — the redesigned trending card. Each row is a
-        // recommendation block: clickable repo link, star + Δ pill, a one-line
-        // reason, and a category tag. No score sparkline. Renders the real radar
-        // container so the redesign can be inspected directly.
-        // swiftlint:disable line_length
-        let radar = container("GitHub 工具雷达", .auto, [
-            card(.trending, .hero, .accent, #"{"topic":"值得现在看 · 多关联 Financial","items":[{"title":"VoltAgent/awesome-design-md","url":"https://github.com/VoltAgent/awesome-design-md","score":102743,"delta":12,"category":"设计系统/AI编码","reason":"DESIGN.md 让 AI agents 生成匹配 UI，直接加速 AIDashUI 的设计系统建设"},{"title":"TauricResearch/TradingAgents","url":"https://github.com/TauricResearch/TradingAgents","score":93459,"delta":412,"category":"AI-agent/交易投资","reason":"多 Agent LLM 金融交易框架，与 Financial 项目直接相关，可用于交易策略开发"},{"title":"ZhuLinsen/daily_stock_analysis","url":"https://github.com/ZhuLinsen/daily_stock_analysis","score":57689,"delta":-8,"category":"AI-agent/交易投资","reason":"LLM 驱动的量化交易系统，与 Financial 的交易分析需求高度契合"},{"title":"emilkowalski/skills","url":"https://github.com/emilkowalski/skills","score":16785,"delta":16,"category":"设计工具","reason":"与你的 Skills 项目同名，直接相关，值得深入了解其设计理念和实现"},{"title":"HKUDS/OpenHarness","url":"https://github.com/HKUDS/OpenHarness","score":14887,"category":"AI-agent 框架","reason":"开源 Agent 框架，与 AIDash 的智能助手系统直接相关，可参考其架构设计"},{"title":"oh-my-mermaid/oh-my-mermaid","url":"https://github.com/oh-my-mermaid/oh-my-mermaid","score":1793,"delta":3,"category":"开发工具","reason":"用 Claude Code 自动生成架构图，适合理解复杂系统"},{"title":"simonlin1212/investment-news","url":"https://github.com/simonlin1212/investment-news","score":289,"delta":5,"category":"交易投资","reason":"A股投资资讯聚合工具，覆盖 12 大赛道，本地 LLM 提炼要点"}]}"#),
-            card(.trending, .hero, .neutral, #"{"topic":"拓展视野","items":[{"title":"byoungd/up","url":"https://github.com/byoungd/up","score":55918,"delta":1,"category":"学习","reason":"英语学习指南，与技术项目无直接关系，但作为开发者的通用技能提升有参考价值"},{"title":"bleedline/aimoneyhunter","url":"https://github.com/bleedline/aimoneyhunter","score":17808,"category":"AI-agent/交易投资","reason":"AI 副业赚钱指南，与 Financial 项目理念相关，但更偏实践案例而非核心技术"},{"title":"tw93/Kami","url":"https://github.com/tw93/Kami","score":9944,"category":"工具","reason":"内容展示工具，可作为知识管理参考，但与现有项目关联不大"},{"title":"zkbys/whiteboard","url":"https://github.com/zkbys/whiteboard","score":15,"category":"工具","reason":"Python 白板工具，可能涉及可视化或协作功能，拓展工具库"}]}"#),
-        ])
-        // swiftlint:enable line_length
-        render(
-            VStack(alignment: .leading, spacing: 16) {
-                Text("2026-07-17").font(.largeTitle.bold())
-                ContainerView(container: radar)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading),
-            width: 1960,   // real dashboard width — where the row goes "too empty"
-            to: "render-radar"
-        )
-
-        // Variant: the two NEW card types — barList (failure root cause with a
-        // semantic hot row + a pure-ranking app-focus card) and stackedBar
-        // (session quality with a warning segment + categorical model tiers).
-        // swiftlint:disable line_length
-        let newCards = container("AI 效能 · 时间与产出", .grid, [
-            card(.barList, .medium, .neutral, #"{"items":[{"label":"runtime-offline","value":39,"valueText":"39%","semantic":"warning"},{"label":"codex-init-fail","value":21,"valueText":"21%"},{"label":"queue-timeout","value":14,"valueText":"14%"},{"label":"rate-limited","value":9,"valueText":"9%"}]}"#),
-            card(.barList, .medium, .neutral, #"{"items":[{"label":"cmux","value":4.4,"valueText":"4.4min"},{"label":"Chrome","value":1.4,"valueText":"1.4min"},{"label":"Outlook","value":1.3,"valueText":"1.3min"}]}"#),
-            card(.stackedBar, .medium, .neutral, #"{"title":"会话质量","segments":[{"label":"end_turn","value":70,"semantic":"success"},{"label":"tool_use","value":25},{"label":"max_tokens","value":5,"semantic":"warning"}]}"#),
-            card(.stackedBar, .medium, .neutral, #"{"title":"模型分层","segments":[{"label":"opus-4.6-1m","value":73.5},{"label":"opus-4.7","value":18},{"label":"gpt-5.4","value":8.5}]}"#),
-        ])
-        // swiftlint:enable line_length
-        render(
-            VStack(alignment: .leading, spacing: 16) {
-                Text("2026-07-26").font(.largeTitle.bold())
-                ContainerView(container: newCards)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading),
-            width: 1000,
-            to: "render-new-cards"
-        )
-
-        // Variant: relationship — the three visualizations side by side, so the
-        // chart + evidence rail can be inspected at both the medium (stacked)
-        // and wide (side-by-side) ViewThatFits outcomes.
-        // swiftlint:disable line_length
-        let relationships = container("关联 · 成本 × 产出", .grid, [
-            card(.relationship, .wide, .neutral, #"{"title":"Cost × outcome","visualization":"scatter","xAxis":{"label":"Cost per completed task","unit":"USD"},"yAxis":{"label":"First-pass completion proxy","unit":"%"},"points":[{"label":"AIDash","x":2.1,"y":88,"magnitude":34,"category":"project"},{"label":"Financial","x":3.4,"y":81,"magnitude":21,"category":"project"},{"label":"Skills","x":4.8,"y":74,"magnitude":12,"category":"workspace"},{"label":"Multica","x":5.6,"y":69,"magnitude":28,"category":"workspace"},{"label":"aidata","x":6.9,"y":62,"magnitude":9,"category":"project"}],"sampleSize":34,"timeWindow":"7d","metricDefinition":"completed is a pipeline proxy, not objective correctness","summary":"AIDash has the lowest observed cost at the highest completion proxy."}"#),
-            card(.relationship, .medium, .neutral, #"{"title":"Rework concentration","visualization":"heatmap","xAxis":{"label":"Day"},"yAxis":{"label":"Workspace"},"cells":[{"column":"08-09","row":"AIDash","value":12000},{"column":"08-10","row":"AIDash","value":48000},{"column":"08-11","row":"AIDash","value":6000},{"column":"08-09","row":"Financial","value":3000},{"column":"08-10","row":"Financial","value":9000},{"column":"08-11","row":"Financial","value":27000}],"sampleSize":4,"timeWindow":"7d","metricDefinition":"tokens on issues completed after cancellation","summary":"Observed rework is concentrated on one day; no causal claim."}"#),
-            card(.relationship, .medium, .neutral, #"{"title":"Before × after","visualization":"slope","xAxis":{"label":"Period"},"yAxis":{"label":"Tokens per completed task"},"slopes":[{"label":"AIDash","before":21000,"after":18000},{"label":"Financial","before":17500,"after":19200},{"label":"Skills","before":12400,"after":9800}],"sampleSize":12,"timeWindow":"previous 7d vs current 7d","metricDefinition":"total tokens divided by completed pipeline tasks","summary":"Observed unit token use decreased."}"#),
-        ])
-        // swiftlint:enable line_length
-        render(
-            VStack(alignment: .leading, spacing: 16) {
-                Text("2026-08-12").font(.largeTitle.bold())
-                ContainerView(container: relationships)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading),
-            width: 1200,
-            to: "render-relationship"
-        )
-
-        // Variant: the two review-found edge cases, so both are inspectable by
-        // eye — a MIXED-magnitude scatter (points 2 and 4 carry no magnitude
-        // and must render as small hollow rings, not mid-size solid discs),
-        // and a TRUNCATED scatter on a small card (12 points against a cap of
-        // 8, so the "Showing 8 of 12." disclosure must appear).
-        // swiftlint:disable line_length
-        let edgeCases = container("关联 · 边界情况", .grid, [
-            card(.relationship, .wide, .neutral, #"{"title":"Mixed magnitudes","visualization":"scatter","xAxis":{"label":"Cost","unit":"USD"},"yAxis":{"label":"Completion","unit":"%"},"points":[{"label":"has-a","x":1.2,"y":90,"magnitude":80},{"label":"missing-b","x":2.4,"y":78},{"label":"has-c","x":3.6,"y":66,"magnitude":30},{"label":"missing-d","x":4.8,"y":54},{"label":"has-e","x":6.0,"y":42,"magnitude":55}],"sampleSize":5,"timeWindow":"7d","metricDefinition":"magnitude is optional per point","summary":"Two points carry no magnitude and must read as absent, not as mid-range."}"#),
-            card(.relationship, .small, .neutral, #"{"title":"Truncated","visualization":"scatter","xAxis":{"label":"X"},"yAxis":{"label":"Y"},"points":[{"label":"p1","x":1,"y":10,"magnitude":5},{"label":"p2","x":2,"y":20,"magnitude":9},{"label":"p3","x":3,"y":30,"magnitude":14},{"label":"p4","x":4,"y":25,"magnitude":7},{"label":"p5","x":5,"y":40,"magnitude":18},{"label":"p6","x":6,"y":35,"magnitude":11},{"label":"p7","x":7,"y":50,"magnitude":22},{"label":"p8","x":8,"y":45,"magnitude":16},{"label":"p9","x":9,"y":60,"magnitude":26},{"label":"p10","x":10,"y":55,"magnitude":20},{"label":"p11","x":11,"y":70,"magnitude":30},{"label":"p12","x":12,"y":65,"magnitude":24}],"sampleSize":12,"timeWindow":"7d","metricDefinition":"12 points against a small-card cap of 8","summary":"Only part of this dataset is plotted."}"#),
-        ])
-        // swiftlint:enable line_length
-        render(
-            VStack(alignment: .leading, spacing: 16) {
-                Text("2026-08-13").font(.largeTitle.bold())
-                ContainerView(container: edgeCases)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading),
-            width: 1200,
-            to: "render-relationship-edges"
-        )
+        evidence.cards = [
+            card("digest", .digest, #"{"title":"系统保持稳定","subtitle":"过去 24 小时","body":"十二个 PR 已合并，构建时间持续下降。","sections":[{"heading":"下一步","paragraphs":["完成性能复核。"]}]}"#, style: .accent)
+        ]
+        return [overview, evidence]
     }
 
-    // MARK: - In-memory model builders
-
-    private func container(_ title: String, _ layout: ContainerLayout, _ cards: [CardModel]) -> ContainerModel {
-        let c = ContainerModel(
-            id: UUID().uuidString, title: title, subtitle: nil,
-            order: 10, layout: layout, style: .neutral
-        )
-        c.cards = cards
-        return c
-    }
-
-    private func card(_ type: CardType, _ size: CardSize, _ style: CardStyle, _ json: String) -> CardModel {
+    private static func card(_ id: String, _ type: CardType, _ json: String,
+                             style: CardStyle = .neutral) -> CardModel {
         CardModel(
-            id: UUID().uuidString, type: type, size: size,
-            style: style, payloadJSON: Data(json.utf8)
+            id: id, type: type, size: .medium, style: style,
+            payloadJSON: Data(json.utf8)
         )
     }
+    #endif
 }

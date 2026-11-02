@@ -18,6 +18,7 @@ public enum AIDashTypography {
     /// Overview tier — container titles, section dividers, briefing date header.
     /// `.caption2 / rounded / semibold`, color `.secondary`, letter spacing +0.6pt.
     public static let section: Font = .system(.caption2, design: .rounded, weight: .semibold)
+    public static let overview: Font = section
 
     /// Overview-tier color. Apply with `.foregroundStyle(AIDashTypography.sectionColor)`.
     public static let sectionColor: Color = .secondary
@@ -36,7 +37,7 @@ public enum AIDashTypography {
     public static let masthead: Font = .system(size: 34, weight: .bold, design: .monospaced)
 
     /// Masthead status line (e.g. "SYSTEMS NOMINAL", "PUBLISHED · SYNCED").
-    public static let mastheadStatus: Font = .system(size: 10, weight: .semibold, design: .monospaced)
+    public static let mastheadStatus: Font = .system(size: 11, weight: .semibold, design: .monospaced)
 
     /// Unit suffix that trails a metric value (e.g. `$`, `%`, `s`). Monospaced
     /// medium at 20pt so it sits on the 36pt value's baseline as a deliberate
