@@ -376,7 +376,12 @@ import SQLite3
             let luminance = 0.2126 * background.redComponent
                 + 0.7152 * background.greenComponent + 0.0722 * background.blueComponent
             #expect(background.alphaComponent > 0.25)
-            #expect(background.alphaComponent < 0.95)
+            #expect(background.alphaComponent < 0.85)
+            if name != "loading" {
+                let card = try #require(bitmap.colorAt(x: 40, y: 180)?.usingColorSpace(.sRGB))
+                #expect(card.alphaComponent > 0.35)
+                #expect(card.alphaComponent < 0.85)
+            }
             if !isDark {
                 lightLuminances[name] = luminance
                 lightHeights[name] = bitmap.pixelsHigh
@@ -408,7 +413,12 @@ import SQLite3
         "menubar.status.in_out_format",
         "menubar.status.cache_format",
         "menubar.status.uptime",
-        "menubar.status.storage_detail"
+        "menubar.status.storage_detail",
+        "menubar.status.refresh_action",
+        "menubar.status.open_briefing_action",
+        "menubar.status.about_action",
+        "menubar.status.quit_action",
+        "menubar.status.actions"
     ]
     for key in keys {
         #expect(!MenuBarController.resolveLocalized(key, "fallback").contains("menubar."))

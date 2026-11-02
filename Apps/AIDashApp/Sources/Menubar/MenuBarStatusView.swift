@@ -6,6 +6,7 @@ private enum Copy {
     static let emptyTitle = localized("menubar.status.empty_title", "No Telemetry Available")
     static let errorTitle = localized("menubar.status.error_title", "Status Unavailable")
     static let refresh = localized("menubar.status.refresh", "Refresh Status")
+    static let refreshAction = localized("menubar.status.refresh_action", "Refresh")
     static let notMounted = localized("menubar.status.not_mounted", "Not Mounted")
     static let unavailable = localized("menubar.status.unavailable", "Unavailable")
     static let available = localized("menubar.status.available", "Available")
@@ -117,36 +118,51 @@ public struct MenuBarStatusView: View {
         .frame(width: 380)
         .environment(\.theme, theme)
         .foregroundStyle(theme.neutrals.text1)
-        .background(theme.neutrals.bg.opacity(colorScheme == .dark ? 0.52 : 0.58), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(theme.neutrals.border.opacity(0.6), lineWidth: 1) }
-        .compositingGroup()
-        .opacity(0.92)
+        .background(.ultraThinMaterial.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(theme.neutrals.bg.opacity(colorScheme == .dark ? 0.44 : 0.50), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.55 : 0.65), lineWidth: 1)
+        }
     }
     private var actionFooter: some View {
-        HStack(spacing: 6) {
-            actionButton(Copy.refresh, symbol: "arrow.clockwise", action: .refresh)
-            actionButton(Copy.openBriefing, symbol: "newspaper", action: .openBriefing, primary: true)
-            actionButton(Copy.about, symbol: "info.circle", action: .showAbout)
-            actionButton(Copy.quit, symbol: "power", action: .quit)
+        glassStrip {
+            HStack(spacing: 6) {
+                actionButton(Copy.refreshAction, symbol: "arrow.clockwise", action: .refresh)
+                actionButton(Copy.openBriefing, symbol: "newspaper", action: .openBriefing, primary: true)
+                actionButton(Copy.about, symbol: "info.circle", action: .showAbout)
+                actionButton(Copy.quit, symbol: "power", action: .quit, destructive: true)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(10)
-        .background(theme.neutrals.inner.opacity(0.44), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Copy.actions)
     }
     @ViewBuilder
-    private func actionButton(_ title: String, symbol: String, action: Action, primary: Bool = false) -> some View {
+    private func actionButton(
+        _ title: String,
+        symbol: String,
+        action: Action,
+        primary: Bool = false,
+        destructive: Bool = false
+    ) -> some View {
         Group {
             if primary {
-                baseActionButton(title, symbol: symbol, action: action).buttonStyle(.glassProminent)
+                baseActionButton(title, symbol: symbol, action: action, role: destructive ? .destructive : nil)
+                    .buttonStyle(.glassProminent)
             } else {
-                baseActionButton(title, symbol: symbol, action: action).buttonStyle(.glass)
+                baseActionButton(title, symbol: symbol, action: action, role: destructive ? .destructive : nil)
+                    .buttonStyle(.glass)
             }
         }
+        .tint(destructive ? theme.danger : nil)
     }
-    private func baseActionButton(_ title: String, symbol: String, action: Action) -> some View {
-        Button { perform(action) } label: {
+    private func baseActionButton(
+        _ title: String,
+        symbol: String,
+        action: Action,
+        role: ButtonRole? = nil
+    ) -> some View {
+        Button(role: role) { perform(action) } label: {
             Label(title, systemImage: symbol)
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
@@ -161,14 +177,14 @@ public struct MenuBarStatusView: View {
             header(snapshot)
             sectionHeader(Copy.computerGroup, icon: "gauge.with.dots.needle.33percent", cadence: Copy.every5s, date: snapshot.computerCapturedAt)
             HStack(alignment: .top, spacing: 12) {
-                Card {
+                glassCard {
                     cpuCard(snapshot.cpu)
                         .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 220, alignment: .top)
                 }
                     .frame(maxWidth: .infinity, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.cpu)
-                Card {
+                glassCard {
                     memoryCard(snapshot.memory)
                         .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 220, alignment: .top)
                 }
@@ -177,14 +193,14 @@ public struct MenuBarStatusView: View {
                     .accessibilityLabel(Copy.memory)
             }
             HStack(alignment: .top, spacing: 12) {
-                Card {
+                glassCard {
                     networkCard(snapshot.network)
                         .frame(maxWidth: .infinity, minHeight: 188, maxHeight: 188, alignment: .top)
                 }
                     .frame(maxWidth: .infinity, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.network)
-                Card {
+                glassCard {
                     storageCard(snapshot.storage)
                         .frame(maxWidth: .infinity, minHeight: 188, maxHeight: 188, alignment: .top)
                 }
@@ -193,13 +209,13 @@ public struct MenuBarStatusView: View {
                     .accessibilityLabel(Copy.storage)
             }
             sectionHeader(Copy.tokens, icon: "sparkles", cadence: Copy.every1m, date: snapshot.tokenCapturedAt)
-            Card { tokenCard(snapshot.tokenUsage) }
+            glassCard { tokenCard(snapshot.tokenUsage) }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(Copy.tokens)
         }
     }
     private func header(_ snapshot: MenuBarSystemSnapshot) -> some View {
-        CardInner {
+        glassStrip {
             Image(systemName: "desktopcomputer")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(theme.primary.primary)
@@ -217,16 +233,7 @@ public struct MenuBarStatusView: View {
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 4) {
-                HStack(spacing: 4) {
-                    StatusPill(thermal(snapshot.machine.thermalState), tone: thermalTone(snapshot.machine.thermalState))
-                    Button(action: onRefresh) {
-                        Label(Copy.refresh, systemImage: "arrow.clockwise")
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .accessibilityLabel(Copy.refresh)
-                }
+                StatusPill(thermal(snapshot.machine.thermalState), tone: thermalTone(snapshot.machine.thermalState))
             }
         }
     }
@@ -496,9 +503,9 @@ public struct MenuBarStatusView: View {
         .accessibilityValue(percent(value))
     }
     private func message(title: String, detail: String? = nil, symbol: String, symbolColor: Color) -> some View {
-        Card {
+        glassCard {
             VStack(alignment: .leading, spacing: 12) {
-                CardInner {
+                glassStrip {
                     Image(systemName: symbol)
                         .foregroundStyle(symbolColor)
                         .accessibilityHidden(true)
@@ -518,6 +525,22 @@ public struct MenuBarStatusView: View {
                     .accessibilityLabel(Copy.refresh)
             }
         }
+    }
+    private func glassCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content().padding(16)
+            .background(theme.neutrals.card.opacity(colorScheme == .dark ? 0.30 : 0.34),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.50 : 0.60), lineWidth: 1) }
+    }
+    private func glassStrip<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.neutrals.inner.opacity(colorScheme == .dark ? 0.28 : 0.32),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.45 : 0.55), lineWidth: 1) }
     }
     private func thermal(_ value: SystemThermalLevel) -> String {
         switch value {
