@@ -1,52 +1,190 @@
 #if os(macOS)
 import DesignKit
 import SwiftUI
-
+private enum Copy {
+    static let updating = localized("menubar.status.updating", "Updating status…")
+    static let emptyTitle = localized("menubar.status.empty_title", "No Telemetry Available")
+    static let errorTitle = localized("menubar.status.error_title", "Status Unavailable")
+    static let refresh = localized("menubar.status.refresh", "Refresh Status")
+    static let refreshAction = localized("menubar.status.refresh_action", "Refresh")
+    static let notMounted = localized("menubar.status.not_mounted", "Not Mounted")
+    static let unavailable = localized("menubar.status.unavailable", "Unavailable")
+    static let available = localized("menubar.status.available", "Available")
+    static let connectedShort = localized("menubar.status.connected_short", "UP")
+    static let disconnectedShort = localized("menubar.status.disconnected_short", "OFF")
+    static let computerGroup = localized("menubar.status.computer_group", "Computer Info")
+    static let every5s = localized("menubar.status.every_5s", "Every 5s")
+    static let tokens = localized("menubar.status.tokens", "Agent Token Usage")
+    static let every1m = localized("menubar.status.every_1m", "Every 1m")
+    static let cpu = localized("menubar.status.cpu", "CPU")
+    static let memory = localized("menubar.status.memory", "Memory")
+    static let network = localized("menubar.status.network", "Network")
+    static let storage = localized("menubar.status.storage", "Storage")
+    static let user = localized("menubar.status.user", "User")
+    static let system = localized("menubar.status.system", "System")
+    static let idle = localized("menubar.status.idle", "Idle")
+    static let wired = localized("menubar.status.wired", "Wired")
+    static let compressed = localized("menubar.status.compressed", "Compressed")
+    static let free = localized("menubar.status.free", "Free")
+    static let swap = localized("menubar.status.swap", "Swap")
+    static let active = localized("menubar.status.active", "Active")
+    static let totalLabel = localized("menubar.status.total_label", "Total")
+    static let cache = localized("menubar.status.cache", "Cache")
+    static let interactions = localized("menubar.status.interactions", "Interactions")
+    static let activeFormat = localized("menubar.status.active_format", "Active %@")
+    static let turnsReqsFormat = localized("menubar.status.turns_reqs", "%@ turns/reqs")
+    static let interactionFormat = localized("menubar.status.interaction", "%@ %@")
+    static let turns = localized("menubar.status.turns", "turns")
+    static let reqs = localized("menubar.status.reqs", "reqs")
+    static let inOutFormat = localized("menubar.status.in_out_format", "In+Out %@")
+    static let cacheFormat = localized("menubar.status.cache_format", "Cache %@")
+    static let uptimeFormat = localized("menubar.status.uptime", "Up %@ · %@")
+    static let loadShort = localized("menubar.status.load_short", "Load")
+    static let claudeQuotaFormat = localized("menubar.status.claude_quota", "Claude %lld%%")
+    static let nominal = localized("menubar.status.thermal_nominal", "Nominal")
+    static let fair = localized("menubar.status.thermal_fair", "Fair")
+    static let serious = localized("menubar.status.thermal_serious", "Serious")
+    static let critical = localized("menubar.status.thermal_critical", "Critical")
+    static let normal = localized("menubar.status.pressure_normal", "Normal")
+    static let warning = localized("menubar.status.pressure_warning", "Warning")
+    static let openBriefing = localized("menubar.status.open_briefing_action", "Open Briefing")
+    static let about = localized("menubar.status.about_action", "About")
+    static let quit = localized("menubar.status.quit_action", "Quit")
+    static let actions = localized("menubar.status.actions", "Actions")
+    static func uptime(_ value: TimeInterval) -> String {
+        "\(Int(value / 3600))h \(Int(value.truncatingRemainder(dividingBy: 3600) / 60))m"
+    }
+    static func cliName(_ cli: AgentCLIKind) -> String {
+        switch cli {
+        case .claude: return localized("menubar.status.cli_claude", "Claude Code")
+        case .codex: return localized("menubar.status.cli_codex", "Codex CLI")
+        case .copilot: return localized("menubar.status.cli_copilot", "Copilot CLI")
+        }
+    }
+    internal static func resolveLocalized(_ key: String, _ value: String) -> String {
+        let resolved = Bundle.main.localizedString(forKey: key, value: value, table: nil)
+        return (resolved.isEmpty || resolved == key || resolved.hasPrefix("menubar.")) ? value : resolved
+    }
+    private static func localized(_ key: String, _ value: String) -> String {
+        resolveLocalized(key, value)
+    }
+}
 @MainActor
 public struct MenuBarStatusView: View {
     public let state: MenuBarStatusViewState
     public let onRefresh: () -> Void
-
-    public init(state: MenuBarStatusViewState, onRefresh: @escaping () -> Void = {}) {
+    public let onOpenBriefing: () -> Void
+    public let onShowAbout: () -> Void
+    public let onQuit: () -> Void
+    public init(
+        state: MenuBarStatusViewState,
+        onRefresh: @escaping () -> Void = {},
+        onOpenBriefing: @escaping () -> Void = {},
+        onShowAbout: @escaping () -> Void = {},
+        onQuit: @escaping () -> Void = {}
+    ) {
         self.state = state
         self.onRefresh = onRefresh
+        self.onOpenBriefing = onOpenBriefing
+        self.onShowAbout = onShowAbout
+        self.onQuit = onQuit
     }
-
     @Environment(\.colorScheme) private var colorScheme
     private var theme: Theme { Theme(seed: .lime, neutral: .slate, isDark: colorScheme == .dark) }
-
+    public enum Action: Sendable, Equatable { case refresh, openBriefing, showAbout, quit }
+    public func perform(_ action: Action) {
+        switch action {
+        case .refresh: onRefresh()
+        case .openBriefing: onOpenBriefing()
+        case .showAbout: onShowAbout()
+        case .quit: onQuit()
+        }
+    }
     public var body: some View {
-        Group {
-            switch state {
-            case .loading:
-                loadingView
-            case let .empty(reason):
-                message(title: Copy.emptyTitle, detail: reason, symbol: "chart.bar.xaxis", symbolColor: theme.primary.primary)
-            case let .error(errorMessage):
-                message(title: Copy.errorTitle, detail: errorMessage, symbol: "exclamationmark.triangle", symbolColor: theme.warning)
-            case let .populated(snapshot):
-                populated(snapshot)
+        VStack(alignment: .leading, spacing: 12) {
+            Group {
+                switch state {
+                case .loading: loadingView
+                case let .empty(reason):
+                    message(title: Copy.emptyTitle, detail: reason, symbol: "chart.bar.xaxis", symbolColor: theme.primary.primary)
+                case let .error(errorMessage):
+                    message(title: Copy.errorTitle, detail: errorMessage, symbol: "exclamationmark.triangle", symbolColor: theme.warning)
+                case let .populated(snapshot): populated(snapshot)
+                }
             }
+            actionFooter
         }
         .padding(16)
         .frame(width: 380)
-        .background(theme.neutrals.bg)
-        .designTheme(seed: .lime, neutral: .slate)
+        .environment(\.theme, theme)
+        .foregroundStyle(theme.neutrals.text1)
+        .background(.ultraThinMaterial.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(theme.neutrals.bg.opacity(colorScheme == .dark ? 0.44 : 0.50), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.55 : 0.65), lineWidth: 1)
+        }
     }
-
+    private var actionFooter: some View {
+        glassStrip {
+            HStack(spacing: 6) {
+                actionButton(Copy.refreshAction, symbol: "arrow.clockwise", action: .refresh)
+                actionButton(Copy.openBriefing, symbol: "newspaper", action: .openBriefing, primary: true)
+                actionButton(Copy.about, symbol: "info.circle", action: .showAbout)
+                actionButton(Copy.quit, symbol: "power", action: .quit, destructive: true)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Copy.actions)
+    }
+    @ViewBuilder
+    private func actionButton(
+        _ title: String,
+        symbol: String,
+        action: Action,
+        primary: Bool = false,
+        destructive: Bool = false
+    ) -> some View {
+        Group {
+            if primary {
+                baseActionButton(title, symbol: symbol, action: action, role: destructive ? .destructive : nil)
+                    .buttonStyle(.glassProminent)
+            } else {
+                baseActionButton(title, symbol: symbol, action: action, role: destructive ? .destructive : nil)
+                    .buttonStyle(.glass)
+            }
+        }
+        .tint(destructive ? theme.danger : nil)
+    }
+    private func baseActionButton(
+        _ title: String,
+        symbol: String,
+        action: Action,
+        role: ButtonRole? = nil
+    ) -> some View {
+        Button(role: role) { perform(action) } label: {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .controlSize(.small)
+        .frame(height: 32)
+        .accessibilityLabel(title)
+    }
     private func populated(_ snapshot: MenuBarSystemSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             header(snapshot)
             sectionHeader(Copy.computerGroup, icon: "gauge.with.dots.needle.33percent", cadence: Copy.every5s, date: snapshot.computerCapturedAt)
             HStack(alignment: .top, spacing: 12) {
-                Card {
+                glassCard {
                     cpuCard(snapshot.cpu)
                         .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 220, alignment: .top)
                 }
                     .frame(maxWidth: .infinity, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.cpu)
-                Card {
+                glassCard {
                     memoryCard(snapshot.memory)
                         .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 220, alignment: .top)
                 }
@@ -55,14 +193,14 @@ public struct MenuBarStatusView: View {
                     .accessibilityLabel(Copy.memory)
             }
             HStack(alignment: .top, spacing: 12) {
-                Card {
+                glassCard {
                     networkCard(snapshot.network)
                         .frame(maxWidth: .infinity, minHeight: 188, maxHeight: 188, alignment: .top)
                 }
                     .frame(maxWidth: .infinity, alignment: .top)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Copy.network)
-                Card {
+                glassCard {
                     storageCard(snapshot.storage)
                         .frame(maxWidth: .infinity, minHeight: 188, maxHeight: 188, alignment: .top)
                 }
@@ -71,14 +209,13 @@ public struct MenuBarStatusView: View {
                     .accessibilityLabel(Copy.storage)
             }
             sectionHeader(Copy.tokens, icon: "sparkles", cadence: Copy.every1m, date: snapshot.tokenCapturedAt)
-            Card { tokenCard(snapshot.tokenUsage) }
+            glassCard { tokenCard(snapshot.tokenUsage) }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(Copy.tokens)
         }
     }
-
     private func header(_ snapshot: MenuBarSystemSnapshot) -> some View {
-        CardInner {
+        glassStrip {
             Image(systemName: "desktopcomputer")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(theme.primary.primary)
@@ -96,20 +233,10 @@ public struct MenuBarStatusView: View {
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 4) {
-                HStack(spacing: 4) {
-                    StatusPill(thermal(snapshot.machine.thermalState), tone: thermalTone(snapshot.machine.thermalState))
-                    Button(action: onRefresh) {
-                        Label(Copy.refresh, systemImage: "arrow.clockwise")
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .accessibilityLabel(Copy.refresh)
-                }
+                StatusPill(thermal(snapshot.machine.thermalState), tone: thermalTone(snapshot.machine.thermalState))
             }
         }
     }
-
     private var loadingView: some View {
         VStack(alignment: .leading, spacing: 12) {
             skeleton(height: 72)
@@ -129,7 +256,6 @@ public struct MenuBarStatusView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Copy.updating)
     }
-
     private func skeleton(height: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(theme.neutrals.border.opacity(0.55))
@@ -137,7 +263,6 @@ public struct MenuBarStatusView: View {
             .frame(height: height)
             .accessibilityHidden(true)
     }
-
     private func sectionHeader(_ title: String, icon: String, cadence: String, date: Date) -> some View {
         HStack(spacing: 8) {
             SectionHeader(title, icon: icon)
@@ -150,7 +275,6 @@ public struct MenuBarStatusView: View {
         }
         .frame(height: 24)
     }
-
     private func cpuCard(_ cpu: CPUStatusSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             cardTitle(Copy.cpu, badge: "\(cpu.coreCount)C")
@@ -174,7 +298,6 @@ public struct MenuBarStatusView: View {
             Spacer(minLength: 0)
         }
     }
-
     private func memoryCard(_ memory: MemoryStatusSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             cardTitle(Copy.memory, badge: pressure(memory.pressure), tone: pressureTone(memory.pressure))
@@ -193,7 +316,6 @@ public struct MenuBarStatusView: View {
             Spacer(minLength: 0)
         }
     }
-
     private func networkCard(_ network: NetworkStatusSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 5) {
@@ -229,7 +351,6 @@ public struct MenuBarStatusView: View {
             Spacer(minLength: 0)
         }
     }
-
     private func storageCard(_ storage: StorageStatusSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             cardTitle(Copy.storage)
@@ -270,7 +391,6 @@ public struct MenuBarStatusView: View {
             Spacer(minLength: 0)
         }
     }
-
     private func tokenCard(_ usage: CLITokenUsageSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if let quota = usage.claudeWeeklyRemainingPercent {
@@ -294,7 +414,6 @@ public struct MenuBarStatusView: View {
             }
         }
     }
-
     private func tokenMetric(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
@@ -308,7 +427,6 @@ public struct MenuBarStatusView: View {
                 .layoutPriority(1)
         }
     }
-
     private func cliRow(_ item: CLITokenUsageItem, usage: CLITokenUsageSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
@@ -338,7 +456,6 @@ public struct MenuBarStatusView: View {
             }
         }
     }
-
     private func cardTitle(_ title: String, badge: String? = nil, tone: PillTone = .neutral) -> some View {
         HStack(spacing: 5) {
             Text(title)
@@ -351,7 +468,6 @@ public struct MenuBarStatusView: View {
         }
         .frame(height: 22)
     }
-
     private func metricLines(_ values: [(String, String)]) -> some View {
         VStack(spacing: 3) {
             ForEach(Array(values.enumerated()), id: \.offset) { _, value in
@@ -371,7 +487,6 @@ public struct MenuBarStatusView: View {
             }
         }
     }
-
     private func progress(value: Double, label: String) -> some View {
         GeometryReader { proxy in
             Capsule()
@@ -387,11 +502,10 @@ public struct MenuBarStatusView: View {
         .accessibilityLabel(label)
         .accessibilityValue(percent(value))
     }
-
     private func message(title: String, detail: String? = nil, symbol: String, symbolColor: Color) -> some View {
-        Card {
+        glassCard {
             VStack(alignment: .leading, spacing: 12) {
-                CardInner {
+                glassStrip {
                     Image(systemName: symbol)
                         .foregroundStyle(symbolColor)
                         .accessibilityHidden(true)
@@ -412,7 +526,22 @@ public struct MenuBarStatusView: View {
             }
         }
     }
-
+    private func glassCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) { content() }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.neutrals.card.opacity(colorScheme == .dark ? 0.32 : 0.36), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.50 : 0.60), lineWidth: 1) }
+    }
+    private func glassStrip<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 8) { content() }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.neutrals.inner.opacity(colorScheme == .dark ? 0.32 : 0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.45 : 0.55), lineWidth: 1) }
+    }
     private func thermal(_ value: SystemThermalLevel) -> String {
         switch value {
         case .nominal: return Copy.nominal
@@ -421,11 +550,9 @@ public struct MenuBarStatusView: View {
         case .critical: return Copy.critical
         }
     }
-
     private func thermalTone(_ value: SystemThermalLevel) -> PillTone {
         value == .nominal ? .success : value == .fair ? .warning : .danger
     }
-
     private func pressure(_ value: MemoryPressureLevel) -> String {
         switch value {
         case .normal: return Copy.normal
@@ -433,28 +560,22 @@ public struct MenuBarStatusView: View {
         case .critical: return Copy.critical
         }
     }
-
     private func pressureTone(_ value: MemoryPressureLevel) -> PillTone {
         value == .normal ? .success : value == .warning ? .warning : .danger
     }
-
     private func pressureColor(_ value: MemoryPressureLevel) -> Color {
         value == .normal ? theme.success : value == .warning ? theme.warning : theme.danger
     }
-
     private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
-
     internal static func formatLoadAverages(one: Double, five: Double, fifteen: Double) -> String {
         "\(loadDecimal(one)) / \(loadDecimal(five)) / \(loadDecimal(fifteen))"
     }
-
     private static func loadDecimal(_ value: Double) -> String { String(format: "%.1f", value) }
-
     internal static func compactMemoryPair(used: UInt64, total: UInt64) -> String {
         guard used > 0 || total > 0 else { return "0 / 0 GB" }
-        return String(format: "%.1f / %.1f GB", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
+        return String(format: "%.1f / %.1f GB",
+            Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
     }
-
     private func compactCount(_ value: UInt64) -> String {
         if value >= 1_000_000_000 {
             return String(format: "%.2fB", Double(value) / 1_000_000_000.0)
@@ -465,85 +586,13 @@ public struct MenuBarStatusView: View {
         }
         return value.formatted(.number)
     }
-
     private func formatBytes(_ value: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
     }
-
     private func rate(_ value: Double) -> String {
         "\(ByteCountFormatter.string(fromByteCount: Int64(max(value, 0)), countStyle: .binary))/s"
     }
-
     private func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
-
-    private enum Copy {
-        static let updating = localized("menubar.status.updating", "Updating status…")
-        static let emptyTitle = localized("menubar.status.empty_title", "No Telemetry Available")
-        static let errorTitle = localized("menubar.status.error_title", "Status Unavailable")
-        static let refresh = localized("menubar.status.refresh", "Refresh Status")
-        static let notMounted = localized("menubar.status.not_mounted", "Not Mounted")
-        static let unavailable = localized("menubar.status.unavailable", "Unavailable")
-        static let available = localized("menubar.status.available", "Available")
-        static let connectedShort = localized("menubar.status.connected_short", "UP")
-        static let disconnectedShort = localized("menubar.status.disconnected_short", "OFF")
-        static let computerGroup = localized("menubar.status.computer_group", "Computer Info")
-        static let every5s = localized("menubar.status.every_5s", "Every 5s")
-        static let tokens = localized("menubar.status.tokens", "Agent Token Usage")
-        static let every1m = localized("menubar.status.every_1m", "Every 1m")
-        static let cpu = localized("menubar.status.cpu", "CPU")
-        static let memory = localized("menubar.status.memory", "Memory")
-        static let network = localized("menubar.status.network", "Network")
-        static let storage = localized("menubar.status.storage", "Storage")
-        static let user = localized("menubar.status.user", "User")
-        static let system = localized("menubar.status.system", "System")
-        static let idle = localized("menubar.status.idle", "Idle")
-        static let wired = localized("menubar.status.wired", "Wired")
-        static let compressed = localized("menubar.status.compressed", "Compressed")
-        static let free = localized("menubar.status.free", "Free")
-        static let swap = localized("menubar.status.swap", "Swap")
-        static let active = localized("menubar.status.active", "Active")
-        static let totalLabel = localized("menubar.status.total_label", "Total")
-        static let cache = localized("menubar.status.cache", "Cache")
-        static let interactions = localized("menubar.status.interactions", "Interactions")
-        static let activeFormat = localized("menubar.status.active_format", "Active %@")
-        static let turnsReqsFormat = localized("menubar.status.turns_reqs", "%@ turns/reqs")
-        static let interactionFormat = localized("menubar.status.interaction", "%@ %@")
-        static let turns = localized("menubar.status.turns", "turns")
-        static let reqs = localized("menubar.status.reqs", "reqs")
-        static let inOutFormat = localized("menubar.status.in_out_format", "In+Out %@")
-        static let cacheFormat = localized("menubar.status.cache_format", "Cache %@")
-        static let uptimeFormat = localized("menubar.status.uptime", "Up %@ · %@")
-        static let loadShort = localized("menubar.status.load_short", "Load")
-        static let claudeQuotaFormat = localized("menubar.status.claude_quota", "Claude %lld%%")
-        static let nominal = localized("menubar.status.thermal_nominal", "Nominal")
-        static let fair = localized("menubar.status.thermal_fair", "Fair")
-        static let serious = localized("menubar.status.thermal_serious", "Serious")
-        static let critical = localized("menubar.status.thermal_critical", "Critical")
-        static let normal = localized("menubar.status.pressure_normal", "Normal")
-        static let warning = localized("menubar.status.pressure_warning", "Warning")
-
-        static func uptime(_ value: TimeInterval) -> String {
-            "\(Int(value / 3600))h \(Int(value.truncatingRemainder(dividingBy: 3600) / 60))m"
-        }
-
-        static func cliName(_ cli: AgentCLIKind) -> String {
-            switch cli {
-            case .claude: return localized("menubar.status.cli_claude", "Claude Code")
-            case .codex: return localized("menubar.status.cli_codex", "Codex CLI")
-            case .copilot: return localized("menubar.status.cli_copilot", "Copilot CLI")
-            }
-        }
-
-        internal static func resolveLocalized(_ key: String, _ value: String) -> String {
-            let resolved = Bundle.main.localizedString(forKey: key, value: value, table: nil)
-            return (resolved.isEmpty || resolved == key || resolved.hasPrefix("menubar.")) ? value : resolved
-        }
-
-        private static func localized(_ key: String, _ value: String) -> String {
-            resolveLocalized(key, value)
-        }
-    }
-
     internal static func resolveLocalized(_ key: String, _ value: String) -> String {
         Copy.resolveLocalized(key, value)
     }
