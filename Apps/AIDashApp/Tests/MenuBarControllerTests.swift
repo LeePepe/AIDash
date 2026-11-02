@@ -87,10 +87,30 @@ import SQLite3
     let summaryItems = (1001...1008).compactMap { menu.item(withTag: $0) }
     #expect(summaryItems.count == 8)
     #expect(summaryItems.allSatisfy { $0.isHidden && !$0.isEnabled })
-    #expect(menu.items.first?.isSeparatorItem == false)
-    #expect(menu.items.dropFirst().first?.isSeparatorItem == true)
+    #expect(menu.items.first?.view != nil)
+    #expect(!menu.items.contains { $0.isSeparatorItem })
+    #expect(menu.items.dropFirst().allSatisfy { $0.isHidden })
     controller.refreshComputerSections()
     #expect(menu.item(withTag: 1001)?.title.contains("CPU") == true)
+}
+
+@MainActor
+@Test func statusViewIntegratedActionCallbacksAreInvocable() async throws {
+    var actions: [MenuBarStatusView.Action] = []
+    let view = MenuBarStatusView(
+        state: .loading,
+        onRefresh: { actions.append(.refresh) },
+        onOpenBriefing: { actions.append(.openBriefing) },
+        onShowAbout: { actions.append(.showAbout) },
+        onQuit: { actions.append(.quit) }
+    )
+
+    view.perform(.refresh)
+    view.perform(.openBriefing)
+    view.perform(.showAbout)
+    view.perform(.quit)
+
+    #expect(actions == [.refresh, .openBriefing, .showAbout, .quit])
 }
 
 @MainActor
@@ -334,12 +354,18 @@ import SQLite3
         "empty": 200,
         "error": 200
     ]
+    // Keep multi-child header/message strips horizontal instead of stacked.
+    let maximumHeights: [String: Int] = [
+        "populated": 2_150,
+        "worst-case": 2_150,
+        "empty": 480,
+        "error": 480
+    ]
 
     for (name, state) in states {
         for isDark in [false, true] {
             let scheme: ColorScheme = isDark ? .dark : .light
             let view = MenuBarStatusView(state: state)
-                .designTheme(seed: .lime, neutral: .slate)
                 .environment(\.colorScheme, scheme)
             let renderer = ImageRenderer(content: view)
             renderer.scale = 2.0
@@ -349,20 +375,27 @@ import SQLite3
             let bitmap = try #require(NSBitmapImageRep(data: data))
             #expect(bitmap.pixelsWide == 760)
             #expect(bitmap.pixelsHigh > minimumHeights[name, default: 0])
+            if let maximumHeight = maximumHeights[name] {
+                #expect(bitmap.pixelsHigh < maximumHeight)
+            }
             let suffix = isDark ? "dark" : "light"
             try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
             try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
-            // Sample the opaque panel background, away from text and card edges.
-            let background = try #require(bitmap.colorAt(x: 2, y: 2)?.usingColorSpace(.sRGB))
+            // Sample inside the rounded panel arc, away from the transparent corner.
+            let background = try #require(bitmap.colorAt(x: 20, y: 100)?.usingColorSpace(.sRGB))
             let luminance = 0.2126 * background.redComponent
                 + 0.7152 * background.greenComponent + 0.0722 * background.blueComponent
-            #expect(background.alphaComponent > 0.99)
+            #expect(background.alphaComponent > 0.25)
+            #expect(background.alphaComponent < 0.85)
+            if name != "loading" {
+                let card = try #require(bitmap.colorAt(x: 40, y: 180)?.usingColorSpace(.sRGB))
+                #expect(card.alphaComponent > 0.35)
+                #expect(card.alphaComponent < 0.85)
+            }
             if !isDark {
-                #expect(luminance > 0.75)
                 lightLuminances[name] = luminance
                 lightHeights[name] = bitmap.pixelsHigh
             } else {
-                #expect(luminance < 0.25)
                 #expect(try #require(lightLuminances[name]) > luminance)
                 #expect(lightHeights[name] == bitmap.pixelsHigh)
             }
@@ -390,7 +423,12 @@ import SQLite3
         "menubar.status.in_out_format",
         "menubar.status.cache_format",
         "menubar.status.uptime",
-        "menubar.status.storage_detail"
+        "menubar.status.storage_detail",
+        "menubar.status.refresh_action",
+        "menubar.status.open_briefing_action",
+        "menubar.status.about_action",
+        "menubar.status.quit_action",
+        "menubar.status.actions"
     ]
     for key in keys {
         #expect(!MenuBarController.resolveLocalized(key, "fallback").contains("menubar."))

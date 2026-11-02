@@ -46,7 +46,6 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         panel.view = sizedHostedStatusView()
         menu.addItem(panel)
         panelItem = panel
-        menu.addItem(.separator())
 
         menu.addItem(summaryMenuItem(title: Self.cpuStatusTitle, tag: 1001))
         menu.addItem(summaryMenuItem(title: Self.memoryStatusTitle, tag: 1002))
@@ -59,40 +58,6 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(summaryMenuItem(title: Self.networkStatusTitle, tag: 1008))
 
-        let refreshItem = NSMenuItem(
-            title: Self.refreshTitle,
-            action: #selector(refreshStatusAction),
-            keyEquivalent: "r"
-        )
-        refreshItem.target = self
-        menu.addItem(refreshItem)
-        menu.addItem(.separator())
-
-        let openItem = NSMenuItem(
-            title: Self.openBriefingTitle,
-            action: #selector(openBriefing),
-            keyEquivalent: ""
-        )
-        openItem.target = self
-        menu.addItem(openItem)
-        menu.addItem(.separator())
-
-        let aboutItem = NSMenuItem(
-            title: Self.aboutTitle,
-            action: #selector(showAbout),
-            keyEquivalent: ""
-        )
-        aboutItem.target = self
-        menu.addItem(aboutItem)
-
-        let quitItem = NSMenuItem(
-            title: Self.quitTitle,
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
-        quitItem.target = NSApp
-        menu.addItem(quitItem)
-
         item.menu = menu
         statusItem = item
         updateMenuPresentation()
@@ -100,9 +65,26 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     private func hostedStatusView() -> NSHostingView<AnyView> {
-        let rootView = AnyView(MenuBarStatusView(state: statusState, onRefresh: { [weak self] in
-            self?.refreshStatus()
-        }))
+        let rootView = AnyView(
+            MenuBarStatusView(
+                state: statusState,
+                onRefresh: { [weak self] in
+                    self?.refreshStatus()
+                },
+                onOpenBriefing: { [weak self] in
+                    self?.cancelMenuTracking()
+                    self?.openBriefing()
+                },
+                onShowAbout: { [weak self] in
+                    self?.cancelMenuTracking()
+                    self?.showAbout()
+                },
+                onQuit: { [weak self] in
+                    self?.cancelMenuTracking()
+                    NSApplication.shared.terminate(nil)
+                }
+            )
+        )
         if let statusHostingView {
             statusHostingView.rootView = rootView
             return statusHostingView
@@ -187,10 +169,6 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    @objc private func refreshStatusAction() {
-        refreshStatus()
-    }
-
     private func refreshStatus() {
         statusState = statusProvider.captureStatusState()
         updateMenuPresentation()
@@ -245,6 +223,10 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func showAbout() {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(nil)
+    }
+
+    private func cancelMenuTracking() {
+        statusItem?.menu?.cancelTracking()
     }
 
     static var appName: String {
