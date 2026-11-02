@@ -37,7 +37,7 @@ public enum AIDashTypography {
     public static let masthead: Font = .system(size: 34, weight: .bold, design: .monospaced)
 
     /// Masthead status line (e.g. "SYSTEMS NOMINAL", "PUBLISHED · SYNCED").
-    public static let mastheadStatus: Font = .system(size: 10, weight: .semibold, design: .monospaced)
+    public static let mastheadStatus: Font = .system(size: 11, weight: .semibold, design: .monospaced)
 
     /// Unit suffix that trails a metric value (e.g. `$`, `%`, `s`). Monospaced
     /// medium at 20pt so it sits on the 36pt value's baseline as a deliberate

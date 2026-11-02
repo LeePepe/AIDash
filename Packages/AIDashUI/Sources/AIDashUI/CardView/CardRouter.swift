@@ -99,7 +99,7 @@ public struct CardRouter: View {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundStyle(theme.warning)
                     .accessibilityHidden(true)
-                StatusPill("DECODE WARNING", tone: .warning)
+                StatusPill(Self.fallbackBadge, tone: .warning)
             }
             Text(Self.fallbackTitle)
                 .font(.headline)
@@ -123,6 +123,13 @@ public struct CardRouter: View {
         defaultValue: "Card unavailable",
         bundle: .module,
         comment: "Headline shown in the CardRouter fallback placeholder when a card payload cannot be decoded."
+    )
+
+    private static let fallbackBadge = String(
+        localized: "card_router.fallback.badge",
+        defaultValue: "DECODE WARNING",
+        bundle: .module,
+        comment: "Badge shown when a card payload cannot be decoded."
     )
 
     private static let fallbackDetailFormat = String(

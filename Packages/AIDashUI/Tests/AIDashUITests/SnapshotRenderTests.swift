@@ -53,11 +53,14 @@ struct SnapshotRenderTests {
         output: URL
     ) throws {
         for (suffix, scheme) in [("-light", ColorScheme.light), ("-dark", ColorScheme.dark)] {
+            let theme = Theme(seed: .lime, neutral: .slate, isDark: scheme == .dark)
             let host = BriefingView(state: state)
                 .padding(.horizontal, padding)
                 .padding(.vertical, AIDashSpacing.pageVertical)
                 .frame(width: width, alignment: .topLeading)
-                .designTheme(seed: .lime, neutral: .slate)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(theme.neutrals.bg)
+                .environment(\.theme, theme)
                 .environment(\.colorScheme, scheme)
             let renderer = ImageRenderer(content: host)
             renderer.scale = 2
@@ -66,6 +69,12 @@ struct SnapshotRenderTests {
             let rep = try #require(NSBitmapImageRep(data: tiff))
             let png = try #require(rep.representation(using: .png, properties: [:]))
             #expect(rep.pixelsWide == Int(width * 2))
+            let uniqueColors = Set((0..<rep.pixelsHigh).flatMap { y in
+                (0..<rep.pixelsWide).map { x in
+                    rep.colorAt(x: x, y: y)?.cgColor.components?.prefix(3).map { Int($0 * 255) } ?? []
+                }
+            })
+            #expect(uniqueColors.count > 20)
             let url = output.appendingPathComponent("\(name)\(suffix).png")
             try png.write(to: url)
         }
@@ -77,23 +86,24 @@ struct SnapshotRenderTests {
             order: 0, layout: .grid, style: .accent
         )
         overview.cards = [
-            card("metric-a", .metric, #"{"items":[{"label":"已合并 PR","value":12,"trend":"up","higherIsBetter":true,"context":"本周"}]}"#),
-            card("metric-b", .metric, #"{"items":[{"label":"构建时间","value":124,"unit":"s","trend":"down","higherIsBetter":false,"context":"CI 中位数"}]}"#),
+            card("metric-a", .metric, #"{"items":[{"label":"已合并 PR","value":1284,"trend":"up","series":[820,940,1100,1180,1284],"higherIsBetter":true,"context":"本周"}]}"#),
+            card("metric-b", .metric, #"{"items":[{"label":"构建时间","value":124,"unit":"s","trend":"down","ratio":0.76,"higherIsBetter":false,"context":"CI 中位数"}]}"#),
+            card("todos", .todoList, #"{"items":[{"title":"回复性能复核","priority":"high"},{"title":"归档分支","priority":"low"}]}"#),
         ]
         let evidence = ContainerModel(
             id: "evidence", title: "本日证据与待处理事项", subtitle: "Agent authored briefing",
             order: 1, layout: .grid, style: .neutral
         )
         evidence.cards = [
-            card("digest", .digest, #"{"title":"系统保持稳定","subtitle":"过去 24 小时","body":"十二个 PR 已合并，构建时间持续下降。","sections":[{"heading":"下一步","paragraphs":["完成性能复核。"]}]}"#),
-            card("todos", .todoList, #"{"items":[{"title":"回复性能复核","priority":"high"},{"title":"归档分支","priority":"low"}]}"#),
+            card("digest", .digest, #"{"title":"系统保持稳定","subtitle":"过去 24 小时","body":"十二个 PR 已合并，构建时间持续下降。","sections":[{"heading":"下一步","paragraphs":["完成性能复核。"]}]}"#, style: .accent)
         ]
         return [overview, evidence]
     }
 
-    private static func card(_ id: String, _ type: CardType, _ json: String) -> CardModel {
+    private static func card(_ id: String, _ type: CardType, _ json: String,
+                             style: CardStyle = .neutral) -> CardModel {
         CardModel(
-            id: id, type: type, size: .medium, style: .neutral,
+            id: id, type: type, size: .medium, style: style,
             payloadJSON: Data(json.utf8)
         )
     }
