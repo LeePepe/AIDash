@@ -527,18 +527,18 @@ public struct MenuBarStatusView: View {
         }
     }
     private func glassCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content().padding(16)
-            .background(theme.neutrals.card.opacity(colorScheme == .dark ? 0.30 : 0.34),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        VStack(alignment: .leading, spacing: 10) { content() }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.neutrals.card.opacity(colorScheme == .dark ? 0.32 : 0.36), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.50 : 0.60), lineWidth: 1) }
     }
     private func glassStrip<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
+        HStack(spacing: 8) { content() }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(theme.neutrals.inner.opacity(colorScheme == .dark ? 0.28 : 0.32),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(theme.neutrals.inner.opacity(colorScheme == .dark ? 0.32 : 0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.45 : 0.55), lineWidth: 1) }
     }

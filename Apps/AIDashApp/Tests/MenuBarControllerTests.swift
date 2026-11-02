@@ -354,6 +354,13 @@ import SQLite3
         "empty": 200,
         "error": 200
     ]
+    // Keep multi-child header/message strips horizontal instead of stacked.
+    let maximumHeights: [String: Int] = [
+        "populated": 2_150,
+        "worst-case": 2_150,
+        "empty": 480,
+        "error": 480
+    ]
 
     for (name, state) in states {
         for isDark in [false, true] {
@@ -368,6 +375,9 @@ import SQLite3
             let bitmap = try #require(NSBitmapImageRep(data: data))
             #expect(bitmap.pixelsWide == 760)
             #expect(bitmap.pixelsHigh > minimumHeights[name, default: 0])
+            if let maximumHeight = maximumHeights[name] {
+                #expect(bitmap.pixelsHigh < maximumHeight)
+            }
             let suffix = isDark ? "dark" : "light"
             try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
             try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
