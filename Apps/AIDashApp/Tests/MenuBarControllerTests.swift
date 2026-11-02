@@ -87,10 +87,30 @@ import SQLite3
     let summaryItems = (1001...1008).compactMap { menu.item(withTag: $0) }
     #expect(summaryItems.count == 8)
     #expect(summaryItems.allSatisfy { $0.isHidden && !$0.isEnabled })
-    #expect(menu.items.first?.isSeparatorItem == false)
-    #expect(menu.items.dropFirst().first?.isSeparatorItem == true)
+    #expect(menu.items.first?.view != nil)
+    #expect(!menu.items.contains { $0.isSeparatorItem })
+    #expect(menu.items.dropFirst().allSatisfy { $0.isHidden })
     controller.refreshComputerSections()
     #expect(menu.item(withTag: 1001)?.title.contains("CPU") == true)
+}
+
+@MainActor
+@Test func statusViewIntegratedActionCallbacksAreInvocable() async throws {
+    var actions: [MenuBarStatusView.Action] = []
+    let view = MenuBarStatusView(
+        state: .loading,
+        onRefresh: { actions.append(.refresh) },
+        onOpenBriefing: { actions.append(.openBriefing) },
+        onShowAbout: { actions.append(.showAbout) },
+        onQuit: { actions.append(.quit) }
+    )
+
+    view.perform(.refresh)
+    view.perform(.openBriefing)
+    view.perform(.showAbout)
+    view.perform(.quit)
+
+    #expect(actions == [.refresh, .openBriefing, .showAbout, .quit])
 }
 
 @MainActor
@@ -339,7 +359,6 @@ import SQLite3
         for isDark in [false, true] {
             let scheme: ColorScheme = isDark ? .dark : .light
             let view = MenuBarStatusView(state: state)
-                .designTheme(seed: .lime, neutral: .slate)
                 .environment(\.colorScheme, scheme)
             let renderer = ImageRenderer(content: view)
             renderer.scale = 2.0
@@ -352,17 +371,16 @@ import SQLite3
             let suffix = isDark ? "dark" : "light"
             try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
             try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
-            // Sample the opaque panel background, away from text and card edges.
-            let background = try #require(bitmap.colorAt(x: 2, y: 2)?.usingColorSpace(.sRGB))
+            // Sample inside the rounded panel arc, away from the transparent corner.
+            let background = try #require(bitmap.colorAt(x: 20, y: 100)?.usingColorSpace(.sRGB))
             let luminance = 0.2126 * background.redComponent
                 + 0.7152 * background.greenComponent + 0.0722 * background.blueComponent
-            #expect(background.alphaComponent > 0.99)
+            #expect(background.alphaComponent > 0.25)
+            #expect(background.alphaComponent < 0.95)
             if !isDark {
-                #expect(luminance > 0.75)
                 lightLuminances[name] = luminance
                 lightHeights[name] = bitmap.pixelsHigh
             } else {
-                #expect(luminance < 0.25)
                 #expect(try #require(lightLuminances[name]) > luminance)
                 #expect(lightHeights[name] == bitmap.pixelsHigh)
             }

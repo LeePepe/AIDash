@@ -78,10 +78,70 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Active" } } }
     },
+    "menubar.status.about_action" : {
+      "comment" : "Compact integrated menu bar panel action label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About"
+          }
+        }
+      }
+    },
+    "menubar.status.actions" : {
+      "comment" : "Accessibility label for the integrated menu bar panel action group.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actions"
+          }
+        }
+      }
+    },
     "menubar.status.available" : {
       "comment" : "Unit label for available storage.",
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "available" } } }
+    },
+    "menubar.status.open_briefing_action" : {
+      "comment" : "Compact integrated menu bar panel action label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Briefing"
+          }
+        }
+      }
+    },
+    "menubar.status.quit_action" : {
+      "comment" : "Compact integrated menu bar panel action label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quit"
+          }
+        }
+      }
+    },
+    "menubar.status.refresh_action" : {
+      "comment" : "Compact integrated menu bar panel action label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh"
+          }
+        }
+      }
     },
     "menubar.status.compressed" : {
       "comment" : "Memory compressed amount label.",
