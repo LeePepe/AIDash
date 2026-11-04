@@ -13,9 +13,10 @@ private struct ContainerCountBadge: View {
             Text(String(format: "%02d", count))
                 .font(AIDashTypography.mastheadStatus)
                 .foregroundStyle(theme.neutrals.text2)
+                .padding(.horizontal, AIDashSpace.s8)
+                .padding(.vertical, AIDashSpace.s4)
         }
-        .padding(.horizontal, AIDashSpace.s8)
-        .padding(.vertical, AIDashSpace.s4)
+        .fixedSize()
         .accessibilityLabel(
             Text(
                 "container.card_count \(count)",
@@ -114,21 +115,32 @@ public struct ContainerView: View {
     /// stays unadorned (`nil`) rather than duplicating one card's style.
     private var titleBarStyle: CardStyle? {
         guard chromeMode == .bare else { return nil }
-        return sortedCards.first?.style
+        return visibleCards.first?.style
     }
 
     @ViewBuilder
     private var layoutContent: some View {
         let cards = visibleCards
-        switch container.layout {
-        case .auto:
-            AutoLayout(cards: cards, style: container.style)
-        case .list:
-            ListLayout(cards: cards, style: container.style)
-        case .grid:
-            GridLayout(cards: cards, style: container.style)
-        case .hero:
-            HeroLayout(cards: cards, style: container.style)
+        if visibleCards.isEmpty && !sortedCards.isEmpty {
+            CardEmptyState(
+                message: String(
+                    localized: "container.hidden.all",
+                    defaultValue: "All cards hidden",
+                    bundle: .module,
+                    comment: "Message shown when every card in a container is hidden."
+                )
+            )
+        } else {
+            switch container.layout {
+            case .auto:
+                AutoLayout(cards: cards, style: container.style)
+            case .list:
+                ListLayout(cards: cards, style: container.style)
+            case .grid:
+                GridLayout(cards: cards, style: container.style)
+            case .hero:
+                HeroLayout(cards: cards, style: container.style)
+            }
         }
     }
 }

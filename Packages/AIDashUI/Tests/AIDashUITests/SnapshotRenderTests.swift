@@ -114,7 +114,7 @@ struct SnapshotRenderTests {
                 completed: [.init(title: "完成主线复核"), .init(title: "发布日报")],
                 stats: [.init(label: "PRs", value: 12), .init(label: "小时", value: 4.5)]
             )),
-            card("section-header", .sectionHeader, SectionHeaderPayload(
+            card("header-relationships", .sectionHeader, SectionHeaderPayload(
                 title: "证据分组", subtitle: "关系与趋势"
             )),
             card("relationship-slope", .relationship, RelationshipPayload(

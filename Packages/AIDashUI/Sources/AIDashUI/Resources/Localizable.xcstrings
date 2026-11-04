@@ -92,6 +92,12 @@
             "state": "translated",
             "value": "ARCHIVE"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "归档"
+          }
         }
       }
     },
@@ -103,6 +109,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Next briefing date"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一期简报日期"
           }
         }
       }
@@ -116,6 +128,12 @@
             "state": "translated",
             "value": "Previous briefing date"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一期简报日期"
+          }
         }
       }
     },
@@ -128,17 +146,29 @@
             "state": "translated",
             "value": "TODAY"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天"
+          }
         }
       }
     },
-    "briefing.hidden.accessibility": {
+    "briefing.hidden.accessibility %lld": {
       "comment": "Accessibility label for the hidden-card recovery control.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show hidden cards"
+            "value": "Show %lld hidden cards"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示 %lld 张隐藏卡片"
           }
         }
       }
@@ -151,6 +181,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "HIDDEN · SHOW"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏 · 显示"
+          }
+        }
+      }
+    },
+    "briefing.section_jump.label %@": {
+      "comment": "Accessibility label for a container jump-rail button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jump to %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳转到 %1$@"
           }
         }
       }
@@ -302,6 +356,12 @@
             "state": "translated",
             "value": "Hide this card"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏此卡片"
+          }
         }
       }
     },
@@ -313,6 +373,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "Show this card"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示此卡片"
+          }
+        }
+      }
+    },
+    "container.hidden.all": {
+      "comment": "Message shown when every card in a container is hidden.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All cards hidden"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有卡片已隐藏"
           }
         }
       }

@@ -344,6 +344,14 @@ public enum AIDashSpacing {
         return 44
         #endif
     }
+    /// Minimum hit target for compact controls.
+    public static var controlHitTarget: CGFloat {
+        #if os(macOS)
+        return 32
+        #else
+        return 44
+        #endif
+    }
 }
 
 // MARK: - Spacing ladder (raw scale)

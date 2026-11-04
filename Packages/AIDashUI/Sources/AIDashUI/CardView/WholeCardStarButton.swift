@@ -46,8 +46,9 @@ struct WholeCardStarButton: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(filled ? theme.primary.primary : theme.neutrals.text3)
                     .contentTransition(.symbolEffect(.replace))
-                    .frame(minWidth: AIDashSpacing.starButtonHitTarget,
-                           minHeight: AIDashSpacing.starButtonHitTarget)
+                    .frame(width: 20, height: 20)
+                    .frame(minWidth: AIDashSpacing.controlHitTarget,
+                           minHeight: AIDashSpacing.controlHitTarget)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -61,8 +62,9 @@ struct WholeCardStarButton: View {
                 Image(systemName: isHidden ? "eye" : "eye.slash")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(theme.neutrals.text3)
-                    .frame(minWidth: AIDashSpacing.starButtonHitTarget,
-                           minHeight: AIDashSpacing.starButtonHitTarget)
+                    .frame(width: 20, height: 20)
+                    .frame(minWidth: AIDashSpacing.controlHitTarget,
+                           minHeight: AIDashSpacing.controlHitTarget)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

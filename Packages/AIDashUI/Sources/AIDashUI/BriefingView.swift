@@ -11,24 +11,14 @@ public enum BriefingViewState {
 }
 
 private enum BriefingViewCopy {
-    static let liveLabel = String(localized: "briefing.status.live", defaultValue: "LIVE", bundle: .module,
-                                  comment: "Freshness status shown for a current briefing.")
-    static let cachedLabel = String(localized: "briefing.status.cached", defaultValue: "CACHED", bundle: .module,
-                                    comment: "Freshness status shown for a fallback briefing.")
-    static let errorLabel = String(localized: "briefing.status.error", defaultValue: "ERROR", bundle: .module,
-                                   comment: "Status label shown for the briefing error state.")
-    static let emptyLabel = String(localized: "briefing.status.empty", defaultValue: "EMPTY", bundle: .module,
-                                   comment: "Status label shown for the briefing empty state.")
-    static let todayLabel = String(localized: "briefing.date.today", defaultValue: "TODAY", bundle: .module,
-                                   comment: "Status pill for the current briefing date.")
-    static let archiveLabel = String(localized: "briefing.date.archive", defaultValue: "ARCHIVE", bundle: .module,
-                                     comment: "Status pill for an archived briefing date.")
-    static let previousDateLabel = String(localized: "briefing.date.previous",
-                                          defaultValue: "Previous briefing date", bundle: .module,
-                                          comment: "Accessibility label for the previous briefing date button.")
-    static let nextDateLabel = String(localized: "briefing.date.next",
-                                      defaultValue: "Next briefing date", bundle: .module,
-                                      comment: "Accessibility label for the next briefing date button.")
+    static let liveLabel = String(localized: "briefing.status.live", defaultValue: "LIVE", bundle: .module)
+    static let cachedLabel = String(localized: "briefing.status.cached", defaultValue: "CACHED", bundle: .module)
+    static let errorLabel = String(localized: "briefing.status.error", defaultValue: "ERROR", bundle: .module)
+    static let emptyLabel = String(localized: "briefing.status.empty", defaultValue: "EMPTY", bundle: .module)
+    static let todayLabel = String(localized: "briefing.date.today", defaultValue: "TODAY", bundle: .module)
+    static let archiveLabel = String(localized: "briefing.date.archive", defaultValue: "ARCHIVE", bundle: .module)
+    static let previousDateLabel = String(localized: "briefing.date.previous", defaultValue: "Previous briefing date", bundle: .module)
+    static let nextDateLabel = String(localized: "briefing.date.next", defaultValue: "Next briefing date", bundle: .module)
 }
 
 public struct BriefingView: View {
@@ -91,7 +81,6 @@ public struct BriefingView: View {
         renderBody
         #endif
     }
-
     @ViewBuilder
     private var renderBody: some View {
         Group {
@@ -104,7 +93,6 @@ public struct BriefingView: View {
         .environment(\.hiddenCardIds, hiddenCardIds.union(locallyHiddenCardIds))
         .environment(\.onHideCard, hideCard)
     }
-
     @ViewBuilder
     private func pageContent(proxy: ScrollViewProxy? = nil) -> some View {
         VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
@@ -133,7 +121,6 @@ public struct BriefingView: View {
             }
         }
     }
-
     @ViewBuilder
     private var scrollBody: some View {
         ScrollViewReader { proxy in
@@ -157,12 +144,12 @@ public struct BriefingView: View {
         masthead(date: Self.localTodayString(), isFallback: false, publishedAt: nil,
                  containerCount: 0, cardCount: 0)
     }
-
     @ViewBuilder
     private func masthead(date: String, isFallback: Bool, publishedAt: Date?,
                           containerCount: Int, cardCount: Int) -> some View {
+        let effectiveDate = displayedDate(fallback: date)
         VStack(alignment: .leading, spacing: 10) {
-            mastheadStatusLine(date: displayedDate(fallback: date), isFallback: isFallback, publishedAt: publishedAt,
+            mastheadStatusLine(date: effectiveDate, isFallback: isFallback, publishedAt: publishedAt,
                                containerCount: containerCount, cardCount: cardCount)
 
             if isFallback {
@@ -175,9 +162,8 @@ public struct BriefingView: View {
                     Text(
                         String(
                             localized: "briefing.fallback.banner %@",
-                            defaultValue: "No new briefing today — showing latest (\(date))",
+                            defaultValue: "No new briefing today — showing latest (\(effectiveDate))",
                             bundle: .module,
-                            comment: "Banner shown above the latest published briefing when no briefing exists for today."
                         )
                     )
                 }
@@ -193,7 +179,7 @@ public struct BriefingView: View {
                 .accessibilityElement(children: .combine)
             }
 
-            Text(date)
+            Text(effectiveDate)
                 .font(AIDashTypography.masthead)
                 .foregroundStyle(theme.neutrals.text1)
 
@@ -219,25 +205,21 @@ public struct BriefingView: View {
                         localized: "briefing.hidden.show",
                         defaultValue: "HIDDEN · SHOW",
                         bundle: .module,
-                        comment: "Recovery control for hidden cards in the active briefing."
                     )
                 )
                 .font(AIDashTypography.mastheadStatus)
                 .monospacedDigit()
                 .padding(.horizontal, AIDashSpace.s8)
-                .frame(minHeight: AIDashSpacing.starButtonHitTarget)
+                .frame(minHeight: AIDashSpacing.controlHitTarget)
                 .background(theme.neutrals.inner, in: Capsule())
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(
                 Text(
-                    String(
-                        localized: "briefing.hidden.accessibility",
-                        defaultValue: "Show \(hiddenCount) hidden cards",
-                        bundle: .module,
-                        comment: "Accessibility label for the hidden-card recovery control."
-                    )
+                    "briefing.hidden.accessibility \(hiddenCount)",
+                    tableName: "Localizable",
+                    bundle: .module,
                 )
             )
         }
@@ -252,21 +234,29 @@ public struct BriefingView: View {
                 Spacer()
                 publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
                 telemetryPill(containerCount: containerCount, cardCount: cardCount)
-                dateSwitcher(date: date)
+                dateSwitcher(date: date, isFallback: isFallback)
             }
             VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 mastheadIdentity
                 HStack(spacing: AIDashSpace.s8) {
                     publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
                     telemetryPill(containerCount: containerCount, cardCount: cardCount)
-                    dateSwitcher(date: date)
+                    dateSwitcher(date: date, isFallback: isFallback)
                 }
+            }
+            VStack(alignment: .leading, spacing: AIDashSpace.s8) {
+                mastheadIdentity
+                HStack(spacing: AIDashSpace.s8) {
+                    publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
+                    telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                }
+                dateSwitcher(date: date, isFallback: isFallback)
             }
         }
     }
 
     @ViewBuilder
-    private func dateSwitcher(date: String) -> some View {
+    private func dateSwitcher(date: String, isFallback: Bool = false) -> some View {
         let dates = availableDates
         let index = dates.firstIndex(of: date) ?? dates.startIndex
         HStack(spacing: AIDashSpace.s4) {
@@ -276,8 +266,8 @@ public struct BriefingView: View {
                     selectedArchiveDate = dates[dates.index(before: index)]
                 } label: {
                     Image(systemName: "chevron.left")
-                        .frame(minWidth: AIDashSpacing.starButtonHitTarget,
-                               minHeight: AIDashSpacing.starButtonHitTarget)
+                        .frame(minWidth: AIDashSpacing.controlHitTarget,
+                               minHeight: AIDashSpacing.controlHitTarget)
                 }
                 .buttonStyle(.plain)
                 .disabled(index <= dates.startIndex)
@@ -287,6 +277,8 @@ public struct BriefingView: View {
             Text(date)
                 .font(AIDashTypography.mastheadStatus)
                 .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
             if dates.count >= 2 {
                 Button {
@@ -294,8 +286,8 @@ public struct BriefingView: View {
                     selectedArchiveDate = dates[dates.index(after: index)]
                 } label: {
                     Image(systemName: "chevron.right")
-                        .frame(minWidth: AIDashSpacing.starButtonHitTarget,
-                               minHeight: AIDashSpacing.starButtonHitTarget)
+                        .frame(minWidth: AIDashSpacing.controlHitTarget,
+                               minHeight: AIDashSpacing.controlHitTarget)
                 }
                 .buttonStyle(.plain)
                 .disabled(index >= dates.index(before: dates.endIndex))
@@ -303,59 +295,71 @@ public struct BriefingView: View {
             }
 
             StatusPill(
-                selectedArchiveDate == nil || date == Self.localTodayString()
+                Self.isTodayBadge(date: date, isFallback: isFallback, today: Self.localTodayString())
                     ? BriefingViewCopy.todayLabel : BriefingViewCopy.archiveLabel,
-                tone: selectedArchiveDate == nil || date == Self.localTodayString()
+                tone: Self.isTodayBadge(date: date, isFallback: isFallback, today: Self.localTodayString())
                     ? .success : .neutral
             )
         }
         .foregroundStyle(theme.neutrals.text2)
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
     private func sectionJumpRail(containers: [ContainerModel], proxy: ScrollViewProxy?) -> some View {
         if containers.count >= 2 {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: AIDashSpace.s8) {
-                    ForEach(containers.sorted { $0.order < $1.order }) { container in
-                        Button {
-                            if let proxy {
-                                withAnimation(.snappy(duration: 0.2)) {
-                                    proxy.scrollTo(container.id, anchor: .top)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: AIDashSpace.s4) {
-                                Text(String(format: "%02d", container.order + 1))
-                                    .monospacedDigit()
-                                Text(container.title)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
-                            }
-                            .padding(.horizontal, AIDashSpace.s8)
-                            .frame(minHeight: AIDashSpacing.starButtonHitTarget)
-                            .background(theme.neutrals.inner, in: Capsule())
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(
-                            Text(
-                                String(
-                                    localized: "briefing.section_jump.label %@",
-                                    defaultValue: "Jump to \(container.title)",
-                                    bundle: .module,
-                                    comment: "Accessibility label for a container jump-rail button."
-                                )
-                            )
-                        )
-                    }
+            if explicitState != nil || proxy == nil {
+                sectionJumpRailContent(containers: containers, proxy: proxy)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    sectionJumpRailContent(containers: containers, proxy: proxy)
                 }
             }
-            .accessibilityElement(children: .contain)
         }
     }
 
+    private func sectionJumpRailContent(containers: [ContainerModel], proxy: ScrollViewProxy?) -> some View {
+        HStack(spacing: AIDashSpace.s8) {
+            ForEach(containers.sorted { $0.order < $1.order }) { container in
+                Button {
+                    if let proxy {
+                        withAnimation(.snappy(duration: 0.2)) {
+                            proxy.scrollTo(container.id, anchor: .top)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: AIDashSpace.s4) {
+                        Text(String(format: "%02d", container.order + 1))
+                            .font(AIDashTypography.mastheadStatus)
+                            .foregroundStyle(theme.neutrals.text3)
+                            .monospacedDigit()
+                        Text(container.title)
+                            .font(AIDashTypography.mastheadStatus)
+                            .foregroundStyle(theme.neutrals.text1)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
+                    .padding(.horizontal, AIDashSpace.s8)
+                    .frame(minHeight: AIDashSpacing.controlHitTarget)
+                    .background(theme.neutrals.inner, in: Capsule())
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    Text(
+                        String(
+                            localized: "briefing.section_jump.label %@",
+                            defaultValue: "Jump to \(container.title)",
+                            bundle: .module,
+                        )
+                    )
+                )
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
     private var availableDates: [String] {
         let storedDates = publishedBriefings.map(\.date)
         let explicitDate: String? = {
@@ -365,11 +369,9 @@ public struct BriefingView: View {
         return Set(storedDates + archiveDates + [explicitDate].compactMap { $0 })
             .sorted()
     }
-
     private func displayedDate(fallback: String) -> String {
         selectedArchiveDate ?? fallback
     }
-
     private func hideCard(cardId: String, cardType: CardType, hidden: Bool) {
         if hidden {
             locallyHiddenCardIds.insert(cardId)
@@ -411,23 +413,26 @@ public struct BriefingView: View {
 
     @ViewBuilder
     private func publishedStatus(isFallback: Bool, publishedAt: Date?) -> some View {
-        if !isFallback, let publishedAt {
-            HStack(spacing: AIDashSpace.s4) {
-                StatusPill(BriefingViewCopy.liveLabel, tone: .success)
-                Text(
-                    String(
-                        localized: "briefing.published.relative %@",
-                        defaultValue: "Published \(publishedAt.formatted(.relative(presentation: .named)))",
-                        bundle: .module,
-                        comment: "Caption showing how long ago the briefing was published."
+        Group {
+            if !isFallback, let publishedAt {
+                HStack(spacing: AIDashSpace.s4) {
+                    StatusPill(BriefingViewCopy.liveLabel, tone: .success)
+                    Text(
+                        String(
+                            localized: "briefing.published.relative %@",
+                            defaultValue: "Published \(publishedAt.formatted(.relative(presentation: .named)))",
+                            bundle: .module,
+                        )
                     )
-                )
-                .font(AIDashTypography.mastheadStatus)
-                .foregroundStyle(theme.neutrals.text2)
+                    .font(AIDashTypography.mastheadStatus)
+                    .foregroundStyle(theme.neutrals.text2)
+                }
+            } else {
+                StatusPill(BriefingViewCopy.cachedLabel, tone: .warning)
             }
-        } else {
-            StatusPill(BriefingViewCopy.cachedLabel, tone: .warning)
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func telemetryPill(containerCount: Int, cardCount: Int) -> some View {
@@ -435,7 +440,6 @@ public struct BriefingView: View {
             localized: "briefing.telemetry.pill",
             defaultValue: "%1$02d SEC · %2$02d CARDS",
             bundle: .module,
-            comment: "Compact telemetry readout showing container and card counts."
         )
         return Text(String(format: format, containerCount, cardCount))
             .font(AIDashTypography.mastheadStatus)
@@ -443,12 +447,13 @@ public struct BriefingView: View {
             .padding(.horizontal, AIDashSpace.s8)
             .padding(.vertical, AIDashSpace.s4)
             .background(theme.neutrals.inner, in: Capsule())
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .accessibilityLabel(
                 Text(
                     "briefing.telemetry.accessibility \(containerCount) \(cardCount)",
                     tableName: "Localizable",
                     bundle: .module,
-                    comment: "Accessibility label for briefing container and card counts."
                 )
             )
     }
@@ -510,7 +515,7 @@ public struct BriefingView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             Text("briefing.loading", tableName: "Localizable", bundle: .module,
-                 comment: "Accessibility label for the briefing loading state.")
+                 )
         )
     }
 
@@ -555,27 +560,17 @@ public struct BriefingView: View {
     private func localizedStateText(for key: String) -> String {
         switch key {
         case "briefing.empty.title":
-            return String(localized: "briefing.empty.title", defaultValue: "No briefings yet",
-                          bundle: .module, comment: "Briefing empty-state title.")
+            return String(localized: "briefing.empty.title", defaultValue: "No briefings yet", bundle: .module)
         case "briefing.empty.subtitle":
-            return String(localized: "briefing.empty.subtitle",
-                          defaultValue: "Use the aidash CLI to publish your first one.",
-                          bundle: .module, comment: "Briefing empty-state detail.")
+            return String(localized: "briefing.empty.subtitle", defaultValue: "Use the aidash CLI to publish your first one.", bundle: .module)
         case "briefing.empty_containers.title":
-            return String(localized: "briefing.empty_containers.title",
-                          defaultValue: "No sections in this briefing",
-                          bundle: .module, comment: "Empty-container state title.")
+            return String(localized: "briefing.empty_containers.title", defaultValue: "No sections in this briefing", bundle: .module)
         case "briefing.empty_containers.subtitle":
-            return String(localized: "briefing.empty_containers.subtitle",
-                          defaultValue: "This briefing was published without any sections.",
-                          bundle: .module, comment: "Empty-container state detail.")
+            return String(localized: "briefing.empty_containers.subtitle", defaultValue: "This briefing was published without any sections.", bundle: .module)
         case "briefing.error.title":
-            return String(localized: "briefing.error.title", defaultValue: "Briefing unavailable",
-                          bundle: .module, comment: "Briefing error-state title.")
+            return String(localized: "briefing.error.title", defaultValue: "Briefing unavailable", bundle: .module)
         case "briefing.error.subtitle":
-            return String(localized: "briefing.error.subtitle",
-                          defaultValue: "The briefing could not be loaded. Try again after the host is available.",
-                          bundle: .module, comment: "Briefing error-state detail.")
+            return String(localized: "briefing.error.subtitle", defaultValue: "The briefing could not be loaded. Try again after the host is available.", bundle: .module)
         default:
             return key
         }
@@ -588,6 +583,11 @@ public struct BriefingView: View {
         return AIDashSpacing.pageHorizontalCompact
         #endif
     }
+
+    static func isTodayBadge(date: String, isFallback: Bool, today: String) -> Bool {
+        !isFallback && date == today
+    }
+
     private static func localTodayString() -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current

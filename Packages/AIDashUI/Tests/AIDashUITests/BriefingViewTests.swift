@@ -39,6 +39,36 @@ struct BriefingViewTests {
                 "the en localization for briefing.navigation.title is missing")
     }
 
+    @Test("date badge distinguishes current and fallback briefings")
+    func dateBadgeState() {
+        #expect(BriefingView.isTodayBadge(date: "2026-11-04", isFallback: false, today: "2026-11-04"))
+        #expect(!BriefingView.isTodayBadge(date: "2026-11-02", isFallback: true, today: "2026-11-04"))
+        #expect(!BriefingView.isTodayBadge(date: "2026-11-02", isFallback: false, today: "2026-11-04"))
+    }
+
+    @Test("historical masthead and jump rail localization entries cover both locales")
+    func historicalLocalizationKeysAreComplete() throws {
+        let catalog = try String(
+            contentsOf: Self.sourceFile(named: "Localizable.xcstrings",
+                                        under: "Sources/AIDashUI/Resources"),
+            encoding: .utf8
+        )
+        for key in [
+            "briefing.date.archive",
+            "briefing.date.next",
+            "briefing.date.previous",
+            "briefing.date.today",
+            "briefing.hidden.accessibility %lld",
+            "briefing.hidden.show",
+            "briefing.section_jump.label %@",
+            "card_router.hide_card.label",
+            "card_router.show_card.label"
+        ] {
+            #expect(catalog.contains("\"\(key)\""))
+            #expect(catalog.contains("zh-Hans"))
+        }
+    }
+
     @Test("body renders on the current platform (iOS NavigationStack / macOS overlay)")
     func bodyRendersOnCurrentPlatform() {
         // MY-1377 wraps the shared scroll surface in a NavigationStack on iOS
