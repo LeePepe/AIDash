@@ -164,6 +164,15 @@ struct ContainerViewTests {
                 "Header-to-card spacing must come from the 12pt token, not a magic number")
     }
 
+    @Test("hidden-card recovery uses visible cards and an explicit all-hidden state")
+    func hiddenCardRecoverySourceContract() throws {
+        let source = try Self.containerViewSource()
+        #expect(source.contains("return visibleCards.first?.style"))
+        #expect(source.contains("visibleCards.isEmpty && !sortedCards.isEmpty"))
+        #expect(source.contains("CardEmptyState("))
+        #expect(source.contains(".fixedSize()"))
+    }
+
     // MARK: - Source helper
 
     private static func containerViewSource() throws -> String {
