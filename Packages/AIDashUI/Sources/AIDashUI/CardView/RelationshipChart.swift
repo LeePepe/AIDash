@@ -55,7 +55,7 @@ enum RelationshipChartAxis {
 
     /// Axis marks with ticks and value labels but NO grid line.
     static func gridless() -> some AxisContent {
-        AxisMarks { _ in
+        AxisMarks(position: .leading) { _ in
             AxisTick()
             AxisValueLabel()
         }

@@ -1,5 +1,6 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 /// `sectionHeader` is the one structural variant that renders **no card
 /// chrome at all** — no background, no border, no padding wrapper, no
@@ -15,6 +16,7 @@ public struct SectionHeaderCardView: View {
     let payload: SectionHeaderPayload
     let size: CardSize
     let style: CardStyle
+    @Environment(\.theme) private var theme
 
     public init(payload: SectionHeaderPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -26,7 +28,7 @@ public struct SectionHeaderCardView: View {
         VStack(alignment: .leading, spacing: subtitleSpacing) {
             Text(payload.title)
                 .font(Self.recipe.primary)
-                .foregroundStyle(.primary)
+                .foregroundStyle(theme.neutrals.text1)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let subtitle = payload.subtitle, !subtitle.isEmpty {
@@ -35,6 +37,9 @@ public struct SectionHeaderCardView: View {
                     .foregroundStyle(Self.recipe.secondaryColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            Rectangle()
+                .fill(theme.neutrals.border)
+                .frame(height: AIDashChrome.hairlineWidth)
         }
         .padding(.vertical, verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)

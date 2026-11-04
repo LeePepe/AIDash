@@ -1,5 +1,6 @@
 import Testing
 import SwiftUI
+import AIDashCore
 @testable import AIDashUI
 
 /// Contract tests for the spec 002 D4 star-action environment: the UI layer
@@ -49,6 +50,26 @@ struct StarActionEnvironmentTests {
     @Test("starredCardIds defaults to empty → every card renders outline")
     func starredCardIdsDefaultsToEmpty() {
         #expect(EnvironmentValues().starredCardIds.isEmpty)
+    }
+
+    @Test("hide action defaults to nil and hidden ids default to empty")
+    func hideActionDefaultsAreSafe() {
+        #expect(EnvironmentValues().onHideCard == nil)
+        #expect(EnvironmentValues().hiddenCardIds.isEmpty)
+    }
+
+    @Test("injected hide action round-trips the card identity and target state")
+    @MainActor
+    func injectedHideActionRoundTrips() {
+        var values = EnvironmentValues()
+        var received: (id: String, type: CardType, hidden: Bool)?
+        values.onHideCard = { id, type, hidden in received = (id, type, hidden) }
+
+        values.onHideCard?("card-1", .agentSummary, true)
+
+        #expect(received?.id == "card-1")
+        #expect(received?.type == .agentSummary)
+        #expect(received?.hidden == true)
     }
 
     @Test("onToggleDone defaults to nil → done toggle degrades to a no-op")
