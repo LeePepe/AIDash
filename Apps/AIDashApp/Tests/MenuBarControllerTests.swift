@@ -345,7 +345,6 @@ import SQLite3
     } ?? FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Development/handoff/sbar-ui-r1/evidence", isDirectory: true)
     try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
-    var lightLuminances: [String: CGFloat] = [:]
     var lightHeights: [String: Int] = [:]
     let minimumHeights: [String: Int] = [
         "populated": 1_200,
@@ -381,22 +380,20 @@ import SQLite3
             let suffix = isDark ? "dark" : "light"
             try data.write(to: outputDirectory.appendingPathComponent("\(name)-\(suffix).png"))
             try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
-            // Sample inside the rounded panel arc, away from the transparent corner.
-            let background = try #require(bitmap.colorAt(x: 20, y: 100)?.usingColorSpace(.sRGB))
-            let luminance = 0.2126 * background.redComponent
-                + 0.7152 * background.greenComponent + 0.0722 * background.blueComponent
-            #expect(background.alphaComponent > 0.25)
-            #expect(background.alphaComponent < 0.85)
-            if name != "loading" {
-                let card = try #require(bitmap.colorAt(x: 40, y: 180)?.usingColorSpace(.sRGB))
-                #expect(card.alphaComponent > 0.35)
-                #expect(card.alphaComponent < 0.85)
+            let rootPadding = try #require(bitmap.colorAt(x: 60, y: 12)?.usingColorSpace(.sRGB))
+            #expect(rootPadding.alphaComponent < 0.05)
+            for point in [
+                (x: 8, y: 80),
+                (x: 751, y: 80),
+                (x: 8, y: bitmap.pixelsHigh - 60),
+                (x: 751, y: bitmap.pixelsHigh - 60)
+            ] {
+                let outerMargin = try #require(bitmap.colorAt(x: point.x, y: point.y)?.usingColorSpace(.sRGB))
+                #expect(outerMargin.alphaComponent < 0.10)
             }
             if !isDark {
-                lightLuminances[name] = luminance
                 lightHeights[name] = bitmap.pixelsHigh
             } else {
-                #expect(try #require(lightLuminances[name]) > luminance)
                 #expect(lightHeights[name] == bitmap.pixelsHigh)
             }
         }

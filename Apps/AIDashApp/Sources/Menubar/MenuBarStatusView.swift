@@ -101,29 +101,25 @@ public struct MenuBarStatusView: View {
         }
     }
     public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Group {
-                switch state {
-                case .loading: loadingView
-                case let .empty(reason):
-                    message(title: Copy.emptyTitle, detail: reason, symbol: "chart.bar.xaxis", symbolColor: theme.primary.primary)
-                case let .error(errorMessage):
-                    message(title: Copy.errorTitle, detail: errorMessage, symbol: "exclamationmark.triangle", symbolColor: theme.warning)
-                case let .populated(snapshot): populated(snapshot)
+        GlassEffectContainer(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                Group {
+                    switch state {
+                    case .loading: loadingView
+                    case let .empty(reason):
+                        message(title: Copy.emptyTitle, detail: reason, symbol: "chart.bar.xaxis", symbolColor: theme.primary.primary)
+                    case let .error(errorMessage):
+                        message(title: Copy.errorTitle, detail: errorMessage, symbol: "exclamationmark.triangle", symbolColor: theme.warning)
+                    case let .populated(snapshot): populated(snapshot)
+                    }
                 }
+                actionFooter
             }
-            actionFooter
+            .padding(16)
         }
-        .padding(16)
         .frame(width: 380)
         .environment(\.theme, theme)
         .foregroundStyle(theme.neutrals.text1)
-        .background(.ultraThinMaterial.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .background(theme.neutrals.bg.opacity(colorScheme == .dark ? 0.44 : 0.50), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.55 : 0.65), lineWidth: 1)
-        }
     }
     private var actionFooter: some View {
         glassStrip {
@@ -145,31 +141,28 @@ public struct MenuBarStatusView: View {
         primary: Bool = false,
         destructive: Bool = false
     ) -> some View {
-        Group {
-            if primary {
-                baseActionButton(title, symbol: symbol, action: action, role: destructive ? .destructive : nil)
-                    .buttonStyle(.glassProminent)
-            } else {
-                baseActionButton(title, symbol: symbol, action: action, role: destructive ? .destructive : nil)
-                    .buttonStyle(.glass)
-            }
-        }
-        .tint(destructive ? theme.danger : nil)
+        baseActionButton(title, symbol: symbol, action: action, role: destructive ? .destructive : nil)
+            .foregroundStyle(destructive ? theme.danger : primary ? theme.primary.primary : theme.neutrals.text1)
+            .glassEffect(
+                destructive
+                    ? .regular.tint(theme.danger.opacity(0.15)).interactive()
+                    : primary
+                        ? .regular.tint(theme.primary.primary.opacity(0.18)).interactive()
+                        : .regular.interactive(),
+                in: .capsule
+            )
     }
-    private func baseActionButton(
-        _ title: String,
-        symbol: String,
-        action: Action,
-        role: ButtonRole? = nil
-    ) -> some View {
+    private func baseActionButton(_ title: String, symbol: String, action: Action, role: ButtonRole? = nil) -> some View {
         Button(role: role) { perform(action) } label: {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 11, weight: .medium))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+            HStack(spacing: 4) {
+                Image(systemName: symbol)
+                Text(title)
+            }
+            .font(.system(size: 11, weight: .medium)).lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false).padding(.horizontal, 7)
+            .frame(height: 32)
         }
-        .controlSize(.small)
-        .frame(height: 32)
+        .buttonStyle(.plain)
         .accessibilityLabel(title)
     }
     private func populated(_ snapshot: MenuBarSystemSnapshot) -> some View {
@@ -234,6 +227,7 @@ public struct MenuBarStatusView: View {
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 4) {
                 StatusPill(thermal(snapshot.machine.thermalState), tone: thermalTone(snapshot.machine.thermalState))
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
     }
@@ -257,10 +251,13 @@ public struct MenuBarStatusView: View {
         .accessibilityLabel(Copy.updating)
     }
     private func skeleton(height: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(theme.neutrals.border.opacity(0.55))
-            .frame(maxWidth: .infinity)
-            .frame(height: height)
+        Color.clear
+            .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
+            .glassEffect(.regular, in: .rect(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.18 : 0.24), lineWidth: 1)
+            }
             .accessibilityHidden(true)
     }
     private func sectionHeader(_ title: String, icon: String, cadence: String, date: Date) -> some View {
@@ -268,6 +265,7 @@ public struct MenuBarStatusView: View {
             SectionHeader(title, icon: icon)
             Spacer(minLength: 4)
             StatusPill(cadence, tone: .primary)
+                .fixedSize(horizontal: true, vertical: false)
             Text(time(date))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.neutrals.text2)
@@ -327,6 +325,7 @@ public struct MenuBarStatusView: View {
                     .lineLimit(1)
                 Spacer(minLength: 2)
                 StatusPill(network.isConnected ? Copy.connectedShort : Copy.disconnectedShort, tone: network.isConnected ? .success : .warning)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             Text("\(network.interfaceName) · \(network.ipAddress ?? "—")")
                 .font(.system(size: 11, design: .monospaced))
@@ -434,6 +433,7 @@ public struct MenuBarStatusView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                 StatusPill(item.isAvailable ? Copy.available : Copy.unavailable, tone: item.isAvailable ? .success : .danger)
+                    .fixedSize(horizontal: true, vertical: false)
                 Spacer(minLength: 4)
                 Text(item.isAvailable ? compactCount(item.totalTokens) : "—")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -463,6 +463,7 @@ public struct MenuBarStatusView: View {
                 .lineLimit(1)
             if let badge {
                 StatusPill(badge, tone: tone)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             Spacer(minLength: 2)
         }
@@ -530,17 +531,17 @@ public struct MenuBarStatusView: View {
         VStack(alignment: .leading, spacing: 10) { content() }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(theme.neutrals.card.opacity(colorScheme == .dark ? 0.32 : 0.36), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .glassEffect(.regular, in: .rect(cornerRadius: 16))
             .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.50 : 0.60), lineWidth: 1) }
+                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.22 : 0.28), lineWidth: 1) }
     }
     private func glassStrip<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 8) { content() }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(theme.neutrals.inner.opacity(colorScheme == .dark ? 0.32 : 0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .glassEffect(.regular, in: .rect(cornerRadius: 12))
             .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.45 : 0.55), lineWidth: 1) }
+                .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.18 : 0.24), lineWidth: 1) }
     }
     private func thermal(_ value: SystemThermalLevel) -> String {
         switch value {
@@ -586,12 +587,8 @@ public struct MenuBarStatusView: View {
         }
         return value.formatted(.number)
     }
-    private func formatBytes(_ value: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
-    }
-    private func rate(_ value: Double) -> String {
-        "\(ByteCountFormatter.string(fromByteCount: Int64(max(value, 0)), countStyle: .binary))/s"
-    }
+    private func formatBytes(_ value: UInt64) -> String { ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary) }
+    private func rate(_ value: Double) -> String { "\(ByteCountFormatter.string(fromByteCount: Int64(max(value, 0)), countStyle: .binary))/s" }
     private func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
     internal static func resolveLocalized(_ key: String, _ value: String) -> String {
         Copy.resolveLocalized(key, value)
