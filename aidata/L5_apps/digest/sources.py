@@ -9,6 +9,7 @@ failure degrades to an empty series + a SourceHealth state, never a crash
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -667,6 +668,29 @@ class RetroOpsTrends:
     prmon_checked: int | None
     prmon_stuck: int | None
     health: SourceHealth
+    # Optional richer shapes keep the legacy positional constructor stable.
+    # They are derived from the same retro queries and remain empty on older
+    # fixtures or when a source has no rows.
+    ci_points: tuple[tuple[str, float, float], ...] = ()
+    release_tf_bars: tuple[tuple[str, float, str, str | None], ...] = ()
+    workspace_hygiene_bars: tuple[tuple[str, float, str, str | None], ...] = ()
+    claude_jobs: tuple[tuple[str, float], ...] = ()
+
+
+def _claude_job_counts() -> tuple[tuple[str, float], ...]:
+    """Read real Claude job outcomes, degrading when the optional DB is absent."""
+    db = clean_path("claude_job")
+    if not db.exists():
+        return ()
+    try:
+        with sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                "SELECT COALESCE(state, 'unknown'), COUNT(*) "
+                "FROM job GROUP BY state ORDER BY state"
+            ).fetchall()
+        return tuple((str(state), float(count)) for state, count in rows)
+    except (OSError, sqlite3.Error):
+        return ()
 
 
 def fetch_retro_ops_trends() -> RetroOpsTrends:
@@ -680,15 +704,18 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
         # These queries are part of the same retro snapshot. Their values are
         # intentionally not charted yet, but running them keeps source health
         # tied to the complete L4 contract consumed by this card family.
-        serve.run_query("retro/tf_release_deliveries")
-        serve.run_query("retro/workspace_hygiene_reclaim")
-        if not (ci_rows or gtt_rows or bot_rows):
+        release_rows, release_cols = serve.run_query("retro/tf_release_deliveries")
+        hygiene_rows, hygiene_cols = serve.run_query(
+            "retro/workspace_hygiene_reclaim")
+        claude_jobs = _claude_job_counts()
+        if not (ci_rows or gtt_rows or bot_rows or release_rows
+                or hygiene_rows or claude_jobs):
             return empty
 
         ci = {name: ci_cols.index(name) for name in (
             "repo_key", "run_count", "success_count", "failure_count",
             "cancelled_or_timeout_count", "pass_rate", "config_noise_job_count",
-        )}
+        )} if ci_rows else {}
         success = sum(int(r[ci["success_count"]] or 0) for r in ci_rows)
         failures = sum(int(r[ci["failure_count"]] or 0) for r in ci_rows)
         noise = sum(int(r[ci["config_noise_job_count"]] or 0) for r in ci_rows)
@@ -720,9 +747,17 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
             for repo, (total, success_count, failure_count, noise_count)
             in sorted(repo_totals.items(), key=lambda item: (-item[1][0], item[0]))
         )
+        ci_points = tuple(
+            (repo, total,
+             success_count / (success_count + failure_count))
+            for repo, (total, success_count, failure_count, _noise_count)
+            in sorted(repo_totals.items(), key=lambda item: item[0])
+            if total > 0 and success_count + failure_count > 0
+        )
 
-        gtt = {name: gtt_cols.index(name)
-               for name in ("goal_id", "actual_status")}
+        gtt = ({name: gtt_cols.index(name)
+                for name in ("goal_id", "actual_status")}
+               if gtt_rows else {})
         statuses: dict[str, str] = {}
         for row in gtt_rows:
             statuses.setdefault(str(row[gtt["goal_id"]] or "unknown"),
@@ -740,9 +775,10 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
             if value > 0
         )
 
-        bot = {name: bot_cols.index(name)
-               for name in ("action_kind", "action_count",
-                            "latest_checked_pr_count", "latest_stuck_pr_count")}
+        bot = ({name: bot_cols.index(name)
+                for name in ("action_kind", "action_count",
+                             "latest_checked_pr_count", "latest_stuck_pr_count")}
+               if bot_rows else {})
         action_counts: dict[str, float] = {}
         checked = stuck = None
         for row in bot_rows:
@@ -760,6 +796,37 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
             for action, count in sorted(action_counts.items(),
                                         key=lambda item: (-item[1], item[0]))
         )
+        release_tf_bars: tuple[tuple[str, float, str, str | None], ...] = ()
+        if release_rows:
+            release_idx = {name: release_cols.index(name) for name in (
+                "repo_key", "target_platform", "delivery_count",
+                "failed_delivery_count")}
+            release_tf_bars = tuple(sorted((
+                (f"{row[release_idx['repo_key']] or 'unknown'} · "
+                 f"{row[release_idx['target_platform']] or 'unknown'}",
+                 float(row[release_idx["delivery_count"]] or 0),
+                 f"{int(row[release_idx['delivery_count']] or 0)}次",
+                 "warning"
+                 if int(row[release_idx["failed_delivery_count"]] or 0) > 0
+                 else None)
+                for row in release_rows
+                if float(row[release_idx["delivery_count"]] or 0) > 0
+            ), key=lambda item: (-item[1], item[0])))
+        workspace_hygiene_bars: tuple[tuple[str, float, str, str | None], ...] = ()
+        if hygiene_rows:
+            hygiene_idx = {name: hygiene_cols.index(name) for name in (
+                "repo_key", "entity_type", "reclaimable_count")}
+            workspace_hygiene_bars = tuple(
+                (f"{row[hygiene_idx['repo_key']] or 'unknown'} · "
+                 f"{row[hygiene_idx['entity_type']] or 'unknown'}",
+                 float(row[hygiene_idx["reclaimable_count"]] or 0),
+                 f"{int(row[hygiene_idx['reclaimable_count']] or 0)}个可回收",
+                 "warning"
+                 if int(row[hygiene_idx["reclaimable_count"]] or 0) > 0
+                 else None)
+                for row in hygiene_rows
+                if float(row[hygiene_idx["reclaimable_count"]] or 0) > 0
+            )
         total_runs = sum(int(r[ci["run_count"]] or 0) for r in ci_rows)
         total_goals = len(statuses)
         return RetroOpsTrends(
@@ -767,6 +834,7 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
             (success / total_runs if total_runs else None),
             ((done + active) / total_goals if total_goals else None),
             checked, stuck, SourceHealth("retro_ops", "ok"),
+            ci_points, release_tf_bars, workspace_hygiene_bars, claude_jobs,
         )
     except Exception:  # noqa: BLE001 - retro source degrades as one bundle
         return empty
