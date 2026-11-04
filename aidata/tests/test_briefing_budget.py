@@ -351,15 +351,24 @@ def test_retro_ops_is_admitted_with_section_and_agent_summary():
     retro = RetroOpsTrends(
         ci_segments=(("通过", 8.0, "success"),),
         ci_repo_bars=(("AIDash", 8.0, "8次", None),),
-        gtt_segments=(), bot_tl_bars=(("CHECK", 2.0, "2次", None),),
-        ci_pass_ratio=0.8, gtt_done_ratio=None,
+        gtt_segments=(("已完成", 3.0, "success"),),
+        bot_tl_bars=(("CHECK", 2.0, "2次", None),),
+        ci_pass_ratio=0.8, gtt_done_ratio=0.75,
         prmon_checked=2, prmon_stuck=0,
         health=SourceHealth("retro_ops", "ok"),
+        ci_points=(("AIDash", 8.0, 0.8),),
+        release_tf_bars=(("iOS", 2.0, "2次", None),),
+        workspace_hygiene_bars=(("worktree", 3.0, "3个", "warning"),),
+        claude_jobs=(("completed", 2.0),),
     )
     cards = _build(_sources(retro_ops=retro))
     retro_cards = next(c.cards for c in cards.containers
                        if c.title == "工程与编排图表")
     assert any(card.type == "agentSummary" for card in retro_cards)
+    assert len(retro_cards) <= 5
+    assert sum(len(container.cards) for container in cards.containers) <= MAX_CARDS
+    assert all(card.payload["completed"] for card in retro_cards
+               if card.type == "agentSummary")
     section = next(card for card in retro_cards if card.type == "sectionHeader")
     assert section.size == "wide"
     ids = [card.id for card in retro_cards]

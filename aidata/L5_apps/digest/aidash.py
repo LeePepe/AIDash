@@ -975,9 +975,9 @@ def _time_output_container(mmdd: str, app_focus, commit_by_repo) -> "Container |
 
 def _agent_summary_card(card_id: str, agent_name: str, completed: list[dict],
                         stats: list[dict] | None = None) -> Card | None:
-    """Build a compact evidence card when completed work or stats exist."""
+    """Build a compact evidence card only when completed work exists."""
     completed = [item for item in completed if item.get("title")]
-    if not completed and not stats:
+    if not completed:
         return None
     payload = {"agentName": agent_name, "completed": completed[:6]}
     if stats:
@@ -1019,6 +1019,8 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
                        **({"semantic": semantic} if semantic else {})}
                       for label, value, value_text, semantic in retro_ops.ci_repo_bars],
         }))
+    # Reserve room for the divider and both operational cards (five total).
+    leading = leading[:2]
     completed: list[dict] = []
     stats: list[dict] = []
     if retro_ops.bot_tl_bars:
@@ -1028,18 +1030,14 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
         )
     if retro_ops.ci_pass_ratio is not None:
         ratio = max(0.0, min(1.0, float(retro_ops.ci_pass_ratio)))
-        stats.append({"label": "CI 通过率", "value": round(ratio * 100, 1),
-                      "unit": "%", "ratio": ratio, "context": "github_ci"})
+        stats.append({"label": "CI 通过率", "value": round(ratio * 100, 1)})
     if retro_ops.gtt_done_ratio is not None:
         ratio = max(0.0, min(1.0, float(retro_ops.gtt_done_ratio)))
-        stats.append({"label": "GTT 非阻塞率", "value": round(ratio * 100, 1),
-                      "unit": "%", "ratio": ratio, "context": "gtt"})
+        stats.append({"label": "GTT 非阻塞率", "value": round(ratio * 100, 1)})
     if retro_ops.prmon_checked is not None:
-        stats.append({"label": "PR monitor 检查", "value": retro_ops.prmon_checked,
-                      "unit": "个", "context": "pr_monitor"})
+        stats.append({"label": "PR monitor 检查", "value": retro_ops.prmon_checked})
     if retro_ops.prmon_stuck is not None:
-        stats.append({"label": "PR monitor 卡住", "value": retro_ops.prmon_stuck,
-                      "unit": "个", "context": "pr_monitor"})
+        stats.append({"label": "PR monitor 卡住", "value": retro_ops.prmon_stuck})
     for state, count in getattr(retro_ops, "claude_jobs", ()):
         completed.append({"title": f"claude_job · {state} · {int(count)}",
                           "ref": "claude_job"})
@@ -1063,6 +1061,7 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
             + list(retro_ops.workspace_hygiene_bars)
         )
     ]
+    operational_items.sort(key=lambda item: (-float(item["value"]), str(item["label"])))
     trailing: list[Card] = []
     trailing_labels: list[str] = []
     if operational_items:

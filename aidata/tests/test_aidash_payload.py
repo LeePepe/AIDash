@@ -324,20 +324,26 @@ def test_retro_ops_container_maps_chart_cards_and_degrades():
         ci_pass_ratio=0.8, gtt_done_ratio=0.75,
         prmon_checked=5, prmon_stuck=1,
         health=SourceHealth("retro_ops", "ok"),
+        ci_points=(("AIDash", 10.0, 0.8),),
+        release_tf_bars=(("iOS", 2.0, "2次", None),),
+        workspace_hygiene_bars=(("worktree", 3.0, "3个", "warning"),),
+        claude_jobs=(("completed", 2.0),),
     )
     container = _retro_ops_container("0709", retro)
     assert container is not None
     assert [card.type for card in container.cards] == [
-        "stackedBar", "stackedBar", "barList", "sectionHeader",
+        "stackedBar", "stackedBar", "sectionHeader", "barList",
         "agentSummary",
     ]
     assert container.cards[0].payload["segments"][1]["semantic"] == "warning"
     stats = next(card.payload["stats"] for card in container.cards
                  if card.type == "agentSummary")
-    assert next(item for item in stats if item["label"] == "CI 通过率")["ratio"] == 0.8
-    section = container.cards[-2]
+    assert next(item for item in stats if item["label"] == "CI 通过率")["value"] == 80.0
+    assert all(set(item) == {"label", "value"} for item in stats)
+    section = container.cards[2]
     assert section.size == "wide"
-    assert section.payload["subtitle"] == "编排汇总"
+    assert section.payload["subtitle"] == "release_tf · workspace_hygiene · 编排汇总"
+    assert [card.id for card in container.cards] == sorted(card.id for card in container.cards)
     assert container.cards[-1].payload["agentName"] == "工程编排"
     assert len(container.cards) <= 5
     assert _retro_ops_container(
@@ -357,8 +363,10 @@ def test_retro_ops_container_maps_real_claude_jobs_and_operational_bars():
         ci_pass_ratio=None, gtt_done_ratio=None,
         prmon_checked=None, prmon_stuck=None,
         health=SourceHealth("retro_ops", "ok"),
-        release_tf_bars=(("AIDash · iOS", 3.0, "3次", None),),
-        workspace_hygiene_bars=(("AIDash · worktree", 1.0, "1个可回收", "warning"),),
+        release_tf_bars=(("AIDash · iOS", 3.0, "3次", None),
+                         ("AIDash · macOS", 1.0, "1次", None)),
+        workspace_hygiene_bars=(("AIDash · worktree", 5.0, "5个可回收", "warning"),
+                                ("AIDash · branch", 3.0, "3个可回收", "warning")),
         claude_jobs=(("completed", 2.0),),
     )
     container = _retro_ops_container("0709", retro)
@@ -366,5 +374,36 @@ def test_retro_ops_container_maps_real_claude_jobs_and_operational_bars():
         "stackedBar", "barList", "sectionHeader", "barList", "agentSummary",
     ]
     assert container.cards[2].size == "wide"
-    assert container.cards[3].payload["items"][0]["value"] == 3.0
+    items = container.cards[3].payload["items"]
+    assert [item["value"] for item in items] == [5.0, 3.0, 3.0, 1.0]
+    assert [item["label"] for item in items[1:3]] == ["AIDash · branch", "AIDash · iOS"]
+    assert items[0]["valueText"] == "5个可回收"
+    assert items[0]["semantic"] == "warning"
     assert container.cards[4].payload["completed"][0]["ref"] == "claude_job"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("completed", [[], [{"title": ""}]])
+def test_agent_summary_requires_completed_work_even_with_stats(completed):
+    from L5_apps.digest.aidash import _agent_summary_card
+
+    assert _agent_summary_card("summary", "工程编排", completed,
+                               [{"label": "PR monitor 检查", "value": 5}]) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("signal", ["ci_pass_ratio", "gtt_done_ratio", "prmon_checked", "prmon_stuck"])
+def test_retro_ops_stats_without_completed_work_omit_agent_summary(signal):
+    from dataclasses import replace
+    from L5_apps.digest.aidash import _retro_ops_container
+
+    retro = RetroOpsTrends(
+        ci_segments=(("通过", 2.0, "success"),),
+        ci_repo_bars=(), gtt_segments=(), bot_tl_bars=(),
+        ci_pass_ratio=None, gtt_done_ratio=None,
+        prmon_checked=None, prmon_stuck=None,
+        health=SourceHealth("retro_ops", "ok"),
+    )
+    container = _retro_ops_container("0709", replace(retro, **{signal: 0}))
+    assert container is not None
+    assert all(card.type != "agentSummary" for card in container.cards)
