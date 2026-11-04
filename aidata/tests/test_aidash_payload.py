@@ -329,10 +329,14 @@ def test_retro_ops_container_maps_chart_cards_and_degrades():
     assert container is not None
     assert [card.type for card in container.cards] == [
         "stackedBar", "stackedBar", "barList", "barList", "metric",
+        "agentSummary", "sectionHeader",
     ]
     assert container.cards[0].payload["segments"][1]["semantic"] == "warning"
-    metric_items = container.cards[-1].payload["items"]
+    metric_items = next(card.payload["items"] for card in container.cards
+                        if card.type == "metric")
     assert next(item for item in metric_items if item["label"] == "CI 通过率")["ratio"] == 0.8
+    assert container.cards[-1].payload["title"] == "运营信号"
+    assert container.cards[-2].payload["agentName"] == "bot_tl"
     assert _retro_ops_container(
         "0709", RetroOpsTrends((), (), (), (), None, None, None, None,
                                SourceHealth("retro_ops", "skipped:未采集"))

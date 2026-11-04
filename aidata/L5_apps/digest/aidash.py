@@ -973,15 +973,34 @@ def _time_output_container(mmdd: str, app_focus, commit_by_repo) -> "Container |
                      layout="auto")
 
 
-def _retro_ops_container(mmdd: str, retro_ops) -> "Container | None":
+def _agent_summary_card(card_id: str, agent_name: str, completed: list[dict],
+                        stats: list[dict] | None = None) -> Card | None:
+    """Build a compact evidence card only when the source has completed work."""
+    completed = [item for item in completed if item.get("title")]
+    if not completed:
+        return None
+    payload = {"agentName": agent_name, "completed": completed[:6]}
+    if stats:
+        payload["stats"] = stats[:4]
+    return Card(card_id, "agentSummary", "wide", payload)
+
+
+def _retro_ops_container(mmdd: str, retro_ops, multica=None,
+                         ai_efficiency=None) -> "Container | None":
     """工程与编排图表: real CI, GTT, Bot-TL and PR monitor signals."""
     if (retro_ops is None or retro_ops.health.state != "ok"
             or not (retro_ops.ci_segments or retro_ops.gtt_segments
                     or retro_ops.ci_repo_bars or retro_ops.bot_tl_bars
+                    or retro_ops.release_tf_bars
+                    or retro_ops.workspace_hygiene_bars
                     or retro_ops.ci_pass_ratio is not None
                     or retro_ops.gtt_done_ratio is not None)):
         return None
     cards: list[Card] = []
+    section = Card(_kuid(mmdd, 46), "sectionHeader", "medium", {
+        "title": "运营信号",
+        "subtitle": "bot_tl · gtt · pr_monitor · claude_jobs · workspace_hygiene · release_tf",
+    })
     if retro_ops.ci_segments:
         cards.append(Card(_kuid(mmdd, 41), "stackedBar", "wide", {
             "title": "CI 与发布门禁分布",
@@ -1005,32 +1024,83 @@ def _retro_ops_container(mmdd: str, retro_ops) -> "Container | None":
         }))
     if retro_ops.bot_tl_bars:
         cards.append(Card(_kuid(mmdd, 44), "barList", "wide", {
-            "title": "Bot-TL 编排与巡检动作",
+            "title": "bot_tl · 编排与巡检动作",
             "items": [{"label": label, "value": value, "valueText": value_text,
                        **({"semantic": semantic} if semantic else {})}
                       for label, value, value_text, semantic in retro_ops.bot_tl_bars],
+        }))
+    if retro_ops.release_tf_bars:
+        cards.append(Card(_kuid(mmdd, 47), "barList", "wide", {
+            "title": "release_tf · 发布交付",
+            "items": [{"label": label, "value": value, "valueText": value_text,
+                       **({"semantic": semantic} if semantic else {})}
+                      for label, value, value_text, semantic
+                      in retro_ops.release_tf_bars],
+        }))
+    if retro_ops.workspace_hygiene_bars:
+        cards.append(Card(_kuid(mmdd, 48), "barList", "wide", {
+            "title": "workspace_hygiene · 可回收快照",
+            "items": [{"label": label, "value": value, "valueText": value_text,
+                       **({"semantic": semantic} if semantic else {})}
+                      for label, value, value_text, semantic
+                      in retro_ops.workspace_hygiene_bars],
         }))
     metric_items: list[dict] = []
     if retro_ops.ci_pass_ratio is not None:
         ratio = max(0.0, min(1.0, float(retro_ops.ci_pass_ratio)))
         metric_items.append({"label": "CI 通过率", "value": round(ratio * 100, 1),
                              "unit": "%", "ratio": ratio,
-                             "higherIsBetter": True})
+                             "higherIsBetter": True, "context": "claude_jobs"})
     if retro_ops.gtt_done_ratio is not None:
         ratio = max(0.0, min(1.0, float(retro_ops.gtt_done_ratio)))
         metric_items.append({"label": "GTT 非阻塞率", "value": round(ratio * 100, 1),
                              "unit": "%", "ratio": ratio,
-                             "higherIsBetter": True})
+                             "higherIsBetter": True, "context": "gtt"})
     if retro_ops.prmon_checked is not None:
         metric_items.append({"label": "PR monitor 检查", "value": retro_ops.prmon_checked,
-                             "unit": "个"})
+                             "unit": "个", "context": "pr_monitor"})
     if retro_ops.prmon_stuck is not None:
         metric_items.append({"label": "PR monitor 卡住", "value": retro_ops.prmon_stuck,
-                             "unit": "个", "higherIsBetter": False})
+                             "unit": "个", "higherIsBetter": False,
+                             "context": "pr_monitor"})
     if metric_items:
         cards.append(Card(_kuid(mmdd, 45), "metric", "wide", {"items": metric_items}))
+    bot_summary = _agent_summary_card(
+        _kuid(mmdd, 49), "bot_tl",
+        [{"title": f"{label} · {value_text}", "ref": "bot_tl"}
+         for label, _, value_text, _ in retro_ops.bot_tl_bars],
+        ([{"label": "PR monitor 检查", "value": float(retro_ops.prmon_checked)}]
+         if retro_ops.prmon_checked is not None else None),
+    )
+    if bot_summary:
+        cards.append(bot_summary)
+    if multica is not None and multica.health.state == "ok":
+        reported = dict(multica.completed)
+        if reported:
+            latest = max(reported)
+            multica_summary = _agent_summary_card(
+                _kuid(mmdd, 50), "multica",
+                [{"title": f"完成 issue · {int(reported[latest])}",
+                  "ref": "multica"}],
+                [{"label": "完成 issue", "value": float(reported[latest])}],
+            )
+            if multica_summary:
+                cards.append(multica_summary)
+    if (ai_efficiency is not None
+            and ai_efficiency.quality.health.state == "ok"
+            and ai_efficiency.quality.segments):
+        claude_summary = _agent_summary_card(
+            _kuid(mmdd, 51), "claude_jobs",
+            [{"title": f"{segment.label} · {int(segment.value)}",
+              "ref": "claude_jobs"}
+             for segment in ai_efficiency.quality.segments],
+        )
+        if claude_summary:
+            cards.append(claude_summary)
     if not cards:
         return None
+    if len(cards) >= 3:
+        cards.append(section)
     return Container(_cuid(mmdd, 14), "工程与编排图表", 28, tuple(cards),
                      layout="auto", style="neutral")
 
@@ -1155,7 +1225,7 @@ def _relationship_summary(cells: list, sample_size: int) -> str:
             "这是相关性观察，不构成因果结论")
 
 
-def _relationship_container(mmdd: str, rework) -> "Container | None":
+def _relationship_container(mmdd: str, rework, retro_ops=None) -> "Container | None":
     """🔗 交叉信号: the workspace × root-cause rework heatmap.
 
     Returns None — not an empty frame — whenever the data cannot honestly carry
@@ -1170,40 +1240,67 @@ def _relationship_container(mmdd: str, rework) -> "Container | None":
     so "why is this wide?" is answered by a unit-tested rule rather than a
     literal typed here.
     """
-    if rework is None or getattr(rework, "health", None) is None:
+    if rework is not None and getattr(rework, "health", None) is not None:
+        if rework.health.state == "ok" and rework.cells and rework.sample_size >= 1:
+            rows = sorted({c.row for c in rework.cells})
+            columns = sorted({c.column for c in rework.cells})
+            profile = DataProfile(
+                semantic="relationship",
+                item_count=len(rework.cells),
+                dimensions=2,
+                row_count=len(rows),
+                column_count=len(columns),
+                relationship_kind="heatmap",
+            )
+            decision = choose_card(profile)
+            if decision.size != "wide":
+                # A medium heatmap is a 1×N strip: the second axis carries no
+                # information, so the chart would assert a structure the data lacks.
+                return None
+            payload = {
+                "title": "返工集中在哪里",
+                "visualization": decision.visualization,
+                "xAxis": {"label": "失败根因"},
+                "yAxis": {"label": "Workspace"},
+                "cells": [{"row": c.row, "column": c.column, "value": float(c.value)}
+                          for c in rework.cells],
+                "sampleSize": int(rework.sample_size),
+                "timeWindow": rework.time_window or "全部",
+                "metricDefinition": _REWORK_METRIC_DEFINITION,
+                "summary": _relationship_summary(rework.cells, rework.sample_size),
+            }
+            card = Card(_kuid(mmdd, 37), "relationship", decision.size, payload)
+            return Container(_cuid(mmdd, 12), "交叉信号", 24, (card,), layout="auto",
+                             subtitle="返工 × 根因 × workspace · 观察性关联")
+
+    # When no genuine matrix is available, CI repository snapshots still provide
+    # a real two-axis observation: run volume versus observed pass rate.
+    points = tuple(getattr(retro_ops, "ci_points", ()) or ())
+    if not points:
         return None
-    if rework.health.state != "ok" or not rework.cells or rework.sample_size < 1:
-        return None
-    rows = sorted({c.row for c in rework.cells})
-    columns = sorted({c.column for c in rework.cells})
     profile = DataProfile(
-        semantic="relationship",
-        item_count=len(rework.cells),
-        dimensions=2,
-        row_count=len(rows),
-        column_count=len(columns),
-        relationship_kind="heatmap",
+        semantic="relationship", item_count=len(points), dimensions=2,
+        relationship_kind="scatter",
     )
     decision = choose_card(profile)
-    if decision.size != "wide":
-        # A medium heatmap is a 1×N strip: the second axis carries no
-        # information, so the chart would assert a structure the data lacks.
-        return None
     payload = {
-        "title": "返工集中在哪里",
-        "visualization": decision.visualization,
-        "xAxis": {"label": "失败根因"},
-        "yAxis": {"label": "Workspace"},
-        "cells": [{"row": c.row, "column": c.column, "value": float(c.value)}
-                  for c in rework.cells],
-        "sampleSize": int(rework.sample_size),
-        "timeWindow": rework.time_window or "全部",
-        "metricDefinition": _REWORK_METRIC_DEFINITION,
-        "summary": _relationship_summary(rework.cells, rework.sample_size),
+        "title": "CI 运行量与通过率",
+        "visualization": "scatter",
+        "xAxis": {"label": "CI 运行次数"},
+        "yAxis": {"label": "观察通过率", "unit": "%"},
+        "points": [{"label": label, "x": x, "y": round(y * 100, 1),
+                    "magnitude": x, "category": "retro_ci"}
+                   for label, x, y in points],
+        "sampleSize": len(points),
+        "timeWindow": "当前 CI 汇总",
+        "metricDefinition": "每个仓库的 CI 运行次数与观察通过率；仅描述汇总快照",
+        "summary": "观察到各仓库 CI 运行量与通过率的分布；这是相关性观察，不构成因果结论",
     }
-    card = Card(_kuid(mmdd, 37), "relationship", decision.size, payload)
-    return Container(_cuid(mmdd, 12), "交叉信号", 24, (card,), layout="auto",
-                     subtitle="返工 × 根因 × workspace · 观察性关联")
+    return Container(
+        _cuid(mmdd, 15), "交叉信号", 24,
+        (Card(_kuid(mmdd, 52), "relationship", decision.size, payload),),
+        layout="auto", subtitle="CI · 运行量 × 通过率 · 观察性关联",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1435,7 +1532,8 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     # 🔗 交叉信号 (order 24): the rework heatmap. Sits between 成本归因 (22) and
     # AI 效能 (25) — it explains where the effectiveness numbers below come from.
     relationship_container = _relationship_container(
-        mmdd, getattr(sources, "rework_relationship", None))
+        mmdd, getattr(sources, "rework_relationship", None),
+        getattr(sources, "retro_ops", None))
     if relationship_container:
         containers.append(relationship_container)
 
@@ -1452,7 +1550,9 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     if time_container:
         containers.append(time_container)
     retro_ops_container = _retro_ops_container(
-        mmdd, getattr(sources, "retro_ops", None))
+        mmdd, getattr(sources, "retro_ops", None),
+        getattr(sources, "multica", None),
+        getattr(sources, "ai_efficiency", None))
     if retro_ops_container:
         containers.append(retro_ops_container)
 

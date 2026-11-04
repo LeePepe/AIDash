@@ -23,7 +23,7 @@ from L5_apps.digest.sources import (
     AdoPrTrends, AiEfficiency, AutomationTrends, CardInterest, CardTypeStar,
     DigestSources, Leverage, ModelTier, MulticaTrends, NewsItem, NewsRadar,
     RankBundle, RankItem, RavenTrends, RelationshipCell, ReworkRelationship,
-    Segment, SegmentBundle, SourceHealth,
+    RetroOpsTrends, Segment, SegmentBundle, SourceHealth,
 )
 
 from tests.test_digest_golden import (
@@ -317,6 +317,23 @@ def test_relationship_absent_from_default_sources():
     """The default bundle is skipped/empty, so an unwired pipeline is silent
     rather than emitting a hollow card."""
     assert _of_type(_build(_sources()), "relationship") == []
+
+
+@pytest.mark.unit
+def test_ci_snapshot_emits_observational_scatter_when_matrix_is_absent():
+    retro = RetroOpsTrends(
+        (), (), (), (), None, None, None, None,
+        SourceHealth("retro_ops", "ok"),
+        ci_points=(("AIDash", 12.0, 0.75), ("AIDashUI", 4.0, 1.0)),
+    )
+    cards = _of_type(_build(_sources(retro_ops=retro)), "relationship")
+    assert len(cards) == 1
+    payload = cards[0].payload
+    assert payload["visualization"] == "scatter"
+    assert payload["points"]
+    assert payload["sampleSize"] == 2
+    assert payload["metricDefinition"]
+    assert "因果" in payload["summary"]
 
 
 # --------------------------------------------------------------------------- #

@@ -667,6 +667,12 @@ class RetroOpsTrends:
     prmon_checked: int | None
     prmon_stuck: int | None
     health: SourceHealth
+    # Optional richer shapes keep the legacy positional constructor stable.
+    # They are derived from the same retro queries and remain empty on older
+    # fixtures or when a source has no rows.
+    ci_points: tuple[tuple[str, float, float], ...] = ()
+    release_tf_bars: tuple[tuple[str, float, str, str | None], ...] = ()
+    workspace_hygiene_bars: tuple[tuple[str, float, str, str | None], ...] = ()
 
 
 def fetch_retro_ops_trends() -> RetroOpsTrends:
@@ -680,8 +686,9 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
         # These queries are part of the same retro snapshot. Their values are
         # intentionally not charted yet, but running them keeps source health
         # tied to the complete L4 contract consumed by this card family.
-        serve.run_query("retro/tf_release_deliveries")
-        serve.run_query("retro/workspace_hygiene_reclaim")
+        release_rows, release_cols = serve.run_query("retro/tf_release_deliveries")
+        hygiene_rows, hygiene_cols = serve.run_query(
+            "retro/workspace_hygiene_reclaim")
         if not (ci_rows or gtt_rows or bot_rows):
             return empty
 
@@ -719,6 +726,14 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
                  if success_count + failure_count else False) else None)
             for repo, (total, success_count, failure_count, noise_count)
             in sorted(repo_totals.items(), key=lambda item: (-item[1][0], item[0]))
+        )
+        ci_points = tuple(
+            (str(row[ci["repo_key"]] or "unknown"),
+             float(row[ci["run_count"]] or 0),
+             float(row[ci["pass_rate"]] or 0))
+            for row in ci_rows
+            if float(row[ci["run_count"]] or 0) > 0
+            and row[ci["pass_rate"]] is not None
         )
 
         gtt = {name: gtt_cols.index(name)
@@ -760,6 +775,37 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
             for action, count in sorted(action_counts.items(),
                                         key=lambda item: (-item[1], item[0]))
         )
+        release_tf_bars: tuple[tuple[str, float, str, str | None], ...] = ()
+        if release_rows:
+            release_idx = {name: release_cols.index(name) for name in (
+                "repo_key", "target_platform", "delivery_count",
+                "failed_delivery_count")}
+            release_tf_bars = tuple(
+                (f"{row[release_idx['repo_key']] or 'unknown'} · "
+                 f"{row[release_idx['target_platform']] or 'unknown'}",
+                 float(row[release_idx["delivery_count"]] or 0),
+                 f"{int(row[release_idx['delivery_count']] or 0)}次",
+                 "warning"
+                 if int(row[release_idx["failed_delivery_count"]] or 0) > 0
+                 else None)
+                for row in release_rows
+                if float(row[release_idx["delivery_count"]] or 0) > 0
+            )
+        workspace_hygiene_bars: tuple[tuple[str, float, str, str | None], ...] = ()
+        if hygiene_rows:
+            hygiene_idx = {name: hygiene_cols.index(name) for name in (
+                "repo_key", "entity_type", "reclaimable_count")}
+            workspace_hygiene_bars = tuple(
+                (f"{row[hygiene_idx['repo_key']] or 'unknown'} · "
+                 f"{row[hygiene_idx['entity_type']] or 'unknown'}",
+                 float(row[hygiene_idx["reclaimable_count"]] or 0),
+                 f"{int(row[hygiene_idx['reclaimable_count']] or 0)}个可回收",
+                 "warning"
+                 if int(row[hygiene_idx["reclaimable_count"]] or 0) > 0
+                 else None)
+                for row in hygiene_rows
+                if float(row[hygiene_idx["reclaimable_count"]] or 0) > 0
+            )
         total_runs = sum(int(r[ci["run_count"]] or 0) for r in ci_rows)
         total_goals = len(statuses)
         return RetroOpsTrends(
@@ -767,6 +813,7 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
             (success / total_runs if total_runs else None),
             ((done + active) / total_goals if total_goals else None),
             checked, stuck, SourceHealth("retro_ops", "ok"),
+            ci_points, release_tf_bars, workspace_hygiene_bars,
         )
     except Exception:  # noqa: BLE001 - retro source degrades as one bundle
         return empty
