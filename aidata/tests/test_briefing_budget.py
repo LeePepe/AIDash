@@ -336,6 +336,37 @@ def test_ci_snapshot_emits_observational_scatter_when_matrix_is_absent():
     assert "因果" in payload["summary"]
 
 
+@pytest.mark.unit
+def test_ci_snapshot_requires_two_repositories_for_scatter():
+    retro = RetroOpsTrends(
+        (), (), (), (), None, None, None, None,
+        SourceHealth("retro_ops", "ok"),
+        ci_points=(("AIDash", 12.0, 0.75),),
+    )
+    assert _of_type(_build(_sources(retro_ops=retro)), "relationship") == []
+
+
+@pytest.mark.unit
+def test_retro_ops_is_admitted_with_section_and_agent_summary():
+    retro = RetroOpsTrends(
+        ci_segments=(("通过", 8.0, "success"),),
+        ci_repo_bars=(("AIDash", 8.0, "8次", None),),
+        gtt_segments=(), bot_tl_bars=(("CHECK", 2.0, "2次", None),),
+        ci_pass_ratio=0.8, gtt_done_ratio=None,
+        prmon_checked=2, prmon_stuck=0,
+        health=SourceHealth("retro_ops", "ok"),
+    )
+    cards = _build(_sources(retro_ops=retro))
+    retro_cards = next(c.cards for c in cards.containers
+                       if c.title == "工程与编排图表")
+    assert any(card.type == "agentSummary" for card in retro_cards)
+    section = next(card for card in retro_cards if card.type == "sectionHeader")
+    assert section.size == "wide"
+    ids = [card.id for card in retro_cards]
+    assert ids.index(section.id) > 0
+    assert ids.index(section.id) < len(ids) - 1
+
+
 # --------------------------------------------------------------------------- #
 # information budget (§design 3)
 #

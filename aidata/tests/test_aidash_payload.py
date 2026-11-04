@@ -328,16 +328,43 @@ def test_retro_ops_container_maps_chart_cards_and_degrades():
     container = _retro_ops_container("0709", retro)
     assert container is not None
     assert [card.type for card in container.cards] == [
-        "stackedBar", "stackedBar", "barList", "barList", "metric",
-        "agentSummary", "sectionHeader",
+        "stackedBar", "stackedBar", "barList", "sectionHeader",
+        "agentSummary",
     ]
     assert container.cards[0].payload["segments"][1]["semantic"] == "warning"
-    metric_items = next(card.payload["items"] for card in container.cards
-                        if card.type == "metric")
-    assert next(item for item in metric_items if item["label"] == "CI 通过率")["ratio"] == 0.8
-    assert container.cards[-1].payload["title"] == "运营信号"
-    assert container.cards[-2].payload["agentName"] == "bot_tl"
+    stats = next(card.payload["stats"] for card in container.cards
+                 if card.type == "agentSummary")
+    assert next(item for item in stats if item["label"] == "CI 通过率")["ratio"] == 0.8
+    section = container.cards[-2]
+    assert section.size == "wide"
+    assert section.payload["subtitle"] == "编排汇总"
+    assert container.cards[-1].payload["agentName"] == "工程编排"
+    assert len(container.cards) <= 5
     assert _retro_ops_container(
         "0709", RetroOpsTrends((), (), (), (), None, None, None, None,
                                SourceHealth("retro_ops", "skipped:未采集"))
     ) is None
+
+
+@pytest.mark.unit
+def test_retro_ops_container_maps_real_claude_jobs_and_operational_bars():
+    from L5_apps.digest.aidash import _retro_ops_container
+
+    retro = RetroOpsTrends(
+        ci_segments=(("通过", 2.0, "success"),),
+        ci_repo_bars=(("AIDash", 2.0, "2次", None),),
+        gtt_segments=(), bot_tl_bars=(),
+        ci_pass_ratio=None, gtt_done_ratio=None,
+        prmon_checked=None, prmon_stuck=None,
+        health=SourceHealth("retro_ops", "ok"),
+        release_tf_bars=(("AIDash · iOS", 3.0, "3次", None),),
+        workspace_hygiene_bars=(("AIDash · worktree", 1.0, "1个可回收", "warning"),),
+        claude_jobs=(("completed", 2.0),),
+    )
+    container = _retro_ops_container("0709", retro)
+    assert [card.type for card in container.cards] == [
+        "stackedBar", "barList", "sectionHeader", "barList", "agentSummary",
+    ]
+    assert container.cards[2].size == "wide"
+    assert container.cards[3].payload["items"][0]["value"] == 3.0
+    assert container.cards[4].payload["completed"][0]["ref"] == "claude_job"

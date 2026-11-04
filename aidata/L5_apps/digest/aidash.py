@@ -975,9 +975,9 @@ def _time_output_container(mmdd: str, app_focus, commit_by_repo) -> "Container |
 
 def _agent_summary_card(card_id: str, agent_name: str, completed: list[dict],
                         stats: list[dict] | None = None) -> Card | None:
-    """Build a compact evidence card only when the source has completed work."""
+    """Build a compact evidence card when completed work or stats exist."""
     completed = [item for item in completed if item.get("title")]
-    if not completed:
+    if not completed and not stats:
         return None
     payload = {"agentName": agent_name, "completed": completed[:6]}
     if stats:
@@ -993,87 +993,56 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
                     or retro_ops.ci_repo_bars or retro_ops.bot_tl_bars
                     or retro_ops.release_tf_bars
                     or retro_ops.workspace_hygiene_bars
+                    or getattr(retro_ops, "claude_jobs", ())
                     or retro_ops.ci_pass_ratio is not None
                     or retro_ops.gtt_done_ratio is not None)):
         return None
-    cards: list[Card] = []
-    section = Card(_kuid(mmdd, 46), "sectionHeader", "medium", {
-        "title": "运营信号",
-        "subtitle": "bot_tl · gtt · pr_monitor · claude_jobs · workspace_hygiene · release_tf",
-    })
+    leading: list[Card] = []
     if retro_ops.ci_segments:
-        cards.append(Card(_kuid(mmdd, 41), "stackedBar", "wide", {
+        leading.append(Card(_kuid(mmdd, 41), "stackedBar", "wide", {
             "title": "CI 与发布门禁分布",
             "segments": [{"label": label, "value": value, **({"semantic": semantic}
                         if semantic else {})}
                          for label, value, semantic in retro_ops.ci_segments],
         }))
     if retro_ops.gtt_segments:
-        cards.append(Card(_kuid(mmdd, 42), "stackedBar", "wide", {
+        leading.append(Card(_kuid(mmdd, 42), "stackedBar", "wide", {
             "title": "GTT Goal 状态分布",
             "segments": [{"label": label, "value": value, **({"semantic": semantic}
                         if semantic else {})}
                          for label, value, semantic in retro_ops.gtt_segments],
         }))
     if retro_ops.ci_repo_bars:
-        cards.append(Card(_kuid(mmdd, 43), "barList", "wide", {
+        leading.append(Card(_kuid(mmdd, 43), "barList", "wide", {
             "title": "各仓 CI 运行与配置异常排行",
             "items": [{"label": label, "value": value, "valueText": value_text,
                        **({"semantic": semantic} if semantic else {})}
                       for label, value, value_text, semantic in retro_ops.ci_repo_bars],
         }))
+    completed: list[dict] = []
+    stats: list[dict] = []
     if retro_ops.bot_tl_bars:
-        cards.append(Card(_kuid(mmdd, 44), "barList", "wide", {
-            "title": "bot_tl · 编排与巡检动作",
-            "items": [{"label": label, "value": value, "valueText": value_text,
-                       **({"semantic": semantic} if semantic else {})}
-                      for label, value, value_text, semantic in retro_ops.bot_tl_bars],
-        }))
-    if retro_ops.release_tf_bars:
-        cards.append(Card(_kuid(mmdd, 47), "barList", "wide", {
-            "title": "release_tf · 发布交付",
-            "items": [{"label": label, "value": value, "valueText": value_text,
-                       **({"semantic": semantic} if semantic else {})}
-                      for label, value, value_text, semantic
-                      in retro_ops.release_tf_bars],
-        }))
-    if retro_ops.workspace_hygiene_bars:
-        cards.append(Card(_kuid(mmdd, 48), "barList", "wide", {
-            "title": "workspace_hygiene · 可回收快照",
-            "items": [{"label": label, "value": value, "valueText": value_text,
-                       **({"semantic": semantic} if semantic else {})}
-                      for label, value, value_text, semantic
-                      in retro_ops.workspace_hygiene_bars],
-        }))
-    metric_items: list[dict] = []
+        completed.extend(
+            {"title": f"bot_tl · {label} · {value_text}", "ref": "bot_tl"}
+            for label, _, value_text, _ in retro_ops.bot_tl_bars
+        )
     if retro_ops.ci_pass_ratio is not None:
         ratio = max(0.0, min(1.0, float(retro_ops.ci_pass_ratio)))
-        metric_items.append({"label": "CI 通过率", "value": round(ratio * 100, 1),
-                             "unit": "%", "ratio": ratio,
-                             "higherIsBetter": True, "context": "claude_jobs"})
+        stats.append({"label": "CI 通过率", "value": round(ratio * 100, 1),
+                      "unit": "%", "ratio": ratio, "context": "github_ci"})
     if retro_ops.gtt_done_ratio is not None:
         ratio = max(0.0, min(1.0, float(retro_ops.gtt_done_ratio)))
-        metric_items.append({"label": "GTT 非阻塞率", "value": round(ratio * 100, 1),
-                             "unit": "%", "ratio": ratio,
-                             "higherIsBetter": True, "context": "gtt"})
+        stats.append({"label": "GTT 非阻塞率", "value": round(ratio * 100, 1),
+                      "unit": "%", "ratio": ratio, "context": "gtt"})
     if retro_ops.prmon_checked is not None:
-        metric_items.append({"label": "PR monitor 检查", "value": retro_ops.prmon_checked,
-                             "unit": "个", "context": "pr_monitor"})
+        stats.append({"label": "PR monitor 检查", "value": retro_ops.prmon_checked,
+                      "unit": "个", "context": "pr_monitor"})
     if retro_ops.prmon_stuck is not None:
-        metric_items.append({"label": "PR monitor 卡住", "value": retro_ops.prmon_stuck,
-                             "unit": "个", "higherIsBetter": False,
-                             "context": "pr_monitor"})
-    if metric_items:
-        cards.append(Card(_kuid(mmdd, 45), "metric", "wide", {"items": metric_items}))
-    bot_summary = _agent_summary_card(
-        _kuid(mmdd, 49), "bot_tl",
-        [{"title": f"{label} · {value_text}", "ref": "bot_tl"}
-         for label, _, value_text, _ in retro_ops.bot_tl_bars],
-        ([{"label": "PR monitor 检查", "value": float(retro_ops.prmon_checked)}]
-         if retro_ops.prmon_checked is not None else None),
-    )
-    if bot_summary:
-        cards.append(bot_summary)
+        stats.append({"label": "PR monitor 卡住", "value": retro_ops.prmon_stuck,
+                      "unit": "个", "context": "pr_monitor"})
+    for state, count in getattr(retro_ops, "claude_jobs", ()):
+        completed.append({"title": f"claude_job · {state} · {int(count)}",
+                          "ref": "claude_job"})
     if multica is not None and multica.health.state == "ok":
         reported = dict(multica.completed)
         if reported:
@@ -1084,23 +1053,38 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
                   "ref": "multica"}],
                 [{"label": "完成 issue", "value": float(reported[latest])}],
             )
-            if multica_summary:
-                cards.append(multica_summary)
-    if (ai_efficiency is not None
-            and ai_efficiency.quality.health.state == "ok"
-            and ai_efficiency.quality.segments):
-        claude_summary = _agent_summary_card(
-            _kuid(mmdd, 51), "claude_jobs",
-            [{"title": f"{segment.label} · {int(segment.value)}",
-              "ref": "claude_jobs"}
-             for segment in ai_efficiency.quality.segments],
+            completed.extend(multica_summary.payload["completed"])
+            stats.extend(multica_summary.payload.get("stats", []))
+    operational_items = [
+        {"label": label, "value": value, "valueText": value_text,
+         **({"semantic": semantic} if semantic else {})}
+        for label, value, value_text, semantic in (
+            list(retro_ops.release_tf_bars)
+            + list(retro_ops.workspace_hygiene_bars)
         )
-        if claude_summary:
-            cards.append(claude_summary)
-    if not cards:
+    ]
+    trailing: list[Card] = []
+    trailing_labels: list[str] = []
+    if operational_items:
+        trailing.append(Card(_kuid(mmdd, 47), "barList", "wide", {
+            "title": "release_tf · workspace_hygiene · 运维指标",
+            "items": operational_items,
+        }))
+        trailing_labels.append("release_tf · workspace_hygiene")
+    summary = _agent_summary_card(_kuid(mmdd, 49), "工程编排",
+                                  completed, stats)
+    if summary:
+        trailing.append(summary)
+        trailing_labels.append("编排汇总")
+    if not leading and not trailing:
         return None
-    if len(cards) >= 3:
-        cards.append(section)
+    cards = leading + trailing
+    if leading and trailing:
+        section = Card(_kuid(mmdd, 46), "sectionHeader", "wide", {
+            "title": "运营信号",
+            "subtitle": " · ".join(trailing_labels),
+        })
+        cards = leading + [section] + trailing
     return Container(_cuid(mmdd, 14), "工程与编排图表", 28, tuple(cards),
                      layout="auto", style="neutral")
 
@@ -1276,7 +1260,7 @@ def _relationship_container(mmdd: str, rework, retro_ops=None) -> "Container | N
     # When no genuine matrix is available, CI repository snapshots still provide
     # a real two-axis observation: run volume versus observed pass rate.
     points = tuple(getattr(retro_ops, "ci_points", ()) or ())
-    if not points:
+    if len(points) < 2:
         return None
     profile = DataProfile(
         semantic="relationship", item_count=len(points), dimensions=2,
@@ -1356,6 +1340,7 @@ _BUDGET_META: dict[str, dict] = {
     "卡型兴趣": {"is_detail": True, "reading_cost": 1},
     "GitHub 工具雷达": {"is_detail": True, "reading_cost": 3},
     "新闻雷达": {"is_detail": True, "reading_cost": 3},
+    "工程与编排图表": {"cross_signal": 3, "reading_cost": 2},
 }
 
 
