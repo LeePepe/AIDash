@@ -44,6 +44,18 @@ struct EnumRoundtripTests {
         #expect(decoded.rawValue == value.rawValue)
     }
 
+    @Test func userEventActionRawValuesRemainStable() {
+        #expect(UserEventAction.allCases.map(\.rawValue) == [
+            "done",
+            "star",
+            "undone",
+            "hide",
+            "unhide",
+            "acknowledgeFinding",
+            "approveRemediation"
+        ])
+    }
+
     @Test func cardTypeCount() {
         // Deliberate tripwire: adding a CardType obliges the downstream layers
         // (DesignKit classification, AIDashUI badge + router, XPC schema ad) to
@@ -61,8 +73,4 @@ struct EnumRoundtripTests {
         #expect(RelationshipVisualization.allCases.count == 3)
     }
 
-    @Test func userEventActionExcludesHide() {
-        #expect(!UserEventAction.allCases.map { $0.rawValue }.contains("hide"),
-                "hide was cut for v1 per spec D17")
-    }
 }

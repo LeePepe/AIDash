@@ -42,6 +42,20 @@ struct UserEventModelTests {
         #expect(starEvent.action == .star)
     }
 
+    @Test(arguments: UserEventAction.allCases)
+    func actionRawValueRoundTripsForEveryAction(_ action: UserEventAction) {
+        let event = UserEventModel(
+            id: UUID().uuidString,
+            timestamp: .now,
+            device: "Mac [12345678]",
+            cardId: "card-\(action.rawValue)",
+            action: action
+        )
+
+        #expect(event.actionRaw == action.rawValue)
+        #expect(event.action == action)
+    }
+
     @Test func actionReturnsNilForUnknownRawValue() {
         let event = UserEventModel(
             id: UUID().uuidString,
