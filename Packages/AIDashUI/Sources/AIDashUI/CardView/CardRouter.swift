@@ -14,6 +14,7 @@ public struct CardRouter: View {
     let effectiveSize: CardSize
     @Environment(\.theme) private var theme
     @Environment(\.starredCardIds) private var starredCardIds
+    @Environment(\.hiddenCardIds) private var hiddenCardIds
 
     public init(card: CardModel, effectiveSize: CardSize? = nil) {
         self.card = card
@@ -58,7 +59,8 @@ public struct CardRouter: View {
             WholeCardStarButton(
                 cardId: card.id,
                 cardType: card.type,
-                isStarred: starredCardIds.contains(card.id)
+                isStarred: starredCardIds.contains(card.id),
+                isHidden: hiddenCardIds.contains(card.id)
             )
             .padding(.trailing, AIDashSpace.s8)
             .padding(.top, AIDashSpace.s8)

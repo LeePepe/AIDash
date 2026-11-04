@@ -1,4 +1,5 @@
 import SwiftUI
+import AIDashCore
 
 /// Intent emitted when the user taps a per-item star button (spec 002, star
 /// feedback loop). Carries the hosting card's id plus the item's stable
@@ -11,6 +12,10 @@ public typealias StarItemAction = @MainActor @Sendable (_ cardId: String, _ item
 /// D1/D4). Carries the card's id plus its `CardType.rawValue`, since the
 /// App-layer writer needs the type to mint `UserEvent.starCard`.
 public typealias StarCardAction = @MainActor @Sendable (_ cardId: String, _ cardType: String) -> Void
+
+/// Intent emitted when a card is hidden or restored. The UI owns no
+/// persistence; the App layer may inject the append-only event writer.
+public typealias HideCardAction = @MainActor @Sendable (_ cardId: String, _ cardType: CardType, _ hidden: Bool) -> Void
 
 /// Intent emitted when the user toggles a TodoList item's completion circle
 /// (spec 005 D3/D4, fixing the done UI->writer wiring gap from spec 003).
@@ -41,6 +46,14 @@ private struct OnStarCardKey: EnvironmentKey {
 }
 
 private struct StarredCardIdsKey: EnvironmentKey {
+    static let defaultValue: Set<String> = []
+}
+
+private struct OnHideCardKey: EnvironmentKey {
+    static let defaultValue: HideCardAction? = nil
+}
+
+private struct HiddenCardIdsKey: EnvironmentKey {
     static let defaultValue: Set<String> = []
 }
 
@@ -90,6 +103,18 @@ extension EnvironmentValues {
     public var starredCardIds: Set<String> {
         get { self[StarredCardIdsKey.self] }
         set { self[StarredCardIdsKey.self] = newValue }
+    }
+
+    /// App-injected handler for reversible card hide/show feedback.
+    public var onHideCard: HideCardAction? {
+        get { self[OnHideCardKey.self] }
+        set { self[OnHideCardKey.self] = newValue }
+    }
+
+    /// Card ids hidden in the active briefing.
+    public var hiddenCardIds: Set<String> {
+        get { self[HiddenCardIdsKey.self] }
+        set { self[HiddenCardIdsKey.self] = newValue }
     }
 
     /// App-injected handler for a TodoList item's done-toggle tap (spec 005

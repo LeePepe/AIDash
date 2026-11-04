@@ -41,10 +41,13 @@ struct SnapshotRenderTests {
         ]
 
         for (name, state) in desktop {
-            try render(state: state, name: name, width: 1200, padding: 24, output: output)
+            try render(state: state, name: name, width: 1200, padding: 24, output: output,
+                       archiveDates: ["2026-11-01", "2026-11-02"],
+                       hiddenCardIds: name == "desktop-populated" ? ["metric-b"] : [])
         }
         for (name, state) in compact {
-            try render(state: state, name: name, width: 390, padding: 20, output: output)
+            try render(state: state, name: name, width: 390, padding: 20, output: output,
+                       archiveDates: ["2026-11-01", "2026-11-02"])
         }
         #else
         Issue.record("Snapshots require AppKit's ImageRenderer on macOS.")
@@ -57,11 +60,13 @@ struct SnapshotRenderTests {
         name: String,
         width: CGFloat,
         padding: CGFloat,
-        output: URL
+        output: URL,
+        archiveDates: [String] = [],
+        hiddenCardIds: Set<String> = []
     ) throws {
         for (suffix, scheme) in [("-light", ColorScheme.light), ("-dark", ColorScheme.dark)] {
             let theme = Theme(seed: .lime, neutral: .slate, isDark: scheme == .dark)
-            let host = BriefingView(state: state)
+            let host = BriefingView(state: state, archiveDates: archiveDates)
                 .padding(.horizontal, padding)
                 .padding(.vertical, AIDashSpacing.pageVertical)
                 .frame(width: width, alignment: .topLeading)
@@ -69,6 +74,7 @@ struct SnapshotRenderTests {
                 .background(theme.neutrals.bg)
                 .environment(\.theme, theme)
                 .environment(\.colorScheme, scheme)
+                .environment(\.hiddenCardIds, hiddenCardIds)
             let renderer = ImageRenderer(content: host)
             renderer.scale = 2
             let nsImage = try #require(renderer.nsImage)
@@ -102,7 +108,40 @@ struct SnapshotRenderTests {
             order: 1, layout: .grid, style: .neutral
         )
         evidence.cards = [
-            card("digest", .digest, #"{"title":"系统保持稳定","subtitle":"过去 24 小时","body":"十二个 PR 已合并，构建时间持续下降。","sections":[{"heading":"下一步","paragraphs":["完成性能复核。"]}]}"#, style: .accent)
+            card("digest", .digest, #"{"title":"系统保持稳定","subtitle":"过去 24 小时","body":"十二个 PR 已合并，构建时间持续下降。","sections":[{"heading":"下一步","paragraphs":["完成性能复核。"]}]}"#, style: .accent),
+            card("agent-summary", .agentSummary, AgentSummaryPayload(
+                agentName: "bot_tl",
+                completed: [.init(title: "完成主线复核"), .init(title: "发布日报")],
+                stats: [.init(label: "PRs", value: 12), .init(label: "小时", value: 4.5)]
+            )),
+            card("section-header", .sectionHeader, SectionHeaderPayload(
+                title: "证据分组", subtitle: "关系与趋势"
+            )),
+            card("relationship-slope", .relationship, RelationshipPayload(
+                title: "交付成本变化",
+                visualization: .slope,
+                xAxis: .init(label: "之前", unit: "min"),
+                yAxis: .init(label: "之后", unit: "min"),
+                slopes: [.init(label: "AIDash", before: 21, after: 18)],
+                sampleSize: 12,
+                timeWindow: "7d",
+                metricDefinition: "Observed cycle time",
+                summary: "Observed cycle time declined."
+            )),
+            card("relationship-scatter", .relationship, RelationshipPayload(
+                title: "投入与交付",
+                visualization: .scatter,
+                xAxis: .init(label: "投入", unit: "h"),
+                yAxis: .init(label: "交付", unit: "PR"),
+                points: [
+                    .init(label: "A", x: 2, y: 3),
+                    .init(label: "B", x: 4, y: 6),
+                ],
+                sampleSize: 8,
+                timeWindow: "7d",
+                metricDefinition: "Observed work and delivery",
+                summary: "Observed association only."
+            ))
         ]
         return [overview, evidence]
     }
@@ -113,6 +152,12 @@ struct SnapshotRenderTests {
             id: id, type: type, size: .medium, style: style,
             payloadJSON: Data(json.utf8)
         )
+    }
+
+    private static func card<T: Encodable>(_ id: String, _ type: CardType, _ payload: T,
+                                           style: CardStyle = .neutral) -> CardModel {
+        let data = try! JSONEncoder().encode(payload)
+        return CardModel(id: id, type: type, size: .medium, style: style, payloadJSON: data)
     }
     #endif
 }

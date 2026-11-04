@@ -10,11 +10,38 @@ public enum BriefingViewState {
     case error
 }
 
+private enum BriefingViewCopy {
+    static let liveLabel = String(localized: "briefing.status.live", defaultValue: "LIVE", bundle: .module,
+                                  comment: "Freshness status shown for a current briefing.")
+    static let cachedLabel = String(localized: "briefing.status.cached", defaultValue: "CACHED", bundle: .module,
+                                    comment: "Freshness status shown for a fallback briefing.")
+    static let errorLabel = String(localized: "briefing.status.error", defaultValue: "ERROR", bundle: .module,
+                                   comment: "Status label shown for the briefing error state.")
+    static let emptyLabel = String(localized: "briefing.status.empty", defaultValue: "EMPTY", bundle: .module,
+                                   comment: "Status label shown for the briefing empty state.")
+    static let todayLabel = String(localized: "briefing.date.today", defaultValue: "TODAY", bundle: .module,
+                                   comment: "Status pill for the current briefing date.")
+    static let archiveLabel = String(localized: "briefing.date.archive", defaultValue: "ARCHIVE", bundle: .module,
+                                     comment: "Status pill for an archived briefing date.")
+    static let previousDateLabel = String(localized: "briefing.date.previous",
+                                          defaultValue: "Previous briefing date", bundle: .module,
+                                          comment: "Accessibility label for the previous briefing date button.")
+    static let nextDateLabel = String(localized: "briefing.date.next",
+                                      defaultValue: "Next briefing date", bundle: .module,
+                                      comment: "Accessibility label for the next briefing date button.")
+}
+
 public struct BriefingView: View {
     @Environment(\.theme) private var theme
+    @Environment(\.hiddenCardIds) private var hiddenCardIds
+    @Environment(\.onHideCard) private var onHideCard
     @Query private var todaysBriefings: [BriefingModel]
     @Query private var latestPublished: [BriefingModel]
+    @Query private var publishedBriefings: [BriefingModel]
     private var explicitState: BriefingViewState?
+    private var archiveDates: [String]
+    @State private var selectedArchiveDate: String?
+    @State private var locallyHiddenCardIds: Set<String> = []
 
     public init() {
         let today = Self.localTodayString()
@@ -22,9 +49,6 @@ public struct BriefingView: View {
             filter: #Predicate<BriefingModel> { $0.date == today && $0.publishedAt != nil },
             sort: [SortDescriptor(\BriefingModel.generatedAt, order: .reverse)]
         )
-        // Fallback: latest published briefing whose date is on or before the user's
-        // local today. This prevents future-dated published briefings from leaking
-        // in when today has no briefing yet.
         var fallbackDescriptor = FetchDescriptor<BriefingModel>(
             predicate: #Predicate<BriefingModel> {
                 $0.publishedAt != nil && $0.date <= today
@@ -33,20 +57,24 @@ public struct BriefingView: View {
         )
         fallbackDescriptor.fetchLimit = 1
         _latestPublished = Query(fallbackDescriptor)
+        _publishedBriefings = Query(
+            filter: #Predicate<BriefingModel> {
+                $0.publishedAt != nil && $0.date <= today
+            },
+            sort: [SortDescriptor(\BriefingModel.date, order: .forward)]
+        )
         explicitState = nil
+        archiveDates = []
     }
 
-    init(state: BriefingViewState) {
+    init(state: BriefingViewState, archiveDates: [String] = []) {
         self.init()
         explicitState = state
+        self.archiveDates = archiveDates
     }
 
     public var body: some View {
         #if os(iOS)
-        // iOS wraps the shared scroll surface in a NavigationStack so the
-        // system navigation bar owns the top safe area and the content no
-        // longer drifts into the status bar. macOS keeps its titlebar
-        // overlay via the existing safeAreaInset — chrome untouched.
         NavigationStack {
             renderBody
                 .navigationTitle(
@@ -66,25 +94,31 @@ public struct BriefingView: View {
 
     @ViewBuilder
     private var renderBody: some View {
-        if explicitState != nil {
-            pageContent
-        } else {
-            scrollBody
+        Group {
+            if explicitState != nil {
+                pageContent()
+            } else {
+                scrollBody
+            }
         }
+        .environment(\.hiddenCardIds, hiddenCardIds.union(locallyHiddenCardIds))
+        .environment(\.onHideCard, hideCard)
     }
 
     @ViewBuilder
-    private var pageContent: some View {
+    private func pageContent(proxy: ScrollViewProxy? = nil) -> some View {
         VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
             switch resolvedState {
             case let .populated(date, containers, isFallback, publishedAt):
                 masthead(date: date, isFallback: isFallback, publishedAt: publishedAt,
                          containerCount: containers.count, cardCount: containers.reduce(0) { $0 + $1.cards.count })
+                sectionJumpRail(containers: containers, proxy: proxy)
                 if containers.isEmpty {
                     emptyContainersState
                 } else {
                     ForEach(containers.sorted { $0.order < $1.order }) {
                         ContainerView(container: $0)
+                            .id($0.id)
                     }
                 }
             case .loading:
@@ -102,22 +136,21 @@ public struct BriefingView: View {
 
     @ViewBuilder
     private var scrollBody: some View {
-        ScrollView {
-            pageContent
-            .padding(.horizontal, Self.pageHorizontalPadding)
-            .padding(.vertical, AIDashSpacing.pageVertical)
-            .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity)
+        ScrollViewReader { proxy in
+            ScrollView {
+                pageContent(proxy: proxy)
+                    .padding(.horizontal, Self.pageHorizontalPadding)
+                    .padding(.vertical, AIDashSpacing.pageVertical)
+                    .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+            }
+            #if os(macOS)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Color.clear.frame(height: 28)
+            }
+            #endif
+            .background(theme.neutrals.bg)
         }
-        #if os(macOS)
-        // Keep the large date header clear of the traffic-light / titlebar
-        // overlay. Without this the first line collides with the window
-        // controls on a full-height content window.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            Color.clear.frame(height: 28)
-        }
-        #endif
-        .background(theme.neutrals.bg)
     }
 
     private var stateMasthead: some View {
@@ -129,7 +162,7 @@ public struct BriefingView: View {
     private func masthead(date: String, isFallback: Bool, publishedAt: Date?,
                           containerCount: Int, cardCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            mastheadStatusLine(isFallback: isFallback, publishedAt: publishedAt,
+            mastheadStatusLine(date: displayedDate(fallback: date), isFallback: isFallback, publishedAt: publishedAt,
                                containerCount: containerCount, cardCount: cardCount)
 
             if isFallback {
@@ -164,7 +197,8 @@ public struct BriefingView: View {
                 .font(AIDashTypography.masthead)
                 .foregroundStyle(theme.neutrals.text1)
 
-            // Hairline rule under the masthead, cockpit console style.
+            hiddenRecoveryPill
+
             Rectangle()
                 .fill(theme.neutrals.border)
                 .frame(height: 1)
@@ -172,7 +206,45 @@ public struct BriefingView: View {
     }
 
     @ViewBuilder
-    private func mastheadStatusLine(isFallback: Bool, publishedAt: Date?,
+    private var hiddenRecoveryPill: some View {
+        let hiddenCount = activeHiddenCardCount
+        if hiddenCount > 0 {
+            Button {
+                for card in activeCards where effectiveHiddenCardIds.contains(card.id) {
+                    hideCard(cardId: card.id, cardType: card.type, hidden: false)
+                }
+            } label: {
+                Text(
+                    "\(hiddenCount) " + String(
+                        localized: "briefing.hidden.show",
+                        defaultValue: "HIDDEN · SHOW",
+                        bundle: .module,
+                        comment: "Recovery control for hidden cards in the active briefing."
+                    )
+                )
+                .font(AIDashTypography.mastheadStatus)
+                .monospacedDigit()
+                .padding(.horizontal, AIDashSpace.s8)
+                .frame(minHeight: AIDashSpacing.starButtonHitTarget)
+                .background(theme.neutrals.inner, in: Capsule())
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                Text(
+                    String(
+                        localized: "briefing.hidden.accessibility",
+                        defaultValue: "Show \(hiddenCount) hidden cards",
+                        bundle: .module,
+                        comment: "Accessibility label for the hidden-card recovery control."
+                    )
+                )
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func mastheadStatusLine(date: String, isFallback: Bool, publishedAt: Date?,
                                     containerCount: Int, cardCount: Int) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -180,13 +252,146 @@ public struct BriefingView: View {
                 Spacer()
                 publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
                 telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                dateSwitcher(date: date)
             }
             VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 mastheadIdentity
                 HStack(spacing: AIDashSpace.s8) {
                     publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
                     telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                    dateSwitcher(date: date)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dateSwitcher(date: String) -> some View {
+        let dates = availableDates
+        let index = dates.firstIndex(of: date) ?? dates.startIndex
+        HStack(spacing: AIDashSpace.s4) {
+            if dates.count >= 2 {
+                Button {
+                    guard index > dates.startIndex else { return }
+                    selectedArchiveDate = dates[dates.index(before: index)]
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(minWidth: AIDashSpacing.starButtonHitTarget,
+                               minHeight: AIDashSpacing.starButtonHitTarget)
+                }
+                .buttonStyle(.plain)
+                .disabled(index <= dates.startIndex)
+                .accessibilityLabel(BriefingViewCopy.previousDateLabel)
+            }
+
+            Text(date)
+                .font(AIDashTypography.mastheadStatus)
+                .monospacedDigit()
+
+            if dates.count >= 2 {
+                Button {
+                    guard index < dates.index(before: dates.endIndex) else { return }
+                    selectedArchiveDate = dates[dates.index(after: index)]
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(minWidth: AIDashSpacing.starButtonHitTarget,
+                               minHeight: AIDashSpacing.starButtonHitTarget)
+                }
+                .buttonStyle(.plain)
+                .disabled(index >= dates.index(before: dates.endIndex))
+                .accessibilityLabel(BriefingViewCopy.nextDateLabel)
+            }
+
+            StatusPill(
+                selectedArchiveDate == nil || date == Self.localTodayString()
+                    ? BriefingViewCopy.todayLabel : BriefingViewCopy.archiveLabel,
+                tone: selectedArchiveDate == nil || date == Self.localTodayString()
+                    ? .success : .neutral
+            )
+        }
+        .foregroundStyle(theme.neutrals.text2)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func sectionJumpRail(containers: [ContainerModel], proxy: ScrollViewProxy?) -> some View {
+        if containers.count >= 2 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: AIDashSpace.s8) {
+                    ForEach(containers.sorted { $0.order < $1.order }) { container in
+                        Button {
+                            if let proxy {
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    proxy.scrollTo(container.id, anchor: .top)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: AIDashSpace.s4) {
+                                Text(String(format: "%02d", container.order + 1))
+                                    .monospacedDigit()
+                                Text(container.title)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                            .padding(.horizontal, AIDashSpace.s8)
+                            .frame(minHeight: AIDashSpacing.starButtonHitTarget)
+                            .background(theme.neutrals.inner, in: Capsule())
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            Text(
+                                String(
+                                    localized: "briefing.section_jump.label %@",
+                                    defaultValue: "Jump to \(container.title)",
+                                    bundle: .module,
+                                    comment: "Accessibility label for a container jump-rail button."
+                                )
+                            )
+                        )
+                    }
+                }
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private var availableDates: [String] {
+        let storedDates = publishedBriefings.map(\.date)
+        let explicitDate: String? = {
+            guard case let .populated(date, _, _, _) = explicitState else { return nil }
+            return date
+        }()
+        return Set(storedDates + archiveDates + [explicitDate].compactMap { $0 })
+            .sorted()
+    }
+
+    private func displayedDate(fallback: String) -> String {
+        selectedArchiveDate ?? fallback
+    }
+
+    private func hideCard(cardId: String, cardType: CardType, hidden: Bool) {
+        if hidden {
+            locallyHiddenCardIds.insert(cardId)
+        } else {
+            locallyHiddenCardIds.remove(cardId)
+        }
+        onHideCard?(cardId, cardType, hidden)
+    }
+
+    private var effectiveHiddenCardIds: Set<String> {
+        hiddenCardIds.union(locallyHiddenCardIds)
+    }
+
+    private var activeCards: [CardModel] {
+        guard case let .populated(_, containers, _, _) = resolvedState else { return [] }
+        return containers.flatMap(\.cards)
+    }
+
+    private var activeHiddenCardCount: Int {
+        activeCards.reduce(into: 0) { count, card in
+            if effectiveHiddenCardIds.contains(card.id) {
+                count += 1
             }
         }
     }
@@ -208,7 +413,7 @@ public struct BriefingView: View {
     private func publishedStatus(isFallback: Bool, publishedAt: Date?) -> some View {
         if !isFallback, let publishedAt {
             HStack(spacing: AIDashSpace.s4) {
-                StatusPill(Self.liveLabel, tone: .success)
+                StatusPill(BriefingViewCopy.liveLabel, tone: .success)
                 Text(
                     String(
                         localized: "briefing.published.relative %@",
@@ -221,7 +426,7 @@ public struct BriefingView: View {
                 .foregroundStyle(theme.neutrals.text2)
             }
         } else {
-            StatusPill(Self.cachedLabel, tone: .warning)
+            StatusPill(BriefingViewCopy.cachedLabel, tone: .warning)
         }
     }
 
@@ -251,6 +456,12 @@ public struct BriefingView: View {
     private var resolvedState: BriefingViewState {
         if let explicitState {
             return explicitState
+        }
+        if let selectedArchiveDate,
+           let archived = publishedBriefings.first(where: { $0.date == selectedArchiveDate }) {
+            return .populated(date: archived.date, containers: archived.containers,
+                              isFallback: archived.date != Self.localTodayString(),
+                              publishedAt: archived.publishedAt)
         }
         if let briefing = todaysBriefings.first {
             return .populated(date: briefing.date, containers: briefing.containers,
@@ -321,7 +532,7 @@ public struct BriefingView: View {
     private func diagnosticCard(icon: String, titleKey: String, detailKey: String,
                                 tone: PillTone) -> some View {
         VStack(alignment: .leading, spacing: AIDashSpace.s12) {
-            StatusPill(titleKey == "briefing.error.title" ? Self.errorLabel : Self.emptyLabel, tone: tone)
+            StatusPill(titleKey == "briefing.error.title" ? BriefingViewCopy.errorLabel : BriefingViewCopy.emptyLabel, tone: tone)
             Image(systemName: icon)
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(icon == "exclamationmark.triangle" ? theme.danger : theme.neutrals.text2)
@@ -370,33 +581,6 @@ public struct BriefingView: View {
         }
     }
 
-    private static let liveLabel = String(
-        localized: "briefing.status.live", defaultValue: "LIVE", bundle: .module,
-        comment: "Freshness status shown for a current briefing."
-    )
-    private static let cachedLabel = String(
-        localized: "briefing.status.cached", defaultValue: "CACHED", bundle: .module,
-        comment: "Freshness status shown for a fallback briefing."
-    )
-    private static let errorLabel = String(
-        localized: "briefing.status.error", defaultValue: "ERROR", bundle: .module,
-        comment: "Status label shown for the briefing error state."
-    )
-    private static let emptyLabel = String(
-        localized: "briefing.status.empty", defaultValue: "EMPTY", bundle: .module,
-        comment: "Status label shown for the briefing empty state."
-    )
-
-    // MARK: - Page chrome tokens
-    //
-    // Sourced from .specify/memory/constitution.md §Page Chrome and
-    // §Spacing & Color Tokens. The page background is `theme.neutrals.bg`,
-    // one luminance tier BELOW the card surface, so cards visually float
-    // without needing a shadow.
-
-    /// Horizontal padding for the page. Mac gets 24pt; iOS / iPad get
-    /// 20pt. Honoring the platform compile-time channel keeps the
-    /// constant deterministic at unit-test time.
     static var pageHorizontalPadding: CGFloat {
         #if os(macOS)
         return AIDashSpacing.pageHorizontalMac
@@ -404,16 +588,6 @@ public struct BriefingView: View {
         return AIDashSpacing.pageHorizontalCompact
         #endif
     }
-
-    /// The user's local calendar day formatted as POSIX `yyyy-MM-dd`.
-    ///
-    /// Uses a Gregorian calendar pinned to the user's current time zone so the
-    /// boundary between "today" and "tomorrow" matches the user's device clock,
-    /// while the year/month/day values stay in the POSIX/Gregorian system that
-    /// Core uses to store and validate `BriefingModel.date`. `Calendar.current`
-    /// is intentionally avoided because users on Buddhist/Japanese/Hebrew/etc.
-    /// calendar settings would otherwise produce non-Gregorian year values
-    /// (e.g. `2569-06-25`) that would never match the stored date strings.
     private static func localTodayString() -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current

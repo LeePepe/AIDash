@@ -31,6 +31,7 @@ private struct ContainerCountBadge: View {
 public struct ContainerView: View {
     let container: ContainerModel
     @Environment(\.theme) private var theme
+    @Environment(\.hiddenCardIds) private var hiddenCardIds
 
     public init(container: ContainerModel) {
         self.container = container
@@ -41,10 +42,14 @@ public struct ContainerView: View {
         container.cards.sorted { $0.id < $1.id }
     }
 
+    var visibleCards: [CardModel] {
+        sortedCards.filter { !hiddenCardIds.contains($0.id) }
+    }
+
     /// How many cards this container actually renders. The sole input to the
     /// chrome decision (MY-1306) — never `CardType`, never `CardSize`.
     var effectiveCardCount: Int {
-        sortedCards.count
+        visibleCards.count
     }
 
     /// The chrome the cards below should draw, derived from this container's
@@ -114,7 +119,7 @@ public struct ContainerView: View {
 
     @ViewBuilder
     private var layoutContent: some View {
-        let cards = sortedCards
+        let cards = visibleCards
         switch container.layout {
         case .auto:
             AutoLayout(cards: cards, style: container.style)

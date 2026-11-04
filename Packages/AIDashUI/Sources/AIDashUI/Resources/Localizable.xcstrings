@@ -83,6 +83,78 @@
         }
       }
     },
+    "briefing.date.archive": {
+      "comment": "Status pill for an archived briefing date.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ARCHIVE"
+          }
+        }
+      }
+    },
+    "briefing.date.next": {
+      "comment": "Accessibility label for the next briefing date button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next briefing date"
+          }
+        }
+      }
+    },
+    "briefing.date.previous": {
+      "comment": "Accessibility label for the previous briefing date button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous briefing date"
+          }
+        }
+      }
+    },
+    "briefing.date.today": {
+      "comment": "Status pill for the current briefing date.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TODAY"
+          }
+        }
+      }
+    },
+    "briefing.hidden.accessibility": {
+      "comment": "Accessibility label for the hidden-card recovery control.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show hidden cards"
+          }
+        }
+      }
+    },
+    "briefing.hidden.show": {
+      "comment": "Recovery control for hidden cards in the active briefing.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HIDDEN · SHOW"
+          }
+        }
+      }
+    },
     "briefing.navigation.title": {
       "comment": "Inline navigation-bar title shown at the top of the BriefingView screen on iOS/iPadOS.",
       "extractionState": "manual",
@@ -217,6 +289,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "Card unavailable"
+          }
+        }
+      }
+    },
+    "card_router.hide_card.label": {
+      "comment": "VoiceOver label for the whole-card hide button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide this card"
+          }
+        }
+      }
+    },
+    "card_router.show_card.label": {
+      "comment": "VoiceOver label for the whole-card show button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show this card"
           }
         }
       }
