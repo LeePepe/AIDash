@@ -382,6 +382,15 @@ import SQLite3
             try data.write(to: exportDirectory.appendingPathComponent("\(name)-\(suffix).png"))
             let rootPadding = try #require(bitmap.colorAt(x: 60, y: 12)?.usingColorSpace(.sRGB))
             #expect(rootPadding.alphaComponent < 0.05)
+            for point in [
+                (x: 8, y: 80),
+                (x: 751, y: 80),
+                (x: 8, y: bitmap.pixelsHigh - 60),
+                (x: 751, y: bitmap.pixelsHigh - 60)
+            ] {
+                let outerMargin = try #require(bitmap.colorAt(x: point.x, y: point.y)?.usingColorSpace(.sRGB))
+                #expect(outerMargin.alphaComponent < 0.10)
+            }
             if !isDark {
                 lightHeights[name] = bitmap.pixelsHigh
             } else {

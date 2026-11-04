@@ -143,8 +143,6 @@ public struct MenuBarStatusView: View {
     ) -> some View {
         baseActionButton(title, symbol: symbol, action: action, role: destructive ? .destructive : nil)
             .foregroundStyle(destructive ? theme.danger : primary ? theme.primary.primary : theme.neutrals.text1)
-            .padding(.horizontal, 8)
-            .frame(height: 32)
             .glassEffect(
                 destructive
                     ? .regular.tint(theme.danger.opacity(0.15)).interactive()
@@ -154,18 +152,17 @@ public struct MenuBarStatusView: View {
                 in: .capsule
             )
     }
-    private func baseActionButton(
-        _ title: String,
-        symbol: String,
-        action: Action,
-        role: ButtonRole? = nil
-    ) -> some View {
+    private func baseActionButton(_ title: String, symbol: String, action: Action, role: ButtonRole? = nil) -> some View {
         Button(role: role) { perform(action) } label: {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 11, weight: .medium))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+            HStack(spacing: 4) {
+                Image(systemName: symbol)
+                Text(title)
+            }
+            .font(.system(size: 11, weight: .medium)).lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false).padding(.horizontal, 7)
+            .frame(height: 32)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(title)
     }
     private func populated(_ snapshot: MenuBarSystemSnapshot) -> some View {
