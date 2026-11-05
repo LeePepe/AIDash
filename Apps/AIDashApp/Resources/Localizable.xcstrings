@@ -524,6 +524,30 @@
       "extractionState" : "manual",
       "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Copilot CLI" } } }
     },
+    "menubar.status.top" : {
+      "comment" : "Prefix for the top CPU or memory process line.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Top" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "占用最高" } }
+      }
+    },
+    "menubar.status.gpu" : {
+      "comment" : "GPU utilization summary label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "GPU" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "GPU" } }
+      }
+    },
+    "menubar.status.power" : {
+      "comment" : "Power source summary label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Power" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "电源" } }
+      }
+    },
     "telemetry.settings.send_usage_data" : {
         "comment" : "The sole opt-in control for anonymous product telemetry.",
         "extractionState" : "manual",

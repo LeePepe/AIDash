@@ -54,6 +54,9 @@ private enum Copy {
     static let actions = localized("menubar.status.actions", "Actions")
     static let needsPerson = localized("menubar.status.needs_person", "Needs a Person")
     static let blocking = localized("menubar.status.blocking", "%lld blocking")
+    static let top = localized("menubar.status.top", "Top")
+    static let gpu = localized("menubar.status.gpu", "GPU")
+    static let power = localized("menubar.status.power", "Power")
     static let gateway = localized("menubar.status.gateway", "Local Gateway")
     static func uptime(_ value: TimeInterval) -> String {
         "\(Int(value / 3600))h \(Int(value.truncatingRemainder(dividingBy: 3600) / 60))m"
@@ -74,7 +77,7 @@ private enum Copy {
     }
 }
 @MainActor
-public struct MenuBarStatusView: View {
+public struct MenuBarStatusView: View { // swiftlint:disable:this type_body_length
     public let state: MenuBarStatusViewState
     public let onRefresh: () -> Void
     public let onOpenBriefing: () -> Void
@@ -218,12 +221,33 @@ public struct MenuBarStatusView: View {
     @ViewBuilder
     private func attentionStrip(_ attention: AttentionStatusSnapshot) -> some View {
         glassStrip {
-            Image(systemName: "person.crop.circle.badge.exclamationmark")
-                .foregroundStyle(attention.needsPersonCount > 0 ? theme.warning : theme.success)
-            Text(Copy.needsPerson)
-                .font(.system(size: 12, weight: .semibold))
-            Spacer(minLength: 4)
-            StatusPill(String(format: Copy.blocking, attention.needsPersonCount), tone: attention.needsPersonCount > 0 ? .warning : .success)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: "person.crop.circle.badge.exclamationmark")
+                        .foregroundStyle(attention.needsPersonCount > 0 ? theme.warning : theme.success)
+                    Text(Copy.needsPerson)
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 4)
+                    StatusPill(String(format: Copy.blocking, attention.needsPersonCount), tone: attention.needsPersonCount > 0 ? .warning : .success)
+                }
+                if attention.needsPersonCount > 0 {
+                    ForEach(Array(attention.items.prefix(2))) { item in
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.turn.down.right")
+                                .foregroundStyle(theme.warning)
+                            Text(item.title)
+                                .lineLimit(1)
+                            if let waitingOn = item.waitingOn, !waitingOn.isEmpty {
+                                Text("· \(waitingOn)")
+                                    .foregroundStyle(theme.neutrals.text2)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .font(.system(size: 11))
+                        .contentShape(Rectangle())
+                    }
+                }
+            }
         }
     }
     private func gatewayCard(_ gateway: GatewayStatusSnapshot) -> some View {
@@ -250,7 +274,10 @@ public struct MenuBarStatusView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                Text("\(snapshot.machine.totalCores)C · \(snapshot.machine.performanceCores)P · \(Copy.uptime(snapshot.machine.uptimeSeconds))")
+                let cores = snapshot.machine.efficiencyCores > 0
+                    ? "\(snapshot.machine.totalCores)C (\(snapshot.machine.performanceCores)P+\(snapshot.machine.efficiencyCores)E)"
+                    : "\(snapshot.machine.totalCores)C · \(snapshot.machine.performanceCores)P"
+                Text("\(cores) · \(Copy.uptime(snapshot.machine.uptimeSeconds))")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(theme.neutrals.text2)
                     .lineLimit(1)
@@ -260,6 +287,11 @@ public struct MenuBarStatusView: View {
             VStack(alignment: .trailing, spacing: 4) {
                 StatusPill(thermal(snapshot.machine.thermalState), tone: thermalTone(snapshot.machine.thermalState))
                     .fixedSize(horizontal: true, vertical: false)
+                if let power = snapshot.machine.powerSummary {
+                    Text("\(Copy.power) \(power)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.neutrals.text2)
+                }
             }
         }
     }
@@ -318,6 +350,18 @@ public struct MenuBarStatusView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .lineLimit(1)
                 .layoutPriority(1)
+            if let name = cpu.topProcessName {
+                Text("\(Copy.top): \(name)\(cpu.topProcessValueText.map { " · \($0)" } ?? "")")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(1)
+            }
+            if cpu.gpu.deviceUtilization > 0 || cpu.gpu.inUseMemoryBytes > 0 {
+                Text("\(Copy.gpu) \(percent(cpu.gpu.deviceUtilization)) · \(formatBytes(cpu.gpu.inUseMemoryBytes))")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(1)
+            }
             Sparkline(data: cpu.history.isEmpty ? [cpu.usage, cpu.usage] : cpu.history, color: theme.primary.primary)
                 .frame(height: 28)
             metricLines([
@@ -337,6 +381,12 @@ public struct MenuBarStatusView: View {
                 .minimumScaleFactor(0.85)
                 .layoutPriority(1)
             SegmentedGauge(value: memory.usageFraction, segments: 16, color: pressureColor(memory.pressure), height: 18)
+            if let name = memory.topProcessName {
+                Text("\(Copy.top): \(name)\(memory.topProcessValueText.map { " · \($0)" } ?? "")")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(1)
+            }
             metricLines([
                 (Copy.wired, formatBytes(memory.wiredBytes)),
                 (Copy.compressed, formatBytes(memory.compressedBytes)),

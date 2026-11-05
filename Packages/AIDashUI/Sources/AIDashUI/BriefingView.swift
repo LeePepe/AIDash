@@ -3,6 +3,8 @@ import SwiftData
 import AIDashCore
 import DesignKit
 
+// swiftlint:disable file_length
+
 public enum BriefingViewState {
     case populated(date: String, containers: [ContainerModel], isFallback: Bool, publishedAt: Date?)
     case loading
@@ -21,7 +23,7 @@ private enum BriefingViewCopy {
     static let nextDateLabel = String(localized: "briefing.date.next", defaultValue: "Next briefing date", bundle: .module)
 }
 
-public struct BriefingView: View {
+public struct BriefingView: View { // swiftlint:disable:this type_body_length
     @Environment(\.theme) private var theme
     @Environment(\.hiddenCardIds) private var hiddenCardIds
     @Environment(\.onHideCard) private var onHideCard
@@ -32,6 +34,7 @@ public struct BriefingView: View {
     private var archiveDates: [String]
     @State private var selectedArchiveDate: String?
     @State private var locallyHiddenCardIds: Set<String> = []
+    @State private var selectedContainerID: String?
 
     public init() {
         let today = Self.localTodayString()
@@ -98,13 +101,14 @@ public struct BriefingView: View {
         VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
             switch resolvedState {
             case let .populated(date, containers, isFallback, publishedAt):
+                let visibleContainers = filteredContainers(containers)
                 masthead(date: date, isFallback: isFallback, publishedAt: publishedAt,
-                         containerCount: containers.count, cardCount: containers.reduce(0) { $0 + $1.cards.count })
+                         containerCount: visibleContainers.count, cardCount: visibleContainers.reduce(0) { $0 + $1.cards.count })
                 sectionJumpRail(containers: containers, proxy: proxy)
-                if containers.isEmpty {
+                if visibleContainers.isEmpty {
                     emptyContainersState
                 } else {
-                    ForEach(containers.sorted { $0.order < $1.order }) {
+                    ForEach(visibleContainers.sorted { $0.order < $1.order }) {
                         ContainerView(container: $0)
                             .id($0.id)
                     }
@@ -322,9 +326,25 @@ public struct BriefingView: View {
 
     private func sectionJumpRailContent(containers: [ContainerModel], proxy: ScrollViewProxy?) -> some View {
         HStack(spacing: AIDashSpace.s8) {
+            Button {
+                selectedContainerID = nil
+            } label: {
+                Text(String(localized: "briefing.section_jump.all", defaultValue: "All", bundle: .module))
+                    .font(AIDashTypography.mastheadStatus)
+                    .foregroundStyle(theme.neutrals.text1)
+                    .padding(.horizontal, AIDashSpace.s8)
+                    .frame(minHeight: AIDashSpacing.controlHitTarget)
+                    .background(theme.neutrals.inner, in: Capsule())
+            }
+            .buttonStyle(.plain)
             ForEach(containers.sorted { $0.order < $1.order }) { container in
                 Button {
-                    if let proxy {
+                    if selectedContainerID == container.id {
+                        selectedContainerID = nil
+                    } else {
+                        selectedContainerID = container.id
+                    }
+                    if let proxy, selectedContainerID == container.id {
                         withAnimation(.snappy(duration: 0.2)) {
                             proxy.scrollTo(container.id, anchor: .top)
                         }
@@ -359,6 +379,10 @@ public struct BriefingView: View {
             }
         }
         .accessibilityElement(children: .contain)
+    }
+    private func filteredContainers(_ containers: [ContainerModel]) -> [ContainerModel] {
+        guard let selectedContainerID else { return containers }
+        return containers.filter { $0.id == selectedContainerID }
     }
     private var availableDates: [String] {
         let storedDates = publishedBriefings.map(\.date)
