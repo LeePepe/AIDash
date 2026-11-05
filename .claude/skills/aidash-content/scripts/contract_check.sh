@@ -17,10 +17,11 @@ AIDASH="${AIDASH_HOME:-$HOME/Development/AIDash}"
 MAPPER="$AIDATA/L5_apps/digest/aidash.py"
 CARDTYPE="$AIDASH/Packages/AIDashCore/Sources/AIDashCore/Models/CardType.swift"
 HANDLERS="$AIDASH/Apps/AIDashApp/Sources/XPCService/XPCHandlers.swift"
+SCHEMAS="$AIDASH/Apps/AIDashApp/Sources/XPCService/XPCPayloadSchemas.swift"
 ROUTER="$AIDASH/Packages/AIDashUI/Sources/AIDashUI/CardView/CardRouter.swift"
 
 fail=0
-for f in "$MAPPER" "$CARDTYPE" "$HANDLERS" "$ROUTER"; do
+for f in "$MAPPER" "$CARDTYPE" "$HANDLERS" "$SCHEMAS" "$ROUTER"; do
   if [[ ! -f "$f" ]]; then
     echo "FATAL: missing anchor file: $f" >&2
     echo "  (set AIDATA_HOME / AIDASH_HOME if your checkout differs)" >&2
@@ -47,7 +48,7 @@ for t in $TYPES; do
   Type="$(cap "$t")"
   in_mapper="—"; in_enum="ok"; in_schema="—"; in_router="—"
   grep -qE "\"type\"[[:space:]]*:[[:space:]]*\"$t\"|type=\"$t\"|\"$t\"" "$MAPPER" && in_mapper="ok"
-  grep -qE "CardType\.$t\.rawValue|\"$t\"" "$HANDLERS" && in_schema="ok"
+  grep -qE "CardType\.$t\.rawValue|\"$t\"" "$HANDLERS" "$SCHEMAS" && in_schema="ok"
   grep -qE "as ${Type}Payload" "$ROUTER" && in_router="ok"
 
   row_fail=0

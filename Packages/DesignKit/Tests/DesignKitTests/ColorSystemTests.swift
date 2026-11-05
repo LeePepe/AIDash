@@ -189,7 +189,7 @@ struct ColorSystemTests {
 
     @Test("classification tints are golden fixed values")
     func classificationGolden() {
-        #expect(Classification.allCases.count == 10)
+        #expect(Classification.allCases.count == 11)
         // Light golden values (mirror Apple system palette). Locks the token so a
         // repo's copy can't silently drift.
         #expect(Classification.metric.tint(isDark: false) == Color(hex: "#007AFF"))
@@ -205,6 +205,8 @@ struct ColorSystemTests {
         // digest teal — the three ride the same cool arc of the wheel.
         #expect(Classification.relationship.tint(isDark: false) == Color(hex: "#0891B2"))
         #expect(Classification.relationship.tint(isDark: true) == Color(hex: "#22D3EE"))
+        #expect(Classification.hourlyTimeline.tint(isDark: false) == Color(hex: "#059669"))
+        #expect(Classification.hourlyTimeline.tint(isDark: true) == Color(hex: "#34D399"))
         // Dark variant differs from light (dark mode is honored, not identical).
         #expect(Classification.metric.tint(isDark: true) != Classification.metric.tint(isDark: false))
         #expect(Classification.barList.tint(isDark: true) != Classification.barList.tint(isDark: false))

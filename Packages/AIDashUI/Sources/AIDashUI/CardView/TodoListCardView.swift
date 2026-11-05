@@ -32,7 +32,7 @@ public struct TodoListCardView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(Self.titleLabel)
+            Text(payload.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? payload.title! : Self.titleLabel)
                 .font(AIDashTypography.section)
                 .tracking(AIDashTypography.sectionTracking)
                 .foregroundStyle(AIDashTypography.sectionColor)
@@ -107,6 +107,12 @@ public struct TodoListCardView: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
+                if let commandHint = item.commandHint {
+                    Text(commandHint)
+                        .font(Self.recipe.secondary)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             .accessibilityElement(children: .combine)
         }
@@ -173,14 +179,29 @@ private struct TodoItemRow: View {
                     .strikethrough(isDone)
                     .foregroundStyle(isDone ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
                 priorityPill
+                metadataLine
                 Spacer(minLength: 8)
                 if showDue, let due = item.due {
                     Text(due, style: .date)
                         .font(TodoListCardView.recipe.secondary)
                         .foregroundStyle(.tertiary)
                 }
+
             }
             .accessibilityElement(children: .combine)
+        }
+    }
+
+    @ViewBuilder
+    private var metadataLine: some View {
+        if item.waitingOn != nil || item.ageText != nil {
+            HStack(spacing: 4) {
+                if let waitingOn = item.waitingOn { Text(waitingOn) }
+                if let ageText = item.ageText { Text(ageText) }
+            }
+            .font(TodoListCardView.recipe.secondary)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
     }
 

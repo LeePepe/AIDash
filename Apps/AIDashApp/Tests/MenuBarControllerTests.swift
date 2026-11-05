@@ -355,8 +355,8 @@ import SQLite3
     ]
     // Keep multi-child header/message strips horizontal instead of stacked.
     let maximumHeights: [String: Int] = [
-        "populated": 2_150,
-        "worst-case": 2_150,
+        "populated": 2_350,
+        "worst-case": 2_350,
         "empty": 480,
         "error": 480
     ]

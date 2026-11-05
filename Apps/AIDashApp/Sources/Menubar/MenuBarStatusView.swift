@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import DesignKit
 import SwiftUI
 private enum Copy {
@@ -51,6 +52,9 @@ private enum Copy {
     static let about = localized("menubar.status.about_action", "About")
     static let quit = localized("menubar.status.quit_action", "Quit")
     static let actions = localized("menubar.status.actions", "Actions")
+    static let needsPerson = localized("menubar.status.needs_person", "Needs a Person")
+    static let blocking = localized("menubar.status.blocking", "%lld blocking")
+    static let gateway = localized("menubar.status.gateway", "Local Gateway")
     static func uptime(_ value: TimeInterval) -> String {
         "\(Int(value / 3600))h \(Int(value.truncatingRemainder(dividingBy: 3600) / 60))m"
     }
@@ -168,6 +172,7 @@ public struct MenuBarStatusView: View {
     private func populated(_ snapshot: MenuBarSystemSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             header(snapshot)
+            attentionStrip(snapshot.attention)
             sectionHeader(Copy.computerGroup, icon: "gauge.with.dots.needle.33percent", cadence: Copy.every5s, date: snapshot.computerCapturedAt)
             HStack(alignment: .top, spacing: 12) {
                 glassCard {
@@ -202,9 +207,36 @@ public struct MenuBarStatusView: View {
                     .accessibilityLabel(Copy.storage)
             }
             sectionHeader(Copy.tokens, icon: "sparkles", cadence: Copy.every1m, date: snapshot.tokenCapturedAt)
-            glassCard { tokenCard(snapshot.tokenUsage) }
+            glassCard {
+                tokenCard(snapshot.tokenUsage)
+                gatewayCard(snapshot.gateway)
+            }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(Copy.tokens)
+        }
+    }
+    @ViewBuilder
+    private func attentionStrip(_ attention: AttentionStatusSnapshot) -> some View {
+        glassStrip {
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .foregroundStyle(attention.needsPersonCount > 0 ? theme.warning : theme.success)
+            Text(Copy.needsPerson)
+                .font(.system(size: 12, weight: .semibold))
+            Spacer(minLength: 4)
+            StatusPill(String(format: Copy.blocking, attention.needsPersonCount), tone: attention.needsPersonCount > 0 ? .warning : .success)
+        }
+    }
+    private func gatewayCard(_ gateway: GatewayStatusSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(Copy.gateway).font(.system(size: 12, weight: .semibold))
+            HStack(spacing: 8) {
+                StatusPill("M \(gateway.magpieUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.magpieUp ? .success : .danger)
+                StatusPill("R \(gateway.ravenUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.ravenUp ? .success : .danger)
+                StatusPill("F \(gateway.falconUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.falconUp ? .success : .danger)
+                Text("\(gateway.jevRequests24h) req · \(gateway.jevStarredCount) starred")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.neutrals.text2)
+            }
         }
     }
     private func header(_ snapshot: MenuBarSystemSnapshot) -> some View {
