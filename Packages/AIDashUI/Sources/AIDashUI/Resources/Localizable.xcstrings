@@ -915,6 +915,74 @@
         }
       }
     },
+    "widgets.completed_goals": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yesterday completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "昨日完成"
+          }
+        }
+      }
+    },
+    "widgets.efficiency.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Efficiency & 4-Stage Time"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "效率与四段耗时"
+          }
+        }
+      }
+    },
+    "widgets.needs_person.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs a Person"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要人工介入"
+          }
+        }
+      }
+    },
+    "widgets.spend.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spend, ROI & Quota Gauge"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "花费、ROI 与配额"
+          }
+        }
+      }
+    },
     "briefing.status.empty": {
       "extractionState": "manual",
       "localizations": {
