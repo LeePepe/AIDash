@@ -338,10 +338,10 @@ public struct MenuBarStatusView: View { // swiftlint:disable:this type_body_leng
         .frame(height: 24)
     }
     private func cpuCard(_ cpu: CPUStatusSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 3) {
             cardTitle(Copy.cpu, badge: "\(cpu.coreCount)C")
-            HStack(spacing: 10) {
-                RingGauge(value: cpu.usage, size: 48, stroke: 5, color: theme.primary.primary, showLabel: true)
+            HStack(spacing: 8) {
+                RingGauge(value: cpu.usage, size: 42, stroke: 5, color: theme.primary.primary, showLabel: true)
                 Text(Copy.loadShort)
                     .font(.system(size: 11))
                     .foregroundStyle(theme.neutrals.text2)
@@ -355,21 +355,22 @@ public struct MenuBarStatusView: View { // swiftlint:disable:this type_body_leng
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(theme.neutrals.text2)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             if cpu.gpu.deviceUtilization > 0 || cpu.gpu.inUseMemoryBytes > 0 {
                 Text("\(Copy.gpu) \(percent(cpu.gpu.deviceUtilization)) · \(formatBytes(cpu.gpu.inUseMemoryBytes))")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(theme.neutrals.text2)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             Sparkline(data: cpu.history.isEmpty ? [cpu.usage, cpu.usage] : cpu.history, color: theme.primary.primary)
-                .frame(height: 28)
+                .frame(height: 20)
             metricLines([
                 (Copy.user, percent(cpu.user)),
                 (Copy.system, percent(cpu.system)),
                 (Copy.idle, percent(cpu.idle))
             ])
-            Spacer(minLength: 0)
         }
     }
     private func memoryCard(_ memory: MemoryStatusSnapshot) -> some View {

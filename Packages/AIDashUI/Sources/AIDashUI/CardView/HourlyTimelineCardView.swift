@@ -91,10 +91,12 @@ public struct HourlyTimelineCardView: View {
         if !payload.citations.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(payload.citations.prefix(3)) { citation in
-                    if let url = citation.url, let destination = URL(string: url) {
+                    if let destination = URLPolicy.validate(citation.url) {
                         Link(citation.label, destination: destination)
                             .font(Self.recipe.secondary)
                             .foregroundStyle(Self.recipe.secondaryColor)
+                            .frame(minHeight: AIDashSpacing.controlHitTarget)
+                            .contentShape(Rectangle())
                     } else {
                         Text(citation.label)
                             .font(Self.recipe.secondary)

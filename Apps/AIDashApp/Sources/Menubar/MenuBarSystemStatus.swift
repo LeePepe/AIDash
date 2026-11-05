@@ -320,9 +320,21 @@ public enum MenuBarStatusViewState: Sendable, Equatable {
 }
 
 public struct CLITokenDatabasePaths: Sendable, Equatable {
-    public let claude: [URL]; public let codex: [URL]; public let copilot: [URL]; public let claudeQuotaFileURL: URL?
-    public init(claude: [URL] = [], codex: [URL] = [], copilot: [URL] = [], claudeQuotaFileURL: URL? = nil) {
-        self.claude = claude; self.codex = codex; self.copilot = copilot; self.claudeQuotaFileURL = claudeQuotaFileURL
+    public let claude: [URL]; public let codex: [URL]; public let copilot: [URL]
+    public let claudeQuotaFileURL: URL?
+    public let magpieQuotaFileURL: URL?
+    public init(
+        claude: [URL] = [],
+        codex: [URL] = [],
+        copilot: [URL] = [],
+        claudeQuotaFileURL: URL? = nil,
+        magpieQuotaFileURL: URL? = nil
+    ) {
+        self.claude = claude
+        self.codex = codex
+        self.copilot = copilot
+        self.claudeQuotaFileURL = claudeQuotaFileURL
+        self.magpieQuotaFileURL = magpieQuotaFileURL
     }
 }
 
@@ -469,7 +481,7 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
             if best == nil || value > best!.value { best = (name, value) }
         }
         guard let best else { return (nil, nil) }
-        return (best.name, metric == .memory ? formatProcessBytes(best.value) : "\(best.value) ticks")
+        return (best.name, metric == .memory ? formatProcessBytes(best.value) : formatProcessTicks(best.value))
     }
 
     private func formatProcessBytes(_ bytes: UInt64) -> String {
@@ -481,6 +493,17 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
             index += 1
         }
         return String(format: "%.1f%@", value, units[index])
+    }
+
+    private func formatProcessTicks(_ ticks: UInt64) -> String {
+        if ticks >= 1_000_000_000 {
+            return String(format: "%.1fB ticks", Double(ticks) / 1_000_000_000)
+        } else if ticks >= 1_000_000 {
+            return String(format: "%.1fM ticks", Double(ticks) / 1_000_000)
+        } else if ticks >= 1_000 {
+            return String(format: "%.1fK ticks", Double(ticks) / 1_000)
+        }
+        return "\(ticks) ticks"
     }
 
     private func captureGPU() -> GPUStatusSnapshot {
@@ -626,10 +649,10 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     }
     // swiftlint:enable large_tuple
     private func readQuota() -> Int? {
-        let urls = [
-            tokenDatabasePaths.claudeQuotaFileURL,
-            Self.realUserHomeDirectoryURL().appendingPathComponent(".config/magpie/quotas.json")
-        ].compactMap { $0 }
+        var urls = [tokenDatabasePaths.claudeQuotaFileURL, tokenDatabasePaths.magpieQuotaFileURL].compactMap { $0 }
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+            urls.append(Self.realUserHomeDirectoryURL().appendingPathComponent(".config/magpie/quotas.json"))
+        }
         for url in urls {
             guard let data = try? Data(contentsOf: url),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
@@ -677,7 +700,7 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         }
     }
     private func readSQLiteCount(path: String, query: String) -> Int? {
-        guard let value = runSQLiteQuery(target: path, flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, query: query) else { return nil }
+        guard let value = readSQLite(path: path, query: query) else { return nil }
         return Int(value.0)
     }
     private static func defaultTokenDatabasePaths() -> CLITokenDatabasePaths {

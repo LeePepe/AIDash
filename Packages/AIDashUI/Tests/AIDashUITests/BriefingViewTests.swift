@@ -185,6 +185,16 @@ struct BriefingViewTests {
         #expect(source.contains("payload.citations.prefix(3)"))
     }
 
+    @Test("timeline citations use the shared URL policy and full hit target")
+    func timelineCitationLinksUseURLPolicy() throws {
+        let url = try Self.sourceFile(named: "HourlyTimelineCardView.swift",
+                                      under: "Sources/AIDashUI/CardView")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        #expect(source.contains("URLPolicy.validate(citation.url)"))
+        #expect(source.contains(".frame(minHeight: AIDashSpacing.controlHitTarget)"))
+        #expect(source.contains(".contentShape(Rectangle())"))
+    }
+
     private static func briefingViewSource() throws -> String {
         let url = try sourceFile(named: "BriefingView.swift",
                                  under: "Sources/AIDashUI")

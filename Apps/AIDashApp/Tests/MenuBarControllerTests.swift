@@ -528,6 +528,21 @@ import SQLite3
 }
 
 @MainActor
+@Test func tokenProviderReadsHermeticMagpieQuota() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("aidash-magpie-quota-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let quotaURL = directory.appendingPathComponent("quotas.json")
+    try Data(#"{"claude":{"7 days":{"used":37}}}"#.utf8).write(to: quotaURL)
+
+    let provider = LiveMenuBarSystemStatusProvider(
+        tokenDatabasePaths: CLITokenDatabasePaths(magpieQuotaFileURL: quotaURL)
+    )
+    #expect(provider.captureTokenStatus().usage.claudeWeeklyRemainingPercent == 63)
+}
+
+@MainActor
 private final class MenuBarStatusProviderSpy: MenuBarSystemStatusProviding {
     var computerStatusCallCount = 0
     var tokenStatusCallCount = 0

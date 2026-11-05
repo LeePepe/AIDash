@@ -335,6 +335,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                     .padding(.horizontal, AIDashSpace.s8)
                     .frame(minHeight: AIDashSpacing.controlHitTarget)
                     .background(theme.neutrals.inner, in: Capsule())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             ForEach(containers.sorted { $0.order < $1.order }) { container in
@@ -382,6 +383,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     }
     private func filteredContainers(_ containers: [ContainerModel]) -> [ContainerModel] {
         guard let selectedContainerID else { return containers }
+        guard containers.contains(where: { $0.id == selectedContainerID }) else { return containers }
         return containers.filter { $0.id == selectedContainerID }
     }
     private var availableDates: [String] {
