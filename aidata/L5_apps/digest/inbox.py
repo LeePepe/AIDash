@@ -46,6 +46,10 @@ class InboxItem:
     priority: str          # high | medium | low
     bucket: str            # 卡顿 | 待决策 | 计划 | 发现
     ref: str = ""          # optional id/identifier for later drill
+    category: str = ""
+    waiting_on: str = ""
+    age_text: str = ""
+    command_hint: str = ""
 
 
 def _stalled_prs() -> list[InboxItem]:
@@ -61,7 +65,8 @@ def _stalled_prs() -> list[InboxItem]:
         days = int((r[ai] or 0) // 24)
         title = str(r[ti])[:60]
         out.append(InboxItem(
-            f"PR 卡 {days} 天：{title}", "high", "卡顿", str(r[pi])))
+            f"PR 卡 {days} 天：{title}", "high", "卡顿", str(r[pi]),
+            "stale", "PR owner", f"{days}d"))
     return out
 
 
@@ -83,7 +88,10 @@ def _pending_issues(cap: int = 6) -> list[InboxItem]:
             f"[{status}] {r[ii]!s} {str(r[ti])[:44]}",
             "high" if blocked else "medium",
             "卡顿" if blocked else "计划",
-            str(r[ii])))
+            str(r[ii]),
+            "blocked" if blocked else "planned",
+            "Owner" if blocked else "",
+        ))
     return out
 
 
@@ -93,7 +101,7 @@ def _downgrade_finding(downgrade_usd: float) -> list[InboxItem]:
         return []
     return [InboxItem(
         f"发现：${downgrade_usd:.0f} 花在 opus 的琐碎输出上，值得核查模型选择",
-        "medium", "发现")]
+        "medium", "发现", "", "discovery")]
 
 
 def _error_log_signals(
@@ -107,7 +115,8 @@ def _error_log_signals(
         tail = reader(path)
         if tail:
             out.append(InboxItem(
-                f"{label}近期报错：{tail[:60]}", "high", "卡顿"))
+                f"{label}近期报错：{tail[:60]}", "high", "卡顿",
+                "", "blocked", "operator"))
     return out
 
 
@@ -133,7 +142,8 @@ def _proposals(read: Callable[[], list[Proposal]] | None = None) -> list[InboxIt
     for p in pending:
         prio = p.priority if p.priority in _PRIO_RANK else "high"
         out.append(InboxItem(
-            f"待决策（{p.agent}）：{p.title[:56]}", prio, "待决策", p.id))
+            f"待决策（{p.agent}）：{p.title[:56]}", prio, "待决策", p.id,
+            "decision", "Owner GO"))
     return out
 
 
@@ -156,7 +166,7 @@ def _retro_signals() -> list[InboxItem]:
             blocked_count = row[blocked_i] or 0
             out.append(InboxItem(
                 f"GTT 阻塞：{goal_id}（{blocked_count} 项阻塞）",
-                "high", "卡顿", goal_id))
+                "high", "卡顿", goal_id, "blocked", "Writer / Reviewer"))
             if len(out) == 2:
                 break
     except Exception:  # noqa: BLE001, S110 - one retro source must not block others
@@ -172,7 +182,7 @@ def _retro_signals() -> list[InboxItem]:
             out.append(InboxItem(
                 f"发现：CI 配置噪音 {total_noise} 次（如 {top_repo}），"
                 "建议补齐变量或停用空跑任务",
-                "medium", "发现", str(top_repo)))
+                "medium", "发现", str(top_repo), "drift", "Owner"))
     except Exception:  # noqa: BLE001, S110 - one retro source must not block others
         pass
 
@@ -183,7 +193,7 @@ def _retro_signals() -> list[InboxItem]:
         if total_reclaimable > 0:
             out.append(InboxItem(
                 f"发现：{total_reclaimable} 个已合并洁净 Worktree 可安全回收",
-                "medium", "发现", "workspace_hygiene"))
+                "medium", "发现", "workspace_hygiene", "stale", "Owner"))
     except Exception:  # noqa: BLE001, S110 - one retro source must not block others
         pass
 

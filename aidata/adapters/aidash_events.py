@@ -54,9 +54,9 @@ import subprocess  # nosec B404 - only via the injected _run_json runner
 from pathlib import Path
 from typing import Any
 
-from config import AIDASH_BIN_FIXED, AIDASH_BIN_GLOB
-from rawio import write_raw, read_raw
 from cleanio import write_clean
+from config import AIDASH_BIN_FIXED, AIDASH_BIN_GLOB
+from rawio import read_raw, write_raw
 from state import get_watermark, set_watermark
 
 SOURCE = "aidash_events"
@@ -70,7 +70,7 @@ _TIMEOUT_S = 60
 # still back-filling anything that exists.
 _EPOCH_SINCE = "2020-01-01"
 
-_ACTIONS = ("done", "star")
+_ACTIONS = ("done", "star", "undone")
 
 
 def _aidash_bin() -> str | None:
@@ -272,7 +272,7 @@ _CLEAN_COLS = ("event_id", "ts", "device", "card_id", "action", "item_ref",
 
 
 def _norm_action(action: Any) -> str | None:
-    """Keep only the known actions (done/star); anything else → NULL."""
+    """Keep only the known actions; anything else → NULL."""
     return action if action in _ACTIONS else None
 
 

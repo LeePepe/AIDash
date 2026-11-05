@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 
 import serve
-from config import MULTICA_WORKSPACES, clean_path
+from config import MULTICA_WORKSPACES, WAREHOUSE_DB, clean_path
 
 
 @dataclass(frozen=True)
@@ -382,6 +383,108 @@ def fetch_work_by_project(since: str | None, until: str | None) -> WorkByProject
         return WorkByProject([], SourceHealth("work", "error", str(exc)[:200]))
 
 
+@dataclass(frozen=True)
+class HourlyBucketItem:
+    hour: int
+    summary: str
+    evidence_ids: tuple[str, ...]
+    sampled: bool = False
+
+
+@dataclass(frozen=True)
+class TimelineCitation:
+    id: str
+    label: str
+    url: str = ""
+
+
+@dataclass(frozen=True)
+class HourlyTimelineBundle:
+    overview: str
+    hours: tuple[HourlyBucketItem, ...]
+    citations: tuple[TimelineCitation, ...]
+    next_steps: tuple[str, ...]
+    health: SourceHealth
+
+    @staticmethod
+    def empty(state: str = "skipped:未取") -> "HourlyTimelineBundle":
+        return HourlyTimelineBundle(
+            "", (), (), (), SourceHealth("hourly_timeline", state)
+        )
+
+
+def _cst_hour(value: object) -> int | None:
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return int(stamp.astimezone(timezone.utc).hour + 8) % 24
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def fetch_hourly_timeline(reported_day: str | None) -> HourlyTimelineBundle:
+    """Build deterministic CST hour buckets from merged evidence facts."""
+    if not reported_day or not WAREHOUSE_DB.exists():
+        return HourlyTimelineBundle.empty("skipped:未采集")
+    try:
+        rows_by_hour: dict[int, list[tuple[str, str, str]]] = {h: [] for h in range(24)}
+        with sqlite3.connect(f"{WAREHOUSE_DB.as_uri()}?mode=ro", uri=True) as conn:
+            queries = (
+                ("fact_gtt_event", "ts", "evt_type", "gtt://"),
+                ("fact_gtt_task_run", "completed_at", "status", "gtt://"),
+                ("fact_github_pr", "created_date", "title", "https://github.com/"),
+                ("fact_ado_pr", "created_date", "title", "ado://"),
+            )
+            for table, ts_col, label_col, prefix in queries:
+                try:
+                    rows = conn.execute(
+                        f"SELECT {ts_col}, {label_col}, * FROM {table} "
+                        "WHERE cst_day = ? ORDER BY " + ts_col,
+                        (reported_day,),
+                    ).fetchall()
+                except sqlite3.Error:
+                    continue
+                for row in rows:
+                    hour = _cst_hour(row[0])
+                    if hour is None:
+                        continue
+                    label = str(row[1] or table)
+                    url = ""
+                    if table == "fact_github_pr":
+                        url = str(row[8] or "") if len(row) > 8 else ""
+                    rows_by_hour[hour].append((label[:80], url, table))
+        if not any(rows_by_hour.values()):
+            return HourlyTimelineBundle.empty("skipped:无当日小时证据")
+
+        citations: list[TimelineCitation] = []
+        buckets: list[HourlyBucketItem] = []
+        for hour in range(24):
+            records = rows_by_hour[hour]
+            if not records:
+                buckets.append(HourlyBucketItem(hour, "无采集数据。", ()))
+                continue
+            ids: list[str] = []
+            for index, (label, url, _source) in enumerate(records[:3], 1):
+                evidence_id = f"H{hour:02d}-F{index}"
+                ids.append(evidence_id)
+                citations.append(TimelineCitation(evidence_id, label, url))
+            summary = f"{len(records)} 条证据：{records[0][0]}"
+            buckets.append(HourlyBucketItem(
+                hour, summary[:80], tuple(ids), sampled=len(records) > 3
+            ))
+        active = sum(bool(bucket.evidence_ids) for bucket in buckets)
+        return HourlyTimelineBundle(
+            overview=f"{active}/24 个小时有可引用证据。",
+            hours=tuple(buckets),
+            citations=tuple(citations),
+            next_steps=(),
+            health=SourceHealth("hourly_timeline", "ok"),
+        )
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        return HourlyTimelineBundle.empty("error:" + str(exc)[:160])
+
+
 # ---------------------------------------------------------------------------
 # Fetched-source bundle. Lets the orchestrator fetch every trend series ONCE
 # and hand the same immutable snapshot to both the Markdown renderer and the
@@ -414,6 +517,9 @@ class DigestSources:
     # Action inbox (§M3): prioritized "需要处理什么" list. list[InboxItem];
     # kept as a plain list to avoid a hard import cycle. Empty by default.
     action_inbox: list = field(default_factory=list)
+    hourly_timeline: "HourlyTimelineBundle" = field(
+        default_factory=HourlyTimelineBundle.empty
+    )
     # GitHub tool-radar (§radar): curated watchlist stars/delta + enrichment.
     # Defaults to a skipped/empty bundle so older constructors keep working;
     # populated by _fetch_sources() in the real pipeline. RepoRadar is defined
@@ -827,6 +933,14 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
                 for row in hygiene_rows
                 if float(row[hygiene_idx["reclaimable_count"]] or 0) > 0
             )
+            if "skills_drift_count" in hygiene_cols:
+                drift = sum(int(row[hygiene_cols.index("skills_drift_count")] or 0)
+                            for row in hygiene_rows)
+                if drift:
+                    workspace_hygiene_bars += (
+                        ("skills_drift_count", float(drift), f"{drift}项漂移",
+                         "warning"),
+                    )
         total_runs = sum(int(r[ci["run_count"]] or 0) for r in ci_rows)
         total_goals = len(statuses)
         return RetroOpsTrends(

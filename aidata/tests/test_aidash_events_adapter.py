@@ -8,9 +8,8 @@ zero exit) deterministically — without the app running.
 
 import json
 
-import pytest
-
 import adapters.aidash_events as ae
+import pytest
 
 
 class _Proc:
@@ -236,6 +235,22 @@ def test_collect_degrades_on_nonzero_exit(monkeypatch):
     monkeypatch.setattr(ae, "get_watermark", lambda s: None)
     monkeypatch.setattr(ae, "write_raw", lambda *a, **k: pytest.fail("exit!=0 → no write"))
     assert ae.collect() == 0
+
+
+@pytest.mark.unit
+def test_normalize_preserves_undone_action(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(ae, "read_raw", lambda _source: [{
+        "id": "evt-undone", "timestamp": "2026-07-21T11:00:00Z",
+        "device": "Mac", "cardId": "todo-list", "action": "undone",
+        "itemRef": "gtt://goal/task",
+    }])
+    monkeypatch.setattr(
+        ae, "write_clean",
+        lambda _source, _table, _ddl, rows, _cols: captured.setdefault("rows", rows) or 1,
+    )
+    ae.normalize()
+    assert captured["rows"][0]["action"] == "undone"
 
 
 # ---- normalize -------------------------------------------------------------

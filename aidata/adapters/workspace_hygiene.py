@@ -20,6 +20,33 @@ SOURCE = "workspace_hygiene"
 _SKIP = {".build", ".shared-ci", "DerivedData", "node_modules", "Pods"}
 
 
+def _skills_and_otter_hygiene() -> int:
+    """Return the current cross-tool skill/manifest drift count.
+
+    Otter is optional and its absence is a healthy no-op for fresh clones.
+    """
+    otter = shutil.which("otter")
+    if not otter:
+        return 0
+    try:
+        result = subprocess.run(
+            [otter, "workspace", "inspect", "--json"],
+            check=True, capture_output=True, text=True, timeout=5,
+        )
+        payload = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return 0
+    relationships = payload.get("relationships", []) if isinstance(payload, dict) else []
+    return sum(
+        1 for item in relationships
+        if isinstance(item, dict)
+        and item.get("relationship") in {
+            "sourceChanged", "localChanged", "bothChanged",
+            "broken", "unknownLineage",
+        }
+    )
+
+
 def _run(args: list[str], cwd: Path | None = None) -> str | None:
     try:
         result = subprocess.run(["git", "--no-optional-locks", *args], cwd=cwd,
@@ -75,6 +102,7 @@ def _git_row(path: Path, entity_type: str, panes: set[Path]) -> dict[str, Any] |
         "shared_ci_pinned_sha": None,
         "ruleset_strict": None,
         "updated_at": cst_today(),
+        "skills_drift_count": _skills_and_otter_hygiene(),
     }
 
 

@@ -27,6 +27,7 @@ import uuid
 from pathlib import Path
 
 OLD_JOB_ID = "78d2b35a5693"  # unified-daily-digest — disabled, not deleted
+OLD_WEEKLY_JOB_ID = "e968439fa1f9"  # daily-digest-周报 — same 04:00 slot
 DEFAULT_JOBS_FILE = str(Path.home() / ".hermes" / "cron" / "jobs.json")
 RUNNER_SCRIPT = "aidata_digest_run.sh"
 NEW_JOB_NAME = "aidata-digest"
@@ -78,7 +79,7 @@ def plan_changes(data: dict, job_id: str | None = None) -> dict:
     """
     new_data = copy.deepcopy(data)
     for job in new_data.get("jobs", []):
-        if job.get("id") == OLD_JOB_ID:
+        if job.get("id") in {OLD_JOB_ID, OLD_WEEKLY_JOB_ID}:
             job["enabled"] = False
             job["state"] = "paused"
             job["paused_reason"] = ("superseded by aidata-digest (ADR-12); "
@@ -89,13 +90,15 @@ def plan_changes(data: dict, job_id: str | None = None) -> dict:
 
 def _print_plan(data: dict, new_data: dict, jobs_file: str) -> None:
     new_job = new_data["jobs"][-1]
-    old_present = any(j.get("id") == OLD_JOB_ID for j in data.get("jobs", []))
+    old_present = any(j.get("id") in {OLD_JOB_ID, OLD_WEEKLY_JOB_ID}
+                      for j in data.get("jobs", []))
     print("=== aidata-digest cron install plan (DRY-RUN) ===")
     print(f"jobs file: {jobs_file}")
     print(f"\n1) ADD new job '{NEW_JOB_NAME}' (id {new_job['id']}):")
     print(json.dumps(new_job, ensure_ascii=False, indent=2))
     print(f"\n2) DISABLE old job {OLD_JOB_ID} (unified-daily-digest): "
           f"{'enabled→false, state→paused' if old_present else 'NOT FOUND (skip)'}")
+    print(f"   Also disable weekly collision {OLD_WEEKLY_JOB_ID} when present.")
     print(f"\n3) Runner invoked by the job: scripts/{RUNNER_SCRIPT}")
     print("\nNothing was written. Re-run with --apply to commit these changes.")
 
