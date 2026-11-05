@@ -28,6 +28,7 @@
 		<string>/.codex/</string>
 		<string>/.config/claude/</string>
 		<string>/.config/magpie/</string>
+		<string>/Library/Application Support/raven/</string>
 		<string>/Library/Application Support/Falcon/</string>
 	</array>
 </dict>

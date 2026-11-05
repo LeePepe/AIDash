@@ -51,6 +51,13 @@ struct AIDashWidgetViewsTests {
         _ = MacSiliconCockpitWidgetView(snapshot: system).body
     }
 
+    @Test("system cockpit accepts full gateway names")
+    func cockpitUsesFullGatewayNames() {
+        _ = MacSiliconCockpitWidgetView(
+            snapshot: WidgetSystemSnapshot(magpieUp: true, ravenUp: true, falconUp: true)
+        ).body
+    }
+
     @Test("widget numeric display conversions clamp extreme and non-finite doubles")
     func numericDisplayConversionsAreSafe() {
         #expect(WidgetSnapshotNumeric.clampedInt(1e100) == 999_999)

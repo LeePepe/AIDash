@@ -10,6 +10,14 @@ import Testing
 @MainActor
 @Suite("Menu bar status view")
 struct MenuBarStatusViewTests {
+    @Test("gateway labels use full names")
+    func gatewayLabelsUseFullNames() {
+        let gateway = GatewayStatusSnapshot(magpieUp: true, ravenUp: true, falconUp: true)
+        #expect(gateway.magpieUp)
+        #expect(gateway.ravenUp)
+        #expect(gateway.falconUp)
+    }
+
     @Test("view renders with expanded attention items and hardware fields")
     func rendersExpandedState() {
         let snapshot = MenuBarSystemSnapshot(
