@@ -609,7 +609,15 @@ class RepoRadar:
 
 def apply_star_preferences(items, starred_refs):
     """Stable Boost Forward / More Like This ordering for radar-like items."""
-    refs = {str(ref).strip().lower() for ref in (starred_refs or ()) if str(ref).strip()}
+    def normalize_ref(ref):
+        value = str(ref).strip().lower().rstrip("/")
+        if value.startswith("https://github.com/"):
+            value = value.removeprefix("https://github.com/")
+        if value.startswith("http://github.com/"):
+            value = value.removeprefix("http://github.com/")
+        return value
+
+    refs = {normalize_ref(ref) for ref in (starred_refs or ()) if str(ref).strip()}
     if not refs:
         return list(items)
 
@@ -623,14 +631,50 @@ def apply_star_preferences(items, starred_refs):
 
     def score(item):
         data = values(item)
-        direct = any(str(data.get(name) or "").lower() in refs
+        direct = any(normalize_ref(data.get(name) or "") in refs
                      for name in ("repo", "project", "related_project", "category"))
         topics = data.get("topics") or ()
-        similar = direct or any(str(topic).lower() in refs for topic in topics)
-        return (0 if direct else 1 if similar else 2)
+        matched = direct or any(normalize_ref(topic) in refs for topic in topics)
+        if matched:
+            return (0 if direct else 1)
+        peer_values = set()
+        for candidate in items:
+            candidate_data = values(candidate)
+            candidate_direct = any(
+                normalize_ref(candidate_data.get(name) or "") in refs
+                for name in ("repo", "project", "related_project", "category")
+            )
+            if candidate_direct:
+                peer_values.update(
+                    normalize_ref(candidate_data.get(name) or "")
+                    for name in ("category", "related_project")
+                    if candidate_data.get(name)
+                )
+                peer_values.update(
+                    normalize_ref(topic) for topic in (candidate_data.get("topics") or ())
+                )
+        similar = any(normalize_ref(value) in peer_values for value in (
+            data.get("category"), data.get("related_project"), *(topics or ())
+        ))
+        return 1 if similar else 2
 
     ordered = sorted(enumerate(items), key=lambda pair: (score(pair[1]), pair[0]))
     return [item for _, item in ordered]
+
+
+def _fetch_starred_refs() -> tuple[str, ...]:
+    db = clean_path("aidash_events")
+    if not db.exists():
+        return ()
+    try:
+        with sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                "SELECT item_ref FROM user_event "
+                "WHERE action = 'star' AND item_ref IS NOT NULL"
+            ).fetchall()
+        return tuple(str(row[0]) for row in rows if row[0])
+    except (OSError, sqlite3.Error):
+        return ()
 
 
 def fetch_known_projects(limit: int = 12) -> list[str]:
@@ -684,7 +728,11 @@ def fetch_repo_radar(client=None) -> RepoRadar:
             ))
         enriched = enrich_repos(cards, client=client,
                                 projects=fetch_known_projects())
-        return RepoRadar(enriched, SourceHealth("github_repo", "ok"))
+        return RepoRadar(
+            enriched,
+            SourceHealth("github_repo", "ok"),
+            _fetch_starred_refs(),
+        )
     except Exception as exc:  # noqa: BLE001 - degrade, never crash the digest
         return RepoRadar([], SourceHealth("github_repo", "error",
                                           str(exc)[:200]))
@@ -782,6 +830,9 @@ class NewsItem:
     title: str
     url: str
     source_name: str
+    category: str = ""
+    related_project: str = ""
+    topics: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -860,6 +911,7 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
         ci = {name: ci_cols.index(name) for name in (
             "repo_key", "run_count", "success_count", "failure_count",
             "cancelled_or_timeout_count", "pass_rate", "config_noise_job_count",
+            "avg_queue_wait_sec",
         ) if name in ci_cols} if ci_rows else {}
         success = sum(int(r[ci["success_count"]] or 0) for r in ci_rows)
         failures = sum(int(r[ci["failure_count"]] or 0) for r in ci_rows)
@@ -1455,7 +1507,8 @@ def fetch_news_radar() -> "NewsRadar":
         ti, hi = idx["topic"], idx["title"]
         ui, si = idx["url"], idx["source_name"]
         items = [NewsItem(str(r[ti]), str(r[hi]), str(r[ui] or ""),
-                          str(r[si] or "")) for r in rows]
+                          str(r[si] or ""), category=str(r[ti])) for r in rows]
+        items = apply_star_preferences(items, _fetch_starred_refs())
         return NewsRadar(items, SourceHealth("news", "ok"))
     except Exception as exc:
         return NewsRadar([], SourceHealth("news", "error", str(exc)[:200]))

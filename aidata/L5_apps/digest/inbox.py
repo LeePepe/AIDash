@@ -143,7 +143,8 @@ def _proposals(read: Callable[[], list[Proposal]] | None = None) -> list[InboxIt
         prio = p.priority if p.priority in _PRIO_RANK else "high"
         out.append(InboxItem(
             f"待决策（{p.agent}）：{p.title[:56]}", prio, "待决策",
-            f"proposal://{p.id}", "decision", "Owner GO"))
+            (p.id if str(p.id).startswith("proposal://")
+             else f"proposal://{p.id}"), "decision", "Owner GO"))
     return out
 
 

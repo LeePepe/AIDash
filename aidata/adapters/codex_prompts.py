@@ -437,15 +437,14 @@ def normalize() -> int:
                 "call_id": rec["call_id"], "skill": rec["skill"],
             })
     db_path = clean_path(SOURCE)
-    if skill_rows or db_path.exists():
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("""CREATE TABLE IF NOT EXISTS skill_use (
-                day TEXT, session_id TEXT, ts REAL, call_id TEXT, skill TEXT,
-                PRIMARY KEY (call_id, skill)
-            )""")
-            conn.execute("DELETE FROM skill_use")
-            conn.executemany(
-                "INSERT OR IGNORE INTO skill_use (day, session_id, ts, call_id, skill) "
-                "VALUES (:day, :session_id, :ts, :call_id, :skill)", skill_rows)
-            conn.commit()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS skill_use (
+            day TEXT, session_id TEXT, ts REAL, call_id TEXT, skill TEXT,
+            PRIMARY KEY (call_id, skill)
+        )""")
+        conn.execute("DELETE FROM skill_use")
+        conn.executemany(
+            "INSERT OR IGNORE INTO skill_use (day, session_id, ts, call_id, skill) "
+            "VALUES (:day, :session_id, :ts, :call_id, :skill)", skill_rows)
+        conn.commit()
     return prompt_count

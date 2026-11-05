@@ -39,7 +39,7 @@ def _normalize_path(value: str) -> str:
 
 
 def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
-    machine_id = path.stem.removeprefix("gtt-bundle-") or "bundle"
+    machine_id = (path.stem.removeprefix("gtt-bundle-") or "bundle").lower()
     try:
         mtime_iso = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()  # noqa: UP017
     except OSError:
@@ -84,7 +84,7 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                     and item.get("content")
                 ):
                     yield {
-                        "machine_id": item.get("machine_id") or "unknown",
+                        "machine_id": str(item.get("machine_id") or "unknown").lower(),
                         "goal_id": item.get("goal_id") or Path(item.get("rel_path", "")).parts[0],
                         "rel_path": item.get("rel_path", ""),
                         "record_type": item["record_type"],
@@ -203,7 +203,10 @@ def _static_status(content: str) -> str:
         if any(status in {"blocked", "paused", "hold"} for status in statuses):
             return "blocked"
         return "active"
-    match = re.search(r"(?im)^\s*[-*]?\s*(?:status|状态)\s*[:|：]\s*`?([A-Za-z_]+)", content)
+    match = re.search(
+        r"(?im)^\s*[-*]?\s*(?:\*\*)?(?:status|状态)(?:\*\*)?\s*[:|：]\s*`?([A-Za-z_]+)",
+        content,
+    )
     if not match:
         match = re.search(r"(?im)^\s*\|\s*status\s*\|\s*([A-Za-z_]+)", content)
     status = (match.group(1).lower() if match else "")
@@ -284,6 +287,24 @@ def _derived_status(content: str, events: list[dict[str, Any]]) -> str:
     return "done" if tasks and tasks <= completed else "in_progress"
 
 
+def _open_blockers(events: list[dict[str, Any]]) -> set[str]:
+    open_blockers: set[str] = set()
+    for event in events:
+        task = event.get("task_id")
+        if event["evt_type"] in {"TASK_BLOCKED", "REVIEW_FAIL", "PAUSE", "HOLD"}:
+            if task:
+                open_blockers.add(task)
+        elif event["evt_type"] == "RESOLVED":
+            if task:
+                open_blockers.discard(task)
+            else:
+                open_blockers.clear()
+        elif event["evt_type"] in {"DONE", "MERGED", "REVIEW_PASS"}:
+            if task:
+                open_blockers.discard(task)
+    return open_blockers
+
+
 _GOAL_DDL = """
 CREATE TABLE goal (
     goal_uid TEXT PRIMARY KEY, machine_id TEXT NOT NULL, goal_id TEXT NOT NULL,
@@ -326,7 +347,7 @@ def normalize() -> int:
     for record in read_raw(SOURCE):
         if record.get("record_type") != "ledger" or not record.get("goal_id"):
             continue
-        key = (record.get("machine_id", "unknown"), record["goal_id"])
+        key = (str(record.get("machine_id", "unknown")).lower(), record["goal_id"])
         content = str(record.get("content", ""))
         parsed_for_ts = [
             event for event in (
@@ -369,8 +390,8 @@ def normalize() -> int:
             "task_done_count": done_count,
             "task_blocked_count": (
                 0 if derived == "done" else len({
-                    e["task_id"] for e in parsed_events
-                    if e["task_id"] and e["evt_type"] == "TASK_BLOCKED"
+                    task_id for task_id in _open_blockers(parsed_events)
+                    if task_id
                 })
             ),
             "created_at": parsed_events[0]["ts"] if parsed_events else None,

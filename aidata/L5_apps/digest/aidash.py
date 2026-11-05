@@ -1094,7 +1094,7 @@ def _agent_summary_card(card_id: str, agent_name: str, completed: list[dict],
         return None
     payload = {"agentName": agent_name, "completed": completed[:6]}
     if stats:
-        payload["stats"] = stats[:4]
+        payload["stats"] = stats
     return Card(card_id, "agentSummary", "wide", payload)
 
 
@@ -1110,6 +1110,7 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
                     or retro_ops.ci_pass_ratio is not None
                     or retro_ops.gtt_done_ratio is not None)):
         return None
+    ci_rank_id = _kuid(mmdd, 43)
     leading: list[Card] = []
     if retro_ops.ci_segments:
         leading.append(Card(_kuid(mmdd, 41), "stackedBar", "wide", {
@@ -1126,14 +1127,12 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
                          for label, value, semantic in retro_ops.gtt_segments],
         }))
     if retro_ops.ci_repo_bars:
-        leading.append(Card(_kuid(mmdd, 43), "barList", "wide", {
+        leading.append(Card(ci_rank_id, "barList", "wide", {
             "title": "各仓 CI 运行与配置异常排行",
             "items": [{"label": label, "value": value, "valueText": value_text,
                        **({"semantic": semantic} if semantic else {})}
                       for label, value, value_text, semantic in retro_ops.ci_repo_bars],
         }))
-    # Reserve room for the divider and both operational cards (five total).
-    leading = leading[:2]
     completed: list[dict] = []
     stats: list[dict] = []
     if retro_ops.bot_tl_bars:
@@ -1152,11 +1151,11 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
     if retro_ops.prmon_stuck is not None:
         stats.append({"label": "PR monitor 卡住", "value": retro_ops.prmon_stuck})
     if getattr(retro_ops, "avg_queue_wait_sec", None) is not None:
-        stats.append({"label": "CI 平均排队", "value": round(
-            retro_ops.avg_queue_wait_sec, 1), "unit": "秒"})
+        stats.append({"label": "CI 平均排队（秒）", "value": round(
+            retro_ops.avg_queue_wait_sec, 1)})
     if getattr(retro_ops, "avg_duration_sec", None) is not None:
-        stats.append({"label": "release_tf 平均耗时", "value": round(
-            retro_ops.avg_duration_sec, 1), "unit": "秒"})
+        stats.append({"label": "release_tf 平均耗时（秒）", "value": round(
+            retro_ops.avg_duration_sec, 1)})
     for state, count in getattr(retro_ops, "claude_jobs", ()):
         completed.append({"title": f"claude_job · {state} · {int(count)}",
                           "ref": "claude_job"})
@@ -1184,7 +1183,9 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
     trailing: list[Card] = []
     trailing_labels: list[str] = []
     if operational_items:
-        trailing.append(Card(_kuid(mmdd, 47), "barList", "wide", {
+        trailing.append(Card(
+            _kuid(mmdd, 47),
+            "barList", "wide", {
             "title": "release_tf · workspace_hygiene · 运维指标",
             "items": operational_items,
         }))
@@ -1198,7 +1199,9 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
         return None
     cards = leading + trailing
     if leading and trailing:
-        section = Card(_kuid(mmdd, 46), "sectionHeader", "wide", {
+        section = Card(
+            _kuid(mmdd, 46),
+            "sectionHeader", "wide", {
             "title": "运营信号",
             "subtitle": " · ".join(trailing_labels),
         })
@@ -1355,25 +1358,24 @@ def _relationship_container(mmdd: str, rework, retro_ops=None) -> "Container | N
                 relationship_kind="heatmap",
             )
             decision = choose_card(profile)
-            if decision.size != "wide":
+            if decision.size == "wide":
                 # A medium heatmap is a 1×N strip: the second axis carries no
                 # information, so the chart would assert a structure the data lacks.
-                return None
-            payload = {
-                "title": "返工集中在哪里",
-                "visualization": decision.visualization,
-                "xAxis": {"label": "失败根因"},
-                "yAxis": {"label": "Workspace"},
-                "cells": [{"row": c.row, "column": c.column, "value": float(c.value)}
-                          for c in rework.cells],
-                "sampleSize": int(rework.sample_size),
-                "timeWindow": rework.time_window or "全部",
-                "metricDefinition": _REWORK_METRIC_DEFINITION,
-                "summary": _relationship_summary(rework.cells, rework.sample_size),
-            }
-            card = Card(_kuid(mmdd, 37), "relationship", decision.size, payload)
-            return Container(_cuid(mmdd, 12), "交叉信号", 24, (card,), layout="auto",
-                             subtitle="返工 × 根因 × workspace · 观察性关联")
+                payload = {
+                    "title": "返工集中在哪里",
+                    "visualization": decision.visualization,
+                    "xAxis": {"label": "失败根因"},
+                    "yAxis": {"label": "Workspace"},
+                    "cells": [{"row": c.row, "column": c.column, "value": float(c.value)}
+                              for c in rework.cells],
+                    "sampleSize": int(rework.sample_size),
+                    "timeWindow": rework.time_window or "全部",
+                    "metricDefinition": _REWORK_METRIC_DEFINITION,
+                    "summary": _relationship_summary(rework.cells, rework.sample_size),
+                }
+                card = Card(_kuid(mmdd, 37), "relationship", decision.size, payload)
+                return Container(_cuid(mmdd, 12), "交叉信号", 24, (card,), layout="auto",
+                                 subtitle="返工 × 根因 × workspace · 观察性关联")
 
     # When no genuine matrix is available, CI repository snapshots still provide
     # a real two-axis observation: run volume versus observed pass rate.
@@ -1527,7 +1529,7 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     head, rest = containers[0], containers[1:]
     # The overview's own cards come out of the same budget — exempt from being
     # dropped is not the same as free.
-    head_cards = len(head.cards)
+    head_cards = sum(card.type != "sectionHeader" for card in head.cards)
     budget = max(0, MAX_CARDS - head_cards)
     first_screen = max(0, FIRST_SCREEN_CARDS - head_cards)
     kept = select_with_budget(_container_candidates(rest),
@@ -1560,7 +1562,10 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
         replace(container, order=head.order + 1 + index)
         for index, container in enumerate(lead + tail)
     ]
-    while sum(len(container.cards) for container in published) + len(head.cards) > MAX_CARDS:
+    while sum(
+        sum(card.type != "sectionHeader" for card in container.cards)
+        for container in published
+    ) + sum(card.type != "sectionHeader" for card in head.cards) > MAX_CARDS:
         if not published:
             break
         published.pop()

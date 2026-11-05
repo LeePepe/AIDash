@@ -79,3 +79,55 @@ def test_hourly_timeline_fetch_degrades_without_warehouse(tmp_path, monkeypatch)
     bundle = sources.fetch_hourly_timeline("2026-11-04")
     assert bundle.health.state.startswith("skipped:")
     assert aidash._hourly_timeline_container("1104", "2026-11-04", bundle) is None
+
+
+@pytest.mark.unit
+def test_hourly_timeline_carries_event_metadata(tmp_path, monkeypatch):
+    warehouse = tmp_path / "warehouse.db"
+    with sqlite3.connect(warehouse) as conn:
+        conn.execute(
+            "CREATE TABLE fact_gtt_event (cst_day TEXT, ts TEXT, evt_type TEXT, "
+            "goal_id TEXT, task_id TEXT, pr_number INTEGER, note_preview TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO fact_gtt_event VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("2026-11-04", "2026-11-04T01:00:00+08:00", "TASK_BLOCKED",
+             "goal-1", "task-1", 272, "needs review"),
+        )
+    monkeypatch.setattr(sources, "WAREHOUSE_DB", warehouse)
+    bundle = sources.fetch_hourly_timeline("2026-11-04")
+    assert bundle.health.state == "ok"
+    assert "goal-1" in bundle.citations[0].label
+    assert "task-1" in bundle.citations[0].label
+    assert "272" in bundle.citations[0].label
+    assert "needs review" in bundle.citations[0].label
+
+
+@pytest.mark.unit
+def test_star_preferences_boost_direct_and_similar_items():
+    from L5_apps.digest.repo_radar import RepoCard
+
+    starred = RepoCard("owner/starred", 10, 1, "", "", ("swift",), "", "",
+                       category="tools", related_project="AIDash")
+    similar = RepoCard("owner/similar", 9, 1, "", "", ("swift",), "", "",
+                       category="tools", related_project="AIDash")
+    other = RepoCard("owner/other", 8, 1, "", "", ("python",), "", "",
+                     category="data")
+    ordered = sources.apply_star_preferences([other, similar, starred], ["owner/starred"])
+    assert [item.repo for item in ordered] == ["owner/starred", "owner/similar", "owner/other"]
+
+
+@pytest.mark.unit
+def test_starred_refs_are_read_from_normalized_events(tmp_path, monkeypatch):
+    db = tmp_path / "aidash_events.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE user_event (action TEXT, item_ref TEXT)")
+        conn.executemany(
+            "INSERT INTO user_event VALUES (?, ?)",
+            [("star", "owner/starred"), ("done", "proposal://p1")],
+        )
+    monkeypatch.setattr(
+        sources, "clean_path",
+        lambda name: db if name == "aidash_events" else tmp_path / name,
+    )
+    assert sources._fetch_starred_refs() == ("owner/starred",)
