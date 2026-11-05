@@ -426,6 +426,7 @@ struct DesignTokensComplianceTests {
         case .barList:       name = "BarListCardView"
         case .stackedBar:    name = "StackedBarCardView"
         case .relationship:  name = "RelationshipCardView"
+        case .hourlyTimeline: name = "HourlyTimelineCardView"
         @unknown default:
             throw ComplianceSourceLookupError.noRendererForType(type.rawValue)
         }

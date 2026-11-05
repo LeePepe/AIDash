@@ -449,6 +449,30 @@
         }
       }
     },
+    "menubar.status.needs_person": {
+      "comment": "Menu bar attention strip label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Needs a Person" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "需要人工处理" } }
+      }
+    },
+    "menubar.status.blocking": {
+      "comment": "Menu bar attention count badge.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld blocking" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%lld 项阻塞" } }
+      }
+    },
+    "menubar.status.gateway": {
+      "comment": "Menu bar local gateway status section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local Gateway" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地网关" } }
+      }
+    },
     "todo_list.done_toggle.label.done %@": {
       "comment": "VoiceOver label for a TodoList item's completion toggle when the item is marked done. %@ is the item title.",
       "extractionState": "manual",

@@ -315,7 +315,7 @@ public extension Neutrals {
 // the app shipped with) so dark mode keeps a proper variant.
 
 public enum Classification: String, CaseIterable, Sendable {
-    case metric, insight, digest, agentSummary, todoList, trending, barList, stackedBar, teamAudit
+    case metric, insight, digest, agentSummary, todoList, trending, barList, stackedBar, teamAudit, hourlyTimeline
     case relationship
 
     /// Resolved tint for the current color scheme. Light/dark hex pairs mirror
@@ -346,6 +346,7 @@ public enum Classification: String, CaseIterable, Sendable {
         // is deeper and the dark value brighter than either neighbor, keeping
         // all three separable at 32×32 badge size in both schemes.
         case .relationship: return Color(hex: isDark ? "#22D3EE" : "#0891B2") // cyan
+        case .hourlyTimeline: return Color(hex: isDark ? "#34D399" : "#059669") // emerald
         }
     }
 }

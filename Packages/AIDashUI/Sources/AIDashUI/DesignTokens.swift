@@ -114,6 +114,8 @@ public enum AIDashTypography {
             // `.caption.monospaced()` — tabular so `n=34` and a numeric axis
             // label stay aligned against the chart edge.
             return DetailRecipe(primary: .headline, secondary: .caption.monospaced(), secondaryColor: .secondary)
+        case .hourlyTimeline:
+            return DetailRecipe(primary: .subheadline.weight(.semibold), secondary: .caption.monospaced(), secondaryColor: .secondary)
         @unknown default:
             return DetailRecipe(primary: .headline, secondary: .caption, secondaryColor: .secondary)
         }
@@ -141,6 +143,7 @@ extension CardType {
         case .barList:       return "chart.bar.xaxis"
         case .stackedBar:    return "chart.bar.doc.horizontal"
         case .relationship:  return "point.3.connected.trianglepath.dotted"
+        case .hourlyTimeline: return "clock.badge.checkmark"
         @unknown default:    return nil
         }
     }
@@ -161,6 +164,7 @@ extension CardType {
         case .barList:       return .barList
         case .stackedBar:    return .stackedBar
         case .relationship:  return .relationship
+        case .hourlyTimeline: return .hourlyTimeline
         @unknown default:    return nil
         }
     }

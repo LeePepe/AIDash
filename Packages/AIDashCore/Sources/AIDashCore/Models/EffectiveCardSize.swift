@@ -92,6 +92,7 @@ public enum EffectiveCardSize {
 
     // MARK: - Per-type justification
 
+    // swiftlint:disable cyclomatic_complexity
     /// The largest size the payload's richness justifies, or `nil` for
     /// pass-through types (metric / trending / sectionHeader / barList /
     /// stackedBar) and undecoded
@@ -123,7 +124,20 @@ public enum EffectiveCardSize {
         case .relationship:
             guard let p = payload as? RelationshipPayload else { return nil }
             return relationshipSize(p)
+
+        case .hourlyTimeline:
+            guard let p = payload as? HourlyTimelinePayload else { return nil }
+            let active = p.hours.filter {
+                $0.summary.trimmingCharacters(in: .whitespacesAndNewlines) != HourlyTimelinePayload.emptyBucketSummary
+            }.count
+            switch active {
+            case 0: return .small
+            case 1: return .medium
+            case 2...3: return .wide
+            default: return .hero
+            }
         }
+        // swiftlint:enable cyclomatic_complexity
     }
 
     private static func digestSize(_ p: DigestPayload) -> CardSize {

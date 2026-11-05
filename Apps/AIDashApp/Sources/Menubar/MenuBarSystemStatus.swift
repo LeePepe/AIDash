@@ -224,16 +224,48 @@ public struct MenuBarSystemSnapshot: Sendable, Equatable {
     public let network: NetworkStatusSnapshot
     public let storage: StorageStatusSnapshot
     public let tokenUsage: CLITokenUsageSnapshot
+    public let attention: AttentionStatusSnapshot
+    public let gateway: GatewayStatusSnapshot
 
-    public init(capturedAt: Date, computerCapturedAt: Date? = nil, tokenCapturedAt: Date? = nil, machine: MachineStatusSnapshot = MachineStatusSnapshot(), cpu: CPUStatusSnapshot, memory: MemoryStatusSnapshot, network: NetworkStatusSnapshot = NetworkStatusSnapshot(), storage: StorageStatusSnapshot, tokenUsage: CLITokenUsageSnapshot) {
+    public init(capturedAt: Date, computerCapturedAt: Date? = nil, tokenCapturedAt: Date? = nil, machine: MachineStatusSnapshot = MachineStatusSnapshot(), cpu: CPUStatusSnapshot, memory: MemoryStatusSnapshot, network: NetworkStatusSnapshot = NetworkStatusSnapshot(), storage: StorageStatusSnapshot, tokenUsage: CLITokenUsageSnapshot, attention: AttentionStatusSnapshot = AttentionStatusSnapshot(), gateway: GatewayStatusSnapshot = GatewayStatusSnapshot()) {
         self.capturedAt = capturedAt; self.computerCapturedAt = computerCapturedAt ?? capturedAt; self.tokenCapturedAt = tokenCapturedAt ?? capturedAt
-        self.machine = machine; self.cpu = cpu; self.memory = memory; self.network = network; self.storage = storage; self.tokenUsage = tokenUsage
+        self.machine = machine; self.cpu = cpu; self.memory = memory; self.network = network; self.storage = storage; self.tokenUsage = tokenUsage; self.attention = attention; self.gateway = gateway
     }
     public func updatingComputer(_ computer: ComputerStatusSnapshot) -> Self {
-        Self(capturedAt: max(computer.capturedAt, tokenCapturedAt), computerCapturedAt: computer.capturedAt, tokenCapturedAt: tokenCapturedAt, machine: computer.machine, cpu: computer.cpu, memory: computer.memory, network: computer.network, storage: computer.storage, tokenUsage: tokenUsage)
+        Self(capturedAt: max(computer.capturedAt, tokenCapturedAt), computerCapturedAt: computer.capturedAt, tokenCapturedAt: tokenCapturedAt, machine: computer.machine, cpu: computer.cpu, memory: computer.memory, network: computer.network, storage: computer.storage, tokenUsage: tokenUsage, attention: attention, gateway: gateway)
     }
     public func updatingTokenUsage(_ tokenUsage: CLITokenUsageSnapshot, capturedAt: Date) -> Self {
-        Self(capturedAt: max(computerCapturedAt, capturedAt), computerCapturedAt: computerCapturedAt, tokenCapturedAt: capturedAt, machine: machine, cpu: cpu, memory: memory, network: network, storage: storage, tokenUsage: tokenUsage)
+        Self(capturedAt: max(computerCapturedAt, capturedAt), computerCapturedAt: computerCapturedAt, tokenCapturedAt: capturedAt, machine: machine, cpu: cpu, memory: memory, network: network, storage: storage, tokenUsage: tokenUsage, attention: attention, gateway: gateway)
+    }
+}
+
+public struct AttentionStatusItem: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let title: String
+    public let category: String?
+    public let waitingOn: String?
+    public init(id: String, title: String, category: String? = nil, waitingOn: String? = nil) {
+        self.id = id; self.title = title; self.category = category; self.waitingOn = waitingOn
+    }
+}
+
+public struct AttentionStatusSnapshot: Sendable, Equatable {
+    public let needsPersonCount: Int
+    public let activeGoalCount: Int
+    public let items: [AttentionStatusItem]
+    public init(needsPersonCount: Int = 0, activeGoalCount: Int = 0, items: [AttentionStatusItem] = []) {
+        self.needsPersonCount = needsPersonCount; self.activeGoalCount = activeGoalCount; self.items = items
+    }
+}
+
+public struct GatewayStatusSnapshot: Sendable, Equatable {
+    public let magpieUp: Bool
+    public let ravenUp: Bool
+    public let falconUp: Bool
+    public let jevRequests24h: Int
+    public let jevStarredCount: Int
+    public init(magpieUp: Bool = false, ravenUp: Bool = false, falconUp: Bool = false, jevRequests24h: Int = 0, jevStarredCount: Int = 0) {
+        self.magpieUp = magpieUp; self.ravenUp = ravenUp; self.falconUp = falconUp; self.jevRequests24h = jevRequests24h; self.jevStarredCount = jevStarredCount
     }
 }
 
@@ -271,7 +303,7 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     public func captureStatusState() -> MenuBarStatusViewState {
         let computer = captureComputerStatus()
         let tokens = captureTokenStatus()
-        return .populated(MenuBarSystemSnapshot(capturedAt: max(computer.capturedAt, tokens.capturedAt), computerCapturedAt: computer.capturedAt, tokenCapturedAt: tokens.capturedAt, machine: computer.machine, cpu: computer.cpu, memory: computer.memory, network: computer.network, storage: computer.storage, tokenUsage: tokens.usage))
+        return .populated(MenuBarSystemSnapshot(capturedAt: max(computer.capturedAt, tokens.capturedAt), computerCapturedAt: computer.capturedAt, tokenCapturedAt: tokens.capturedAt, machine: computer.machine, cpu: computer.cpu, memory: computer.memory, network: computer.network, storage: computer.storage, tokenUsage: tokens.usage, attention: captureAttention(), gateway: captureGateway()))
     }
     public func captureComputerStatus() -> ComputerStatusSnapshot {
         let now = Date()
@@ -437,6 +469,38 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     private func readQuota() -> Int? {
         guard let url = tokenDatabasePaths.claudeQuotaFileURL, let data = try? Data(contentsOf: url), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let value = object["weekly_remaining_pct"] as? NSNumber else { return nil }
         return value.intValue
+    }
+    private func captureAttention() -> AttentionStatusSnapshot {
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return AttentionStatusSnapshot() }
+        let url = Self.realUserHomeDirectoryURL().appendingPathComponent("Development/handoff/_watch/attention-status.json")
+        guard let data = try? Data(contentsOf: url) else { return AttentionStatusSnapshot() }
+        struct WireItem: Decodable { let id: String; let title: String; let category: String?; let waitingOn: String? }
+        struct Wire: Decodable { let needsPersonCount: Int?; let activeGoalCount: Int?; let items: [WireItem]? }
+        guard let wire = try? JSONDecoder().decode(Wire.self, from: data) else { return AttentionStatusSnapshot() }
+        return AttentionStatusSnapshot(needsPersonCount: wire.needsPersonCount ?? wire.items?.count ?? 0, activeGoalCount: wire.activeGoalCount ?? 0, items: wire.items?.map { AttentionStatusItem(id: $0.id, title: $0.title, category: $0.category, waitingOn: $0.waitingOn) } ?? [])
+    }
+    private func captureGateway() -> GatewayStatusSnapshot {
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return GatewayStatusSnapshot() }
+        let home = Self.realUserHomeDirectoryURL()
+        let falcon = home.appendingPathComponent("Library/Application Support/Falcon/falcon.sqlite")
+        let falconUp = FileManager.default.fileExists(atPath: falcon.path)
+        let requests = readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE created_at >= datetime('now','-1 day');") ?? 0
+        let starred = readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE starredAt IS NOT NULL;") ?? 0
+        return GatewayStatusSnapshot(magpieUp: portOpen(3425), ravenUp: portOpen(7024), falconUp: falconUp, jevRequests24h: requests, jevStarredCount: starred)
+    }
+    private func portOpen(_ port: UInt16) -> Bool {
+        let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/bin/nc"); task.arguments = ["-z", "127.0.0.1", "\(port)"]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            return task.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+    private func readSQLiteCount(path: String, query: String) -> Int? {
+        guard let value = runSQLiteQuery(target: path, flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, query: query) else { return nil }
+        return Int(value.0)
     }
     private static func defaultTokenDatabasePaths() -> CLITokenDatabasePaths {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return CLITokenDatabasePaths() }
