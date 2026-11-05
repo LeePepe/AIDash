@@ -34,7 +34,7 @@ def _dbs(tmp_path: Path):
 
     prompts = tmp_path / "claude_prompts.db"
     con = sqlite3.connect(prompts)
-    con.execute("CREATE TABLE prompt (prompt_id TEXT, session_id TEXT, ts REAL, repo TEXT)")
+    con.execute("CREATE TABLE prompt (prompt_id TEXT, session_id TEXT, ts REAL, cwd TEXT)")
     con.executemany("INSERT INTO prompt VALUES (?, ?, ?, ?)", [
         ("a", "s1", 900, "owner/old"),
         ("a", "s1", 1000, "owner/early-tie"),
@@ -47,7 +47,7 @@ def _dbs(tmp_path: Path):
     state = tmp_path / "state_db.db"
     con = sqlite3.connect(state)
     con.execute("""CREATE TABLE session (
-        started_at REAL, repo TEXT, input_tokens INTEGER, output_tokens INTEGER,
+        started_at REAL, cwd TEXT, input_tokens INTEGER, output_tokens INTEGER,
         cache_read_tokens INTEGER, cache_write_tokens INTEGER
     )""")
     con.execute("INSERT INTO session VALUES (1792454400, 'owner/hermes', 6, 4, 1, 2)")
@@ -70,4 +70,3 @@ def test_project_query_allocates_prompts_and_conserves_share(tmp_path, monkeypat
     assert sum(row[6] for row in rows) == pytest.approx(100.0, abs=0.001)
     assert cols == ["cst_day", "repo", "input", "output", "cache_read",
                     "cache_write", "share_pct"]
-

@@ -24,7 +24,13 @@ _KEY_RE = re.compile(
 
 
 def _machine_id() -> str:
-    return socket.gethostname().split(".", 1)[0] or "unknown"
+    return (socket.gethostname().split(".", 1)[0] or "unknown").lower()
+
+
+def _normalize_iso(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return value
+    return re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value)
 
 
 def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
@@ -123,7 +129,7 @@ def _field(text: str, names: tuple[str, ...]) -> str | None:
     for match in _KEY_RE.finditer(text):
         key = re.sub(r"\s+", " ", match.group("key").strip().lower().replace("_", " "))
         if key in wanted or any(name in key for name in wanted):
-            return match.group("value").strip().strip("`")
+            return match.group("value").strip().strip("`* ")
     return None
 
 
@@ -202,15 +208,32 @@ def normalize() -> int:
         head = _field(content, ("head", "PR"))
         head_match = re.search(r"\b[0-9a-f]{7,40}\b", head or "", re.IGNORECASE)
         prefix = match.group("prefix")
-        role_from_name = prefix.rsplit("-", 1)[-1] if "-" in prefix else prefix
-        task_id = prefix.rsplit("-", 1)[0] if "-" in prefix else prefix
-        known_roles = {"writer", "explorer", "reviewer", "pr-monitor", "planner", "code-reviewer"}
-        if role_from_name not in known_roles:
-            role_from_name = "unknown"
-            task_id = prefix
-        role = _field(content, ("Role", "Role / Model")) or _role_from_name(role_from_name)
-        status = (_field(content, ("Status",)) or "completed").lower()
+        known_roles = (
+            "writer-escalated", "planner-reviewer", "code-reviewer", "pr-monitor",
+            "reviewer", "explorer", "designer", "planner", "writer", "prmon",
+            "rev", "review",
+        )
+        role_from_name = next(
+            (role for role in sorted(known_roles, key=len, reverse=True)
+             if prefix == role or prefix.endswith(f"-{role}")),
+            None,
+        )
+        task_id = prefix[:-len(role_from_name) - 1] if role_from_name else prefix
+        role = _field(content, ("Role", "Role / Model")) or _role_from_name(role_from_name or "unknown")
+        role = _role_from_name(role.split("/", 1)[0].strip())
+        status = (_field(content, ("Status", "Outcome", "Result")) or "completed").lower()
         v5 = _field(content, ("V5",))
+        failure_text = " ".join(
+            value for value in (
+                _field(content, ("Outcome",)), _field(content, ("Result",)),
+                _field(content, ("Status",)), v5,
+            ) if value
+        ).upper()
+        if any(marker in failure_text for marker in (
+            "FAILED_CHECK", "FAIL_FAST_CHECK_FAILURE", "PR_CHECK_FAILED",
+            "PR_CONFLICT", "CHANGES REQUESTED", "V5=FAIL",
+        )):
+            status, v5 = "failed", "FAIL"
         goal = str(record.get("goal_id", "unknown"))
         machine_id = str(record.get("machine_id", "unknown"))
         uid = f"{machine_id}:{rel or name}"
@@ -222,7 +245,9 @@ def normalize() -> int:
             "model_id": model, "vendor": None, "status": status, "v5_verdict": v5,
             "head_sha": head_match.group(0) if head_match else None,
             "receipt_sha256": hashlib.sha256(content.encode()).hexdigest(),
-            "completed_at": _field(content, ("Timestamp",)),
+            "completed_at": _normalize_iso(
+                _field(content, ("Timestamp", "Updated", "Ended", "Reviewed At"))
+            ) or _normalize_iso(record.get("mtime_iso")),
         }
     task_cols = ("receipt_uid", "goal_uid", "machine_id", "goal_id", "task_id", "role_name",
                  "round_no", "agent_name", "cli_tool", "model_id", "vendor", "status",

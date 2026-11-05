@@ -12,11 +12,11 @@ WITH
 claude_turn_repo AS (
     SELECT t.cst_day,
            COALESCE(
-               (SELECT p.repo FROM claude_prompts.prompt p
+               (SELECT p.cwd FROM claude_prompts.prompt p
                 WHERE p.session_id = t.session_id
                   AND p.ts <= (julianday(t.ts) - 2440587.5) * 86400.0
                 ORDER BY p.ts DESC, p.prompt_id DESC LIMIT 1),
-               (SELECT p.repo FROM claude_prompts.prompt p
+               (SELECT p.cwd FROM claude_prompts.prompt p
                 WHERE p.session_id = t.session_id
                 ORDER BY p.ts ASC, p.prompt_id ASC LIMIT 1),
                '(unresolved)') AS repo,
@@ -33,7 +33,7 @@ raven AS (
 ),
 hermes AS (
     SELECT date(started_at, 'unixepoch', '+8 hours') AS cst_day,
-           COALESCE(repo, '(unresolved)') AS repo,
+           COALESCE(cwd, '(unresolved)') AS repo,
            input_tokens AS input, output_tokens AS output,
            cache_read_tokens AS cache_read, cache_write_tokens AS cache_write
     FROM state_db.session
