@@ -1,7 +1,10 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import AppKit
 import Darwin
 import Foundation
+import IOKit
+import IOKit.ps
 import SQLite3
 
 public enum AgentCLIKind: String, CaseIterable, Sendable, Equatable, Identifiable {
@@ -29,6 +32,8 @@ public struct MachineStatusSnapshot: Sendable, Equatable {
     public let performanceCores: Int
     public let uptimeSeconds: TimeInterval
     public let thermalState: SystemThermalLevel
+    public let efficiencyCores: Int
+    public let powerSummary: String?
 
     public init(
         chipName: String = "Apple Silicon",
@@ -36,7 +41,9 @@ public struct MachineStatusSnapshot: Sendable, Equatable {
         totalCores: Int = 0,
         performanceCores: Int = 0,
         uptimeSeconds: TimeInterval = 0,
-        thermalState: SystemThermalLevel = .nominal
+        thermalState: SystemThermalLevel = .nominal,
+        efficiencyCores: Int = 0,
+        powerSummary: String? = nil
     ) {
         self.chipName = chipName
         self.modelIdentifier = modelIdentifier
@@ -44,6 +51,30 @@ public struct MachineStatusSnapshot: Sendable, Equatable {
         self.performanceCores = performanceCores
         self.uptimeSeconds = uptimeSeconds
         self.thermalState = thermalState
+        self.efficiencyCores = efficiencyCores
+        self.powerSummary = powerSummary
+    }
+}
+
+public struct GPUStatusSnapshot: Sendable, Equatable {
+    public let deviceUtilization: Double
+    public let rendererUtilization: Double
+    public let tilerUtilization: Double
+    public let inUseMemoryBytes: UInt64
+    public let allocMemoryBytes: UInt64
+
+    public init(
+        deviceUtilization: Double = 0,
+        rendererUtilization: Double = 0,
+        tilerUtilization: Double = 0,
+        inUseMemoryBytes: UInt64 = 0,
+        allocMemoryBytes: UInt64 = 0
+    ) {
+        self.deviceUtilization = deviceUtilization
+        self.rendererUtilization = rendererUtilization
+        self.tilerUtilization = tilerUtilization
+        self.inUseMemoryBytes = inUseMemoryBytes
+        self.allocMemoryBytes = allocMemoryBytes
     }
 }
 
@@ -57,6 +88,9 @@ public struct CPUStatusSnapshot: Sendable, Equatable {
     public let loadFiveMinutes: Double
     public let loadFifteenMinutes: Double
     public let history: [Double]
+    public let gpu: GPUStatusSnapshot
+    public let topProcessName: String?
+    public let topProcessValueText: String?
 
     public init(
         usage: Double,
@@ -67,7 +101,10 @@ public struct CPUStatusSnapshot: Sendable, Equatable {
         loadOneMinute: Double,
         loadFiveMinutes: Double,
         loadFifteenMinutes: Double,
-        history: [Double] = []
+        history: [Double] = [],
+        gpu: GPUStatusSnapshot = GPUStatusSnapshot(),
+        topProcessName: String? = nil,
+        topProcessValueText: String? = nil
     ) {
         self.usage = usage
         self.user = user
@@ -78,6 +115,9 @@ public struct CPUStatusSnapshot: Sendable, Equatable {
         self.loadFiveMinutes = loadFiveMinutes
         self.loadFifteenMinutes = loadFifteenMinutes
         self.history = history
+        self.gpu = gpu
+        self.topProcessName = topProcessName
+        self.topProcessValueText = topProcessValueText
     }
 }
 
@@ -92,6 +132,8 @@ public struct MemoryStatusSnapshot: Sendable, Equatable {
     public let pressure: MemoryPressureLevel
     public let swapUsedBytes: UInt64
     public let swapTotalBytes: UInt64
+    public let topProcessName: String?
+    public let topProcessValueText: String?
 
     public init(
         usedBytes: UInt64,
@@ -101,7 +143,9 @@ public struct MemoryStatusSnapshot: Sendable, Equatable {
         compressedBytes: UInt64,
         pressure: MemoryPressureLevel,
         swapUsedBytes: UInt64 = 0,
-        swapTotalBytes: UInt64 = 0
+        swapTotalBytes: UInt64 = 0,
+        topProcessName: String? = nil,
+        topProcessValueText: String? = nil
     ) {
         self.usedBytes = usedBytes
         self.totalBytes = totalBytes
@@ -111,6 +155,8 @@ public struct MemoryStatusSnapshot: Sendable, Equatable {
         self.pressure = pressure
         self.swapUsedBytes = swapUsedBytes
         self.swapTotalBytes = swapTotalBytes
+        self.topProcessName = topProcessName
+        self.topProcessValueText = topProcessValueText
     }
 
     public var usageFraction: Double { totalBytes > 0 ? min(max(Double(usedBytes) / Double(totalBytes), 0), 1) : 0 }
@@ -274,9 +320,21 @@ public enum MenuBarStatusViewState: Sendable, Equatable {
 }
 
 public struct CLITokenDatabasePaths: Sendable, Equatable {
-    public let claude: [URL]; public let codex: [URL]; public let copilot: [URL]; public let claudeQuotaFileURL: URL?
-    public init(claude: [URL] = [], codex: [URL] = [], copilot: [URL] = [], claudeQuotaFileURL: URL? = nil) {
-        self.claude = claude; self.codex = codex; self.copilot = copilot; self.claudeQuotaFileURL = claudeQuotaFileURL
+    public let claude: [URL]; public let codex: [URL]; public let copilot: [URL]
+    public let claudeQuotaFileURL: URL?
+    public let magpieQuotaFileURL: URL?
+    public init(
+        claude: [URL] = [],
+        codex: [URL] = [],
+        copilot: [URL] = [],
+        claudeQuotaFileURL: URL? = nil,
+        magpieQuotaFileURL: URL? = nil
+    ) {
+        self.claude = claude
+        self.codex = codex
+        self.copilot = copilot
+        self.claudeQuotaFileURL = claudeQuotaFileURL
+        self.magpieQuotaFileURL = magpieQuotaFileURL
     }
 }
 
@@ -337,7 +395,17 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         }
         let total = max(ProcessInfo.processInfo.activeProcessorCount, 1)
         let performance = sysctlInt("hw.perflevel0.physicalcpu") ?? total
-        return MachineStatusSnapshot(chipName: sysctlString("machdep.cpu.brand_string") ?? "Apple Silicon", modelIdentifier: sysctlString("hw.model") ?? "Mac", totalCores: total, performanceCores: performance, uptimeSeconds: ProcessInfo.processInfo.systemUptime, thermalState: thermal)
+        let efficiency = sysctlInt("hw.perflevel1.physicalcpu") ?? max(total - performance, 0)
+        return MachineStatusSnapshot(
+            chipName: sysctlString("machdep.cpu.brand_string") ?? "Apple Silicon",
+            modelIdentifier: sysctlString("hw.model") ?? "Mac",
+            totalCores: total,
+            performanceCores: performance,
+            uptimeSeconds: ProcessInfo.processInfo.systemUptime,
+            thermalState: thermal,
+            efficiencyCores: efficiency,
+            powerSummary: capturePowerSummary()
+        )
     }
     private func captureCPU() -> CPUStatusSnapshot {
         var info = host_cpu_load_info()
@@ -345,11 +413,28 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         let result = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count) } }
         let coreCount = max(ProcessInfo.processInfo.activeProcessorCount, 1)
         let loads = getLoadAverages()
-        guard result == KERN_SUCCESS else { return CPUStatusSnapshot(usage: min(max(loads.one / Double(coreCount), 0), 1), user: 0, system: 0, idle: 1, coreCount: coreCount, loadOneMinute: loads.one, loadFiveMinutes: loads.five, loadFifteenMinutes: loads.fifteen, history: cpuUsageHistory) }
+        let gpu = captureGPU()
+        let topProcess = captureTopProcess(metric: .cpu)
+        guard result == KERN_SUCCESS else {
+            return CPUStatusSnapshot(
+                usage: min(max(loads.one / Double(coreCount), 0), 1),
+                user: 0,
+                system: 0,
+                idle: 1,
+                coreCount: coreCount,
+                loadOneMinute: loads.one,
+                loadFiveMinutes: loads.five,
+                loadFifteenMinutes: loads.fifteen,
+                history: cpuUsageHistory,
+                gpu: gpu,
+                topProcessName: topProcess.name,
+                topProcessValueText: topProcess.value
+            )
+        }
         let ticks = [UInt64(info.cpu_ticks.0), UInt64(info.cpu_ticks.1), UInt64(info.cpu_ticks.2), UInt64(info.cpu_ticks.3)]
         let breakdown = Self.computeCPUUsageBreakdown(currentTicks: ticks, previousTicks: previousCPUTicks)
         previousCPUTicks = ticks; cpuUsageHistory = Array((cpuUsageHistory + [breakdown.usage]).suffix(12))
-        return CPUStatusSnapshot(usage: breakdown.usage, user: breakdown.user, system: breakdown.system, idle: breakdown.idle, coreCount: coreCount, loadOneMinute: loads.one, loadFiveMinutes: loads.five, loadFifteenMinutes: loads.fifteen, history: cpuUsageHistory)
+        return CPUStatusSnapshot(usage: breakdown.usage, user: breakdown.user, system: breakdown.system, idle: breakdown.idle, coreCount: coreCount, loadOneMinute: loads.one, loadFiveMinutes: loads.five, loadFifteenMinutes: loads.fifteen, history: cpuUsageHistory, gpu: gpu, topProcessName: topProcess.name, topProcessValueText: topProcess.value)
     }
     private func getLoadAverages() -> (one: Double, five: Double, fifteen: Double) {
         var values = [Double](repeating: 0, count: 3)
@@ -363,13 +448,110 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         var swap = xsw_usage(); var swapSize = MemoryLayout<xsw_usage>.size
         let swapOK = sysctlbyname("vm.swapusage", &swap, &swapSize, nil, 0) == 0
         let total = ProcessInfo.processInfo.physicalMemory; let page = UInt64(max(hostPageSize(), 1))
-        guard result == KERN_SUCCESS else { return MemoryStatusSnapshot(usedBytes: 0, totalBytes: total, freeBytes: total, wiredBytes: 0, compressedBytes: 0, pressure: .normal, swapUsedBytes: swapOK ? swap.xsu_used : 0, swapTotalBytes: swapOK ? swap.xsu_total : 0) }
+        let topProcess = captureTopProcess(metric: .memory)
+        guard result == KERN_SUCCESS else { return MemoryStatusSnapshot(usedBytes: 0, totalBytes: total, freeBytes: total, wiredBytes: 0, compressedBytes: 0, pressure: .normal, swapUsedBytes: swapOK ? swap.xsu_used : 0, swapTotalBytes: swapOK ? swap.xsu_total : 0, topProcessName: topProcess.name, topProcessValueText: topProcess.value) }
         let free = UInt64(vm.free_count) * page; let inactive = UInt64(vm.inactive_count) * page; let speculative = UInt64(vm.speculative_count) * page
         let used = total > free + inactive + speculative ? total - free - inactive - speculative : 0
         let fraction = total > 0 ? Double(used) / Double(total) : 0
-        return MemoryStatusSnapshot(usedBytes: used, totalBytes: total, freeBytes: free, wiredBytes: UInt64(vm.wire_count) * page, compressedBytes: UInt64(vm.compressor_page_count) * page, pressure: fraction >= 0.9 ? .critical : fraction >= 0.75 ? .warning : .normal, swapUsedBytes: swapOK ? swap.xsu_used : 0, swapTotalBytes: swapOK ? swap.xsu_total : 0)
+        return MemoryStatusSnapshot(usedBytes: used, totalBytes: total, freeBytes: free, wiredBytes: UInt64(vm.wire_count) * page, compressedBytes: UInt64(vm.compressor_page_count) * page, pressure: fraction >= 0.9 ? .critical : fraction >= 0.75 ? .warning : .normal, swapUsedBytes: swapOK ? swap.xsu_used : 0, swapTotalBytes: swapOK ? swap.xsu_total : 0, topProcessName: topProcess.name, topProcessValueText: topProcess.value)
     }
     private func hostPageSize() -> vm_size_t { var size: vm_size_t = 0; host_page_size(mach_host_self(), &size); return size }
+    private enum ProcessMetric { case cpu, memory }
+
+    private func captureTopProcess(metric: ProcessMetric) -> (name: String?, value: String?) {
+        var pids = [pid_t](repeating: 0, count: 2048)
+        let bytes = pids.withUnsafeMutableBytes {
+            proc_listpids(UInt32(PROC_ALL_PIDS), 0, $0.baseAddress, Int32($0.count))
+        }
+        guard bytes > 0 else { return (nil, nil) }
+        var best: (name: String, value: UInt64)?
+        for pid in pids.prefix(Int(bytes) / MemoryLayout<pid_t>.stride) where pid > 0 {
+            var task = proc_taskinfo()
+            let size = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, Int32(MemoryLayout<proc_taskinfo>.size))
+            guard size == MemoryLayout<proc_taskinfo>.size else { continue }
+            let value: UInt64
+            switch metric {
+            case .cpu: value = task.pti_total_user + task.pti_total_system
+            case .memory: value = task.pti_resident_size
+            }
+            guard value > 0 else { continue }
+            var buffer = [CChar](repeating: 0, count: 256)
+            guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { continue }
+            let name = String(cString: buffer)
+            if best == nil || value > best!.value { best = (name, value) }
+        }
+        guard let best else { return (nil, nil) }
+        return (best.name, metric == .memory ? formatProcessBytes(best.value) : formatProcessTicks(best.value))
+    }
+
+    private func formatProcessBytes(_ bytes: UInt64) -> String {
+        let units = ["B", "K", "M", "G", "T"]
+        var value = Double(bytes)
+        var index = 0
+        while value >= 1024, index < units.count - 1 {
+            value /= 1024
+            index += 1
+        }
+        return String(format: "%.1f%@", value, units[index])
+    }
+
+    private func formatProcessTicks(_ ticks: UInt64) -> String {
+        if ticks >= 1_000_000_000 {
+            return String(format: "%.1fB ticks", Double(ticks) / 1_000_000_000)
+        } else if ticks >= 1_000_000 {
+            return String(format: "%.1fM ticks", Double(ticks) / 1_000_000)
+        } else if ticks >= 1_000 {
+            return String(format: "%.1fK ticks", Double(ticks) / 1_000)
+        }
+        return "\(ticks) ticks"
+    }
+
+    private func captureGPU() -> GPUStatusSnapshot {
+        let matching = IOServiceMatching("IOAccelerator")
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == kIOReturnSuccess else {
+            return GPUStatusSnapshot()
+        }
+        defer { IOObjectRelease(iterator) }
+        var service = IOIteratorNext(iterator)
+        while service != 0 {
+            defer {
+                IOObjectRelease(service)
+                service = IOIteratorNext(iterator)
+            }
+            var properties: Unmanaged<CFMutableDictionary>?
+            guard IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == kIOReturnSuccess,
+                  let dictionary = properties?.takeRetainedValue() as? [String: Any],
+                  let performance = dictionary["PerformanceStatistics"] as? [String: Any] else { continue }
+            func number(_ key: String) -> Double { (performance[key] as? NSNumber)?.doubleValue ?? 0 }
+            func bytes(_ key: String) -> UInt64 { (performance[key] as? NSNumber).map { UInt64(max($0.int64Value, 0)) } ?? 0 }
+            return GPUStatusSnapshot(
+                deviceUtilization: number("Device Utilization %") / 100,
+                rendererUtilization: number("Renderer Utilization %") / 100,
+                tilerUtilization: number("Tiler Utilization %") / 100,
+                inUseMemoryBytes: bytes("In use system memory"),
+                allocMemoryBytes: bytes("Alloc system memory")
+            )
+        }
+        return GPUStatusSnapshot()
+    }
+
+    private func capturePowerSummary() -> String? {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else {
+            return nil
+        }
+        for source in sources {
+            guard let description = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any],
+                  let state = description[kIOPSPowerSourceStateKey as String] as? String else { continue }
+            if state == kIOPSACPowerValue as String { return "AC" }
+            if let current = description[kIOPSCurrentCapacityKey as String] as? NSNumber {
+                return "\(current.intValue)%"
+            }
+        }
+        return nil
+    }
+
     private func captureNetwork() -> NetworkStatusSnapshot {
         var pointer: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&pointer) == 0, let first = pointer else { return NetworkStatusSnapshot() }
@@ -467,8 +649,23 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     }
     // swiftlint:enable large_tuple
     private func readQuota() -> Int? {
-        guard let url = tokenDatabasePaths.claudeQuotaFileURL, let data = try? Data(contentsOf: url), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let value = object["weekly_remaining_pct"] as? NSNumber else { return nil }
-        return value.intValue
+        var urls = [tokenDatabasePaths.claudeQuotaFileURL, tokenDatabasePaths.magpieQuotaFileURL].compactMap { $0 }
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+            urls.append(Self.realUserHomeDirectoryURL().appendingPathComponent(".config/magpie/quotas.json"))
+        }
+        for url in urls {
+            guard let data = try? Data(contentsOf: url),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            if let value = object["weekly_remaining_pct"] as? NSNumber {
+                return value.intValue
+            }
+            if let claude = object["claude"] as? [String: Any],
+               let sevenDays = claude["7 days"] as? [String: Any],
+               let used = sevenDays["used"] as? NSNumber {
+                return max(0, min(100, 100 - used.intValue))
+            }
+        }
+        return nil
     }
     private func captureAttention() -> AttentionStatusSnapshot {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return AttentionStatusSnapshot() }
@@ -483,9 +680,13 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return GatewayStatusSnapshot() }
         let home = Self.realUserHomeDirectoryURL()
         let falcon = home.appendingPathComponent("Library/Application Support/Falcon/falcon.sqlite")
-        let falconUp = FileManager.default.fileExists(atPath: falcon.path)
-        let requests = readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE created_at >= datetime('now','-1 day');") ?? 0
-        let starred = readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE starredAt IS NOT NULL;") ?? 0
+        let falconUp = portOpen(19823) || FileManager.default.fileExists(atPath: falcon.path)
+        let requests = readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE received_at >= (strftime('%s','now') - 978307200 - 86400);")
+            ?? readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE created_at >= datetime('now','-1 day');")
+            ?? 0
+        let starred = readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE json_extract(summary_json, '$.starredAt') IS NOT NULL OR review_state = 'starred';")
+            ?? readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE starredAt IS NOT NULL;")
+            ?? 0
         return GatewayStatusSnapshot(magpieUp: portOpen(3425), ravenUp: portOpen(7024), falconUp: falconUp, jevRequests24h: requests, jevStarredCount: starred)
     }
     private func portOpen(_ port: UInt16) -> Bool {
@@ -499,7 +700,7 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         }
     }
     private func readSQLiteCount(path: String, query: String) -> Int? {
-        guard let value = runSQLiteQuery(target: path, flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, query: query) else { return nil }
+        guard let value = readSQLite(path: path, query: query) else { return nil }
         return Int(value.0)
     }
     private static func defaultTokenDatabasePaths() -> CLITokenDatabasePaths {

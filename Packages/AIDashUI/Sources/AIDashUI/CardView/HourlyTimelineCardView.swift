@@ -55,6 +55,7 @@ public struct HourlyTimelineCardView: View {
         case .wide:
             VStack(alignment: .leading, spacing: 6) {
                 buckets(activeBuckets)
+                citationLinks
                 if emptyCount > 0 {
                     Text("\(emptyCount) empty hours")
                         .font(Self.recipe.secondary)
@@ -64,11 +65,7 @@ public struct HourlyTimelineCardView: View {
         case .hero:
             VStack(alignment: .leading, spacing: 8) {
                 buckets(activeBuckets)
-                ForEach(payload.citations) { citation in
-                    Text(citation.label)
-                        .font(Self.recipe.secondary)
-                        .foregroundStyle(Self.recipe.secondaryColor)
-                }
+                citationLinks
                 if let nextSteps = payload.nextSteps {
                     ForEach(nextSteps, id: \.self) { Text($0).font(Self.recipe.secondary) }
                 }
@@ -88,6 +85,27 @@ public struct HourlyTimelineCardView: View {
 
     private var emptyCount: Int { payload.hours.count - activeBuckets.count }
     private var activeSummary: String { "\(activeBuckets.count) active hours" }
+
+    @ViewBuilder
+    private var citationLinks: some View {
+        if !payload.citations.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(payload.citations.prefix(3)) { citation in
+                    if let destination = URLPolicy.validate(citation.url) {
+                        Link(citation.label, destination: destination)
+                            .font(Self.recipe.secondary)
+                            .foregroundStyle(Self.recipe.secondaryColor)
+                            .frame(minHeight: AIDashSpacing.controlHitTarget)
+                            .contentShape(Rectangle())
+                    } else {
+                        Text(citation.label)
+                            .font(Self.recipe.secondary)
+                            .foregroundStyle(Self.recipe.secondaryColor)
+                    }
+                }
+            }
+        }
+    }
 }
 
 private struct HourlyBucketRow: View {

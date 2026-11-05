@@ -167,6 +167,34 @@ struct BriefingViewTests {
                 "no stub_data helper allowed in BriefingView")
     }
 
+    @Test("section jump rail supports an All lens and toggled in-place filtering")
+    func sectionJumpRailSupportsDomainLensFiltering() throws {
+        let source = try Self.briefingViewSource()
+        #expect(source.contains("selectedContainerID"))
+        #expect(source.contains("filteredContainers"))
+        #expect(source.contains("briefing.section_jump.all"))
+        #expect(source.contains("selectedContainerID = nil"))
+    }
+
+    @Test("wide hourly timelines retain up to three citations")
+    func wideTimelineRetainsCitations() throws {
+        let url = try Self.sourceFile(named: "HourlyTimelineCardView.swift",
+                                      under: "Sources/AIDashUI/CardView")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        #expect(source.contains("case .wide"))
+        #expect(source.contains("payload.citations.prefix(3)"))
+    }
+
+    @Test("timeline citations use the shared URL policy and full hit target")
+    func timelineCitationLinksUseURLPolicy() throws {
+        let url = try Self.sourceFile(named: "HourlyTimelineCardView.swift",
+                                      under: "Sources/AIDashUI/CardView")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        #expect(source.contains("URLPolicy.validate(citation.url)"))
+        #expect(source.contains(".frame(minHeight: AIDashSpacing.controlHitTarget)"))
+        #expect(source.contains(".contentShape(Rectangle())"))
+    }
+
     private static func briefingViewSource() throws -> String {
         let url = try sourceFile(named: "BriefingView.swift",
                                  under: "Sources/AIDashUI")
