@@ -33,6 +33,9 @@ struct WidgetSnapshotTests {
           "top_actions": [
             {"id": "a1", "title": "Unblock build", "priority": "high", "waiting_on": "Owner"}
           ],
+          "quotas": [
+            {"provider": "Claude 7d", "remaining_percent": 71}
+          ],
           "time_breakdown": {
             "lead_time_minutes_p50": 42,
             "agent_minutes": 10,
@@ -47,7 +50,9 @@ struct WidgetSnapshotTests {
         #expect(snapshot.needsPersonCount == 1)
         #expect(snapshot.topActions[0].waitingOn == "Owner")
         #expect(snapshot.timeBreakdown?.leadTimeMinutesP50 == 42)
-        #expect(snapshot.quotas.isEmpty)
+        #expect(snapshot.quotas.count == 1)
+        #expect(snapshot.quotas[0].id == "Claude 7d")
+        #expect(snapshot.quotas[0].remainingPercent == 71)
     }
 
     @Test("round trips and atomically stores briefing snapshots")

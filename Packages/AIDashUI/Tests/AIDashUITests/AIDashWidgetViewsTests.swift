@@ -1,5 +1,6 @@
 import Testing
 import SwiftUI
+import Foundation
 import AIDashCore
 import DesignKit
 @testable import AIDashUI
@@ -48,5 +49,36 @@ struct AIDashWidgetViewsTests {
             ttftSummary: "TTFT 1.8s"
         )
         _ = MacSiliconCockpitWidgetView(snapshot: system).body
+    }
+
+    @Test("widget localization keys are rooted and translated")
+    func widgetLocalizationKeysAreComplete() throws {
+        let data = try Data(contentsOf: Self.catalogURL)
+        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let strings = try #require(root["strings"] as? [String: Any])
+
+        for key in [
+            "widgets.completed_goals",
+            "widgets.efficiency.title",
+            "widgets.needs_person.title",
+            "widgets.spend.title"
+        ] {
+            let entry = try #require(strings[key] as? [String: Any], "\(key) is not rooted in strings")
+            let localizations = try #require(entry["localizations"] as? [String: Any])
+            for locale in ["en", "zh-Hans"] {
+                let localization = try #require(localizations[locale] as? [String: Any])
+                let stringUnit = try #require(localization["stringUnit"] as? [String: Any])
+                let value = try #require(stringUnit["value"] as? String)
+                #expect(!value.isEmpty, "\(key) has an empty \(locale) translation")
+            }
+        }
+    }
+
+    private static var catalogURL: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/AIDashUI/Resources/Localizable.xcstrings")
     }
 }

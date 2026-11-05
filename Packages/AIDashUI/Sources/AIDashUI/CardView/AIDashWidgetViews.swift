@@ -80,8 +80,10 @@ public struct EfficiencyTimeWidgetView: View {
                     if let breakdown = snapshot.timeBreakdown {
                         VStack(alignment: .leading, spacing: AIDashSpace.s4) {
                             Text("\(Int(breakdown.leadTimeMinutesP50))m P50")
-                                .font(AIDashTypography.detail(for: .metric).primary)
+                                .font(AIDashTypography.detail(for: .hourlyTimeline).primary)
                                 .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
                             timeRow("Agent", breakdown.agentMinutes)
                             timeRow("Model", breakdown.modelMinutes)
                             timeRow("CI", breakdown.ciMinutes)
@@ -157,9 +159,11 @@ public struct SpendQuotaWidgetView: View {
     private func metric(_ value: String, label: String) -> some View {
         VStack(alignment: .leading, spacing: AIDashSpace.s4) {
             Text(value)
-                .font(AIDashTypography.detail(for: .metric).primary)
+                .font(AIDashTypography.detail(for: .barList).primary)
                 .monospacedDigit()
                 .foregroundStyle(theme.neutrals.text1)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
             Text(label)
                 .font(AIDashTypography.detail(for: .metric).secondary)
                 .foregroundStyle(theme.neutrals.text2)
@@ -222,10 +226,11 @@ public struct MacSiliconCockpitWidgetView: View {
                 .font(AIDashTypography.detail(for: .metric).secondary)
                 .foregroundStyle(theme.neutrals.text2)
             Text(value)
-                .font(AIDashTypography.detail(for: .metric).primary)
+                .font(AIDashTypography.detail(for: .agentSummary).primary)
                 .monospacedDigit()
                 .foregroundStyle(theme.neutrals.text1)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
     }
 

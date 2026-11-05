@@ -103,6 +103,27 @@ public struct WidgetBriefingSnapshot: Codable, Sendable, Equatable {
             self.provider = provider
             self.remainingPercent = remainingPercent
         }
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case provider
+            case remainingPercent
+            case remaining_percent
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? ""
+            id = try container.decodeIfPresent(String.self, forKey: .id) ?? provider
+            remainingPercent = try container.decodeIfPresent(Int.self, forKeys: [.remainingPercent, .remaining_percent]) ?? 0
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(provider, forKey: .provider)
+            try container.encode(remainingPercent, forKey: .remainingPercent)
+        }
     }
 
     public let date: String
