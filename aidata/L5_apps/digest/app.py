@@ -16,35 +16,50 @@ from datetime import datetime
 from pathlib import Path
 
 from config import DIGEST_DIR
-from L5_apps.digest.cst import _CST, yesterday, _parse as _parse_cst_day
+
+import L5_apps.digest.sources as digest_sources
+from L5_apps.digest.aidash import PushResult, build_briefing, push_briefing
+from L5_apps.digest.cst import _CST, yesterday
+from L5_apps.digest.cst import _parse as _parse_cst_day
+from L5_apps.digest.llm import LLMClient, LLMError, default_client
+from L5_apps.digest.must_see import must_see_layer
+from L5_apps.digest.polish import polish_digest
+from L5_apps.digest.render import render_digest
 from L5_apps.digest.sources import (  # noqa: F401 — fetch_ado_pr_trends re-export
     DigestSources,
-    fetch_raven_trends, fetch_multica_completed,
+    HourlyTimelineBundle,
     # fetch_ado_pr_trends is imported into this module's namespace as a test
     # monkeypatch seam: test_digest_golden / _aidash / _llm do
     # `monkeypatch.setattr(app, "fetch_ado_pr_trends", ...)`. ruff can't see the
     # patch, so it flags F401 — keep it (deleting turns golden's assertion
     # failure into an AttributeError).
-    fetch_ado_pr_trends, fetch_automation_trends, fetch_cost_improvement,
-    fetch_value_efficiency, fetch_work_by_project, fetch_repo_radar,
-    fetch_combined_pr_trends,
+    fetch_ado_pr_trends,
     # batch-2 (L5 数据接入批2): AI 效能 + 时间与产出 + 新闻雷达 + 模型分层.
-    fetch_ai_efficiency, fetch_app_focus, fetch_commit_by_repo,
-    fetch_cost_by_project, fetch_model_by_project,
-    fetch_leverage, fetch_rework_by_workspace, fetch_tool_cross,
-    fetch_news_radar, fetch_model_tier,
-    # 交叉信号 (§design 4.2): the workspace × root-cause rework matrix.
-    fetch_rework_relationship,
-    fetch_retro_ops_trends,
+    fetch_ai_efficiency,
+    fetch_app_focus,
+    fetch_automation_trends,
     # 你最常收藏的卡型 (spec 005 T007/US5).
     fetch_card_interest,
+    fetch_combined_pr_trends,
+    fetch_commit_by_repo,
+    fetch_cost_by_project,
+    fetch_cost_improvement,
+    fetch_leverage,
+    fetch_model_by_project,
+    fetch_model_tier,
+    fetch_multica_completed,
+    fetch_news_radar,
+    fetch_raven_trends,
+    fetch_repo_radar,
+    fetch_retro_ops_trends,
+    fetch_rework_by_workspace,
+    # 交叉信号 (§design 4.2): the workspace × root-cause rework matrix.
+    fetch_rework_relationship,
+    fetch_tool_cross,
+    fetch_value_efficiency,
+    fetch_work_by_project,
 )
-from L5_apps.digest.render import render_digest
-from L5_apps.digest.llm import LLMClient, LLMError, default_client
-from L5_apps.digest.polish import polish_digest
 from L5_apps.digest.verify import verify_numbers
-from L5_apps.digest.must_see import must_see_layer
-from L5_apps.digest.aidash import build_briefing, push_briefing, PushResult
 
 log = logging.getLogger("aidata.digest.app")
 
@@ -84,6 +99,10 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         cost_improvement=cost_improvement,
         value_efficiency=fetch_value_efficiency(since, window_days),
         work_by_project=fetch_work_by_project(day_since, day_until),
+        hourly_timeline=(
+            digest_sources.fetch_hourly_timeline(day_since)
+            if report_date is not None else HourlyTimelineBundle.empty()
+        ),
         action_inbox=_build_action_inbox(cost_improvement),
         repo_radar=fetch_repo_radar(),
         # batch-2: 时间与产出 uses the yesterday-only window (same as 做了什么);
@@ -194,7 +213,11 @@ def _push_to_aidash(md: str, report_date: str,
     Side-effect (MY-1450): persists delivery state after the push attempt so the
     next briefing can report delivery health independently of source health.
     """
-    from L5_apps.digest.aidash import resolve_aidash_bin, save_delivery_state, load_delivery_state
+    from L5_apps.digest.aidash import (
+        load_delivery_state,
+        resolve_aidash_bin,
+        save_delivery_state,
+    )
     delivery = load_delivery_state()
     briefing = build_briefing(report_date, sources, md, must_see_layer(md),
                               delivery=delivery)
@@ -224,8 +247,8 @@ def write_digest(report_date: str, use_llm: bool = False,
     # notify — so a silently-incomplete digest (0 issue / 0 PR / stale radar) is
     # noticed the same day. Never blocks generation (ADR-16 必成 sink).
     try:
-        from L5_apps.digest.freshness import alarm_if_degraded
         from L5_apps.digest.aidash import _default_notifier
+        from L5_apps.digest.freshness import alarm_if_degraded
         alarm_if_degraded(sources, report_date, notifier=_default_notifier)
     except Exception as exc:  # noqa: BLE001 - monitoring must never break digest
         log.warning("freshness gate errored (non-fatal): %s", exc)

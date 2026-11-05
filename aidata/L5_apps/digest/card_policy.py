@@ -201,6 +201,13 @@ def choose_card(profile: DataProfile) -> CardDecision:
         return CardDecision(
             "todoList", _collection_size(profile.item_count, MAX_ACTIONS),
             None, "bounded action set")
+    if profile.semantic == "hourly_timeline":
+        return CardDecision(
+            "hourlyTimeline",
+            "hero" if profile.item_count >= 4 else "wide",
+            None,
+            "24h evidence-cited timeline",
+        )
     if profile.semantic == "narrative":
         many = profile.item_count > 1
         return CardDecision("digest" if many else "insight",

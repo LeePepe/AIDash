@@ -32,19 +32,25 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from config import AIDASH_BIN_FIXED, AIDASH_BIN_GLOB
+
 from L5_apps.digest.card_policy import (
-    FIRST_SCREEN_CARDS, MAX_ACTIONS, MAX_CARDS,
-    CardCandidate, DataProfile, choose_card, select_with_budget,
+    FIRST_SCREEN_CARDS,
+    MAX_ACTIONS,
+    MAX_CARDS,
+    CardCandidate,
+    DataProfile,
+    choose_card,
+    select_with_budget,
 )
-from L5_apps.digest.polish import MAX_TODO, truncate
 from L5_apps.digest.cst import yesterday
+from L5_apps.digest.polish import MAX_TODO, truncate
 from L5_apps.digest.trends import compute_trend
 
 if TYPE_CHECKING:  # type-only; keeps aidash import free of serve/I-O
     # DigestSources is the actual annotation used below (as a string forward
     # ref); import it here so the annotation resolves and ruff sees no F821.
     # sources.py is never imported at runtime from this module.
-    from L5_apps.digest.sources import DigestSources
+    from L5_apps.digest.sources import DigestSources, HourlyTimelineBundle
 
 log = logging.getLogger("aidata.digest.aidash")
 
@@ -603,7 +609,17 @@ def _prose_containers(mmdd: str,
     # 今日规划 → real action inbox (§M3, goal ② 需要处理什么) when available,
     # else fall back to the markdown 今日 TODO section. The inbox merges stalls
     # / decisions / planned work / findings into one prioritized list.
-    inbox = [{"title": truncate(it.title, MAX_TODO), "priority": it.priority} for it in (inbox_items or [])]
+    inbox = []
+    for it in inbox_items or []:
+        item = {"title": truncate(it.title, MAX_TODO), "priority": it.priority}
+        for key, value in (
+            ("ref", it.ref), ("category", it.category),
+            ("waitingOn", it.waiting_on), ("ageText", it.age_text),
+            ("commandHint", it.command_hint),
+        ):
+            if value:
+                item[key] = value
+        inbox.append(item)
     todos = _capped_actions(inbox or _todo_items(_section(sections, "今日 TODO")))
     if todos:
         out.append(Container(_cuid(mmdd, 4), "今日规划", 40,
@@ -661,6 +677,47 @@ def _work_container(mmdd: str, work) -> "Container | None":
         })
     return Container(_cuid(mmdd, 6), "今日工作", 15,
                      (Card(_kuid(mmdd, 9), "metric", "wide", {"items": items}),),
+                     layout="auto", style="accent")
+
+
+def _hourly_timeline_container(
+    mmdd: str,
+    reported_day: str,
+    timeline: "HourlyTimelineBundle | None",
+) -> "Container | None":
+    if (timeline is None or timeline.health.state != "ok"
+            or len(timeline.hours) != 24):
+        return None
+    active = sum(bool(bucket.evidence_ids) for bucket in timeline.hours)
+    if active == 0:
+        return None
+    decision = choose_card(DataProfile("hourly_timeline", active, 1))
+    payload = {
+        "title": f"24h 证据时间线 · {reported_day}",
+        "overview": timeline.overview,
+        "hours": [
+            {
+                "hour": bucket.hour,
+                "summary": bucket.summary,
+                "evidenceIds": list(bucket.evidence_ids),
+                **({"sampled": True} if bucket.sampled else {}),
+            }
+            for bucket in timeline.hours
+        ],
+        "citations": [
+            {
+                "id": citation.id,
+                "label": citation.label,
+                **({"url": citation.url} if citation.url else {}),
+            }
+            for citation in timeline.citations
+        ],
+    }
+    if timeline.next_steps:
+        payload["nextSteps"] = list(timeline.next_steps[:3])
+    card = Card(_kuid(mmdd, 60), type="hourlyTimeline", size=decision.size,
+                payload=payload, style="accent")
+    return Container(_cuid(mmdd, 16), "24h 证据时间线", 29, (card,),
                      layout="auto", style="accent")
 
 
@@ -1340,6 +1397,7 @@ _BUDGET_META: dict[str, dict] = {
     "GitHub 工具雷达": {"is_detail": True, "reading_cost": 3},
     "新闻雷达": {"is_detail": True, "reading_cost": 3},
     "工程与编排图表": {"cross_signal": 3, "reading_cost": 2},
+    "24h 证据时间线": {"cross_signal": 2, "reading_cost": 2},
 }
 
 
@@ -1495,6 +1553,10 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         mmdd, getattr(sources, "work_by_project", None))
     if work_container:
         containers.append(work_container)
+    timeline_container = _hourly_timeline_container(
+        mmdd, reported_day, getattr(sources, "hourly_timeline", None))
+    if timeline_container:
+        containers.append(timeline_container)
 
     # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
     attribution_container = _attribution_container(
@@ -1851,7 +1913,8 @@ def delivery_health_line(report_date: str,
         try:
             from datetime import datetime, timedelta
             ts = datetime.fromisoformat(delivery.timestamp.replace("Z", "+00:00"))
-            from L5_apps.digest.cst import _parse as _parse_cst_day, _CST
+            from L5_apps.digest.cst import _CST
+            from L5_apps.digest.cst import _parse as _parse_cst_day
             report_dt = _parse_cst_day(report_date).replace(tzinfo=_CST)
             age = report_dt - ts
             if age > timedelta(hours=36):

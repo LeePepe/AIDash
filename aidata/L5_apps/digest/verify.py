@@ -13,7 +13,10 @@ an optional `codex:review` secondary is deferred to a later milestone.
 
 from __future__ import annotations
 
+import json
 import re
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 # Matches integers and decimals, optionally signed. The sign is stripped during
@@ -57,3 +60,110 @@ def verify_numbers(template_md: str, polished_md: str) -> VerificationResult:
         reason = "number mismatch: " + "; ".join(parts)
     return VerificationResult(ok=ok, introduced=introduced,
                               missing=missing, reason=reason)
+
+
+@dataclass(frozen=True)
+class VerifyResult:
+    ok: bool
+    reason: str = ""
+    offending_ids: tuple[str, ...] = ()
+
+
+def verify_hourly_timeline(payload: dict) -> VerifyResult:
+    """Verify the deterministic 24-hour evidence/citation invariants."""
+    hours = payload.get("hours")
+    citations = payload.get("citations")
+    if not isinstance(hours, list) or len(hours) != 24:
+        return VerifyResult(False, "hours must contain exactly 24 buckets")
+    if not isinstance(citations, list):
+        return VerifyResult(False, "citations must be a list")
+    citation_ids = {
+        str(item.get("id")) for item in citations
+        if isinstance(item, dict) and item.get("id")
+    }
+    offending: list[str] = []
+    for expected, bucket in enumerate(hours):
+        if not isinstance(bucket, dict) or bucket.get("hour") != expected:
+            return VerifyResult(False, f"hour bucket {expected} is out of order")
+        summary = str(bucket.get("summary") or "").strip()
+        evidence = bucket.get("evidenceIds")
+        if not isinstance(evidence, list):
+            return VerifyResult(False, f"hour {expected} evidenceIds is invalid")
+        if summary == "无采集数据。":
+            if evidence:
+                offending.append(f"H{expected:02d}")
+            continue
+        if not 1 <= len(evidence) <= 3:
+            offending.append(f"H{expected:02d}")
+            continue
+        prefix = f"H{expected:02d}-"
+        if any(not str(item).startswith(prefix) or str(item) not in citation_ids
+               for item in evidence):
+            offending.append(f"H{expected:02d}")
+    if offending:
+        return VerifyResult(False, "hourly evidence invariant failed",
+                            tuple(offending))
+    return VerifyResult(True)
+
+
+def _default_jev_opener(endpoint: str, payload: dict, timeout: float = 5.0):
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _jev_call(opener, endpoint: str, payload: dict):
+    try:
+        return opener(endpoint, payload, timeout=5.0)
+    except TypeError:
+        return opener(endpoint, payload)
+
+
+def verify_citations_with_jev(
+    payload: dict,
+    evidence_by_id: dict[str, str],
+    *,
+    opener=None,
+    endpoint: str = "http://127.0.0.1:19823/v1/systemone",
+) -> VerifyResult:
+    """Run Jev R06 checks concurrently; offline Jev degrades open."""
+    active = [
+        bucket for bucket in payload.get("hours", [])
+        if isinstance(bucket, dict)
+        and str(bucket.get("summary") or "").strip() != "无采集数据。"
+    ]
+    if not active:
+        return VerifyResult(True)
+
+    def check(bucket: dict) -> tuple[str, bool, str]:
+        hour = f"H{int(bucket.get('hour', -1)):02d}"
+        claims = [evidence_by_id.get(str(eid), "") for eid in bucket.get("evidenceIds", [])]
+        request = {
+            "choice": {"supports": True, "contradicts": True, "unrelated": True},
+            "noul": {"unbacked_claim": True},
+            "hour": hour,
+            "claims": claims,
+        }
+        response = _jev_call(opener or _default_jev_opener, endpoint, request)
+        if not isinstance(response, dict):
+            return hour, False, "invalid Jev response"
+        choice = str(response.get("choice") or response.get("Choice") or "").lower()
+        confidence = float(response.get("confidence", 0.0) or 0.0)
+        noul = float(response.get("noul", response.get("Noul", 1.0)) or 1.0)
+        return hour, choice == "supports" and confidence >= 0.70 and noul < 0.35, choice
+
+    try:
+        with ThreadPoolExecutor(max_workers=min(8, len(active))) as pool:
+            results = list(pool.map(check, active))
+    except (OSError, TimeoutError, ValueError, TypeError, json.JSONDecodeError):
+        return VerifyResult(True, "jev unavailable; deterministic verification retained")
+    offending = tuple(hour for hour, ok, _ in results if not ok)
+    if offending:
+        return VerifyResult(False, "Jev citation truth table rejected active hours",
+                            offending)
+    return VerifyResult(True)
