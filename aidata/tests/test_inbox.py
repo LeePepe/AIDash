@@ -171,3 +171,21 @@ def test_retro_signals_degrade_cleanly(monkeypatch):
     assert inbox_mod._retro_signals() == []
     assert inbox_mod.build_inbox(
         proposals_reader=_no_proposals, log_reader=_no_logs) == []
+
+
+@pytest.mark.unit
+def test_inbox_skips_done_goals_and_preserves_proposal_ref(monkeypatch):
+    def run_query(name, params=None):
+        if name == "retro/gtt_scorecard":
+            return ([("done-goal", "done", 4), ("open-goal", "blocked", 1)],
+                    ["goal_id", "actual_status", "task_blocked_count"])
+        return ([], [])
+
+    monkeypatch.setattr(inbox_mod.serve, "run_query", run_query)
+    signals = inbox_mod._retro_signals()
+    assert all("done-goal" not in item.title for item in signals)
+
+    items = inbox_mod._proposals(
+        lambda: [Proposal("proposal://p1", "t", "agent", "title", "", "high", "pending")]
+    )
+    assert items[0].ref == "proposal://p1"

@@ -60,6 +60,31 @@ def test_gtt_ledger_pipe_fields_and_resolved_blocker(monkeypatch):
 
 
 @pytest.mark.unit
+def test_gtt_ledger_normalizes_offset_machine_and_active_blockers(monkeypatch):
+    raw = [{
+        "machine_id": "MAC-MINI",
+        "goal_id": "demo",
+        "record_type": "ledger",
+        "content": (
+            "- **状态**: in_progress\n"
+            "- 2026-10-28T01:00:00+0800 | EVT=TASK_BLOCKED | id=E1 | task=tk1\n"
+            "- 2026-10-28T02:00:00+0800 | EVT=RESOLVED | id=E2 | task=tk1\n"
+        ),
+    }]
+    captured = {}
+    monkeypatch.setattr(gtt_ledger, "read_raw", lambda _source: raw)
+    monkeypatch.setattr(
+        gtt_ledger, "write_clean",
+        lambda _source, table, _ddl, rows, _columns: captured.setdefault(table, rows) or len(rows),
+    )
+    gtt_ledger.normalize()
+    assert captured["goal"][0]["machine_id"] == "mac-mini"
+    assert captured["goal"][0]["static_header_status"] == "active"
+    assert captured["goal"][0]["task_blocked_count"] == 0
+    assert captured["gtt_event"][0]["ts"].endswith("+08:00")
+
+
+@pytest.mark.unit
 def test_gtt_receipt_accepts_bundle_style_record(monkeypatch):
     raw = [{
         "machine_id": "macbook",
@@ -82,6 +107,35 @@ def test_gtt_receipt_accepts_bundle_style_record(monkeypatch):
     assert captured["task_run"][0]["goal_uid"] == "macbook:demo"
     assert captured["task_run"][0]["round_no"] == 1
     assert captured["task_run"][0]["receipt_uid"] == "macbook:demo/receipts/writer-r1.md"
+
+
+@pytest.mark.unit
+def test_gtt_receipt_maps_hyphenated_role_and_failure(monkeypatch):
+    raw = [{
+        "machine_id": "MACBOOK",
+        "goal_id": "demo",
+        "record_type": "receipt",
+        "rel_path": "demo/receipts/demo-writer-escalated-r1.md",
+        "content": (
+            "- **Task**: TK1\n"
+            "- **Role / Model**: writer-escalated / gpt\n"
+            "- **Outcome**: FAILED_CHECK\n"
+            "- **Updated**: 2026-10-28T01:00:00+0800\n"
+        ),
+    }]
+    captured = {}
+    monkeypatch.setattr(gtt_receipt, "read_raw", lambda _source: raw)
+    monkeypatch.setattr(gtt_receipt, "_profiles", list)
+    monkeypatch.setattr(
+        gtt_receipt, "write_clean",
+        lambda _source, table, _ddl, rows, _columns: captured.setdefault(table, rows) or len(rows),
+    )
+    gtt_receipt.normalize()
+    row = captured["task_run"][0]
+    assert row["task_id"] == "demo"
+    assert row["role_name"] == "writer_escalated"
+    assert row["machine_id"] == "macbook"
+    assert row["status"] == "failed" and row["v5_verdict"] == "FAIL"
 
 
 @pytest.mark.unit

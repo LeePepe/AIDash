@@ -34,7 +34,7 @@ def _normalize_iso(value: str | None) -> str | None:
 
 
 def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
-    machine_id = path.stem.removeprefix("gtt-bundle-") or "bundle"
+    machine_id = (path.stem.removeprefix("gtt-bundle-") or "bundle").lower()
     if path.suffix == ".tgz":
         try:
             with tarfile.open(path, "r:gz") as archive:
@@ -63,7 +63,7 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                 continue
             if item.get("collector") in (None, "gtt") and item.get("record_type") == "receipt" and item.get("content"):
                 yield {
-                    "machine_id": item.get("machine_id") or "unknown",
+                    "machine_id": str(item.get("machine_id") or "unknown").lower(),
                     "goal_id": item.get("goal_id") or "unknown",
                     "rel_path": item.get("rel_path", ""),
                     "record_type": "receipt",
@@ -134,9 +134,21 @@ def _field(text: str, names: tuple[str, ...]) -> str | None:
 
 
 def _role_from_name(role: str) -> str:
-    role = role.lower()
-    return {"analyst": "planner", "explorer": "explorer", "reviewer": "reviewer",
-            "writer": "writer", "pr-monitor": "pr_monitor"}.get(role, role)
+    role = role.lower().strip()
+    return {
+        "analyst": "planner",
+        "explorer": "explorer",
+        "reviewer": "reviewer",
+        "review": "reviewer",
+        "rev": "reviewer",
+        "writer": "writer",
+        "pr-monitor": "pr_monitor",
+        "prmon": "pr_monitor",
+        "code-reviewer": "code_reviewer",
+        "planner-reviewer": "planner_reviewer",
+        "writer-escalated": "writer_escalated",
+        "worker.writer": "writer",
+    }.get(role, role.replace("-", "_"))
 
 
 _TASK_DDL = """
@@ -218,7 +230,12 @@ def normalize() -> int:
              if prefix == role or prefix.endswith(f"-{role}")),
             None,
         )
-        task_id = prefix[:-len(role_from_name) - 1] if role_from_name else prefix
+        if role_from_name and prefix.endswith(f"-{role_from_name}"):
+            task_id = prefix[:-len(role_from_name) - 1]
+        elif role_from_name and prefix == role_from_name:
+            task_id = _field(content, ("Task", "Task ID")) or prefix
+        else:
+            task_id = prefix
         role = _field(content, ("Role", "Role / Model")) or _role_from_name(role_from_name or "unknown")
         role = _role_from_name(role.split("/", 1)[0].strip())
         status = (_field(content, ("Status", "Outcome", "Result")) or "completed").lower()
@@ -235,10 +252,10 @@ def normalize() -> int:
         )):
             status, v5 = "failed", "FAIL"
         goal = str(record.get("goal_id", "unknown"))
-        machine_id = str(record.get("machine_id", "unknown"))
+        machine_id = str(record.get("machine_id", "unknown")).lower()
         uid = f"{machine_id}:{rel or name}"
         task_rows[uid] = {
-            "receipt_uid": uid, "goal_uid": f"{record.get('machine_id', 'unknown')}:{goal}",
+            "receipt_uid": uid, "goal_uid": f"{machine_id}:{goal}",
             "machine_id": machine_id, "goal_id": goal,
             "task_id": task_id, "role_name": role, "round_no": int(match.group("round")),
             "agent_name": _field(content, ("Agent",)),             "cli_tool": _field(content, ("CLI", "Role / Model")),
