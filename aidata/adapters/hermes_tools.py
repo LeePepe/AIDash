@@ -98,7 +98,7 @@ def collect() -> int:
 
 
 _CLEAN_DDL = """
-CREATE TABLE skill_day (
+CREATE TABLE IF NOT EXISTS skill_day (
     day TEXT,
     skill TEXT,
     n INTEGER,
@@ -108,7 +108,7 @@ CREATE TABLE skill_day (
 _CLEAN_COLS = ("day", "skill", "n")
 
 _TOOL_CLEAN_DDL = """
-CREATE TABLE tool_day (
+CREATE TABLE IF NOT EXISTS tool_day (
     day TEXT, tool_name TEXT, n INTEGER,
     PRIMARY KEY (day, tool_name)
 )

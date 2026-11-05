@@ -142,8 +142,8 @@ def _proposals(read: Callable[[], list[Proposal]] | None = None) -> list[InboxIt
     for p in pending:
         prio = p.priority if p.priority in _PRIO_RANK else "high"
         out.append(InboxItem(
-            f"待决策（{p.agent}）：{p.title[:56]}", prio, "待决策", p.id,
-            "decision", "Owner GO"))
+            f"待决策（{p.agent}）：{p.title[:56]}", prio, "待决策",
+            f"proposal://{p.id}", "decision", "Owner GO"))
     return out
 
 
@@ -159,6 +159,8 @@ def _retro_signals() -> list[InboxItem]:
         seen_goals: set[str] = set()
         for row in rows:
             goal_id = str(row[goal_i])
+            if str(row[status_i]).lower() in {"done", "completed", "complete"}:
+                continue
             if (row[status_i] != "blocked"
                     and (row[blocked_i] or 0) <= 0) or goal_id in seen_goals:
                 continue

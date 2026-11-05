@@ -438,21 +438,31 @@ def fetch_hourly_timeline(reported_day: str | None) -> HourlyTimelineBundle:
             )
             for table, ts_col, label_col, prefix in queries:
                 try:
-                    rows = conn.execute(
-                        f"SELECT {ts_col}, {label_col}, * FROM {table} "
+                    cursor = conn.execute(
+                        f"SELECT * FROM {table} "
                         "WHERE cst_day = ? ORDER BY " + ts_col,
                         (reported_day,),
-                    ).fetchall()
+                    )
+                    columns = [column[0] for column in cursor.description]
+                    rows = cursor.fetchall()
                 except sqlite3.Error:
                     continue
                 for row in rows:
-                    hour = _cst_hour(row[0])
+                    record = dict(zip(columns, row))
+                    hour = _cst_hour(record.get(ts_col))
                     if hour is None:
                         continue
-                    label = str(row[1] or table)
+                    label = str(record.get(label_col) or table)
+                    metadata = [
+                        str(record.get(name))
+                        for name in ("goal_id", "task_id", "pr_number", "note_preview")
+                        if record.get(name) not in (None, "")
+                    ]
+                    if metadata:
+                        label = f"{label} · {' · '.join(metadata)}"
                     url = ""
                     if table == "fact_github_pr":
-                        url = str(row[8] or "") if len(row) > 8 else ""
+                        url = str(record.get("html_url") or record.get("url") or "")
                     rows_by_hour[hour].append((label[:80], url, table))
         if not any(rows_by_hour.values()):
             return HourlyTimelineBundle.empty("skipped:无当日小时证据")
@@ -594,6 +604,33 @@ class DigestSources:
 class RepoRadar:
     cards: list          # list[repo_radar.RepoCard], ordered by stars desc
     health: SourceHealth
+    starred_refs: tuple[str, ...] = ()
+
+
+def apply_star_preferences(items, starred_refs):
+    """Stable Boost Forward / More Like This ordering for radar-like items."""
+    refs = {str(ref).strip().lower() for ref in (starred_refs or ()) if str(ref).strip()}
+    if not refs:
+        return list(items)
+
+    def values(item):
+        if isinstance(item, dict):
+            return item
+        return {
+            name: getattr(item, name, None)
+            for name in ("repo", "related_project", "category", "topics", "project")
+        }
+
+    def score(item):
+        data = values(item)
+        direct = any(str(data.get(name) or "").lower() in refs
+                     for name in ("repo", "project", "related_project", "category"))
+        topics = data.get("topics") or ()
+        similar = direct or any(str(topic).lower() in refs for topic in topics)
+        return (0 if direct else 1 if similar else 2)
+
+    ordered = sorted(enumerate(items), key=lambda pair: (score(pair[1]), pair[0]))
+    return [item for _, item in ordered]
 
 
 def fetch_known_projects(limit: int = 12) -> list[str]:
@@ -781,6 +818,8 @@ class RetroOpsTrends:
     release_tf_bars: tuple[tuple[str, float, str, str | None], ...] = ()
     workspace_hygiene_bars: tuple[tuple[str, float, str, str | None], ...] = ()
     claude_jobs: tuple[tuple[str, float], ...] = ()
+    avg_queue_wait_sec: float | None = None
+    avg_duration_sec: float | None = None
 
 
 def _claude_job_counts() -> tuple[tuple[str, float], ...]:
@@ -821,7 +860,7 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
         ci = {name: ci_cols.index(name) for name in (
             "repo_key", "run_count", "success_count", "failure_count",
             "cancelled_or_timeout_count", "pass_rate", "config_noise_job_count",
-        )} if ci_rows else {}
+        ) if name in ci_cols} if ci_rows else {}
         success = sum(int(r[ci["success_count"]] or 0) for r in ci_rows)
         failures = sum(int(r[ci["failure_count"]] or 0) for r in ci_rows)
         noise = sum(int(r[ci["config_noise_job_count"]] or 0) for r in ci_rows)
@@ -903,10 +942,18 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
                                         key=lambda item: (-item[1], item[0]))
         )
         release_tf_bars: tuple[tuple[str, float, str, str | None], ...] = ()
+        avg_duration_sec: float | None = None
         if release_rows:
             release_idx = {name: release_cols.index(name) for name in (
                 "repo_key", "target_platform", "delivery_count",
                 "failed_delivery_count")}
+            if "avg_duration_sec" in release_cols:
+                durations = [
+                    float(row[release_cols.index("avg_duration_sec")])
+                    for row in release_rows
+                    if row[release_cols.index("avg_duration_sec")] is not None
+                ]
+                avg_duration_sec = sum(durations) / len(durations) if durations else None
             release_tf_bars = tuple(sorted((
                 (f"{row[release_idx['repo_key']] or 'unknown'} · "
                  f"{row[release_idx['target_platform']] or 'unknown'}",
@@ -942,6 +989,11 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
                          "warning"),
                     )
         total_runs = sum(int(r[ci["run_count"]] or 0) for r in ci_rows)
+        queue_values = [
+            float(row[ci["avg_queue_wait_sec"]])
+            for row in ci_rows
+            if row[ci["avg_queue_wait_sec"]] is not None
+        ] if ci_rows and "avg_queue_wait_sec" in ci else []
         total_goals = len(statuses)
         return RetroOpsTrends(
             ci_segments, ci_repo_bars, gtt_segments, bot_tl_bars,
@@ -949,6 +1001,8 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
             ((done + active) / total_goals if total_goals else None),
             checked, stuck, SourceHealth("retro_ops", "ok"),
             ci_points, release_tf_bars, workspace_hygiene_bars, claude_jobs,
+            (sum(queue_values) / len(queue_values) if queue_values else None),
+            avg_duration_sec,
         )
     except Exception:  # noqa: BLE001 - retro source degrades as one bundle
         return empty

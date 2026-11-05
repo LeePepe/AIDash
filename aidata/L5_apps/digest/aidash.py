@@ -126,6 +126,58 @@ class Briefing:
     containers: tuple[Container, ...]
 
 
+def export_widget_briefing_snapshot(
+    briefing: Briefing,
+    sources=None,
+    path: Path | None = None,
+) -> Path | None:
+    """Write the compact widget summary without making publishing fail."""
+    snapshot_path = path or (Path.home() / ".aidash" / "widget-briefing-snapshot.json")
+    actions = [
+        item
+        for container in briefing.containers
+        for card in container.cards
+        if card.type == "todoList"
+        for item in card.payload.get("items", [])
+    ]
+    retro = getattr(sources, "retro_ops", None)
+    raven = getattr(sources, "raven", None)
+    multica = getattr(sources, "multica", None)
+    ai = getattr(sources, "ai_efficiency", None)
+    spend = float(sorted(raven.cost)[-1][1]) if getattr(raven, "cost", None) else 0.0
+    completed = 0.0
+    if retro is not None:
+        completed = sum(
+            float(value) for label, value, _ in getattr(retro, "gtt_segments", ())
+            if label in {"已完成", "完成"}
+        )
+    if not completed and getattr(multica, "completed", None):
+        completed = float(max(multica.completed)[1])
+    cache = float(sorted(ai.cache)[-1][1]) if getattr(ai, "cache", None) else 0.0
+    ci_rate = getattr(retro, "ci_pass_ratio", None)
+    gtt_rate = getattr(retro, "gtt_done_ratio", None)
+    payload = {
+        "date": briefing.date,
+        "needsPersonCount": len(actions),
+        "topActions": [item.get("title", "") for item in actions[:3]],
+        "completedGoalsCount": int(completed),
+        "ciPassRate": round(float(ci_rate) * 100, 1) if ci_rate is not None else None,
+        "gttNonBlockedRate": round(float(gtt_rate) * 100, 1) if gtt_rate is not None else None,
+        "dailySpendUSD": round(spend, 2),
+        "costPerCompletedTask": round(spend / completed, 2) if completed else None,
+        "cacheHitPct": round(cache, 1),
+    }
+    try:
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        temp = snapshot_path.with_suffix(".json.tmp")
+        temp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        temp.replace(snapshot_path)
+        return snapshot_path
+    except (OSError, TypeError, ValueError) as exc:
+        log.warning("could not write widget briefing snapshot: %s", exc)
+        return None
+
+
 @dataclass(frozen=True)
 class PushResult:
     ok: bool
@@ -770,8 +822,12 @@ def _radar_containers(mmdd: str, radar) -> list[Container]:
         return []
     cards: list[Card] = []
     n = 10
+    from L5_apps.digest.sources import apply_star_preferences
+    preferred = apply_star_preferences(
+        radar.cards, getattr(radar, "starred_refs", ())
+    )
     for tier, label, style in _TIER_TITLES:
-        tier_repos = [c for c in radar.cards if c.tier == tier]
+        tier_repos = [c for c in preferred if c.tier == tier]
         if not tier_repos:
             continue
         payload = {
@@ -1095,6 +1151,12 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
         stats.append({"label": "PR monitor 检查", "value": retro_ops.prmon_checked})
     if retro_ops.prmon_stuck is not None:
         stats.append({"label": "PR monitor 卡住", "value": retro_ops.prmon_stuck})
+    if getattr(retro_ops, "avg_queue_wait_sec", None) is not None:
+        stats.append({"label": "CI 平均排队", "value": round(
+            retro_ops.avg_queue_wait_sec, 1), "unit": "秒"})
+    if getattr(retro_ops, "avg_duration_sec", None) is not None:
+        stats.append({"label": "release_tf 平均耗时", "value": round(
+            retro_ops.avg_duration_sec, 1), "unit": "秒"})
     for state, count in getattr(retro_ops, "claude_jobs", ()):
         completed.append({"title": f"claude_job · {state} · {int(count)}",
                           "ref": "claude_job"})
@@ -1429,7 +1491,7 @@ def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
             source_coverage=len(container.cards),
             reading_cost=int(meta.get("reading_cost", 2)),
             is_detail=bool(meta.get("is_detail", False)),
-            weight=len(container.cards),
+            weight=sum(card.type != "sectionHeader" for card in container.cards),
         ))
     return candidates
 
@@ -1498,6 +1560,10 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
         replace(container, order=head.order + 1 + index)
         for index, container in enumerate(lead + tail)
     ]
+    while sum(len(container.cards) for container in published) + len(head.cards) > MAX_CARDS:
+        if not published:
+            break
+        published.pop()
     return tuple([head] + published)
 
 

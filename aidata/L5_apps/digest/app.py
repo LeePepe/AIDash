@@ -214,6 +214,7 @@ def _push_to_aidash(md: str, report_date: str,
     next briefing can report delivery health independently of source health.
     """
     from L5_apps.digest.aidash import (
+        export_widget_briefing_snapshot,
         load_delivery_state,
         resolve_aidash_bin,
         save_delivery_state,
@@ -223,6 +224,7 @@ def _push_to_aidash(md: str, report_date: str,
                               delivery=delivery)
     result = push_briefing(briefing, bin_path=resolve_aidash_bin(),
                            failure_sink=failure_sink)
+    export_widget_briefing_snapshot(briefing, sources)
     try:
         save_delivery_state(result)
     except Exception:  # noqa: BLE001 - state persistence is non-fatal

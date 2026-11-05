@@ -25,7 +25,13 @@ _HOME = re.compile(r"(?<![\w-])(?:/Users|/home)/[^/\s]+")
 
 
 def _machine_id() -> str:
-    return socket.gethostname().split(".", 1)[0] or "unknown"
+    return (socket.gethostname().split(".", 1)[0] or "unknown").lower()
+
+
+def _normalize_iso(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value)
 
 
 def _normalize_path(value: str) -> str:
@@ -59,8 +65,8 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                         "rel_path": rel_path,
                         "record_type": record_type,
                         "content": _normalize_path(content.read().decode("utf-8")),
-                        "mtime_iso": mtime_iso,
-                        "exported_at": mtime_iso,
+                        "mtime_iso": _normalize_iso(mtime_iso),
+                        "exported_at": _normalize_iso(mtime_iso),
                     }
         except (OSError, tarfile.TarError, UnicodeDecodeError):
             return
@@ -83,9 +89,9 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
                         "rel_path": item.get("rel_path", ""),
                         "record_type": item["record_type"],
                         "content": _normalize_path(str(item["content"])),
-                        "last_event_at": item.get("last_event_at"),
-                        "mtime_iso": item.get("mtime_iso") or mtime_iso,
-                        "exported_at": item.get("exported_at"),
+                        "last_event_at": _normalize_iso(item.get("last_event_at")),
+                        "mtime_iso": _normalize_iso(item.get("mtime_iso") or mtime_iso),
+                        "exported_at": _normalize_iso(item.get("exported_at")),
                         "machine_alias": item.get("machine_alias"),
                         "device_id": item.get("device_id"),
                     }
@@ -161,14 +167,36 @@ def _pairs(text: str) -> dict[str, str]:
 
 
 def _static_status(content: str) -> str:
-    statuses = [
-        match.group(2).strip().lower()
-        for match in re.finditer(
-            r"(?im)^\s*\|\s*([A-Za-z][\w-]*)\s*\|\s*([^|]+)\|", content
+    lines = content.splitlines()
+    header_index = next(
+        (index for index, line in enumerate(lines)
+         if line.strip().startswith("|")
+         and any(name in line.lower() for name in ("状态", "status"))),
+        None,
+    )
+    statuses: list[str] = []
+    if header_index is not None:
+        headers = [part.strip().lower() for part in lines[header_index].strip().strip("|").split("|")]
+        status_index = next(
+            (index for index, header in enumerate(headers)
+             if header in {"状态", "status", "state"}),
+            None,
         )
-        if match.group(1).lower() not in {"task", "id", "tasks", "goal"}
-        and match.group(2).strip().lower() not in {"status", "state"}
-    ]
+        if status_index is not None:
+            for line in lines[header_index + 2:]:
+                if not line.strip().startswith("|"):
+                    continue
+                cells = [part.strip().lower() for part in line.strip().strip("|").split("|")]
+                if len(cells) > status_index:
+                    statuses.append(cells[status_index])
+    if not statuses:
+        statuses = [
+            match.group(2).strip().lower()
+            for match in re.finditer(
+                r"(?im)^\s*\|\s*([A-Za-z][\w-]*)\s*\|\s*([^|]+)\|", content
+            )
+            if match.group(1).lower() in {"status", "state"}
+        ]
     if statuses:
         if all(status in {"done", "completed", "merged"} for status in statuses):
             return "done"
@@ -218,7 +246,7 @@ def _parse_event(line: str, line_number: int, goal_id: str) -> dict[str, Any] | 
         "goal_id": goal_id,
         "line_no": line_number,
         "event_id": event_id or "none",
-        "ts": match.group("ts"),
+        "ts": _normalize_iso(match.group("ts")),
         "evt_type": match.group("evt"),
         "task_id": fields.get("task"),
         "actor_from": fields.get("from"),
@@ -339,7 +367,12 @@ def normalize() -> int:
             "static_header_status": static, "derived_actual_status": derived,
             "is_status_drifted": int(static != derived), "task_total_count": len(task_ids),
             "task_done_count": done_count,
-            "task_blocked_count": len({e["task_id"] for e in parsed_events if e["task_id"] and e["evt_type"] == "TASK_BLOCKED"}),
+            "task_blocked_count": (
+                0 if derived == "done" else len({
+                    e["task_id"] for e in parsed_events
+                    if e["task_id"] and e["evt_type"] == "TASK_BLOCKED"
+                })
+            ),
             "created_at": parsed_events[0]["ts"] if parsed_events else None,
             "last_event_at": parsed_events[-1]["ts"] if parsed_events else None,
             "ledger_sha256": hashlib.sha256(content.encode()).hexdigest(),
