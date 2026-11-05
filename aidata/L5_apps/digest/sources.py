@@ -631,7 +631,7 @@ def apply_star_preferences(items, starred_refs):
 
     def score(item):
         data = values(item)
-        direct = any(str(data.get(name) or "").lower() in refs
+        direct = any(normalize_ref(data.get(name) or "") in refs
                      for name in ("repo", "project", "related_project", "category"))
         topics = data.get("topics") or ()
         matched = direct or any(normalize_ref(topic) in refs for topic in topics)
@@ -911,6 +911,7 @@ def fetch_retro_ops_trends() -> RetroOpsTrends:
         ci = {name: ci_cols.index(name) for name in (
             "repo_key", "run_count", "success_count", "failure_count",
             "cancelled_or_timeout_count", "pass_rate", "config_noise_job_count",
+            "avg_queue_wait_sec",
         ) if name in ci_cols} if ci_rows else {}
         success = sum(int(r[ci["success_count"]] or 0) for r in ci_rows)
         failures = sum(int(r[ci["failure_count"]] or 0) for r in ci_rows)

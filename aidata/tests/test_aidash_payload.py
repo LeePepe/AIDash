@@ -332,7 +332,7 @@ def test_retro_ops_container_maps_chart_cards_and_degrades():
     container = _retro_ops_container("0709", retro)
     assert container is not None
     assert [card.type for card in container.cards] == [
-        "stackedBar", "stackedBar", "sectionHeader", "barList",
+        "stackedBar", "stackedBar", "barList", "sectionHeader", "barList",
         "agentSummary",
     ]
     assert container.cards[0].payload["segments"][1]["semantic"] == "warning"
@@ -340,12 +340,12 @@ def test_retro_ops_container_maps_chart_cards_and_degrades():
                  if card.type == "agentSummary")
     assert next(item for item in stats if item["label"] == "CI 通过率")["value"] == 80.0
     assert all(set(item) == {"label", "value"} for item in stats)
-    section = container.cards[2]
+    section = container.cards[3]
     assert section.size == "wide"
     assert section.payload["subtitle"] == "release_tf · workspace_hygiene · 编排汇总"
     assert [card.id for card in container.cards] == sorted(card.id for card in container.cards)
     assert container.cards[-1].payload["agentName"] == "工程编排"
-    assert len(container.cards) <= 5
+    assert sum(card.type != "sectionHeader" for card in container.cards) == 5
     assert _retro_ops_container(
         "0709", RetroOpsTrends((), (), (), (), None, None, None, None,
                                SourceHealth("retro_ops", "skipped:未采集"))

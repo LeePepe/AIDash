@@ -365,8 +365,8 @@ def test_retro_ops_is_admitted_with_section_and_agent_summary():
     retro_cards = next(c.cards for c in cards.containers
                        if c.title == "工程与编排图表")
     assert any(card.type == "agentSummary" for card in retro_cards)
-    assert len(retro_cards) <= 5
-    assert sum(len(container.cards) for container in cards.containers) <= MAX_CARDS
+    assert sum(card.type != "sectionHeader" for card in retro_cards) == 5
+    assert sum(card.type != "sectionHeader" for card in _cards(cards)) <= MAX_CARDS
     assert all(card.payload["completed"] for card in retro_cards
                if card.type == "agentSummary")
     section = next(card for card in retro_cards if card.type == "sectionHeader")
@@ -374,6 +374,33 @@ def test_retro_ops_is_admitted_with_section_and_agent_summary():
     ids = [card.id for card in retro_cards]
     assert ids.index(section.id) > 0
     assert ids.index(section.id) < len(ids) - 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("header_in_overview", [False, True])
+def test_section_headers_do_not_evict_containers_at_budget_boundary(header_in_overview):
+    from L5_apps.digest.aidash import _apply_budget
+
+    overview = Card("overview", "insight", "wide", {"body": "Overview"})
+    header = Card("header", "sectionHeader", "wide", {"title": "Signals"})
+    details = tuple(
+        Card(f"detail-{index}", "insight", "wide", {"body": str(index)})
+        for index in range(MAX_CARDS - 1)
+    )
+    head = Container("head", "总览", 0,
+                     (header, overview) if header_in_overview else (overview,))
+    tail = Container("tail", "Signals", 1,
+                     details if header_in_overview else (header,) + details)
+    published = _apply_budget([head, tail])
+    assert [container.id for container in published] == ["head", "tail"]
+    assert published[1].cards == tail.cards
+    cards = [card for container in published for card in container.cards]
+    assert len(cards) == MAX_CARDS + 1
+    assert sum(card.type != "sectionHeader" for card in cards) == MAX_CARDS
+    overflow = dataclasses.replace(
+        tail, cards=tail.cards + (Card("extra", "insight", "wide", {"body": "Extra"}),),
+    )
+    assert _apply_budget([head, overflow]) == (head,)
 
 
 # --------------------------------------------------------------------------- #

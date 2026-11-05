@@ -1179,25 +1179,14 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
             + list(retro_ops.workspace_hygiene_bars)
         )
     ]
-    if retro_ops.ci_repo_bars and operational_items and retro_ops.gtt_segments:
-        repo_items = [
-            {"label": label, "value": value, "valueText": value_text,
-             **({"semantic": semantic} if semantic else {})}
-            for label, value, value_text, semantic in retro_ops.ci_repo_bars
-        ]
-        operational_items = repo_items + operational_items
-        leading = [card for card in leading if card.id != ci_rank_id]
     operational_items.sort(key=lambda item: (-float(item["value"]), str(item["label"])))
     trailing: list[Card] = []
     trailing_labels: list[str] = []
     if operational_items:
         trailing.append(Card(
-            ci_rank_id if retro_ops.ci_repo_bars and not retro_ops.gtt_segments
-            else _kuid(mmdd, 47),
+            _kuid(mmdd, 47),
             "barList", "wide", {
-            "title": ("各仓 CI 运行与配置异常排行 · 运维指标"
-                      if retro_ops.ci_repo_bars
-                      else "release_tf · workspace_hygiene · 运维指标"),
+            "title": "release_tf · workspace_hygiene · 运维指标",
             "items": operational_items,
         }))
         trailing_labels.append("release_tf · workspace_hygiene")
@@ -1206,20 +1195,12 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
     if summary:
         trailing.append(summary)
         trailing_labels.append("编排汇总")
-    while leading and trailing and len(leading) + 1 + len(trailing) > 5:
-        if len(trailing) > 1 and trailing[0].type == "barList":
-            trailing.pop(0)
-            trailing_labels.pop(0)
-        else:
-            trailing.pop()
-            trailing_labels.pop()
     if not leading and not trailing:
         return None
     cards = leading + trailing
     if leading and trailing:
         section = Card(
-            ci_rank_id if retro_ops.ci_repo_bars and retro_ops.gtt_segments
-            else _kuid(mmdd, 46),
+            _kuid(mmdd, 46),
             "sectionHeader", "wide", {
             "title": "运营信号",
             "subtitle": " · ".join(trailing_labels),
@@ -1581,10 +1562,6 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
         replace(container, order=head.order + 1 + index)
         for index, container in enumerate(lead + tail)
     ]
-    while sum(len(container.cards) for container in published) + len(head.cards) > MAX_CARDS:
-        if not published:
-            break
-        published.pop()
     while sum(
         sum(card.type != "sectionHeader" for card in container.cards)
         for container in published
