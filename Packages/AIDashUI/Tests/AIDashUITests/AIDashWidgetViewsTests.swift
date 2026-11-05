@@ -51,6 +51,25 @@ struct AIDashWidgetViewsTests {
         _ = MacSiliconCockpitWidgetView(snapshot: system).body
     }
 
+    @Test("widget numeric display conversions clamp extreme and non-finite doubles")
+    func numericDisplayConversionsAreSafe() {
+        #expect(WidgetSnapshotNumeric.clampedInt(1e100) == 999_999)
+        #expect(WidgetSnapshotNumeric.clampedInt(-50) == 0)
+        #expect(WidgetSnapshotNumeric.clampedInt(.nan) == 0)
+
+        let extremeBreakdown = WidgetBriefingSnapshot.TimeBreakdown(
+            leadTimeMinutesP50: 1e100,
+            agentMinutes: -50,
+            modelMinutes: .nan
+        )
+        _ = EfficiencyTimeWidgetView(
+            snapshot: WidgetBriefingSnapshot(timeBreakdown: extremeBreakdown)
+        ).body
+        _ = MacSiliconCockpitWidgetView(
+            snapshot: WidgetSystemSnapshot(cpuUsage: 1e100, gpuUsage: -50, memoryUsage: .nan)
+        ).body
+    }
+
     @Test("widget localization keys are rooted and translated")
     func widgetLocalizationKeysAreComplete() throws {
         let data = try Data(contentsOf: Self.catalogURL)

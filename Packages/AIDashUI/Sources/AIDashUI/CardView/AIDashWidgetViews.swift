@@ -79,7 +79,7 @@ public struct EfficiencyTimeWidgetView: View {
                     metricRing(snapshot.ciPassRate, label: "CI")
                     if let breakdown = snapshot.timeBreakdown {
                         VStack(alignment: .leading, spacing: AIDashSpace.s4) {
-                            Text("\(Int(breakdown.leadTimeMinutesP50))m P50")
+                            Text("\(WidgetSnapshotNumeric.clampedInt(breakdown.leadTimeMinutesP50))m P50")
                                 .font(AIDashTypography.detail(for: .hourlyTimeline).primary)
                                 .monospacedDigit()
                                 .lineLimit(1)
@@ -109,7 +109,7 @@ public struct EfficiencyTimeWidgetView: View {
         HStack(spacing: AIDashSpace.s4) {
             Text(label)
             Spacer(minLength: AIDashSpace.s4)
-            Text("\(Int(minutes))m").monospacedDigit()
+            Text("\(WidgetSnapshotNumeric.clampedInt(minutes))m").monospacedDigit()
         }
         .font(AIDashTypography.detail(for: .metric).secondary)
         .foregroundStyle(theme.neutrals.text2)
@@ -193,14 +193,14 @@ public struct MacSiliconCockpitWidgetView: View {
                 }
                 HStack(alignment: .top, spacing: AIDashSpace.s16) {
                     VStack(alignment: .leading, spacing: AIDashSpace.s8) {
-                        instrument("CPU (P+E)", value: "\(Int(snapshot.cpuUsage))%")
-                        instrument("GPU", value: "\(Int(snapshot.gpuUsage))% · \(snapshot.vramSummary)")
+                        instrument("CPU (P+E)", value: "\(WidgetSnapshotNumeric.clampedInt(snapshot.cpuUsage))%")
+                        instrument("GPU", value: "\(WidgetSnapshotNumeric.clampedInt(snapshot.gpuUsage))% · \(snapshot.vramSummary)")
                         if let process = snapshot.topCPUProcess {
                             instrument("Top CPU", value: process)
                         }
                     }
                     VStack(alignment: .leading, spacing: AIDashSpace.s8) {
-                        instrument("Memory", value: "\(Int(snapshot.memoryUsage))% · \(snapshot.memorySummary)")
+                        instrument("Memory", value: "\(WidgetSnapshotNumeric.clampedInt(snapshot.memoryUsage))% · \(snapshot.memorySummary)")
                         if let process = snapshot.topMemoryProcess {
                             instrument("Top Mem", value: process)
                         }

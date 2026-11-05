@@ -55,6 +55,53 @@ struct WidgetSnapshotTests {
         #expect(snapshot.quotas[0].remainingPercent == 71)
     }
 
+    @Test("sanitizes extreme snapshot doubles during decoding")
+    func sanitizesExtremeValues() throws {
+        let data = Data(#"""
+        {
+          "ciPassRate": 1e100,
+          "dailySpendUSD": -50,
+          "cacheHitPct": 999999999,
+          "timeBreakdown": {
+            "lead_time_minutes_p50": 1e100,
+            "agent_minutes": -50,
+            "model_minutes": 999999999,
+            "ci_minutes": 10,
+            "wait_minutes": 0
+          }
+        }
+        """#.utf8)
+
+        let snapshot = try JSONDecoder().decode(WidgetBriefingSnapshot.self, from: data)
+        #expect(snapshot.ciPassRate == WidgetSnapshotNumeric.maximum)
+        #expect(snapshot.dailySpendUSD == 0)
+        #expect(snapshot.cacheHitPct == WidgetSnapshotNumeric.maximum)
+        #expect(snapshot.timeBreakdown?.leadTimeMinutesP50 == WidgetSnapshotNumeric.maximum)
+        #expect(snapshot.timeBreakdown?.agentMinutes == 0)
+        #expect(snapshot.timeBreakdown?.modelMinutes == WidgetSnapshotNumeric.maximum)
+    }
+
+    @Test("sanitizes non-finite values before integer conversion")
+    func sanitizesNonFiniteValues() {
+        let breakdown = WidgetBriefingSnapshot.TimeBreakdown(
+            leadTimeMinutesP50: .nan,
+            agentMinutes: .infinity,
+            modelMinutes: -.infinity
+        )
+        let snapshot = WidgetBriefingSnapshot(
+            ciPassRate: .nan,
+            timeBreakdown: breakdown
+        )
+
+        #expect(snapshot.ciPassRate == 0)
+        #expect(snapshot.timeBreakdown?.leadTimeMinutesP50 == 0)
+        #expect(snapshot.timeBreakdown?.agentMinutes == 0)
+        #expect(snapshot.timeBreakdown?.modelMinutes == 0)
+        #expect(WidgetSnapshotNumeric.clampedInt(1e100) == 999_999)
+        #expect(WidgetSnapshotNumeric.clampedInt(-50) == 0)
+        #expect(WidgetSnapshotNumeric.clampedInt(.nan) == 0)
+    }
+
     @Test("round trips and atomically stores briefing snapshots")
     func roundTripsAndAtomicallyStoresBriefingSnapshots() throws {
         let directory = FileManager.default.temporaryDirectory

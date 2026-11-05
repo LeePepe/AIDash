@@ -1,5 +1,18 @@
 import Foundation
 
+public enum WidgetSnapshotNumeric {
+    public static let maximum = 999_999.0
+
+    public static func sanitized(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), maximum)
+    }
+
+    public static func clampedInt(_ value: Double) -> Int {
+        Int(sanitized(value))
+    }
+}
+
 public struct WidgetBriefingSnapshot: Codable, Sendable, Equatable {
     public struct ActionItem: Codable, Sendable, Equatable, Identifiable {
         public let id: String
@@ -59,11 +72,11 @@ public struct WidgetBriefingSnapshot: Codable, Sendable, Equatable {
             ciMinutes: Double = 0,
             waitMinutes: Double = 0
         ) {
-            self.leadTimeMinutesP50 = leadTimeMinutesP50
-            self.agentMinutes = agentMinutes
-            self.modelMinutes = modelMinutes
-            self.ciMinutes = ciMinutes
-            self.waitMinutes = waitMinutes
+            self.leadTimeMinutesP50 = WidgetSnapshotNumeric.sanitized(leadTimeMinutesP50)
+            self.agentMinutes = WidgetSnapshotNumeric.sanitized(agentMinutes)
+            self.modelMinutes = WidgetSnapshotNumeric.sanitized(modelMinutes)
+            self.ciMinutes = WidgetSnapshotNumeric.sanitized(ciMinutes)
+            self.waitMinutes = WidgetSnapshotNumeric.sanitized(waitMinutes)
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -76,11 +89,13 @@ public struct WidgetBriefingSnapshot: Codable, Sendable, Equatable {
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            leadTimeMinutesP50 = try container.decodeIfPresent(Double.self, forKeys: [.leadTimeMinutesP50, .lead_time_minutes_p50]) ?? 0
-            agentMinutes = try container.decodeIfPresent(Double.self, forKeys: [.agentMinutes, .agent_minutes]) ?? 0
-            modelMinutes = try container.decodeIfPresent(Double.self, forKeys: [.modelMinutes, .model_minutes]) ?? 0
-            ciMinutes = try container.decodeIfPresent(Double.self, forKeys: [.ciMinutes, .ci_minutes]) ?? 0
-            waitMinutes = try container.decodeIfPresent(Double.self, forKeys: [.waitMinutes, .wait_minutes]) ?? 0
+            self.init(
+                leadTimeMinutesP50: try container.decodeIfPresent(Double.self, forKeys: [.leadTimeMinutesP50, .lead_time_minutes_p50]) ?? 0,
+                agentMinutes: try container.decodeIfPresent(Double.self, forKeys: [.agentMinutes, .agent_minutes]) ?? 0,
+                modelMinutes: try container.decodeIfPresent(Double.self, forKeys: [.modelMinutes, .model_minutes]) ?? 0,
+                ciMinutes: try container.decodeIfPresent(Double.self, forKeys: [.ciMinutes, .ci_minutes]) ?? 0,
+                waitMinutes: try container.decodeIfPresent(Double.self, forKeys: [.waitMinutes, .wait_minutes]) ?? 0
+            )
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -157,12 +172,12 @@ public struct WidgetBriefingSnapshot: Codable, Sendable, Equatable {
         self.needsPersonCount = needsPersonCount
         self.topActions = topActions
         self.completedGoalsCount = completedGoalsCount
-        self.ciPassRate = ciPassRate
-        self.gttNonBlockedRate = gttNonBlockedRate
-        self.dailySpendUSD = dailySpendUSD
-        self.costPerCompletedTask = costPerCompletedTask
-        self.cacheHitPct = cacheHitPct
-        self.ftrPercent = ftrPercent
+        self.ciPassRate = ciPassRate.map(WidgetSnapshotNumeric.sanitized)
+        self.gttNonBlockedRate = gttNonBlockedRate.map(WidgetSnapshotNumeric.sanitized)
+        self.dailySpendUSD = dailySpendUSD.map(WidgetSnapshotNumeric.sanitized)
+        self.costPerCompletedTask = costPerCompletedTask.map(WidgetSnapshotNumeric.sanitized)
+        self.cacheHitPct = cacheHitPct.map(WidgetSnapshotNumeric.sanitized)
+        self.ftrPercent = ftrPercent.map(WidgetSnapshotNumeric.sanitized)
         self.timeBreakdown = timeBreakdown
         self.quotas = quotas
     }
@@ -181,12 +196,12 @@ public struct WidgetBriefingSnapshot: Codable, Sendable, Equatable {
         date = try container.decodeIfPresent(String.self, forKeys: [.date]) ?? ""
         needsPersonCount = try container.decodeIfPresent(Int.self, forKeys: [.needsPersonCount, .needs_person_count]) ?? 0
         completedGoalsCount = try container.decodeIfPresent(Int.self, forKeys: [.completedGoalsCount, .completed_goals_count]) ?? 0
-        ciPassRate = try container.decodeIfPresent(Double.self, forKeys: [.ciPassRate, .ci_pass_rate])
-        gttNonBlockedRate = try container.decodeIfPresent(Double.self, forKeys: [.gttNonBlockedRate, .gtt_non_blocked_rate])
-        dailySpendUSD = try container.decodeIfPresent(Double.self, forKeys: [.dailySpendUSD, .daily_spend_usd])
-        costPerCompletedTask = try container.decodeIfPresent(Double.self, forKeys: [.costPerCompletedTask, .cost_per_completed_task])
-        cacheHitPct = try container.decodeIfPresent(Double.self, forKeys: [.cacheHitPct, .cache_hit_pct])
-        ftrPercent = try container.decodeIfPresent(Double.self, forKeys: [.ftrPercent, .ftr_percent])
+        ciPassRate = try container.decodeIfPresent(Double.self, forKeys: [.ciPassRate, .ci_pass_rate]).map(WidgetSnapshotNumeric.sanitized)
+        gttNonBlockedRate = try container.decodeIfPresent(Double.self, forKeys: [.gttNonBlockedRate, .gtt_non_blocked_rate]).map(WidgetSnapshotNumeric.sanitized)
+        dailySpendUSD = try container.decodeIfPresent(Double.self, forKeys: [.dailySpendUSD, .daily_spend_usd]).map(WidgetSnapshotNumeric.sanitized)
+        costPerCompletedTask = try container.decodeIfPresent(Double.self, forKeys: [.costPerCompletedTask, .cost_per_completed_task]).map(WidgetSnapshotNumeric.sanitized)
+        cacheHitPct = try container.decodeIfPresent(Double.self, forKeys: [.cacheHitPct, .cache_hit_pct]).map(WidgetSnapshotNumeric.sanitized)
+        ftrPercent = try container.decodeIfPresent(Double.self, forKeys: [.ftrPercent, .ftr_percent]).map(WidgetSnapshotNumeric.sanitized)
         timeBreakdown = try container.decodeIfPresent(TimeBreakdown.self, forKeys: [.timeBreakdown, .time_breakdown])
         quotas = try container.decodeIfPresent([QuotaItem].self, forKeys: [.quotas]) ?? []
 
