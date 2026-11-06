@@ -10,7 +10,61 @@
             "state" : "translated",
             "value" : "iCloud unavailable"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud 不可用"
+          }
         }
+      }
+    },
+    "briefing.scene.loading.status" : {
+      "comment" : "Status shown while the BriefingWindowScene is preparing the briefing.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "SYNCING" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步中" } }
+      }
+    },
+    "briefing.scene.loading.title" : {
+      "comment" : "Title shown while the BriefingWindowScene is preparing the briefing.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Loading briefing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在加载简报" } }
+      }
+    },
+    "briefing.scene.loading.subtitle" : {
+      "comment" : "Supporting copy shown while the BriefingWindowScene is preparing the briefing.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preparing today’s briefing." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在准备今天的简报。" } }
+      }
+    },
+    "briefing.scene.error.status" : {
+      "comment" : "Status shown when the BriefingWindowScene cannot initialize its CloudKit store.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "ERROR" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "错误" } }
+      }
+    },
+    "briefing.scene.error.title" : {
+      "comment" : "Title shown when the BriefingWindowScene cannot initialize its CloudKit store.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Briefing unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "简报不可用" } }
+      }
+    },
+    "briefing.scene.error.subtitle" : {
+      "comment" : "Supporting copy shown when the BriefingWindowScene cannot initialize its CloudKit store.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Check iCloud and try opening the briefing again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查 iCloud，然后重新打开简报。" } }
       }
     },
     "cloudkit.unavailable.message" : {
@@ -557,6 +611,12 @@
               "state" : "translated",
               "value" : "Send usage data"
             }
+            },
+            "zh-Hans" : {
+              "stringUnit" : {
+                "state" : "translated",
+                "value" : "发送使用数据"
+              }
           }
         }
     },
@@ -568,6 +628,12 @@
             "stringUnit" : {
               "state" : "translated",
               "value" : "Usage data"
+            }
+          },
+          "zh-Hans" : {
+            "stringUnit" : {
+              "state" : "translated",
+              "value" : "使用数据"
             }
           }
         }

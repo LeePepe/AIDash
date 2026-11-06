@@ -9,7 +9,6 @@ enum AIDashTelemetrySettingsPlacement {
         !headless && hasCoordinator
     }
 }
-
 enum AIDashWindowGeometry {
     static let macMinWidth: CGFloat = 720
     static let macMinHeight: CGFloat = 480
@@ -18,7 +17,6 @@ enum AIDashWindowGeometry {
         isMacOS
     }
 }
-
 /// The main briefing window scene. Hosts BriefingView when the
 /// CloudKit container is ready, or shows an error state on failure.
 ///
@@ -58,23 +56,22 @@ public struct BriefingWindowScene: Scene {
                 } else {
                     switch state {
                     case .loading:
-                        ProgressView()
-                            .controlSize(.large)
+                        BriefingSceneStateView(kind: .loading)
                     case .ready(let container):
                         StarFeedbackScope(
                             container: container,
                             telemetryCoordinator: telemetryCoordinator
                         )
-                            .designTheme(seed: .lime, neutral: .slate)
                             .modelContainer(container)
                             .onAppear {
                                 telemetryCoordinator?.readySceneAppeared()
                             }
                     case .failed(let reason):
-                        ICloudUnavailableView(reason: reason)
+                        BriefingSceneStateView(kind: .failed(reason))
                     }
                 }
             }
+            .designTheme(seed: .lime, neutral: .slate)
             #if os(macOS)
             .frame(
                 minWidth: AIDashWindowGeometry.macMinWidth,
@@ -129,6 +126,115 @@ public struct BriefingWindowScene: Scene {
     }
 }
 
+private struct BriefingSceneStateView: View {
+    enum Kind {
+        case loading
+        case failed(String)
+    }
+
+    let kind: Kind
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("AIDash")
+                        .font(AIDashTypography.masthead)
+                        .foregroundStyle(theme.neutrals.text1)
+                    Spacer()
+                    Text(statusLabel)
+                        .font(AIDashTypography.mastheadStatus)
+                        .foregroundStyle(statusColor)
+                        .padding(.horizontal, AIDashSpace.s8)
+                        .padding(.vertical, AIDashSpace.s4)
+                        .background(theme.neutrals.inner, in: Capsule())
+                }
+                Rectangle()
+                    .fill(theme.neutrals.border)
+                    .frame(height: AIDashChrome.hairlineWidth)
+                VStack(alignment: .leading, spacing: AIDashSpace.s12) {
+                    Image(systemName: iconName)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                    Text(title)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(theme.neutrals.text1)
+                    Text(detail)
+                        .font(.callout)
+                        .foregroundStyle(theme.neutrals.text2)
+                    if case let .failed(reason) = kind {
+                        Text(reason)
+                            .font(.callout)
+                            .foregroundStyle(theme.neutrals.text2)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(AIDashSpace.s20)
+                .frame(maxWidth: .infinity, minHeight: 220, alignment: .leading)
+                .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: AIDashSpace.s12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AIDashSpace.s12)
+                        .stroke(theme.neutrals.border, lineWidth: AIDashChrome.hairlineWidth)
+                }
+            }
+            .padding(.horizontal, pageHorizontalPadding)
+            .padding(.vertical, AIDashSpacing.pageVertical)
+            .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .background(theme.neutrals.bg)
+    }
+
+    private var statusLabel: String {
+        switch kind {
+        case .loading:
+            return String(localized: "briefing.scene.loading.status", defaultValue: "SYNCING", bundle: .main)
+        case .failed:
+            return String(localized: "briefing.scene.error.status", defaultValue: "ERROR", bundle: .main)
+        }
+    }
+
+    private var title: String {
+        switch kind {
+        case .loading:
+            return String(localized: "briefing.scene.loading.title", defaultValue: "Loading briefing", bundle: .main)
+        case .failed:
+            return String(localized: "briefing.scene.error.title", defaultValue: "Briefing unavailable", bundle: .main)
+        }
+    }
+
+    private var detail: String {
+        switch kind {
+        case .loading:
+            return String(localized: "briefing.scene.loading.subtitle", defaultValue: "Preparing today’s briefing.", bundle: .main)
+        case .failed:
+            return String(localized: "briefing.scene.error.subtitle", defaultValue: "Check iCloud and try opening the briefing again.", bundle: .main)
+        }
+    }
+
+    private var iconName: String {
+        switch kind {
+        case .loading: return "arrow.triangle.2.circlepath"
+        case .failed: return "icloud.slash"
+        }
+    }
+
+    private var statusColor: Color {
+        switch kind {
+        case .loading: return theme.primary.primary
+        case .failed: return theme.danger
+        }
+    }
+
+    private var pageHorizontalPadding: CGFloat {
+        #if os(macOS)
+        return AIDashSpacing.pageHorizontalMac
+        #else
+        return AIDashSpacing.pageHorizontalCompact
+        #endif
+    }
+}
 /// App-side bridge for the spec 002 star feedback loop, extended in spec 005
 /// D3 for whole-card star + TODO done toggle. The UI layer emits intents via
 /// injected environment closures (never touching SwiftData directly, per
@@ -188,30 +294,5 @@ private struct StarFeedbackScope: View {
             .environment(\.starredItemRefs, Set(starEvents.compactMap(\.itemRef)))
             .environment(\.starredCardIds, Set(cardStarEvents.map(\.cardId)))
             .environment(\.doneItemRefs, UserEventWriter.doneRefs(from: doneEvents))
-    }
-}
-
-/// Placeholder until T133 ships the real error scene.
-struct ICloudUnavailableView: View {
-    let reason: String
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "icloud.slash")
-                .font(.system(size: 56))
-                .foregroundStyle(.secondary)
-            Text(String(
-                localized: "briefing.storage_unavailable.title",
-                defaultValue: "iCloud unavailable",
-                bundle: .main,
-                comment: "Title shown in the BriefingWindowScene fallback when CloudKit container init fails."
-            ))
-                .font(.title2.bold())
-            Text(reason)
-                .font(.callout)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-        }
-        .padding(48)
     }
 }
