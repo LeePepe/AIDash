@@ -105,9 +105,12 @@ def _repo_path(repo: str) -> Path | None:
         if root in seen:
             continue
         seen.add(root)
-        candidates = (root,) if root.name == name else (root / name,)
+        candidates = (root, root / name)
         for path in candidates:
-            if path.is_dir():
+            if path.is_dir() and (
+                (path / ".git").exists()
+                or (path / ".github" / "workflows").is_dir()
+            ):
                 return path
     return None
 

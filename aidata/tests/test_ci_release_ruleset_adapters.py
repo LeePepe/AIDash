@@ -105,13 +105,14 @@ def test_github_ruleset_collect_skips_invalid_repository_entries(monkeypatch):
 
 
 @pytest.mark.unit
-def test_ruleset_repo_path_uses_local_scan_roots_and_last_segment(monkeypatch):
-    repo_path = Path(__file__).parents[2]
-    root = repo_path.parent
-    monkeypatch.setattr(github_ruleset, "HOME", Path("/nonexistent"))
+def test_ruleset_repo_path_uses_local_scan_roots_and_last_segment(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    repo_path = root / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    monkeypatch.setattr(github_ruleset, "HOME", tmp_path / "home")
     monkeypatch.setattr(github_ruleset, "LOCAL_GIT_SCAN_ROOTS", (root,))
 
-    assert github_ruleset._repo_path(f"msft.ghe.com/org/{repo_path.name}") == repo_path
+    assert github_ruleset._repo_path("msft.ghe.com/org/repo") == repo_path
 
 
 @pytest.mark.unit
