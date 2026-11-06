@@ -9,6 +9,28 @@ import SwiftUI
 @Suite("Cockpit viz components")
 struct CockpitVizComponentTests {
 
+    @Test("Container hit target uses the platform minimum")
+    @MainActor
+    func containerHitTarget() {
+        #if os(macOS)
+        #expect(CockpitHitTarget.platformMinimum == 28)
+        #else
+        #expect(CockpitHitTarget.platformMinimum == 44)
+        #endif
+
+        _ = Text("Section")
+            .containerHitTarget()
+            .containerHitTarget(minSize: 44)
+    }
+
+    @Test("Rail chip accepts token-backed status and selection variants")
+    @MainActor
+    func railChip() {
+        _ = RailChip("Overview")
+        _ = RailChip("Healthy", icon: "checkmark", tone: .success)
+        _ = RailChip("Archive", icon: "archivebox", isSelected: true)
+    }
+
     @Test("Sparkbars constructs for empty / single / trend series")
     func sparkbars() {
         _ = Sparkbars(data: [], color: .green)
