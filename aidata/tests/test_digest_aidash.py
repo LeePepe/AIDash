@@ -98,6 +98,23 @@ def test_widget_snapshot_exports_compact_metrics(tmp_path):
 
 
 @pytest.mark.unit
+def test_build_briefing_follows_main_page_reading_bands(frozen):
+    briefing = aidash.build_briefing(
+        REPORT_DATE,
+        app._fetch_sources(REPORT_DATE),
+        "## 今日 TODO\n- P0: Fix CI\n",
+        "> 💡 点评: Fix CI",
+    )
+    assert briefing.containers[0].title == "总览"
+    assert briefing.containers[0].order == 10
+    assert all(
+        container.order < 50
+        for container in briefing.containers
+        if container.title in {"今日工作", "今日规划", "昨日汇总"}
+    )
+
+
+@pytest.mark.unit
 def test_retro_ops_keeps_repo_rank_and_time_stats():
     from L5_apps.digest.sources import RetroOpsTrends
 

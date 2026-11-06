@@ -68,7 +68,37 @@ def _cards_by_type(b: Briefing) -> dict[str, Card]:
     for c in b.containers:
         for card in c.cards:
             out[card.type] = card
+    metric_cards = [
+        card for c in b.containers for card in c.cards if card.type == "metric"
+    ]
+    if metric_cards:
+        out["metric"] = Card(
+            metric_cards[0].id,
+            "metric",
+            metric_cards[0].size,
+            {"items": [
+                item
+                for card in metric_cards
+                for item in card.payload.get("items", [])
+            ]},
+            metric_cards[0].style,
+        )
     return out
+
+
+@pytest.mark.unit
+def test_overview_uses_independent_kpi_cards_before_focal_digest(sources):
+    overview = next(c for c in _build(sources).containers if c.title == "总览")
+    assert overview.order == 10
+    assert overview.layout == "grid"
+    metric_cards = [card for card in overview.cards if card.type == "metric"]
+    assert metric_cards
+    assert all(card.size in {"small", "medium"} for card in metric_cards)
+    assert all(len(card.payload["items"]) == 1 for card in metric_cards)
+    digest_index = next(
+        index for index, card in enumerate(overview.cards) if card.type == "digest"
+    )
+    assert all(card.type == "metric" for card in overview.cards[:digest_index])
 
 
 @pytest.mark.unit

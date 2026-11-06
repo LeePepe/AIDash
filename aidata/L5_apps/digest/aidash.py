@@ -37,6 +37,8 @@ from L5_apps.digest.card_policy import (
     FIRST_SCREEN_CARDS,
     MAX_ACTIONS,
     MAX_CARDS,
+    KPI_CARD_SIZE,
+    OVERVIEW_KPI_LIMIT,
     CardCandidate,
     DataProfile,
     choose_card,
@@ -555,9 +557,19 @@ def _overview_sections(sections: dict[str, list[str]]) -> list[dict]:
 
 def _overview_container(mmdd: str, reported_day: str, must_see: str,
                         sections: dict[str, list[str]],
+                        metric_items: list[dict] | None = None,
                         delivery: "DeliveryState | None" = None,
                         report_date: str = "") -> Container:
-    """总览: the always-present digest card + optional data-health insight."""
+    """总览: bounded independent KPIs, then the focal digest card."""
+    cards: list[Card] = []
+    for index, item in enumerate((metric_items or [])[:OVERVIEW_KPI_LIMIT], start=101):
+        cards.append(Card(
+            _kuid(mmdd, index),
+            "metric",
+            KPI_CARD_SIZE,
+            {"items": [dict(item)]},
+            style="accent",
+        ))
     digest_payload = {
         "title": f"AI 使用日报 {reported_day}",
         "body": _plain_summary(must_see),
@@ -565,8 +577,8 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
     overview_sections = _overview_sections(sections)
     if overview_sections:
         digest_payload["sections"] = overview_sections
-    cards = [Card(_kuid(mmdd, 1), "digest", "hero", digest_payload,
-                  style="accent")]
+    cards.append(Card(_kuid(mmdd, 1), "digest", "hero", digest_payload,
+                      style="accent"))
     health = _health_line(sections)
     if health:
         cards.append(Card(_kuid(mmdd, 2), "insight", "wide",
@@ -582,7 +594,7 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
                               {"title": "投递健康", "body": _strip_md(d_line)},
                               style="warning"))
     return Container(_cuid(mmdd, 1), "总览", 10, tuple(cards),
-                     layout="auto", style="accent")
+                     layout="grid", style="accent")
 
 
 def _cost_improvement_body(ci) -> str:
@@ -1464,6 +1476,31 @@ _BUDGET_META: dict[str, dict] = {
     "24h 证据时间线": {"cross_signal": 2, "reading_cost": 2},
 }
 
+_READING_FLOW_ORDER = {
+    "总览": 10,
+    "今日工作": 20,
+    "今日规划": 30,
+    "昨日汇总": 40,
+    "24h 证据时间线": 50,
+    "交叉信号": 55,
+    "工程与编排图表": 60,
+    "时间与产出": 65,
+    "AI 效能": 70,
+    "成本归因": 80,
+    "可改良": 85,
+    "GitHub 工具雷达": 90,
+    "卡型兴趣": 92,
+    "新闻雷达": 95,
+}
+
+
+def _apply_reading_flow_order(containers: list[Container]) -> list[Container]:
+    """Apply the redesigned page bands without changing standalone builders."""
+    return [
+        replace(container, order=_READING_FLOW_ORDER.get(container.title, container.order))
+        for container in containers
+    ]
+
 
 def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
     """One CardCandidate per container, weighted by the cards it publishes.
@@ -1508,21 +1545,9 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     all. Its cards are still CHARGED against the budget, since the reader pays
     for them either way; only its admission is unconditional.
 
-    ## Why this rewrites `order` rather than just returning a tuple
-
-    The app does NOT render containers in the order we send them — both
-    `BriefingView.swift` and `XPCHandlers.swift` sort by `container.order`. So a
-    first-screen decision expressed only as tuple position is invisible to the
-    reader: whatever `order` says wins, and the budget's ranking is silently
-    discarded on the way through XPC. (Sorting survivors straight back to
-    authored order here had exactly that effect — `FIRST_SCREEN_CARDS` decided
-    nothing a reader could see.)
-
-    So the lead containers are renumbered into a reserved band BELOW every
-    authored order, preserving their priority sequence, while the tail keeps its
-    authored numbering. `order` remains ascending — it is still the single
-    ordering key — but its leading stretch now encodes "this is the two-minute
-    read" instead of "this is where the producer happened to append it".
+    Container `order` is a product contract, not an internal ranking score.
+    The app sorts by it, so survivors retain their authored reading-flow bands
+    (overview, action, context, supporting) after trimming.
     """
     if not containers:
         return ()
@@ -1537,31 +1562,10 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     if not [c for c in kept.selected if c.card.cards]:
         return (head,)
 
-    # Take the first-screen boundary FROM the budget rather than re-deriving it.
-    # Counting cards off the front of the result would be wrong: the tail is
-    # sorted back into authored order, so a light low-priority container sitting
-    # early in authored order gets swept into the lead and — because the lead is
-    # what gets renumbered — genuinely promoted onto the reader's first screen
-    # ahead of a higher-priority one.
-    lead = [c.card for c in kept.lead if c.card.cards]
-    tail = [c.card for c in kept.tail if c.card.cards]
-
-    # Renumber EVERY survivor into one ascending run below the overview.
-    #
-    # Renumbering only the lead is not enough. The app sorts by `order` alone,
-    # so a tail container that happens to carry a low authored number (say the
-    # producer gave it 15 while a lead container authored 30 got renumbered)
-    # would still render above the first screen — the budget's decision loses to
-    # an accident of how the producers numbered their sections.
-    #
-    # So: lead first, in priority order; then tail, in authored order. The
-    # overview keeps the hard top. Within each group the relative order is the
-    # one that group is supposed to express, and across groups the first screen
-    # always wins.
-    published = [
-        replace(container, order=head.order + 1 + index)
-        for index, container in enumerate(lead + tail)
-    ]
+    published = sorted(
+        (c.card for c in kept.selected if c.card.cards),
+        key=lambda container: container.order,
+    )
     while sum(
         sum(card.type != "sectionHeader" for card in container.cards)
         for container in published
@@ -1615,7 +1619,20 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     reported_day = yesterday(report_date)
     sections = parse_sections(full_md)
     mmdd = _mmdd(reported_day)
+    metrics = _metric_items(sources, report_date)
+    # Keep the overview readable: the highest-signal KPIs get independent cards
+    # and the remaining metrics stay out rather than becoming a second mega-card.
+    preferred_labels = ("成本", "请求数", "会话数", "自动化占比")
+    preferred = [
+        item for label in preferred_labels
+        for item in metrics
+        if item.get("label") == label
+    ]
+    overview_metrics = preferred + [
+        item for item in metrics if item not in preferred
+    ]
     containers = [_overview_container(mmdd, reported_day, must_see, sections,
+                                      metric_items=overview_metrics,
                                       delivery=delivery,
                                       report_date=report_date)]
 
@@ -1635,13 +1652,6 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         getattr(sources, "model_by_project", None),
         getattr(sources, "leverage", None),
         getattr(sources, "rework_by_workspace", None))
-
-    metrics = _metric_items(sources, report_date)
-    if metrics:
-        containers.append(Container(
-            _cuid(mmdd, 2), "趋势指标", 20,
-            (Card(_kuid(mmdd, 3), "metric", "wide", {"items": metrics}),),
-            layout="auto"))
 
     if attribution_container:
         containers.append(attribution_container)
@@ -1697,6 +1707,7 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     # De-duplicate AFTER the budget, never before: a row is only redundant if
     # the card that covers it actually reaches the reader, and until the budget
     # has run that is not known (§design 3, criterion 5).
+    containers = _apply_reading_flow_order(containers)
     return Briefing(reported_day, GENERATED_BY,
                     _dedupe_published(_apply_budget(containers)))
 
