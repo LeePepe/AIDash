@@ -76,9 +76,9 @@ def test_prefix_contradiction_sources_ok_but_delivery_degraded():
         must_see="", delivery=delivery,
     )
     overview = briefing.containers[0]
-    # There must be both a "数据源健康" AND a "投递健康" card.
+    # Delivery degradation is inline; source health is never published.
     titles = [c.payload.get("title") for c in overview.cards]
-    assert "数据源健康" in titles, "content-source health card must be present"
+    assert "数据源健康" not in titles
     assert "投递健康" in titles, "delivery health card must surface XPC failure"
 
     # Verify the delivery card body mentions XPC failure.
@@ -102,7 +102,7 @@ def test_no_delivery_card_when_delivery_ok():
 
 @pytest.mark.unit
 def test_delivery_card_when_delivery_is_stale():
-    """A stale delivery should still surface in the overview card even when OK."""
+    """A merely stale successful delivery remains hidden."""
     delivery = DeliveryState(ok=True, reason="", timestamp="2026-08-17T01:00:00Z")
     briefing = build_briefing(
         "2026-08-19", _minimal_raven_trends(), _minimal_full_md(),
@@ -110,10 +110,7 @@ def test_delivery_card_when_delivery_is_stale():
     )
     overview = briefing.containers[0]
     titles = [c.payload.get("title") for c in overview.cards]
-    assert "投递健康" in titles
-
-    delivery_card = next(c for c in overview.cards if c.payload.get("title") == "投递健康")
-    assert "stale" in delivery_card.payload["body"].lower()
+    assert "投递健康" not in titles
 
 
 @pytest.mark.unit
