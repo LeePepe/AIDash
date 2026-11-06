@@ -253,14 +253,14 @@ public struct MenuBarStatusView: View { // swiftlint:disable:this type_body_leng
     private func gatewayCard(_ gateway: GatewayStatusSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(Copy.gateway).font(.system(size: 12, weight: .semibold))
-            HStack(spacing: 8) {
-                StatusPill("M \(gateway.magpieUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.magpieUp ? .success : .danger)
-                StatusPill("R \(gateway.ravenUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.ravenUp ? .success : .danger)
-                StatusPill("F \(gateway.falconUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.falconUp ? .success : .danger)
-                Text("\(gateway.jevRequests24h) req · \(gateway.jevStarredCount) starred")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(theme.neutrals.text2)
+            HStack(spacing: 6) {
+                StatusPill("Magpie \(gateway.magpieUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.magpieUp ? .success : .danger)
+                StatusPill("Raven \(gateway.ravenUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.ravenUp ? .success : .danger)
+                StatusPill("Falcon \(gateway.falconUp ? Copy.connectedShort : Copy.disconnectedShort)", tone: gateway.falconUp ? .success : .danger)
             }
+            Text("\(gateway.jevRequests24h) req · \(gateway.jevStarredCount) starred")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.neutrals.text2)
         }
     }
     private func header(_ snapshot: MenuBarSystemSnapshot) -> some View {

@@ -205,9 +205,9 @@ public struct MacSiliconCockpitWidgetView: View {
                             instrument("Top Mem", value: process)
                         }
                         HStack(spacing: AIDashSpace.s4) {
-                            gateway("M", isUp: snapshot.magpieUp)
-                            gateway("R", isUp: snapshot.ravenUp)
-                            gateway("F", isUp: snapshot.falconUp)
+                            gateway("Magpie", isUp: snapshot.magpieUp)
+                            gateway("Raven", isUp: snapshot.ravenUp)
+                            gateway("Falcon", isUp: snapshot.falconUp)
                         }
                     }
                 }

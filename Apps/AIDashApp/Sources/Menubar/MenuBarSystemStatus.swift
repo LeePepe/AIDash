@@ -679,15 +679,57 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     private func captureGateway() -> GatewayStatusSnapshot {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return GatewayStatusSnapshot() }
         let home = Self.realUserHomeDirectoryURL()
+        let magpieConfig = home.appendingPathComponent(".config/magpie")
+        let ravenSupport = home.appendingPathComponent("Library/Application Support/raven")
         let falcon = home.appendingPathComponent("Library/Application Support/Falcon/falcon.sqlite")
-        let falconUp = portOpen(19823) || FileManager.default.fileExists(atPath: falcon.path)
+        let magpieUp = portOpen(3425)
+            || runningProcess(named: "magpie")
+            || fileExists(at: magpieConfig.appendingPathComponent("served.json"))
+            || fileExists(at: magpieConfig.appendingPathComponent("quotas.json"))
+        let served = magpieConfig.appendingPathComponent("served.json")
+        let ravenUp = portOpen(7024)
+            || fileContains(served, substring: "raven")
+            || fileExists(at: ravenSupport.appendingPathComponent("raven.db"))
+            || fileExists(at: ravenSupport.appendingPathComponent("clean/raven.db"))
+            || fileExists(at: home.appendingPathComponent("Development/AIDash/aidata/L2_normalize/clean/raven.db"))
+        let falconUp = portOpen(19823)
+            || runningProcess(named: "Falcon")
+            || fileExists(at: falcon)
+            || fileExists(at: home.appendingPathComponent("Library/Application Support/Falcon/instance.lock"))
         let requests = readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE received_at >= (strftime('%s','now') - 978307200 - 86400);")
             ?? readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE created_at >= datetime('now','-1 day');")
             ?? 0
         let starred = readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE json_extract(summary_json, '$.starredAt') IS NOT NULL OR review_state = 'starred';")
             ?? readSQLiteCount(path: falcon.path, query: "SELECT COUNT(*) FROM requests WHERE starredAt IS NOT NULL;")
             ?? 0
-        return GatewayStatusSnapshot(magpieUp: portOpen(3425), ravenUp: portOpen(7024), falconUp: falconUp, jevRequests24h: requests, jevStarredCount: starred)
+        return GatewayStatusSnapshot(magpieUp: magpieUp, ravenUp: ravenUp, falconUp: falconUp, jevRequests24h: requests, jevStarredCount: starred)
+    }
+    private func fileExists(at url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.path)
+    }
+    private func fileContains(_ url: URL, substring: String) -> Bool {
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        return contents.localizedCaseInsensitiveContains(substring)
+    }
+    private func runningProcess(named name: String) -> Bool {
+        var pids = [pid_t](repeating: 0, count: 2048)
+        let bytes = pids.withUnsafeMutableBytes {
+            proc_listpids(UInt32(PROC_ALL_PIDS), 0, $0.baseAddress, Int32($0.count))
+        }
+        guard bytes > 0 else { return false }
+        for pid in pids.prefix(Int(bytes) / MemoryLayout<pid_t>.stride) where pid > 0 {
+            var nameBuffer = [CChar](repeating: 0, count: 256)
+            if proc_name(pid, &nameBuffer, UInt32(nameBuffer.count)) > 0,
+               String(cString: nameBuffer) == name {
+                return true
+            }
+            var pathBuffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+            if proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count)) > 0,
+               URL(fileURLWithPath: String(cString: pathBuffer)).lastPathComponent == name {
+                return true
+            }
+        }
+        return false
     }
     private func portOpen(_ port: UInt16) -> Bool {
         let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/bin/nc"); task.arguments = ["-z", "127.0.0.1", "\(port)"]
