@@ -86,32 +86,31 @@ struct SectionHeaderCardViewTests {
         #expect(SectionHeaderCardView.recipe.secondary == .subheadline)
     }
 
-    @Test("vertical padding scales monotonically: small ≤ medium ≤ wide ≤ hero")
-    func verticalPaddingMonotonic() {
+    @Test("dense section headers stay within the 44pt row budget")
+    func denseHeaderGeometry() {
         let payload = SectionHeaderPayload(title: "Title")
         let small  = SectionHeaderCardView(payload: payload, size: .small, style: .neutral)
         let medium = SectionHeaderCardView(payload: payload, size: .medium, style: .neutral)
         let wide   = SectionHeaderCardView(payload: payload, size: .wide, style: .neutral)
         let hero   = SectionHeaderCardView(payload: payload, size: .hero, style: .neutral)
 
-        #expect(small.verticalPadding < medium.verticalPadding)
-        #expect(medium.verticalPadding <= wide.verticalPadding)
-        #expect(wide.verticalPadding < hero.verticalPadding)
-        // Compact for .small, generous for .hero — contract wording.
-        #expect(small.verticalPadding < hero.verticalPadding)
+        for view in [small, medium, wide, hero] {
+            #expect(view.verticalPadding <= 4)
+            #expect(view.subtitleSpacing <= 4)
+        }
     }
 
-    @Test("subtitle spacing scales monotonically: small ≤ medium ≤ wide ≤ hero")
-    func subtitleSpacingMonotonic() {
+    @Test("subtitle spacing is stable across macro tiers")
+    func subtitleSpacingIsStable() {
         let payload = SectionHeaderPayload(title: "Title", subtitle: "Sub")
         let small  = SectionHeaderCardView(payload: payload, size: .small, style: .neutral)
         let medium = SectionHeaderCardView(payload: payload, size: .medium, style: .neutral)
         let wide   = SectionHeaderCardView(payload: payload, size: .wide, style: .neutral)
         let hero   = SectionHeaderCardView(payload: payload, size: .hero, style: .neutral)
 
-        #expect(small.subtitleSpacing < medium.subtitleSpacing)
-        #expect(medium.subtitleSpacing < wide.subtitleSpacing)
-        #expect(wide.subtitleSpacing < hero.subtitleSpacing)
+        #expect(small.subtitleSpacing == medium.subtitleSpacing)
+        #expect(medium.subtitleSpacing == wide.subtitleSpacing)
+        #expect(wide.subtitleSpacing == hero.subtitleSpacing)
     }
 
     @Test("vertical padding values do not depend on style")

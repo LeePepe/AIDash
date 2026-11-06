@@ -40,6 +40,7 @@ public struct TodoListCardView: View {
             Text("\(payload.items.count)")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: true, vertical: false)
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)

@@ -340,8 +340,7 @@ private struct TrendingRepoCell: View {
                 .foregroundStyle(theme.neutrals.text3)
                 .frame(width: Self.rankWidth, alignment: .trailing)
             repoLink
-                .lineLimit(1)
-                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
             if let deltaLabel = deltaPillLabel {
                 StatusPill(deltaLabel.text, tone: deltaLabel.tone)
             }

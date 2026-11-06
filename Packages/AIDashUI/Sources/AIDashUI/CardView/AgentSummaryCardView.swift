@@ -169,6 +169,7 @@ public struct AgentSummaryCardView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(formattedStatValue(stat.value))
                 .font(.system(.title3, design: .rounded).weight(.bold))
+                .fixedSize(horizontal: true, vertical: false)
             Text(stat.label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -198,10 +199,11 @@ public struct AgentSummaryCardView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(formattedStatValue(stat.value))
                 .font(recipe.primary)
+                .fixedSize(horizontal: true, vertical: false)
             Text(stat.label)
                 .font(recipe.secondary)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(AIDashCardInterior.tierThreeLineLimit)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

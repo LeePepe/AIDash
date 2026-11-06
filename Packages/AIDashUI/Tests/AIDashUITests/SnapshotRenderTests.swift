@@ -11,7 +11,7 @@ import AppKit
 @MainActor
 @Suite("Main page snapshots")
 struct SnapshotRenderTests {
-    @Test("exports the locked desktop and compact state matrix")
+    @Test("exports four states plus max-density in light and dark")
     func exportsStateMatrix() throws {
         #if canImport(AppKit)
         let customDir = ProcessInfo.processInfo.environment["AIDASH_SNAPSHOT_DIR"]
@@ -25,33 +25,31 @@ struct SnapshotRenderTests {
         }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
 
-        let desktop: [(String, BriefingViewState)] = [
-            ("desktop-populated", .populated(
+        let states: [(String, BriefingViewState)] = [
+            ("populated", .populated(
                 date: "2026-11-02", containers: Self.sampleContainers, isFallback: true,
                 publishedAt: Date(timeIntervalSinceNow: -3600))),
-            ("desktop-loading", .loading),
-            ("desktop-empty", .empty),
-            ("desktop-error", .error),
-            ("desktop-stale-error", .staleError(
-                date: "2026-11-02", containers: Self.sampleContainers,
-                publishedAt: Date(timeIntervalSinceNow: -7200))),
-        ]
-        let compact: [(String, BriefingViewState)] = [
-            ("compact-populated", .populated(
-                date: "2026-11-02", containers: Self.sampleContainers, isFallback: false,
-                publishedAt: Date(timeIntervalSinceNow: -120))),
-            ("compact-empty", .empty),
+            ("loading", .loading),
+            ("empty", .empty),
+            ("error", .error),
         ]
 
-        for (name, state) in desktop {
+        for (name, state) in states {
             try render(state: state, name: name, width: 1200, padding: 24, output: output,
                        archiveDates: ["2026-11-01", "2026-11-02"],
-                       hiddenCardIds: name == "desktop-populated" ? ["metric-b"] : [])
+                       hiddenCardIds: name == "populated" ? ["metric-b"] : [])
         }
-        for (name, state) in compact {
-            try render(state: state, name: name, width: 390, padding: 20, output: output,
-                       archiveDates: ["2026-11-01", "2026-11-02"])
-        }
+        try render(
+            state: .populated(
+                date: "2026-11-02", containers: Self.maxDensityContainers,
+                isFallback: false, publishedAt: Date(timeIntervalSinceNow: -120)
+            ),
+            name: "max-density",
+            width: 1200,
+            padding: 24,
+            output: output,
+            archiveDates: ["2026-11-01", "2026-11-02"]
+        )
         #else
         Issue.record("Snapshots require AppKit's ImageRenderer on macOS.")
         #endif
@@ -147,6 +145,31 @@ struct SnapshotRenderTests {
             ))
         ]
         return [overview, evidence]
+    }
+
+    private static var maxDensityContainers: [ContainerModel] {
+        let container = ContainerModel(
+            id: "max-density",
+            title: "远程代理运行状态（最近一次同步失败，等待重试）",
+            subtitle: "最大密度验证",
+            order: 0,
+            layout: .grid,
+            style: .warning
+        )
+        container.cards = [
+            card("dense-metric", .metric, #"{"items":[{"label":"有效上下文容量","value":1681,"unit":"MB","trend":"up","series":[820,940,1100,1180,1681],"higherIsBetter":true},{"label":"任务完成率","value":99.9,"unit":"%","ratio":0.999,"higherIsBetter":true}]}"#),
+            card("dense-todo", .todoList, #"{"title":"待处理事项","items":[{"title":"检查远程代理运行状态（最近一次同步失败，等待重试）","priority":"high","waitingOn":"权限确认"},{"title":"归档本周所有构建证据","priority":"medium","ageText":"2h"}]}"#),
+            card("dense-trending", .trending, #"{"topic":"值得现在看","items":[{"title":"owner/long-repository-name-for-density","url":"https://example.com/repo","score":93459,"delta":412,"category":"AI-agent","reason":"长标题与长解释必须保持可读，不与状态胶囊争抢空间"}]}"#),
+            card("dense-stacked", .stackedBar, StackedBarPayload(
+                segments: [
+                    .init(label: "成功", value: 70, semantic: "success"),
+                    .init(label: "工具调用", value: 25),
+                    .init(label: "达到上限", value: 5, semantic: "warning"),
+                ],
+                title: "会话质量"
+            )),
+        ]
+        return [container]
     }
 
     private static func card(_ id: String, _ type: CardType, _ json: String,

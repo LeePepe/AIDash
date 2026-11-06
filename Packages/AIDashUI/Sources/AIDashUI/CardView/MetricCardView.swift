@@ -298,8 +298,8 @@ public struct MetricCardView: View {
             HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s4) {
                 Text(formattedValue(item.value))
                     .font(recipe.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .minimumScaleFactor(AIDashCardInterior.numericMinimumScaleFactor)
+                    .fixedSize(horizontal: true, vertical: false)
                 if let unit = item.unit {
                     // Unit reads as a proper suffix, not floating-point cruft:
                     // a monospaced medium glyph on the value's baseline via the
@@ -308,7 +308,7 @@ public struct MetricCardView: View {
                     Text(unit)
                         .font(AIDashTypography.metricUnit)
                         .foregroundStyle(recipe.secondaryColor)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
             // Draw the pill if this item has one; otherwise reserve the row's

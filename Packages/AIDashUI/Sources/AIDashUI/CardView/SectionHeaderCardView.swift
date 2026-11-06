@@ -53,24 +53,14 @@ public struct SectionHeaderCardView: View {
 
     static let recipe = AIDashTypography.detail(for: .sectionHeader)
 
-    // MARK: - Size-driven vertical spacing only
+    // MARK: - Dense section-header geometry
 
     var verticalPadding: CGFloat {
-        switch size {
-        case .small:  return 6
-        case .medium: return 10
-        case .wide:   return 12
-        case .hero:   return 16
-        }
+        4
     }
 
     var subtitleSpacing: CGFloat {
-        switch size {
-        case .small:  return 2
-        case .medium: return 4
-        case .wide:   return 6
-        case .hero:   return 8
-        }
+        4
     }
 }
 

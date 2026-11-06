@@ -221,10 +221,14 @@ private struct StackedBarLegendRow: View {
                 .font(StackedBarCardView.recipe.secondary)
                 .foregroundStyle(theme.neutrals.text1)
                 .lineLimit(1)
+            if let tone = slice.tone {
+                StatusPill(tone.rawValue.capitalized, tone: tone.pillTone)
+            }
             Spacer(minLength: AIDashSpace.s8)
             Text(percentText)
                 .font(StackedBarCardView.recipe.secondary)
                 .foregroundStyle(theme.neutrals.text2)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)

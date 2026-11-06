@@ -354,6 +354,7 @@ public enum AIDashSpacing {
         return 44
         #endif
     }
+
 }
 
 // MARK: - Spacing ladder (raw scale)
@@ -373,6 +374,11 @@ public enum AIDashSpace {
     public static let s28: CGFloat = 28
     public static let s32: CGFloat = 32
     public static let s40: CGFloat = 40
+}
+
+public enum AIDashCardInterior {
+    public static let tierThreeLineLimit = 2
+    public static let numericMinimumScaleFactor: CGFloat = 0.55
 }
 
 // MARK: - Chrome (stripe + hairline only)
