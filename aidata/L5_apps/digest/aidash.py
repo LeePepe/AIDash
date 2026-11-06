@@ -400,7 +400,7 @@ def _metric_items(sources: "DigestSources", report_date: str) -> list[dict]:
 # The redundancy in this briefing is real, but it is not container-shaped, not
 # card-shaped, and SMALLER than it looks — it is one row.
 #
-# `趋势指标` publishes one row per metric. When the per-project spend breakdown
+# The overview publishes one row per metric. When the per-project spend breakdown
 # is on the page, its 成本 row reports the same total that breakdown decomposes,
 # so the bare row carries nothing the split does not.
 #
@@ -471,8 +471,10 @@ def _dedupe_metric_items(items: list[dict],
     return kept or items
 
 
-def _dedupe_published(containers: tuple[Container, ...]) -> tuple[Container, ...]:
-    """Thin duplicated rows out of the trend card, after the budget has run.
+def _dedupe_published(containers: tuple[Container, ...],
+                      metric_items: list[dict] | None = None,
+                      ) -> tuple[Container, ...]:
+    """Thin duplicated rows out of the overview KPI row, after the budget.
 
     Two conditions, and both are about what the reader ACTUALLY sees:
 
@@ -499,18 +501,34 @@ def _dedupe_published(containers: tuple[Container, ...]) -> tuple[Container, ...
         return containers
     out: list[Container] = []
     for container in containers:
-        if container.title != "趋势指标":
+        if container.title != "总览":
             out.append(container)
             continue
-        cards = []
+        cards = list(container.cards)
+        existing_labels = {
+            card.payload["items"][0].get("label")
+            for card in cards
+            if card.type == "metric"
+            and card.payload.get("items")
+            and isinstance(card.payload["items"][0], dict)
+        }
+        replacement = next(
+            (item for item in (metric_items or [])
+             if item.get("label") not in existing_labels
+             and item.get("label") not in _SPEND_TOTAL_LABELS),
+            None,
+        )
+        rebuilt: list[Card] = []
         for card in container.cards:
-            items = card.payload.get("items")
-            if not items:
-                cards.append(card)
+            items = card.payload.get("items") if card.type == "metric" else None
+            if not items or items[0].get("label") not in _SPEND_TOTAL_LABELS:
+                rebuilt.append(card)
                 continue
-            kept = _dedupe_metric_items(items, True)
-            cards.append(replace(card, payload={**card.payload, "items": kept}))
-        out.append(replace(container, cards=tuple(cards)))
+            if replacement is not None:
+                rebuilt.append(replace(
+                    card, payload={**card.payload, "items": [dict(replacement)]}))
+                replacement = None
+        out.append(replace(container, cards=tuple(rebuilt)))
     return tuple(out)
 
 
@@ -1042,7 +1060,7 @@ def _attribution_container(mmdd: str, cost_by_project, model_by_project,
                            leverage=None, rework_by_workspace=None) -> "Container | None":
     """💸 成本归因 (order 22): WHY the trend arrows moved.
 
-    Sits immediately after 趋势指标 (order 20) on purpose — it exists to
+    Sits immediately after the overview (order 20) on purpose — it exists to
     explain the arrows directly above it. Every other card in the briefing
     reports a single dimension, so a "+968%" tells you something changed but
     not where to look; this splits the same spend across projects, then across
@@ -1430,8 +1448,8 @@ def _relationship_container(mmdd: str, rework, retro_ops=None) -> "Container | N
 # ## Why redundancy is handled per ITEM, not here
 #
 # An earlier version let one container declare it superseded another's signal
-# (成本归因's per-project split vs 趋势指标's spend total). The granularity was
-# wrong: admission is per CONTAINER, but the redundancy is a single ROW. 趋势指标
+# (成本归因's per-project split vs the overview's spend total). The granularity
+# was wrong: admission is per CONTAINER, but the redundancy is a single ROW. The
 # carries tokens, requests, sessions, completed-issues and the automation ratio
 # beside the cost row — none of which the cost split restates — so suppressing
 # the container to remove one duplicated row deleted five unrelated signals.
@@ -1453,18 +1471,12 @@ def _relationship_container(mmdd: str, rework, retro_ops=None) -> "Container | N
 #   cross_signal     — how much cross-source value it adds (0 = single dimension).
 #   reading_cost     — roughly how long a reader spends on it.
 #
-# 趋势指标 scores 1 rather than 0 because its rows are de-duplicated before the
-# card is built: whatever survives is a signal no other card restates (requests,
-# sessions, completed work, automation ratio). Ranking it at 0 — as a bare
-# single-dimension total — described the card before de-duplication, and dropped
-# the day's only source of those numbers on a busy day.
 _BUDGET_META: dict[str, dict] = {
     "总览": {"reading_cost": 2, "requires_action": False},
     "今日规划": {"requires_action": True, "reading_cost": 1},
     "交叉信号": {"cross_signal": 3, "reading_cost": 2},
     "AI 效能": {"cross_signal": 2, "reading_cost": 3},
     "成本归因": {"cross_signal": 2, "reading_cost": 3},
-    "趋势指标": {"cross_signal": 1, "reading_cost": 2},
     "今日工作": {"reading_cost": 2},
     "昨日汇总": {"reading_cost": 2},
     "可改良": {"cross_signal": 1, "reading_cost": 3},
@@ -1555,6 +1567,10 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     # The overview's own cards come out of the same budget — exempt from being
     # dropped is not the same as free.
     head_cards = sum(card.type != "sectionHeader" for card in head.cards)
+    if head.title == "总览":
+        head_cards -= sum(card.type == "metric" for card in head.cards)
+        head_cards += min(
+            1, sum(card.type == "metric" for card in head.cards))
     budget = max(0, MAX_CARDS - head_cards)
     first_screen = max(0, FIRST_SCREEN_CARDS - head_cards)
     kept = select_with_budget(_container_candidates(rest),
@@ -1566,13 +1582,20 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
         (c.card for c in kept.selected if c.card.cards),
         key=lambda container: container.order,
     )
-    while sum(
+    published_card_cost = sum(
         sum(card.type != "sectionHeader" for card in container.cards)
         for container in published
-    ) + sum(card.type != "sectionHeader" for card in head.cards) > MAX_CARDS:
+    )
+    head_card_cost = sum(card.type != "sectionHeader" for card in head.cards)
+    if head.title == "总览":
+        head_card_cost -= sum(card.type == "metric" for card in head.cards)
+        head_card_cost += min(1, sum(card.type == "metric" for card in head.cards))
+    while published_card_cost + head_card_cost > MAX_CARDS:
         if not published:
             break
-        published.pop()
+        removed = published.pop()
+        published_card_cost -= sum(
+            card.type != "sectionHeader" for card in removed.cards)
     return tuple([head] + published)
 
 
@@ -1646,7 +1669,7 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     if timeline_container:
         containers.append(timeline_container)
 
-    # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
+    # 💸 成本归因 (order 22): explains the arrows in the overview directly above.
     attribution_container = _attribution_container(
         mmdd, getattr(sources, "cost_by_project", None),
         getattr(sources, "model_by_project", None),
@@ -1665,7 +1688,7 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         containers.append(relationship_container)
 
     # 🧠 AI 效能 (order 25) + ⏱ 时间与产出 (order 28): batch-2 差异化 sections,
-    # placed right after the trend metrics and before the prose 昨日汇总 (order 30).
+    # placed right after the overview metrics and before the prose 昨日汇总 (order 30).
     ai_container = _ai_efficiency_container(
         mmdd, getattr(sources, "ai_efficiency", None),
         getattr(sources, "tool_cross", None))
@@ -1709,7 +1732,7 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     # has run that is not known (§design 3, criterion 5).
     containers = _apply_reading_flow_order(containers)
     return Briefing(reported_day, GENERATED_BY,
-                    _dedupe_published(_apply_budget(containers)))
+                    _dedupe_published(_apply_budget(containers), metrics))
 
 
 # ---------------------------------------------------------------------------
