@@ -113,6 +113,7 @@ def test_ruleset_repo_path_uses_local_scan_roots_and_last_segment(tmp_path, monk
     monkeypatch.setattr(github_ruleset, "LOCAL_GIT_SCAN_ROOTS", (root,))
 
     assert github_ruleset._repo_path("msft.ghe.com/org/repo") == repo_path
+    assert github_ruleset._repo_path("msft.ghe.com/org/other") is None
 
 
 @pytest.mark.unit
