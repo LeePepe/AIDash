@@ -46,7 +46,7 @@ struct BriefingViewTests {
         #expect(!BriefingView.isTodayBadge(date: "2026-11-02", isFallback: false, today: "2026-11-04"))
     }
 
-    @Test("historical masthead and jump rail localization entries cover both locales")
+    @Test("historical masthead localization entries cover both locales")
     func historicalLocalizationKeysAreComplete() throws {
         let catalog = try String(
             contentsOf: Self.sourceFile(named: "Localizable.xcstrings",
@@ -60,7 +60,6 @@ struct BriefingViewTests {
             "briefing.date.today",
             "briefing.hidden.accessibility %lld",
             "briefing.hidden.show",
-            "briefing.section_jump.label %@",
             "briefing.error.retry",
             "card_router.hide_card.label",
             "card_router.show_card.label"
@@ -167,16 +166,25 @@ struct BriefingViewTests {
                 "no stub_data helper allowed in BriefingView")
     }
 
-    @Test("section rail stays single-row and supports in-place filtering")
-    func sectionRailSupportsDomainLensFiltering() throws {
+    @Test("two-container pages omit the section rail while larger pages retain filtering")
+    func sectionRailIsReservedForLargerPages() throws {
         let source = try Self.briefingViewSource()
         #expect(source.contains("selectedContainerID"))
         #expect(source.contains("filteredContainers"))
-        #expect(source.contains("briefing.section_jump.all"))
-        #expect(source.contains("selectedContainerID = nil"))
+        #expect(source.contains("if containers.count > 2"))
+        #expect(!source.contains("if containers.count >= 2"))
         #expect(source.contains("ScrollView(.horizontal"))
         #expect(source.contains("showsIndicators: false"))
         #expect(source.contains("lineLimit(1)"))
+    }
+
+    @Test("simplified masthead omits telemetry and redundant date-status pills")
+    func mastheadIsCalm() throws {
+        let source = try Self.briefingViewSource()
+        #expect(!source.contains("telemetryPill"))
+        #expect(!source.contains("briefing.telemetry.pill"))
+        #expect(!source.contains("BriefingViewCopy.todayLabel"))
+        #expect(!source.contains("BriefingViewCopy.archiveLabel"))
     }
 
     @Test("wide hourly timelines retain up to three citations")

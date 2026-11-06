@@ -235,6 +235,10 @@ struct ContainerChromeModeTests {
                 "framed spacing must still come from the 12pt token")
         #expect(source.contains("AIDashSpacing.containerHeaderToBareContent"),
                 "bare spacing must come from the 10pt token, not a magic number")
+        #expect(!source.contains("ContainerCountBadge"),
+                "two-section headers must not carry a card-count capsule")
+        #expect(!source.contains("Divider("),
+                "the simplified header must not add a duplicate divider")
     }
 
     @Test("the title-side bar lives in the token layer, so ContainerView stays chrome-free")

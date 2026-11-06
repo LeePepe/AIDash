@@ -259,6 +259,15 @@ struct MetricCardViewTests {
         }
     }
 
+    @Test("compact KPI composition keeps numeric values visible and spacing tokenized")
+    func compactKPIComposition() throws {
+        let source = try Self.metricRendererSource()
+        #expect(source.contains("AIDashSpace.s8"))
+        #expect(source.contains(".fixedSize(horizontal: true, vertical: false)"))
+        #expect(source.contains("formattedValue(item.value)"))
+        #expect(!source.contains("Text(formattedValue(item.value))\n                    .lineLimit"))
+    }
+
     private static func metricRendererSource() throws -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         let packageRoot = testFile

@@ -84,6 +84,10 @@ struct DesignTokensChromeHierarchyTests {
                 "ContainerView header-to-first-card spacing must use AIDashSpacing.containerHeaderToFirstCard")
         #expect(source.contains("AIDashTypography.section"),
                 "ContainerView header must use the overview-tier AIDashTypography.section font")
+        #expect(!source.contains("ContainerCountBadge"),
+                "simplified two-section headers must not carry count chrome")
+        #expect(!source.contains("Divider("),
+                "simplified headers must not add a duplicate divider")
     }
 
     // MARK: - Acceptance 20 — card chrome uses `theme.neutrals.card` + 1px neutrals border
