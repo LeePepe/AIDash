@@ -4,6 +4,95 @@ import pytest
 from adapters import github_ci, github_ruleset, release_tf
 
 
+class _CompletedProcess:
+    returncode = 0
+    stdout = "{}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("repo", "expected"),
+    [
+        ("owner/repo", ["gh", "api", "repos/owner/repo/actions/runs?per_page=100"]),
+        (
+            "msft.ghe.com/org/repo",
+            [
+                "gh",
+                "api",
+                "--hostname",
+                "msft.ghe.com",
+                "repos/org/repo/actions/runs?per_page=100",
+            ],
+        ),
+    ],
+)
+def test_github_ci_api_routes_github_and_ghe_repositories(monkeypatch, repo, expected):
+    calls = []
+    monkeypatch.setattr(github_ci.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setattr(
+        github_ci.subprocess,
+        "run",
+        lambda args, **_kwargs: (calls.append(args) or _CompletedProcess()),
+    )
+
+    assert github_ci._gh_api(repo, "actions/runs?per_page=100") == {}
+    assert calls == [expected]
+
+
+@pytest.mark.unit
+def test_github_ci_collect_degrades_to_zero_without_repositories(monkeypatch):
+    monkeypatch.setattr(github_ci, "GITHUB_CI_REPOS", ())
+    monkeypatch.setattr(
+        github_ci,
+        "write_raw_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("empty config must not write a snapshot"),
+    )
+
+    assert github_ci.collect() == 0
+
+
+@pytest.mark.unit
+def test_github_ruleset_api_routes_ghe_repository(monkeypatch):
+    calls = []
+    monkeypatch.setattr(github_ruleset.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setattr(
+        github_ruleset.subprocess,
+        "run",
+        lambda args, **_kwargs: (calls.append(args) or _CompletedProcess()),
+    )
+
+    assert github_ruleset._gh_rules("msft.ghe.com/org/repo") == {}
+    assert calls == [[
+        "gh",
+        "api",
+        "--hostname",
+        "msft.ghe.com",
+        "repos/org/repo/rules/branches/main",
+    ]]
+
+
+@pytest.mark.unit
+def test_github_ruleset_collect_degrades_to_zero_without_repositories(monkeypatch):
+    monkeypatch.setattr(github_ruleset, "GITHUB_CI_REPOS", ())
+    monkeypatch.setattr(
+        github_ruleset,
+        "write_raw_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("empty config must not write a snapshot"),
+    )
+
+    assert github_ruleset.collect() == 0
+
+
+@pytest.mark.unit
+def test_ruleset_repo_path_uses_local_scan_roots_and_last_segment(monkeypatch):
+    repo_path = Path(__file__).parents[2]
+    root = repo_path.parent
+    monkeypatch.setattr(github_ruleset, "HOME", Path("/nonexistent"))
+    monkeypatch.setattr(github_ruleset, "LOCAL_GIT_SCAN_ROOTS", (root,))
+
+    assert github_ruleset._repo_path(f"msft.ghe.com/org/{repo_path.name}") == repo_path
+
+
 @pytest.mark.unit
 def test_github_ci_normalize_separates_run_and_job(monkeypatch):
     raw = [

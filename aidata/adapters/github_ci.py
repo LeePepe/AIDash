@@ -26,12 +26,20 @@ _EVIDENCE_PATHS = (
 )
 
 
-def _gh_api(path: str) -> Any:
+def _gh_api(repo: str, suffix: str) -> Any:
     if not shutil.which("gh"):
+        return None
+    parts = repo.split("/")
+    if len(parts) == 3:
+        host, owner, name = parts
+        args = ["gh", "api", "--hostname", host, f"repos/{owner}/{name}/{suffix}"]
+    elif len(parts) == 2:
+        args = ["gh", "api", f"repos/{repo}/{suffix}"]
+    else:
         return None
     try:
         proc = subprocess.run(
-            ["gh", "api", path], capture_output=True, text=True,
+            args, capture_output=True, text=True,
             timeout=_TIMEOUT_S, check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -139,7 +147,7 @@ def collect() -> int:
     records: list[dict[str, Any]] = []
     live_run_ids: set[int] = set()
     for repo in GITHUB_CI_REPOS:
-        payload = _gh_api(f"repos/{repo}/actions/runs?per_page=100")
+        payload = _gh_api(repo, "actions/runs?per_page=100")
         runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
         for run in runs:
             if not isinstance(run, dict) or run.get("id") is None:
@@ -172,7 +180,7 @@ def collect() -> int:
             )
             if not should_sample:
                 continue
-            jobs = _gh_api(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")
+            jobs = _gh_api(repo, f"actions/runs/{run_id}/jobs?per_page=100")
             for job in (jobs or {}).get("jobs", []) if isinstance(jobs, dict) else []:
                 if not isinstance(job, dict) or job.get("id") is None:
                     continue

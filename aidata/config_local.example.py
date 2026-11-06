@@ -53,15 +53,23 @@ GITHUB_PR_REPOS = (
     "owner/repo",
 )
 
+# GitHub repositories whose Actions runs, governance, and releases feed the
+# digest. Both repository lists accept "owner/repo" for github.com or
+# "host/owner/repo" for GitHub Enterprise, for example
+# "msft.ghe.com/org/repo". Leave empty to disable the source.
+GITHUB_CI_REPOS = (
+    "owner/repo",
+)
+
 # ---------------------------------------------------------------------------
 # Optional path overrides — config.py's defaults are already HOME-relative and
 # portable, so most people never need these. Uncomment only if your layout
 # differs. Every one of these degrades to "skip this source" when absent
 # (ADR-23), so a wrong path never crashes the digest.
 # ---------------------------------------------------------------------------
-# from pathlib import Path
-# import os
-# HOME = Path(os.path.expanduser("~"))
+from pathlib import Path
+import os
+HOME = Path(os.path.expanduser("~"))
 #
 # # Team Workflow Audit bundle import root for the explicit manual source.
 # # Leave blank to keep the source disabled; a non-empty directory allows the
@@ -69,9 +77,11 @@ GITHUB_PR_REPOS = (
 # TEAM_AUDIT_IMPORT_ROOT = ""
 #
 # # Roots walked for `.git` repos to aggregate your own commit activity.
-# # Keep this narrow — walking all of ~ is slow. Author email is read live from
-# # `git config --global user.email`, never configured here.
-# LOCAL_GIT_SCAN_ROOTS = (HOME / "Development",)
+# # Keep this scoped to the project folders you want; the tracked default scans
+# # all of ~/Development only when this override is omitted.
+LOCAL_GIT_SCAN_ROOTS = (
+    HOME / "Development" / "AIDash",
+)
 #
 # # Curated watchlist folder for the GitHub tool-radar source (github_repo):
 # # one Markdown note per tool, each carrying a github.com/owner/repo URL.
