@@ -144,6 +144,8 @@ def _evidence_runs() -> list[dict[str, Any]]:
 
 
 def collect() -> int:
+    if not GITHUB_CI_REPOS:
+        return 0
     records: list[dict[str, Any]] = []
     live_run_ids: set[int] = set()
     for repo in GITHUB_CI_REPOS:

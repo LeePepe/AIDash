@@ -116,6 +116,9 @@ def collect() -> int:
     repos: list[dict[str, Any]] = []
     gates: list[dict[str, Any]] = []
     for repo in GITHUB_CI_REPOS:
+        repo_parts = repo.split("/")
+        if len(repo_parts) not in {2, 3}:
+            continue
         path = _repo_path(repo)
         workflows = sorted(path.glob(".github/workflows/*")) if path else []
         rules = _gh_rules(repo)
@@ -147,7 +150,6 @@ def collect() -> int:
                 ),
                 "timeout_minutes": int(timeout_raw) if timeout_raw and timeout_raw.isdigit() else None,
             })
-        repo_parts = repo.split("/")
         owner, repo_name = repo_parts[-2:]
         repos.append({
             "repo_key": repo,

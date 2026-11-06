@@ -12,6 +12,9 @@ sources below simply collect nothing (ADR-23 degrade-not-crash), so the digest
 still builds on a fresh machine.
 """
 
+import os
+from pathlib import Path
+
 # Product telemetry Blob reader. Keep both empty unless configuring the local,
 # query-free HTTPS container and single allow-listed VoxPocket prefix.
 PRODUCT_BLOB_CONTAINER_URL = ""
@@ -67,8 +70,6 @@ GITHUB_CI_REPOS = (
 # differs. Every one of these degrades to "skip this source" when absent
 # (ADR-23), so a wrong path never crashes the digest.
 # ---------------------------------------------------------------------------
-from pathlib import Path
-import os
 HOME = Path(os.path.expanduser("~"))
 #
 # # Team Workflow Audit bundle import root for the explicit manual source.

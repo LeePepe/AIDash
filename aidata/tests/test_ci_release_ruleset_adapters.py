@@ -44,6 +44,11 @@ def test_github_ci_collect_degrades_to_zero_without_repositories(monkeypatch):
     monkeypatch.setattr(github_ci, "GITHUB_CI_REPOS", ())
     monkeypatch.setattr(
         github_ci,
+        "_evidence_runs",
+        lambda: pytest.fail("empty config must not load evidence"),
+    )
+    monkeypatch.setattr(
+        github_ci,
         "write_raw_snapshot",
         lambda *_args, **_kwargs: pytest.fail("empty config must not write a snapshot"),
     )
@@ -78,6 +83,22 @@ def test_github_ruleset_collect_degrades_to_zero_without_repositories(monkeypatc
         github_ruleset,
         "write_raw_snapshot",
         lambda *_args, **_kwargs: pytest.fail("empty config must not write a snapshot"),
+    )
+
+    assert github_ruleset.collect() == 0
+
+
+@pytest.mark.unit
+def test_github_ruleset_collect_skips_invalid_repository_entries(monkeypatch):
+    monkeypatch.setattr(
+        github_ruleset,
+        "GITHUB_CI_REPOS",
+        ("owner/repo/extra/segment",),
+    )
+    monkeypatch.setattr(
+        github_ruleset,
+        "write_raw_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("invalid config must be skipped"),
     )
 
     assert github_ruleset.collect() == 0
