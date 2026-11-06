@@ -11,7 +11,7 @@ import AppKit
 @MainActor
 @Suite("Main page snapshots")
 struct SnapshotRenderTests {
-    @Test("exports four states plus max-density in light and dark")
+    @Test("exports four states for the two-container page in light and dark")
     func exportsStateMatrix() throws {
         #if canImport(AppKit)
         let customDir = ProcessInfo.processInfo.environment["AIDASH_SNAPSHOT_DIR"]
@@ -39,17 +39,6 @@ struct SnapshotRenderTests {
                        archiveDates: ["2026-11-01", "2026-11-02"],
                        hiddenCardIds: name == "populated" ? ["metric-b"] : [])
         }
-        try render(
-            state: .populated(
-                date: "2026-11-02", containers: Self.maxDensityContainers,
-                isFallback: false, publishedAt: Date(timeIntervalSinceNow: -120)
-            ),
-            name: "max-density",
-            width: 1200,
-            padding: 24,
-            output: output,
-            archiveDates: ["2026-11-01", "2026-11-02"]
-        )
         #else
         Issue.record("Snapshots require AppKit's ImageRenderer on macOS.")
         #endif
@@ -96,80 +85,23 @@ struct SnapshotRenderTests {
 
     private static var sampleContainers: [ContainerModel] {
         let overview = ContainerModel(
-            id: "overview", title: "运行状态与交付信号", subtitle: "今日 · 多工作区",
-            order: 0, layout: .grid, style: .accent
+            id: "overview", title: "总览", subtitle: nil,
+            order: 10, layout: .grid, style: .neutral
         )
         overview.cards = [
-            card("metric-a", .metric, #"{"items":[{"label":"已合并 PR","value":1284,"trend":"up","series":[820,940,1100,1180,1284],"higherIsBetter":true,"context":"本周"}]}"#),
-            card("metric-b", .metric, #"{"items":[{"label":"构建时间","value":124,"unit":"s","trend":"down","ratio":0.76,"higherIsBetter":false,"context":"CI 中位数"}]}"#),
-            card("todos", .todoList, #"{"items":[{"title":"回复性能复核","priority":"high"},{"title":"归档分支","priority":"low"}]}"#),
+            card("metric-a", .metric, #"{"items":[{"label":"成本","value":1013.79,"unit":"$","trend":"down","higherIsBetter":false,"series":[2180.19,1500.4,1013.79]}]}"#),
+            card("metric-b", .metric, #"{"items":[{"label":"请求数","value":1284,"trend":"up","higherIsBetter":true,"series":[820,940,1284]}]}"#),
+            card("metric-c", .metric, #"{"items":[{"label":"会话数","value":341,"trend":"up","higherIsBetter":true,"series":[220,290,341]}]}"#),
+            card("digest", .digest, #"{"title":"今日摘要","body":"十二个 PR 已合并，构建时间持续下降。今日优先完成性能复核。"}"#, style: .accent),
         ]
-        let evidence = ContainerModel(
-            id: "evidence", title: "本日证据与待处理事项", subtitle: "Agent authored briefing",
-            order: 1, layout: .grid, style: .neutral
+        let plan = ContainerModel(
+            id: "plan", title: "今日规划", subtitle: nil,
+            order: 30, layout: .list, style: .neutral
         )
-        evidence.cards = [
-            card("digest", .digest, #"{"title":"系统保持稳定","subtitle":"过去 24 小时","body":"十二个 PR 已合并，构建时间持续下降。","sections":[{"heading":"下一步","paragraphs":["完成性能复核。"]}]}"#, style: .accent),
-            card("agent-summary", .agentSummary, AgentSummaryPayload(
-                agentName: "bot_tl",
-                completed: [.init(title: "完成主线复核"), .init(title: "发布日报")],
-                stats: [.init(label: "PRs", value: 12), .init(label: "小时", value: 4.5)]
-            )),
-            card("header-relationships", .sectionHeader, SectionHeaderPayload(
-                title: "证据分组", subtitle: "关系与趋势"
-            )),
-            card("relationship-slope", .relationship, RelationshipPayload(
-                title: "交付成本变化",
-                visualization: .slope,
-                xAxis: .init(label: "之前", unit: "min"),
-                yAxis: .init(label: "之后", unit: "min"),
-                slopes: [.init(label: "AIDash", before: 21, after: 18)],
-                sampleSize: 12,
-                timeWindow: "7d",
-                metricDefinition: "Observed cycle time",
-                summary: "Observed cycle time declined."
-            )),
-            card("relationship-scatter", .relationship, RelationshipPayload(
-                title: "投入与交付",
-                visualization: .scatter,
-                xAxis: .init(label: "投入", unit: "h"),
-                yAxis: .init(label: "交付", unit: "PR"),
-                points: [
-                    .init(label: "A", x: 2, y: 3),
-                    .init(label: "B", x: 4, y: 6),
-                ],
-                sampleSize: 8,
-                timeWindow: "7d",
-                metricDefinition: "Observed work and delivery",
-                summary: "Observed association only."
-            ))
+        plan.cards = [
+            card("todos", .todoList, #"{"title":"近期行动","items":[{"title":"回复性能复核","priority":"high","ref":"PR #4521"},{"title":"归档分支","priority":"medium","category":"工程"},{"title":"更新日报","priority":"low"}]}"#)
         ]
-        return [overview, evidence]
-    }
-
-    private static var maxDensityContainers: [ContainerModel] {
-        let container = ContainerModel(
-            id: "max-density",
-            title: "远程代理运行状态（最近一次同步失败，等待重试）",
-            subtitle: "最大密度验证",
-            order: 0,
-            layout: .grid,
-            style: .warning
-        )
-        container.cards = [
-            card("dense-metric", .metric, #"{"items":[{"label":"有效上下文容量","value":1681,"unit":"MB","trend":"up","series":[820,940,1100,1180,1681],"higherIsBetter":true},{"label":"任务完成率","value":99.9,"unit":"%","ratio":0.999,"higherIsBetter":true}]}"#),
-            card("dense-todo", .todoList, #"{"title":"待处理事项","items":[{"title":"检查远程代理运行状态（最近一次同步失败，等待重试）","priority":"high","waitingOn":"权限确认"},{"title":"归档本周所有构建证据","priority":"medium","ageText":"2h"}]}"#),
-            card("dense-trending", .trending, #"{"topic":"值得现在看","items":[{"title":"owner/long-repository-name-for-density","url":"https://example.com/repo","score":93459,"delta":412,"category":"AI-agent","reason":"长标题与长解释必须保持可读，不与状态胶囊争抢空间"}]}"#),
-            card("dense-stacked", .stackedBar, StackedBarPayload(
-                segments: [
-                    .init(label: "成功", value: 70, semantic: "success"),
-                    .init(label: "工具调用", value: 25),
-                    .init(label: "达到上限", value: 5, semantic: "warning"),
-                ],
-                title: "会话质量"
-            )),
-        ]
-        return [container]
+        return [overview, plan]
     }
 
     private static func card(_ id: String, _ type: CardType, _ json: String,

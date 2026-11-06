@@ -103,6 +103,20 @@ struct TodoListCardViewTests {
         #expect(source.contains("CardTypeBadge(type: .todoList)"), "TodoListCardView must render the shared 32×32 type badge")
     }
 
+    @Test("simplified plan renders at most three stable priority-sorted rows")
+    func simplifiedPlanRows() throws {
+        let source = try loadRendererSource(named: "TodoListCardView")
+        #expect(source.contains("prefix(3)"))
+        #expect(source.contains("payload.items.enumerated()"))
+        #expect(source.contains("$0.offset < $1.offset"))
+        #expect(!source.contains("payload.items.count"))
+        #expect(!source.contains("waitingOn"))
+        #expect(!source.contains("ageText"))
+        #expect(!source.contains("commandHint"))
+        #expect(!source.contains("showDue"))
+        #expect(!source.contains("Divider("))
+    }
+
     // MARK: - Spec 005 D3/D4: TodoItemRow completion toggle
 
     @Test("body materializes with onToggleDone + doneItemRefs injected, for done and not-done items alike")

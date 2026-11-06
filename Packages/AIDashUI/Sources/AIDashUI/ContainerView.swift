@@ -2,36 +2,9 @@ import SwiftUI
 import AIDashCore
 import DesignKit
 
-private struct ContainerCountBadge: View {
-    let count: Int
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        ZStack {
-            Capsule()
-                .foregroundStyle(theme.neutrals.inner)
-            Text(String(format: "%02d", count))
-                .font(AIDashTypography.mastheadStatus)
-                .foregroundStyle(theme.neutrals.text2)
-                .padding(.horizontal, AIDashSpace.s8)
-                .padding(.vertical, AIDashSpace.s4)
-        }
-        .fixedSize()
-        .accessibilityLabel(
-            Text(
-                "container.card_count \(count)",
-                tableName: "Localizable",
-                bundle: .module,
-                comment: "Accessibility label for a container's card count."
-            )
-        )
-    }
-}
-
 @MainActor
 public struct ContainerView: View {
     let container: ContainerModel
-    @Environment(\.theme) private var theme
     @Environment(\.hiddenCardIds) private var hiddenCardIds
 
     public init(container: ContainerModel) {
@@ -86,28 +59,20 @@ public struct ContainerView: View {
     @ViewBuilder
     private var header: some View {
         VStack(alignment: .leading, spacing: AIDashSpace.s4) {
-            HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s8) {
-                VStack(alignment: .leading, spacing: AIDashSpace.s4) {
-                    Text(container.title)
-                        .font(AIDashTypography.overview)
-                        .tracking(AIDashTypography.sectionTracking)
-                        .foregroundStyle(AIDashTypography.sectionColor)
-                        .textCase(.uppercase)
-                        .containerStyleBar(titleBarStyle)
-                    if let subtitle = container.subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(AIDashTypography.section)
-                            .tracking(AIDashTypography.sectionTracking)
-                            .foregroundStyle(AIDashTypography.sectionColor)
-                    }
-                }
-                Spacer(minLength: AIDashSpace.s8)
-                ContainerCountBadge(count: effectiveCardCount)
+            Text(container.title)
+                .font(AIDashTypography.overview)
+                .tracking(AIDashTypography.sectionTracking)
+                .foregroundStyle(AIDashTypography.sectionColor)
+                .textCase(.uppercase)
+                .containerStyleBar(titleBarStyle)
+            if let subtitle = container.subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(AIDashTypography.section)
+                    .tracking(AIDashTypography.sectionTracking)
+                    .foregroundStyle(AIDashTypography.sectionColor)
             }
-            Divider()
-                .overlay(theme.neutrals.border)
         }
-        .frame(minHeight: 44, maxHeight: 44, alignment: .bottom)
+        .frame(minHeight: AIDashSpacing.controlHitTarget, alignment: .bottom)
     }
 
     /// The style the title-side bar carries. In `.bare` mode the lone card has

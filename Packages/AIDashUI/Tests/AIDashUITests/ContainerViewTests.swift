@@ -159,9 +159,18 @@ struct ContainerViewTests {
     @Test("ContainerView header-to-first-card spacing uses AIDashSpacing token")
     func headerToFirstCardSpacingUsesToken() throws {
         let source = try Self.containerViewSource()
-
         #expect(source.contains("AIDashSpacing.containerHeaderToFirstCard"),
                 "Header-to-card spacing must come from the 12pt token, not a magic number")
+    }
+
+    @Test("ContainerView uses a calm title row without a count capsule or divider")
+    func calmTitleRowHasNoLegacyChrome() throws {
+        let source = try Self.containerViewSource()
+        #expect(!source.contains("ContainerCountBadge"))
+        #expect(!source.contains("card_count"))
+        #expect(!source.contains("Divider("))
+        #expect(source.contains("AIDashSpacing.controlHitTarget"))
+        #expect(source.contains("containerStyleBar"))
     }
 
     @Test("hidden-card recovery uses visible cards and an explicit all-hidden state")
@@ -170,7 +179,6 @@ struct ContainerViewTests {
         #expect(source.contains("return visibleCards.first?.style"))
         #expect(source.contains("visibleCards.isEmpty && !sortedCards.isEmpty"))
         #expect(source.contains("CardEmptyState("))
-        #expect(source.contains(".fixedSize()"))
     }
 
     // MARK: - Source helper

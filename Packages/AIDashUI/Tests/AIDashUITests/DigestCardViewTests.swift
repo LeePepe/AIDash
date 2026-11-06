@@ -67,6 +67,22 @@ struct DigestCardViewTests {
         #expect(view.payload.sections == nil)
     }
 
+    @Test("renders populated sections after the body for wide and hero digests")
+    func rendersPopulatedSections() throws {
+        for size in [CardSize.wide, .hero] {
+            let view = DigestCardView(payload: samplePayload, size: size, style: .neutral)
+            _ = view.body
+            #expect(view.payload.sections?.isEmpty == false)
+        }
+
+        let source = try Self.digestRendererSource()
+        #expect(source.contains("sectionsContent"))
+        #expect(source.contains("payload.sections"))
+        #expect(source.contains("size == .wide || size == .hero"))
+        #expect(source.contains("ForEach(Array(sections.enumerated())"))
+        #expect(source.contains("bodyText(paragraph)"))
+    }
+
     @Test("renders very long body across hero layout")
     func rendersLongBody() {
         let longBody = String(repeating: "Lorem ipsum dolor sit amet. ", count: 50)
@@ -77,6 +93,15 @@ struct DigestCardViewTests {
         let view = DigestCardView(payload: payload, size: .hero, style: .neutral)
         _ = view.body
         #expect(view.payload.body.count > 200)
+    }
+
+    @Test("renders one section-free body without numeric ellipsis or line truncation")
+    func rendersSectionFreeBody() throws {
+        let source = try Self.digestRendererSource()
+        #expect(source.contains("bodyText(payload.body)"))
+        #expect(!source.contains("truncatedBody"))
+        #expect(!source.contains("\\u{2026}"))
+        #expect(!source.contains("lineLimit"))
     }
 
     // MARK: - Token compliance contract
@@ -95,5 +120,19 @@ struct DigestCardViewTests {
         #expect(recipe.secondary == .body)
         #expect(recipe.secondaryLineSpacing == 4)
         #expect(recipe.secondaryColor == .primary)
+    }
+
+    private static func digestRendererSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let packageRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = packageRoot
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("AIDashUI")
+            .appendingPathComponent("CardView")
+            .appendingPathComponent("DigestCardView.swift")
+        return try String(contentsOf: sourceURL, encoding: .utf8)
     }
 }

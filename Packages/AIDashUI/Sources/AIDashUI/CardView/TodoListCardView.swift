@@ -16,106 +16,32 @@ public struct TodoListCardView: View {
     public var body: some View {
         HStack(alignment: .top, spacing: 12) {
             CardTypeBadge(type: .todoList)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: AIDashSpace.s12) {
                 header
-                Divider()
                 content
             }
-            .frame(maxWidth: 560, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
     }
 
-    // MARK: - Checklist header (title + count) — gives the card a distinct
-    // "to-do list" identity vs the other prose cards.
-
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s8) {
             Text(payload.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? payload.title! : Self.titleLabel)
                 .font(AIDashTypography.section)
                 .tracking(AIDashTypography.sectionTracking)
                 .foregroundStyle(AIDashTypography.sectionColor)
                 .textCase(.uppercase)
-            Text("\(payload.items.count)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: true, vertical: false)
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Size-driven content selection (geometry/density only)
-
     @ViewBuilder
     private var content: some View {
-        switch size {
-        case .small:
-            smallContent
-        case .medium:
-            mediumContent
-        case .wide:
-            wideContent
-        case .hero:
-            heroContent
-        }
-    }
-
-    // MARK: - Small: highest-priority item only
-
-    @ViewBuilder
-    private var smallContent: some View {
-        if let item = itemsSortedByPriority.first {
-            TodoItemRow(item: item, showDue: false)
-        }
-    }
-
-    // MARK: - Medium: top 3 by priority
-
-    @ViewBuilder
-    private var mediumContent: some View {
-        let top3 = Array(itemsSortedByPriority.prefix(3))
-        ForEach(Array(top3.enumerated()), id: \.offset) { _, item in
-            TodoItemRow(item: item, showDue: false)
-        }
-        if payload.items.count > 3 {
-            Text("+\(payload.items.count - 3) more")
-                .font(Self.recipe.secondary)
-                .foregroundStyle(Self.recipe.secondaryColor)
-        }
-    }
-
-    // MARK: - Wide: all items (payload order preserved)
-
-    @ViewBuilder
-    private var wideContent: some View {
-        ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
-            TodoItemRow(item: item, showDue: true)
-        }
-    }
-
-    // MARK: - Hero: all items with expanded due-date / ref panel (payload order preserved)
-
-    @ViewBuilder
-    private var heroContent: some View {
-        ForEach(Array(payload.items.enumerated()), id: \.offset) { _, item in
-            VStack(alignment: .leading, spacing: 4) {
-                TodoItemRow(item: item, showDue: true)
-                if let ref = item.ref {
-                    Text(ref)
-                        .font(Self.recipe.secondary)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                if let commandHint = item.commandHint {
-                    Text(commandHint)
-                        .font(Self.recipe.secondary)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .accessibilityElement(children: .combine)
+        ForEach(Array(itemsSortedByPriority.prefix(3).enumerated()), id: \.offset) { _, item in
+            TodoItemRow(item: item)
         }
     }
 
@@ -131,9 +57,13 @@ public struct TodoListCardView: View {
     )
 
     private var itemsSortedByPriority: [TodoListPayload.Item] {
-        payload.items.sorted { lhs, rhs in
-            priorityWeight(lhs.priority) > priorityWeight(rhs.priority)
-        }
+        payload.items.enumerated()
+            .sorted {
+                let leftWeight = priorityWeight($0.element.priority)
+                let rightWeight = priorityWeight($1.element.priority)
+                return leftWeight == rightWeight ? $0.offset < $1.offset : leftWeight > rightWeight
+            }
+            .map(\.element)
     }
 
     private func priorityWeight(_ priority: TodoListPayload.Item.Priority?) -> Int {
@@ -154,7 +84,6 @@ private struct TodoItemRow: View {
     @Environment(\.doneItemRefs) private var doneItemRefs
     @Environment(\.currentCardId) private var currentCardId
     let item: TodoListPayload.Item
-    let showDue: Bool
 
     /// Optimistic toggle: the persisted done/undone event only flows back
     /// through `doneItemRefs` on the next SwiftData refresh, so the tap flips
@@ -171,38 +100,34 @@ private struct TodoItemRow: View {
         // The done toggle sits outside the combined accessibility element so
         // VoiceOver keeps it as its own actionable control (mirrors
         // `TrendingItemRow`'s star button in TrendingCardView.swift).
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: AIDashSpace.s8) {
             doneToggle
-            HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: AIDashSpace.s4) {
                 Text(item.title)
                     .font(TodoListCardView.recipe.primary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .strikethrough(isDone)
                     .foregroundStyle(isDone ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
                 priorityPill
-                metadataLine
-                Spacer(minLength: 8)
-                if showDue, let due = item.due {
-                    Text(due, style: .date)
-                        .font(TodoListCardView.recipe.secondary)
-                        .foregroundStyle(.tertiary)
-                }
-
+                referenceLine
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
         }
     }
 
     @ViewBuilder
-    private var metadataLine: some View {
-        if item.waitingOn != nil || item.ageText != nil {
-            HStack(spacing: 4) {
-                if let waitingOn = item.waitingOn { Text(waitingOn) }
-                if let ageText = item.ageText { Text(ageText) }
-            }
-            .font(TodoListCardView.recipe.secondary)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+    private var referenceLine: some View {
+        if let ref = item.ref, !ref.isEmpty {
+            Text(ref)
+                .font(TodoListCardView.recipe.secondary)
+                .foregroundStyle(TodoListCardView.recipe.secondaryColor)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let category = item.category, !category.isEmpty {
+            Text(category)
+                .font(TodoListCardView.recipe.secondary)
+                .foregroundStyle(TodoListCardView.recipe.secondaryColor)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -215,7 +140,7 @@ private struct TodoItemRow: View {
     private var doneToggle: some View {
         Button {
             let target = !isDone
-            withAnimation(.snappy(duration: 0.2)) { optimisticDone = target }
+            withAnimation(.snappy(duration: 0.12)) { optimisticDone = target }
             onToggleDone?(currentCardId, itemRef, target)
         } label: {
             Image(systemName: isDone ? "checkmark.circle.fill" : "circle")

@@ -19,9 +19,9 @@ public struct MetricCardView: View {
         // Collapse the card to a compact height when empty so the "no data"
         // caption reads as intentional, not a broken tall box (review P1).
         let emptyHeight: CGFloat? = isEmpty ? AIDashSize.emptyMinHeight : nil
-        return HStack(alignment: isEmpty ? .center : .top, spacing: AIDashSpace.s12) {
+        return HStack(alignment: isEmpty ? .center : .top, spacing: AIDashSpace.s8) {
             CardTypeBadge(type: .metric)
-            VStack(alignment: .leading, spacing: AIDashSpace.s8) {
+            VStack(alignment: .leading, spacing: AIDashSpace.s12) {
                 content
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -130,7 +130,7 @@ public struct MetricCardView: View {
     private func kpiCell(_ item: MetricPayload.Item) -> some View {
         let recipe = AIDashTypography.detail(for: .metric)
         let viz = vizKind(item)
-        return VStack(alignment: .leading, spacing: AIDashSpace.s12) {
+        return VStack(alignment: .leading, spacing: AIDashSpace.s8) {
             VStack(alignment: .leading, spacing: 1) {
                 // Label and context are COPY — a reader reads them to know what
                 // the number is. Both resolve through DesignKit's `TextRole`
