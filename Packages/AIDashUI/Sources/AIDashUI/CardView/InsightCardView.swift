@@ -44,19 +44,13 @@ public struct InsightCardView: View {
 
         switch size {
         case .small:
-            // MY-1305: `.small` must still render the body — the earlier
-            // `EmptyView()` branch structurally dropped the body when a
-            // wide-authored short-body insight (e.g. the "数据源健康" health
-            // card) was downgraded by `EffectiveCardSize.insightSize`, leaving
-            // only the title on screen. Route through `leadStatement` with the
-            // truncated body so `.small` stays compact.
-            leadStatement(truncatedBody)
+            leadStatement(payload.body)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
 
         case .medium:
-            leadStatement(truncatedBody)
+            leadStatement(payload.body)
             if let citations = payload.citations, !citations.isEmpty {
                 collapsedCitations(count: citations.count)
             }
@@ -78,12 +72,11 @@ public struct InsightCardView: View {
     /// The body text that lands inside `leadStatement` for the current size.
     /// Exposed for tests so `.small` regressions (empty body) are directly
     /// observable without a snapshot harness. Mirrors the switch above:
-    /// `.small` / `.medium` use `truncatedBody`; `.wide` / `.hero` use full body.
+    /// All tiers preserve the authored body; the lead statement is a dedicated
+    /// tier-three row and must not hide prose behind an ellipsis.
     var renderedBody: String {
         switch size {
-        case .small, .medium:
-            return truncatedBody
-        case .wide, .hero:
+        case .small, .medium, .wide, .hero:
             return payload.body
         }
     }
@@ -107,11 +100,7 @@ public struct InsightCardView: View {
     }
 
     var truncatedBody: String {
-        if payload.body.count <= 150 {
-            return payload.body
-        }
-        let prefix = payload.body.prefix(150)
-        return String(prefix) + "\u{2026}"
+        payload.body
     }
 
     @ViewBuilder

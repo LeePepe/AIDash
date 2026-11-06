@@ -79,15 +79,14 @@ struct InsightCardViewTests {
         #expect(safe[0].label == "Good HTTPS")
     }
 
-    @Test("truncatedBody truncates at 150 chars with ellipsis")
-    func truncatesLongBody() {
+    @Test("tier-three body preserves authored prose without ellipsis")
+    func preservesLongBody() {
         let longBody = String(repeating: "A", count: 200)
         let payload = InsightPayload(title: "T", body: longBody)
         let view = InsightCardView(payload: payload, size: .medium, style: .neutral)
 
-        let truncated = view.truncatedBody
-        #expect(truncated.count == 151) // 150 chars + ellipsis character
-        #expect(truncated.hasSuffix("\u{2026}"))
+        #expect(view.truncatedBody == longBody)
+        #expect(!view.truncatedBody.contains("\u{2026}"))
     }
 
     @Test("truncatedBody does not truncate short body")
@@ -154,20 +153,22 @@ struct InsightCardViewTests {
         #expect(view.renderedBody == payload.body)
     }
 
-    @Test("small size truncates a long body (uses truncatedBody)")
-    func smallSizeTruncatesLongBody() {
+    @Test("small size preserves a long body for the tier-three dedicated row")
+    func smallSizePreservesLongBody() {
         let longBody = String(repeating: "A", count: 200)
         let payload = InsightPayload(title: "T", body: longBody)
         let view = InsightCardView(payload: payload, size: .small, style: .neutral)
 
-        #expect(view.renderedBody == view.truncatedBody)
-        #expect(view.renderedBody.hasSuffix("\u{2026}"))
+        #expect(view.renderedBody == longBody)
+        #expect(!view.renderedBody.contains("\u{2026}"))
     }
 
-    @Test("medium size renders the truncated body")
-    func mediumSizeRendersTruncatedBody() {
-        let view = InsightCardView(payload: samplePayload, size: .medium, style: .neutral)
-        #expect(view.renderedBody == view.truncatedBody)
+    @Test("medium size preserves the body for the tier-three dedicated row")
+    func mediumSizeRendersFullBody() {
+        let longBody = String(repeating: "A", count: 200)
+        let payload = InsightPayload(title: "T", body: longBody)
+        let view = InsightCardView(payload: payload, size: .medium, style: .neutral)
+        #expect(view.renderedBody == longBody)
     }
 
     @Test("wide size renders the full body (not truncated)")

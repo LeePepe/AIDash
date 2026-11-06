@@ -199,6 +199,10 @@ private struct BarListRow: View {
             Text(valueText)
                 .font(BarListCardView.recipe.secondary)
                 .foregroundStyle(theme.neutrals.text1)
+                .fixedSize(horizontal: true, vertical: false)
+            if let semantic {
+                StatusPill(semantic.rawValue.capitalized, tone: semantic.pillTone)
+            }
         }
         // Only the LABEL LINE is inset: the value read-out is what the star
         // would collide with. The bar below keeps the full track width, so the
@@ -276,6 +280,14 @@ enum SemanticTone: String {
         case .success: return "checkmark.circle.fill"
         case .warning: return "exclamationmark.triangle.fill"
         case .danger:  return "xmark.octagon.fill"
+        }
+    }
+
+    var pillTone: PillTone {
+        switch self {
+        case .success: return .success
+        case .warning: return .warning
+        case .danger: return .danger
         }
     }
 }
