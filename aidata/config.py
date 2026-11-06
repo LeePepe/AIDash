@@ -192,20 +192,7 @@ GITHUB_PR_REPOS: tuple[str, ...] = ()
 # Repositories sampled for Actions runs, governance, and release delivery.
 # Keep the tracked default public and identity-free; a local override may
 # replace this tuple with the operator's current monitoring set.
-GITHUB_CI_REPOS: tuple[str, ...] = (
-    "LeePepe/VitalStride",
-    "LeePepe/VoxPocket",
-    "LeePepe/AIDash",
-    "LeePepe/demoUI",
-    "LeePepe/shared-ci",
-    "LeePepe/shared-design-system",
-    "LeePepe/shared-design-tokens",
-    "LeePepe/shared-telemetry",
-    "LeePepe/user-skills",
-    "LeePepe/agent-skills",
-    "LeePepe/leepepe.github.io",
-    "LeePepe/raven",
-)
+GITHUB_CI_REPOS: tuple[str, ...] = ()
 
 # ---------------------------------------------------------------------------
 # AIDash CLI (aidash_events source) — resolves the `aidash` binary the same way

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from cleanio import write_clean
-from config import GITHUB_CI_REPOS, HOME
+from config import GITHUB_CI_REPOS, HOME, LOCAL_GIT_SCAN_ROOTS
 from rawio import read_raw, write_raw_snapshot
 
 SOURCE = "github_ruleset"
@@ -19,9 +19,21 @@ SOURCE = "github_ruleset"
 def _gh_rules(repo: str, default_branch: str = "main") -> Any:
     if not shutil.which("gh"):
         return None
+    parts = repo.split("/")
+    if len(parts) == 3:
+        host, owner, name = parts
+        rules_path = f"repos/{owner}/{name}/rules/branches/{default_branch}"
+        rulesets_path = f"repos/{owner}/{name}/rulesets"
+        prefix = ["gh", "api", "--hostname", host]
+    elif len(parts) == 2:
+        rules_path = f"repos/{repo}/rules/branches/{default_branch}"
+        rulesets_path = f"repos/{repo}/rulesets"
+        prefix = ["gh", "api"]
+    else:
+        return None
     try:
         proc = subprocess.run(
-            ["gh", "api", f"repos/{repo}/rules/branches/{default_branch}"], capture_output=True,
+            [*prefix, rules_path], capture_output=True,
             text=True, timeout=30, check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -29,7 +41,7 @@ def _gh_rules(repo: str, default_branch: str = "main") -> Any:
     if proc.returncode != 0:
         try:
             proc = subprocess.run(
-                ["gh", "api", f"repos/{repo}/rulesets"], capture_output=True,
+                [*prefix, rulesets_path], capture_output=True,
                 text=True, timeout=30, check=False,
             )
         except (OSError, subprocess.SubprocessError):
@@ -85,15 +97,31 @@ def _workflow_category(workflow: Path, text: str) -> str:
 
 
 def _repo_path(repo: str) -> Path | None:
-    name = repo.split("/", 1)[-1]
-    path = HOME / "Development" / name
-    return path if path.is_dir() else None
+    name = repo.rsplit("/", 1)[-1]
+    roots = (HOME / "Development", *LOCAL_GIT_SCAN_ROOTS)
+    seen: set[Path] = set()
+    for root in roots:
+        root = Path(root)
+        if root in seen:
+            continue
+        seen.add(root)
+        candidates = (root, root / name) if root.name == name else (root / name,)
+        for path in candidates:
+            if path.is_dir() and (
+                (path / ".git").exists()
+                or (path / ".github" / "workflows").is_dir()
+            ):
+                return path
+    return None
 
 
 def collect() -> int:
     repos: list[dict[str, Any]] = []
     gates: list[dict[str, Any]] = []
     for repo in GITHUB_CI_REPOS:
+        repo_parts = repo.split("/")
+        if len(repo_parts) not in {2, 3}:
+            continue
         path = _repo_path(repo)
         workflows = sorted(path.glob(".github/workflows/*")) if path else []
         rules = _gh_rules(repo)
@@ -125,11 +153,12 @@ def collect() -> int:
                 ),
                 "timeout_minutes": int(timeout_raw) if timeout_raw and timeout_raw.isdigit() else None,
             })
+        owner, repo_name = repo_parts[-2:]
         repos.append({
             "repo_key": repo,
-            "owner": repo.split("/", 1)[0],
-            "repo_name": repo.split("/", 1)[1],
-            "domain_group": "shared" if repo.split("/", 1)[1].startswith("shared-") else "product",
+            "owner": owner,
+            "repo_name": repo_name,
+            "domain_group": "shared" if repo_name.startswith("shared-") else "product",
             "local_main_path": str(path).replace(str(HOME), "~", 1) if path else None,
             "default_branch": "main",
             "head_sha": None,
