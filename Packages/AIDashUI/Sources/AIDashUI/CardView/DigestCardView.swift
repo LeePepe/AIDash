@@ -16,56 +16,18 @@ public struct DigestCardView: View {
         HStack(alignment: .top, spacing: 12) {
             CardTypeBadge(type: .digest)
             VStack(alignment: .leading, spacing: 8) {
-                content
+                titleText
+                subtitleText
+                bodyText(payload.body)
             }
-            .frame(maxWidth: contentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
     }
 
-    /// A full-row `wide` digest lets its section columns spread across the card;
-    /// smaller sizes keep a comfortable reading measure.
-    private var contentMaxWidth: CGFloat {
-        size == .wide ? 900 : 680
-    }
-
     private var recipe: AIDashTypography.DetailRecipe {
         AIDashTypography.detail(for: .digest)
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch size {
-        case .small:
-            titleText
-                .lineLimit(2)
-
-        case .medium:
-            titleText
-            subtitleText
-            bodyText(truncatedBody)
-
-        case .wide:
-            titleText
-            subtitleText
-            bodyText(payload.body)
-                .frame(maxWidth: 640, alignment: .leading)
-            if let sections = payload.sections, !sections.isEmpty {
-                sectionColumns(sections)
-            }
-
-        case .hero:
-            titleText
-            subtitleText
-            bodyText(payload.body)
-                .frame(maxWidth: 640, alignment: .leading)
-            if let sections = payload.sections {
-                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
-                    sectionView(section)
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -88,46 +50,6 @@ public struct DigestCardView: View {
             .foregroundStyle(recipe.secondaryColor)
             .lineSpacing(recipe.secondaryLineSpacing)
             .fixedSize(horizontal: false, vertical: true)
-    }
-
-    @ViewBuilder
-    private func sectionView(_ section: DigestPayload.Section) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(section.heading)
-                .font(recipe.primary)
-            ForEach(Array(section.paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                Text(paragraph)
-                    .font(recipe.secondary)
-                    .foregroundStyle(recipe.secondaryColor)
-                    .lineSpacing(recipe.secondaryLineSpacing)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    /// `wide` sections laid out in equal columns (with a hairline divider
-    /// between them) so a full-row digest fills its width symmetrically instead
-    /// of stranding one section on the left (design-review r4/r5).
-    @ViewBuilder
-    private func sectionColumns(_ sections: [DigestPayload.Section]) -> some View {
-        HStack(alignment: .top, spacing: 20) {
-            ForEach(Array(sections.prefix(3).enumerated()), id: \.offset) { index, section in
-                if index > 0 {
-                    Divider()
-                }
-                sectionView(section)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private var truncatedBody: String {
-        if payload.body.count <= 200 {
-            return payload.body
-        }
-        let prefix = payload.body.prefix(200)
-        return String(prefix) + "\u{2026}"
     }
 }
 
@@ -163,17 +85,7 @@ public struct DigestCardView: View {
     DigestCardView(
         payload: DigestPayload(
             title: "Tuesday at a glance",
-            body: "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention.",
-            sections: [
-                .init(heading: "What got shipped", paragraphs: [
-                    "Atlas merged 3 PRs overnight.",
-                    "The crash that was blocking v9 is fixed.",
-                ]),
-                .init(heading: "What's blocking today", paragraphs: [
-                    "Performance review feedback (due 5pm).",
-                    "Decision needed on Q3 priorities.",
-                ]),
-            ]
+            body: "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention."
         ),
         size: .wide,
         style: .success
@@ -186,17 +98,7 @@ public struct DigestCardView: View {
     DigestCardView(
         payload: DigestPayload(
             title: "Tuesday at a glance",
-            body: "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention, including the PROJ-301 crash that had been blocking the v9 release.",
-            sections: [
-                .init(heading: "What got shipped", paragraphs: [
-                    "Atlas merged 3 PRs overnight.",
-                    "The crash that was blocking v9 is fixed.",
-                ]),
-                .init(heading: "What's blocking today", paragraphs: [
-                    "Performance review feedback (due 5pm).",
-                    "Decision needed on Q3 priorities.",
-                ]),
-            ]
+            body: "Yesterday was a moderate-pace day. Multica handled three Atlas PRs without intervention, including the PROJ-301 crash that had been blocking the v9 release."
         ),
         size: .hero,
         style: .warning

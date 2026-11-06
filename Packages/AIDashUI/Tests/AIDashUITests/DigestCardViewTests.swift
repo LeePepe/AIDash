@@ -79,6 +79,17 @@ struct DigestCardViewTests {
         #expect(view.payload.body.count > 200)
     }
 
+    @Test("renders one section-free body without numeric ellipsis or line truncation")
+    func rendersSectionFreeBody() throws {
+        let source = try Self.digestRendererSource()
+        #expect(source.contains("bodyText(payload.body)"))
+        #expect(!source.contains("sectionView"))
+        #expect(!source.contains("sectionColumns"))
+        #expect(!source.contains("truncatedBody"))
+        #expect(!source.contains("\\u{2026}"))
+        #expect(!source.contains("lineLimit"))
+    }
+
     // MARK: - Token compliance contract
 
     @Test("declares CardType.digest so it carries the constitution badge + tint")
@@ -95,5 +106,19 @@ struct DigestCardViewTests {
         #expect(recipe.secondary == .body)
         #expect(recipe.secondaryLineSpacing == 4)
         #expect(recipe.secondaryColor == .primary)
+    }
+
+    private static func digestRendererSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let packageRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = packageRoot
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("AIDashUI")
+            .appendingPathComponent("CardView")
+            .appendingPathComponent("DigestCardView.swift")
+        return try String(contentsOf: sourceURL, encoding: .utf8)
     }
 }

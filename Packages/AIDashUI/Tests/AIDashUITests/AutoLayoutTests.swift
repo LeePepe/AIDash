@@ -110,18 +110,18 @@ struct AutoLayoutTests {
         #expect(rows[0].count == 4)
     }
 
-    @Test("a rich multi-section wide digest keeps its full-row span")
-    func richDigestKeepsSpan() {
+    @Test("a concise section-free digest keeps the authored compact span")
+    func conciseDigestKeepsCompactSpan() {
         let rich = CardModel(
-            id: "d", type: .digest, size: .wide, style: .neutral,
+            id: "d", type: .digest, size: .medium, style: .neutral,
             payloadJSON: encode(DigestPayload(
-                title: "T", body: String(repeating: "x", count: 500),
-                sections: [.init(heading: "a", paragraphs: ["p"]),
-                           .init(heading: "b", paragraphs: ["p"])]))
+                title: "T",
+                body: "A concise summary of the day."
+            ))
         )
         let span = AIDashSize.gridSpan(EffectiveCardSize.resolve(
             type: rich.type, authored: rich.size, payloadJSON: rich.payloadJSON))
-        #expect(span == AIDashSize.gridSpan(.wide)) // unchanged — content justifies wide
+        #expect(span == AIDashSize.gridSpan(.small))
     }
 
     @Test("row packing proposes one shared height to each sibling")

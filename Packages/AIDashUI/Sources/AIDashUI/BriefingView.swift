@@ -18,8 +18,6 @@ private enum BriefingViewCopy {
     static let cachedLabel = String(localized: "briefing.status.cached", defaultValue: "CACHED", bundle: .module)
     static let errorLabel = String(localized: "briefing.status.error", defaultValue: "ERROR", bundle: .module)
     static let emptyLabel = String(localized: "briefing.status.empty", defaultValue: "EMPTY", bundle: .module)
-    static let todayLabel = String(localized: "briefing.date.today", defaultValue: "TODAY", bundle: .module)
-    static let archiveLabel = String(localized: "briefing.date.archive", defaultValue: "ARCHIVE", bundle: .module)
     static let previousDateLabel = String(localized: "briefing.date.previous", defaultValue: "Previous briefing date", bundle: .module)
     static let nextDateLabel = String(localized: "briefing.date.next", defaultValue: "Next briefing date", bundle: .module)
 }
@@ -106,8 +104,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
             switch resolvedState {
             case let .populated(date, containers, isFallback, publishedAt):
                 let visibleContainers = filteredContainers(containers)
-                masthead(date: date, isFallback: isFallback, publishedAt: publishedAt,
-                         containerCount: visibleContainers.count, cardCount: visibleContainers.reduce(0) { $0 + $1.cards.count })
+                masthead(date: date, isFallback: isFallback, publishedAt: publishedAt)
                 sectionJumpRail(containers: containers, proxy: proxy)
                 if visibleContainers.isEmpty {
                     emptyContainersState
@@ -128,9 +125,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                 errorState
             case let .staleError(date, containers, publishedAt):
                 let visibleContainers = filteredContainers(containers)
-                masthead(date: date, isFallback: true, publishedAt: publishedAt,
-                         containerCount: visibleContainers.count,
-                         cardCount: visibleContainers.reduce(0) { $0 + $1.cards.count })
+                masthead(date: date, isFallback: true, publishedAt: publishedAt)
                 staleErrorBanner
                 ForEach(visibleContainers.sorted { $0.order < $1.order }) {
                     ContainerView(container: $0)
@@ -159,16 +154,13 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     }
 
     private var stateMasthead: some View {
-        masthead(date: Self.localTodayString(), isFallback: false, publishedAt: nil,
-                 containerCount: nil, cardCount: nil)
+        masthead(date: Self.localTodayString(), isFallback: false, publishedAt: nil)
     }
     @ViewBuilder
-    private func masthead(date: String, isFallback: Bool, publishedAt: Date?,
-                          containerCount: Int?, cardCount: Int?) -> some View {
+    private func masthead(date: String, isFallback: Bool, publishedAt: Date?) -> some View {
         let effectiveDate = displayedDate(fallback: date)
         VStack(alignment: .leading, spacing: 10) {
-            mastheadStatusLine(date: effectiveDate, isFallback: isFallback, publishedAt: publishedAt,
-                               containerCount: containerCount, cardCount: cardCount)
+            mastheadStatusLine(date: effectiveDate, isFallback: isFallback, publishedAt: publishedAt)
 
             if isFallback {
                 HStack(spacing: 8) {
@@ -244,43 +236,33 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     }
 
     @ViewBuilder
-    private func mastheadStatusLine(date: String, isFallback: Bool, publishedAt: Date?,
-                                    containerCount: Int?, cardCount: Int?) -> some View {
+    private func mastheadStatusLine(date: String, isFallback: Bool, publishedAt: Date?) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 mastheadIdentity
                 Spacer()
                 publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
-                if let containerCount, let cardCount {
-                    telemetryPill(containerCount: containerCount, cardCount: cardCount)
-                }
-                dateSwitcher(date: date, isFallback: isFallback)
+                dateSwitcher(date: date)
             }
             VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 mastheadIdentity
                 HStack(spacing: AIDashSpace.s8) {
                     publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
-                    if let containerCount, let cardCount {
-                        telemetryPill(containerCount: containerCount, cardCount: cardCount)
-                    }
-                    dateSwitcher(date: date, isFallback: isFallback)
+                    dateSwitcher(date: date)
                 }
             }
             VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 mastheadIdentity
                 HStack(spacing: AIDashSpace.s8) {
                     publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
-                    if let containerCount, let cardCount {
-                        telemetryPill(containerCount: containerCount, cardCount: cardCount)
-                    }
                 }
-                dateSwitcher(date: date, isFallback: isFallback)
+                dateSwitcher(date: date)
             }
         }
     }
 
     @ViewBuilder
-    private func dateSwitcher(date: String, isFallback: Bool = false) -> some View {
+    private func dateSwitcher(date: String) -> some View {
         let dates = availableDates
         let index = dates.firstIndex(of: date) ?? dates.startIndex
         HStack(spacing: AIDashSpace.s4) {
@@ -301,7 +283,6 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
             Text(date)
                 .font(AIDashTypography.mastheadStatus)
                 .monospacedDigit()
-                .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
 
             if dates.count >= 2 {
@@ -318,22 +299,15 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                 .accessibilityLabel(BriefingViewCopy.nextDateLabel)
             }
 
-            StatusPill(
-                Self.isTodayBadge(date: date, isFallback: isFallback, today: Self.localTodayString())
-                    ? BriefingViewCopy.todayLabel : BriefingViewCopy.archiveLabel,
-                tone: Self.isTodayBadge(date: date, isFallback: isFallback, today: Self.localTodayString())
-                    ? .success : .neutral
-            )
         }
         .foregroundStyle(theme.neutrals.text2)
-        .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
     private func sectionJumpRail(containers: [ContainerModel], proxy: ScrollViewProxy?) -> some View {
-        if containers.count >= 2 {
+        if containers.count > 2 {
             ScrollView(.horizontal, showsIndicators: false) {
                 sectionJumpRailContent(containers: containers, proxy: proxy)
             }
@@ -461,48 +435,14 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     @ViewBuilder
     private func publishedStatus(isFallback: Bool, publishedAt: Date?) -> some View {
         Group {
-            if !isFallback, let publishedAt {
-                HStack(spacing: AIDashSpace.s4) {
-                    StatusPill(BriefingViewCopy.liveLabel, tone: .success)
-                    Text(
-                        String(
-                            localized: "briefing.published.relative %@",
-                            defaultValue: "Published \(publishedAt.formatted(.relative(presentation: .named)))",
-                            bundle: .module,
-                        )
-                    )
-                    .font(AIDashTypography.mastheadStatus)
-                    .foregroundStyle(theme.neutrals.text2)
-                }
+            if !isFallback, publishedAt != nil {
+                StatusPill(BriefingViewCopy.liveLabel, tone: .success)
             } else {
                 StatusPill(BriefingViewCopy.cachedLabel, tone: .warning)
             }
         }
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private func telemetryPill(containerCount: Int, cardCount: Int) -> some View {
-        let format = String(
-            localized: "briefing.telemetry.pill",
-            defaultValue: "%1$02d SEC · %2$02d CARDS",
-            bundle: .module,
-        )
-        return Text(String(format: format, containerCount, cardCount))
-            .font(AIDashTypography.mastheadStatus)
-            .foregroundStyle(theme.neutrals.text2)
-            .padding(.horizontal, AIDashSpace.s8)
-            .padding(.vertical, AIDashSpace.s4)
-            .background(theme.neutrals.inner, in: Capsule())
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .accessibilityLabel(
-                Text(
-                    "briefing.telemetry.accessibility \(containerCount) \(cardCount)",
-                    tableName: "Localizable",
-                    bundle: .module,
-                )
-            )
     }
 
     private var resolvedState: BriefingViewState {
