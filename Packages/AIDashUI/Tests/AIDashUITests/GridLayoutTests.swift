@@ -28,64 +28,23 @@ struct GridLayoutTests {
         #expect(layout.style == .accent)
     }
 
-    // MARK: - Column count: compact size class
+    // MARK: - Macro-tier breakpoints
 
-    @Test("compact size class produces 2 columns (narrow width)")
-    func compactNarrowProduces2Columns() {
-        #expect(GridLayout.columnCount(for: .compact, width: 320) == 2)
+    @Test("compact portrait stays single-column")
+    func compactPortraitIsSingleColumn() {
+        #expect(GridLayout.columnCount(for: .compact, width: 390) == 1)
     }
 
-    @Test("compact size class produces 2 columns even at wider width")
-    func compactWideProduces2Columns() {
-        #expect(GridLayout.columnCount(for: .compact, width: 1024) == 2)
-    }
-
-    // MARK: - Column count: regular size class (3- and 4-column tiers)
-
-    @Test("regular size class with narrow width produces 3 columns")
-    func regularNarrowProduces3Columns() {
+    @Test("wide touch uses two or three columns")
+    func wideTouchUsesTwoOrThreeColumns() {
         #expect(GridLayout.columnCount(for: .regular, width: 768) == 3)
+        #expect(GridLayout.columnCount(for: .regular, width: 1024) == 3)
     }
 
-    @Test("regular size class just under threshold produces 3 columns")
-    func regularJustUnderThresholdProduces3Columns() {
-        #expect(GridLayout.columnCount(for: .regular, width: 899) == 3)
-    }
-
-    @Test("regular size class at threshold produces 4 columns")
-    func regularAtThresholdProduces4Columns() {
-        #expect(GridLayout.columnCount(for: .regular, width: 900) == 4)
-    }
-
-    @Test("regular size class at full width produces 4 columns")
-    func regularFullWidthProduces4Columns() {
-        #expect(GridLayout.columnCount(for: .regular, width: 1366) == 4)
-    }
-
-    // MARK: - Column count: nil size class (width-only fallback uses AIDashSize tokens)
-
-    @Test("nil size class with very narrow width produces 1 column")
-    func nilVeryNarrowProduces1Column() {
-        // AIDashSize.columnCount: width < 480 → 1 column
-        #expect(GridLayout.columnCount(for: nil, width: 320) == 1)
-    }
-
-    @Test("nil size class with narrow width produces 2 columns")
-    func nilNarrowProduces2Columns() {
-        // AIDashSize.columnCount: 480 ≤ width < 768 → 2 columns
-        #expect(GridLayout.columnCount(for: nil, width: 600) == 2)
-    }
-
-    @Test("nil size class with medium width produces 4 columns")
-    func nilMediumProduces4Columns() {
-        // AIDashSize.columnCount: 900 ≤ width < 1180 → 4 columns
-        #expect(GridLayout.columnCount(for: nil, width: 900) == 4)
-    }
-
-    @Test("nil size class with wide width produces 5 columns")
-    func nilWideProduces5Columns() {
-        // AIDashSize.columnCount: width ≥ 1180 → 5 columns
-        #expect(GridLayout.columnCount(for: nil, width: 1200) == 5)
+    @Test("desktop pointer caps at four columns")
+    func desktopPointerCapsAtFourColumns() {
+        #expect(GridLayout.columnCount(for: .regular, width: 1200) == 4)
+        #expect(GridLayout.columnCount(for: nil, width: 2000) == 4)
     }
 
     // MARK: - TokenGrid wiring

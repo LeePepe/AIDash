@@ -85,7 +85,7 @@ public struct ContainerView: View {
 
     @ViewBuilder
     private var header: some View {
-        VStack(alignment: .leading, spacing: AIDashSpace.s8) {
+        VStack(alignment: .leading, spacing: AIDashSpace.s4) {
             HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s8) {
                 VStack(alignment: .leading, spacing: AIDashSpace.s4) {
                     Text(container.title)
@@ -107,6 +107,7 @@ public struct ContainerView: View {
             Divider()
                 .overlay(theme.neutrals.border)
         }
+        .frame(minHeight: 44, maxHeight: 44, alignment: .bottom)
     }
 
     /// The style the title-side bar carries. In `.bare` mode the lone card has

@@ -32,6 +32,9 @@ struct SnapshotRenderTests {
             ("desktop-loading", .loading),
             ("desktop-empty", .empty),
             ("desktop-error", .error),
+            ("desktop-stale-error", .staleError(
+                date: "2026-11-02", containers: Self.sampleContainers,
+                publishedAt: Date(timeIntervalSinceNow: -7200))),
         ]
         let compact: [(String, BriefingViewState)] = [
             ("compact-populated", .populated(

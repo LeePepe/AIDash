@@ -70,18 +70,15 @@ struct DesignTokensFoundationTests {
         #expect(AIDashSize.gridSpan(.hero) == .max)
     }
 
-    @Test("AIDashSize.columnCount maps viewport widths to ~240pt columns")
+    @Test("AIDashSize.columnCount follows the three macro tiers and caps desktop density")
     func columnCount() {
         #expect(AIDashSize.columnCount(forWidth: 320) == 1)   // iPhone
         #expect(AIDashSize.columnCount(forWidth: 339) == 1)
-        #expect(AIDashSize.columnCount(forWidth: 340) == 2)
-        #expect(AIDashSize.columnCount(forWidth: 619) == 2)
-        #expect(AIDashSize.columnCount(forWidth: 620) == 3)
-        #expect(AIDashSize.columnCount(forWidth: 899) == 3)
-        #expect(AIDashSize.columnCount(forWidth: 900) == 4)   // typical Mac window
-        #expect(AIDashSize.columnCount(forWidth: 1179) == 4)
-        #expect(AIDashSize.columnCount(forWidth: 1180) == 5)  // wide Mac
-        #expect(AIDashSize.columnCount(forWidth: 2000) == 5)
+        #expect(AIDashSize.columnCount(forWidth: 390) == 1)
+        #expect(AIDashSize.columnCount(forWidth: 640) == 2)
+        #expect(AIDashSize.columnCount(forWidth: 900) == 3)
+        #expect(AIDashSize.columnCount(forWidth: 1200) == 4)
+        #expect(AIDashSize.columnCount(forWidth: 2000) == 4)
     }
 
     @Test("AIDashSize.kpiColumnCount balances rows so the last row has no orphan")

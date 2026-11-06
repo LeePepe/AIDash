@@ -61,6 +61,7 @@ struct BriefingViewTests {
             "briefing.hidden.accessibility %lld",
             "briefing.hidden.show",
             "briefing.section_jump.label %@",
+            "briefing.error.retry",
             "card_router.hide_card.label",
             "card_router.show_card.label"
         ] {
@@ -115,9 +116,8 @@ struct BriefingViewTests {
 
     // MARK: - Page Chrome tokens
     //
-    // Constitution §Page Chrome — the page background must be one
-    // hierarchy step below the card background, page horizontal padding
-    // is 24 Mac / 20 iOS, page vertical padding is 24pt.
+    // Page chrome is token-backed: 24pt macOS / 20pt compact horizontal
+    // insets, 28pt vertical rhythm, and a centered 1200pt content cap.
 
     @Test("pageHorizontalPadding resolves to the platform-correct token")
     func pageHorizontalPaddingMatchesPlatformToken() {
@@ -167,13 +167,16 @@ struct BriefingViewTests {
                 "no stub_data helper allowed in BriefingView")
     }
 
-    @Test("section jump rail supports an All lens and toggled in-place filtering")
-    func sectionJumpRailSupportsDomainLensFiltering() throws {
+    @Test("section rail stays single-row and supports in-place filtering")
+    func sectionRailSupportsDomainLensFiltering() throws {
         let source = try Self.briefingViewSource()
         #expect(source.contains("selectedContainerID"))
         #expect(source.contains("filteredContainers"))
         #expect(source.contains("briefing.section_jump.all"))
         #expect(source.contains("selectedContainerID = nil"))
+        #expect(source.contains("ScrollView(.horizontal"))
+        #expect(source.contains("showsIndicators: false"))
+        #expect(source.contains("lineLimit(1)"))
     }
 
     @Test("wide hourly timelines retain up to three citations")
