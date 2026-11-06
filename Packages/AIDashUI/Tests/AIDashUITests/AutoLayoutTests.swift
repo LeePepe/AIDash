@@ -123,6 +123,13 @@ struct AutoLayoutTests {
             type: rich.type, authored: rich.size, payloadJSON: rich.payloadJSON))
         #expect(span == AIDashSize.gridSpan(.wide)) // unchanged — content justifies wide
     }
+
+    @Test("row packing proposes one shared height to each sibling")
+    func rowPackingPreservesSiblingHeightContract() throws {
+        let source = try readLayoutSource("AutoLayout.swift")
+        #expect(source.contains("proposal: ProposedViewSize(width: cellWidth, height: rowHeight)"))
+        #expect(source.contains("rowHeight = max(rowHeight"))
+    }
 }
 
 /// Reads a Swift source file from `Sources/AIDashUI/Layout/<filename>` by

@@ -11,22 +11,11 @@ public struct GridLayout: View {
         self.style = style
     }
 
-    /// Total column count for the given viewport width, sourced from
-    /// `AIDashSize.columnCount(forWidth:)` per the constitution
-    /// §Size = Geometry Only. The legacy `horizontalSizeClass`-aware
-    /// matrix is preserved as a fallback for callers that still pass a
-    /// size class; new code should rely on `AIDashSize.columnCount`.
+    /// Resolve macro-tier columns from available width. Size class is retained
+    /// for source compatibility, but width is the sole geometry authority.
     static func columnCount(for sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> Int {
-        switch sizeClass {
-        case .compact:
-            return 2
-        case .regular:
-            return width >= 900 ? 4 : 3
-        case .none:
-            return AIDashSize.columnCount(forWidth: width)
-        case .some:
-            return 2
-        }
+        _ = sizeClass
+        return AIDashSize.columnCount(forWidth: width)
     }
 
     public var body: some View {

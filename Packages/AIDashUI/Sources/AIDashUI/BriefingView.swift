@@ -10,6 +10,7 @@ public enum BriefingViewState {
     case loading
     case empty
     case error
+    case staleError(date: String, containers: [ContainerModel], publishedAt: Date?)
 }
 
 private enum BriefingViewCopy {
@@ -32,6 +33,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     @Query private var publishedBriefings: [BriefingModel]
     private var explicitState: BriefingViewState?
     private var archiveDates: [String]
+    private var onRetry: (() -> Void)?
     @State private var selectedArchiveDate: String?
     @State private var locallyHiddenCardIds: Set<String> = []
     @State private var selectedContainerID: String?
@@ -58,12 +60,14 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
         )
         explicitState = nil
         archiveDates = []
+        onRetry = nil
     }
 
-    init(state: BriefingViewState, archiveDates: [String] = []) {
+    init(state: BriefingViewState, archiveDates: [String] = [], onRetry: (() -> Void)? = nil) {
         self.init()
         explicitState = state
         self.archiveDates = archiveDates
+        self.onRetry = onRetry
     }
 
     public var body: some View {
@@ -122,6 +126,16 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
             case .error:
                 stateMasthead
                 errorState
+            case let .staleError(date, containers, publishedAt):
+                let visibleContainers = filteredContainers(containers)
+                masthead(date: date, isFallback: true, publishedAt: publishedAt,
+                         containerCount: visibleContainers.count,
+                         cardCount: visibleContainers.reduce(0) { $0 + $1.cards.count })
+                staleErrorBanner
+                ForEach(visibleContainers.sorted { $0.order < $1.order }) {
+                    ContainerView(container: $0)
+                        .id($0.id)
+                }
             }
         }
     }
@@ -133,7 +147,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                     .padding(.horizontal, Self.pageHorizontalPadding)
                     .padding(.vertical, AIDashSpacing.pageVertical)
                     .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
             #if os(macOS)
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -146,11 +160,11 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
 
     private var stateMasthead: some View {
         masthead(date: Self.localTodayString(), isFallback: false, publishedAt: nil,
-                 containerCount: 0, cardCount: 0)
+                 containerCount: nil, cardCount: nil)
     }
     @ViewBuilder
     private func masthead(date: String, isFallback: Bool, publishedAt: Date?,
-                          containerCount: Int, cardCount: Int) -> some View {
+                          containerCount: Int?, cardCount: Int?) -> some View {
         let effectiveDate = displayedDate(fallback: date)
         VStack(alignment: .leading, spacing: 10) {
             mastheadStatusLine(date: effectiveDate, isFallback: isFallback, publishedAt: publishedAt,
@@ -231,20 +245,24 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
 
     @ViewBuilder
     private func mastheadStatusLine(date: String, isFallback: Bool, publishedAt: Date?,
-                                    containerCount: Int, cardCount: Int) -> some View {
+                                    containerCount: Int?, cardCount: Int?) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 mastheadIdentity
                 Spacer()
                 publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
-                telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                if let containerCount, let cardCount {
+                    telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                }
                 dateSwitcher(date: date, isFallback: isFallback)
             }
             VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 mastheadIdentity
                 HStack(spacing: AIDashSpace.s8) {
                     publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
-                    telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                    if let containerCount, let cardCount {
+                        telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                    }
                     dateSwitcher(date: date, isFallback: isFallback)
                 }
             }
@@ -252,7 +270,9 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                 mastheadIdentity
                 HStack(spacing: AIDashSpace.s8) {
                     publishedStatus(isFallback: isFallback, publishedAt: publishedAt)
-                    telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                    if let containerCount, let cardCount {
+                        telemetryPill(containerCount: containerCount, cardCount: cardCount)
+                    }
                 }
                 dateSwitcher(date: date, isFallback: isFallback)
             }
@@ -314,12 +334,8 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     @ViewBuilder
     private func sectionJumpRail(containers: [ContainerModel], proxy: ScrollViewProxy?) -> some View {
         if containers.count >= 2 {
-            if explicitState != nil || proxy == nil {
+            ScrollView(.horizontal, showsIndicators: false) {
                 sectionJumpRailContent(containers: containers, proxy: proxy)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    sectionJumpRailContent(containers: containers, proxy: proxy)
-                }
             }
         }
     }
@@ -412,8 +428,13 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     }
 
     private var activeCards: [CardModel] {
-        guard case let .populated(_, containers, _, _) = resolvedState else { return [] }
-        return containers.flatMap(\.cards)
+        switch resolvedState {
+        case let .populated(_, containers, _, _),
+             let .staleError(_, containers, _):
+            return containers.flatMap(\.cards)
+        default:
+            return []
+        }
     }
 
     private var activeHiddenCardCount: Int {
@@ -560,6 +581,38 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                        detailKey: "briefing.error.subtitle", tone: .danger)
     }
 
+    private var staleErrorBanner: some View {
+        HStack(spacing: AIDashSpace.s8) {
+            StatusPill(BriefingViewCopy.errorLabel, tone: .danger)
+            Text(localizedStateText(for: "briefing.error.subtitle"))
+                .font(.callout)
+                .foregroundStyle(theme.neutrals.text2)
+                .lineLimit(2)
+            Spacer(minLength: AIDashSpace.s8)
+            retryButton
+        }
+        .padding(AIDashSpace.s12)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: AIDashSpace.s8))
+        .overlay {
+            RoundedRectangle(cornerRadius: AIDashSpace.s8)
+                .stroke(theme.neutrals.border, lineWidth: AIDashChrome.hairlineWidth)
+        }
+    }
+
+    private var retryButton: some View {
+        Button {
+            onRetry?()
+        } label: {
+            Text(String(localized: "briefing.error.retry", defaultValue: "Retry", bundle: .module))
+                .font(AIDashTypography.mastheadStatus)
+                .frame(minWidth: AIDashSpacing.controlHitTarget,
+                       minHeight: AIDashSpacing.controlHitTarget)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(onRetry == nil)
+        .accessibilityLabel(Text("briefing.error.retry", tableName: "Localizable", bundle: .module))
+    }
+
     private func diagnosticCard(icon: String, titleKey: String, detailKey: String,
                                 tone: PillTone) -> some View {
         VStack(alignment: .leading, spacing: AIDashSpace.s12) {
@@ -573,6 +626,9 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
             Text(localizedStateText(for: detailKey))
                 .font(.callout)
                 .foregroundStyle(theme.neutrals.text2)
+            if tone == .danger {
+                retryButton
+            }
         }
         .padding(AIDashSpace.s20)
         .frame(maxWidth: .infinity, minHeight: 220, alignment: .leading)

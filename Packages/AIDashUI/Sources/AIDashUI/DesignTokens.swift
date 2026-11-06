@@ -266,15 +266,13 @@ public enum AIDashSize {
     }
 
     /// Container grid column count for the given viewport width.
-    /// Targets ~240pt columns (north-star §1: adaptive KPI grid, min ~220),
-    /// so a standard Mac window reaches 3–4 columns and cards stay dense
-    /// rather than stretching into sparse strips. iPhone stays single-column.
+    /// Compact portrait is one column, wide touch is two or three columns,
+    /// and desktop pointer is capped at four columns inside the 1200pt page.
     public static func columnCount(forWidth width: CGFloat) -> Int {
-        if width < 340 { return 1 }
-        if width < 620 { return 2 }
-        if width < 900 { return 3 }
-        if width < 1180 { return 4 }
-        return 5
+        if width < 480 { return 1 }
+        if width < 768 { return 2 }
+        if width <= 1024 { return 3 }
+        return 4
     }
 
     /// Column count for a wide metric card's INTERNAL KPI grid, chosen to
