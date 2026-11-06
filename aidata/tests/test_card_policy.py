@@ -21,6 +21,8 @@ from L5_apps.digest.card_policy import (
     CardCandidate,
     DataProfile,
     FIRST_SCREEN_CARDS,
+    OVERVIEW_KPI_LIMIT,
+    KPI_CARD_SIZE,
     MAX_ACTIONS,
     MAX_CARDS,
     choose_card,
@@ -326,6 +328,8 @@ def test_action_budget_constant_matches_the_design():
     assert MAX_ACTIONS == 3
     assert FIRST_SCREEN_CARDS == 6
     assert MAX_CARDS == 10
+    assert OVERVIEW_KPI_LIMIT == 4
+    assert KPI_CARD_SIZE == "medium"
 
 
 # --------------------------------------------------------------------------- #

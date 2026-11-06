@@ -37,6 +37,8 @@ from L5_apps.digest.card_policy import (
     FIRST_SCREEN_CARDS,
     MAX_ACTIONS,
     MAX_CARDS,
+    KPI_CARD_SIZE,
+    OVERVIEW_KPI_LIMIT,
     CardCandidate,
     DataProfile,
     choose_card,
@@ -398,7 +400,7 @@ def _metric_items(sources: "DigestSources", report_date: str) -> list[dict]:
 # The redundancy in this briefing is real, but it is not container-shaped, not
 # card-shaped, and SMALLER than it looks — it is one row.
 #
-# `趋势指标` publishes one row per metric. When the per-project spend breakdown
+# The overview publishes one row per metric. When the per-project spend breakdown
 # is on the page, its 成本 row reports the same total that breakdown decomposes,
 # so the bare row carries nothing the split does not.
 #
@@ -469,8 +471,10 @@ def _dedupe_metric_items(items: list[dict],
     return kept or items
 
 
-def _dedupe_published(containers: tuple[Container, ...]) -> tuple[Container, ...]:
-    """Thin duplicated rows out of the trend card, after the budget has run.
+def _dedupe_published(containers: tuple[Container, ...],
+                      metric_items: list[dict] | None = None,
+                      ) -> tuple[Container, ...]:
+    """Thin duplicated rows out of the overview KPI row, after the budget.
 
     Two conditions, and both are about what the reader ACTUALLY sees:
 
@@ -497,18 +501,34 @@ def _dedupe_published(containers: tuple[Container, ...]) -> tuple[Container, ...
         return containers
     out: list[Container] = []
     for container in containers:
-        if container.title != "趋势指标":
+        if container.title != "总览":
             out.append(container)
             continue
-        cards = []
+        cards = list(container.cards)
+        existing_labels = {
+            card.payload["items"][0].get("label")
+            for card in cards
+            if card.type == "metric"
+            and card.payload.get("items")
+            and isinstance(card.payload["items"][0], dict)
+        }
+        replacement = next(
+            (item for item in (metric_items or [])
+             if item.get("label") not in existing_labels
+             and item.get("label") not in _SPEND_TOTAL_LABELS),
+            None,
+        )
+        rebuilt: list[Card] = []
         for card in container.cards:
-            items = card.payload.get("items")
-            if not items:
-                cards.append(card)
+            items = card.payload.get("items") if card.type == "metric" else None
+            if not items or items[0].get("label") not in _SPEND_TOTAL_LABELS:
+                rebuilt.append(card)
                 continue
-            kept = _dedupe_metric_items(items, True)
-            cards.append(replace(card, payload={**card.payload, "items": kept}))
-        out.append(replace(container, cards=tuple(cards)))
+            if replacement is not None:
+                rebuilt.append(replace(
+                    card, payload={**card.payload, "items": [dict(replacement)]}))
+                replacement = None
+        out.append(replace(container, cards=tuple(rebuilt)))
     return tuple(out)
 
 
@@ -555,9 +575,19 @@ def _overview_sections(sections: dict[str, list[str]]) -> list[dict]:
 
 def _overview_container(mmdd: str, reported_day: str, must_see: str,
                         sections: dict[str, list[str]],
+                        metric_items: list[dict] | None = None,
                         delivery: "DeliveryState | None" = None,
                         report_date: str = "") -> Container:
-    """总览: the always-present digest card + optional data-health insight."""
+    """总览: bounded independent KPIs, then the focal digest card."""
+    cards: list[Card] = []
+    for index, item in enumerate((metric_items or [])[:OVERVIEW_KPI_LIMIT], start=101):
+        cards.append(Card(
+            _kuid(mmdd, index),
+            "metric",
+            KPI_CARD_SIZE,
+            {"items": [dict(item)]},
+            style="accent",
+        ))
     digest_payload = {
         "title": f"AI 使用日报 {reported_day}",
         "body": _plain_summary(must_see),
@@ -565,8 +595,8 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
     overview_sections = _overview_sections(sections)
     if overview_sections:
         digest_payload["sections"] = overview_sections
-    cards = [Card(_kuid(mmdd, 1), "digest", "hero", digest_payload,
-                  style="accent")]
+    cards.append(Card(_kuid(mmdd, 1), "digest", "hero", digest_payload,
+                      style="accent"))
     health = _health_line(sections)
     if health:
         cards.append(Card(_kuid(mmdd, 2), "insight", "wide",
@@ -582,7 +612,7 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
                               {"title": "投递健康", "body": _strip_md(d_line)},
                               style="warning"))
     return Container(_cuid(mmdd, 1), "总览", 10, tuple(cards),
-                     layout="auto", style="accent")
+                     layout="grid", style="accent")
 
 
 def _cost_improvement_body(ci) -> str:
@@ -1030,7 +1060,7 @@ def _attribution_container(mmdd: str, cost_by_project, model_by_project,
                            leverage=None, rework_by_workspace=None) -> "Container | None":
     """💸 成本归因 (order 22): WHY the trend arrows moved.
 
-    Sits immediately after 趋势指标 (order 20) on purpose — it exists to
+    Sits immediately after the overview (order 20) on purpose — it exists to
     explain the arrows directly above it. Every other card in the briefing
     reports a single dimension, so a "+968%" tells you something changed but
     not where to look; this splits the same spend across projects, then across
@@ -1418,8 +1448,8 @@ def _relationship_container(mmdd: str, rework, retro_ops=None) -> "Container | N
 # ## Why redundancy is handled per ITEM, not here
 #
 # An earlier version let one container declare it superseded another's signal
-# (成本归因's per-project split vs 趋势指标's spend total). The granularity was
-# wrong: admission is per CONTAINER, but the redundancy is a single ROW. 趋势指标
+# (成本归因's per-project split vs the overview's spend total). The granularity
+# was wrong: admission is per CONTAINER, but the redundancy is a single ROW. The
 # carries tokens, requests, sessions, completed-issues and the automation ratio
 # beside the cost row — none of which the cost split restates — so suppressing
 # the container to remove one duplicated row deleted five unrelated signals.
@@ -1441,18 +1471,12 @@ def _relationship_container(mmdd: str, rework, retro_ops=None) -> "Container | N
 #   cross_signal     — how much cross-source value it adds (0 = single dimension).
 #   reading_cost     — roughly how long a reader spends on it.
 #
-# 趋势指标 scores 1 rather than 0 because its rows are de-duplicated before the
-# card is built: whatever survives is a signal no other card restates (requests,
-# sessions, completed work, automation ratio). Ranking it at 0 — as a bare
-# single-dimension total — described the card before de-duplication, and dropped
-# the day's only source of those numbers on a busy day.
 _BUDGET_META: dict[str, dict] = {
     "总览": {"reading_cost": 2, "requires_action": False},
     "今日规划": {"requires_action": True, "reading_cost": 1},
     "交叉信号": {"cross_signal": 3, "reading_cost": 2},
     "AI 效能": {"cross_signal": 2, "reading_cost": 3},
     "成本归因": {"cross_signal": 2, "reading_cost": 3},
-    "趋势指标": {"cross_signal": 1, "reading_cost": 2},
     "今日工作": {"reading_cost": 2},
     "昨日汇总": {"reading_cost": 2},
     "可改良": {"cross_signal": 1, "reading_cost": 3},
@@ -1463,6 +1487,31 @@ _BUDGET_META: dict[str, dict] = {
     "工程与编排图表": {"cross_signal": 3, "reading_cost": 2},
     "24h 证据时间线": {"cross_signal": 2, "reading_cost": 2},
 }
+
+_READING_FLOW_ORDER = {
+    "总览": 10,
+    "今日工作": 20,
+    "今日规划": 30,
+    "昨日汇总": 40,
+    "24h 证据时间线": 50,
+    "交叉信号": 55,
+    "工程与编排图表": 60,
+    "时间与产出": 65,
+    "AI 效能": 70,
+    "成本归因": 80,
+    "可改良": 85,
+    "GitHub 工具雷达": 90,
+    "卡型兴趣": 92,
+    "新闻雷达": 95,
+}
+
+
+def _apply_reading_flow_order(containers: list[Container]) -> list[Container]:
+    """Apply the redesigned page bands without changing standalone builders."""
+    return [
+        replace(container, order=_READING_FLOW_ORDER.get(container.title, container.order))
+        for container in containers
+    ]
 
 
 def _container_candidates(containers: list[Container]) -> list[CardCandidate]:
@@ -1508,21 +1557,9 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     all. Its cards are still CHARGED against the budget, since the reader pays
     for them either way; only its admission is unconditional.
 
-    ## Why this rewrites `order` rather than just returning a tuple
-
-    The app does NOT render containers in the order we send them — both
-    `BriefingView.swift` and `XPCHandlers.swift` sort by `container.order`. So a
-    first-screen decision expressed only as tuple position is invisible to the
-    reader: whatever `order` says wins, and the budget's ranking is silently
-    discarded on the way through XPC. (Sorting survivors straight back to
-    authored order here had exactly that effect — `FIRST_SCREEN_CARDS` decided
-    nothing a reader could see.)
-
-    So the lead containers are renumbered into a reserved band BELOW every
-    authored order, preserving their priority sequence, while the tail keeps its
-    authored numbering. `order` remains ascending — it is still the single
-    ordering key — but its leading stretch now encodes "this is the two-minute
-    read" instead of "this is where the producer happened to append it".
+    Container `order` is a product contract, not an internal ranking score.
+    The app sorts by it, so survivors retain their authored reading-flow bands
+    (overview, action, context, supporting) after trimming.
     """
     if not containers:
         return ()
@@ -1530,6 +1567,10 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     # The overview's own cards come out of the same budget — exempt from being
     # dropped is not the same as free.
     head_cards = sum(card.type != "sectionHeader" for card in head.cards)
+    if head.title == "总览":
+        head_cards -= sum(card.type == "metric" for card in head.cards)
+        head_cards += min(
+            1, sum(card.type == "metric" for card in head.cards))
     budget = max(0, MAX_CARDS - head_cards)
     first_screen = max(0, FIRST_SCREEN_CARDS - head_cards)
     kept = select_with_budget(_container_candidates(rest),
@@ -1537,38 +1578,24 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     if not [c for c in kept.selected if c.card.cards]:
         return (head,)
 
-    # Take the first-screen boundary FROM the budget rather than re-deriving it.
-    # Counting cards off the front of the result would be wrong: the tail is
-    # sorted back into authored order, so a light low-priority container sitting
-    # early in authored order gets swept into the lead and — because the lead is
-    # what gets renumbered — genuinely promoted onto the reader's first screen
-    # ahead of a higher-priority one.
-    lead = [c.card for c in kept.lead if c.card.cards]
-    tail = [c.card for c in kept.tail if c.card.cards]
-
-    # Renumber EVERY survivor into one ascending run below the overview.
-    #
-    # Renumbering only the lead is not enough. The app sorts by `order` alone,
-    # so a tail container that happens to carry a low authored number (say the
-    # producer gave it 15 while a lead container authored 30 got renumbered)
-    # would still render above the first screen — the budget's decision loses to
-    # an accident of how the producers numbered their sections.
-    #
-    # So: lead first, in priority order; then tail, in authored order. The
-    # overview keeps the hard top. Within each group the relative order is the
-    # one that group is supposed to express, and across groups the first screen
-    # always wins.
-    published = [
-        replace(container, order=head.order + 1 + index)
-        for index, container in enumerate(lead + tail)
-    ]
-    while sum(
+    published = sorted(
+        (c.card for c in kept.selected if c.card.cards),
+        key=lambda container: container.order,
+    )
+    published_card_cost = sum(
         sum(card.type != "sectionHeader" for card in container.cards)
         for container in published
-    ) + sum(card.type != "sectionHeader" for card in head.cards) > MAX_CARDS:
+    )
+    head_card_cost = sum(card.type != "sectionHeader" for card in head.cards)
+    if head.title == "总览":
+        head_card_cost -= sum(card.type == "metric" for card in head.cards)
+        head_card_cost += min(1, sum(card.type == "metric" for card in head.cards))
+    while published_card_cost + head_card_cost > MAX_CARDS:
         if not published:
             break
-        published.pop()
+        removed = published.pop()
+        published_card_cost -= sum(
+            card.type != "sectionHeader" for card in removed.cards)
     return tuple([head] + published)
 
 
@@ -1615,7 +1642,20 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     reported_day = yesterday(report_date)
     sections = parse_sections(full_md)
     mmdd = _mmdd(reported_day)
+    metrics = _metric_items(sources, report_date)
+    # Keep the overview readable: the highest-signal KPIs get independent cards
+    # and the remaining metrics stay out rather than becoming a second mega-card.
+    preferred_labels = ("成本", "请求数", "会话数", "自动化占比")
+    preferred = [
+        item for label in preferred_labels
+        for item in metrics
+        if item.get("label") == label
+    ]
+    overview_metrics = preferred + [
+        item for item in metrics if item not in preferred
+    ]
     containers = [_overview_container(mmdd, reported_day, must_see, sections,
+                                      metric_items=overview_metrics,
                                       delivery=delivery,
                                       report_date=report_date)]
 
@@ -1629,19 +1669,12 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     if timeline_container:
         containers.append(timeline_container)
 
-    # 💸 成本归因 (order 22): explains the arrows in 趋势指标 directly above.
+    # 💸 成本归因 (order 22): explains the arrows in the overview directly above.
     attribution_container = _attribution_container(
         mmdd, getattr(sources, "cost_by_project", None),
         getattr(sources, "model_by_project", None),
         getattr(sources, "leverage", None),
         getattr(sources, "rework_by_workspace", None))
-
-    metrics = _metric_items(sources, report_date)
-    if metrics:
-        containers.append(Container(
-            _cuid(mmdd, 2), "趋势指标", 20,
-            (Card(_kuid(mmdd, 3), "metric", "wide", {"items": metrics}),),
-            layout="auto"))
 
     if attribution_container:
         containers.append(attribution_container)
@@ -1655,7 +1688,7 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         containers.append(relationship_container)
 
     # 🧠 AI 效能 (order 25) + ⏱ 时间与产出 (order 28): batch-2 差异化 sections,
-    # placed right after the trend metrics and before the prose 昨日汇总 (order 30).
+    # placed right after the overview metrics and before the prose 昨日汇总 (order 30).
     ai_container = _ai_efficiency_container(
         mmdd, getattr(sources, "ai_efficiency", None),
         getattr(sources, "tool_cross", None))
@@ -1697,8 +1730,9 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
     # De-duplicate AFTER the budget, never before: a row is only redundant if
     # the card that covers it actually reaches the reader, and until the budget
     # has run that is not known (§design 3, criterion 5).
+    containers = _apply_reading_flow_order(containers)
     return Briefing(reported_day, GENERATED_BY,
-                    _dedupe_published(_apply_budget(containers)))
+                    _dedupe_published(_apply_budget(containers), metrics))
 
 
 # ---------------------------------------------------------------------------

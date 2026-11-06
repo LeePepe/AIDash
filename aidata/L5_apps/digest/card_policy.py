@@ -34,6 +34,8 @@ from typing import Any, Sequence
 FIRST_SCREEN_CARDS = 6
 MAX_CARDS = 10
 MAX_ACTIONS = 3
+OVERVIEW_KPI_LIMIT = 4
+KPI_CARD_SIZE = "medium"
 
 # ---- Size thresholds (§design 2.2) ----------------------------------------
 # A handful of related items reads at `medium`; past that the card needs the

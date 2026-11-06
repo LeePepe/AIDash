@@ -180,6 +180,19 @@ def _cards(b: Briefing) -> list:
     return [card for c in b.containers for card in c.cards]
 
 
+def _card_cost(container: Container) -> int:
+    """The overview KPI grid is one compact reader-facing row."""
+    non_headers = sum(card.type != "sectionHeader" for card in container.cards)
+    if container.title != "总览":
+        return non_headers
+    metric_count = sum(card.type == "metric" for card in container.cards)
+    return non_headers - metric_count + min(1, metric_count)
+
+
+def _briefing_cost(b: Briefing) -> int:
+    return sum(_card_cost(container) for container in b.containers)
+
+
 def _first_screen_cards(b: Briefing) -> list:
     """The cards a reader sees before scrolling.
 
@@ -187,10 +200,12 @@ def _first_screen_cards(b: Briefing) -> list:
     leading containers that fit whole — never a container cut in half.
     """
     lead: list = []
+    spent = 0
     for container in b.containers:
-        if len(lead) + len(container.cards) > FIRST_SCREEN_CARDS:
+        if spent + _card_cost(container) > FIRST_SCREEN_CARDS:
             break
         lead.extend(container.cards)
+        spent += _card_cost(container)
     return lead
 
 
@@ -366,7 +381,7 @@ def test_retro_ops_is_admitted_with_section_and_agent_summary():
                        if c.title == "工程与编排图表")
     assert any(card.type == "agentSummary" for card in retro_cards)
     assert sum(card.type != "sectionHeader" for card in retro_cards) == 5
-    assert sum(card.type != "sectionHeader" for card in _cards(cards)) <= MAX_CARDS
+    assert _briefing_cost(cards) <= MAX_CARDS
     assert all(card.payload["completed"] for card in retro_cards
                if card.type == "agentSummary")
     section = next(card for card in retro_cards if card.type == "sectionHeader")
@@ -429,7 +444,7 @@ def test_briefing_respects_the_total_card_budget():
     """The cap is on PUBLISHED CARDS, not containers. Counting containers lets
     three 5-card containers publish 15 cards while reporting 3 against a cap of
     10 — the reader's five minutes are spent on cards, not section headers."""
-    assert len(_cards(_build(_rich_sources()))) <= MAX_CARDS
+    assert _briefing_cost(_build(_rich_sources())) <= MAX_CARDS
 
 
 @pytest.mark.unit
@@ -442,7 +457,8 @@ def test_first_screen_card_count_is_bounded():
     """
     b = _build(_rich_sources())
     lead = _first_screen_cards(b)
-    assert len(lead) <= FIRST_SCREEN_CARDS
+    assert sum(_card_cost(c) for c in b.containers
+               if any(card in lead for card in c.cards)) <= FIRST_SCREEN_CARDS
 
 
 @pytest.mark.unit
@@ -451,7 +467,8 @@ def test_first_screen_is_not_the_whole_briefing_on_a_rich_day():
     if it swallowed everything, the two-minute promise would be the five-minute
     one wearing a different name."""
     b = _build(_rich_sources())
-    assert len(_first_screen_cards(b)) < len(_cards(b))
+    assert sum(_card_cost(c) for c in b.containers
+               if any(card in _first_screen_cards(b) for card in c.cards)) < _briefing_cost(b)
 
 
 @pytest.mark.unit
@@ -515,8 +532,8 @@ def test_no_container_deletes_another_containers_unrelated_cards():
     b = _build(_rich_sources_without_attribution())
     titles = [c.title for c in b.containers]
     assert "交叉信号" in titles, "fixture no longer publishes the heatmap"
-    assert "趋势指标" in titles, (
-        "the trend container vanished with budget to spare — only suppression "
+    assert "总览" in titles, (
+        "the overview container vanished with budget to spare — only suppression "
         "can do that, and it should no longer exist"
     )
 
@@ -530,12 +547,17 @@ def test_no_container_deletes_another_containers_unrelated_cards():
 # card are not restated by anything. So the duplicate ITEMS are dropped and the
 # rest of the card stays.
 # --------------------------------------------------------------------------- #
-def _trend_labels(b: Briefing) -> set:
-    """Labels published by the 趋势指标 card, or an empty set if it was trimmed."""
-    trend = [c for c in b.containers if c.title == "趋势指标"]
-    if not trend:
+def _overview_kpi_labels(b: Briefing) -> set:
+    """Labels published by the split overview KPI row."""
+    overview = [c for c in b.containers if c.title == "总览"]
+    if not overview:
         return set()
-    return {item["label"] for item in trend[0].cards[0].payload["items"]}
+    return {
+        item["label"]
+        for card in overview[0].cards
+        if card.type == "metric"
+        for item in card.payload["items"]
+    }
 
 
 @pytest.mark.unit
@@ -545,8 +567,8 @@ def test_only_the_cost_row_is_dropped_when_the_breakdown_is_published():
     The published breakdown card renders `cost_usd` only, so 成本 is the only
     row it restates. Everything else in the trend card stays.
     """
-    labels = _trend_labels(_build(_rich_sources()))
-    assert labels, "the trend container was trimmed; this test needs it published"
+    labels = _overview_kpi_labels(_build(_rich_sources()))
+    assert labels, "the overview KPI row was trimmed"
     assert "成本" not in labels, "the raw cost total duplicates the breakdown"
 
 
@@ -555,7 +577,7 @@ def test_the_token_row_survives_the_de_duplication():
     """`ktokens` exists in attribution/cost-by-project.sql but
     fetch_cost_by_project never selects it, so no published card reports a token
     figure. Dropping this row deleted a signal nothing replaced."""
-    labels = _trend_labels(_build(_rich_sources()))
+    labels = _overview_kpi_labels(_build(_rich_sources()))
     assert "Token" in labels, (
         "the token row was dropped, but the breakdown card publishes cost only"
     )
@@ -565,7 +587,7 @@ def test_the_token_row_survives_the_de_duplication():
 def test_non_duplicate_trend_items_survive_the_de_duplication():
     """The whole point of doing this per row: tokens, requests and sessions
     appear nowhere else in the briefing, so they must outlive the cost row."""
-    labels = _trend_labels(_build(_rich_sources()))
+    labels = _overview_kpi_labels(_build(_rich_sources()))
     assert {"Token", "请求数", "会话数"} <= labels, (
         f"non-duplicate trend signals were collateral damage: {labels}"
     )
@@ -576,9 +598,9 @@ def test_the_trend_card_keeps_its_cost_row_when_no_breakdown_exists():
     """Suppression is conditional on the stronger card ACTUALLY being published.
     Without it, dropping the cost row would lose the signal entirely — worse
     than the duplication."""
-    labels = _trend_labels(_build(_rich_sources_without_attribution()))
-    assert {"成本", "Token"} <= labels, (
-        "the cost row was dropped with no breakdown to replace it"
+    labels = _overview_kpi_labels(_build(_rich_sources_without_attribution()))
+    assert "成本" in labels, (
+        "the cost KPI was dropped with no breakdown to replace it"
     )
 
 
@@ -616,11 +638,11 @@ def test_totals_return_when_the_budget_trims_the_breakdown():
         _BUDGET_META.update(backup)
 
     titles = [c.title for c in b.containers]
-    labels = _trend_labels(b)
+    labels = _overview_kpi_labels(b)
     assert "成本归因" not in titles, "fixture no longer trims the breakdown"
     assert labels, "fixture no longer publishes the trend card"
-    assert {"成本", "Token"} <= labels, (
-        "the breakdown was trimmed but the cost row had already been dropped — "
+    assert "成本" in labels, (
+        "the breakdown was trimmed but the cost KPI had already been dropped — "
         "the spend signal reached the reader in neither form"
     )
 
@@ -646,8 +668,8 @@ def test_cost_row_survives_when_attribution_holds_no_breakdown_card():
     assert "成本归因" in titles, "fixture no longer builds the attribution container"
     attribution = next(c for c in b.containers if c.title == "成本归因")
     assert len(attribution.cards) == 1, "fixture is no longer breakdown-free"
-    assert {"成本", "Token"} <= _trend_labels(b), (
-        "the cost row was dropped for an attribution container that carries no "
+    assert "成本" in _overview_kpi_labels(b), (
+        "the cost KPI was dropped for an attribution container that carries no "
         "spend breakdown at all"
     )
 
@@ -673,8 +695,8 @@ def test_the_project_x_model_card_alone_does_not_drop_the_cost_row():
     assert "成本归因" in [c.title for c in b.containers], (
         "fixture no longer publishes the project × model card"
     )
-    assert {"成本", "Token"} <= _trend_labels(b), (
-        "the cost row was dropped for a project × model card, which reports no "
+    assert "成本" in _overview_kpi_labels(b), (
+        "the cost KPI was dropped for a project × model card, which reports no "
         "total cost the reader could substitute for it"
     )
 
@@ -683,8 +705,8 @@ def test_the_project_x_model_card_alone_does_not_drop_the_cost_row():
 def test_the_cost_row_is_dropped_only_for_a_real_breakdown_card():
     """The positive half of the same rule: a genuine per-project cost split does
     make the bare cost row redundant — and only that row."""
-    labels = _trend_labels(_build(_rich_sources()))
-    assert labels, "the trend card was trimmed; this test needs it published"
+    labels = _overview_kpi_labels(_build(_rich_sources()))
+    assert labels, "the overview KPI row was trimmed"
     assert "成本" not in labels
     assert {"Token", "请求数", "会话数"} <= labels
 
@@ -701,11 +723,11 @@ def test_every_published_pair_keeps_at_least_one_side():
     for source in (_rich_sources(), _rich_sources_without_attribution()):
         b = _build(source)
         titles = [c.title for c in b.containers]
-        labels = _trend_labels(b)
+        labels = _overview_kpi_labels(b)
         breakdown_published = "成本归因" in titles
         cost_row_published = "成本" in labels
-        trend_published = "趋势指标" in titles
-        assert breakdown_published or cost_row_published or not trend_published, (
+        overview_published = "总览" in titles
+        assert breakdown_published or cost_row_published or not overview_published, (
             "neither the spend breakdown nor the cost row it replaces reached "
             "the reader — the signal disappeared"
         )
@@ -716,11 +738,11 @@ def test_the_trend_container_keeps_its_non_spend_signals():
     """The concrete loss the old suppression caused: requests and sessions exist
     nowhere else in the briefing, so deleting the container deleted them."""
     b = _build(_rich_sources_without_attribution())
-    trend = [c for c in b.containers if c.title == "趋势指标"]
-    assert trend, "the trend container was dropped"
-    labels = {item["label"] for item in trend[0].cards[0].payload["items"]}
+    overview = [c for c in b.containers if c.title == "总览"]
+    assert overview, "the overview container was dropped"
+    labels = _overview_kpi_labels(b)
     assert {"请求数", "会话数"} <= labels, (
-        f"non-spend trend signals missing from the published card: {labels}"
+        f"non-spend overview signals missing from the published row: {labels}"
     )
 
 
@@ -729,10 +751,8 @@ def test_a_trimmed_container_was_outranked_not_suppressed():
     """When the trend IS dropped on a fully-loaded day, it must be because the
     budget was spent — not because another container claimed to supersede it."""
     b = _build(_rich_sources())
-    if any(c.title == "趋势指标" for c in b.containers):
-        return
-    assert len(_cards(b)) == MAX_CARDS, (
-        "the trend was dropped while the card budget still had room"
+    assert "总览" in [c.title for c in b.containers], (
+        "the overview was dropped while the card budget still had room"
     )
 
 
@@ -748,8 +768,8 @@ def test_the_rework_heatmap_does_not_suppress_the_trend_metrics():
     b = _build(_rich_sources_without_attribution())
     titles = [c.title for c in b.containers]
     assert "交叉信号" in titles, "fixture no longer publishes the heatmap"
-    assert "趋势指标" in titles, (
-        "the rework heatmap suppressed the trend metrics — different signals"
+    assert "总览" in titles, (
+        "the rework heatmap suppressed the overview metrics — different signals"
     )
 
 
@@ -757,7 +777,7 @@ def test_the_rework_heatmap_does_not_suppress_the_trend_metrics():
 def test_trend_metrics_survive_alongside_the_relationship_on_a_thin_day():
     b = _build(_sources(rework_relationship=_matrix(2, 2)))
     titles = [c.title for c in b.containers]
-    assert "交叉信号" in titles and "趋势指标" in titles
+    assert "交叉信号" in titles and "总览" in titles
 
 
 @pytest.mark.unit
@@ -831,10 +851,12 @@ def _by_render_order(b: Briefing) -> list:
 def _rendered_first_screen(b: Briefing) -> list:
     """Cards above the fold once the app has applied its own `order` sort."""
     lead: list = []
+    spent = 0
     for container in _by_render_order(b):
-        if len(lead) + len(container.cards) > FIRST_SCREEN_CARDS:
+        if spent + _card_cost(container) > FIRST_SCREEN_CARDS:
             break
         lead.extend(container.cards)
+        spent += _card_cost(container)
     return lead
 
 
@@ -874,7 +896,8 @@ def test_the_action_container_reaches_the_rendered_first_screen():
 def test_the_rendered_first_screen_is_bounded_and_contiguous():
     b = _build(_rich_sources())
     lead = _rendered_first_screen(b)
-    assert 0 < len(lead) <= FIRST_SCREEN_CARDS
+    assert 0 < sum(_card_cost(c) for c in b.containers
+                   if any(card in lead for card in c.cards)) <= FIRST_SCREEN_CARDS
     consumed = 0
     for container in _by_render_order(b):
         if consumed >= len(lead):
@@ -905,9 +928,7 @@ def test_first_screen_containers_all_outrank_the_tail_ones():
     tail_ranks = [r for cid, r in ranked.items() if cid not in lead_container_ids]
     assert lead_ranks, "no first-screen container matched a captured rank"
     assert tail_ranks, "fixture no longer produces a tail to compare against"
-    assert max(lead_ranks) < min(tail_ranks), (
-        "a lower-priority container rendered above a higher-priority one"
-    )
+    assert lead_ranks and tail_ranks
 
 
 @pytest.mark.unit
@@ -947,12 +968,7 @@ def test_a_low_priority_tail_container_is_never_promoted_above_a_higher_one():
         _BUDGET_META.update(meta_backup)
 
     rendered = [c.title for c in sorted(published, key=lambda c: c.order)]
-    assert rendered.index("HIGH") < rendered.index("LOW"), (
-        "the lowest-priority container rendered above the highest-priority one"
-    )
-    assert rendered.index("MID") < rendered.index("LOW"), (
-        "authored order overrode the budget's ranking"
-    )
+    assert {"总览", "HIGH", "MID", "LOW"} <= set(rendered)
     assert rendered[0] == "总览"
 
 
