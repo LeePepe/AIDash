@@ -19,8 +19,11 @@ the unit suite is hermetic.
 from __future__ import annotations
 
 import os
+import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import serve
@@ -38,6 +41,11 @@ _PRIO_RANK = {"high": 0, "medium": 1, "low": 2}
 _DOWNGRADE_FINDING_USD = 500.0
 # Cap the inbox so the card stays a glance, not a backlog dump.
 _MAX_ITEMS = 12
+_MAX_PR_AGE_DAYS = 30
+_MAX_CRON_ERROR_AGE_DAYS = 7
+_ISO_TIMESTAMP = re.compile(
+    r"\b20\d{2}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?\b"
+)
 
 
 @dataclass(frozen=True)
@@ -50,6 +58,7 @@ class InboxItem:
     waiting_on: str = ""
     age_text: str = ""
     command_hint: str = ""
+    fresh: bool = True
 
 
 def _stalled_prs() -> list[InboxItem]:
@@ -63,6 +72,8 @@ def _stalled_prs() -> list[InboxItem]:
     out = []
     for r in rows[:4]:
         days = int((r[ai] or 0) // 24)
+        if days > _MAX_PR_AGE_DAYS:
+            continue
         title = str(r[ti])[:60]
         out.append(InboxItem(
             f"PR 卡 {days} 天：{title}", "high", "卡顿", str(r[pi]),
@@ -120,13 +131,33 @@ def _error_log_signals(
     return out
 
 
+def _embedded_timestamp(line: str) -> float | None:
+    match = _ISO_TIMESTAMP.search(line)
+    if not match:
+        return None
+    value = match.group(0).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
 def _default_log_reader(path: Path) -> str:
-    """Return the last non-empty line if the log was touched recently, else ''."""
+    """Return a recent error line, using mtime or an embedded timestamp."""
     try:
         if not path.exists():
             return ""
         lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-        return lines[-1].strip() if lines else ""
+        if not lines:
+            return ""
+        cutoff = time.time() - timedelta(days=_MAX_CRON_ERROR_AGE_DAYS).total_seconds()
+        if path.stat().st_mtime >= cutoff:
+            return lines[-1].strip()
+        timestamp = _embedded_timestamp(lines[-1])
+        return lines[-1].strip() if timestamp is not None and timestamp >= cutoff else ""
     except OSError:
         return ""
 
@@ -228,6 +259,8 @@ def build_inbox(
     raw += _pending_issues()
     raw += _downgrade_finding(downgrade_usd if downgrade_usd is not None else 0.0)
     raw += _retro_signals()
+
+    raw = [item for item in raw if item.fresh]
 
     # Apply per-bucket quota, preserving each bucket's internal (urgency) order.
     kept: list[InboxItem] = []

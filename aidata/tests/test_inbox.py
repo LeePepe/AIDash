@@ -4,6 +4,9 @@ Hermetic: serve.run_query is monkeypatched, proposals/log readers injected.
 Covers bucket aggregation, per-bucket quotas, priority sort, and degradation.
 """
 
+import os
+import time
+
 import pytest
 from L5_apps.digest import inbox as inbox_mod
 from L5_apps.digest.inbox import build_inbox
@@ -15,7 +18,7 @@ def fake_queries(monkeypatch):
     """Monkeypatch serve.run_query for the two inbox SQL queries."""
     def _run(name, params=None):
         if name == "inbox/stalled-prs":
-            return ([("6750052", "cookie sync fix", 1112.0, "b1", "WorkspaceA"),
+            return ([("6750052", "cookie sync fix", 480.0, "b1", "WorkspaceA"),
                      ("6805136", "screenshot crash", 745.0, "b2", "WorkspaceA")],
                     ["pr_id", "title", "age_hours", "source_branch", "repo"])
         if name == "inbox/pending-issues":
@@ -40,7 +43,7 @@ def test_aggregates_stalls_and_issues(fake_queries):
     buckets = {it.bucket for it in items}
     assert "卡顿" in buckets
     titles = " ".join(it.title for it in items)
-    assert "PR 卡 46 天" in titles          # 1112h → 46 days
+    assert "PR 卡 20 天" in titles          # 480h → 20 days
     assert "ABC-297" in titles              # blocked issue
 
 
@@ -189,3 +192,38 @@ def test_inbox_skips_done_goals_and_preserves_proposal_ref(monkeypatch):
         lambda: [Proposal("proposal://p1", "t", "agent", "title", "", "high", "pending")]
     )
     assert items[0].ref == "proposal://p1"
+
+
+@pytest.mark.unit
+def test_stalled_pr_older_than_thirty_days_is_not_actionable(monkeypatch):
+    def run_query(name, params=None):
+        if name == "inbox/stalled-prs":
+            return ([
+                ("old", "old PR", 31 * 24, "b", "R"),
+                ("fresh", "fresh PR", 20 * 24, "b", "R"),
+            ], ["pr_id", "title", "age_hours", "source_branch", "repo"])
+        return ([], [])
+
+    monkeypatch.setattr(inbox_mod.serve, "run_query", run_query)
+    items = build_inbox(0.0, proposals_reader=_no_proposals, log_reader=_no_logs)
+    titles = " ".join(item.title for item in items)
+    assert "old PR" not in titles
+    assert "fresh PR" in titles
+
+
+@pytest.mark.unit
+def test_old_cron_log_line_is_not_actionable(tmp_path):
+    log = tmp_path / "cron-errors.log"
+    log.write_text("2026-10-01T04:00:00Z — old failure\n", encoding="utf-8")
+    old = time.time() - 8 * 24 * 60 * 60
+    os.utime(log, (old, old))
+    assert inbox_mod._default_log_reader(log) == ""
+
+
+@pytest.mark.unit
+def test_recent_embedded_cron_timestamp_is_actionable(tmp_path):
+    log = tmp_path / "cron-errors.log"
+    log.write_text("2026-11-05T04:00:00Z — recent failure\n", encoding="utf-8")
+    old = time.time() - 8 * 24 * 60 * 60
+    os.utime(log, (old, old))
+    assert "recent failure" in inbox_mod._default_log_reader(log)

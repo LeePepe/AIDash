@@ -285,12 +285,11 @@ def _strip_md(line: str) -> str:
 
 
 def _plain_summary(must_see: str) -> str:
-    """The overview body: short clean prose — no `##`/`- `/`> ` markdown.
+    """Return one short, section-free overview digest.
 
-    Takes only the leading TL;DR prose (the 点评 line + any preamble before the
-    first `## ` section header) — the numeric trends, TODO and 可改良 become their
-    own cards, so the overview body must not repeat them. Falls back to the whole
-    stripped text when there is no header (e.g. a degraded "数据缺失" summary).
+    The digest is deliberately independent from the deferred sections. It keeps
+    only the leading prose, removes copied source-health lines and duplicate
+    headings, then caps the result at three short sentences / 480 scalars.
     """
     lines = must_see.splitlines()
     preamble = []
@@ -298,9 +297,30 @@ def _plain_summary(must_see: str) -> str:
         if ln.strip().startswith("## "):
             break
         preamble.append(ln)
-    chosen = preamble if any(p.strip() for p in preamble) else lines
-    parts = [_strip_md(ln) for ln in chosen if ln.strip()]
-    return " · ".join(p for p in parts if p) or "（无摘要）"
+    has_section_heading = any(ln.strip().startswith("## ") for ln in lines)
+    chosen = preamble if any(p.strip() for p in preamble) else (
+        [] if has_section_heading else lines
+    )
+    parts: list[str] = []
+    seen: set[str] = set()
+    for line in chosen:
+        if not line.strip():
+            continue
+        if line.lstrip().startswith("#"):
+            continue
+        clean = _strip_md(line)
+        if (not clean or "数据源" in clean or "multica✅" in clean
+                or "ADO✅" in clean or "state.db✅" in clean):
+            continue
+        if clean in seen:
+            continue
+        seen.add(clean)
+        parts.append(clean)
+    if not parts:
+        return "（无摘要）"
+    sentences = re.split(r"(?<=[。！？.!?])\s*", " ".join(parts))
+    body = " ".join(sentence for sentence in sentences[:3] if sentence)
+    return body[:480].rstrip() or "（无摘要）"
 
 
 def _lines_body(lines: list[str]) -> str:
@@ -375,10 +395,11 @@ def _raven_specs(sources: "DigestSources") -> list[tuple]:
 def _metric_items(sources: "DigestSources", report_date: str) -> list[dict]:
     """Build every valid metric Item (sparkline metrics + automation ring)."""
     items: list[dict] = []
-    for label, series, unit, higher in _raven_specs(sources):
-        item = _metric_item(label, series, unit, higher, report_date)
-        if item:
-            items.append(item)
+    if sources.raven.health.state == "ok":
+        for label, series, unit, higher in _raven_specs(sources):
+            item = _metric_item(label, series, unit, higher, report_date)
+            if item:
+                items.append(item)
     if sources.multica.health.state == "ok":
         item = _metric_item("完成 issue", sources.multica.completed, "", True,
                             report_date)
@@ -592,22 +613,13 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
         "title": f"AI 使用日报 {reported_day}",
         "body": _plain_summary(must_see),
     }
-    overview_sections = _overview_sections(sections)
-    if overview_sections:
-        digest_payload["sections"] = overview_sections
     cards.append(Card(_kuid(mmdd, 1), "digest", "hero", digest_payload,
                       style="accent"))
-    health = _health_line(sections)
-    if health:
-        cards.append(Card(_kuid(mmdd, 2), "insight", "wide",
-                          {"title": "数据源健康", "body": _strip_md(health)},
-                          style="warning"))
-    # Delivery/XPC health — separate from content-source health (MY-1450).
-    # Show a delivery-health card when the last push failed OR the persisted
-    # delivery is stale, even if the most recent push reported OK.
-    if delivery is not None:
+    # Delivery/XPC health is default-hidden unless the last attempt genuinely
+    # failed or degraded. A merely stale successful state is not reader content.
+    if delivery is not None and not delivery.ok:
         d_line = delivery_health_line(report_date, delivery)
-        if d_line and (not delivery.ok or "stale" in d_line):
+        if d_line:
             cards.append(Card(_kuid(mmdd, 99), "insight", "wide",
                               {"title": "投递健康", "body": _strip_md(d_line)},
                               style="warning"))
@@ -693,6 +705,8 @@ def _prose_containers(mmdd: str,
     # / decisions / planned work / findings into one prioritized list.
     inbox = []
     for it in inbox_items or []:
+        if not getattr(it, "fresh", True):
+            continue
         item = {"title": truncate(it.title, MAX_TODO), "priority": it.priority}
         for key, value in (
             ("ref", it.ref), ("category", it.category),
@@ -732,6 +746,34 @@ def _prose_containers(mmdd: str,
         out.append(Container(_cuid(mmdd, 5), "可改良", 50, tuple(cards),
                              layout="list"))
     return out
+
+
+def _default_plan_container(mmdd: str, sections: dict[str, list[str]],
+                            inbox_items=None) -> Container:
+    """Build the only default action surface, with a valid empty state."""
+    items: list[dict] = []
+    for it in inbox_items or []:
+        if not getattr(it, "fresh", True):
+            continue
+        item = {"title": truncate(it.title, MAX_TODO), "priority": it.priority}
+        for key, value in (("ref", it.ref), ("category", it.category)):
+            if value:
+                item[key] = value
+        items.append(item)
+    todos = _capped_actions(items or _todo_items(_section(sections, "今日 TODO")))
+    if todos:
+        card = Card(_kuid(mmdd, 53), "todoList", "hero", {"items": todos},
+                    style="accent")
+    else:
+        card = Card(
+            _kuid(mmdd, 54),
+            "insight",
+            "wide",
+            {"title": "今日规划", "body": "暂无新鲜且可执行的事项。"},
+            style="neutral",
+        )
+    return Container(_cuid(mmdd, 17), "今日规划", 30, (card,),
+                     layout="list", style="accent")
 
 
 def _work_container(mmdd: str, work) -> "Container | None":
@@ -1623,15 +1665,9 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
                    delivery: "DeliveryState | None" = None) -> Briefing:
     """Map the digest into a Briefing (pure). `report_date` is the RUN date.
 
-    Numeric trends render as a `metric` card (sparklines + a ring gauge for the
-    automation ratio) built from the structured `sources` series — not by parsing
-    numbers back out of markdown. `full_md` still supplies the prose sections
-    (昨日汇总/TODO/可改良) and the source-health line.
-
-    Containers are built first and then passed through the INFORMATION BUDGET
-    (§design 3): what a reader can finish in two minutes leads, the whole page
-    stays inside five, and a low-value card is omitted rather than pushed to the
-    bottom. The overview is exempt so a fully degraded day still publishes.
+    The default publication is intentionally small: an overview and today's
+    plan. Numeric trends render from structured source series, while the
+    remaining builders stay callable for deferred redesign work.
 
     The briefing date/title/UUIDs key on the REPORTED day (yesterday of the run
     date) so they match the local archive filename and the digest title (BUG 3).
@@ -1651,88 +1687,17 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         for item in metrics
         if item.get("label") == label
     ]
-    overview_metrics = preferred + [
-        item for item in metrics if item not in preferred
+    overview_metrics = [
+        item for item in preferred
+        if item.get("label") in {"成本", "请求数", "会话数", "自动化占比"}
     ]
     containers = [_overview_container(mmdd, reported_day, must_see, sections,
                                       metric_items=overview_metrics,
                                       delivery=delivery,
                                       report_date=report_date)]
-
-    # 今日工作 (goal ① 做了什么, M2): per-project effort, right after overview.
-    work_container = _work_container(
-        mmdd, getattr(sources, "work_by_project", None))
-    if work_container:
-        containers.append(work_container)
-    timeline_container = _hourly_timeline_container(
-        mmdd, reported_day, getattr(sources, "hourly_timeline", None))
-    if timeline_container:
-        containers.append(timeline_container)
-
-    # 💸 成本归因 (order 22): explains the arrows in the overview directly above.
-    attribution_container = _attribution_container(
-        mmdd, getattr(sources, "cost_by_project", None),
-        getattr(sources, "model_by_project", None),
-        getattr(sources, "leverage", None),
-        getattr(sources, "rework_by_workspace", None))
-
-    if attribution_container:
-        containers.append(attribution_container)
-
-    # 🔗 交叉信号 (order 24): the rework heatmap. Sits between 成本归因 (22) and
-    # AI 效能 (25) — it explains where the effectiveness numbers below come from.
-    relationship_container = _relationship_container(
-        mmdd, getattr(sources, "rework_relationship", None),
-        getattr(sources, "retro_ops", None))
-    if relationship_container:
-        containers.append(relationship_container)
-
-    # 🧠 AI 效能 (order 25) + ⏱ 时间与产出 (order 28): batch-2 差异化 sections,
-    # placed right after the overview metrics and before the prose 昨日汇总 (order 30).
-    ai_container = _ai_efficiency_container(
-        mmdd, getattr(sources, "ai_efficiency", None),
-        getattr(sources, "tool_cross", None))
-    if ai_container:
-        containers.append(ai_container)
-    time_container = _time_output_container(
-        mmdd, getattr(sources, "app_focus", None),
-        getattr(sources, "commit_by_repo", None))
-    if time_container:
-        containers.append(time_container)
-    retro_ops_container = _retro_ops_container(
-        mmdd, getattr(sources, "retro_ops", None),
-        getattr(sources, "multica", None),
-        getattr(sources, "ai_efficiency", None))
-    if retro_ops_container:
-        containers.append(retro_ops_container)
-
-    # 可改良 gains the 模型分层 stackedBar (§design: 融进现有, not a standalone card).
-    model_tier_card = _model_tier_card(mmdd, getattr(sources, "model_tier", None))
-    containers.extend(_prose_containers(mmdd, sections,
-                                        cost_improvement=getattr(sources, "cost_improvement", None),
-                                        value_efficiency=getattr(sources, "value_efficiency", None),
-                                        inbox_items=getattr(sources, "action_inbox", None),
-                                        model_tier_card=model_tier_card))
-
-    # GitHub 工具雷达 (§radar): curated watchlist stars/delta, split by tier.
-    containers.extend(_radar_containers(mmdd, getattr(sources, "repo_radar", None)))
-
-    # 卡型兴趣 (spec 005 US5): "你最常收藏的卡型 Top-N", right after 可改良 (order 55).
-    card_interest_container = _card_interest_container(
-        mmdd, getattr(sources, "card_interest", None))
-    if card_interest_container:
-        containers.append(card_interest_container)
-
-    # 📰 新闻雷达 (order 80): newest headlines by topic, at the参考/探索 tail.
-    news_container = _news_container(mmdd, getattr(sources, "news_radar", None))
-    if news_container:
-        containers.append(news_container)
-    # De-duplicate AFTER the budget, never before: a row is only redundant if
-    # the card that covers it actually reaches the reader, and until the budget
-    # has run that is not known (§design 3, criterion 5).
-    containers = _apply_reading_flow_order(containers)
-    return Briefing(reported_day, GENERATED_BY,
-                    _dedupe_published(_apply_budget(containers), metrics))
+    containers.append(_default_plan_container(
+        mmdd, sections, getattr(sources, "action_inbox", None)))
+    return Briefing(reported_day, GENERATED_BY, tuple(containers))
 
 
 # ---------------------------------------------------------------------------

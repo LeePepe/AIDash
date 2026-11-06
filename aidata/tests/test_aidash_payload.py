@@ -116,7 +116,9 @@ def test_build_briefing_maps_sections_to_cards(sources):
     assert "digest" in types      # 总览
     assert "metric" in types      # 趋势指标 (BUG 1: metric, not trending)
     assert "todoList" in types    # 今日规划
-    assert "insight" in types     # 昨日汇总 / 可改良
+    assert [c.title for c in b.containers] == ["总览", "今日规划"]
+    assert [c.order for c in b.containers] == [10, 30]
+    assert "insight" not in types
 
 
 @pytest.mark.unit
@@ -198,29 +200,13 @@ def test_digest_body_is_plain_text_no_markdown(sources):
 
 
 @pytest.mark.unit
-def test_digest_carries_real_data_sections(sources):
-    """The digest hero card must carry ≥2 real-data sections so the AIDash app
-    keeps it at hero (sections>=2 ⇒ hero) instead of downgrading a body-only
-    card to small — whose layout renders only the title and looks empty."""
+def test_digest_is_concise_and_section_free(sources):
+    """The default overview publishes one concise body without copied sections."""
     digest = _cards_by_type(_build(sources))["digest"]
-    sections = digest.payload.get("sections")
-    assert sections, "digest must have sections"
-    assert len(sections) >= 2
-    headings = [s["heading"] for s in sections]
-    assert "昨日概况" in headings
-    assert "趋势要点" in headings
-    # sections carry real content, clean of markdown markers
-    for s in sections:
-        assert s["paragraphs"]
-        for p in s["paragraphs"]:
-            assert not p.lstrip().startswith("- ")
-            assert not p.lstrip().startswith(">")
-    # 昨日概况 mirrors the 昨日汇总 lines (real data, not padding)
-    overview = next(s for s in sections if s["heading"] == "昨日概况")
-    assert any("花费" in p or "请求" in p for p in overview["paragraphs"])
-    # 趋势要点 surfaces cost as the lead signal
-    trend = next(s for s in sections if s["heading"] == "趋势要点")
-    assert any(p.startswith("成本") for p in trend["paragraphs"])
+    assert "sections" not in digest.payload
+    assert 0 < len(digest.payload["body"]) <= 480
+    assert "昨日汇总" not in digest.payload["body"]
+    assert "Trending" not in digest.payload["body"]
 
 
 @pytest.mark.unit
@@ -266,10 +252,35 @@ def test_todo_priorities_mapped(sources):
 
 
 @pytest.mark.unit
-def test_health_line_becomes_card(sources):
+def test_source_health_is_not_published(sources):
     bodies = [card.payload.get("body", "")
               for c in _build(sources).containers for card in c.cards]
-    assert any("数据源" in body for body in bodies)
+    assert all("数据源" not in body for body in bodies)
+    assert all(card.payload.get("title") != "数据源健康"
+               for c in _build(sources).containers for card in c.cards)
+
+
+@pytest.mark.unit
+def test_default_publication_keeps_only_allowlisted_kpis(sources):
+    overview = _build(sources).containers[0]
+    labels = [
+        item["label"]
+        for card in overview.cards
+        if card.type == "metric"
+        for item in card.payload["items"]
+    ]
+    assert labels
+    assert set(labels) <= {"成本", "请求数", "会话数", "自动化占比"}
+    assert len(labels) <= 4
+
+
+@pytest.mark.unit
+def test_empty_plan_is_still_published_with_explanation():
+    b = build_briefing(REPORT_DATE, _empty_sources(), "", "")
+    assert [c.title for c in b.containers] == ["总览", "今日规划"]
+    plan = b.containers[1]
+    assert plan.cards[0].type == "insight"
+    assert plan.cards[0].payload["body"]
 
 
 @pytest.mark.unit
