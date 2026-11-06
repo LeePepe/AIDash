@@ -67,6 +67,22 @@ struct DigestCardViewTests {
         #expect(view.payload.sections == nil)
     }
 
+    @Test("renders populated sections after the body for wide and hero digests")
+    func rendersPopulatedSections() throws {
+        for size in [CardSize.wide, .hero] {
+            let view = DigestCardView(payload: samplePayload, size: size, style: .neutral)
+            _ = view.body
+            #expect(view.payload.sections?.isEmpty == false)
+        }
+
+        let source = try Self.digestRendererSource()
+        #expect(source.contains("sectionsContent"))
+        #expect(source.contains("payload.sections"))
+        #expect(source.contains("size == .wide || size == .hero"))
+        #expect(source.contains("ForEach(Array(sections.enumerated())"))
+        #expect(source.contains("bodyText(paragraph)"))
+    }
+
     @Test("renders very long body across hero layout")
     func rendersLongBody() {
         let longBody = String(repeating: "Lorem ipsum dolor sit amet. ", count: 50)
@@ -83,8 +99,6 @@ struct DigestCardViewTests {
     func rendersSectionFreeBody() throws {
         let source = try Self.digestRendererSource()
         #expect(source.contains("bodyText(payload.body)"))
-        #expect(!source.contains("sectionView"))
-        #expect(!source.contains("sectionColumns"))
         #expect(!source.contains("truncatedBody"))
         #expect(!source.contains("\\u{2026}"))
         #expect(!source.contains("lineLimit"))

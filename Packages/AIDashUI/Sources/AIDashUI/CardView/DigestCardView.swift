@@ -13,12 +13,13 @@ public struct DigestCardView: View {
     }
 
     public var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: AIDashSpace.s12) {
             CardTypeBadge(type: .digest)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 titleText
                 subtitleText
                 bodyText(payload.body)
+                sectionsContent
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
@@ -50,6 +51,27 @@ public struct DigestCardView: View {
             .foregroundStyle(recipe.secondaryColor)
             .lineSpacing(recipe.secondaryLineSpacing)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var sectionsContent: some View {
+        if size == .wide || size == .hero,
+           let sections = payload.sections,
+           !sections.isEmpty {
+            VStack(alignment: .leading, spacing: AIDashSpace.s16) {
+                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                    VStack(alignment: .leading, spacing: AIDashSpace.s8) {
+                        Text(section.heading)
+                            .font(recipe.primary)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        ForEach(Array(section.paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                            bodyText(paragraph)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
