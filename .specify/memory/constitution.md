@@ -60,7 +60,7 @@ repository buys atomic commits across the producer/renderer seam — it grants n
 new privileges. Any change that lets Python touch CloudKit, the app's storage,
 or an internal API directly is a constitutional violation.
 
-### III. Glanceable Daily Briefing (NON-NEGOTIABLE)
+### III. Glanceable Daily Briefing and Favorites (NON-NEGOTIABLE)
 
 The product unit is a single day's briefing. Hierarchy is flat: `Briefing →
 Container → Card`, exactly two levels of nesting, no deeper. Containers must
@@ -70,7 +70,12 @@ use a `sectionHeader` card, not a nested container. This matches Apple HIG
 Fitness, and Google Discover.
 
 The intended reading time is five minutes. Any feature that pushes users into
-a navigation tree, search, or drill-down is suspect.
+a navigation tree, search, history, detail page, or drill-down is suspect.
+
+Favorites are a peer view to the daily briefing, not a deeper level of
+briefing hierarchy. Favorites may show local card snapshots and their current
+favorite state, but MUST NOT become an archive, search, or detail-navigation
+surface.
 
 ### IV. Schema-Locked Card Types, Data-Driven Layout
 
@@ -128,8 +133,9 @@ constitutional violation and the Reviewer MUST 🔴 FAIL.
 - **`style` = semantic signal tint only.** `style` MUST NOT change card
   chrome structure (background material, padding) or the size-driven
   geometry (corner radius). The only permitted style affordance is a
-  left-edge accent stripe (3pt hairline; success=green, warning=orange,
-  accent=accentColor; `neutral` = no stripe). Filling the whole card
+  left-edge accent stripe (3pt hairline; success=`status.success`,
+  warning=`status.warning`, accent=`brand.primary`; `neutral` = no stripe).
+  Filling the whole card
   with a colored background tint is forbidden — it cannot be
   distinguished at low opacity and dominates the visual at high opacity.
   A colored status pill (`StatusPill`) is NOT a `style` affordance — it
@@ -195,12 +201,12 @@ AIDash/
 │   │                     place.
 │   ├── AIDashUI/         Cross-platform SwiftUI views: type renderers,
 │   │                     container layouts, briefing scaffold. Depends on
-│   │                     Core + DesignKit.
-│   └── DesignKit/        Seed color system + shared SwiftUI component
-│                         vocabulary. Zero local deps.
+│   │                     Core + shared-design-system.
+│   └── shared-design-system/  Strata native products: NativeDesignKit and
+│                              DesignTokens. Exact-pinned external dependency.
 ├── Apps/
 │   └── AIDashApp/        macOS + iPadOS + iPhone app target (XcodeGen
-│                         managed). Depends on UI + Core + DesignKit.
+│                         managed). Depends on UI + Core + shared-design-system.
 ├── CLI/
 │   └── aidash/           Swift Argument Parser CLI, macOS-only.
 │                         Depends on Core. Does not depend on UI.
@@ -214,10 +220,12 @@ AIDash/
 └── project.yml           XcodeGen config for app + CLI targets.
 ```
 
-Dependency direction is unidirectional: `UI → Core`, `UI → DesignKit`,
-`App → UI + Core + DesignKit`, `CLI → Core`. The app's direct DesignKit
-dependency supplies theme injection used by app lifecycle code. The CLI may
-never import UI. The package boundary enforces this.
+Dependency direction is unidirectional: `UI → Core`, `UI → shared-design-system`,
+`App → UI + Core + shared-design-system`, `CLI → Core`. The shared design
+system is an ADR-006-approved dependency pinned to an exact revision. Its
+native products are `NativeDesignKit` and `DesignTokens`, and they are the
+sole design-system source for the AIDash pilot. The CLI may never import UI.
+The package boundary enforces this.
 
 `aidata/` sits **outside** that graph. It couples to the Swift side by a
 one-way **data flow**, not a compile-time dependency: it emits card payloads
@@ -235,6 +243,12 @@ its `contract_check.sh` lint.
 - **Events**: CloudKit Private DB, custom record type `UserEvent`, append-only.
 - **App-local cache**: SwiftData mirror of the last fetched briefing for
   offline display. Cache is disposable; CloudKit is source of truth.
+- **Favorite snapshots**: one independent local SwiftData store and storage
+  file for cards explicitly favorited by the user. This local-only snapshot
+  exception is not a mirror of previous briefings: it MUST NOT be included in
+  any CloudKit schema or synchronized between devices. If unavailable, the
+  Favorites view shows the item as unavailable; the underlying event remains
+  authoritative.
 - **No third-party storage**, except the isolated telemetry storage authorized
   by §GUI Product Telemetry (no Firebase, no Realm, and no local SQLite outside
   SwiftData or that exception).
@@ -285,7 +299,10 @@ an isolated Azure Blob telemetry store only under all of these conditions:
   for the CLI).
 - **Any other third-party dependency** requires a short ADR (under
   `docs/adr/`) that answers: what problem, what alternatives, what binary-size
-  / build-time / Swift 6 concurrency cost. Do not introduce dependencies
+  / build-time / Swift 6 concurrency cost. ADR-006 approves the exact-pinned
+  Strata shared-design-system dependency for the AIDash Goal C pilot; its
+  native products are `NativeDesignKit` and `DesignTokens`. No floating range
+  or additional design-system source is allowed. Do not introduce dependencies
   speculatively.
 - **Networking**: `URLSession` + async/await for HTTP. The explicit-consent GUI
   telemetry channel in §GUI Product Telemetry is the app's only current HTTP
@@ -390,15 +407,15 @@ discriminator — reader sees the glyph first) AND the detail-tier
 typography recipe. `size` MUST NOT mutate either; size only controls how
 many items / how much of the payload the renderer chooses to show.
 
-| CardType | Icon (SF Symbol) | Icon tint (DesignKit `Classification`) | Primary font | Secondary font | Notes |
+| CardType | Icon (SF Symbol) | Icon tint (transition: chart-family color + glyph; later Strata role) | Primary font | Secondary font | Notes |
 |---|---|---|---|---|---|
-| `metric` | `chart.bar.fill` | `.metric` (blue hue) | `.system(size: 36, weight: .bold, design: .rounded)` | `.caption` `.secondary` for label | Hero number always large; unit + trend arrow inline |
-| `insight` | `sparkles` | `.insight` (purple hue) | `.title3.weight(.semibold)` | `.body` `.primary` for body | Title first, body wraps |
-| `digest` | `doc.text.fill` | `.digest` (teal hue) | `.headline` for section heading | `.body` `lineSpacing: 4` for paragraphs | Prose; section list expands `body` paragraphs |
-| `agentSummary` | `bubble.left.and.bubble.right.fill` | `.agentSummary` (indigo hue) | `.headline` for agent name | `.callout` for completed; `.caption.monospaced()` for refs | Refs render as capsule chips |
-| `todoList` | `checklist` | `.todoList` (green hue) | `.body` per row | `.caption2` for priority dot label | Each row leads with a priority color dot |
-| `trending` | `chart.line.uptrend.xyaxis` | `.trending` (orange hue) | `.callout.monospaced()` for score | `.body` for title | Scores right-aligned mono |
-| `relationship` | `point.3.connected.trianglepath.dotted` | `.relationship` (cyan) | `.headline` for conclusion | `.caption.monospaced()` for axes/sample/window | Scatter/heatmap/slope; wide uses chart + evidence rail |
+| `metric` | `chart.bar.fill` | chart-family color + glyph (transition) | `largeTitle` with monospaced digits | `.caption` `.secondary` for label | Hero number always large; unit + trend arrow inline |
+| `insight` | `sparkles` | chart-family color + glyph (transition) | `.title3.weight(.semibold)` | `.body` `.primary` for body | Title first, body wraps |
+| `digest` | `doc.text.fill` | chart-family color + glyph (transition) | `.headline` for section heading | `.body` `lineSpacing: 4` for paragraphs | Prose; section list expands `body` paragraphs |
+| `agentSummary` | `bubble.left.and.bubble.right.fill` | chart-family color + glyph (transition) | `.headline` for agent name | `.callout` for completed; `.caption.monospaced()` for refs | Refs render as capsule chips |
+| `todoList` | `checklist` | chart-family color + glyph (transition) | `.body` per row | `.caption2` for priority dot label | Each row leads with a priority color dot |
+| `trending` | `chart.line.uptrend.xyaxis` | chart-family color + glyph (transition) | `.callout.monospaced()` for score | `.body` for title | Scores right-aligned mono |
+| `relationship` | `point.3.connected.trianglepath.dotted` | chart-family color + glyph (transition) | `.headline` for conclusion | `.caption.monospaced()` for axes/sample/window | Scatter/heatmap/slope; wide uses chart + evidence rail |
 | `sectionHeader` | (no badge, no chrome) | — | `.title3.weight(.semibold)` | `.subheadline` `.secondary` | Renders with NO card chrome (raw header inside container) |
 
 #### Relationship visualization
@@ -425,13 +442,19 @@ ZStack {
 .frame(width: 32, height: 32)
 ```
 
-The icon tint colors above come from the DesignKit `Classification` token
+The icon tint colors above come from the Strata classification role
 (one case per CardType, resolved via the injected `Theme`). Each is a
 calibrated light/dark hex pair chosen to be visually distinguishable at a
 glance, follow Apple Settings app icon coding conventions, and carry a
 dark-mode variant. Views MUST read the tint from the token (never inline a
-`.blue`/`Color(hex:)` literal); the raw hex lives only in DesignKit's
-`ColorSystem` token source.
+`.blue`/`Color(hex:)` literal). During the transition, the raw hex remains
+owned by the current DesignKit implementation; the concrete Strata mapping
+is a migration input, not an API assertion in this constitution.
+
+Per north-star §11, the transition uses three chart-family colors plus the
+type glyph. After the transition, the badge uses the applicable Strata
+classification color role; the concrete role mapping is not defined here.
+The 32×32 badge remains mandatory (P0.5).
 
 #### Size = Geometry Only (geometry ladders)
 
@@ -441,10 +464,10 @@ together so a small card feels tight and a hero feels editorial.
 
 | size | Grid span | Min height | Corner radius | Padding |
 |---|---|---|---|---|
-| `small` | 1 column (target 200-260pt) | 96pt | 10pt | 12 / 14pt |
-| `medium` | 2 columns (target 400-520pt) | 140pt | 14pt | 16pt |
-| `wide` | full row (all columns) | 140pt (intrinsic) | 14pt | 16 / 20pt |
-| `hero` | full row, double height | 280pt | 20pt | 24pt |
+| `small` | 1 column (target 200-260pt) | 96pt | 16pt | 12pt |
+| `medium` | 2 columns (target 400-520pt) | 140pt | 24pt | 16pt |
+| `wide` | full row (all columns) | 140pt (intrinsic) | 24pt | 16pt |
+| `hero` | full row, double height | 280pt | 24pt | 24pt |
 
 Container grid columns adapt by viewport: iPhone = 1 col, iPad portrait
 = 2 col, iPad landscape / Mac small window = 3 col, Mac large window = 4
@@ -491,23 +514,25 @@ are identical across all four `style` values.
 | style | Stripe color | When agents use it |
 |---|---|---|
 | `neutral` | none | default; informational |
-| `success` | `.green` | positive outcomes (PR merged, goal hit) |
-| `warning` | `.orange` | attention needed (PR stuck, deadline near) |
-| `accent` | `.accentColor` | spotlight / call to action |
+| `success` | `status.success` | positive outcomes (PR merged, goal hit) |
+| `warning` | `status.warning` | attention needed (PR stuck, deadline near) |
+| `accent` | `brand.primary` | spotlight / call to action |
 
 Trend arrows inside `metric` cards may still use red / green — these are
 content (signal direction), not card chrome.
 
 #### Content-Level Status Pills
 
-Card **content** may express status with a colored pill (DesignKit's
-`StatusPill`: `Capsule()` filled at `color.opacity(0.16)` with
+Card **content** may express status with a colored pill (the current
+DesignKit `StatusPill` during the transition; its concrete Strata mapping is
+specified by spec 008 and the Goal B component specification): `Capsule()`
+filled at `color.opacity(0.16)` with
 full-saturation text/icon). This is the same "content, not chrome"
 exception the trend arrow already carries — the pill is driven by
 **payload fields**, never by the card's `style` dimension:
 
 - `todoList` item `priority` → tone (high=danger, medium=warning,
-  low=primary).
+  low=neutral).
 - `metric` item `trend` → optional tone (up=success, down=danger,
   flat=neutral).
 - `trending` item `score` → neutral tone.
@@ -536,9 +561,11 @@ value to give numbers visual context (north-star §6/§7):
 Both are optional content: absent → nothing drawn. The chart's fixed
 render height is geometry-neutral — it MUST NOT branch on the card's
 `size` dimension (that would conflate size with type; §Size = Geometry
-Only). Data-viz components live in DesignKit (`Sparkline`, `Sparkbars`,
-`RingGauge`, `SegmentedGauge`); which trend/ratio form is drawn is a theme
-choice, not a payload or `size` concern. (Cockpit theme, constitution 1.7.0.)
+Only). The current DesignKit implementation supplies the data-viz components
+during the transition; their concrete Strata mapping is specified by spec 008
+and the Goal B component specification. Which trend/ratio form is drawn
+remains a theme choice, not a payload or `size` concern. (Cockpit theme,
+constitution 1.7.0.)
 
 #### Card Chrome (shared structure, size-scaled geometry)
 
@@ -549,11 +576,13 @@ across cards are geometry (corner radius, padding — both driven by
 frame is drawn at all (driven by the container's card COUNT — see
 §Container Chrome Modes below).
 
-- Background: `theme.neutrals.card` — the middle luminance tier of the
-  DesignKit neutral system (page `bg` < card `card` < inner `inner`).
+- Background: `theme.neutrals.card` — the middle luminance tier of the current
+  DesignKit neutral system during the transition (page `bg` < card `card` <
+  inner `inner`). Its concrete Strata mapping is specified by spec 008 and the
+  Goal B component specification.
   Cards float via luminance tiers, not shadow. (Supersedes the earlier
   `.background.secondary` material approach; see 1.6.0 migration note.)
-- Corner radius: per §Size = Geometry Only ladder (10 / 14 / 14 / 20).
+- Corner radius: per §Size = Geometry Only ladder (16 / 24 / 24 / 24).
 - Inner padding: per §Size = Geometry Only ladder.
 - Shadow: none (flat, luminance-tier depth).
 - Border: 1px `theme.neutrals.border` overlay at `0.08` opacity for edge
@@ -578,7 +607,7 @@ container's effective card count — and on NOTHING else:
 - **count == 1 → `bare`.** The card draws no background, no hairline, no
   corner radius, no padding, and no min height. Its content sits directly
   on the page background, left-aligned with the container title, and the
-  header gap tightens from 12pt to 10pt. `style` is not lost: it moves to
+  header gap tightens from 12pt to 8pt. `style` is not lost: it moves to
   a 3pt vertical bar at the LEFT OF THE TITLE, the height of the title
   line. A card's whole-BODY inner panel (`InnerSurfaceRole.body`) also
   collapses here — keeping it would regrow the removed frame one level
@@ -606,9 +635,9 @@ disappear into the canvas (the failure mode observed on 2026-06-29).
 - Content max width: page content is capped at `1200pt` and horizontally
   centered (`Space.contentMaxWidth`), so ultra-wide windows do not
   stretch cards into sparse strips.
-- Page horizontal padding: 24pt (Mac) / 20pt (iOS / iPad).
+- Page horizontal padding: 24pt (Mac) / 16pt (iOS / iPad).
 - Page vertical padding (top of briefing, bottom of last container):
-  28pt.
+  24pt.
 
 #### Container Chrome
 
@@ -617,7 +646,7 @@ container is rendered as:
 
 1. An overview-tier title line (and optional subtitle line), preceded by
    the 3pt `style` bar when the container is in `bare` mode.
-2. 12pt vertical spacing (10pt in `bare` mode — no card padding is left
+2. 12pt vertical spacing (8pt in `bare` mode — no card padding is left
    to absorb the gap).
 3. The cards laid out by the container's `layout` (auto/list/grid/hero).
 4. 32pt vertical spacing before the next container.
@@ -629,19 +658,20 @@ headers act as anchors; cards carry the content.
 #### Spacing & Color Tokens
 
 - Container vertical spacing: 32pt between containers; 12pt between
-  container header and first card (10pt when the container is `bare`).
-- Card vertical spacing inside a container: 14pt.
+  container header and first card (8pt when the container is `bare`).
+- Card vertical spacing inside a container: 12pt.
 - Grid column gap: 16pt.
-- Page horizontal padding: see §Page Chrome.
+- Page horizontal padding: see §Page Chrome; iPhone/iPad use 16pt.
 - **Colors MUST come from a package token source**, never inlined in a
-  view. The token sources are: DesignKit's `ColorSystem` (seed-derived
-  `PrimaryPalette`), `Semantic` (success/warning/danger), and
-  `Classification` (per-CardType icon tints); plus AIDashUI's
-  `DesignTokens` for card-domain aliases. Text uses the system semantic
+  view. The canonical source is Strata's `DesignTokens` and
+  `NativeDesignKit` role system, including semantic and classification roles;
+  AIDashUI may define only aliases that resolve to those roles. The product
+  brand role is `strata-blue`. Text uses the system semantic
   roles `.primary` / `.secondary` / `.tertiary` (these are roles, not
   literals, and remain allowed). **Raw hex (`Color(hex:)`,
   `Color(red:green:blue:)`) is permitted ONLY inside these token
-  sources.** A view MUST NOT inline a hex literal, nor a system color
+  sources. There is no local copied DesignKit palette.** A view MUST NOT inline
+  a hex literal, nor a system color
   (`.blue` / `.green` / …) as a signal channel — it consumes the token
   instead (Quality Bar §I P1.4).
 
@@ -802,16 +832,20 @@ orthogonality contract:
 2. Hardcoded padding / spacing values that disagree with the
    §Size = Geometry Only ladder or the §Spacing & Color Tokens list.
 3. Corner radius that disagrees with the §Size = Geometry Only ladder
-   (small=10 / medium=14 / wide=14 / hero=20), or shadow added to a
+   (small=16 / medium=24 / wide=24 / hero=24), or shadow added to a
    card.
 4. A **view** that inlines a color literal — raw hex (`Color(hex:)`,
    `Color(red:green:blue:)`) OR a system color (`.blue`, `.green`,
    `.accentColor`, …) used as a signal channel — instead of consuming a
-   package token. Raw hex inside a token source (DesignKit `ColorSystem`
-   / `Semantic` / `Classification`, or AIDashUI `DesignTokens`) is
-   compliant; inlining in a `CardView` / layout is the violation. Type
-   icon tints MUST come from the DesignKit `Classification` token per the
-   §Per-Type Visual Recipes table, not freshly chosen. (Text roles
+   package token. A local AIDashUI alias is compliant only when it references
+   an actual Strata role and token ID; it MUST NOT define or contain a new
+   color value. Inlining in a `CardView` / layout is the violation. Type icon
+   tints MUST come from the actual Strata classification role and token ID per
+   the §Per-Type Visual Recipes table, not freshly chosen. Per north-star §11,
+   the transition uses three chart-family colors plus the type glyph. After
+   the transition, the badge uses the applicable Strata classification color
+   role; the concrete role mapping is not defined here. The 32×32 badge
+   remains mandatory (P0.5). (Text roles
    `.primary` / `.secondary` / `.tertiary` are allowed.)
 5. `Container` view wrapping its child cards in its own
    `RoundedRectangle` / `background` — containers are typography +
@@ -828,12 +862,15 @@ For any PR touching `Packages/AIDashUI/Sources/AIDashUI/**`:
    System & Tokens.
 2. For each modified view, walk the per-type recipe table and confirm
    typography matches the CardType row.
-3. Confirm size-switches do not change font / padding / chrome.
-4. Confirm style-switches only toggle the left stripe. (Content-level
+3. Confirm the view consumes the actual Strata role and token ID required by
+   the recipe; an AIDashUI alias may reference that role/ID but may not define
+   a color value of its own.
+4. Confirm size-switches do not change font / padding / chrome.
+5. Confirm style-switches only toggle the left stripe. (Content-level
    `StatusPill`s and `metric` sparkline/ring data-viz are driven by
    payload fields, not `style` — they are content signals, not chrome;
    see §Content-Level Status Pills, §Metric Data-Viz.)
-5. Confirm spacing constants come from the §Spacing & Color Tokens
+6. Confirm spacing constants come from the §Spacing & Color Tokens
    list, not freshly-invented numbers.
 
 ### Verdict Aggregation Rules
@@ -860,12 +897,14 @@ burn run-count guards on stylistic findings.
 ### Spec-Driven, Multica-Executed
 
 This project uses Spec Kit (`/speckit-constitution`, `/speckit-specify`,
-`/speckit-plan`, `/speckit-tasks`) inside Hermes for spec and plan
-authoring. **Implementation is handed off to Multica**: each task from
-`tasks.md` becomes a Multica issue, dispatched to the TL → Planner →
-Fullstack → Reviewer pipeline.
+`/speckit-plan`, `/speckit-tasks`) inside Hermes for spec and plan authoring.
+The Strata × AIDash Goal C pilot is the bounded exception: its implementation
+is executed by assigned GTT CLI writers and MUST NOT create Multica issues.
+That exception applies only until Goal C is closed; all other work remains on
+the normal Multica path.
 
-This means `tasks.md` must be written for Multica consumption:
+For the normal Multica path, `tasks.md` must be written for Multica
+consumption:
 
 - Every task is self-contained and lists touched files, acceptance criteria,
   and dependencies on other tasks.
@@ -880,7 +919,9 @@ This means `tasks.md` must be written for Multica consumption:
   isolate parallel agent work and prevent branch contamination.
 - **Conventional commits**: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`,
   `test:`. The CI auto-reviewer parses these.
-- **PR is the unit of merge**. `main` is protected. Each PR closes one
+- **PR is the unit of merge**. `main` is protected. Each normal-work PR
+  closes one Multica issue. A PR belonging to the Strata × AIDash Goal C
+  instead cites its GTT Goal/Target/Task ID and does not create or close a
   Multica issue. CI runs the build gate and the Core test gate; both must
   pass.
 - **CI auto-review** is enabled — review comments come from GitHub Actions,
@@ -970,7 +1011,42 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.14.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-10-15
+**Version**: 1.15.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-10-21
+
+<!--
+Sync Impact Report — 1.15.0 (MINOR):
+- §Persistence authorizes the local-only SwiftData favorite snapshot store
+  and keeps it outside CloudKit synchronization.
+- Principle III makes Favorites a peer view and preserves the no-history,
+  no-search, no-detail, no-drill-down boundary.
+- §Dependencies and §Design System & Tokens adopt the exact-pinned Strata
+  shared-design-system products NativeDesignKit and DesignTokens, with the
+  strata-blue brand role and token-role/token-ID compliance evidence.
+- §Design System & Tokens now follows north-star §11 (source sha256
+  `6c57b00d42201426fa8e9df5e2a4b73c956721e08dbd0408721e7b533c197ab3`):
+  16/24/24/24 geometry, 12/8/16/24 spacing, the three chart-family-color
+  badge transition, semantic stripe roles, monospaced large-title metrics,
+  neutral low-priority pills, and Strata token-source ownership.
+- §Quality Bar I requires checking the actual Strata roles and token IDs used;
+  aliases may reference those roles/IDs but may not define colors, and
+  compliance is not established by merely avoiding hard-coded hex values.
+- §Spec-Driven Multica-Executed and §Git Workflow record the bounded Goal C
+  GTT CLI execution exception and GTT Task ID PR reference.
+
+Migration note: in-flight Goal C work must use ADR-006, migrate the package
+and theme dependency in AP2, and update affected UI specs, design references,
+token-compliance tests, and GTT execution records. During the transition,
+existing DesignKit consumers retain only the explicitly documented transition
+behavior until their layer-owned task lands; no mixed source may be introduced
+in a migrated surface. Favorite snapshots are newly local-only and require no
+CloudKit data migration. The north-star §11 row-level transition notes are
+now incorporated in the Design System & Tokens section and ADR-006.
+-->
+
+<!--
+1.15.0 — MINOR (material governance and product-scope expansion; no core
+principle removed or inverted). See the Sync Impact Report immediately above.
+-->
 
 <!--
 1.14.0 — MINOR (material expansion with no principle removed or inverted).
