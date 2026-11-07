@@ -337,7 +337,12 @@ struct DashboardWorkspaceTests {
         store.openDashboardWindow(section: .actionItems)
         #expect(store.selectedSection == .actionItems)
         #expect(!store.actionItems.contains(where: { $0.id == "sys-memory-pressure" }))
+        for item in store.actionItems {
+            store.toggleActionItem(id: item.id)
+        }
+        #expect(store.pendingActionCount == 0)
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
+        _ = ActionItemsCardView(store: store).body
     }
 }
 #endif

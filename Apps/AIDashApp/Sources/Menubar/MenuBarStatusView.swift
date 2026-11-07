@@ -220,34 +220,21 @@ public struct MenuBarStatusView: View {
         let usedPct = Int((entry.usedFraction * 100).rounded())
         let remainingPct = max(0, 100 - usedPct)
         return Button {
-            DashboardWorkspaceStore.shared.openDashboardWindow(
-                section: .systemAndCosts,
-                cliFilter: entry.cliFilter
-            )
+            DashboardWorkspaceStore.shared.openDashboardWindow(section: .systemAndCosts, cliFilter: entry.cliFilter)
             perform(.openBriefing)
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Image(systemName: entry.health.symbolName)
-                        .foregroundStyle(tint)
-                    Text(entry.displayName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
+                    Image(systemName: entry.health.symbolName).foregroundStyle(tint)
+                    Text(entry.displayName).font(.caption.weight(.semibold)).foregroundStyle(.primary)
                     Spacer(minLength: 4)
                     Text(DashboardL10n.format("menubar.pulse.quota_remaining_format", "Left %lld%%", remainingPct))
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                    Text("\(usedPct)%")
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(tint)
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    Text("\(usedPct)%").font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
                 }
-                Gauge(value: entry.usedFraction, in: 0...1) {
-                    Text(entry.displayName)
-                }
-                .gaugeStyle(.accessoryLinearCapacity)
-                .tint(tint)
+                Gauge(value: entry.usedFraction, in: 0...1) { Text(entry.displayName) }
+                    .gaugeStyle(.accessoryLinearCapacity)
+                    .tint(tint)
             }
             .contentShape(Rectangle())
         }
@@ -255,29 +242,21 @@ public struct MenuBarStatusView: View {
     }
 
     private func tokenVolumeChartSection(
-        entries: [CLICostQuotaEntry],
-        trendPoints: [TrendDataPoint],
-        todayTotal: UInt64,
-        periodTotal: UInt64
+        entries: [CLICostQuotaEntry], trendPoints: [TrendDataPoint], todayTotal: UInt64, periodTotal: UInt64
     ) -> some View {
         let maxTokens = max(entries.map(\.totalTokens).max() ?? 1, 1)
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(DashboardL10n.tr("menubar.pulse.token_chart_title", "CLI TOKEN VOLUME"))
-                    .font(.system(.caption2, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(.caption2, design: .rounded, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 Text(
                     DashboardL10n.format(
-                        "menubar.pulse.today_tokens_format",
-                        "Today %@ · 7d %@",
-                        DashboardTokenFormatter.compact(todayTotal),
-                        DashboardTokenFormatter.compact(periodTotal)
+                        "menubar.pulse.today_tokens_format", "Today %@ · 7d %@",
+                        DashboardTokenFormatter.compact(todayTotal), DashboardTokenFormatter.compact(periodTotal)
                     )
                 )
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
-                .contentTransition(.numericText())
+                .font(.caption.weight(.semibold)).monospacedDigit().contentTransition(.numericText())
             }
             VStack(alignment: .leading, spacing: 10) {
                 Chart(trendPoints) { point in
@@ -293,10 +272,7 @@ public struct MenuBarStatusView: View {
                 VStack(spacing: 6) {
                     ForEach(entries.filter { $0.totalTokens > 0 || $0.cliFilter != .kimi }) { entry in
                         HStack(spacing: 6) {
-                            Text(entry.displayName)
-                                .font(.caption.weight(.medium))
-                                .frame(width: 78, alignment: .leading)
-                                .lineLimit(1)
+                            Text(entry.displayName).font(.caption.weight(.medium)).frame(width: 78, alignment: .leading).lineLimit(1)
                             GeometryReader { geo in
                                 let ratio = min(max(Double(entry.totalTokens) / Double(maxTokens), 0.04), 1.0)
                                 RoundedRectangle(cornerRadius: 3, style: .continuous)
@@ -309,56 +285,216 @@ public struct MenuBarStatusView: View {
                             }
                             .frame(height: 7)
                             Text("\(DashboardTokenFormatter.compact(entry.totalTokens))")
-                                .font(.caption.weight(.semibold))
-                                .monospacedDigit()
-                                .frame(width: 52, alignment: .trailing)
+                                .font(.caption.weight(.semibold)).monospacedDigit().frame(width: 52, alignment: .trailing)
                         }
                     }
                 }
             }
             .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(solidCardColor)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-            }
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
         }
     }
     private func topActionsSection(items: [DashboardActionItem]) -> some View {
-        let pendingCount = items.filter { !completedActionIDs.contains($0.id) }.count
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        MenuBarTopActionsCard(
+            items: items,
+            solidCardColor: solidCardColor,
+            completedActionIDs: $completedActionIDs,
+            copiedActionID: $copiedActionID,
+            onOpenBriefing: { perform(.openBriefing) }
+        )
+    }
+
+    private var footerBar: some View {
+        functionalGlassBar {
+            Button { perform(.openBriefing) } label: {
+                Label(Copy.openBriefing, systemImage: "macwindow").font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.small)
+            .frame(minHeight: 28)
+
+            Spacer(minLength: 4)
+
+            Button { perform(.refresh) } label: {
+                Image(systemName: "arrow.clockwise").frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(Copy.refreshAction)
+
+            Button { perform(.showAbout) } label: {
+                Image(systemName: "info.circle").frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(Copy.about)
+
+            Button(role: .destructive) { perform(.quit) } label: {
+                Image(systemName: "power").frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(Copy.quit)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Copy.actions)
+    }
+
+    private var loadingView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach([44.0, 68.0, 150.0, 84.0], id: \.self) { h in
+                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor).frame(height: h)
+            }
+        }
+        .redacted(reason: .placeholder)
+        .accessibilityLabel(Copy.updating)
+    }
+
+    private func diagnosticCard(title: String, detail: String?, symbol: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol).foregroundStyle(tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.weight(.semibold))
+                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+            Button(Copy.refresh, action: onRefresh).buttonStyle(.borderedProminent).controlSize(.small)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
+        .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+    }
+
+    private func functionalGlassBar<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 8) { content() }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: .rect(cornerRadius: 10))
+    }
+
+    private var solidCardColor: Color {
+        reduceTransparency ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor)
+    }
+
+    internal static func formatLoadAverages(one: Double, five: Double, fifteen: Double) -> String {
+        String(format: "%.1f / %.1f / %.1f", one, five, fifteen)
+    }
+
+    internal static func compactMemoryPair(used: UInt64, total: UInt64) -> String {
+        guard used > 0 || total > 0 else { return "0 / 0 GB" }
+        return String(format: "%.1f / %.1f GB", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
+    }
+
+    private static func compactMemoryShort(used: UInt64, total: UInt64) -> String {
+        guard total > 0 else { return "0GB" }
+        return String(format: "%.0f/%.0fG", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
+    }
+
+    internal static func resolveLocalized(_ key: String, _ value: String) -> String {
+        Copy.resolveLocalized(key, value)
+    }
+}
+
+@MainActor
+private struct MenuBarTopActionsCard: View {
+    let items: [DashboardActionItem]
+    let solidCardColor: Color
+    @Binding var completedActionIDs: Set<String>
+    @Binding var copiedActionID: String?
+    let onOpenBriefing: () -> Void
+
+    var body: some View {
+        let pendingItems = items.filter { !completedActionIDs.contains($0.id) && !$0.isCompleted }
+        let completedCount = items.count - pendingItems.count
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 Text(DashboardL10n.tr("menubar.pulse.top_actions", "TOP ACTIONABLE ITEMS"))
                     .font(.system(.caption2, design: .rounded, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Text(DashboardL10n.format("menubar.pulse.pending_count_format", "%lld pending", pendingCount))
+                if completedCount > 0 {
+                    Button {
+                        for item in items where completedActionIDs.contains(item.id) || item.isCompleted {
+                            completedActionIDs.remove(item.id)
+                            if item.isCompleted {
+                                DashboardWorkspaceStore.shared.toggleActionItem(id: item.id)
+                            }
+                        }
+                    } label: {
+                        Text(DashboardL10n.format("menubar.pulse.undo_completed_format", "Undo (%lld)", completedCount))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text(DashboardL10n.format("menubar.pulse.pending_count_format", "%lld pending", pendingItems.count))
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(items) { item in
-                    topActionRow(item)
+            Group {
+                if pendingItems.isEmpty {
+                    emptyStateView(completedCount: completedCount)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(pendingItems.prefix(2)) { item in
+                            actionRow(item)
+                        }
+                    }
                 }
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(solidCardColor)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        }
+    }
+
+    private func emptyStateView(completedCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: completedCount > 0 ? "checkmark.seal.fill" : "checkmark.shield.fill")
+                    .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Color.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(
+                        completedCount > 0
+                            ? DashboardL10n.tr("menubar.pulse.empty_resolved_title", "All actionable items resolved")
+                            : DashboardL10n.tr("menubar.pulse.empty_healthy_title", "System & CLI quotas are all healthy")
+                    )
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    Text(
+                        completedCount > 0
+                            ? DashboardL10n.format("menubar.pulse.empty_resolved_desc_format", "Cleared %lld item(s). Click 'Undo' above to restore.", completedCount)
+                            : DashboardL10n.tr("menubar.pulse.empty_healthy_desc", "Zero approval blockers, quota alerts, or memory pressure warnings.")
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                }
+                Spacer(minLength: 4)
+            }
+            HStack(spacing: 6) {
+                healthyStatusPill(symbol: "cpu", title: DashboardL10n.tr("menubar.pulse.pill_system_ok", "System Normal"))
+                healthyStatusPill(symbol: "gauge.with.dots.needle.33percent", title: DashboardL10n.tr("menubar.pulse.pill_quota_ok", "Quotas Healthy"))
+                healthyStatusPill(symbol: "checkmark.circle", title: DashboardL10n.tr("menubar.pulse.pill_zero_blockers", "0 Blockers"))
             }
         }
     }
 
-    private func topActionRow(_ item: DashboardActionItem) -> some View {
+    private func healthyStatusPill(symbol: String, title: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol).font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.green)
+            Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.green.opacity(0.10), in: Capsule())
+    }
+
+    private func actionRow(_ item: DashboardActionItem) -> some View {
         let isDone = completedActionIDs.contains(item.id) || item.isCompleted
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
@@ -381,7 +517,7 @@ public struct MenuBarStatusView: View {
                         NSWorkspace.shared.open(url)
                     }
                     DashboardWorkspaceStore.shared.openDashboardWindow(section: .actionItems)
-                    perform(.openBriefing)
+                    onOpenBriefing()
                 } label: {
                     HStack(spacing: 5) {
                         Text(item.priority.label)
@@ -389,10 +525,7 @@ public struct MenuBarStatusView: View {
                             .monospacedDigit()
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(
-                                DashboardSemanticColorPalette.color(for: item.priority.health).opacity(0.16),
-                                in: Capsule()
-                            )
+                            .background(DashboardSemanticColorPalette.color(for: item.priority.health).opacity(0.16), in: Capsule())
                             .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
                         Text(item.title)
                             .font(.caption.weight(.medium))
@@ -427,7 +560,7 @@ public struct MenuBarStatusView: View {
                 } else if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
                     Button {
                         NSWorkspace.shared.open(url)
-                        perform(.openBriefing)
+                        onOpenBriefing()
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "arrow.up.right.square")
@@ -447,149 +580,6 @@ public struct MenuBarStatusView: View {
                     .lineLimit(2)
             }
         }
-    }
-
-    private var footerBar: some View {
-        functionalGlassBar {
-            Button {
-                perform(.openBriefing)
-            } label: {
-                Label(Copy.openBriefing, systemImage: "macwindow")
-                    .font(.caption.weight(.semibold))
-            }
-            .buttonStyle(.glassProminent)
-            .controlSize(.small)
-            .frame(minHeight: 28)
-
-            Spacer(minLength: 4)
-
-            Button {
-                perform(.refresh)
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(Copy.refreshAction)
-
-            Button {
-                perform(.showAbout)
-            } label: {
-                Image(systemName: "info.circle")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(Copy.about)
-
-            Button(role: .destructive) {
-                perform(.quit)
-            } label: {
-                Image(systemName: "power")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(Copy.quit)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Copy.actions)
-    }
-
-    private var loadingView: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(solidCardColor)
-                .frame(height: 44)
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(solidCardColor)
-                .frame(height: 68)
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(solidCardColor)
-                .frame(height: 150)
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(solidCardColor)
-                .frame(height: 84)
-        }
-        .redacted(reason: .placeholder)
-        .accessibilityLabel(Copy.updating)
-    }
-
-    private func diagnosticCard(title: String, detail: String?, symbol: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .foregroundStyle(tint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                    if let detail {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Button(Copy.refresh, action: onRefresh)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(solidCardColor)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-        }
-    }
-
-    private func functionalGlassBar<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 8) {
-            content()
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 10))
-    }
-
-    private var solidCardColor: Color {
-        reduceTransparency
-            ? Color(nsColor: .windowBackgroundColor)
-            : Color(nsColor: .controlBackgroundColor)
-    }
-    internal static func formatLoadAverages(one: Double, five: Double, fifteen: Double) -> String {
-        String(format: "%.1f / %.1f / %.1f", one, five, fifteen)
-    }
-
-    internal static func compactMemoryPair(used: UInt64, total: UInt64) -> String {
-        guard used > 0 || total > 0 else { return "0 / 0 GB" }
-        return String(
-            format: "%.1f / %.1f GB",
-            Double(used) / 1_073_741_824.0,
-            Double(total) / 1_073_741_824.0
-        )
-    }
-
-    private static func compactMemoryShort(used: UInt64, total: UInt64) -> String {
-        guard total > 0 else { return "0GB" }
-        return String(format: "%.0f/%.0fG", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
-    }
-    private func compactCount(_ value: UInt64) -> String {
-        if value >= 1_000_000_000 {
-            return String(format: "%.2fB", Double(value) / 1_000_000_000.0)
-        } else if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000.0)
-        } else if value >= 10_000 {
-            return String(format: "%.1fK", Double(value) / 1_000.0)
-        }
-        return value.formatted(.number)
-    }
-    private func formatBytes(_ value: UInt64) -> String { ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary) }
-    private func rate(_ value: Double) -> String { "\(ByteCountFormatter.string(fromByteCount: Int64(max(value, 0)), countStyle: .binary))/s" }
-    private func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
-    internal static func resolveLocalized(_ key: String, _ value: String) -> String {
-        Copy.resolveLocalized(key, value)
     }
 }
 #endif

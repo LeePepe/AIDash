@@ -2323,6 +2323,78 @@
         }
       }
     },
+    "menubar.pulse.empty_healthy_desc": {
+      "comment": "Description when system telemetry and CLI quotas are all healthy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zero approval blockers, quota alerts, or memory pressure warnings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前无审批阻塞、额度预警或内存压力"
+          }
+        }
+      }
+    },
+    "menubar.pulse.empty_healthy_title": {
+      "comment": "Title when there are zero alerts or blockers.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System & CLI quotas are all healthy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统与 CLI 额度一切正常"
+          }
+        }
+      }
+    },
+    "menubar.pulse.empty_resolved_desc_format": {
+      "comment": "Description when all actionable items have been resolved.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cleared %lld item(s). Click 'Undo' above to restore."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已处理 %lld 项待办 · 点右上角「恢复」可重新查看"
+          }
+        }
+      }
+    },
+    "menubar.pulse.empty_resolved_title": {
+      "comment": "Title when all actionable items have been checked off.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All actionable items resolved"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日待办已全部处理完毕"
+          }
+        }
+      }
+    },
     "menubar.pulse.machine_format": {
       "comment": "Menu bar machine chip and core count summary.",
       "extractionState": "manual",
@@ -2355,6 +2427,60 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 项待办"
+          }
+        }
+      }
+    },
+    "menubar.pulse.pill_quota_ok": {
+      "comment": "Healthy status pill for CLI quotas.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quotas Healthy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI 额度充足"
+          }
+        }
+      }
+    },
+    "menubar.pulse.pill_system_ok": {
+      "comment": "Healthy status pill for system load.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System Normal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统负载正常"
+          }
+        }
+      }
+    },
+    "menubar.pulse.pill_zero_blockers": {
+      "comment": "Healthy status pill for zero workflow blockers.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0 Blockers"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0 阻塞任务"
           }
         }
       }
@@ -2481,6 +2607,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "待推进事项"
+          }
+        }
+      }
+    },
+    "menubar.pulse.undo_completed_format": {
+      "comment": "Button in MenuBar top actions section to restore completed action items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo (%lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复 (%lld)"
           }
         }
       }

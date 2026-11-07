@@ -53,24 +53,72 @@ public struct ActionItemsCardView: View {
             }
         } content: {
             if store.filteredActionItems.isEmpty {
-                ContentUnavailableView {
-                    Label(DashboardL10n.tr("dashboard.actions.empty_title", "No Matching Actionable Items"), systemImage: "checkmark.seal")
-                } description: {
-                    Text(DashboardL10n.tr("dashboard.actions.empty_desc", "No actionable items match the active filter combination."))
-                } actions: {
-                    if store.hasScopedSubFilter {
-                        Button(DashboardL10n.tr("dashboard.actions.reset_filter", "Reset Scoped Filter")) {
-                            store.clearScopedFilterOnly()
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .frame(minHeight: 140)
+                actionEmptyStateContent
+                    .frame(minHeight: 150)
             } else {
                 VStack(spacing: 8) {
                     ForEach(store.filteredActionItems) { item in
                         actionItemRow(item)
                     }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var actionEmptyStateContent: some View {
+        if store.actionItems.isEmpty {
+            ContentUnavailableView {
+                Label(
+                    DashboardL10n.tr("menubar.pulse.empty_healthy_title", "System & CLI quotas are all healthy"),
+                    systemImage: "checkmark.shield.fill"
+                )
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.green)
+            } description: {
+                Text(DashboardL10n.tr("menubar.pulse.empty_healthy_desc", "Zero approval blockers, quota alerts, or memory pressure warnings."))
+            } actions: {
+                Button(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh")) {
+                    store.refreshFromProvider()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        } else if store.pendingActionCount == 0 && store.actionFilter == .pending {
+            ContentUnavailableView {
+                Label(
+                    DashboardL10n.tr("menubar.pulse.empty_resolved_title", "All actionable items resolved"),
+                    systemImage: "checkmark.seal.fill"
+                )
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.green)
+            } description: {
+                Text(
+                    DashboardL10n.format(
+                        "menubar.pulse.empty_resolved_desc_format",
+                        "Cleared %lld item(s). Click 'Undo' above to restore.",
+                        store.completedActionCount
+                    )
+                )
+            } actions: {
+                Button(DashboardL10n.tr("dashboard.action_filter.completed", "Completed")) {
+                    store.actionFilter = .completed
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        } else {
+            ContentUnavailableView {
+                Label(DashboardL10n.tr("dashboard.actions.empty_title", "No Matching Actionable Items"), systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text(DashboardL10n.tr("dashboard.actions.empty_desc", "No actionable items match the active filter combination."))
+            } actions: {
+                if store.hasScopedSubFilter {
+                    Button(DashboardL10n.tr("dashboard.actions.reset_filter", "Reset Scoped Filter")) {
+                        store.clearScopedFilterOnly()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
             }
         }
