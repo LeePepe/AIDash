@@ -289,10 +289,16 @@ private struct StarFeedbackScope: View {
         // the spec 005 §6 wiring test exercises the exact same code path (see
         // StarFeedbackActions.swift). The filled/checked state sets are derived
         // here from `@Query` and injected alongside.
-        BriefingView()
-            .starFeedbackActions(StarFeedbackActions(writer: writer))
-            .environment(\.starredItemRefs, Set(starEvents.compactMap(\.itemRef)))
-            .environment(\.starredCardIds, Set(cardStarEvents.map(\.cardId)))
-            .environment(\.doneItemRefs, UserEventWriter.doneRefs(from: doneEvents))
+        Group {
+            #if os(macOS)
+            AIDashMacWorkspaceView()
+            #else
+            BriefingView()
+            #endif
+        }
+        .starFeedbackActions(StarFeedbackActions(writer: writer))
+        .environment(\.starredItemRefs, Set(starEvents.compactMap(\.itemRef)))
+        .environment(\.starredCardIds, Set(cardStarEvents.map(\.cardId)))
+        .environment(\.doneItemRefs, UserEventWriter.doneRefs(from: doneEvents))
     }
 }

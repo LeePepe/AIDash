@@ -614,7 +614,10 @@ public struct MenuBarStatusView: View { // swiftlint:disable:this type_body_leng
         VStack(alignment: .leading, spacing: 10) { content() }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: 16))
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(theme.neutrals.card)
+            )
             .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(theme.neutrals.border.opacity(colorScheme == .dark ? 0.22 : 0.28), lineWidth: 1) }
     }
