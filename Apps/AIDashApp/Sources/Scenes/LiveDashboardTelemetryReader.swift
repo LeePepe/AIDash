@@ -97,7 +97,7 @@ public enum LiveDashboardTelemetryReader {
                 todayCostUSD: copilotTodayCost, periodCostUSD: copilotWeekCost, quotaLimitUSD: 100.0,
                 activeTokens: copilotDayIn + copilotDayOut, cacheTokens: copilotDayCache,
                 interactionCount: copilotDayRuns, isAvailable: true,
-                quotaUsedOverride: quotas.cursorWeeklyUsedFraction ?? 0.0, quotaLabel: weeklyQuotaLabel
+                quotaUsedOverride: 0.0, quotaLabel: weeklyQuotaLabel
             ),
             CLICostQuotaEntry(
                 id: "cli-codex", cliFilter: .codex, displayName: "Codex CLI",
@@ -105,7 +105,7 @@ public enum LiveDashboardTelemetryReader {
                 todayCostUSD: codexTodayCost, periodCostUSD: codexWeekCost, quotaLimitUSD: 100.0,
                 activeTokens: codexStats.dayIn + codexStats.dayOut, cacheTokens: codexStats.dayCache,
                 interactionCount: codexStats.dayRuns, isAvailable: true,
-                quotaUsedOverride: quotas.cursorWeeklyUsedFraction ?? 0.0, quotaLabel: weeklyQuotaLabel
+                quotaUsedOverride: 0.0, quotaLabel: weeklyQuotaLabel
             ),
             CLICostQuotaEntry(
                 id: "cli-claude", cliFilter: .claude, displayName: "Claude Code",

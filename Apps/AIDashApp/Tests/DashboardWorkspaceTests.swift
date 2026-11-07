@@ -328,6 +328,7 @@ struct DashboardWorkspaceTests {
         #expect(abs((parsed.claudeSevenDayUsedFraction ?? -1) - 0.08) < 0.0001)
         #expect(abs((parsed.claudeFiveHourUsedFraction ?? -1) - 0.125) < 0.0001)
         #expect(abs((parsed.cursorWeeklyUsedFraction ?? -1) - 0.2767) < 0.0001)
+        #expect(DashboardTokenFormatter.compact(4_980_000) == "5.0M")
     }
 }
 #endif
