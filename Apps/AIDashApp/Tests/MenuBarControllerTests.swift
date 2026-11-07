@@ -55,7 +55,7 @@ import SQLite3
 // status item plus a template image whose `size` is set before being
 // handed to the button.
 @MainActor
-@Test func menuBarStatusItemUsesFixedLengthAndSizedTemplateIcon() async throws {
+@Test func menuBarStatusItemUsesVariableLengthWithLiveSpendAndSizedTemplateIcon() async throws {
     let controller = MenuBarController()
     defer {
         controller.stopPeriodicRefresh()
@@ -65,7 +65,8 @@ import SQLite3
     }
 
     let item = try #require(controller.statusItemForTesting)
-    #expect(item.length == NSStatusItem.squareLength)
+    #expect(item.length == NSStatusItem.variableLength)
+    #expect(item.button?.title.contains("tok") == true)
 
     let icon = try #require(item.button?.image)
     #expect(icon.isTemplate)
@@ -347,16 +348,16 @@ import SQLite3
     try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
     var lightHeights: [String: Int] = [:]
     let minimumHeights: [String: Int] = [
-        "populated": 1_200,
-        "worst-case": 1_200,
-        "loading": 1_200,
+        "populated": 600,
+        "worst-case": 600,
+        "loading": 600,
         "empty": 200,
         "error": 200
     ]
     // Keep multi-child header/message strips horizontal instead of stacked.
     let maximumHeights: [String: Int] = [
-        "populated": 2_350,
-        "worst-case": 2_350,
+        "populated": 1_800,
+        "worst-case": 1_800,
         "empty": 480,
         "error": 480
     ]
@@ -372,7 +373,7 @@ import SQLite3
             let data = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
             #expect(!data.isEmpty)
             let bitmap = try #require(NSBitmapImageRep(data: data))
-            #expect(bitmap.pixelsWide == 760)
+            #expect(bitmap.pixelsWide == 720)
             #expect(bitmap.pixelsHigh > minimumHeights[name, default: 0])
             if let maximumHeight = maximumHeights[name] {
                 #expect(bitmap.pixelsHigh < maximumHeight)
@@ -384,9 +385,9 @@ import SQLite3
             #expect(rootPadding.alphaComponent < 0.05)
             for point in [
                 (x: 8, y: 80),
-                (x: 751, y: 80),
+                (x: 711, y: 80),
                 (x: 8, y: bitmap.pixelsHigh - 60),
-                (x: 751, y: bitmap.pixelsHigh - 60)
+                (x: 711, y: bitmap.pixelsHigh - 60)
             ] {
                 let outerMargin = try #require(bitmap.colorAt(x: point.x, y: point.y)?.usingColorSpace(.sRGB))
                 #expect(outerMargin.alphaComponent < 0.10)

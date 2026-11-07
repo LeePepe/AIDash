@@ -48,6 +48,8 @@ struct AIDashApp: App {
         // process (it IS the spawned job) and never a test host (no real
         // launchctl side effects during `swift`/`xcodebuild test`).
         if mode == .gui {
+            NSApplication.shared.setActivationPolicy(.regular)
+            NSApplication.shared.activate(ignoringOtherApps: true)
             let outcome = LaunchdAgentInstaller.shared.registerIfNeeded()
             if !outcome.isHealthy {
                 Self.recordLaunchAgentProblem(outcome)
