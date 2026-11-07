@@ -135,17 +135,26 @@ public final class DashboardWorkspaceStore {
     public func selectPreviousDate() {
         guard let idx = availableDates.firstIndex(of: selectedDateString), idx > availableDates.startIndex else { return }
         selectedDateString = availableDates[availableDates.index(before: idx)]
+        reloadCurrentSnapshotForSelectedDate()
     }
 
     public func selectNextDate() {
         guard let idx = availableDates.firstIndex(of: selectedDateString),
               idx < availableDates.index(before: availableDates.endIndex) else { return }
         selectedDateString = availableDates[availableDates.index(after: idx)]
+        reloadCurrentSnapshotForSelectedDate()
     }
 
     public func selectToday() {
         if let last = availableDates.last {
             selectedDateString = last
+            reloadCurrentSnapshotForSelectedDate()
+        }
+    }
+
+    private func reloadCurrentSnapshotForSelectedDate() {
+        if case let .populated(snapshot) = systemState {
+            applySnapshot(snapshot)
         }
     }
 
@@ -181,7 +190,10 @@ public final class DashboardWorkspaceStore {
         customRankings: [AgentRankingRow]? = nil
     ) {
         systemState = .populated(snapshot)
-        let derivedCLIs = customCLIs ?? Self.deriveCLIEntries(from: snapshot.tokenUsage)
+        let liveDataset = (customCLIs == nil && customRankings == nil)
+            ? LiveDashboardTelemetryReader.loadLiveDataset(forDate: selectedDateString, fallbackUsage: snapshot.tokenUsage)
+            : nil
+        let derivedCLIs = customCLIs ?? liveDataset?.entries ?? Self.deriveCLIEntries(from: snapshot.tokenUsage, forDate: selectedDateString)
         cliEntries = derivedCLIs
         trendPoints = customTrends ?? Self.deriveTrendPoints(from: derivedCLIs)
         let preservedCompletedIDs = Set(actionItems.filter(\.isCompleted).map(\.id))
@@ -190,7 +202,7 @@ public final class DashboardWorkspaceStore {
             nextActions[index].isCompleted = true
         }
         actionItems = nextActions
-        rankingRows = customRankings ?? Self.deriveRankingRows(from: derivedCLIs)
+        rankingRows = customRankings ?? liveDataset?.rankings ?? Self.deriveRankingRows(from: derivedCLIs)
         if selectedRankingRowID == nil {
             selectedRankingRowID = rankingRows.first?.id
         }
@@ -392,19 +404,25 @@ public final class DashboardWorkspaceStore {
 }
 
 extension DashboardWorkspaceStore {
-    static func deriveCLIEntries(from usage: CLITokenUsageSnapshot) -> [CLICostQuotaEntry] {
+    static func deriveCLIEntries(
+        from usage: CLITokenUsageSnapshot,
+        forDate dateString: String? = nil
+    ) -> [CLICostQuotaEntry] {
+        let targetDate = dateString ?? todayDateString()
+        if let live = LiveDashboardTelemetryReader.loadLiveDataset(forDate: targetDate, fallbackUsage: usage) {
+            return live.entries
+        }
         let baseItems = usage.items
         let claudeItem = baseItems.first { $0.cli == .claude }
         let codexItem = baseItems.first { $0.cli == .codex }
         let copilotItem = baseItems.first { $0.cli == .copilot }
 
-        let claudeCost = estimateCostUSD(activeTokens: claudeItem?.activeTokens ?? 0, ratePerMillion: 9.0, fallback: 6.40)
-        let codexCost = estimateCostUSD(activeTokens: codexItem?.activeTokens ?? 0, ratePerMillion: 6.0, fallback: 4.20)
-        let copilotCost = estimateCostUSD(activeTokens: copilotItem?.activeTokens ?? 0, ratePerMillion: 1.5, fallback: 1.90)
+        let claudeCost = estimateCostUSD(activeTokens: claudeItem?.activeTokens ?? 0, ratePerMillion: 9.0, fallback: 0.0)
+        let codexCost = estimateCostUSD(activeTokens: codexItem?.activeTokens ?? 0, ratePerMillion: 6.0, fallback: 0.0)
+        let copilotCost = estimateCostUSD(activeTokens: copilotItem?.activeTokens ?? 0, ratePerMillion: 1.5, fallback: 0.0)
         let claudeQuotaCap = 15.0
-        let claudeUsedFromQuota: Double? = usage.claudeWeeklyRemainingPercent.map { rem in
-            let usedRatio = Double(max(0, min(100, 100 - rem))) / 100.0
-            return max(claudeCost, usedRatio * claudeQuotaCap)
+        let claudeUsedFraction: Double? = usage.claudeWeeklyRemainingPercent.map { rem in
+            Double(max(0, min(100, 100 - rem))) / 100.0
         }
 
         return [
@@ -413,13 +431,14 @@ extension DashboardWorkspaceStore {
                 cliFilter: .claude,
                 displayName: "Claude Code",
                 modelTag: "claude-opus-4-6 / sonnet-4-6",
-                todayCostUSD: claudeUsedFromQuota ?? claudeCost,
-                periodCostUSD: max((claudeUsedFromQuota ?? claudeCost) * 12.0, 78.50),
+                todayCostUSD: claudeCost,
+                periodCostUSD: claudeCost * 7.0,
                 quotaLimitUSD: claudeQuotaCap,
-                activeTokens: claudeItem?.activeTokens ?? 6_581_259,
-                cacheTokens: claudeItem?.cacheTokens ?? 287_535_391,
-                interactionCount: claudeItem?.interactionCount ?? 342,
-                isAvailable: claudeItem?.isAvailable ?? true
+                activeTokens: claudeItem?.activeTokens ?? 0,
+                cacheTokens: claudeItem?.cacheTokens ?? 0,
+                interactionCount: claudeItem?.interactionCount ?? 0,
+                isAvailable: claudeItem?.isAvailable ?? true,
+                quotaUsedOverride: claudeUsedFraction
             ),
             CLICostQuotaEntry(
                 id: "cli-codex",
@@ -427,24 +446,24 @@ extension DashboardWorkspaceStore {
                 displayName: "Codex CLI",
                 modelTag: "gpt-5.4 / codex-exec",
                 todayCostUSD: codexCost,
-                periodCostUSD: max(codexCost * 14.0, 62.40),
-                quotaLimitUSD: 6.00,
-                activeTokens: codexItem?.activeTokens ?? 23_587_180,
-                cacheTokens: codexItem?.cacheTokens ?? 12_400_000,
-                interactionCount: codexItem?.interactionCount ?? 518,
+                periodCostUSD: codexCost * 7.0,
+                quotaLimitUSD: 15.0,
+                activeTokens: codexItem?.activeTokens ?? 0,
+                cacheTokens: codexItem?.cacheTokens ?? 0,
+                interactionCount: codexItem?.interactionCount ?? 0,
                 isAvailable: codexItem?.isAvailable ?? true
             ),
             CLICostQuotaEntry(
                 id: "cli-copilot",
                 cliFilter: .copilot,
                 displayName: "Copilot CLI",
-                modelTag: "gemini-4-argon / claude",
+                modelTag: "gemini-4-argon / gpt-5.6-luna",
                 todayCostUSD: copilotCost,
-                periodCostUSD: max(copilotCost * 10.0, 29.00),
-                quotaLimitUSD: 10.00,
-                activeTokens: copilotItem?.activeTokens ?? 25_852_407,
-                cacheTokens: copilotItem?.cacheTokens ?? 249_631_055,
-                interactionCount: copilotItem?.interactionCount ?? 610,
+                periodCostUSD: copilotCost * 7.0,
+                quotaLimitUSD: 15.0,
+                activeTokens: copilotItem?.activeTokens ?? 0,
+                cacheTokens: copilotItem?.cacheTokens ?? 0,
+                interactionCount: copilotItem?.interactionCount ?? 0,
                 isAvailable: copilotItem?.isAvailable ?? true
             ),
             CLICostQuotaEntry(
@@ -452,12 +471,12 @@ extension DashboardWorkspaceStore {
                 cliFilter: .kimi,
                 displayName: "Kimi CLI",
                 modelTag: "kimi-k2.5-coding",
-                todayCostUSD: 1.25,
-                periodCostUSD: 18.60,
-                quotaLimitUSD: 8.00,
-                activeTokens: 3_120_000,
-                cacheTokens: 14_800_000,
-                interactionCount: 128,
+                todayCostUSD: 0.0,
+                periodCostUSD: 0.0,
+                quotaLimitUSD: 15.0,
+                activeTokens: 0,
+                cacheTokens: 0,
+                interactionCount: 0,
                 isAvailable: true
             )
         ]
@@ -465,8 +484,7 @@ extension DashboardWorkspaceStore {
 
     private static func estimateCostUSD(activeTokens: UInt64, ratePerMillion: Double, fallback: Double) -> Double {
         guard activeTokens > 0 else { return fallback }
-        let raw = (Double(activeTokens) / 1_000_000.0) * ratePerMillion
-        return min(max(raw, 0.45), 14.50)
+        return (Double(activeTokens) / 1_000_000.0) * ratePerMillion
     }
 
     static func deriveTrendPoints(from entries: [CLICostQuotaEntry]) -> [TrendDataPoint] {
@@ -476,8 +494,8 @@ extension DashboardWorkspaceStore {
                 bucketLabel: entry.cliFilter.shortLabel,
                 category: entry.displayName,
                 cliFilter: entry.cliFilter,
-                invocations: max(Int(entry.interactionCount), 40),
-                successRate: entry.health == .critical ? 0.91 : 0.97,
+                invocations: Int(entry.interactionCount),
+                successRate: entry.health == .critical ? 0.91 : 0.99,
                 costUSD: entry.todayCostUSD
             )
         }

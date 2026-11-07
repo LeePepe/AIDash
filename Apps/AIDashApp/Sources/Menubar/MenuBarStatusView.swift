@@ -235,10 +235,17 @@ public struct MenuBarStatusView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary)
                     Spacer(minLength: 4)
-                    Text(String(format: "$%.2f / $%.2f", entry.todayCostUSD, entry.quotaLimitUSD))
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                    if let quotaLabel = entry.quotaLabel {
+                        Text(DashboardL10n.format("dashboard.cli_cost.spend_and_quota_format", "$%.2f · %@", entry.todayCostUSD, quotaLabel))
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(String(format: "$%.2f / $%.2f", entry.todayCostUSD, entry.quotaLimitUSD))
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
                     Text("\(Int((entry.usedFraction * 100).rounded()))%")
                         .font(.caption.weight(.semibold))
                         .monospacedDigit()

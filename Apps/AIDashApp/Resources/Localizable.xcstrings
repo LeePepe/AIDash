@@ -1009,6 +1009,24 @@
         }
       }
     },
+    "dashboard.cli_cost.spend_and_quota_format": {
+      "comment": "Format showing today's API-equivalent spend and quota window label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "$%.2f · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日折算 $%.2f · %@"
+          }
+        }
+      }
+    },
     "dashboard.cli_cost.today": {
       "comment": "Header label for today total CLI spend.",
       "extractionState": "manual",
@@ -1365,6 +1383,42 @@
           "stringUnit": {
             "state": "translated",
             "value": "次"
+          }
+        }
+      }
+    },
+    "dashboard.quota.claude_7d_label": {
+      "comment": "Label for Claude Pro 7-day quota window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro 7d Quota"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro 7天配额"
+          }
+        }
+      }
+    },
+    "dashboard.quota.weekly_label": {
+      "comment": "Label for 7-day / weekly quota window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7d Quota"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "周配额"
           }
         }
       }

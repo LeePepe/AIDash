@@ -288,5 +288,46 @@ struct DashboardWorkspaceTests {
             }
         }
     }
+
+    @Test("LiveDashboardTelemetryReader parses real magpie quotas.json windows without fake caps")
+    func liveTelemetryReaderParsesRealQuotas() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-quota-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        let magpieURL = tempDir.appendingPathComponent("quotas.json")
+        let payload = """
+        {
+          "claude/user@example.com": {
+            "quota": {
+              "provider": "claude",
+              "windows": [
+                {"name": "5 hours", "used": 12.5},
+                {"name": "7 days", "used": 8.0}
+              ]
+            }
+          },
+          "cursor/user@example.com": {
+            "quota": {
+              "provider": "cursor",
+              "windows": [
+                {"name": "Weekly", "used": 27.67}
+              ]
+            }
+          }
+        }
+        """
+        try payload.write(to: magpieURL, atomically: true, encoding: .utf8)
+
+        let parsed = LiveDashboardTelemetryReader.readQuotas(
+            magpieQuotasURL: magpieURL,
+            claudeFallbackURL: tempDir.appendingPathComponent("missing.json"),
+            fallbackUsage: CLITokenUsageSnapshot(items: [])
+        )
+        #expect(abs((parsed.claudeSevenDayUsedFraction ?? -1) - 0.08) < 0.0001)
+        #expect(abs((parsed.claudeFiveHourUsedFraction ?? -1) - 0.125) < 0.0001)
+        #expect(abs((parsed.cursorWeeklyUsedFraction ?? -1) - 0.2767) < 0.0001)
+    }
 }
 #endif

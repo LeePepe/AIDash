@@ -188,6 +188,8 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
     public let cacheTokens: UInt64
     public let interactionCount: UInt64
     public let isAvailable: Bool
+    public let quotaUsedOverride: Double?
+    public let quotaLabel: String?
 
     public init(
         id: String,
@@ -200,7 +202,9 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
         activeTokens: UInt64,
         cacheTokens: UInt64,
         interactionCount: UInt64,
-        isAvailable: Bool = true
+        isAvailable: Bool = true,
+        quotaUsedOverride: Double? = nil,
+        quotaLabel: String? = nil
     ) {
         self.id = id
         self.cliFilter = cliFilter
@@ -213,9 +217,14 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
         self.cacheTokens = cacheTokens
         self.interactionCount = interactionCount
         self.isAvailable = isAvailable
+        self.quotaUsedOverride = quotaUsedOverride
+        self.quotaLabel = quotaLabel
     }
 
     public var usedFraction: Double {
+        if let quotaUsedOverride {
+            return min(max(quotaUsedOverride, 0), 1)
+        }
         guard quotaLimitUSD > 0 else { return 0 }
         return min(max(todayCostUSD / quotaLimitUSD, 0), 1)
     }

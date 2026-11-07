@@ -435,10 +435,17 @@ public struct CLICostQuotaCardView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                Text(String(format: "$%.2f / $%.2f", entry.todayCostUSD, entry.quotaLimitUSD))
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
+                if let quotaLabel = entry.quotaLabel {
+                    Text(DashboardL10n.format("dashboard.cli_cost.spend_and_quota_format", "$%.2f · %@", entry.todayCostUSD, quotaLabel))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                } else {
+                    Text(String(format: "$%.2f / $%.2f", entry.todayCostUSD, entry.quotaLimitUSD))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                }
                 Text("\(Int((entry.usedFraction * 100).rounded()))%")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
