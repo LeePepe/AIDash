@@ -33,6 +33,8 @@ public struct MenuBarStatusView: View {
     public let onQuit: () -> Void
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var completedActionIDs: Set<String> = []
+    @State private var copiedActionID: String?
 
     public init(
         state: MenuBarStatusViewState,
@@ -326,46 +328,21 @@ public struct MenuBarStatusView: View {
         }
     }
     private func topActionsSection(items: [DashboardActionItem]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let pendingCount = items.filter { !completedActionIDs.contains($0.id) }.count
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(DashboardL10n.tr("menubar.pulse.top_actions", "TOP ACTIONABLE ITEMS"))
                     .font(.system(.caption2, design: .rounded, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Text(DashboardL10n.format("menubar.pulse.pending_count_format", "%lld pending", items.count))
+                Text(DashboardL10n.format("menubar.pulse.pending_count_format", "%lld pending", pendingCount))
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(items) { item in
-                    HStack(spacing: 6) {
-                        Text(item.priority.label)
-                            .font(.caption2.weight(.bold))
-                            .monospacedDigit()
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(
-                                DashboardSemanticColorPalette.color(for: item.priority.health).opacity(0.16),
-                                in: Capsule()
-                            )
-                            .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
-                        Text(item.title)
-                            .font(.caption)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        if let command = item.command {
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(command, forType: .string)
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .frame(width: 24, height: 24)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Copy CLI Command")
-                        }
-                    }
+                    topActionRow(item)
                 }
             }
             .padding(10)
@@ -377,6 +354,77 @@ public struct MenuBarStatusView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+            }
+        }
+    }
+
+    private func topActionRow(_ item: DashboardActionItem) -> some View {
+        let isDone = completedActionIDs.contains(item.id) || item.isCompleted
+        return HStack(spacing: 6) {
+            Button {
+                if completedActionIDs.contains(item.id) {
+                    completedActionIDs.remove(item.id)
+                } else {
+                    completedActionIDs.insert(item.id)
+                }
+                DashboardWorkspaceStore.shared.toggleActionItem(id: item.id)
+            } label: {
+                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isDone ? Color.green : Color.secondary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.borderless)
+
+            Button {
+                if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
+                    NSWorkspace.shared.open(url)
+                }
+                DashboardWorkspaceStore.shared.openDashboardWindow(section: .actionItems)
+                perform(.openBriefing)
+            } label: {
+                HStack(spacing: 6) {
+                    Text(item.priority.label)
+                        .font(.caption2.weight(.bold))
+                        .monospacedDigit()
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(
+                            DashboardSemanticColorPalette.color(for: item.priority.health).opacity(0.16),
+                            in: Capsule()
+                        )
+                        .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
+                    Text(item.title)
+                        .font(.caption)
+                        .strikethrough(isDone)
+                        .foregroundStyle(isDone ? .secondary : .primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if let command = item.command {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    copiedActionID = item.id
+                } label: {
+                    Image(systemName: copiedActionID == item.id ? "checkmark" : "doc.on.doc")
+                        .foregroundStyle(copiedActionID == item.id ? Color.green : Color.secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.borderless)
+            } else if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                    perform(.openBriefing)
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.borderless)
             }
         }
     }

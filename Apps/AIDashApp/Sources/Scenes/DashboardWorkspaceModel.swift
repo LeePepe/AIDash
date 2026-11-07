@@ -166,10 +166,12 @@ public final class DashboardWorkspaceStore {
         if let cliFilter {
             selectedCLI = cliFilter
         }
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        for window in NSApp.windows where window.canBecomeMain {
-            window.makeKeyAndOrderFront(nil)
+        if let app = NSApp {
+            app.setActivationPolicy(.regular)
+            app.activate(ignoringOtherApps: true)
+            for window in app.windows where window.canBecomeMain {
+                window.makeKeyAndOrderFront(nil)
+            }
         }
         NotificationCenter.default.post(name: .openBriefingWindow, object: nil)
     }
