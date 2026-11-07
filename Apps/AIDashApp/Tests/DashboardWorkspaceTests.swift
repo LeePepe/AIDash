@@ -336,7 +336,7 @@ struct DashboardWorkspaceTests {
         #expect(LiveDashboardTelemetryReader.sanitizeSQLToken("2026-11-07") == "2026-11-07")
         store.openDashboardWindow(section: .actionItems)
         #expect(store.selectedSection == .actionItems)
-        #expect(!store.actionItems.isEmpty)
+        #expect(!store.actionItems.contains(where: { $0.id == "sys-memory-pressure" }))
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
     }
 }

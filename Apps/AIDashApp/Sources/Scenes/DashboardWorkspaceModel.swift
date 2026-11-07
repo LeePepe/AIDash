@@ -517,59 +517,28 @@ extension DashboardWorkspaceStore {
         }
     }
 
-    static func deriveActionItems(
-        from snapshot: MenuBarSystemSnapshot,
-        cliEntries: [CLICostQuotaEntry]
-    ) -> [DashboardActionItem] {
+    static func deriveActionItems(from snapshot: MenuBarSystemSnapshot, cliEntries: [CLICostQuotaEntry]) -> [DashboardActionItem] {
         var result: [DashboardActionItem] = snapshot.attention.items.enumerated().map { index, att in
             DashboardActionItem(
-                id: "attention-\(att.id)",
-                title: att.title,
+                id: "attention-\(att.id)", title: att.title,
                 summary: att.waitingOn.map {
                     DashboardL10n.format("dashboard.action.waiting_on_format", "Waiting on %@ · %@", $0, att.category ?? "Workflow")
                 } ?? DashboardL10n.tr("dashboard.action.requires_review", "Requires owner review to unblock downstream tasks."),
-                sourceTag: att.category ?? "Claude Code",
-                cliFilter: .claude,
-                priority: index == 0 ? .p0 : .p1,
-                isCompleted: false,
-                command: "aidash events pull --since 24h"
+                sourceTag: att.category ?? "Claude Code", cliFilter: .claude,
+                priority: index == 0 ? .p0 : .p1, isCompleted: false, command: "aidash events pull --since 24h"
             )
         }
-
         for entry in cliEntries where entry.health == .warning || entry.health == .critical {
             let pct = Int((entry.usedFraction * 100).rounded())
             result.append(DashboardActionItem(
                 id: "quota-\(entry.id)",
                 title: DashboardL10n.format("dashboard.action.quota_title_format", "%@ quota at %lld%%", entry.displayName, pct),
                 summary: DashboardL10n.format("dashboard.action.quota_total_summary_format", "Today total %@ tok · 7d %@ tok. Consider routing routine tasks to secondary CLI.", DashboardTokenFormatter.compact(entry.totalTokens), DashboardTokenFormatter.compact(entry.periodTotalTokens)),
-                sourceTag: entry.displayName,
-                cliFilter: entry.cliFilter,
-                priority: entry.health == .critical ? .p0 : .p1,
-                isCompleted: false,
-                command: "aidash schema list --quiet"
+                sourceTag: entry.displayName, cliFilter: entry.cliFilter,
+                priority: entry.health == .critical ? .p0 : .p1, isCompleted: false, command: "aidash schema list --quiet"
             ))
         }
-
-        if snapshot.memory.pressure != .normal {
-            let memPct = Int((snapshot.memory.usageFraction * 100).rounded())
-            let topProc = snapshot.memory.topProcessName.map { name in
-                if let val = snapshot.memory.topProcessValueText { return "\(name) \(val)" }
-                return name
-            } ?? MenuBarController.pressureTitle(snapshot.memory.pressure)
-            let pairText = MenuBarStatusView.compactMemoryPair(used: snapshot.memory.usedBytes, total: snapshot.memory.totalBytes)
-            result.append(DashboardActionItem(
-                id: "sys-memory-pressure",
-                title: DashboardL10n.format("dashboard.action.memory_pressure_title_format", "Memory at %lld%% (Top: %@)", memPct, topProc),
-                summary: DashboardL10n.format("dashboard.action.memory_pressure_detail_format", "Used %@. Click 'Copy' to inspect top processes in Terminal, or click circle to dismiss.", pairText),
-                sourceTag: DashboardL10n.tr("dashboard.action.source_system", "System Telemetry"),
-                cliFilter: .all,
-                priority: snapshot.memory.pressure == .critical ? .p0 : .p1,
-                isCompleted: false,
-                command: "top -l 1 -o mem -n 10"
-            ))
-        }
-
-        if result.isEmpty {
+        if result.isEmpty && !LiveDashboardTelemetryReader.isLiveEnvironment {
             result = [
                 DashboardActionItem(
                     id: "default-action-digest",
