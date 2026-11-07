@@ -360,71 +360,91 @@ public struct MenuBarStatusView: View {
 
     private func topActionRow(_ item: DashboardActionItem) -> some View {
         let isDone = completedActionIDs.contains(item.id) || item.isCompleted
-        return HStack(spacing: 6) {
-            Button {
-                if completedActionIDs.contains(item.id) {
-                    completedActionIDs.remove(item.id)
-                } else {
-                    completedActionIDs.insert(item.id)
-                }
-                DashboardWorkspaceStore.shared.toggleActionItem(id: item.id)
-            } label: {
-                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isDone ? Color.green : Color.secondary)
-                    .frame(width: 20, height: 20)
-            }
-            .buttonStyle(.borderless)
-
-            Button {
-                if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
-                    NSWorkspace.shared.open(url)
-                }
-                DashboardWorkspaceStore.shared.openDashboardWindow(section: .actionItems)
-                perform(.openBriefing)
-            } label: {
-                HStack(spacing: 6) {
-                    Text(item.priority.label)
-                        .font(.caption2.weight(.bold))
-                        .monospacedDigit()
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            DashboardSemanticColorPalette.color(for: item.priority.health).opacity(0.16),
-                            in: Capsule()
-                        )
-                        .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
-                    Text(item.title)
-                        .font(.caption)
-                        .strikethrough(isDone)
-                        .foregroundStyle(isDone ? .secondary : .primary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if let command = item.command {
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
                 Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(command, forType: .string)
-                    copiedActionID = item.id
+                    if completedActionIDs.contains(item.id) {
+                        completedActionIDs.remove(item.id)
+                    } else {
+                        completedActionIDs.insert(item.id)
+                    }
+                    DashboardWorkspaceStore.shared.toggleActionItem(id: item.id)
                 } label: {
-                    Image(systemName: copiedActionID == item.id ? "checkmark" : "doc.on.doc")
-                        .foregroundStyle(copiedActionID == item.id ? Color.green : Color.secondary)
-                        .frame(width: 24, height: 24)
+                    Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isDone ? Color.green : Color.secondary)
+                        .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.borderless)
-            } else if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
+
                 Button {
-                    NSWorkspace.shared.open(url)
+                    if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
+                        NSWorkspace.shared.open(url)
+                    }
+                    DashboardWorkspaceStore.shared.openDashboardWindow(section: .actionItems)
                     perform(.openBriefing)
                 } label: {
-                    Image(systemName: "arrow.up.right.square")
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 24, height: 24)
+                    HStack(spacing: 5) {
+                        Text(item.priority.label)
+                            .font(.caption2.weight(.bold))
+                            .monospacedDigit()
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(
+                                DashboardSemanticColorPalette.color(for: item.priority.health).opacity(0.16),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
+                        Text(item.title)
+                            .font(.caption.weight(.medium))
+                            .strikethrough(isDone)
+                            .foregroundStyle(isDone ? .secondary : .primary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+
+                if let command = item.command {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(command, forType: .string)
+                        copiedActionID = item.id
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: copiedActionID == item.id ? "checkmark" : "doc.on.doc")
+                            Text(
+                                copiedActionID == item.id
+                                    ? DashboardL10n.tr("dashboard.actions.copied", "Copied")
+                                    : DashboardL10n.tr("dashboard.actions.copy_command", "Copy Command")
+                            )
+                        }
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(copiedActionID == item.id ? Color.green : Color.accentColor)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                } else if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                        perform(.openBriefing)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.up.right.square")
+                            Text(DashboardL10n.tr("dashboard.actions.open_link", "Open"))
+                        }
+                        .font(.caption2.weight(.medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+            }
+            if !isDone {
+                Text(item.summary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 26)
+                    .lineLimit(2)
             }
         }
     }

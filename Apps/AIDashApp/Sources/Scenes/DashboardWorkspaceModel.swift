@@ -3,6 +3,7 @@ import AppKit
 import Foundation
 import Observation
 import SQLite3
+import SwiftUI
 import AIDashCore
 
 @MainActor
@@ -158,22 +159,38 @@ public final class DashboardWorkspaceStore {
         }
     }
 
-    public func openDashboardWindow(
-        section: DashboardWorkspaceSection = .overview,
-        cliFilter: DashboardCLIFilter? = nil
-    ) {
+    private static var standaloneDashboardWindow: NSWindow?
+
+    public func openDashboardWindow(section: DashboardWorkspaceSection = .overview, cliFilter: DashboardCLIFilter? = nil) {
         selectedSection = section
-        if let cliFilter {
-            selectedCLI = cliFilter
-        }
+        if let cliFilter { selectedCLI = cliFilter }
         if let app = NSApp {
             app.setActivationPolicy(.regular)
             app.activate(ignoringOtherApps: true)
-            for window in app.windows where window.canBecomeMain {
-                window.makeKeyAndOrderFront(nil)
+            let candidateWindows = app.windows.filter { $0.canBecomeMain && !$0.className.contains("StatusBar") }
+            if let existing = candidateWindows.first {
+                existing.makeKeyAndOrderFront(nil)
+            } else if LiveDashboardTelemetryReader.isLiveEnvironment {
+                Self.makeOrReuseDashboardWindow(store: self).makeKeyAndOrderFront(nil)
             }
         }
         NotificationCenter.default.post(name: .openBriefingWindow, object: nil)
+    }
+
+    private static func makeOrReuseDashboardWindow(store: DashboardWorkspaceStore) -> NSWindow {
+        if let win = standaloneDashboardWindow { return win }
+        let win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 740),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false
+        )
+        win.title = "AIDash"
+        win.minSize = NSSize(width: 880, height: 580)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: AIDashMacWorkspaceView(store: store))
+        standaloneDashboardWindow = win
+        return win
     }
 
     public func refreshFromProvider() {
@@ -534,10 +551,16 @@ extension DashboardWorkspaceStore {
         }
 
         if snapshot.memory.pressure != .normal {
+            let memPct = Int((snapshot.memory.usageFraction * 100).rounded())
+            let topProc = snapshot.memory.topProcessName.map { name in
+                if let val = snapshot.memory.topProcessValueText { return "\(name) \(val)" }
+                return name
+            } ?? MenuBarController.pressureTitle(snapshot.memory.pressure)
+            let pairText = MenuBarStatusView.compactMemoryPair(used: snapshot.memory.usedBytes, total: snapshot.memory.totalBytes)
             result.append(DashboardActionItem(
                 id: "sys-memory-pressure",
-                title: DashboardL10n.format("dashboard.action.memory_pressure_title_format", "System memory pressure is %@", snapshot.memory.pressure.rawValue),
-                summary: DashboardL10n.tr("dashboard.action.memory_pressure_summary", "Close idle simulator runtimes or background indexing workers to reclaim wired memory."),
+                title: DashboardL10n.format("dashboard.action.memory_pressure_title_format", "Memory at %lld%% (Top: %@)", memPct, topProc),
+                summary: DashboardL10n.format("dashboard.action.memory_pressure_detail_format", "Used %@. Click 'Copy' to inspect top processes in Terminal, or click circle to dismiss.", pairText),
                 sourceTag: DashboardL10n.tr("dashboard.action.source_system", "System Telemetry"),
                 cliFilter: .all,
                 priority: snapshot.memory.pressure == .critical ? .p0 : .p1,

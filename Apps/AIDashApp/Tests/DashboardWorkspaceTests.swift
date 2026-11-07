@@ -336,6 +336,7 @@ struct DashboardWorkspaceTests {
         #expect(LiveDashboardTelemetryReader.sanitizeSQLToken("2026-11-07") == "2026-11-07")
         store.openDashboardWindow(section: .actionItems)
         #expect(store.selectedSection == .actionItems)
+        #expect(!store.actionItems.isEmpty)
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
     }
 }

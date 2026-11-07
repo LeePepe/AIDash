@@ -217,6 +217,24 @@
         }
       }
     },
+    "dashboard.action.memory_pressure_detail_format": {
+      "comment": "Actionable instructions for memory pressure warning item.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used %@. Click 'Copy' to inspect top processes in Terminal, or click circle to dismiss."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已用 %@。点右侧「复制命令」可在终端查看内存前10进程，或点左侧圆圈忽略。"
+          }
+        }
+      }
+    },
     "dashboard.action.memory_pressure_summary": {
       "comment": "Summary for memory pressure warning action item.",
       "extractionState": "manual",
@@ -236,19 +254,19 @@
       }
     },
     "dashboard.action.memory_pressure_title_format": {
-      "comment": "Title format for memory pressure warning action item.",
+      "comment": "Title format for memory pressure warning action item showing percent and top process.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "System memory pressure is %@"
+            "value": "Memory at %lld%% (Top: %@)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "系统内存压力状态: %@"
+            "value": "内存占用 %lld%%（最高: %@）"
           }
         }
       }
