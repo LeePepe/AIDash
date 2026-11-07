@@ -341,6 +341,7 @@ struct DashboardWorkspaceTests {
             store.toggleActionItem(id: item.id)
         }
         #expect(store.pendingActionCount == 0)
+        #expect(store.completedActionCount >= 1)
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
         _ = ActionItemsCardView(store: store).body
     }

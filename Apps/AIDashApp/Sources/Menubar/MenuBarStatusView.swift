@@ -405,93 +405,29 @@ private struct MenuBarTopActionsCard: View {
 
     var body: some View {
         let pendingItems = items.filter { !completedActionIDs.contains($0.id) && !$0.isCompleted }
-        let completedCount = items.count - pendingItems.count
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text(DashboardL10n.tr("menubar.pulse.top_actions", "TOP ACTIONABLE ITEMS"))
-                    .font(.system(.caption2, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 4)
-                if completedCount > 0 {
-                    Button {
-                        for item in items where completedActionIDs.contains(item.id) || item.isCompleted {
-                            completedActionIDs.remove(item.id)
-                            if item.isCompleted {
-                                DashboardWorkspaceStore.shared.toggleActionItem(id: item.id)
-                            }
-                        }
-                    } label: {
-                        Text(DashboardL10n.format("menubar.pulse.undo_completed_format", "Undo (%lld)", completedCount))
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
+        if !pendingItems.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(DashboardL10n.tr("menubar.pulse.top_actions", "TOP ACTIONABLE ITEMS"))
+                        .font(.system(.caption2, design: .rounded, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Text(DashboardL10n.format("menubar.pulse.pending_count_format", "%lld pending", pendingItems.count))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
-                Text(DashboardL10n.format("menubar.pulse.pending_count_format", "%lld pending", pendingItems.count))
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            Group {
-                if pendingItems.isEmpty {
-                    emptyStateView(completedCount: completedCount)
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(pendingItems.prefix(2)) { item in
-                            actionRow(item)
-                        }
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(pendingItems.prefix(2)) { item in
+                        actionRow(item)
                     }
                 }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
-            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
-        }
-    }
-
-    private func emptyStateView(completedCount: Int) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: completedCount > 0 ? "checkmark.seal.fill" : "checkmark.shield.fill")
-                    .font(.title3)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Color.green)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(
-                        completedCount > 0
-                            ? DashboardL10n.tr("menubar.pulse.empty_resolved_title", "All actionable items resolved")
-                            : DashboardL10n.tr("menubar.pulse.empty_healthy_title", "System & CLI quotas are all healthy")
-                    )
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    Text(
-                        completedCount > 0
-                            ? DashboardL10n.format("menubar.pulse.empty_resolved_desc_format", "Cleared %lld item(s). Click 'Undo' above to restore.", completedCount)
-                            : DashboardL10n.tr("menubar.pulse.empty_healthy_desc", "Zero approval blockers, quota alerts, or memory pressure warnings.")
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                }
-                Spacer(minLength: 4)
-            }
-            HStack(spacing: 6) {
-                healthyStatusPill(symbol: "cpu", title: DashboardL10n.tr("menubar.pulse.pill_system_ok", "System Normal"))
-                healthyStatusPill(symbol: "gauge.with.dots.needle.33percent", title: DashboardL10n.tr("menubar.pulse.pill_quota_ok", "Quotas Healthy"))
-                healthyStatusPill(symbol: "checkmark.circle", title: DashboardL10n.tr("menubar.pulse.pill_zero_blockers", "0 Blockers"))
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
+                .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
             }
         }
-    }
-
-    private func healthyStatusPill(symbol: String, title: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: symbol).font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.green)
-            Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(Color.green.opacity(0.10), in: Capsule())
     }
 
     private func actionRow(_ item: DashboardActionItem) -> some View {
