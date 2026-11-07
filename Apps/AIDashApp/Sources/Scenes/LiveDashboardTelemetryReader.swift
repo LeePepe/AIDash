@@ -96,24 +96,6 @@ public enum LiveDashboardTelemetryReader {
 
         let entries: [CLICostQuotaEntry] = [
             CLICostQuotaEntry(
-                id: "cli-copilot", cliFilter: .copilot, displayName: "Copilot CLI",
-                modelTag: copilotSessionStats.modelsSummary.isEmpty ? "gemini-4-argon / gpt-5.6-luna" : copilotSessionStats.modelsSummary,
-                todayCostUSD: copilotTodayCost, periodCostUSD: copilotWeekCost, quotaLimitUSD: 100.0,
-                activeTokens: copilotDayIn + copilotDayOut, cacheTokens: copilotDayCache,
-                interactionCount: copilotDayRuns, isAvailable: true,
-                quotaUsedOverride: 0.0,
-                quotaLabel: weeklyQuotaLabel, periodTotalTokens: copilotWeekTotal
-            ),
-            CLICostQuotaEntry(
-                id: "cli-codex", cliFilter: .codex, displayName: "Codex CLI",
-                modelTag: codexStats.modelsSummary.isEmpty ? "gpt-6.1-sol / gemini-4-argon" : codexStats.modelsSummary,
-                todayCostUSD: codexTodayCost, periodCostUSD: codexWeekCost, quotaLimitUSD: 100.0,
-                activeTokens: codexStats.dayIn + codexStats.dayOut, cacheTokens: codexStats.dayCache,
-                interactionCount: codexStats.dayRuns, isAvailable: true,
-                quotaUsedOverride: 0.0,
-                quotaLabel: weeklyQuotaLabel, periodTotalTokens: codexWeekTotal
-            ),
-            CLICostQuotaEntry(
                 id: "cli-claude", cliFilter: .claude, displayName: "Claude Code",
                 modelTag: "Claude Pro (5h / 7d)",
                 todayCostUSD: claudeTodayCost, periodCostUSD: claudeWeekCost, quotaLimitUSD: 100.0,
@@ -121,6 +103,24 @@ public enum LiveDashboardTelemetryReader {
                 interactionCount: claudeDayRuns, isAvailable: true,
                 quotaUsedOverride: quotas.claudeSevenDayUsedFraction ?? 0.0,
                 quotaLabel: claudeQuotaLabel, periodTotalTokens: claudeWeekTotal
+            ),
+            CLICostQuotaEntry(
+                id: "cli-codex", cliFilter: .codex, displayName: "Codex CLI",
+                modelTag: codexStats.modelsSummary.isEmpty ? "gpt-6.1-sol / gemini-4-argon" : codexStats.modelsSummary,
+                todayCostUSD: codexTodayCost, periodCostUSD: codexWeekCost, quotaLimitUSD: 100.0,
+                activeTokens: codexStats.dayIn + codexStats.dayOut, cacheTokens: codexStats.dayCache,
+                interactionCount: codexStats.dayRuns, isAvailable: true,
+                quotaUsedOverride: quotas.cursorWeeklyUsedFraction ?? 0.0,
+                quotaLabel: weeklyQuotaLabel, periodTotalTokens: codexWeekTotal
+            ),
+            CLICostQuotaEntry(
+                id: "cli-copilot", cliFilter: .copilot, displayName: "Copilot CLI",
+                modelTag: copilotSessionStats.modelsSummary.isEmpty ? "gemini-4-argon / gpt-5.6-luna" : copilotSessionStats.modelsSummary,
+                todayCostUSD: copilotTodayCost, periodCostUSD: copilotWeekCost, quotaLimitUSD: 100.0,
+                activeTokens: copilotDayIn + copilotDayOut, cacheTokens: copilotDayCache,
+                interactionCount: copilotDayRuns, isAvailable: true,
+                quotaUsedOverride: 0.0,
+                quotaLabel: nil, periodTotalTokens: copilotWeekTotal
             )
         ]
 
@@ -168,8 +168,8 @@ public enum LiveDashboardTelemetryReader {
             }
         }
 
-        if claude7d == nil {
-            claude7d = readClaudeFallbackQuota(url: claudeFallbackURL, fallbackUsage: fallbackUsage)
+        if let fallbackClaude = readClaudeFallbackQuota(url: claudeFallbackURL, fallbackUsage: fallbackUsage) {
+            claude7d = max(claude7d ?? 0, fallbackClaude)
         }
 
         return RealQuotaSnapshot(

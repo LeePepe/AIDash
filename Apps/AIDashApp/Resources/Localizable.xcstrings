@@ -2288,19 +2288,19 @@
       }
     },
     "menubar.pulse.cli_cost_quota": {
-      "comment": "Menu bar CLI total token volume and quota section header.",
+      "comment": "Menu bar CLI quota section header.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "TODAY CLI TOKENS & QUOTA"
+            "value": "CLI QUOTA MONITOR"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "CLI 总量与额度"
+            "value": "CLI 额度监控"
           }
         }
       }
@@ -2337,6 +2337,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 项待办"
+          }
+        }
+      }
+    },
+    "menubar.pulse.quota_remaining_format": {
+      "comment": "Menu bar remaining quota percentage label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Left %lld%%"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剩余 %lld%%"
           }
         }
       }
@@ -2409,6 +2427,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日 %@ · 7日 %@"
+          }
+        }
+      }
+    },
+    "menubar.pulse.token_chart_title": {
+      "comment": "Menu bar token volume chart section header.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI TOKEN VOLUME"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI Token 总量趋势"
           }
         }
       }

@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import Charts
 import SwiftUI
 
 private enum Copy {
@@ -80,7 +81,10 @@ public struct MenuBarStatusView: View {
         .frame(width: 360)
     }
     private func populatedView(_ snapshot: MenuBarSystemSnapshot) -> some View {
-        let cliEntries = DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage)
+        let today = DashboardWorkspaceStore.todayDateString()
+        let liveDataset = LiveDashboardTelemetryReader.loadLiveDataset(forDate: today, fallbackUsage: snapshot.tokenUsage)
+        let cliEntries = liveDataset?.entries ?? DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage)
+        let trendPoints = liveDataset?.trends ?? DashboardWorkspaceStore.deriveTrendPoints(from: cliEntries)
         let todayTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.totalTokens }
         let periodTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.periodTotalTokens }
         let pendingActions = Array(
@@ -92,7 +96,8 @@ public struct MenuBarStatusView: View {
         return VStack(alignment: .leading, spacing: 12) {
             pulseHeaderStrip(snapshot)
             telemetryGaugeStrip(snapshot)
-            cliCostSection(entries: cliEntries, todayTotal: todayTotal, periodTotal: periodTotal)
+            cliCostSection(entries: cliEntries)
+            tokenVolumeChartSection(entries: cliEntries, trendPoints: trendPoints, todayTotal: todayTotal, periodTotal: periodTotal)
             topActionsSection(items: pendingActions)
         }
     }
@@ -185,31 +190,14 @@ public struct MenuBarStatusView: View {
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
         }
     }
-    private func cliCostSection(
-        entries: [CLICostQuotaEntry],
-        todayTotal: UInt64,
-        periodTotal: UInt64
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(DashboardL10n.tr("menubar.pulse.cli_cost_quota", "TODAY CLI TOKENS & QUOTA"))
-                    .font(.system(.caption2, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 4)
-                Text(
-                    DashboardL10n.format(
-                        "menubar.pulse.today_tokens_format",
-                        "Today %@ · 7d %@",
-                        DashboardTokenFormatter.compact(todayTotal),
-                        DashboardTokenFormatter.compact(periodTotal)
-                    )
-                )
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-            }
+    private func cliCostSection(entries: [CLICostQuotaEntry]) -> some View {
+        let quotaEntries = entries.filter { $0.cliFilter == .claude || $0.cliFilter == .codex }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(DashboardL10n.tr("menubar.pulse.cli_cost_quota", "CLI QUOTA MONITOR"))
+                .font(.system(.caption2, design: .rounded, weight: .semibold))
+                .foregroundStyle(.secondary)
             VStack(spacing: 8) {
-                ForEach(entries) { entry in
+                ForEach(quotaEntries) { entry in
                     cliPopoverRow(entry)
                 }
             }
@@ -227,7 +215,8 @@ public struct MenuBarStatusView: View {
 
     private func cliPopoverRow(_ entry: CLICostQuotaEntry) -> some View {
         let tint = DashboardSemanticColorPalette.color(for: entry.health)
-        let todayCompact = DashboardTokenFormatter.compact(entry.totalTokens)
+        let usedPct = Int((entry.usedFraction * 100).rounded())
+        let remainingPct = max(0, 100 - usedPct)
         return Button {
             DashboardWorkspaceStore.shared.openDashboardWindow(
                 section: .systemAndCosts,
@@ -243,18 +232,11 @@ public struct MenuBarStatusView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary)
                     Spacer(minLength: 4)
-                    if let quotaLabel = entry.quotaLabel {
-                        Text(DashboardL10n.format("dashboard.cli_cost.tokens_and_quota_format", "%@ tok · %@", todayCompact, quotaLabel))
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("\(todayCompact) tok")
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("\(Int((entry.usedFraction * 100).rounded()))%")
+                    Text(DashboardL10n.format("menubar.pulse.quota_remaining_format", "Left %lld%%", remainingPct))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Text("\(usedPct)%")
                         .font(.caption.weight(.semibold))
                         .monospacedDigit()
                         .foregroundStyle(tint)
@@ -268,6 +250,80 @@ public struct MenuBarStatusView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func tokenVolumeChartSection(
+        entries: [CLICostQuotaEntry],
+        trendPoints: [TrendDataPoint],
+        todayTotal: UInt64,
+        periodTotal: UInt64
+    ) -> some View {
+        let maxTokens = max(entries.map(\.totalTokens).max() ?? 1, 1)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(DashboardL10n.tr("menubar.pulse.token_chart_title", "CLI TOKEN VOLUME"))
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Text(
+                    DashboardL10n.format(
+                        "menubar.pulse.today_tokens_format",
+                        "Today %@ · 7d %@",
+                        DashboardTokenFormatter.compact(todayTotal),
+                        DashboardTokenFormatter.compact(periodTotal)
+                    )
+                )
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Chart(trendPoints) { point in
+                    BarMark(
+                        x: .value("Date", point.bucketLabel),
+                        y: .value("Tokens (M)", Double(point.totalTokens) / 1_000_000.0)
+                    )
+                    .foregroundStyle(by: .value("CLI", point.category))
+                }
+                .chartLegend(position: .bottom, alignment: .leading)
+                .frame(height: 105)
+
+                VStack(spacing: 6) {
+                    ForEach(entries.filter { $0.totalTokens > 0 || $0.cliFilter != .kimi }) { entry in
+                        HStack(spacing: 6) {
+                            Text(entry.displayName)
+                                .font(.caption.weight(.medium))
+                                .frame(width: 78, alignment: .leading)
+                                .lineLimit(1)
+                            GeometryReader { geo in
+                                let ratio = min(max(Double(entry.totalTokens) / Double(maxTokens), 0.04), 1.0)
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.20))
+                                    .overlay(alignment: .leading) {
+                                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                            .fill(Color.accentColor)
+                                            .frame(width: entry.totalTokens > 0 ? geo.size.width * ratio : 0)
+                                    }
+                            }
+                            .frame(height: 7)
+                            Text("\(DashboardTokenFormatter.compact(entry.totalTokens))")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .frame(width: 52, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(solidCardColor)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+            }
+        }
     }
     private func topActionsSection(items: [DashboardActionItem]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
