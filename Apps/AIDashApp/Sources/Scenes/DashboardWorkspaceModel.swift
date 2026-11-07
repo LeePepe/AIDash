@@ -8,7 +8,16 @@ import AIDashCore
 @MainActor
 @Observable
 public final class DashboardWorkspaceStore {
-    public static let shared = DashboardWorkspaceStore()
+    private static var _sharedInstance: DashboardWorkspaceStore?
+    public static var shared: DashboardWorkspaceStore {
+        if let existing = _sharedInstance {
+            return existing
+        }
+        let created = DashboardWorkspaceStore(deferInitialRefresh: true)
+        _sharedInstance = created
+        created.refreshFromProvider()
+        return created
+    }
 
     public var selectedSection: DashboardWorkspaceSection = .overview
     public var selectedCLI: DashboardCLIFilter = .all
@@ -68,9 +77,14 @@ public final class DashboardWorkspaceStore {
         )
     ]
 
-    public init(statusProvider: (any MenuBarSystemStatusProviding)? = nil) {
+    public init(
+        statusProvider: (any MenuBarSystemStatusProviding)? = nil,
+        deferInitialRefresh: Bool = false
+    ) {
         self.statusProvider = statusProvider ?? LiveMenuBarSystemStatusProvider()
-        refreshFromProvider()
+        if !deferInitialRefresh {
+            refreshFromProvider()
+        }
     }
 
     public init(

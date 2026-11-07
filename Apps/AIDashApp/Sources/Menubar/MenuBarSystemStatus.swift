@@ -732,14 +732,20 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         return false
     }
     private func portOpen(_ port: UInt16) -> Bool {
-        let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/bin/nc"); task.arguments = ["-z", "127.0.0.1", "\(port)"]
-        do {
-            try task.run()
-            task.waitUntilExit()
-            return task.terminationStatus == 0
-        } catch {
-            return false
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(port).bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
         }
+        return connected
     }
     private func readSQLiteCount(path: String, query: String) -> Int? {
         guard let value = readSQLite(path: path, query: query) else { return nil }

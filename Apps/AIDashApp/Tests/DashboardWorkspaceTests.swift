@@ -257,5 +257,12 @@ struct DashboardWorkspaceTests {
         _ = ActionItemsCardView(store: store).body
         _ = RankingTableCardView(store: store).body
     }
+
+    @Test("shared workspace store initializes without dispatch_once re-entrancy trap")
+    func sharedWorkspaceStoreIsReentrantSafe() {
+        let shared = DashboardWorkspaceStore.shared
+        #expect(shared === DashboardWorkspaceStore.shared)
+        _ = AIDashMacWorkspaceView().body
+    }
 }
 #endif
