@@ -266,7 +266,8 @@ public final class DashboardWorkspaceStore {
     public var periodTotalCostUSD: Double { filteredCLIEntries.reduce(0) { $0 + $1.periodCostUSD } }
     public var todayTotalActiveTokens: UInt64 { filteredCLIEntries.reduce(0) { $0 + $1.activeTokens } }
     public var todayTotalCacheTokens: UInt64 { filteredCLIEntries.reduce(0) { $0 + $1.cacheTokens } }
-    public var todayGrandTotalTokens: UInt64 { todayTotalActiveTokens + todayTotalCacheTokens }
+    public var todayGrandTotalTokens: UInt64 { filteredCLIEntries.reduce(0) { $0 + $1.totalTokens } }
+    public var periodGrandTotalTokens: UInt64 { filteredCLIEntries.reduce(0) { $0 + $1.periodTotalTokens } }
     public var highestQuotaWarningCount: Int { filteredCLIEntries.filter { $0.health == .warning || $0.health == .critical }.count }
 
     // MARK: - Derived Filtered & Sorted Collections (IP-001, IP-002, IP-003)
@@ -374,12 +375,12 @@ public final class DashboardWorkspaceStore {
             ),
             KPIMetricItem(
                 id: "kpi-cost",
-                label: DashboardL10n.tr("dashboard.kpi.cost.label", "Today Token Usage"),
-                formattedValue: DashboardTokenFormatter.compact(todayTotalActiveTokens),
-                unit: DashboardL10n.format("dashboard.kpi.tokens.cache_unit_format", "Cache %@", DashboardTokenFormatter.compact(todayTotalCacheTokens)),
+                label: DashboardL10n.tr("dashboard.kpi.cost.label", "Today Total Tokens"),
+                formattedValue: DashboardTokenFormatter.compact(todayGrandTotalTokens),
+                unit: DashboardL10n.format("dashboard.kpi.tokens.period_unit_format", "7d %@", DashboardTokenFormatter.compact(periodGrandTotalTokens)),
                 deltaText: highestQuotaWarningCount > 0
                     ? DashboardL10n.format("dashboard.kpi.cost.near_quota_format", "%lld CLI near quota", highestQuotaWarningCount)
-                    : DashboardL10n.format("dashboard.kpi.tokens.total_format", "Total %@ tok", DashboardTokenFormatter.compact(todayGrandTotalTokens)),
+                    : DashboardL10n.tr("dashboard.kpi.cost.within_budget", "Quota healthy"),
                 direction: highestQuotaWarningCount > 0 ? .up : .flat,
                 health: highestQuotaWarningCount > 0 ? .warning : .healthy,
                 symbolName: "sparkles"
@@ -521,7 +522,7 @@ extension DashboardWorkspaceStore {
             result.append(DashboardActionItem(
                 id: "quota-\(entry.id)",
                 title: DashboardL10n.format("dashboard.action.quota_title_format", "%@ quota at %lld%%", entry.displayName, pct),
-                summary: DashboardL10n.format("dashboard.action.quota_tokens_summary_format", "Active %@ tok · Cache %@ tok. Consider routing routine tasks to secondary CLI.", DashboardTokenFormatter.compact(entry.activeTokens), DashboardTokenFormatter.compact(entry.cacheTokens)),
+                summary: DashboardL10n.format("dashboard.action.quota_total_summary_format", "Today total %@ tok · 7d %@ tok. Consider routing routine tasks to secondary CLI.", DashboardTokenFormatter.compact(entry.totalTokens), DashboardTokenFormatter.compact(entry.periodTotalTokens)),
                 sourceTag: entry.displayName,
                 cliFilter: entry.cliFilter,
                 priority: entry.health == .critical ? .p0 : .p1,
@@ -574,10 +575,10 @@ extension DashboardWorkspaceStore {
             let pct = Int((entry.usedFraction * 100).rounded())
             return AgentRankingRow(
                 id: "rank-\(entry.id)", agentName: roleName, cliFilter: entry.cliFilter, providerName: entry.displayName,
-                runs: max(Int(entry.interactionCount), 45), totalTokens: entry.activeTokens + entry.cacheTokens,
+                runs: max(Int(entry.interactionCount), 45), totalTokens: entry.totalTokens,
                 successRate: entry.health == .critical ? 0.924 : (0.978 - Double(idx) * 0.008),
                 avgDurationSeconds: 9.5 + Double(idx) * 3.2, costUSD: entry.todayCostUSD,
-                detailSummary: DashboardL10n.format("dashboard.ranking.detail_format", "%@ (%@) · Active %@ tok · Cache %@ tok", entry.displayName, entry.modelTag, entry.activeTokens.formatted(.number), entry.cacheTokens.formatted(.number)),
+                detailSummary: DashboardL10n.format("dashboard.ranking.total_detail_format", "%@ (%@) · Total %@ tok · %lld runs", entry.displayName, entry.modelTag, DashboardTokenFormatter.compact(entry.totalTokens), Int(entry.interactionCount)),
                 recentIssue: entry.health == .healthy ? nil : DashboardL10n.format("dashboard.ranking.issue_format", "Approaching daily quota ceiling (%lld%%)", pct)
             )
         }

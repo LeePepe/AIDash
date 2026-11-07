@@ -182,8 +182,8 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         item.button?.toolTip = summaryText
         if case let .populated(snapshot) = statusState {
             let entries = DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage)
-            let totalActive = entries.reduce(UInt64(0)) { $0 + $1.activeTokens }
-            item.button?.title = " \(DashboardTokenFormatter.compact(totalActive)) tok"
+            let grandTotal = entries.reduce(UInt64(0)) { $0 + $1.totalTokens }
+            item.button?.title = " \(DashboardTokenFormatter.compact(grandTotal)) tok"
         } else {
             item.button?.title = ""
         }

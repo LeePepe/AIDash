@@ -81,8 +81,8 @@ public struct MenuBarStatusView: View {
     }
     private func populatedView(_ snapshot: MenuBarSystemSnapshot) -> some View {
         let cliEntries = DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage)
-        let totalActive = cliEntries.reduce(UInt64(0)) { $0 + $1.activeTokens }
-        let totalCache = cliEntries.reduce(UInt64(0)) { $0 + $1.cacheTokens }
+        let todayTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.totalTokens }
+        let periodTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.periodTotalTokens }
         let pendingActions = Array(
             DashboardWorkspaceStore.deriveActionItems(from: snapshot, cliEntries: cliEntries)
                 .filter { !$0.isCompleted }
@@ -92,7 +92,7 @@ public struct MenuBarStatusView: View {
         return VStack(alignment: .leading, spacing: 12) {
             pulseHeaderStrip(snapshot)
             telemetryGaugeStrip(snapshot)
-            cliCostSection(entries: cliEntries, totalActive: totalActive, totalCache: totalCache)
+            cliCostSection(entries: cliEntries, todayTotal: todayTotal, periodTotal: periodTotal)
             topActionsSection(items: pendingActions)
         }
     }
@@ -187,8 +187,8 @@ public struct MenuBarStatusView: View {
     }
     private func cliCostSection(
         entries: [CLICostQuotaEntry],
-        totalActive: UInt64,
-        totalCache: UInt64
+        todayTotal: UInt64,
+        periodTotal: UInt64
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -199,9 +199,9 @@ public struct MenuBarStatusView: View {
                 Text(
                     DashboardL10n.format(
                         "menubar.pulse.today_tokens_format",
-                        "Active %@ · Cache %@",
-                        DashboardTokenFormatter.compact(totalActive),
-                        DashboardTokenFormatter.compact(totalCache)
+                        "Today %@ · 7d %@",
+                        DashboardTokenFormatter.compact(todayTotal),
+                        DashboardTokenFormatter.compact(periodTotal)
                     )
                 )
                     .font(.caption.weight(.semibold))
@@ -227,8 +227,7 @@ public struct MenuBarStatusView: View {
 
     private func cliPopoverRow(_ entry: CLICostQuotaEntry) -> some View {
         let tint = DashboardSemanticColorPalette.color(for: entry.health)
-        let activeCompact = DashboardTokenFormatter.compact(entry.activeTokens)
-        let totalCompact = DashboardTokenFormatter.compact(entry.activeTokens + entry.cacheTokens)
+        let todayCompact = DashboardTokenFormatter.compact(entry.totalTokens)
         return Button {
             DashboardWorkspaceStore.shared.openDashboardWindow(
                 section: .systemAndCosts,
@@ -245,12 +244,12 @@ public struct MenuBarStatusView: View {
                         .foregroundStyle(.primary)
                     Spacer(minLength: 4)
                     if let quotaLabel = entry.quotaLabel {
-                        Text(DashboardL10n.format("dashboard.cli_cost.tokens_and_quota_format", "%@ tok · %@", activeCompact, quotaLabel))
+                        Text(DashboardL10n.format("dashboard.cli_cost.tokens_and_quota_format", "%@ tok · %@", todayCompact, quotaLabel))
                             .font(.caption)
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("\(activeCompact) / \(totalCompact) tok")
+                        Text("\(todayCompact) tok")
                             .font(.caption)
                             .monospacedDigit()
                             .foregroundStyle(.secondary)

@@ -329,6 +329,9 @@ struct DashboardWorkspaceTests {
         #expect(abs((parsed.claudeFiveHourUsedFraction ?? -1) - 0.125) < 0.0001)
         #expect(abs((parsed.cursorWeeklyUsedFraction ?? -1) - 0.2767) < 0.0001)
         #expect(DashboardTokenFormatter.compact(4_980_000) == "5.0M")
+        let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
+        #expect(store.todayGrandTotalTokens > 0)
+        #expect(store.periodGrandTotalTokens >= store.todayGrandTotalTokens)
     }
 }
 #endif
