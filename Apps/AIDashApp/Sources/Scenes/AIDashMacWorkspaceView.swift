@@ -244,7 +244,7 @@ public struct AIDashMacWorkspaceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(store: DashboardWorkspaceStore? = nil) {
-        _store = State(initialValue: store ?? DashboardWorkspaceStore())
+        _store = State(initialValue: store ?? DashboardWorkspaceStore.shared)
     }
 
     public var body: some View {
@@ -263,6 +263,32 @@ public struct AIDashMacWorkspaceView: View {
             }
             .background(Color(nsColor: .underPageBackgroundColor))
             .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    HStack(spacing: 6) {
+                        Button {
+                            store.selectPreviousDate()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                        }
+                        .disabled(!store.canSelectPreviousDate)
+
+                        Text(store.selectedDateString)
+                            .font(.subheadline.weight(.medium))
+                            .monospacedDigit()
+
+                        Button {
+                            store.selectNextDate()
+                        } label: {
+                            Image(systemName: "chevron.right")
+                        }
+                        .disabled(!store.canSelectNextDate)
+
+                        Button("Today") {
+                            store.selectToday()
+                        }
+                        .controlSize(.small)
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     Picker("CLI Scope", selection: $store.selectedCLI) {
                         ForEach(DashboardCLIFilter.allCases) { cli in
@@ -346,7 +372,6 @@ public struct AIDashMacWorkspaceView: View {
             )
             ActionItemsCardView(store: store, onToggleDone: onToggleDone)
             RankingTableCardView(store: store)
-            BriefingView()
         case .agentEfficiency:
             KPISummaryCardView(metrics: store.effectiveKPIMetrics)
             TrendChartCardView(
@@ -356,7 +381,6 @@ public struct AIDashMacWorkspaceView: View {
                 onClearSelection: { store.clearChartSelection() }
             )
             RankingTableCardView(store: store)
-            BriefingView()
         case .actionItems:
             KPISummaryCardView(metrics: store.effectiveKPIMetrics)
             ActionItemsCardView(store: store, onToggleDone: onToggleDone)

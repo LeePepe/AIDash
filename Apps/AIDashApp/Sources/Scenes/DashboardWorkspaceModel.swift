@@ -1,11 +1,15 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import Observation
+import SQLite3
 import AIDashCore
 
 @MainActor
 @Observable
 public final class DashboardWorkspaceStore {
+    public static let shared = DashboardWorkspaceStore()
+
     public var selectedSection: DashboardWorkspaceSection = .overview
     public var selectedCLI: DashboardCLIFilter = .all
     public var selectedChartCategory: String?
@@ -14,6 +18,8 @@ public final class DashboardWorkspaceStore {
     public var selectedRankingRowID: String?
     public var rankingAscending: Bool = false
     public var lastCopiedActionID: String?
+    public var availableDates: [String] = DashboardWorkspaceStore.recentDateStrings()
+    public var selectedDateString: String = DashboardWorkspaceStore.todayDateString()
 
     public private(set) var systemState: MenuBarStatusViewState = .loading
     public private(set) var trendPoints: [TrendDataPoint] = []
@@ -82,6 +88,67 @@ public final class DashboardWorkspaceStore {
             customActions: actionItems,
             customRankings: rankingRows
         )
+    }
+
+    public static func todayDateString() -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let comp = calendar.dateComponents([.year, .month, .day], from: Date())
+        return String(format: "%04d-%02d-%02d", comp.year ?? 2026, comp.month ?? 1, comp.day ?? 1)
+    }
+
+    public static func recentDateStrings(days: Int = 7) -> [String] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let now = Date()
+        return (0..<max(days, 1)).reversed().compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: now) else { return nil }
+            let comp = calendar.dateComponents([.year, .month, .day], from: date)
+            return String(format: "%04d-%02d-%02d", comp.year ?? 2026, comp.month ?? 1, comp.day ?? 1)
+        }
+    }
+
+    public var canSelectPreviousDate: Bool {
+        guard let idx = availableDates.firstIndex(of: selectedDateString) else { return false }
+        return idx > availableDates.startIndex
+    }
+
+    public var canSelectNextDate: Bool {
+        guard let idx = availableDates.firstIndex(of: selectedDateString) else { return false }
+        return idx < availableDates.index(before: availableDates.endIndex)
+    }
+
+    public func selectPreviousDate() {
+        guard let idx = availableDates.firstIndex(of: selectedDateString), idx > availableDates.startIndex else { return }
+        selectedDateString = availableDates[availableDates.index(before: idx)]
+    }
+
+    public func selectNextDate() {
+        guard let idx = availableDates.firstIndex(of: selectedDateString),
+              idx < availableDates.index(before: availableDates.endIndex) else { return }
+        selectedDateString = availableDates[availableDates.index(after: idx)]
+    }
+
+    public func selectToday() {
+        if let last = availableDates.last {
+            selectedDateString = last
+        }
+    }
+
+    public func openDashboardWindow(
+        section: DashboardWorkspaceSection = .overview,
+        cliFilter: DashboardCLIFilter? = nil
+    ) {
+        selectedSection = section
+        if let cliFilter {
+            selectedCLI = cliFilter
+        }
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        for window in NSApp.windows where window.canBecomeMain {
+            window.makeKeyAndOrderFront(nil)
+        }
+        NotificationCenter.default.post(name: .openBriefingWindow, object: nil)
     }
 
     public func refreshFromProvider() {

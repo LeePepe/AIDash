@@ -34,6 +34,6 @@ import Foundation
 @Test func desktopWindowMinimumFrameIsMacOSOnly() {
     #expect(AIDashWindowGeometry.requiresDesktopMinFrame(isMacOS: true))
     #expect(!AIDashWindowGeometry.requiresDesktopMinFrame(isMacOS: false))
-    #expect(AIDashWindowGeometry.macMinWidth == 720)
-    #expect(AIDashWindowGeometry.macMinHeight == 480)
+    #expect(AIDashWindowGeometry.macMinWidth == 880)
+    #expect(AIDashWindowGeometry.macMinHeight == 580)
 }

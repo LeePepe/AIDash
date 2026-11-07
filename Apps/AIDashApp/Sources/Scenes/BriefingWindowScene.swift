@@ -2,7 +2,6 @@ import SwiftUI
 import SwiftData
 import AIDashCore
 import AIDashUI
-import DesignKit
 
 enum AIDashTelemetrySettingsPlacement {
     static func isAvailable(headless: Bool, hasCoordinator: Bool) -> Bool {
@@ -10,21 +9,15 @@ enum AIDashTelemetrySettingsPlacement {
     }
 }
 enum AIDashWindowGeometry {
-    static let macMinWidth: CGFloat = 720
-    static let macMinHeight: CGFloat = 480
+    static let macMinWidth: CGFloat = 880
+    static let macMinHeight: CGFloat = 580
 
     static func requiresDesktopMinFrame(isMacOS: Bool) -> Bool {
         isMacOS
     }
 }
-/// The main briefing window scene. Hosts BriefingView when the
-/// CloudKit container is ready, or shows an error state on failure.
-///
-/// `headless` (macOS agent mode): the window content is empty so the
-/// launchd-spawned XPC agent presents no UI. Kept as ONE Scene type (rather
-/// than branching to `Settings` in the App body) because SwiftUI's SceneBuilder
-/// won't return two different Scene types from `App.body` cleanly; varying the
-/// window *content* is the well-supported pattern.
+/// The main briefing window scene. Hosts AIDashMacWorkspaceView on macOS when
+/// the container is ready, or shows a native state view on loading/failure.
 public struct BriefingWindowScene: Scene {
     let state: CloudKitContainer.InitState
     let headless: Bool
@@ -42,14 +35,6 @@ public struct BriefingWindowScene: Scene {
 
     public var body: some Scene {
         WindowGroup {
-            // The min-size modifier is applied at a stable position outside the
-            // state switch. A state-dependent `.frame(minWidth:minHeight:)`
-            // combined with `.windowResizability(.contentMinSize)` made the
-            // window's min size flip between branches during the initial layout
-            // pass, which triggered SwiftUI's NSHostingView to call
-            // `-layoutSubtreeIfNeeded` while it was already laying out — the
-            // `_NSDetectedLayoutRecursion` warning Apple has marked as a future
-            // hard crash.
             Group {
                 if headless {
                     EmptyView()
@@ -71,7 +56,6 @@ public struct BriefingWindowScene: Scene {
                     }
                 }
             }
-            .designTheme(seed: .lime, neutral: .slate)
             #if os(macOS)
             .frame(
                 minWidth: AIDashWindowGeometry.macMinWidth,
@@ -91,7 +75,7 @@ public struct BriefingWindowScene: Scene {
             #endif
         }
         #if os(macOS)
-        .defaultSize(width: 1024, height: 720)
+        .defaultSize(width: 1120, height: 740)
         .windowResizability(.contentMinSize)
         #endif
     }
@@ -133,65 +117,28 @@ private struct BriefingSceneStateView: View {
     }
 
     let kind: Kind
-    @Environment(\.theme) private var theme
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("AIDash")
-                        .font(AIDashTypography.masthead)
-                        .foregroundStyle(theme.neutrals.text1)
-                    Spacer()
-                    Text(statusLabel)
-                        .font(AIDashTypography.mastheadStatus)
-                        .foregroundStyle(statusColor)
-                        .padding(.horizontal, AIDashSpace.s8)
-                        .padding(.vertical, AIDashSpace.s4)
-                        .background(theme.neutrals.inner, in: Capsule())
-                }
-                Rectangle()
-                    .fill(theme.neutrals.border)
-                    .frame(height: AIDashChrome.hairlineWidth)
-                VStack(alignment: .leading, spacing: AIDashSpace.s12) {
-                    Image(systemName: iconName)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(statusColor)
+        Group {
+            switch kind {
+            case .loading:
+                VStack(spacing: 12) {
+                    ProgressView()
                     Text(title)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(theme.neutrals.text1)
+                        .font(.headline)
                     Text(detail)
-                        .font(.callout)
-                        .foregroundStyle(theme.neutrals.text2)
-                    if case let .failed(reason) = kind {
-                        Text(reason)
-                            .font(.callout)
-                            .foregroundStyle(theme.neutrals.text2)
-                            .textSelection(.enabled)
-                    }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .padding(AIDashSpace.s20)
-                .frame(maxWidth: .infinity, minHeight: 220, alignment: .leading)
-                .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: AIDashSpace.s12))
-                .overlay {
-                    RoundedRectangle(cornerRadius: AIDashSpace.s12)
-                        .stroke(theme.neutrals.border, lineWidth: AIDashChrome.hairlineWidth)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case let .failed(reason):
+                ContentUnavailableView {
+                    Label(title, systemImage: "icloud.slash")
+                } description: {
+                    Text("\(detail)\n\(reason)")
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.horizontal, pageHorizontalPadding)
-            .padding(.vertical, AIDashSpacing.pageVertical)
-            .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .background(theme.neutrals.bg)
-    }
-
-    private var statusLabel: String {
-        switch kind {
-        case .loading:
-            return String(localized: "briefing.scene.loading.status", defaultValue: "SYNCING", bundle: .main)
-        case .failed:
-            return String(localized: "briefing.scene.error.status", defaultValue: "ERROR", bundle: .main)
         }
     }
 
@@ -211,28 +158,6 @@ private struct BriefingSceneStateView: View {
         case .failed:
             return String(localized: "briefing.scene.error.subtitle", defaultValue: "Check iCloud and try opening the briefing again.", bundle: .main)
         }
-    }
-
-    private var iconName: String {
-        switch kind {
-        case .loading: return "arrow.triangle.2.circlepath"
-        case .failed: return "icloud.slash"
-        }
-    }
-
-    private var statusColor: Color {
-        switch kind {
-        case .loading: return theme.primary.primary
-        case .failed: return theme.danger
-        }
-    }
-
-    private var pageHorizontalPadding: CGFloat {
-        #if os(macOS)
-        return AIDashSpacing.pageHorizontalMac
-        #else
-        return AIDashSpacing.pageHorizontalCompact
-        #endif
     }
 }
 /// App-side bridge for the spec 002 star feedback loop, extended in spec 005
