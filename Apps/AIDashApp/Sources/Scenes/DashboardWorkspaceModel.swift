@@ -262,17 +262,12 @@ public final class DashboardWorkspaceStore {
         actionItems.filter { !$0.isCompleted && $0.priority == .p0 }.count
     }
 
-    public var todayTotalCostUSD: Double {
-        filteredCLIEntries.reduce(0) { $0 + $1.todayCostUSD }
-    }
-
-    public var periodTotalCostUSD: Double {
-        filteredCLIEntries.reduce(0) { $0 + $1.periodCostUSD }
-    }
-
-    public var highestQuotaWarningCount: Int {
-        filteredCLIEntries.filter { $0.health == .warning || $0.health == .critical }.count
-    }
+    public var todayTotalCostUSD: Double { filteredCLIEntries.reduce(0) { $0 + $1.todayCostUSD } }
+    public var periodTotalCostUSD: Double { filteredCLIEntries.reduce(0) { $0 + $1.periodCostUSD } }
+    public var todayTotalActiveTokens: UInt64 { filteredCLIEntries.reduce(0) { $0 + $1.activeTokens } }
+    public var todayTotalCacheTokens: UInt64 { filteredCLIEntries.reduce(0) { $0 + $1.cacheTokens } }
+    public var todayGrandTotalTokens: UInt64 { todayTotalActiveTokens + todayTotalCacheTokens }
+    public var highestQuotaWarningCount: Int { filteredCLIEntries.filter { $0.health == .warning || $0.health == .critical }.count }
 
     // MARK: - Derived Filtered & Sorted Collections (IP-001, IP-002, IP-003)
 
@@ -379,15 +374,15 @@ public final class DashboardWorkspaceStore {
             ),
             KPIMetricItem(
                 id: "kpi-cost",
-                label: DashboardL10n.tr("dashboard.kpi.cost.label", "Today CLI Spend"),
-                formattedValue: String(format: "$%.2f", totalSpend),
-                unit: DashboardL10n.format("dashboard.kpi.cost.unit_format", "$%.0f MTD", periodTotalCostUSD),
+                label: DashboardL10n.tr("dashboard.kpi.cost.label", "Today Token Usage"),
+                formattedValue: DashboardTokenFormatter.compact(todayTotalActiveTokens),
+                unit: DashboardL10n.format("dashboard.kpi.tokens.cache_unit_format", "Cache %@", DashboardTokenFormatter.compact(todayTotalCacheTokens)),
                 deltaText: highestQuotaWarningCount > 0
                     ? DashboardL10n.format("dashboard.kpi.cost.near_quota_format", "%lld CLI near quota", highestQuotaWarningCount)
-                    : DashboardL10n.tr("dashboard.kpi.cost.within_budget", "Within daily budget"),
+                    : DashboardL10n.format("dashboard.kpi.tokens.total_format", "Total %@ tok", DashboardTokenFormatter.compact(todayGrandTotalTokens)),
                 direction: highestQuotaWarningCount > 0 ? .up : .flat,
                 health: highestQuotaWarningCount > 0 ? .warning : .healthy,
-                symbolName: "creditcard.fill"
+                symbolName: "sparkles"
             ),
             KPIMetricItem(
                 id: "kpi-actions",
@@ -496,7 +491,8 @@ extension DashboardWorkspaceStore {
                 cliFilter: entry.cliFilter,
                 invocations: Int(entry.interactionCount),
                 successRate: entry.health == .critical ? 0.91 : 0.99,
-                costUSD: entry.todayCostUSD
+                costUSD: entry.todayCostUSD,
+                totalTokens: entry.activeTokens + entry.cacheTokens
             )
         }
     }
@@ -525,7 +521,7 @@ extension DashboardWorkspaceStore {
             result.append(DashboardActionItem(
                 id: "quota-\(entry.id)",
                 title: DashboardL10n.format("dashboard.action.quota_title_format", "%@ quota at %lld%%", entry.displayName, pct),
-                summary: DashboardL10n.format("dashboard.action.quota_summary_format", "Today spend $%.2f / $%.2f cap. Consider routing routine tasks to secondary CLI.", entry.todayCostUSD, entry.quotaLimitUSD),
+                summary: DashboardL10n.format("dashboard.action.quota_tokens_summary_format", "Active %@ tok · Cache %@ tok. Consider routing routine tasks to secondary CLI.", DashboardTokenFormatter.compact(entry.activeTokens), DashboardTokenFormatter.compact(entry.cacheTokens)),
                 sourceTag: entry.displayName,
                 cliFilter: entry.cliFilter,
                 priority: entry.health == .critical ? .p0 : .p1,

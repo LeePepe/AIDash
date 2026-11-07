@@ -66,7 +66,7 @@ import SQLite3
 
     let item = try #require(controller.statusItemForTesting)
     #expect(item.length == NSStatusItem.variableLength)
-    #expect(item.button?.title.contains("$") == true)
+    #expect(item.button?.title.contains("tok") == true)
 
     let icon = try #require(item.button?.image)
     #expect(icon.isTemplate)

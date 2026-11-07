@@ -361,7 +361,7 @@ public struct TrendChartCardView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: active ? "checkmark.circle.fill" : "circle")
                                 Text(point.bucketLabel)
-                                Text(String(format: "$%.2f", point.costUSD))
+                                Text("\(DashboardTokenFormatter.compact(point.totalTokens)) tok")
                                     .monospacedDigit()
                             }
                             .font(.caption)
@@ -393,20 +393,22 @@ public struct CLICostQuotaCardView: View {
     }
 
     public var body: some View {
-        SolidModularCardContainer(
-            title: DashboardL10n.tr("dashboard.card.cli_cost.title", "Multi-CLI Cost & Quota Monitor"),
-            subtitle: DashboardL10n.tr("dashboard.card.cli_cost.subtitle", "Daily spend, cycle cumulative cost, and quota utilization"),
-            symbolName: "creditcard.and.123"
+        let totalActive = entries.reduce(UInt64(0)) { $0 + $1.activeTokens }
+        let totalCache = entries.reduce(UInt64(0)) { $0 + $1.cacheTokens }
+        return SolidModularCardContainer(
+            title: DashboardL10n.tr("dashboard.card.cli_cost.title", "Multi-CLI Token & Quota Monitor"),
+            subtitle: DashboardL10n.tr("dashboard.card.cli_cost.subtitle", "Daily active tokens, cache tokens, and quota utilization"),
+            symbolName: "sparkles"
         ) {
             HStack(spacing: 12) {
-                LabeledContent(DashboardL10n.tr("dashboard.cli_cost.today", "Today")) {
-                    Text(String(format: "$%.2f", todayTotalUSD))
+                LabeledContent(DashboardL10n.tr("dashboard.cli_cost.today", "Active")) {
+                    Text(DashboardTokenFormatter.compact(totalActive))
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                 }
-                LabeledContent(DashboardL10n.tr("dashboard.cli_cost.cycle", "Cycle")) {
-                    Text(String(format: "$%.2f", periodTotalUSD))
+                LabeledContent(DashboardL10n.tr("dashboard.cli_cost.cycle", "Cache")) {
+                    Text(DashboardTokenFormatter.compact(totalCache))
                         .font(.subheadline)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
@@ -424,6 +426,8 @@ public struct CLICostQuotaCardView: View {
 
     private func cliQuotaRow(_ entry: CLICostQuotaEntry) -> some View {
         let tint = DashboardSemanticColorPalette.color(for: entry.health)
+        let activeCompact = DashboardTokenFormatter.compact(entry.activeTokens)
+        let totalCompact = DashboardTokenFormatter.compact(entry.activeTokens + entry.cacheTokens)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: entry.health.symbolName)
@@ -436,12 +440,12 @@ public struct CLICostQuotaCardView: View {
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 if let quotaLabel = entry.quotaLabel {
-                    Text(DashboardL10n.format("dashboard.cli_cost.spend_and_quota_format", "$%.2f · %@", entry.todayCostUSD, quotaLabel))
+                    Text(DashboardL10n.format("dashboard.cli_cost.tokens_and_quota_format", "%@ tok · %@", activeCompact, quotaLabel))
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                 } else {
-                    Text(String(format: "$%.2f / $%.2f", entry.todayCostUSD, entry.quotaLimitUSD))
+                    Text("\(activeCompact) / \(totalCompact) tok")
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
@@ -462,7 +466,7 @@ public struct CLICostQuotaCardView: View {
                 Text(DashboardL10n.format("dashboard.cli_cost.cache_tokens_format", "Cache: %@ tok", entry.cacheTokens.formatted(.number)))
                 Text(DashboardL10n.format("dashboard.cli_cost.sessions_format", "Sessions/Turns: %@", entry.interactionCount.formatted(.number)))
                 Spacer(minLength: 4)
-                Text(DashboardL10n.format("dashboard.cli_cost.cycle_cost_format", "Cycle: $%.2f", entry.periodCostUSD))
+                Text(DashboardL10n.format("dashboard.cli_cost.total_tokens_format", "Total: %@ tok", totalCompact))
             }
             .font(.caption)
             .monospacedDigit()

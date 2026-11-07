@@ -289,6 +289,24 @@
         }
       }
     },
+    "dashboard.action.quota_tokens_summary_format": {
+      "comment": "Summary format for a CLI quota warning action item using token counts.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active %@ tok · Cache %@ tok. Consider routing routine tasks to secondary CLI."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日活跃 %@ tok · 缓存 %@ tok，建议将常规任务分流至备用 CLI。"
+          }
+        }
+      }
+    },
     "dashboard.action.requires_review": {
       "comment": "Fallback summary for an attention item.",
       "extractionState": "manual",
@@ -686,37 +704,37 @@
       }
     },
     "dashboard.card.cli_cost.subtitle": {
-      "comment": "Subtitle of the multi-CLI cost and quota modular card.",
+      "comment": "Subtitle of the multi-CLI token and quota modular card.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Daily spend, cycle cumulative cost, and quota utilization"
+            "value": "Daily active tokens, cache tokens, and quota utilization"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日实时花费、周期累计开销与配额使用率"
+            "value": "今日活跃 Token、缓存 Token 与真实配额使用率"
           }
         }
       }
     },
     "dashboard.card.cli_cost.title": {
-      "comment": "Title of the multi-CLI cost and quota modular card.",
+      "comment": "Title of the multi-CLI token and quota modular card.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Multi-CLI Cost & Quota Monitor"
+            "value": "Multi-CLI Token & Quota Monitor"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "多 CLI 费用与配额监控"
+            "value": "多 CLI Token 用量与配额监控"
           }
         }
       }
@@ -728,13 +746,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Key invocations, efficiency, cost, and action status"
+            "value": "Key invocations, efficiency, token usage, and action status"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "调用次数、执行效率、今日花费与待推进事项总览"
+            "value": "调用次数、执行效率、Token 用量与待推进事项总览"
           }
         }
       }
@@ -818,13 +836,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Agent Invocations & Spend by CLI"
+            "value": "Agent Invocations & Tokens by CLI"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "各 CLI 调用量与费用对比"
+            "value": "各 CLI 调用量与 Token 对比"
           }
         }
       }
@@ -956,19 +974,19 @@
       }
     },
     "dashboard.cli_cost.cycle": {
-      "comment": "Header label for billing cycle total CLI spend.",
+      "comment": "Header label for today total cached tokens.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cycle"
+            "value": "Cache"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "周期累计"
+            "value": "今日缓存"
           }
         }
       }
@@ -1028,19 +1046,55 @@
       }
     },
     "dashboard.cli_cost.today": {
-      "comment": "Header label for today total CLI spend.",
+      "comment": "Header label for today total active tokens.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Today"
+            "value": "Active"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日合计"
+            "value": "今日活跃"
+          }
+        }
+      }
+    },
+    "dashboard.cli_cost.tokens_and_quota_format": {
+      "comment": "Format showing active token count and quota window label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ tok · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活跃 %@ · %@"
+          }
+        }
+      }
+    },
+    "dashboard.cli_cost.total_tokens_format": {
+      "comment": "Per-CLI total token count label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total: %@ tok"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总计: %@ tok"
           }
         }
       }
@@ -1172,19 +1226,19 @@
       }
     },
     "dashboard.kpi.cost.label": {
-      "comment": "KPI label for today CLI spend.",
+      "comment": "KPI label for today active token usage.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Today CLI Spend"
+            "value": "Today Active Tokens"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日 CLI 总花费"
+            "value": "今日活跃 Token"
           }
         }
       }
@@ -1383,6 +1437,42 @@
           "stringUnit": {
             "state": "translated",
             "value": "次"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.tokens.cache_unit_format": {
+      "comment": "KPI unit showing cached token volume.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缓存 %@"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.tokens.total_format": {
+      "comment": "KPI delta showing grand total tokens including cache.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total %@ tok"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "含缓存共 %@ tok"
           }
         }
       }
@@ -1766,19 +1856,19 @@
       }
     },
     "dashboard.section.system_costs": {
-      "comment": "Sidebar section title for System and CLI Costs.",
+      "comment": "Sidebar section title for System and CLI token usage.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "System & CLI Costs"
+            "value": "System & CLI Usage"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "系统与 CLI 费用"
+            "value": "系统与 CLI 用量"
           }
         }
       }
@@ -1815,6 +1905,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日花费 $%.2f"
+          }
+        }
+      }
+    },
+    "dashboard.sidebar.today_tokens_format": {
+      "comment": "Sidebar footer live token usage summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today %@ tok"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日 Token %@"
           }
         }
       }
@@ -2090,19 +2198,19 @@
       }
     },
     "menubar.pulse.cli_cost_quota": {
-      "comment": "Menu bar CLI cost and quota section header.",
+      "comment": "Menu bar CLI token and quota section header.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "TODAY CLI COST & QUOTA"
+            "value": "TODAY CLI TOKENS & QUOTA"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日 CLI 费用与配额"
+            "value": "今日 CLI Token 与配额"
           }
         }
       }
@@ -2193,6 +2301,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日 $%.2f · 周期 $%.0f"
+          }
+        }
+      }
+    },
+    "menubar.pulse.today_tokens_format": {
+      "comment": "Menu bar today active and cache token summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active %@ · Cache %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活跃 %@ · 缓存 %@"
           }
         }
       }

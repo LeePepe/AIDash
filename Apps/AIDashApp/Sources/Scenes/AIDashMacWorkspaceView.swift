@@ -211,10 +211,6 @@ public struct RankingTableCardView: View {
                         Text(DashboardL10n.format("dashboard.ranking.latency_value_format", "%.1fs", row.avgDurationSeconds))
                             .monospacedDigit()
                     }
-                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_cost", "Today Cost")) { row in
-                        Text(String(format: "$%.2f", row.costUSD))
-                            .monospacedDigit()
-                    }
                 }
                 .tableStyle(.inset(alternatesRowBackgrounds: true))
                 .frame(minHeight: 165)
@@ -343,7 +339,7 @@ public struct AIDashMacWorkspaceView: View {
                 Circle()
                     .fill(Color.green)
                     .frame(width: 8, height: 8)
-                Text(DashboardL10n.format("dashboard.sidebar.today_spend_format", "Today $%.2f", store.todayTotalCostUSD))
+                Text(DashboardL10n.format("dashboard.sidebar.today_tokens_format", "Today %@ tok", DashboardTokenFormatter.compact(store.todayGrandTotalTokens)))
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .contentTransition(.numericText())

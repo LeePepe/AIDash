@@ -17,6 +17,19 @@ public enum DashboardL10n {
     }
 }
 
+public enum DashboardTokenFormatter {
+    public static func compact(_ value: UInt64) -> String {
+        if value >= 1_000_000_000 {
+            return String(format: "%.2fB", Double(value) / 1_000_000_000.0)
+        } else if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000.0)
+        } else if value >= 1_000 {
+            return String(format: "%.1fK", Double(value) / 1_000.0)
+        }
+        return value.formatted(.number)
+    }
+}
+
 public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable, Identifiable {
     case overview
     case agentEfficiency
@@ -156,6 +169,7 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
     public let invocations: Int
     public let successRate: Double
     public let costUSD: Double
+    public let totalTokens: UInt64
 
     public init(
         id: String,
@@ -164,7 +178,8 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         cliFilter: DashboardCLIFilter,
         invocations: Int,
         successRate: Double,
-        costUSD: Double
+        costUSD: Double,
+        totalTokens: UInt64 = 0
     ) {
         self.id = id
         self.bucketLabel = bucketLabel
@@ -173,6 +188,7 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         self.invocations = invocations
         self.successRate = successRate
         self.costUSD = costUSD
+        self.totalTokens = totalTokens
     }
 }
 
