@@ -333,6 +333,7 @@ struct DashboardWorkspaceTests {
         #expect(store.todayGrandTotalTokens > 0)
         #expect(store.periodGrandTotalTokens >= store.todayGrandTotalTokens)
         #expect(store.filteredTrendPoints.contains { $0.totalTokens > 0 })
+        #expect(LiveDashboardTelemetryReader.sanitizeSQLToken("2026-11-07") == "2026-11-07")
     }
 }
 #endif

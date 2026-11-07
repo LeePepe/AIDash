@@ -288,8 +288,6 @@ public struct TrendChartCardView: View {
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
 
-    @State private var chartHoveredCategory: String?
-
     public init(
         points: [TrendDataPoint],
         selectedCategory: String?,
@@ -323,46 +321,35 @@ public struct TrendChartCardView: View {
                 .frame(minHeight: 28)
             }
         } content: {
+            let categoryTotals = Self.groupedCategoryTotals(from: points)
             VStack(alignment: .leading, spacing: 12) {
                 Chart(points) { point in
                     let isSelected = selectedCategory == nil || selectedCategory == point.category
                     let tokenMillions = Double(point.totalTokens) / 1_000_000.0
                     BarMark(
-                        x: .value("CLI", point.category),
+                        x: .value("Date", point.bucketLabel),
                         y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
                     )
                     .foregroundStyle(by: .value("CLI", point.category))
                     .opacity(isSelected ? 1.0 : 0.30)
-                    .annotation(position: .top) {
-                        Text("\(DashboardTokenFormatter.compact(point.totalTokens)) tok")
-                            .font(.caption2)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
                 }
-                .frame(height: 185)
+                .frame(height: 195)
                 .chartLegend(position: .bottom, alignment: .leading)
-                .chartXSelection(value: $chartHoveredCategory)
-                .onChange(of: chartHoveredCategory) { _, newValue in
-                    if let newValue {
-                        onSelectCategory(newValue)
-                    }
-                }
                 .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
 
                 HStack(spacing: 8) {
                     Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    ForEach(points) { point in
-                        let active = selectedCategory == point.category
+                    ForEach(categoryTotals, id: \.category) { item in
+                        let active = selectedCategory == item.category
                         Button {
-                            onSelectCategory(point.category)
+                            onSelectCategory(item.category)
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: active ? "checkmark.circle.fill" : "circle")
-                                Text(point.bucketLabel)
-                                Text("\(DashboardTokenFormatter.compact(point.totalTokens)) tok")
+                                Text(item.category)
+                                Text("\(DashboardTokenFormatter.compact(item.tokens)) tok")
                                     .monospacedDigit()
                             }
                             .font(.caption)
@@ -375,6 +362,18 @@ public struct TrendChartCardView: View {
                 }
             }
         }
+    }
+
+    private static func groupedCategoryTotals(from points: [TrendDataPoint]) -> [(category: String, tokens: UInt64)] {
+        var order: [String] = []
+        var sums: [String: UInt64] = [:]
+        for p in points {
+            if sums[p.category] == nil {
+                order.append(p.category)
+            }
+            sums[p.category, default: 0] += p.totalTokens
+        }
+        return order.map { ($0, sums[$0] ?? 0) }
     }
 }
 

@@ -31,7 +31,7 @@ public enum LiveDashboardTelemetryReader {
     public static func loadLiveDataset(
         forDate dateString: String,
         fallbackUsage: CLITokenUsageSnapshot
-    ) -> (entries: [CLICostQuotaEntry], rankings: [AgentRankingRow])? {
+    ) -> (entries: [CLICostQuotaEntry], rankings: [AgentRankingRow], trends: [TrendDataPoint])? {
         guard isLiveEnvironment else { return nil }
         let home = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
         return loadDataset(forDate: dateString, homeURL: home, fallbackUsage: fallbackUsage)
@@ -41,7 +41,7 @@ public enum LiveDashboardTelemetryReader {
         forDate dateString: String,
         homeURL: URL,
         fallbackUsage: CLITokenUsageSnapshot
-    ) -> (entries: [CLICostQuotaEntry], rankings: [AgentRankingRow])? {
+    ) -> (entries: [CLICostQuotaEntry], rankings: [AgentRankingRow], trends: [TrendDataPoint])? {
         let ravenURL = homeURL.appendingPathComponent("Library/Application Support/raven/raven.db")
         let copilotURL = homeURL.appendingPathComponent(".copilot/session-store.db")
         let warehouseURL = homeURL.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
@@ -125,7 +125,8 @@ public enum LiveDashboardTelemetryReader {
         ]
 
         let rankings = queryRealRankings(ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString, fallbackEntries: entries)
-        return (entries, rankings)
+        let trends = querySevenDayTrends(ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString, fallbackEntries: entries)
+        return (entries, rankings, trends)
     }
 
     private static func computeCostUSD(
@@ -222,15 +223,23 @@ extension LiveDashboardTelemetryReader {
         var modelsSummary: String = ""
     }
 
+    static func sanitizeSQLToken(_ value: String) -> String {
+        String(value.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" })
+    }
+
     static func openReadOnlySQLite(path: String) -> OpaquePointer? {
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
         var db: OpaquePointer?
         if sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, let db {
             sqlite3_busy_timeout(db, 120)
-            return db
+            if sqlite3_exec(db, "SELECT 1 FROM sqlite_master LIMIT 1;", nil, nil, nil) == SQLITE_OK {
+                return db
+            }
+            sqlite3_close(db)
+        } else if let db {
+            sqlite3_close(db)
         }
-        if let db { sqlite3_close(db) }
         var uriDB: OpaquePointer?
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
         if sqlite3_open_v2("file:\(encoded)?mode=ro&immutable=1", &uriDB, flags | SQLITE_OPEN_URI, nil) == SQLITE_OK, let uriDB {
@@ -243,19 +252,21 @@ extension LiveDashboardTelemetryReader {
     static func queryRavenCLIStats(dbURL: URL, clientPrefix: String, dateString: String) -> CLIWindowStats {
         guard let db = openReadOnlySQLite(path: dbURL.path) else { return CLIWindowStats() }
         defer { sqlite3_close(db) }
+        let safeDate = sanitizeSQLToken(dateString)
+        let safePrefix = sanitizeSQLToken(clientPrefix)
         let sql = """
         SELECT
-            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = ?1 THEN 1 ELSE 0 END),
-            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = ?1 THEN COALESCE(input_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = ?1 THEN COALESCE(output_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = ?1 THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
             SUM(COALESCE(input_tokens,0)),
             SUM(COALESCE(output_tokens,0)),
             SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-            GROUP_CONCAT(DISTINCT CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = ?1 AND resolved_model != '' THEN resolved_model ELSE NULL END)
+            GROUP_CONCAT(DISTINCT CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' AND resolved_model != '' THEN resolved_model ELSE NULL END)
         FROM requests
-        WHERE client_name LIKE ?2
-          AND timestamp >= (strftime('%s', ?1, '-7 days') * 1000);
+        WHERE client_name LIKE '\(safePrefix)%'
+          AND timestamp >= (strftime('%s', '\(safeDate)', '-7 days') * 1000);
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
@@ -263,9 +274,6 @@ extension LiveDashboardTelemetryReader {
             return CLIWindowStats()
         }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, (dateString as NSString).utf8String, -1, nil)
-        let pattern = "\(clientPrefix)%"
-        sqlite3_bind_text(stmt, 2, (pattern as NSString).utf8String, -1, nil)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return CLIWindowStats() }
         let models = sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? ""
         return CLIWindowStats(
@@ -283,18 +291,19 @@ extension LiveDashboardTelemetryReader {
     static func queryCopilotSessionStats(dbURL: URL, dateString: String) -> CLIWindowStats {
         guard let db = openReadOnlySQLite(path: dbURL.path) else { return CLIWindowStats() }
         defer { sqlite3_close(db) }
+        let safeDate = sanitizeSQLToken(dateString)
         let sql = """
         SELECT
-            SUM(CASE WHEN substr(created_at, 1, 10) = ?1 THEN 1 ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = ?1 THEN COALESCE(input_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = ?1 THEN COALESCE(output_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = ?1 THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
             SUM(COALESCE(input_tokens,0)),
             SUM(COALESCE(output_tokens,0)),
             SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-            GROUP_CONCAT(DISTINCT CASE WHEN substr(created_at, 1, 10) = ?1 AND model != '' THEN model ELSE NULL END)
+            GROUP_CONCAT(DISTINCT CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' AND model != '' THEN model ELSE NULL END)
         FROM assistant_usage_events
-        WHERE substr(created_at, 1, 10) >= date(?1, '-7 days');
+        WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-7 days');
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
@@ -302,7 +311,6 @@ extension LiveDashboardTelemetryReader {
             return CLIWindowStats()
         }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, (dateString as NSString).utf8String, -1, nil)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return CLIWindowStats() }
         let models = sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? ""
         return CLIWindowStats(
@@ -320,17 +328,18 @@ extension LiveDashboardTelemetryReader {
     static func queryWarehouseClaudeStats(dbURL: URL, dateString: String) -> CLIWindowStats {
         guard let db = openReadOnlySQLite(path: dbURL.path) else { return CLIWindowStats() }
         defer { sqlite3_close(db) }
+        let safeDate = sanitizeSQLToken(dateString)
         let sql = """
         SELECT
-            SUM(CASE WHEN substr(ts, 1, 10) = ?1 THEN 1 ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = ?1 THEN COALESCE(input_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = ?1 THEN COALESCE(output_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = ?1 THEN COALESCE(cache_read,0)+COALESCE(cache_creation,0) ELSE 0 END),
+            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(cache_read,0)+COALESCE(cache_creation,0) ELSE 0 END),
             SUM(COALESCE(input_tokens,0)),
             SUM(COALESCE(output_tokens,0)),
             SUM(COALESCE(cache_read,0)+COALESCE(cache_creation,0))
         FROM fact_turn
-        WHERE substr(ts, 1, 10) >= date(?1, '-7 days');
+        WHERE substr(ts, 1, 10) >= date('\(safeDate)', '-7 days');
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
@@ -338,7 +347,6 @@ extension LiveDashboardTelemetryReader {
             return CLIWindowStats()
         }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, (dateString as NSString).utf8String, -1, nil)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return CLIWindowStats() }
         return CLIWindowStats(
             dayRuns: UInt64(max(sqlite3_column_int64(stmt, 0), 0)),
@@ -352,6 +360,101 @@ extension LiveDashboardTelemetryReader {
         )
     }
 
+    static func querySevenDayTrends(
+        ravenURL: URL,
+        copilotURL: URL,
+        dateString: String,
+        fallbackEntries: [CLICostQuotaEntry]
+    ) -> [TrendDataPoint] {
+        let safeDate = sanitizeSQLToken(dateString)
+        var dailyMap: [String: [DashboardCLIFilter: (tokens: UInt64, runs: Int)]] = [:]
+
+        if let db = openReadOnlySQLite(path: ravenURL.path) {
+            defer { sqlite3_close(db) }
+            let sql = """
+            SELECT
+                date(timestamp/1000, 'unixepoch', 'localtime') as d,
+                CASE
+                    WHEN client_name LIKE 'codex%' THEN 'codex'
+                    WHEN client_name LIKE 'claude%' THEN 'claude'
+                    ELSE 'copilot'
+                END as cli_kind,
+                SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
+                COUNT(*)
+            FROM requests
+            WHERE timestamp >= (strftime('%s', '\(safeDate)', '-6 days') * 1000)
+              AND date(timestamp/1000, 'unixepoch', 'localtime') <= '\(safeDate)'
+            GROUP BY d, cli_kind;
+            """
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+                defer { sqlite3_finalize(stmt) }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    guard let dayPtr = sqlite3_column_text(stmt, 0),
+                          let kindPtr = sqlite3_column_text(stmt, 1) else { continue }
+                    let day = String(cString: dayPtr)
+                    let kind = String(cString: kindPtr)
+                    let tok = UInt64(max(sqlite3_column_int64(stmt, 2), 0))
+                    let runs = Int(max(sqlite3_column_int64(stmt, 3), 0))
+                    let cli: DashboardCLIFilter = kind == "codex" ? .codex : (kind == "claude" ? .claude : .copilot)
+                    var dayDict = dailyMap[day, default: [:]]
+                    dayDict[cli] = (tok, runs)
+                    dailyMap[day] = dayDict
+                }
+            }
+        }
+
+        if let db = openReadOnlySQLite(path: copilotURL.path) {
+            defer { sqlite3_close(db) }
+            let sql = """
+            SELECT
+                substr(created_at, 1, 10) as d,
+                SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
+                COUNT(*)
+            FROM assistant_usage_events
+            WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-6 days')
+              AND substr(created_at, 1, 10) <= '\(safeDate)'
+            GROUP BY d;
+            """
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+                defer { sqlite3_finalize(stmt) }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    guard let dayPtr = sqlite3_column_text(stmt, 0) else { continue }
+                    let day = String(cString: dayPtr)
+                    let tok = UInt64(max(sqlite3_column_int64(stmt, 1), 0))
+                    let runs = Int(max(sqlite3_column_int64(stmt, 2), 0))
+                    var dayDict = dailyMap[day, default: [:]]
+                    let prev = dayDict[.copilot] ?? (0, 0)
+                    dayDict[.copilot] = (max(prev.tokens, tok), max(prev.runs, runs))
+                    dailyMap[day] = dayDict
+                }
+            }
+        }
+
+        var points: [TrendDataPoint] = []
+        for day in dailyMap.keys.sorted() {
+            let shortDay = day.count >= 10 ? String(day.suffix(5)) : day
+            guard let cliDict = dailyMap[day] else { continue }
+            for cli in [DashboardCLIFilter.copilot, .codex, .claude] {
+                guard let stat = cliDict[cli], stat.tokens > 0 else { continue }
+                points.append(
+                    TrendDataPoint(
+                        id: "trend-\(day)-\(cli.rawValue)",
+                        bucketLabel: shortDay,
+                        category: cli.rawValue,
+                        cliFilter: cli,
+                        invocations: stat.runs,
+                        successRate: 0.99,
+                        costUSD: 0,
+                        totalTokens: stat.tokens
+                    )
+                )
+            }
+        }
+        return points.isEmpty ? DashboardWorkspaceStore.deriveTrendPoints(from: fallbackEntries) : points
+    }
+
     static func queryRealRankings(
         ravenURL: URL,
         copilotURL: URL,
@@ -362,6 +465,7 @@ extension LiveDashboardTelemetryReader {
 
         if let db = openReadOnlySQLite(path: ravenURL.path) {
             defer { sqlite3_close(db) }
+            let safeDate = sanitizeSQLToken(dateString)
             let sql = """
             SELECT
                 CASE
@@ -385,7 +489,7 @@ extension LiveDashboardTelemetryReader {
                 AVG(latency_ms) / 1000.0,
                 1.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
             FROM requests
-            WHERE date(timestamp/1000, 'unixepoch', 'localtime') = ?1
+            WHERE date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)'
             GROUP BY role_group, resolved_model
             ORDER BY runs DESC
             LIMIT 10;
@@ -393,7 +497,6 @@ extension LiveDashboardTelemetryReader {
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
                 defer { sqlite3_finalize(stmt) }
-                sqlite3_bind_text(stmt, 1, (dateString as NSString).utf8String, -1, nil)
                 var index = 0
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Agent"

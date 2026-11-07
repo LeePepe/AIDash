@@ -195,7 +195,7 @@ public final class DashboardWorkspaceStore {
             : nil
         let derivedCLIs = customCLIs ?? liveDataset?.entries ?? Self.deriveCLIEntries(from: snapshot.tokenUsage, forDate: selectedDateString)
         cliEntries = derivedCLIs
-        trendPoints = customTrends ?? Self.deriveTrendPoints(from: derivedCLIs)
+        trendPoints = customTrends ?? liveDataset?.trends ?? Self.deriveTrendPoints(from: derivedCLIs)
         let preservedCompletedIDs = Set(actionItems.filter(\.isCompleted).map(\.id))
         var nextActions = customActions ?? Self.deriveActionItems(from: snapshot, cliEntries: derivedCLIs)
         for index in nextActions.indices where preservedCompletedIDs.contains(nextActions[index].id) {
