@@ -104,8 +104,8 @@ public struct SystemTelemetryStripView: View {
 
     public var body: some View {
         SolidModularCardContainer(
-            title: "Real-Time Machine Telemetry",
-            subtitle: "\(snapshot.machine.chipName) · \(snapshot.machine.totalCores) Cores",
+            title: DashboardL10n.tr("dashboard.telemetry.title", "Real-Time Machine Telemetry"),
+            subtitle: DashboardL10n.format("dashboard.telemetry.subtitle_format", "%@ · %lld Cores", snapshot.machine.chipName, snapshot.machine.totalCores),
             symbolName: "cpu"
         ) {
             Text(snapshot.capturedAt.formatted(date: .omitted, time: .shortened))
@@ -116,11 +116,12 @@ public struct SystemTelemetryStripView: View {
             Grid(horizontalSpacing: 14, verticalSpacing: 10) {
                 GridRow {
                     telemetryGaugeTile(
-                        title: "CPU Load",
+                        title: DashboardL10n.tr("dashboard.telemetry.cpu_load", "CPU Load"),
                         symbol: "cpu",
                         valueText: "\(Int((snapshot.cpu.usage * 100).rounded()))%",
-                        detailText: String(
-                            format: "Load %.1f / %.1f / %.1f",
+                        detailText: DashboardL10n.format(
+                            "dashboard.telemetry.load_avg_format",
+                            "Load %.1f / %.1f / %.1f",
                             snapshot.cpu.loadOneMinute,
                             snapshot.cpu.loadFiveMinutes,
                             snapshot.cpu.loadFifteenMinutes
@@ -129,21 +130,34 @@ public struct SystemTelemetryStripView: View {
                         health: snapshot.cpu.usage >= 0.90 ? .critical : (snapshot.cpu.usage >= 0.70 ? .warning : .healthy)
                     )
                     telemetryGaugeTile(
-                        title: "Memory",
+                        title: DashboardL10n.tr("dashboard.telemetry.memory", "Memory"),
                         symbol: "memorychip",
                         valueText: MenuBarStatusView.compactMemoryPair(
                             used: snapshot.memory.usedBytes,
                             total: snapshot.memory.totalBytes
                         ),
-                        detailText: "Pressure: \(snapshot.memory.pressure.rawValue.capitalized)",
+                        detailText: DashboardL10n.format(
+                            "dashboard.telemetry.pressure_format",
+                            "Pressure: %@",
+                            MenuBarController.pressureTitle(snapshot.memory.pressure)
+                        ),
                         fraction: snapshot.memory.usageFraction,
                         health: snapshot.memory.pressure == .critical ? .critical : (snapshot.memory.pressure == .warning ? .warning : .healthy)
                     )
                     telemetryGaugeTile(
-                        title: "System Storage",
+                        title: DashboardL10n.tr("dashboard.telemetry.storage", "System Storage"),
                         symbol: "internaldrive",
-                        valueText: "\(ByteCountFormatter.string(fromByteCount: Int64(snapshot.storage.systemVolume.availableBytes), countStyle: .binary)) free",
-                        detailText: "\(Int((snapshot.storage.systemVolume.usageFraction * 100).rounded()))% used on \(snapshot.storage.systemVolume.name)",
+                        valueText: DashboardL10n.format(
+                            "dashboard.telemetry.storage_free_format",
+                            "%@ free",
+                            ByteCountFormatter.string(fromByteCount: Int64(snapshot.storage.systemVolume.availableBytes), countStyle: .binary)
+                        ),
+                        detailText: DashboardL10n.format(
+                            "dashboard.telemetry.storage_used_format",
+                            "%lld%% used on %@",
+                            Int((snapshot.storage.systemVolume.usageFraction * 100).rounded()),
+                            snapshot.storage.systemVolume.name
+                        ),
                         fraction: snapshot.storage.systemVolume.usageFraction,
                         health: snapshot.storage.systemVolume.usageFraction >= 0.90 ? .critical : (snapshot.storage.systemVolume.usageFraction >= 0.78 ? .warning : .healthy)
                     )
@@ -207,8 +221,8 @@ public struct KPISummaryCardView: View {
 
     public var body: some View {
         SolidModularCardContainer(
-            title: "Daily Agent Summary",
-            subtitle: "Key invocations, efficiency, cost, and action status",
+            title: DashboardL10n.tr("dashboard.card.kpi.title", "Daily Agent Summary"),
+            subtitle: DashboardL10n.tr("dashboard.card.kpi.subtitle", "Key invocations, efficiency, cost, and action status"),
             symbolName: "gauge.with.dots.needle.33percent"
         ) {
             LazyVGrid(
@@ -290,15 +304,18 @@ public struct TrendChartCardView: View {
 
     public var body: some View {
         SolidModularCardContainer(
-            title: "Agent Invocations & Spend by CLI",
-            subtitle: "Click any bar to cross-filter tables and actionable items below (IP-001)",
+            title: DashboardL10n.tr("dashboard.card.trend.title", "Agent Invocations & Spend by CLI"),
+            subtitle: DashboardL10n.tr("dashboard.card.trend.subtitle", "Click any bar to cross-filter tables and actionable items below"),
             symbolName: "chart.bar.xaxis"
         ) {
             if let selectedCategory {
                 Button {
                     onClearSelection()
                 } label: {
-                    Label("Filter: \(selectedCategory) ×", systemImage: "line.3.horizontal.decrease.circle.fill")
+                    Label(
+                        DashboardL10n.format("dashboard.chart.clear_filter_format", "Filter: %@ ×", selectedCategory),
+                        systemImage: "line.3.horizontal.decrease.circle.fill"
+                    )
                         .font(.caption.weight(.medium))
                 }
                 .buttonStyle(.bordered)
@@ -311,7 +328,7 @@ public struct TrendChartCardView: View {
                     let isSelected = selectedCategory == nil || selectedCategory == point.category
                     BarMark(
                         x: .value("CLI", point.category),
-                        y: .value("Invocations", point.invocations)
+                        y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Invocations"), point.invocations)
                     )
                     .foregroundStyle(by: .value("CLI", point.category))
                     .opacity(isSelected ? 1.0 : 0.30)
@@ -330,10 +347,10 @@ public struct TrendChartCardView: View {
                         onSelectCategory(newValue)
                     }
                 }
-                .accessibilityLabel("Agent invocations by CLI chart")
+                .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
 
                 HStack(spacing: 8) {
-                    Text("Quick Cross-Filter:")
+                    Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     ForEach(points) { point in
@@ -377,18 +394,18 @@ public struct CLICostQuotaCardView: View {
 
     public var body: some View {
         SolidModularCardContainer(
-            title: "Multi-CLI Cost & Quota Monitor",
-            subtitle: "Daily spend, cycle cumulative cost, and quota utilization",
+            title: DashboardL10n.tr("dashboard.card.cli_cost.title", "Multi-CLI Cost & Quota Monitor"),
+            subtitle: DashboardL10n.tr("dashboard.card.cli_cost.subtitle", "Daily spend, cycle cumulative cost, and quota utilization"),
             symbolName: "creditcard.and.123"
         ) {
             HStack(spacing: 12) {
-                LabeledContent("Today") {
+                LabeledContent(DashboardL10n.tr("dashboard.cli_cost.today", "Today")) {
                     Text(String(format: "$%.2f", todayTotalUSD))
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                 }
-                LabeledContent("Cycle") {
+                LabeledContent(DashboardL10n.tr("dashboard.cli_cost.cycle", "Cycle")) {
                     Text(String(format: "$%.2f", periodTotalUSD))
                         .font(.subheadline)
                         .monospacedDigit()
@@ -434,11 +451,11 @@ public struct CLICostQuotaCardView: View {
             .gaugeStyle(.accessoryLinearCapacity)
             .tint(tint)
             HStack(spacing: 12) {
-                Text("Active: \(entry.activeTokens.formatted(.number)) tok")
-                Text("Cache: \(entry.cacheTokens.formatted(.number)) tok")
-                Text("Sessions/Turns: \(entry.interactionCount.formatted(.number))")
+                Text(DashboardL10n.format("dashboard.cli_cost.active_tokens_format", "Active: %@ tok", entry.activeTokens.formatted(.number)))
+                Text(DashboardL10n.format("dashboard.cli_cost.cache_tokens_format", "Cache: %@ tok", entry.cacheTokens.formatted(.number)))
+                Text(DashboardL10n.format("dashboard.cli_cost.sessions_format", "Sessions/Turns: %@", entry.interactionCount.formatted(.number)))
                 Spacer(minLength: 4)
-                Text("Cycle: \(String(format: "$%.2f", entry.periodCostUSD))")
+                Text(DashboardL10n.format("dashboard.cli_cost.cycle_cost_format", "Cycle: $%.2f", entry.periodCostUSD))
             }
             .font(.caption)
             .monospacedDigit()

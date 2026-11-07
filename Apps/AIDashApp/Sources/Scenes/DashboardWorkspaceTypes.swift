@@ -2,6 +2,21 @@
 import Foundation
 import AIDashCore
 
+public enum DashboardL10n {
+    public static func tr(_ key: String, _ defaultValue: String) -> String {
+        let resolved = Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
+        if resolved.isEmpty || resolved == key || resolved.hasPrefix("dashboard.") || resolved.hasPrefix("menubar.") {
+            return defaultValue
+        }
+        return resolved
+    }
+
+    public static func format(_ key: String, _ defaultFormat: String, _ args: CVarArg...) -> String {
+        let formatString = tr(key, defaultFormat)
+        return String(format: formatString, arguments: args)
+    }
+}
+
 public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable, Identifiable {
     case overview
     case agentEfficiency
@@ -12,10 +27,14 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
 
     public var title: String {
         switch self {
-        case .overview: return "Overview"
-        case .agentEfficiency: return "Agent Efficiency"
-        case .actionItems: return "Actionable Items"
-        case .systemAndCosts: return "System & CLI Costs"
+        case .overview:
+            return DashboardL10n.tr("dashboard.section.overview", "Overview")
+        case .agentEfficiency:
+            return DashboardL10n.tr("dashboard.section.agent_efficiency", "Agent Efficiency")
+        case .actionItems:
+            return DashboardL10n.tr("dashboard.section.action_items", "Actionable Items")
+        case .systemAndCosts:
+            return DashboardL10n.tr("dashboard.section.system_costs", "System & CLI Costs")
         }
     }
 
@@ -40,7 +59,7 @@ public enum DashboardCLIFilter: String, CaseIterable, Codable, Sendable, Equatab
 
     public var shortLabel: String {
         switch self {
-        case .all: return "All"
+        case .all: return DashboardL10n.tr("dashboard.cli.all", "All")
         case .claude: return "Claude"
         case .codex: return "Codex"
         case .copilot: return "Copilot"
@@ -66,10 +85,10 @@ public enum DashboardSemanticHealth: String, Codable, Sendable, Equatable {
 
     public var label: String {
         switch self {
-        case .healthy: return "Healthy"
-        case .warning: return "Warning"
-        case .critical: return "Exceeded"
-        case .neutral: return "Idle"
+        case .healthy: return DashboardL10n.tr("dashboard.health.healthy", "Healthy")
+        case .warning: return DashboardL10n.tr("dashboard.health.warning", "Warning")
+        case .critical: return DashboardL10n.tr("dashboard.health.critical", "Exceeded")
+        case .neutral: return DashboardL10n.tr("dashboard.health.neutral", "Idle")
         }
     }
 }
@@ -242,6 +261,15 @@ public enum DashboardActionFilter: String, CaseIterable, Sendable, Equatable, Id
     case highPriorityOnly = "P0 / P1"
 
     public var id: String { rawValue }
+
+    public var displayTitle: String {
+        switch self {
+        case .all: return DashboardL10n.tr("dashboard.action_filter.all", "All")
+        case .pending: return DashboardL10n.tr("dashboard.action_filter.pending", "Pending")
+        case .completed: return DashboardL10n.tr("dashboard.action_filter.completed", "Completed")
+        case .highPriorityOnly: return "P0 / P1"
+        }
+    }
 }
 
 public enum DashboardActionSort: String, CaseIterable, Sendable, Equatable, Identifiable {
@@ -250,6 +278,14 @@ public enum DashboardActionSort: String, CaseIterable, Sendable, Equatable, Iden
     case title = "Title"
 
     public var id: String { rawValue }
+
+    public var displayTitle: String {
+        switch self {
+        case .priority: return DashboardL10n.tr("dashboard.action_sort.priority", "Priority")
+        case .source: return DashboardL10n.tr("dashboard.action_sort.source", "Source")
+        case .title: return DashboardL10n.tr("dashboard.action_sort.title", "Title")
+        }
+    }
 }
 
 public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {

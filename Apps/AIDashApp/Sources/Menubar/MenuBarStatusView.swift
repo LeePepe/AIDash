@@ -8,7 +8,7 @@ private enum Copy {
     static let errorTitle = localized("menubar.status.error_title", "Status Unavailable")
     static let refresh = localized("menubar.status.refresh", "Refresh Status")
     static let refreshAction = localized("menubar.status.refresh_action", "Refresh")
-    static let openBriefing = localized("menubar.status.open_briefing_action", "Open Dashboard")
+    static let openBriefing = localized("menubar.status.open_briefing_action", "Open Briefing")
     static let about = localized("menubar.status.about_action", "About")
     static let quit = localized("menubar.status.quit_action", "Quit")
     static let actions = localized("menubar.status.actions", "Actions")
@@ -103,9 +103,9 @@ public struct MenuBarStatusView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                Text("AIDash Pulse")
+                Text(DashboardL10n.tr("menubar.pulse.title", "AIDash Pulse"))
                     .font(.headline)
-                Text("\(snapshot.machine.chipName) · \(snapshot.machine.totalCores)C")
+                Text(DashboardL10n.format("menubar.pulse.machine_format", "%@ · %lldC", snapshot.machine.chipName, snapshot.machine.totalCores))
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -121,25 +121,25 @@ public struct MenuBarStatusView: View {
 
     private func telemetryGaugeStrip(_ snapshot: MenuBarSystemSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("SYSTEM TELEMETRY")
+            Text(DashboardL10n.tr("menubar.pulse.system_telemetry", "SYSTEM TELEMETRY"))
                 .font(.system(.caption2, design: .rounded, weight: .semibold))
                 .foregroundStyle(.secondary)
             Grid(horizontalSpacing: 8, verticalSpacing: 8) {
                 GridRow {
                     compactGaugeCell(
-                        label: "CPU",
+                        label: DashboardL10n.tr("menubar.status.cpu", "CPU"),
                         valueText: "\(Int((snapshot.cpu.usage * 100).rounded()))%",
                         fraction: snapshot.cpu.usage,
                         health: snapshot.cpu.usage >= 0.90 ? .critical : (snapshot.cpu.usage >= 0.70 ? .warning : .healthy)
                     )
                     compactGaugeCell(
-                        label: "Mem",
+                        label: DashboardL10n.tr("menubar.status.memory", "Memory"),
                         valueText: Self.compactMemoryShort(used: snapshot.memory.usedBytes, total: snapshot.memory.totalBytes),
                         fraction: snapshot.memory.usageFraction,
                         health: snapshot.memory.pressure == .critical ? .critical : (snapshot.memory.pressure == .warning ? .warning : .healthy)
                     )
                     compactGaugeCell(
-                        label: "Disk",
+                        label: DashboardL10n.tr("menubar.status.storage", "Storage"),
                         valueText: ByteCountFormatter.string(fromByteCount: Int64(snapshot.storage.systemVolume.availableBytes), countStyle: .binary),
                         fraction: snapshot.storage.systemVolume.usageFraction,
                         health: snapshot.storage.systemVolume.usageFraction >= 0.90 ? .critical : .healthy
@@ -192,11 +192,11 @@ public struct MenuBarStatusView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("TODAY CLI COST & QUOTA")
+                Text(DashboardL10n.tr("menubar.pulse.cli_cost_quota", "TODAY CLI COST & QUOTA"))
                     .font(.system(.caption2, design: .rounded, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Text(String(format: "Today $%.2f · MTD $%.0f", todayTotal, periodTotal))
+                Text(DashboardL10n.format("menubar.pulse.today_mtd_format", "Today $%.2f · MTD $%.0f", todayTotal, periodTotal))
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
@@ -257,11 +257,11 @@ public struct MenuBarStatusView: View {
     private func topActionsSection(items: [DashboardActionItem]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("TOP ACTIONABLE ITEMS")
+                Text(DashboardL10n.tr("menubar.pulse.top_actions", "TOP ACTIONABLE ITEMS"))
                     .font(.system(.caption2, design: .rounded, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Text("\(items.count) pending")
+                Text(DashboardL10n.format("menubar.pulse.pending_count_format", "%lld pending", items.count))
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)

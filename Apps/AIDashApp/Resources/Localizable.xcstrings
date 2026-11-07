@@ -1,643 +1,3732 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "briefing.storage_unavailable.title" : {
-      "comment" : "Title shown in the BriefingWindowScene fallback when CloudKit container init fails.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iCloud unavailable"
+  "sourceLanguage": "en",
+  "strings": {
+    "briefing.scene.error.status": {
+      "comment": "Status shown when the BriefingWindowScene cannot initialize its CloudKit store.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ERROR"
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iCloud 不可用"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "错误"
           }
         }
       }
     },
-    "briefing.scene.loading.status" : {
-      "comment" : "Status shown while the BriefingWindowScene is preparing the briefing.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "SYNCING" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步中" } }
-      }
-    },
-    "briefing.scene.loading.title" : {
-      "comment" : "Title shown while the BriefingWindowScene is preparing the briefing.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Loading briefing" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在加载简报" } }
-      }
-    },
-    "briefing.scene.loading.subtitle" : {
-      "comment" : "Supporting copy shown while the BriefingWindowScene is preparing the briefing.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preparing today’s briefing." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在准备今天的简报。" } }
-      }
-    },
-    "briefing.scene.error.status" : {
-      "comment" : "Status shown when the BriefingWindowScene cannot initialize its CloudKit store.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "ERROR" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "错误" } }
-      }
-    },
-    "briefing.scene.error.title" : {
-      "comment" : "Title shown when the BriefingWindowScene cannot initialize its CloudKit store.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Briefing unavailable" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "简报不可用" } }
-      }
-    },
-    "briefing.scene.error.subtitle" : {
-      "comment" : "Supporting copy shown when the BriefingWindowScene cannot initialize its CloudKit store.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Check iCloud and try opening the briefing again." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请检查 iCloud，然后重新打开简报。" } }
-      }
-    },
-    "cloudkit.unavailable.message" : {
-      "comment" : "Shown in the iCloud unavailable scene when SwiftData CloudKit init fails.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iCloud data sync is unavailable. Please check your iCloud account in Settings."
+    "briefing.scene.error.subtitle": {
+      "comment": "Supporting copy shown when the BriefingWindowScene cannot initialize its CloudKit store.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check iCloud and try opening the briefing again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请检查 iCloud，然后重新打开简报。"
           }
         }
       }
     },
-    "menubar.about" : {
-      "comment" : "Menu bar item that opens the standard About panel.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "About AIDash"
+    "briefing.scene.error.title": {
+      "comment": "Title shown when the BriefingWindowScene cannot initialize its CloudKit store.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Briefing unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "简报不可用"
           }
         }
       }
     },
-    "menubar.app_name" : {
-      "comment" : "Accessibility label for the AIDash menu bar status item icon.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AIDash"
+    "briefing.scene.loading.status": {
+      "comment": "Status shown while the BriefingWindowScene is preparing the briefing.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SYNCING"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步中"
           }
         }
       }
     },
-    "menubar.open_briefing" : {
-      "comment" : "Menu bar item that opens the briefing window.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Briefing"
+    "briefing.scene.loading.subtitle": {
+      "comment": "Supporting copy shown while the BriefingWindowScene is preparing the briefing.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing today’s briefing."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在准备今天的简报。"
           }
         }
       }
     },
-    "menubar.quit" : {
-      "comment" : "Menu bar item that quits the AIDash app.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Quit AIDash"
+    "briefing.scene.loading.title": {
+      "comment": "Title shown while the BriefingWindowScene is preparing the briefing.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading briefing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载简报"
           }
         }
       }
     },
-    "menubar.status.active" : {
-      "comment" : "Label for active input plus output agent tokens.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Active" } } }
-    },
-    "menubar.status.about_action" : {
-      "comment" : "Compact integrated menu bar panel action label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "About"
+    "briefing.storage_unavailable.title": {
+      "comment": "Title shown in the BriefingWindowScene fallback when CloudKit container init fails.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 不可用"
           }
         }
       }
     },
-    "menubar.status.actions" : {
-      "comment" : "Accessibility label for the integrated menu bar panel action group.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Actions"
+    "cloudkit.unavailable.message": {
+      "comment": "Shown in the iCloud unavailable scene when SwiftData CloudKit init fails.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud data sync is unavailable. Please check your iCloud account in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 数据同步不可用，请在系统设置中检查 iCloud 账号状态。"
           }
         }
       }
     },
-    "menubar.status.needs_person" : {
-      "comment" : "Menu bar attention strip label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Needs a Person" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要人工处理" } }
-      }
-    },
-    "menubar.status.blocking" : {
-      "comment" : "Menu bar attention count badge.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld blocking" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 项阻塞" } }
-      }
-    },
-    "menubar.status.gateway" : {
-      "comment" : "Menu bar local gateway status section.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Local Gateway" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本地网关" } }
-      }
-    },
-    "menubar.status.available" : {
-      "comment" : "Unit label for available storage.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "available" } } }
-    },
-    "menubar.status.open_briefing_action" : {
-      "comment" : "Compact integrated menu bar panel action label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Briefing"
+    "dashboard.action.default_codex_summary": {
+      "comment": "Default action item summary for Codex CLI check.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify zero pending retries across automated PR review gates."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确认自动化 PR 审查门禁无排队重试任务。"
           }
         }
       }
     },
-    "menubar.status.quit_action" : {
-      "comment" : "Compact integrated menu bar panel action label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Quit"
+    "dashboard.action.default_codex_title": {
+      "comment": "Default action item title for Codex CLI check.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspect Codex CLI batch verification throughput"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看 Codex CLI 批量验证吞吐情况"
           }
         }
       }
     },
-    "menubar.status.refresh_action" : {
-      "comment" : "Compact integrated menu bar panel action label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Refresh"
+    "dashboard.action.default_digest_summary": {
+      "comment": "Default action item summary when all metrics are healthy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All CLI quotas and system telemetry are within healthy thresholds today."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前所有 CLI 配额与本机系统状态均在健康范围内。"
           }
         }
       }
     },
-    "menubar.status.compressed" : {
-      "comment" : "Memory compressed amount label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Compressed" } } }
-    },
-    "menubar.status.cpu" : {
-      "comment" : "CPU section label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "CPU" } } }
-    },
-    "menubar.status.cpu_status" : {
-      "comment" : "Accessible CPU summary menu item fallback.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "CPU status" } } }
-    },
-    "menubar.status.cpu_summary" : {
-      "comment" : "Compact CPU status summary.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "CPU %@ · %@ user · %@ system" } } }
-    },
-    "menubar.status.cli_token_summary" : {
-      "comment" : "Compact per-CLI token status summary.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ %@ active · %@ cache" } } }
-    },
-    "menubar.status.cli_unavailable_summary" : {
-      "comment" : "Unavailable per-CLI token status summary.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ unavailable" } } }
-    },
-    "menubar.status.cores" : {
-      "comment" : "CPU core count.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld cores" } } }
-    },
-    "menubar.status.empty_title" : {
-      "comment" : "Empty telemetry state title.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No Telemetry Available" } } }
-    },
-    "menubar.status.error_title" : {
-      "comment" : "Error telemetry state title.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Status Unavailable" } } }
-    },
-    "menubar.status.free" : {
-      "comment" : "Free memory label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Free" } } }
-    },
-    "menubar.status.in_out" : {
-      "comment" : "Input and output token label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "In+Out" } } }
-    },
-    "menubar.status.load_fifteen" : {
-      "comment" : "Fifteen-minute CPU load label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "15m load" } } }
-    },
-    "menubar.status.load_five" : {
-      "comment" : "Five-minute CPU load label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "5m load" } } }
-    },
-    "menubar.status.load_one" : {
-      "comment" : "One-minute CPU load label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "1m load" } } }
-    },
-    "menubar.status.memory" : {
-      "comment" : "Memory section label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Memory" } } }
-    },
-    "menubar.status.memory_status" : {
-      "comment" : "Accessible memory summary menu item fallback.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Memory status" } } }
-    },
-    "menubar.status.memory_summary" : {
-      "comment" : "Compact memory status summary.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Memory %@ used · %@" } } }
-    },
-    "menubar.status.pressure_critical" : {
-      "comment" : "Critical memory pressure label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Critical" } } }
-    },
-    "menubar.status.pressure_normal" : {
-      "comment" : "Normal memory pressure label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Normal" } } }
-    },
-    "menubar.status.pressure_warning" : {
-      "comment" : "Warning memory pressure label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Warning" } } }
-    },
-    "menubar.status.not_mounted" : {
-      "comment" : "Degraded state for an unavailable external SSD mount.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Not Mounted" } } }
-    },
-    "menubar.status.refresh" : {
-      "comment" : "Action that refreshes menu bar telemetry.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh Status" } } }
-    },
-    "menubar.status.storage" : {
-      "comment" : "Storage section label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Storage" } } }
-    },
-    "menubar.status.storage_status" : {
-      "comment" : "Accessible storage summary menu item fallback.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Storage status" } } }
-    },
-    "menubar.status.storage_summary" : {
-      "comment" : "Compact storage status summary.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Storage %@ · SSD %@" } } }
-    },
-    "menubar.status.system" : {
-      "comment" : "CPU system time label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "System" } } }
-    },
-    "menubar.status.title" : {
-      "comment" : "Menu bar telemetry panel title.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "System Status" } } }
-    },
-    "menubar.status.used" : {
-      "comment" : "Memory used amount label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Used" } } }
-    },
-    "menubar.status.token_status" : {
-      "comment" : "Accessible token summary menu item fallback.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent token status" } } }
-    },
-    "menubar.status.token_summary" : {
-      "comment" : "Compact agent token status summary.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent tokens %@ active" } } }
-    },
-    "menubar.status.tokens" : {
-      "comment" : "Agent token section label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent Token Usage" } } }
-    },
-    "menubar.status.total" : {
-      "comment" : "Total token label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Total %@" } } }
-    },
-    "menubar.status.total_label" : {
-      "comment" : "Compact total token metric label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Total" } } }
-    },
-    "menubar.status.cache" : {
-      "comment" : "Cached token metric label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cache" } } }
-    },
-    "menubar.status.interactions" : {
-      "comment" : "Aggregate interaction metric label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Interactions" } } }
-    },
-    "menubar.status.connected" : {
-      "comment" : "Connected network status pill.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Online" } } }
-    },
-    "menubar.status.connected_short" : {
-      "comment" : "Compact connected network status pill.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "UP" } } }
-    },
-    "menubar.status.disconnected" : {
-      "comment" : "Disconnected network status pill.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline" } } }
-    },
-    "menubar.status.disconnected_short" : {
-      "comment" : "Compact disconnected network status pill.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "OFF" } } }
-    },
-    "menubar.status.unavailable" : {
-      "comment" : "Unavailable telemetry value.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unavailable" } } }
-    },
-    "menubar.status.unavailable_summary" : {
-      "comment" : "Unavailable compact menu summary.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Status unavailable" } } }
-    },
-    "menubar.status.updated" : {
-      "comment" : "Status freshness label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Updated %@" } } }
-    },
-    "menubar.status.updating" : {
-      "comment" : "Loading telemetry status.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Updating status…" } } }
-    },
-    "menubar.status.usage" : {
-      "comment" : "CPU usage label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Usage" } } }
-    },
-    "menubar.status.user" : {
-      "comment" : "CPU user time label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "User" } } }
-    },
-    "menubar.status.wired" : {
-      "comment" : "Memory wired amount label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Wired" } } }
-    },
-    "menubar.status.computer_group" : {
-      "comment" : "Computer telemetry group header.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Computer Info" } } }
-    },
-    "menubar.status.every_5s" : {
-      "comment" : "Computer telemetry refresh cadence.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Every 5s" } } }
-    },
-    "menubar.status.every_1m" : {
-      "comment" : "Agent token telemetry refresh cadence.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Every 1m" } } }
-    },
-    "menubar.status.network_status" : {
-      "comment" : "Accessible network summary menu item.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Network status" } } }
-    },
-    "menubar.status.network_summary" : {
-      "comment" : "Compact network status summary.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Network %@ · ↓ %@/s · ↑ %@/s" } } }
-    },
-    "menubar.status.network" : {
-      "comment" : "Network section label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Network" } } }
-    },
-    "menubar.status.idle" : {
-      "comment" : "CPU idle time label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Idle" } } }
-    },
-    "menubar.status.swap" : {
-      "comment" : "Memory swap label.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Swap" } } }
-    },
-    "menubar.status.cadence_badge" : {
-      "comment" : "Combined refresh cadence badge.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "5s / 1m" } } }
-    },
-    "menubar.status.active_format" : {
-      "comment" : "Active token total.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Active %@" } } }
-    },
-    "menubar.status.turns_reqs" : {
-      "comment" : "Combined interaction count.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ turns/reqs" } } }
-    },
-    "menubar.status.interaction" : {
-      "comment" : "Per-CLI interaction count.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ %@" } } }
-    },
-    "menubar.status.in_out_format" : {
-      "comment" : "Input and output token count.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "In+Out %@" } } }
-    },
-    "menubar.status.cache_format" : {
-      "comment" : "Cache token count.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cache %@" } } }
-    },
-    "menubar.status.storage_detail" : {
-      "comment" : "Storage usage detail.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ / %@ · %@ %@" } } }
-    },
-    "menubar.status.uptime" : {
-      "comment" : "Machine uptime and update time.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Up %@ · %@" } } }
-    },
-    "menubar.status.load_short" : {
-      "comment" : "Short CPU load row label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Load" } }
-      }
-    },
-    "menubar.status.claude_quota" : {
-      "comment" : "Claude weekly quota remaining.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude %lld%%" } } }
-    },
-    "menubar.status.thermal_nominal" : {
-      "comment" : "Nominal thermal state.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Nominal" } } }
-    },
-    "menubar.status.thermal_fair" : {
-      "comment" : "Fair thermal state.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Fair" } } }
-    },
-    "menubar.status.thermal_serious" : {
-      "comment" : "Serious thermal state.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Serious" } } }
-    },
-    "menubar.status.thermal_critical" : {
-      "comment" : "Critical thermal state.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Critical" } } }
-    },
-    "menubar.status.cli_claude" : {
-      "comment" : "Claude CLI name.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code" } } }
-    },
-    "menubar.status.cli_codex" : {
-      "comment" : "Codex CLI name.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Codex CLI" } } }
-    },
-    "menubar.status.cli_copilot" : {
-      "comment" : "Copilot CLI name.",
-      "extractionState" : "manual",
-      "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Copilot CLI" } } }
-    },
-    "menubar.status.top" : {
-      "comment" : "Prefix for the top CPU or memory process line.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Top" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "占用最高" } }
-      }
-    },
-    "menubar.status.gpu" : {
-      "comment" : "GPU utilization summary label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "GPU" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "GPU" } }
-      }
-    },
-    "menubar.status.power" : {
-      "comment" : "Power source summary label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Power" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "电源" } }
-      }
-    },
-    "telemetry.settings.send_usage_data" : {
-        "comment" : "The sole opt-in control for anonymous product telemetry.",
-        "extractionState" : "manual",
-        "localizations" : {
-          "en" : {
-            "stringUnit" : {
-              "state" : "translated",
-              "value" : "Send usage data"
-            }
-            },
-            "zh-Hans" : {
-              "stringUnit" : {
-                "state" : "translated",
-                "value" : "发送使用数据"
-              }
+    "dashboard.action.default_digest_title": {
+      "comment": "Default action item title for daily agent digest check.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review daily agent efficiency & cache hit ratios"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查今日 Agent 执行效率与缓存命中率"
           }
         }
+      }
     },
-    "telemetry.settings.title" : {
-        "comment" : "Toolbar menu title for product telemetry settings.",
-        "extractionState" : "manual",
-        "localizations" : {
-          "en" : {
-            "stringUnit" : {
-              "state" : "translated",
-              "value" : "Usage data"
-            }
-          },
-          "zh-Hans" : {
-            "stringUnit" : {
-              "state" : "translated",
-              "value" : "使用数据"
-            }
+    "dashboard.action.memory_pressure_summary": {
+      "comment": "Summary for memory pressure warning action item.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close idle simulator runtimes or background indexing workers to reclaim wired memory."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "建议关闭空闲模拟器或后台索引进程以释放常驻内存。"
           }
         }
+      }
+    },
+    "dashboard.action.memory_pressure_title_format": {
+      "comment": "Title format for memory pressure warning action item.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System memory pressure is %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统内存压力状态: %@"
+          }
+        }
+      }
+    },
+    "dashboard.action.quota_summary_format": {
+      "comment": "Summary format for a CLI quota warning action item.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today spend $%.2f / $%.2f cap. Consider routing routine tasks to secondary CLI."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日花费 $%.2f / 限额 $%.2f，建议将常规任务分流至备用 CLI。"
+          }
+        }
+      }
+    },
+    "dashboard.action.quota_title_format": {
+      "comment": "Title format for a CLI quota warning action item.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ quota at %lld%%"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 配额已用 %lld%%"
+          }
+        }
+      }
+    },
+    "dashboard.action.requires_review": {
+      "comment": "Fallback summary for an attention item.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Requires owner review to unblock downstream tasks."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要确认以解除下游任务阻塞。"
+          }
+        }
+      }
+    },
+    "dashboard.action.source_system": {
+      "comment": "Source tag for system telemetry action items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System Telemetry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统状态"
+          }
+        }
+      }
+    },
+    "dashboard.action.waiting_on_format": {
+      "comment": "Summary format for an attention item waiting on a person.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting on %@ · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待 %@ 处理 · %@"
+          }
+        }
+      }
+    },
+    "dashboard.action_filter.all": {
+      "comment": "Filter showing all actionable items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        }
+      }
+    },
+    "dashboard.action_filter.completed": {
+      "comment": "Filter showing completed actionable items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已完成"
+          }
+        }
+      }
+    },
+    "dashboard.action_filter.pending": {
+      "comment": "Filter showing pending actionable items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pending"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待处理"
+          }
+        }
+      }
+    },
+    "dashboard.action_sort.priority": {
+      "comment": "Sort actionable items by priority.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Priority"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "优先级"
+          }
+        }
+      }
+    },
+    "dashboard.action_sort.source": {
+      "comment": "Sort actionable items by source.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来源"
+          }
+        }
+      }
+    },
+    "dashboard.action_sort.title": {
+      "comment": "Sort actionable items by title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Title"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标题"
+          }
+        }
+      }
+    },
+    "dashboard.actions.copied": {
+      "comment": "Button label after copying CLI command.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制"
+          }
+        }
+      }
+    },
+    "dashboard.actions.copy_command": {
+      "comment": "Button label to copy CLI command.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制命令"
+          }
+        }
+      }
+    },
+    "dashboard.actions.empty_desc": {
+      "comment": "Empty state description when no actionable items match filter.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No actionable items match the active filter combination."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前筛选条件下没有匹配的待推进事项。"
+          }
+        }
+      }
+    },
+    "dashboard.actions.empty_title": {
+      "comment": "Empty state title when no actionable items match filter.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Matching Actionable Items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无匹配的可推进事项"
+          }
+        }
+      }
+    },
+    "dashboard.actions.filter_label": {
+      "comment": "Accessibility label for actionable items filter picker.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状态筛选"
+          }
+        }
+      }
+    },
+    "dashboard.actions.mark_completed_format": {
+      "comment": "Accessibility label for actionable item completion checkbox.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark %@ as completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将 %@ 标记为已完成"
+          }
+        }
+      }
+    },
+    "dashboard.actions.open_link": {
+      "comment": "Button label to open external link.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开链接"
+          }
+        }
+      }
+    },
+    "dashboard.actions.reset_filter": {
+      "comment": "Button title to reset scoped filter in empty state.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Scoped Filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置局部筛选"
+          }
+        }
+      }
+    },
+    "dashboard.actions.sort_button_format": {
+      "comment": "Menu button label showing active sort order.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sort: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "排序: %@"
+          }
+        }
+      }
+    },
+    "dashboard.actions.sort_by": {
+      "comment": "Menu picker title for sorting actionable items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sort By"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "排序方式"
+          }
+        }
+      }
+    },
+    "dashboard.actions.subtitle_format": {
+      "comment": "Subtitle format for actionable items card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld pending · %lld completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 项待处理 · %lld 项已完成"
+          }
+        }
+      }
+    },
+    "dashboard.card.actions.subtitle": {
+      "comment": "Subtitle of the actionable items modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blockers, quota warnings, and ready-to-advance agent tasks"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前阻塞项、配额预警及可立即推进的事项"
+          }
+        }
+      }
+    },
+    "dashboard.card.actions.title": {
+      "comment": "Title of the actionable items modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actionable Items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可推进事项"
+          }
+        }
+      }
+    },
+    "dashboard.card.cli_cost.subtitle": {
+      "comment": "Subtitle of the multi-CLI cost and quota modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily spend, cycle cumulative cost, and quota utilization"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日实时花费、周期累计开销与配额使用率"
+          }
+        }
+      }
+    },
+    "dashboard.card.cli_cost.title": {
+      "comment": "Title of the multi-CLI cost and quota modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Multi-CLI Cost & Quota Monitor"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多 CLI 费用与配额监控"
+          }
+        }
+      }
+    },
+    "dashboard.card.kpi.subtitle": {
+      "comment": "Subtitle of the KPI summary modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Key invocations, efficiency, cost, and action status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调用次数、执行效率、今日花费与待推进事项总览"
+          }
+        }
+      }
+    },
+    "dashboard.card.kpi.title": {
+      "comment": "Title of the KPI summary modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily Agent Summary"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每日 Agent 状态汇总"
+          }
+        }
+      }
+    },
+    "dashboard.card.ranking.subtitle": {
+      "comment": "Subtitle of the ranking table modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a row to inspect detailed execution telemetry in-place"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选中任意行即可在下方查看该 Agent 的详细运行指标"
+          }
+        }
+      }
+    },
+    "dashboard.card.ranking.title": {
+      "comment": "Title of the ranking table modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent & CLI Efficiency Ranking"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 与 CLI 效能排行"
+          }
+        }
+      }
+    },
+    "dashboard.card.trend.subtitle": {
+      "comment": "Subtitle of the trend chart modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click any bar to cross-filter tables and actionable items below"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击柱状条或下方按钮可联动筛选列表与待推进事项"
+          }
+        }
+      }
+    },
+    "dashboard.card.trend.title": {
+      "comment": "Title of the trend chart modular card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Invocations & Spend by CLI"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各 CLI 调用量与费用对比"
+          }
+        }
+      }
+    },
+    "dashboard.chart.accessibility_label": {
+      "comment": "Accessibility label for the CLI invocations chart.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent invocations by CLI chart"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各 CLI 调用次数对比图表"
+          }
+        }
+      }
+    },
+    "dashboard.chart.axis_invocations": {
+      "comment": "Y-axis label for invocations count in chart.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invocations"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调用次数"
+          }
+        }
+      }
+    },
+    "dashboard.chart.clear_filter_format": {
+      "comment": "Button label to clear active chart category cross-filter.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter: %@ ×"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已选: %@ ×"
+          }
+        }
+      }
+    },
+    "dashboard.chart.quick_filter": {
+      "comment": "Label preceding quick cross-filter buttons below chart.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick Cross-Filter:"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击联动筛选:"
+          }
+        }
+      }
+    },
+    "dashboard.cli.all": {
+      "comment": "All CLIs filter segment label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        }
+      }
+    },
+    "dashboard.cli_cost.active_tokens_format": {
+      "comment": "Per-CLI active token count label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active: %@ tok"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活跃 Token: %@"
+          }
+        }
+      }
+    },
+    "dashboard.cli_cost.cache_tokens_format": {
+      "comment": "Per-CLI cache token count label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache: %@ tok"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缓存 Token: %@"
+          }
+        }
+      }
+    },
+    "dashboard.cli_cost.cycle": {
+      "comment": "Header label for billing cycle total CLI spend.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cycle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "周期累计"
+          }
+        }
+      }
+    },
+    "dashboard.cli_cost.cycle_cost_format": {
+      "comment": "Per-CLI billing cycle cost label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cycle: $%.2f"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "周期花费: $%.2f"
+          }
+        }
+      }
+    },
+    "dashboard.cli_cost.sessions_format": {
+      "comment": "Per-CLI session or turn count label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessions/Turns: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调用次数: %@"
+          }
+        }
+      }
+    },
+    "dashboard.cli_cost.today": {
+      "comment": "Header label for today total CLI spend.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日合计"
+          }
+        }
+      }
+    },
+    "dashboard.health.critical": {
+      "comment": "Critical or quota exceeded semantic status label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exceeded"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "超限"
+          }
+        }
+      }
+    },
+    "dashboard.health.healthy": {
+      "comment": "Healthy semantic status label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Healthy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正常"
+          }
+        }
+      }
+    },
+    "dashboard.health.neutral": {
+      "comment": "Neutral or idle semantic status label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空闲"
+          }
+        }
+      }
+    },
+    "dashboard.health.warning": {
+      "comment": "Warning semantic status label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warning"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预警"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.actions.completed_format": {
+      "comment": "Delta text showing completed action items count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld completed today"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日已完成 %lld 项"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.actions.label": {
+      "comment": "KPI label for pending actionable items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actionable Items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待推进事项"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.actions.unit": {
+      "comment": "KPI unit for pending actionable items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "pending"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "项待办"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.cost.label": {
+      "comment": "KPI label for today CLI spend.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today CLI Spend"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日 CLI 总花费"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.cost.near_quota_format": {
+      "comment": "Delta text when one or more CLIs are near quota.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld CLI near quota"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个 CLI 接近配额"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.cost.unit_format": {
+      "comment": "KPI unit format for cycle cumulative spend.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "$%.0f MTD"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "周期 $%.0f"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.cost.within_budget": {
+      "comment": "Delta text when all CLIs are within budget.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Within daily budget"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在每日预算范围内"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.efficiency.below_target": {
+      "comment": "Delta text when success rate is below target.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Below 95% target"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "低于 95% 目标"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.efficiency.label": {
+      "comment": "KPI label for success rate and average latency.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Success & Latency"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "成功率与平均耗时"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.efficiency.target_met": {
+      "comment": "Delta text when success rate target is met.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Target >= 95% met"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已达 >= 95% 目标"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.efficiency.unit_format": {
+      "comment": "KPI unit format for average duration in seconds.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%.1fs avg"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "平均 %.1f 秒"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.filtered_format": {
+      "comment": "Delta badge when cross-filtered by chart category.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtered: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已筛选: %@"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.invocations.delta": {
+      "comment": "Default delta text for agent invocations.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+14.2% vs avg"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "较日均 +14.2%"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.invocations.label": {
+      "comment": "KPI label for total agent invocations.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Invocations"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 调用次数"
+          }
+        }
+      }
+    },
+    "dashboard.kpi.invocations.unit": {
+      "comment": "KPI unit for agent invocations.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "runs"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.col_cost": {
+      "comment": "Table column header for today cost.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today Cost"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日花费"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.col_latency": {
+      "comment": "Table column header for average latency.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avg Latency"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "平均耗时"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.col_provider": {
+      "comment": "Table column header for CLI provider.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI Provider"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所属 CLI"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.col_role": {
+      "comment": "Table column header for agent role.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Role"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 角色"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.col_runs": {
+      "comment": "Table column header for invocation count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调用次数"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.col_success": {
+      "comment": "Table column header for success rate.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Success Rate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "成功率"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.col_tokens": {
+      "comment": "Table column header for total tokens.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总 Token"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.detail_format": {
+      "comment": "Detail summary format for selected ranking row.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (%@) · Active %@ tok · Cache %@ tok"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (%@) · 活跃 Token %@ · 缓存 Token %@"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.issue_format": {
+      "comment": "Warning note when a ranked CLI is approaching its daily quota ceiling.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approaching daily quota ceiling (%lld%%)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接近每日配额上限 (%lld%%)"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.latency_value_format": {
+      "comment": "Formatted latency value in seconds.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%.1fs"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%.1f秒"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.sort_asc": {
+      "comment": "Button label when ranking table is sorted ascending by runs.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs: Ascending"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调用次数: 升序"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.sort_desc": {
+      "comment": "Button label when ranking table is sorted descending by runs.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs: Descending"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调用次数: 降序"
+          }
+        }
+      }
+    },
+    "dashboard.role.cli_assistant": {
+      "comment": "Agent role name for interactive CLI assistant.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interactive CLI Assistant"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "终端交互助手"
+          }
+        }
+      }
+    },
+    "dashboard.role.research_audit": {
+      "comment": "Agent role name for research and audit worker.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Research & Audit Worker"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调研与审计节点"
+          }
+        }
+      }
+    },
+    "dashboard.role.steering": {
+      "comment": "Agent role name for steering and architecture.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steering / Architect"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主控 / 架构规划"
+          }
+        }
+      }
+    },
+    "dashboard.role.writer_reviewer": {
+      "comment": "Agent role name for code writer and reviewer.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code Writer & Reviewer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "代码实现与审查"
+          }
+        }
+      }
+    },
+    "dashboard.section.action_items": {
+      "comment": "Sidebar section title for Actionable Items.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actionable Items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可推进事项"
+          }
+        }
+      }
+    },
+    "dashboard.section.agent_efficiency": {
+      "comment": "Sidebar section title for Agent Efficiency.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Efficiency"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 效能"
+          }
+        }
+      }
+    },
+    "dashboard.section.overview": {
+      "comment": "Sidebar section title for Overview.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overview"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总览"
+          }
+        }
+      }
+    },
+    "dashboard.section.system_costs": {
+      "comment": "Sidebar section title for System and CLI Costs.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System & CLI Costs"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统与 CLI 费用"
+          }
+        }
+      }
+    },
+    "dashboard.sidebar.title": {
+      "comment": "Sidebar section header title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash Workspace"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash 工作台"
+          }
+        }
+      }
+    },
+    "dashboard.sidebar.today_spend_format": {
+      "comment": "Sidebar footer live spend summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today $%.2f"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日花费 $%.2f"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.cpu_load": {
+      "comment": "Title of the CPU load gauge tile.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU Load"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU 负载"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.load_avg_format": {
+      "comment": "Detail format showing 1m, 5m, and 15m load averages.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load %.1f / %.1f / %.1f"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "平均负载 %.1f / %.1f / %.1f"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.memory": {
+      "comment": "Title of the memory gauge tile.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存占用"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.pressure_format": {
+      "comment": "Detail format showing memory pressure level.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pressure: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存压力: %@"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.storage": {
+      "comment": "Title of the system storage gauge tile.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System Storage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁盘存储"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.storage_free_format": {
+      "comment": "Value format showing free storage space.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ free"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可用 %@"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.storage_used_format": {
+      "comment": "Detail format showing used percentage on volume name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% used on %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%2$@ 已用 %1$lld%%"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.subtitle_format": {
+      "comment": "Subtitle format of the machine telemetry card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %lld Cores"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %lld 核"
+          }
+        }
+      }
+    },
+    "dashboard.telemetry.title": {
+      "comment": "Title of the real-time machine telemetry card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Real-Time Machine Telemetry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机实时状态"
+          }
+        }
+      }
+    },
+    "dashboard.toolbar.cli_scope": {
+      "comment": "Toolbar segmented picker label for CLI scope.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI Scope"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI 筛选"
+          }
+        }
+      }
+    },
+    "dashboard.toolbar.refresh": {
+      "comment": "Toolbar button to refresh telemetry and dashboard data.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新"
+          }
+        }
+      }
+    },
+    "dashboard.toolbar.today": {
+      "comment": "Toolbar button to jump to today's date.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天"
+          }
+        }
+      }
+    },
+    "menubar.about": {
+      "comment": "Menu bar item that opens the standard About panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About AIDash"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关于 AIDash"
+          }
+        }
+      }
+    },
+    "menubar.app_name": {
+      "comment": "Accessibility label for the AIDash menu bar status item icon.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash"
+          }
+        }
+      }
+    },
+    "menubar.open_briefing": {
+      "comment": "Menu bar item that opens the briefing window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Briefing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开主面板"
+          }
+        }
+      }
+    },
+    "menubar.pulse.cli_cost_quota": {
+      "comment": "Menu bar CLI cost and quota section header.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TODAY CLI COST & QUOTA"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日 CLI 费用与配额"
+          }
+        }
+      }
+    },
+    "menubar.pulse.machine_format": {
+      "comment": "Menu bar machine chip and core count summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %lldC"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %lld 核"
+          }
+        }
+      }
+    },
+    "menubar.pulse.pending_count_format": {
+      "comment": "Menu bar pending action count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld pending"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 项待办"
+          }
+        }
+      }
+    },
+    "menubar.pulse.system_telemetry": {
+      "comment": "Menu bar system telemetry section header.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SYSTEM TELEMETRY"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机实时状态"
+          }
+        }
+      }
+    },
+    "menubar.pulse.title": {
+      "comment": "Menu bar live pulse header title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash Pulse"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash 实时速览"
+          }
+        }
+      }
+    },
+    "menubar.pulse.today_mtd_format": {
+      "comment": "Menu bar today and cycle spend summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today $%.2f · MTD $%.0f"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日 $%.2f · 周期 $%.0f"
+          }
+        }
+      }
+    },
+    "menubar.pulse.top_actions": {
+      "comment": "Menu bar top actionable items section header.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TOP ACTIONABLE ITEMS"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待推进事项"
+          }
+        }
+      }
+    },
+    "menubar.quit": {
+      "comment": "Menu bar item that quits the AIDash app.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit AIDash"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出 AIDash"
+          }
+        }
+      }
+    },
+    "menubar.status.about_action": {
+      "comment": "Compact integrated menu bar panel action label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关于"
+          }
+        }
+      }
+    },
+    "menubar.status.actions": {
+      "comment": "Accessibility label for the integrated menu bar panel action group.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "操作"
+          }
+        }
+      }
+    },
+    "menubar.status.active": {
+      "comment": "Label for active input plus output agent tokens.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活跃"
+          }
+        }
+      }
+    },
+    "menubar.status.active_format": {
+      "comment": "Active token total.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活跃 %@"
+          }
+        }
+      }
+    },
+    "menubar.status.available": {
+      "comment": "Unit label for available storage.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "available"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可用"
+          }
+        }
+      }
+    },
+    "menubar.status.blocking": {
+      "comment": "Menu bar attention count badge.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld blocking"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 项阻塞"
+          }
+        }
+      }
+    },
+    "menubar.status.cache": {
+      "comment": "Cached token metric label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缓存"
+          }
+        }
+      }
+    },
+    "menubar.status.cache_format": {
+      "comment": "Cache token count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缓存 %@"
+          }
+        }
+      }
+    },
+    "menubar.status.cadence_badge": {
+      "comment": "Combined refresh cadence badge.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5s / 1m"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5秒 / 1分"
+          }
+        }
+      }
+    },
+    "menubar.status.claude_quota": {
+      "comment": "Claude weekly quota remaining.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude %lld%%"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude %lld%%"
+          }
+        }
+      }
+    },
+    "menubar.status.cli_claude": {
+      "comment": "Claude CLI name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code"
+          }
+        }
+      }
+    },
+    "menubar.status.cli_codex": {
+      "comment": "Codex CLI name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex CLI"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex CLI"
+          }
+        }
+      }
+    },
+    "menubar.status.cli_copilot": {
+      "comment": "Copilot CLI name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copilot CLI"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copilot CLI"
+          }
+        }
+      }
+    },
+    "menubar.status.cli_token_summary": {
+      "comment": "Compact per-CLI token status summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ %@ active · %@ cache"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 活跃 %@ · 缓存 %@"
+          }
+        }
+      }
+    },
+    "menubar.status.cli_unavailable_summary": {
+      "comment": "Unavailable per-CLI token status summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 不可用"
+          }
+        }
+      }
+    },
+    "menubar.status.compressed": {
+      "comment": "Memory compressed amount label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compressed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已压缩"
+          }
+        }
+      }
+    },
+    "menubar.status.computer_group": {
+      "comment": "Computer telemetry group header.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Computer Info"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机状态"
+          }
+        }
+      }
+    },
+    "menubar.status.connected": {
+      "comment": "Connected network status pill.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Online"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在线"
+          }
+        }
+      }
+    },
+    "menubar.status.connected_short": {
+      "comment": "Compact connected network status pill.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UP"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在线"
+          }
+        }
+      }
+    },
+    "menubar.status.cores": {
+      "comment": "CPU core count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld cores"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 核"
+          }
+        }
+      }
+    },
+    "menubar.status.cpu": {
+      "comment": "CPU section label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU"
+          }
+        }
+      }
+    },
+    "menubar.status.cpu_status": {
+      "comment": "Accessible CPU summary menu item fallback.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU 状态"
+          }
+        }
+      }
+    },
+    "menubar.status.cpu_summary": {
+      "comment": "Compact CPU status summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU %@ · %@ user · %@ system"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU %@ · 用户 %@ · 系统 %@"
+          }
+        }
+      }
+    },
+    "menubar.status.disconnected": {
+      "comment": "Disconnected network status pill.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "离线"
+          }
+        }
+      }
+    },
+    "menubar.status.disconnected_short": {
+      "comment": "Compact disconnected network status pill.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OFF"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "离线"
+          }
+        }
+      }
+    },
+    "menubar.status.empty_title": {
+      "comment": "Empty telemetry state title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Telemetry Available"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无遥测数据"
+          }
+        }
+      }
+    },
+    "menubar.status.error_title": {
+      "comment": "Error telemetry state title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status Unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状态暂不可用"
+          }
+        }
+      }
+    },
+    "menubar.status.every_1m": {
+      "comment": "Agent token telemetry refresh cadence.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every 1m"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每 1 分钟"
+          }
+        }
+      }
+    },
+    "menubar.status.every_5s": {
+      "comment": "Computer telemetry refresh cadence.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every 5s"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每 5 秒"
+          }
+        }
+      }
+    },
+    "menubar.status.free": {
+      "comment": "Free memory label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可用"
+          }
+        }
+      }
+    },
+    "menubar.status.gateway": {
+      "comment": "Menu bar local gateway status section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local Gateway"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地网关"
+          }
+        }
+      }
+    },
+    "menubar.status.gpu": {
+      "comment": "GPU utilization summary label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GPU"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GPU"
+          }
+        }
+      }
+    },
+    "menubar.status.idle": {
+      "comment": "CPU idle time label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空闲"
+          }
+        }
+      }
+    },
+    "menubar.status.in_out": {
+      "comment": "Input and output token label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In+Out"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入+输出"
+          }
+        }
+      }
+    },
+    "menubar.status.in_out_format": {
+      "comment": "Input and output token count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In+Out %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入+输出 %@"
+          }
+        }
+      }
+    },
+    "menubar.status.interaction": {
+      "comment": "Per-CLI interaction count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ %@"
+          }
+        }
+      }
+    },
+    "menubar.status.interactions": {
+      "comment": "Aggregate interaction metric label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interactions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调用次数"
+          }
+        }
+      }
+    },
+    "menubar.status.load_fifteen": {
+      "comment": "Fifteen-minute CPU load label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "15m load"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "15分钟负载"
+          }
+        }
+      }
+    },
+    "menubar.status.load_five": {
+      "comment": "Five-minute CPU load label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5m load"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5分钟负载"
+          }
+        }
+      }
+    },
+    "menubar.status.load_one": {
+      "comment": "One-minute CPU load label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1m load"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1分钟负载"
+          }
+        }
+      }
+    },
+    "menubar.status.load_short": {
+      "comment": "Short CPU load row label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "负载"
+          }
+        }
+      }
+    },
+    "menubar.status.memory": {
+      "comment": "Memory section label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存"
+          }
+        }
+      }
+    },
+    "menubar.status.memory_status": {
+      "comment": "Accessible memory summary menu item fallback.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存状态"
+          }
+        }
+      }
+    },
+    "menubar.status.memory_summary": {
+      "comment": "Compact memory status summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory %@ used · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存已用 %@ · %@"
+          }
+        }
+      }
+    },
+    "menubar.status.needs_person": {
+      "comment": "Menu bar attention strip label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs a Person"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要人工处理"
+          }
+        }
+      }
+    },
+    "menubar.status.network": {
+      "comment": "Network section label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Network"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络"
+          }
+        }
+      }
+    },
+    "menubar.status.network_status": {
+      "comment": "Accessible network summary menu item.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Network status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络状态"
+          }
+        }
+      }
+    },
+    "menubar.status.network_summary": {
+      "comment": "Compact network status summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Network %@ · ↓ %@/s · ↑ %@/s"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络 %@ · ↓ %@/s · ↑ %@/s"
+          }
+        }
+      }
+    },
+    "menubar.status.not_mounted": {
+      "comment": "Degraded state for an unavailable external SSD mount.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Mounted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未挂载"
+          }
+        }
+      }
+    },
+    "menubar.status.open_briefing_action": {
+      "comment": "Compact integrated menu bar panel action label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Briefing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开主面板"
+          }
+        }
+      }
+    },
+    "menubar.status.power": {
+      "comment": "Power source summary label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Power"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "电源"
+          }
+        }
+      }
+    },
+    "menubar.status.pressure_critical": {
+      "comment": "Critical memory pressure label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Critical"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "严重"
+          }
+        }
+      }
+    },
+    "menubar.status.pressure_normal": {
+      "comment": "Normal memory pressure label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Normal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正常"
+          }
+        }
+      }
+    },
+    "menubar.status.pressure_warning": {
+      "comment": "Warning memory pressure label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warning"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "偏高"
+          }
+        }
+      }
+    },
+    "menubar.status.quit_action": {
+      "comment": "Compact integrated menu bar panel action label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出"
+          }
+        }
+      }
+    },
+    "menubar.status.refresh": {
+      "comment": "Action that refreshes menu bar telemetry.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新状态"
+          }
+        }
+      }
+    },
+    "menubar.status.refresh_action": {
+      "comment": "Compact integrated menu bar panel action label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新"
+          }
+        }
+      }
+    },
+    "menubar.status.storage": {
+      "comment": "Storage section label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储"
+          }
+        }
+      }
+    },
+    "menubar.status.storage_detail": {
+      "comment": "Storage usage detail.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ / %@ · %@ %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ / %@ · %@ %@"
+          }
+        }
+      }
+    },
+    "menubar.status.storage_status": {
+      "comment": "Accessible storage summary menu item fallback.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储状态"
+          }
+        }
+      }
+    },
+    "menubar.status.storage_summary": {
+      "comment": "Compact storage status summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage %@ · SSD %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储 %@ · SSD %@"
+          }
+        }
+      }
+    },
+    "menubar.status.swap": {
+      "comment": "Memory swap label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Swap"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "交换区"
+          }
+        }
+      }
+    },
+    "menubar.status.system": {
+      "comment": "CPU system time label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统"
+          }
+        }
+      }
+    },
+    "menubar.status.thermal_critical": {
+      "comment": "Critical thermal state.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Critical"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "过高"
+          }
+        }
+      }
+    },
+    "menubar.status.thermal_fair": {
+      "comment": "Fair thermal state.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fair"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "温和"
+          }
+        }
+      }
+    },
+    "menubar.status.thermal_nominal": {
+      "comment": "Nominal thermal state.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nominal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正常"
+          }
+        }
+      }
+    },
+    "menubar.status.thermal_serious": {
+      "comment": "Serious thermal state.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serious"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "偏高"
+          }
+        }
+      }
+    },
+    "menubar.status.title": {
+      "comment": "Menu bar telemetry panel title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System Status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统状态"
+          }
+        }
+      }
+    },
+    "menubar.status.token_status": {
+      "comment": "Accessible token summary menu item fallback.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent token status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Token 状态"
+          }
+        }
+      }
+    },
+    "menubar.status.token_summary": {
+      "comment": "Compact agent token status summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent tokens %@ active"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 活跃 Token %@"
+          }
+        }
+      }
+    },
+    "menubar.status.tokens": {
+      "comment": "Agent token section label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Token Usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Token 用量"
+          }
+        }
+      }
+    },
+    "menubar.status.top": {
+      "comment": "Prefix for the top CPU or memory process line.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Top"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "占用最高"
+          }
+        }
+      }
+    },
+    "menubar.status.total": {
+      "comment": "Total token label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总计 %@"
+          }
+        }
+      }
+    },
+    "menubar.status.total_label": {
+      "comment": "Compact total token metric label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总计"
+          }
+        }
+      }
+    },
+    "menubar.status.turns_reqs": {
+      "comment": "Combined interaction count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ turns/reqs"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 轮次/请求"
+          }
+        }
+      }
+    },
+    "menubar.status.unavailable": {
+      "comment": "Unavailable telemetry value.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用"
+          }
+        }
+      }
+    },
+    "menubar.status.unavailable_summary": {
+      "comment": "Unavailable compact menu summary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状态不可用"
+          }
+        }
+      }
+    },
+    "menubar.status.updated": {
+      "comment": "Status freshness label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updated %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新于 %@"
+          }
+        }
+      }
+    },
+    "menubar.status.updating": {
+      "comment": "Loading telemetry status.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updating status…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在更新状态…"
+          }
+        }
+      }
+    },
+    "menubar.status.uptime": {
+      "comment": "Machine uptime and update time.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Up %@ · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已运行 %@ · %@"
+          }
+        }
+      }
+    },
+    "menubar.status.usage": {
+      "comment": "CPU usage label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "占用"
+          }
+        }
+      }
+    },
+    "menubar.status.used": {
+      "comment": "Memory used amount label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已用"
+          }
+        }
+      }
+    },
+    "menubar.status.user": {
+      "comment": "CPU user time label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用户"
+          }
+        }
+      }
+    },
+    "menubar.status.wired": {
+      "comment": "Memory wired amount label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wired"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "联动内存"
+          }
+        }
+      }
+    },
+    "telemetry.settings.send_usage_data": {
+      "comment": "The sole opt-in control for anonymous product telemetry.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send usage data"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送使用数据"
+          }
+        }
+      }
+    },
+    "telemetry.settings.title": {
+      "comment": "Toolbar menu title for product telemetry settings.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage data"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用数据"
+          }
+        }
+      }
     }
   },
-  "version" : "1.0"
+  "version": "1.0"
 }

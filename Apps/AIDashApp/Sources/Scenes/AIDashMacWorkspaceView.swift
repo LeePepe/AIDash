@@ -17,27 +17,35 @@ public struct ActionItemsCardView: View {
 
     public var body: some View {
         SolidModularCardContainer(
-            title: "Actionable Items",
-            subtitle: "\(store.pendingActionCount) pending · \(store.completedActionCount) completed (IP-005)",
+            title: DashboardL10n.tr("dashboard.card.actions.title", "Actionable Items"),
+            subtitle: DashboardL10n.format(
+                "dashboard.actions.subtitle_format",
+                "%lld pending · %lld completed",
+                store.pendingActionCount,
+                store.completedActionCount
+            ),
             symbolName: "checklist"
         ) {
             HStack(spacing: 8) {
-                Picker("Filter", selection: $store.actionFilter) {
+                Picker(DashboardL10n.tr("dashboard.actions.filter_label", "Filter"), selection: $store.actionFilter) {
                     ForEach(DashboardActionFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
+                        Text(filter.displayTitle).tag(filter)
                     }
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 240)
 
                 Menu {
-                    Picker("Sort By", selection: $store.actionSort) {
+                    Picker(DashboardL10n.tr("dashboard.actions.sort_by", "Sort By"), selection: $store.actionSort) {
                         ForEach(DashboardActionSort.allCases) { sort in
-                            Text(sort.rawValue).tag(sort)
+                            Text(sort.displayTitle).tag(sort)
                         }
                     }
                 } label: {
-                    Label("Sort: \(store.actionSort.rawValue)", systemImage: "arrow.up.arrow.down")
+                    Label(
+                        DashboardL10n.format("dashboard.actions.sort_button_format", "Sort: %@", store.actionSort.displayTitle),
+                        systemImage: "arrow.up.arrow.down"
+                    )
                         .font(.caption)
                 }
                 .controlSize(.small)
@@ -46,12 +54,12 @@ public struct ActionItemsCardView: View {
         } content: {
             if store.filteredActionItems.isEmpty {
                 ContentUnavailableView {
-                    Label("No Matching Actionable Items", systemImage: "checkmark.seal")
+                    Label(DashboardL10n.tr("dashboard.actions.empty_title", "No Matching Actionable Items"), systemImage: "checkmark.seal")
                 } description: {
-                    Text("No actionable items match the active filter combination.")
+                    Text(DashboardL10n.tr("dashboard.actions.empty_desc", "No actionable items match the active filter combination."))
                 } actions: {
                     if store.hasScopedSubFilter {
-                        Button("Reset Scoped Filter") {
+                        Button(DashboardL10n.tr("dashboard.actions.reset_filter", "Reset Scoped Filter")) {
                             store.clearScopedFilterOnly()
                         }
                         .buttonStyle(.borderedProminent)
@@ -81,7 +89,7 @@ public struct ActionItemsCardView: View {
             }
             .toggleStyle(.checkbox)
             .frame(minWidth: 28, minHeight: 28)
-            .accessibilityLabel("Mark \(item.title) as completed")
+            .accessibilityLabel(DashboardL10n.format("dashboard.actions.mark_completed_format", "Mark %@ as completed", item.title))
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -120,7 +128,9 @@ public struct ActionItemsCardView: View {
                         store.lastCopiedActionID = item.id
                     } label: {
                         Label(
-                            store.lastCopiedActionID == item.id ? "Copied" : "Copy Command",
+                            store.lastCopiedActionID == item.id
+                                ? DashboardL10n.tr("dashboard.actions.copied", "Copied")
+                                : DashboardL10n.tr("dashboard.actions.copy_command", "Copy Command"),
                             systemImage: store.lastCopiedActionID == item.id ? "checkmark" : "doc.on.doc"
                         )
                         .contentTransition(.symbolEffect(.replace))
@@ -133,7 +143,7 @@ public struct ActionItemsCardView: View {
                     Button {
                         NSWorkspace.shared.open(url)
                     } label: {
-                        Label("Open", systemImage: "arrow.up.right.square")
+                        Label(DashboardL10n.tr("dashboard.actions.open_link", "Open"), systemImage: "arrow.up.right.square")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -158,15 +168,17 @@ public struct RankingTableCardView: View {
 
     public var body: some View {
         SolidModularCardContainer(
-            title: "Agent & CLI Efficiency Ranking",
-            subtitle: "Select a row to inspect detailed execution telemetry in-place (IP-003)",
+            title: DashboardL10n.tr("dashboard.card.ranking.title", "Agent & CLI Efficiency Ranking"),
+            subtitle: DashboardL10n.tr("dashboard.card.ranking.subtitle", "Select a row to inspect detailed execution telemetry in-place"),
             symbolName: "tablecells"
         ) {
             Button {
                 store.rankingAscending.toggle()
             } label: {
                 Label(
-                    store.rankingAscending ? "Runs: Ascending" : "Runs: Descending",
+                    store.rankingAscending
+                        ? DashboardL10n.tr("dashboard.ranking.sort_asc", "Runs: Ascending")
+                        : DashboardL10n.tr("dashboard.ranking.sort_desc", "Runs: Descending"),
                     systemImage: store.rankingAscending ? "arrow.up" : "arrow.down"
                 )
                 .font(.caption)
@@ -177,17 +189,17 @@ public struct RankingTableCardView: View {
         } content: {
             VStack(alignment: .leading, spacing: 12) {
                 Table(store.filteredRankingRows, selection: $store.selectedRankingRowID) {
-                    TableColumn("Agent Role", value: \.agentName)
-                    TableColumn("CLI Provider", value: \.providerName)
-                    TableColumn("Runs") { row in
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_role", "Agent Role"), value: \.agentName)
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_provider", "CLI Provider"), value: \.providerName)
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_runs", "Runs")) { row in
                         Text(row.runs.formatted(.number))
                             .monospacedDigit()
                     }
-                    TableColumn("Tokens") { row in
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_tokens", "Tokens")) { row in
                         Text(row.totalTokens.formatted(.number))
                             .monospacedDigit()
                     }
-                    TableColumn("Success Rate") { row in
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_success", "Success Rate")) { row in
                         HStack(spacing: 4) {
                             Image(systemName: row.health.symbolName)
                                 .foregroundStyle(DashboardSemanticColorPalette.color(for: row.health))
@@ -195,11 +207,11 @@ public struct RankingTableCardView: View {
                                 .monospacedDigit()
                         }
                     }
-                    TableColumn("Avg Latency") { row in
-                        Text(String(format: "%.1fs", row.avgDurationSeconds))
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_latency", "Avg Latency")) { row in
+                        Text(DashboardL10n.format("dashboard.ranking.latency_value_format", "%.1fs", row.avgDurationSeconds))
                             .monospacedDigit()
                     }
-                    TableColumn("Today Cost") { row in
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_cost", "Today Cost")) { row in
                         Text(String(format: "$%.2f", row.costUSD))
                             .monospacedDigit()
                     }
@@ -283,14 +295,14 @@ public struct AIDashMacWorkspaceView: View {
                         }
                         .disabled(!store.canSelectNextDate)
 
-                        Button("Today") {
+                        Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) {
                             store.selectToday()
                         }
                         .controlSize(.small)
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Picker("CLI Scope", selection: $store.selectedCLI) {
+                    Picker(DashboardL10n.tr("dashboard.toolbar.cli_scope", "CLI Scope"), selection: $store.selectedCLI) {
                         ForEach(DashboardCLIFilter.allCases) { cli in
                             Text(cli.shortLabel).tag(cli)
                         }
@@ -308,7 +320,7 @@ public struct AIDashMacWorkspaceView: View {
                             }
                         }
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Label(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"), systemImage: "arrow.clockwise")
                     }
                     .keyboardShortcut("r", modifiers: .command)
                 }
@@ -318,7 +330,7 @@ public struct AIDashMacWorkspaceView: View {
 
     private var sidebarContent: some View {
         List(selection: $store.selectedSection) {
-            Section("AIDash Workspace") {
+            Section(DashboardL10n.tr("dashboard.sidebar.title", "AIDash Workspace")) {
                 ForEach(DashboardWorkspaceSection.allCases) { section in
                     Label(section.title, systemImage: section.symbolName)
                         .badge(badgeCount(for: section))
@@ -331,7 +343,7 @@ public struct AIDashMacWorkspaceView: View {
                 Circle()
                     .fill(Color.green)
                     .frame(width: 8, height: 8)
-                Text(String(format: "Today $%.2f", store.todayTotalCostUSD))
+                Text(DashboardL10n.format("dashboard.sidebar.today_spend_format", "Today $%.2f", store.todayTotalCostUSD))
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .contentTransition(.numericText())

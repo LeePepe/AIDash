@@ -264,5 +264,29 @@ struct DashboardWorkspaceTests {
         #expect(shared === DashboardWorkspaceStore.shared)
         _ = AIDashMacWorkspaceView().body
     }
+
+    @Test("Localizable.xcstrings provides complete en and zh-Hans translations for all dashboard and menubar keys")
+    func xcstringsCatalogHasCompleteEnglishAndSimplifiedChineseTranslations() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let catalogURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Resources/Localizable.xcstrings")
+        let data = try Data(contentsOf: catalogURL)
+        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let strings = try #require(root["strings"] as? [String: [String: Any]])
+        #expect(strings.count >= 100)
+
+        for (key, entry) in strings {
+            let localizations = try #require(entry["localizations"] as? [String: [String: Any]], "Missing localizations for \(key)")
+            for locale in ["en", "zh-Hans"] {
+                let localeObj = try #require(localizations[locale], "Missing \(locale) translation for \(key)")
+                let unit = try #require(localeObj["stringUnit"] as? [String: Any], "Missing stringUnit for \(key) [\(locale)]")
+                let value = try #require(unit["value"] as? String, "Missing value for \(key) [\(locale)]")
+                #expect(!value.isEmpty, "Empty \(locale) translation for \(key)")
+                #expect(value != key, "Raw key leaked as translation for \(key) [\(locale)]")
+            }
+        }
+    }
 }
 #endif

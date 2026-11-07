@@ -43,36 +43,36 @@ public final class DashboardWorkspaceStore {
         ModularDashboardDescriptor(
             id: "card-kpi-summary",
             kind: .kpiSummary,
-            title: "Daily Agent Pulse",
-            subtitle: "Aggregated invocations, efficiency, spend, and pending actions",
+            title: DashboardL10n.tr("dashboard.card.kpi.title", "Daily Agent Summary"),
+            subtitle: DashboardL10n.tr("dashboard.card.kpi.subtitle", "Key invocations, efficiency, cost, and action status"),
             symbolName: "gauge.with.dots.needle.33percent"
         ),
         ModularDashboardDescriptor(
             id: "card-trend-chart",
             kind: .trendChart,
-            title: "Agent Volume & Cost by CLI",
-            subtitle: "Click any CLI bar to cross-filter rankings and actionable items below",
+            title: DashboardL10n.tr("dashboard.card.trend.title", "Agent Invocations & Spend by CLI"),
+            subtitle: DashboardL10n.tr("dashboard.card.trend.subtitle", "Click any bar to cross-filter tables and actionable items below"),
             symbolName: "chart.bar.xaxis"
         ),
         ModularDashboardDescriptor(
             id: "card-cli-cost",
             kind: .cliCostQuota,
-            title: "Multi-CLI Cost & Quota Monitor",
-            subtitle: "Live daily spend, quota utilization, and token breakdown across CLIs",
+            title: DashboardL10n.tr("dashboard.card.cli_cost.title", "Multi-CLI Cost & Quota Monitor"),
+            subtitle: DashboardL10n.tr("dashboard.card.cli_cost.subtitle", "Daily spend, cycle cumulative cost, and quota utilization"),
             symbolName: "creditcard.and.123"
         ),
         ModularDashboardDescriptor(
             id: "card-action-items",
             kind: .actionItems,
-            title: "Actionable Items",
-            subtitle: "Blockers, quota warnings, and ready-to-advance agent tasks",
+            title: DashboardL10n.tr("dashboard.card.actions.title", "Actionable Items"),
+            subtitle: DashboardL10n.tr("dashboard.card.actions.subtitle", "Blockers, quota warnings, and ready-to-advance agent tasks"),
             symbolName: "checklist"
         ),
         ModularDashboardDescriptor(
             id: "card-ranking-table",
             kind: .rankingTable,
-            title: "Agent & CLI Efficiency Ranking",
-            subtitle: "Select any row to inspect detailed execution telemetry in-place",
+            title: DashboardL10n.tr("dashboard.card.ranking.title", "Agent & CLI Efficiency Ranking"),
+            subtitle: DashboardL10n.tr("dashboard.card.ranking.subtitle", "Select a row to inspect detailed execution telemetry in-place"),
             symbolName: "tablecells"
         )
     ]
@@ -343,40 +343,46 @@ public final class DashboardWorkspaceStore {
         return [
             KPIMetricItem(
                 id: "kpi-invocations",
-                label: "Agent Invocations",
+                label: DashboardL10n.tr("dashboard.kpi.invocations.label", "Agent Invocations"),
                 formattedValue: totalRuns.formatted(.number),
-                unit: "runs",
-                deltaText: selectedChartCategory.map { "Filtered: \($0)" } ?? "+14.2% vs avg",
+                unit: DashboardL10n.tr("dashboard.kpi.invocations.unit", "runs"),
+                deltaText: selectedChartCategory.map {
+                    DashboardL10n.format("dashboard.kpi.filtered_format", "Filtered: %@", $0)
+                } ?? DashboardL10n.tr("dashboard.kpi.invocations.delta", "+14.2% vs avg"),
                 direction: .up,
                 health: .healthy,
                 symbolName: "bolt.horizontal.circle.fill"
             ),
             KPIMetricItem(
                 id: "kpi-efficiency",
-                label: "Success & Latency",
+                label: DashboardL10n.tr("dashboard.kpi.efficiency.label", "Success & Latency"),
                 formattedValue: String(format: "%.1f%%", avgSuccess * 100),
-                unit: String(format: "%.1fs avg", avgDuration),
-                deltaText: avgSuccess >= 0.95 ? "Target >= 95% met" : "Below 95% target",
+                unit: DashboardL10n.format("dashboard.kpi.efficiency.unit_format", "%.1fs avg", avgDuration),
+                deltaText: avgSuccess >= 0.95
+                    ? DashboardL10n.tr("dashboard.kpi.efficiency.target_met", "Target >= 95% met")
+                    : DashboardL10n.tr("dashboard.kpi.efficiency.below_target", "Below 95% target"),
                 direction: avgSuccess >= 0.95 ? .up : .down,
                 health: avgSuccess >= 0.95 ? .healthy : .warning,
                 symbolName: "waveform.path.ecg"
             ),
             KPIMetricItem(
                 id: "kpi-cost",
-                label: "Today CLI Spend",
+                label: DashboardL10n.tr("dashboard.kpi.cost.label", "Today CLI Spend"),
                 formattedValue: String(format: "$%.2f", totalSpend),
-                unit: String(format: "$%.0f MTD", periodTotalCostUSD),
-                deltaText: highestQuotaWarningCount > 0 ? "\(highestQuotaWarningCount) CLI near quota" : "Within daily budget",
+                unit: DashboardL10n.format("dashboard.kpi.cost.unit_format", "$%.0f MTD", periodTotalCostUSD),
+                deltaText: highestQuotaWarningCount > 0
+                    ? DashboardL10n.format("dashboard.kpi.cost.near_quota_format", "%lld CLI near quota", highestQuotaWarningCount)
+                    : DashboardL10n.tr("dashboard.kpi.cost.within_budget", "Within daily budget"),
                 direction: highestQuotaWarningCount > 0 ? .up : .flat,
                 health: highestQuotaWarningCount > 0 ? .warning : .healthy,
                 symbolName: "creditcard.fill"
             ),
             KPIMetricItem(
                 id: "kpi-actions",
-                label: "Actionable Items",
+                label: DashboardL10n.tr("dashboard.kpi.actions.label", "Actionable Items"),
                 formattedValue: "\(pendingCount)",
-                unit: "pending",
-                deltaText: "\(completedActionCount) completed today",
+                unit: DashboardL10n.tr("dashboard.kpi.actions.unit", "pending"),
+                deltaText: DashboardL10n.format("dashboard.kpi.actions.completed_format", "%lld completed today", completedActionCount),
                 direction: pendingCount == 0 ? .down : .flat,
                 health: pendingHealth,
                 symbolName: pendingHealth.symbolName
@@ -485,7 +491,9 @@ extension DashboardWorkspaceStore {
             DashboardActionItem(
                 id: "attention-\(att.id)",
                 title: att.title,
-                summary: att.waitingOn.map { "Waiting on \($0) · \(att.category ?? "Workflow")" } ?? "Requires owner review to unblock downstream tasks.",
+                summary: att.waitingOn.map {
+                    DashboardL10n.format("dashboard.action.waiting_on_format", "Waiting on %@ · %@", $0, att.category ?? "Workflow")
+                } ?? DashboardL10n.tr("dashboard.action.requires_review", "Requires owner review to unblock downstream tasks."),
                 sourceTag: att.category ?? "Claude Code",
                 cliFilter: .claude,
                 priority: index == 0 ? .p0 : .p1,
@@ -495,56 +503,45 @@ extension DashboardWorkspaceStore {
         }
 
         for entry in cliEntries where entry.health == .warning || entry.health == .critical {
-            result.append(
-                DashboardActionItem(
-                    id: "quota-\(entry.id)",
-                    title: "\(entry.displayName) quota at \(Int((entry.usedFraction * 100).rounded()))%",
-                    summary: String(format: "Today spend $%.2f / $%.2f cap. Consider routing routine tasks to secondary CLI.", entry.todayCostUSD, entry.quotaLimitUSD),
-                    sourceTag: entry.displayName,
-                    cliFilter: entry.cliFilter,
-                    priority: entry.health == .critical ? .p0 : .p1,
-                    isCompleted: false,
-                    command: "aidash schema list --quiet"
-                )
-            )
+            let pct = Int((entry.usedFraction * 100).rounded())
+            result.append(DashboardActionItem(
+                id: "quota-\(entry.id)",
+                title: DashboardL10n.format("dashboard.action.quota_title_format", "%@ quota at %lld%%", entry.displayName, pct),
+                summary: DashboardL10n.format("dashboard.action.quota_summary_format", "Today spend $%.2f / $%.2f cap. Consider routing routine tasks to secondary CLI.", entry.todayCostUSD, entry.quotaLimitUSD),
+                sourceTag: entry.displayName,
+                cliFilter: entry.cliFilter,
+                priority: entry.health == .critical ? .p0 : .p1,
+                isCompleted: false,
+                command: "aidash schema list --quiet"
+            ))
         }
 
         if snapshot.memory.pressure != .normal {
-            result.append(
-                DashboardActionItem(
-                    id: "sys-memory-pressure",
-                    title: "System memory pressure is \(snapshot.memory.pressure.rawValue)",
-                    summary: "Close idle simulator runtimes or background indexing workers to reclaim wired memory.",
-                    sourceTag: "System Telemetry",
-                    cliFilter: .all,
-                    priority: snapshot.memory.pressure == .critical ? .p0 : .p1,
-                    isCompleted: false,
-                    command: "top -l 1 -o mem -n 10"
-                )
-            )
+            result.append(DashboardActionItem(
+                id: "sys-memory-pressure",
+                title: DashboardL10n.format("dashboard.action.memory_pressure_title_format", "System memory pressure is %@", snapshot.memory.pressure.rawValue),
+                summary: DashboardL10n.tr("dashboard.action.memory_pressure_summary", "Close idle simulator runtimes or background indexing workers to reclaim wired memory."),
+                sourceTag: DashboardL10n.tr("dashboard.action.source_system", "System Telemetry"),
+                cliFilter: .all,
+                priority: snapshot.memory.pressure == .critical ? .p0 : .p1,
+                isCompleted: false,
+                command: "top -l 1 -o mem -n 10"
+            ))
         }
 
         if result.isEmpty {
             result = [
                 DashboardActionItem(
                     id: "default-action-digest",
-                    title: "Review daily agent efficiency & cache hit ratios",
-                    summary: "All CLI quotas and system telemetry are within healthy thresholds today.",
-                    sourceTag: "Claude Code",
-                    cliFilter: .claude,
-                    priority: .p2,
-                    isCompleted: false,
-                    command: "aidash briefing get --date today --json"
+                    title: DashboardL10n.tr("dashboard.action.default_digest_title", "Review daily agent efficiency & cache hit ratios"),
+                    summary: DashboardL10n.tr("dashboard.action.default_digest_summary", "All CLI quotas and system telemetry are within healthy thresholds today."),
+                    sourceTag: "Claude Code", cliFilter: .claude, priority: .p2, isCompleted: false, command: "aidash briefing get --date today --json"
                 ),
                 DashboardActionItem(
                     id: "default-action-codex",
-                    title: "Inspect Codex CLI batch verification throughput",
-                    summary: "Verify zero pending retries across automated PR review gates.",
-                    sourceTag: "Codex CLI",
-                    cliFilter: .codex,
-                    priority: .p1,
-                    isCompleted: false,
-                    externalURLString: "https://github.com/LeePepe/AIDash/pulls"
+                    title: DashboardL10n.tr("dashboard.action.default_codex_title", "Inspect Codex CLI batch verification throughput"),
+                    summary: DashboardL10n.tr("dashboard.action.default_codex_summary", "Verify zero pending retries across automated PR review gates."),
+                    sourceTag: "Codex CLI", cliFilter: .codex, priority: .p1, isCompleted: false, externalURLString: "https://github.com/LeePepe/AIDash/pulls"
                 )
             ]
         }
@@ -553,18 +550,21 @@ extension DashboardWorkspaceStore {
 
     static func deriveRankingRows(from entries: [CLICostQuotaEntry]) -> [AgentRankingRow] {
         entries.enumerated().map { idx, entry in
-            AgentRankingRow(
-                id: "rank-\(entry.id)",
-                agentName: idx == 0 ? "Steering / Architect" : idx == 1 ? "Code Writer & Reviewer" : idx == 2 ? "Interactive CLI Assistant" : "Research & Audit Worker",
-                cliFilter: entry.cliFilter,
-                providerName: entry.displayName,
-                runs: max(Int(entry.interactionCount), 45),
-                totalTokens: entry.activeTokens + entry.cacheTokens,
+            let roleName: String
+            switch idx {
+            case 0: roleName = DashboardL10n.tr("dashboard.role.steering", "Steering / Architect")
+            case 1: roleName = DashboardL10n.tr("dashboard.role.writer_reviewer", "Code Writer & Reviewer")
+            case 2: roleName = DashboardL10n.tr("dashboard.role.cli_assistant", "Interactive CLI Assistant")
+            default: roleName = DashboardL10n.tr("dashboard.role.research_audit", "Research & Audit Worker")
+            }
+            let pct = Int((entry.usedFraction * 100).rounded())
+            return AgentRankingRow(
+                id: "rank-\(entry.id)", agentName: roleName, cliFilter: entry.cliFilter, providerName: entry.displayName,
+                runs: max(Int(entry.interactionCount), 45), totalTokens: entry.activeTokens + entry.cacheTokens,
                 successRate: entry.health == .critical ? 0.924 : (0.978 - Double(idx) * 0.008),
-                avgDurationSeconds: 9.5 + Double(idx) * 3.2,
-                costUSD: entry.todayCostUSD,
-                detailSummary: "\(entry.displayName) (\(entry.modelTag)) · Active \(entry.activeTokens.formatted(.number)) tok · Cache \(entry.cacheTokens.formatted(.number)) tok",
-                recentIssue: entry.health == .healthy ? nil : "Approaching daily quota ceiling (\(Int((entry.usedFraction * 100).rounded()))%)"
+                avgDurationSeconds: 9.5 + Double(idx) * 3.2, costUSD: entry.todayCostUSD,
+                detailSummary: DashboardL10n.format("dashboard.ranking.detail_format", "%@ (%@) · Active %@ tok · Cache %@ tok", entry.displayName, entry.modelTag, entry.activeTokens.formatted(.number), entry.cacheTokens.formatted(.number)),
+                recentIssue: entry.health == .healthy ? nil : DashboardL10n.format("dashboard.ranking.issue_format", "Approaching daily quota ceiling (%lld%%)", pct)
             )
         }
     }
