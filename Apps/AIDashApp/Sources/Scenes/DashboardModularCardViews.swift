@@ -326,14 +326,15 @@ public struct TrendChartCardView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Chart(points) { point in
                     let isSelected = selectedCategory == nil || selectedCategory == point.category
+                    let tokenMillions = Double(point.totalTokens) / 1_000_000.0
                     BarMark(
                         x: .value("CLI", point.category),
-                        y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Invocations"), point.invocations)
+                        y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
                     )
                     .foregroundStyle(by: .value("CLI", point.category))
                     .opacity(isSelected ? 1.0 : 0.30)
                     .annotation(position: .top) {
-                        Text("\(point.invocations)")
+                        Text("\(DashboardTokenFormatter.compact(point.totalTokens)) tok")
                             .font(.caption2)
                             .monospacedDigit()
                             .foregroundStyle(.secondary)

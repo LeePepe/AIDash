@@ -332,6 +332,7 @@ struct DashboardWorkspaceTests {
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
         #expect(store.todayGrandTotalTokens > 0)
         #expect(store.periodGrandTotalTokens >= store.todayGrandTotalTokens)
+        #expect(store.filteredTrendPoints.contains { $0.totalTokens > 0 })
     }
 }
 #endif

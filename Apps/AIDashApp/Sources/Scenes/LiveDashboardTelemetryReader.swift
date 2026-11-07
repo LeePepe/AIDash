@@ -87,16 +87,11 @@ public enum LiveDashboardTelemetryReader {
         let copilotTodayCost = computeCostUSD(input: copilotDayIn, output: copilotDayOut, cache: copilotDayCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
         let copilotWeekCost = computeCostUSD(input: copilotWeekIn, output: copilotWeekOut, cache: copilotWeekCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
 
-        let copilotDayTotal = copilotDayIn + copilotDayOut + copilotDayCache
-        let codexDayTotal = codexStats.dayIn + codexStats.dayOut + codexStats.dayCache
-        let claudeDayTotal = claudeDayIn + claudeDayOut + claudeDayCache
-        let grandDayTotal = max(copilotDayTotal + codexDayTotal + claudeDayTotal, 1)
-
         let copilotWeekTotal = copilotWeekIn + copilotWeekOut + copilotWeekCache
         let codexWeekTotal = codexStats.weekIn + codexStats.weekOut + codexStats.weekCache
         let claudeWeekTotal = claudeWeekIn + claudeWeekOut + claudeWeekCache
 
-        let shareLabel = DashboardL10n.tr("dashboard.quota.share_label", "Share")
+        let weeklyQuotaLabel = DashboardL10n.tr("dashboard.quota.weekly_label", "7d Quota")
         let claudeQuotaLabel = DashboardL10n.tr("dashboard.quota.claude_7d_label", "Pro 7d Quota")
 
         let entries: [CLICostQuotaEntry] = [
@@ -106,8 +101,8 @@ public enum LiveDashboardTelemetryReader {
                 todayCostUSD: copilotTodayCost, periodCostUSD: copilotWeekCost, quotaLimitUSD: 100.0,
                 activeTokens: copilotDayIn + copilotDayOut, cacheTokens: copilotDayCache,
                 interactionCount: copilotDayRuns, isAvailable: true,
-                quotaUsedOverride: Double(copilotDayTotal) / Double(grandDayTotal),
-                quotaLabel: shareLabel, periodTotalTokens: copilotWeekTotal
+                quotaUsedOverride: 0.0,
+                quotaLabel: weeklyQuotaLabel, periodTotalTokens: copilotWeekTotal
             ),
             CLICostQuotaEntry(
                 id: "cli-codex", cliFilter: .codex, displayName: "Codex CLI",
@@ -115,8 +110,8 @@ public enum LiveDashboardTelemetryReader {
                 todayCostUSD: codexTodayCost, periodCostUSD: codexWeekCost, quotaLimitUSD: 100.0,
                 activeTokens: codexStats.dayIn + codexStats.dayOut, cacheTokens: codexStats.dayCache,
                 interactionCount: codexStats.dayRuns, isAvailable: true,
-                quotaUsedOverride: Double(codexDayTotal) / Double(grandDayTotal),
-                quotaLabel: shareLabel, periodTotalTokens: codexWeekTotal
+                quotaUsedOverride: 0.0,
+                quotaLabel: weeklyQuotaLabel, periodTotalTokens: codexWeekTotal
             ),
             CLICostQuotaEntry(
                 id: "cli-claude", cliFilter: .claude, displayName: "Claude Code",

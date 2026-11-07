@@ -854,13 +854,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Agent Invocations & Tokens by CLI"
+            "value": "CLI Total Token Volume"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "各 CLI 调用量与 Token 对比"
+            "value": "各 CLI Token 总量对比"
           }
         }
       }
@@ -884,19 +884,19 @@
       }
     },
     "dashboard.chart.axis_invocations": {
-      "comment": "Y-axis label for invocations count in chart.",
+      "comment": "Y-axis label for total tokens in millions in chart.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Invocations"
+            "value": "Total Tokens (M)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "调用次数"
+            "value": "Token 总量 (M)"
           }
         }
       }
