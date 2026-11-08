@@ -342,6 +342,7 @@ struct DashboardWorkspaceTests {
         }
         #expect(store.pendingActionCount == 0)
         #expect(store.completedActionCount >= 1)
+        #expect(store.cliEntries.contains(where: { $0.cliFilter == .kimi }))
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
         _ = ActionItemsCardView(store: store).body
     }

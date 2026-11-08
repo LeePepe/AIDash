@@ -2306,19 +2306,19 @@
       }
     },
     "menubar.pulse.cli_cost_quota": {
-      "comment": "Menu bar CLI quota section header.",
+      "comment": "Unified section title for CLI token volume chart and quota monitor in MenuBar popover.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "CLI QUOTA MONITOR"
+            "value": "CLI TOKEN & QUOTA MONITOR"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "CLI 额度监控"
+            "value": "CLI 用量与额度监控"
           }
         }
       }
