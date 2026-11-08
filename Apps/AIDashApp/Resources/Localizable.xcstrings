@@ -4429,6 +4429,24 @@
         }
       }
     },
+    "dashboard.chart.scrub_idle_sub": {
+      "comment": "Sub-line in the fixed-height scrub header slot when not hovering a specific bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move pointer across chart to inspect bucket breakdown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滑动鼠标至下方图表可切换对应时段明细"
+          }
+        }
+      }
+    },
     "dashboard.chart.hover_calls_format": {
       "comment": "Hovered chart bucket invocation call count.",
       "extractionState": "manual",

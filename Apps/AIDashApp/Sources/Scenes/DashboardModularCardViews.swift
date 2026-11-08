@@ -325,40 +325,50 @@ private struct TrendChartInteractiveCanvas: View {
         let hoverSummary = hoveredBucketLabel.flatMap {
             TrendDataPoint.hoverSummary(forBucket: $0, in: rawPoints, granularity: timeGranularity)
         }
-        Group {
+        VStack(alignment: .leading, spacing: 8) {
+            scrubReadoutSlot(summary: hoverSummary)
             if timeGranularity == .threeDayHourly, activePoints.contains(where: { $0.bucketDate != nil }) {
                 hourlyTrendChart
             } else {
                 dailyBarChart
             }
         }
-        .overlay(alignment: .topLeading) {
-            if let hoverSummary {
-                hoverOverlayBadge(summary: hoverSummary)
-                    .allowsHitTesting(false)
-            }
-        }
     }
 
-    private func hoverOverlayBadge(summary: TrendBucketHoverSummary) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+    private func scrubReadoutSlot(summary: TrendBucketHoverSummary?) -> some View {
+        let totalTok = activePoints.reduce(UInt64(0)) { $0 + $1.totalTokens }
+        let totalIn = activePoints.reduce(UInt64(0)) { $0 + $1.inputTokens }
+        let totalOut = activePoints.reduce(UInt64(0)) { $0 + $1.outputTokens }
+        let totalCache = activePoints.reduce(UInt64(0)) { $0 + $1.cacheTokens }
+        let totalCalls = activePoints.reduce(0) { $0 + $1.invocations }
+
+        return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
-                Image(systemName: "chart.bar.doc.horizontal.fill").font(.caption).foregroundStyle(Color.accentColor)
-                Text(summary.bucketLabel).font(.caption.weight(.bold)).monospacedDigit()
-                Text(DashboardL10n.format("dashboard.chart.hover_total_calls_format", "Total %@ · %lld calls", DashboardTokenFormatter.compact(summary.totalTokens), summary.invocations))
+                Image(systemName: summary == nil ? "chart.bar.xaxis" : "chart.bar.doc.horizontal.fill")
+                    .font(.caption).foregroundStyle(summary == nil ? Color.secondary : Color.accentColor)
+                Text(summary?.bucketLabel ?? timeGranularity.displayTitle).font(.caption.weight(.bold)).monospacedDigit()
+                Text(DashboardL10n.format("dashboard.chart.hover_total_calls_format", "Total %@ · %lld calls", DashboardTokenFormatter.compact(summary?.totalTokens ?? totalTok), summary?.invocations ?? totalCalls))
                     .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(Color.accentColor)
-                Text("·").foregroundStyle(.secondary)
-                Text(DashboardL10n.format("dashboard.chart.hover_io_cache_format", "In %@ · Out %@ · Cache %@", DashboardTokenFormatter.compact(summary.inputTokens), DashboardTokenFormatter.compact(summary.outputTokens), DashboardTokenFormatter.compact(summary.cacheTokens)))
-                    .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.primary)
+                Spacer(minLength: 4)
+                Text(DashboardL10n.format("dashboard.chart.hover_io_cache_format", "In %@ · Out %@ · Cache %@", DashboardTokenFormatter.compact(summary?.inputTokens ?? totalIn), DashboardTokenFormatter.compact(summary?.outputTokens ?? totalOut), DashboardTokenFormatter.compact(summary?.cacheTokens ?? totalCache)))
+                    .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
             }
-            if !summary.cliShares.isEmpty {
+            if let summary, !summary.cliShares.isEmpty {
                 Text(summary.cliShares.map { "\($0.cli.shortLabel) \(DashboardTokenFormatter.compact($0.tokens))" }.joined(separator: " · "))
-                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                Text(periodCLISummaryText).font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor).opacity(0.95)))
-        .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        .frame(maxWidth: .infinity, minHeight: 46, maxHeight: 46, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    private var periodCLISummaryText: String {
+        var byCLI: [DashboardCLIFilter: UInt64] = [:]
+        for pt in activePoints { byCLI[pt.cliFilter, default: 0] += pt.totalTokens }
+        return byCLI.sorted { $0.value > $1.value }.map { "\($0.key.shortLabel) \(DashboardTokenFormatter.compact($0.value))" }.joined(separator: " · ")
     }
 
     private var hourlyTrendChart: some View {
@@ -368,25 +378,16 @@ private struct TrendChartInteractiveCanvas: View {
                     let isSelected = selectedCategory == nil || selectedCategory == point.category
                     let tokenMillions = Double(point.totalTokens) / 1_000_000.0
                     AreaMark(x: .value("Time", date), y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions))
-                        .foregroundStyle(by: .value("CLI", point.category))
-                        .opacity(isSelected ? 0.25 : 0.08)
-                        .interpolationMethod(.monotone)
+                        .foregroundStyle(by: .value("CLI", point.category)).opacity(isSelected ? 0.25 : 0.08).interpolationMethod(.monotone)
                     LineMark(x: .value("Time", date), y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions))
-                        .foregroundStyle(by: .value("CLI", point.category))
-                        .lineStyle(StrokeStyle(lineWidth: 2.0))
-                        .opacity(isSelected ? 1.0 : 0.30)
-                        .interpolationMethod(.monotone)
+                        .foregroundStyle(by: .value("CLI", point.category)).lineStyle(StrokeStyle(lineWidth: 2.0)).opacity(isSelected ? 1.0 : 0.30).interpolationMethod(.monotone)
                 }
             }
-            if let hoveredBucketLabel,
-               let hoveredDate = activePoints.first(where: { $0.bucketLabel == hoveredBucketLabel })?.bucketDate {
-                RuleMark(x: .value("Time", hoveredDate))
-                    .foregroundStyle(Color.accentColor.opacity(0.55))
-                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            if let hoveredBucketLabel, let hoveredDate = activePoints.first(where: { $0.bucketLabel == hoveredBucketLabel })?.bucketDate {
+                RuleMark(x: .value("Time", hoveredDate)).foregroundStyle(Color.accentColor.opacity(0.55)).lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
             }
         }
-        .frame(height: 210)
-        .chartLegend(position: .bottom, alignment: .leading)
+        .frame(height: 210).chartLegend(position: .bottom, alignment: .leading)
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
