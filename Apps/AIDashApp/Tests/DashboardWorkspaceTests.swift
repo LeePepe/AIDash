@@ -396,6 +396,8 @@ struct DashboardWorkspaceTests {
         #expect(MenuBarBadgeMetric.memory.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries) == " Mem 18/32G")
         #expect(MenuBarBadgeMetric.storage.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries).contains("Disk"))
         #expect(MenuBarBadgeMetric.cpuAndMemory.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries) == " CPU 34% · 18/32G")
+        prefs.defaultChartGranularity = .threeDayHourly
+        #expect(prefs.defaultChartGranularity == .threeDayHourly)
         _ = DashboardSettingsPageView(store: store, prefs: prefs).body
         let proposalsURL = tempDir.appendingPathComponent("proposals.jsonl")
         let proposalsSample = """

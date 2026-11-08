@@ -165,13 +165,14 @@ public struct MenuBarStatusView: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Picker(DashboardL10n.tr("dashboard.chart_time.picker_label", "Time Granularity"), selection: $timeGranularity) {
-                    ForEach(DashboardChartTimeGranularity.allCases) { gran in
-                        Text(gran.displayTitle).tag(gran)
+                    ForEach(DashboardChartTimeGranularity.allCases) { gran in Text(gran.displayTitle).tag(gran) }
+                }
+                .pickerStyle(.segmented).labelsHidden().controlSize(.small)
+                .onChange(of: timeGranularity) { _, newValue in
+                    if MenuBarDisplayPreferences.shared.defaultChartGranularity != newValue {
+                        MenuBarDisplayPreferences.shared.defaultChartGranularity = newValue
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
 
                 MenuBarInteractiveTokenChart(
                     rawPoints: trendPoints,

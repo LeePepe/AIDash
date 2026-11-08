@@ -209,7 +209,7 @@ public struct TrendChartCardView: View {
     public let selectedCategory: String?
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
-    @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayDaily
+    @State private var timeGranularity: DashboardChartTimeGranularity = MenuBarDisplayPreferences.shared.defaultChartGranularity
 
     public init(
         points: [TrendDataPoint],
@@ -233,13 +233,14 @@ public struct TrendChartCardView: View {
         ) {
             HStack(spacing: 8) {
                 Picker(DashboardL10n.tr("dashboard.chart_time.picker_label", "Time Granularity"), selection: $timeGranularity) {
-                    ForEach(DashboardChartTimeGranularity.allCases) { gran in
-                        Text(gran.displayTitle).tag(gran)
+                    ForEach(DashboardChartTimeGranularity.allCases) { gran in Text(gran.displayTitle).tag(gran) }
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 190)
+                .onChange(of: timeGranularity) { _, newValue in
+                    if MenuBarDisplayPreferences.shared.defaultChartGranularity != newValue {
+                        MenuBarDisplayPreferences.shared.defaultChartGranularity = newValue
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 190)
 
                 if let selectedCategory {
                     Button {
