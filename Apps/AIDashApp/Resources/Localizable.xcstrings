@@ -4374,6 +4374,222 @@
           }
         }
       }
+    },
+    "dashboard.chart.hover_split_format": {
+      "comment": "Hovered chart bucket token breakdown across Input, Output, and Cache.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · Total %@ (In %@ · Out %@ · Cache %@)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 总量 %@ (输入 %@ · 输出 %@ · 缓存 %@)"
+          }
+        }
+      }
+    },
+    "dashboard.chart.hover_calls_format": {
+      "comment": "Hovered chart bucket invocation call count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld calls"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 次调用"
+          }
+        }
+      }
+    },
+    "dashboard.chart.hover_hint": {
+      "comment": "Hint shown above the token chart when no bar is hovered.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hover over any bar or point to inspect Input / Output / Cache & per-CLI tokens"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鼠标悬停柱状图或折线查看当日输入 / 输出 / 缓存及各 CLI 明细"
+          }
+        }
+      }
+    },
+    "dashboard.quota.pool_title": {
+      "comment": "Title for the overall multi-CLI quota pool strip.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overall Quota Pool"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多渠道总体额度池"
+          }
+        }
+      }
+    },
+    "dashboard.quota.pool_used_rem_format": {
+      "comment": "Format string for overall quota pool used and remaining percentages.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used %lld%% · Left %lld%%"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已用 %lld%% · 剩余 %lld%%"
+          }
+        }
+      }
+    },
+    "dashboard.quota.recommend_route_format": {
+      "comment": "Recommended CLI routing target based on highest remaining quota.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recommended Route: %@ (%lld%% remaining)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "均衡调度建议：优先使用 %@（剩余 %lld%%）"
+          }
+        }
+      }
+    },
+    "dashboard.quota.balance_hint_format": {
+      "comment": "Summary of idle and high-load CLI channels.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld idle channel(s) (<25%% used) · %lld high-load channel(s)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个空闲渠道 (<25%% 已用) · %lld 个高负载渠道"
+          }
+        }
+      }
+    },
+    "dashboard.quota.token_metered": {
+      "comment": "Badge shown for CLIs metered by tokens without a weekly percentage cap.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token Metered"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按 Token 计敏"
+          }
+        }
+      }
+    },
+    "menubar.pulse.cli_hover_detail_format": {
+      "comment": "Hover readout for a CLI quota tile in the MenuBar popover.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · Today %@ (Act %@ · Cache %@) · 7d %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 今日 %@ (活跃 %@ · 缓存 %@) · 7日 %@"
+          }
+        }
+      }
+    },
+    "menubar.pulse.hover_hint": {
+      "comment": "Default hint in the MenuBar chart hover readout strip.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hover bars or CLI cards to inspect exact token & quota breakdown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "悬停柱状图或下方渠道卡片查看详细 Token 构成"
+          }
+        }
+      }
+    },
+    "menubar.pulse.pool_remaining_format": {
+      "comment": "Compact overall quota pool remaining percentage in MenuBar popover.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pool Left %lld%%"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总额度池余 %lld%%"
+          }
+        }
+      }
+    },
+    "menubar.pulse.route_recommend_format": {
+      "comment": "Compact recommended CLI route in MenuBar popover.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Route → %@ (%lld%% left)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "优先调度 → %@ (余 %lld%%)"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

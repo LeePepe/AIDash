@@ -36,6 +36,8 @@ public struct MenuBarStatusView: View {
     @State private var completedActionIDs: Set<String> = []
     @State private var copiedActionID: String?
     @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayDaily
+    @State private var hoveredBucketLabel: String?
+    @State private var hoveredCLIEntryID: String?
 
     public init(
         state: MenuBarStatusViewState,
@@ -44,16 +46,11 @@ public struct MenuBarStatusView: View {
         onShowAbout: @escaping () -> Void = {},
         onQuit: @escaping () -> Void = {}
     ) {
-        self.state = state
-        self.onRefresh = onRefresh
-        self.onOpenBriefing = onOpenBriefing
-        self.onShowAbout = onShowAbout
-        self.onQuit = onQuit
+        self.state = state; self.onRefresh = onRefresh; self.onOpenBriefing = onOpenBriefing
+        self.onShowAbout = onShowAbout; self.onQuit = onQuit
     }
 
-    public enum Action: Sendable, Equatable {
-        case refresh, openBriefing, showAbout, quit
-    }
+    public enum Action: Sendable, Equatable { case refresh, openBriefing, showAbout, quit }
 
     public func perform(_ action: Action) {
         switch action {
@@ -68,14 +65,10 @@ public struct MenuBarStatusView: View {
         GlassEffectContainer(spacing: 12) {
             VStack(alignment: .leading, spacing: 14) {
                 switch state {
-                case .loading:
-                    loadingView
-                case let .empty(reason):
-                    diagnosticCard(title: Copy.emptyTitle, detail: reason, symbol: "chart.bar.xaxis", tint: .accentColor)
-                case let .error(errorMessage):
-                    diagnosticCard(title: Copy.errorTitle, detail: errorMessage, symbol: "exclamationmark.triangle.fill", tint: .orange)
-                case let .populated(snapshot):
-                    populatedView(snapshot)
+                case .loading: loadingView
+                case let .empty(reason): diagnosticCard(title: Copy.emptyTitle, detail: reason, symbol: "chart.bar.xaxis", tint: .accentColor)
+                case let .error(errorMessage): diagnosticCard(title: Copy.errorTitle, detail: errorMessage, symbol: "exclamationmark.triangle.fill", tint: .orange)
+                case let .populated(snapshot): populatedView(snapshot)
                 }
                 footerBar
             }
@@ -83,6 +76,7 @@ public struct MenuBarStatusView: View {
         }
         .frame(width: 360)
     }
+
     private func populatedView(_ snapshot: MenuBarSystemSnapshot) -> some View {
         let today = DashboardWorkspaceStore.todayDateString()
         let liveDataset = LiveDashboardTelemetryReader.loadLiveDataset(forDate: today, fallbackUsage: snapshot.tokenUsage)
@@ -90,52 +84,18 @@ public struct MenuBarStatusView: View {
         let trendPoints = liveDataset?.trends ?? DashboardWorkspaceStore.deriveTrendPoints(from: cliEntries)
         let todayTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.totalTokens }
         let periodTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.periodTotalTokens }
-        let pendingActions = Array(
-            DashboardWorkspaceStore.deriveActionItems(from: snapshot, cliEntries: cliEntries)
-                .filter { !$0.isCompleted }
-                .prefix(3)
-        )
-
+        let pendingActions = Array(DashboardWorkspaceStore.deriveActionItems(from: snapshot, cliEntries: cliEntries).filter { !$0.isCompleted }.prefix(3))
         return VStack(alignment: .leading, spacing: 12) {
-            pulseHeaderStrip(snapshot)
             telemetryGaugeStrip(snapshot)
-            cliTokenAndQuotaSection(
-                entries: cliEntries,
-                trendPoints: trendPoints,
-                todayTotal: todayTotal,
-                periodTotal: periodTotal
-            )
+            cliTokenAndQuotaSection(entries: cliEntries, trendPoints: trendPoints, todayTotal: todayTotal, periodTotal: periodTotal)
             topActionsSection(items: pendingActions)
-        }
-    }
-
-    private func pulseHeaderStrip(_ snapshot: MenuBarSystemSnapshot) -> some View {
-        functionalGlassBar {
-            Image(systemName: "bolt.horizontal.circle.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(DashboardL10n.tr("menubar.pulse.title", "AIDash Pulse"))
-                    .font(.headline)
-                Text(DashboardL10n.format("menubar.pulse.machine_format", "%@ · %lldC", snapshot.machine.chipName, snapshot.machine.totalCores))
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            Text(snapshot.capturedAt.formatted(date: .omitted, time: .shortened))
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
         }
     }
 
     private func telemetryGaugeStrip(_ snapshot: MenuBarSystemSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(DashboardL10n.tr("menubar.pulse.system_telemetry", "SYSTEM TELEMETRY"))
-                .font(.system(.caption2, design: .rounded, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(.caption2, design: .rounded, weight: .semibold)).foregroundStyle(.secondary)
             Grid(horizontalSpacing: 8, verticalSpacing: 8) {
                 GridRow {
                     compactGaugeCell(
@@ -161,41 +121,21 @@ public struct MenuBarStatusView: View {
         }
     }
 
-    private func compactGaugeCell(
-        label: String,
-        valueText: String,
-        fraction: Double,
-        health: DashboardSemanticHealth
-    ) -> some View {
+    private func compactGaugeCell(label: String, valueText: String, fraction: Double, health: DashboardSemanticHealth) -> some View {
         let tint = DashboardSemanticColorPalette.color(for: health)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
-                Text(label)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 Spacer(minLength: 2)
-                Text(valueText)
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .lineLimit(1)
+                Text(valueText).font(.caption.weight(.semibold)).monospacedDigit().contentTransition(.numericText()).lineLimit(1)
             }
-            Gauge(value: min(max(fraction, 0), 1), in: 0...1) {
-                Text(label)
-            }
-            .gaugeStyle(.accessoryLinearCapacity)
-            .tint(tint)
+            Gauge(value: min(max(fraction, 0), 1), in: 0...1) { Text(label) }
+                .gaugeStyle(.accessoryLinearCapacity).tint(tint)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(solidCardColor)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-        }
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(solidCardColor))
+        .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
     }
     private func cliTokenAndQuotaSection(
         entries: [CLICostQuotaEntry],
@@ -203,11 +143,13 @@ public struct MenuBarStatusView: View {
         todayTotal: UInt64,
         periodTotal: UInt64
     ) -> some View {
-        let quotaEntries = entries.filter {
-            $0.cliFilter == .claude || $0.cliFilter == .codex || $0.cliFilter == .kimi
-        }
         let activePoints = TrendDataPoint.points(from: trendPoints, granularity: timeGranularity)
         let dailySegments = TrendDataPoint.dailyKindBarSegments(from: trendPoints)
+        let pool = QuotaPoolSummary.summarize(entries: entries)
+        let hoverSummary = hoveredBucketLabel.flatMap {
+            TrendDataPoint.hoverSummary(forBucket: $0, in: trendPoints, granularity: timeGranularity)
+        }
+        let hoveredCLI = entries.first { $0.id == hoveredCLIEntryID }
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(DashboardL10n.tr("menubar.pulse.cli_cost_quota", "CLI TOKEN & QUOTA MONITOR"))
@@ -236,13 +178,26 @@ public struct MenuBarStatusView: View {
                 .labelsHidden()
                 .controlSize(.small)
 
+                menuBarHoverReadoutStrip(chartSummary: hoverSummary, hoveredCLI: hoveredCLI)
+
                 menuBarTokenChart(points: activePoints, dailySegments: dailySegments)
 
                 Divider()
 
-                VStack(spacing: 8) {
-                    ForEach(quotaEntries) { entry in
-                        cliPopoverRow(entry)
+                menuBarQuotaPoolStrip(pool: pool)
+
+                Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                    GridRow {
+                        ForEach(Array(entries.prefix(2))) { entry in
+                            cliPopoverTile(entry)
+                        }
+                    }
+                    if entries.count > 2 {
+                        GridRow {
+                            ForEach(Array(entries.dropFirst(2).prefix(2))) { entry in
+                                cliPopoverTile(entry)
+                            }
+                        }
                     }
                 }
             }
@@ -252,70 +207,188 @@ public struct MenuBarStatusView: View {
         }
     }
 
-    @ViewBuilder
-    private func menuBarTokenChart(points: [TrendDataPoint], dailySegments: [DailyKindBarSegment]) -> some View {
-        if timeGranularity == .threeDayHourly, points.contains(where: { $0.bucketDate != nil }) {
-            Chart(points) { point in
-                if let date = point.bucketDate {
-                    let valM = Double(point.totalTokens) / 1_000_000.0
-                    AreaMark(
-                        x: .value("Time", date),
-                        y: .value("Tokens (M)", valM)
+    private func menuBarHoverReadoutStrip(chartSummary: TrendBucketHoverSummary?, hoveredCLI: CLICostQuotaEntry?) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: (chartSummary != nil || hoveredCLI != nil) ? "chart.bar.doc.horizontal.fill" : "cursorarrow.motionlines")
+                .font(.caption2).foregroundStyle((chartSummary != nil || hoveredCLI != nil) ? Color.accentColor : Color.secondary)
+            if let chartSummary {
+                Text(chartSummary.formattedReadout).font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
+            } else if let hoveredCLI {
+                Text(
+                    DashboardL10n.format(
+                        "menubar.pulse.cli_hover_detail_format", "%@ · Today %@ (Act %@ · Cache %@) · 7d %@",
+                        hoveredCLI.cliFilter.shortLabel, DashboardTokenFormatter.compact(hoveredCLI.totalTokens),
+                        DashboardTokenFormatter.compact(hoveredCLI.activeTokens), DashboardTokenFormatter.compact(hoveredCLI.cacheTokens),
+                        DashboardTokenFormatter.compact(hoveredCLI.periodTotalTokens)
                     )
-                    .foregroundStyle(by: .value("CLI", point.category))
-                    .opacity(0.24)
-                    .interpolationMethod(.monotone)
-
-                    LineMark(
-                        x: .value("Time", date),
-                        y: .value("Tokens (M)", valM)
-                    )
-                    .foregroundStyle(by: .value("CLI", point.category))
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-                    .interpolationMethod(.monotone)
-                }
-            }
-            .chartLegend(position: .bottom, alignment: .leading)
-            .frame(height: 118)
-        } else {
-            Chart(dailySegments) { seg in
-                BarMark(
-                    x: .value("Date", seg.bucketLabel),
-                    y: .value("Tokens (M)", seg.tokenMillions)
                 )
-                .position(by: .value("Kind", seg.kindTitle))
-                .foregroundStyle(by: .value("CLI", seg.category))
+                .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
+            } else {
+                Text(DashboardL10n.tr("menubar.pulse.hover_hint", "Hover bars or CLI cards to inspect exact token & quota breakdown"))
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
-            .chartYScale(type: .symmetricLog(slopeAtZero: 0.1))
-            .chartLegend(position: .bottom, alignment: .leading)
-            .frame(height: 118)
+            Spacer(minLength: 2)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    private func menuBarQuotaPoolStrip(pool: QuotaPoolSummary) -> some View {
+        let poolTint = DashboardSemanticColorPalette.color(for: pool.health)
+        let remPct = max(0, 100 - Int((pool.averageUsedFraction * 100).rounded()))
+        return HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.branch").font(.caption2.weight(.semibold)).foregroundStyle(poolTint)
+            Text(DashboardL10n.format("menubar.pulse.pool_remaining_format", "Pool Left %lld%%", remPct))
+                .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(poolTint)
+            Spacer(minLength: 4)
+            if let rec = pool.recommendedEntry {
+                let recRem = Int((rec.remainingFraction * 100).rounded())
+                Text(DashboardL10n.format("menubar.pulse.route_recommend_format", "Route → %@ (%lld%% left)", rec.cliFilter.shortLabel, recRem))
+                    .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            }
         }
     }
 
-    private func cliPopoverRow(_ entry: CLICostQuotaEntry) -> some View {
+    @ViewBuilder
+    private func menuBarTokenChart(points: [TrendDataPoint], dailySegments: [DailyKindBarSegment]) -> some View {
+        if timeGranularity == .threeDayHourly, points.contains(where: { $0.bucketDate != nil }) {
+            menuBarHourlyChart(points: points)
+        } else {
+            menuBarDailyChart(dailySegments: dailySegments)
+        }
+    }
+
+    private func menuBarHourlyChart(points: [TrendDataPoint]) -> some View {
+        Chart {
+            ForEach(points) { point in
+                if let date = point.bucketDate {
+                    let valM = Double(point.totalTokens) / 1_000_000.0
+                    AreaMark(x: .value("Time", date), y: .value("Tokens (M)", valM))
+                        .foregroundStyle(by: .value("CLI", point.category))
+                        .opacity(0.24)
+                        .interpolationMethod(.monotone)
+                    LineMark(x: .value("Time", date), y: .value("Tokens (M)", valM))
+                        .foregroundStyle(by: .value("CLI", point.category))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                        .interpolationMethod(.monotone)
+                }
+            }
+            if let hoveredBucketLabel,
+               let hoveredDate = points.first(where: { $0.bucketLabel == hoveredBucketLabel })?.bucketDate {
+                RuleMark(x: .value("Time", hoveredDate))
+                    .foregroundStyle(Color.accentColor.opacity(0.55))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            }
+        }
+        .chartLegend(position: .bottom, alignment: .leading)
+        .frame(height: 118)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
+                    guard case let .active(loc) = phase, let plotFrame = proxy.plotFrame else {
+                        hoveredBucketLabel = nil
+                        return
+                    }
+                    let xPos = loc.x - geo[plotFrame].origin.x
+                    guard xPos >= 0, xPos <= geo[plotFrame].width, let date: Date = proxy.value(atX: xPos) else {
+                        hoveredBucketLabel = nil
+                        return
+                    }
+                    hoveredBucketLabel = TrendDataPoint.nearestHourlyBucketLabel(to: date, in: points)
+                }
+            }
+        }
+    }
+
+    private func menuBarDailyChart(dailySegments: [DailyKindBarSegment]) -> some View {
+        Chart {
+            ForEach(dailySegments) { seg in
+                let isHovered = hoveredBucketLabel == nil || hoveredBucketLabel == seg.bucketLabel
+                BarMark(x: .value("Date", seg.bucketLabel), y: .value("Tokens (M)", seg.tokenMillions))
+                    .position(by: .value("Kind", seg.kindTitle))
+                    .foregroundStyle(by: .value("CLI", seg.category))
+                    .opacity(isHovered ? 1.0 : 0.35)
+            }
+            if let hoveredBucketLabel {
+                RuleMark(x: .value("Date", hoveredBucketLabel))
+                    .foregroundStyle(Color.accentColor.opacity(0.50))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            }
+        }
+        .chartYScale(type: .symmetricLog(slopeAtZero: 0.1))
+        .chartLegend(position: .bottom, alignment: .leading)
+        .frame(height: 118)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
+                    guard case let .active(loc) = phase, let plotFrame = proxy.plotFrame else {
+                        hoveredBucketLabel = nil
+                        return
+                    }
+                    let xPos = loc.x - geo[plotFrame].origin.x
+                    guard xPos >= 0, xPos <= geo[plotFrame].width, let bucket: String = proxy.value(atX: xPos) else {
+                        hoveredBucketLabel = nil
+                        return
+                    }
+                    hoveredBucketLabel = bucket
+                }
+            }
+        }
+    }
+
+    private func cliPopoverTile(_ entry: CLICostQuotaEntry) -> some View {
         let tint = DashboardSemanticColorPalette.color(for: entry.health)
         let usedPct = Int((entry.usedFraction * 100).rounded())
         let remainingPct = max(0, 100 - usedPct)
+        let todayCompact = DashboardTokenFormatter.compact(entry.totalTokens)
+        let periodCompact = DashboardTokenFormatter.compact(entry.periodTotalTokens)
         return Button {
             DashboardWorkspaceStore.shared.openDashboardWindow(section: .systemAndCosts, cliFilter: entry.cliFilter)
             perform(.openBriefing)
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: entry.health.symbolName).foregroundStyle(tint)
-                    Text(entry.displayName).font(.caption.weight(.semibold)).foregroundStyle(.primary)
-                    Spacer(minLength: 4)
-                    Text(DashboardL10n.format("menubar.pulse.quota_remaining_format", "Left %lld%%", remainingPct))
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                    Text("\(usedPct)%").font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 4) {
+                    Image(systemName: entry.health.symbolName).font(.caption2).foregroundStyle(tint)
+                    Text(entry.cliFilter.shortLabel).font(.caption.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                    Spacer(minLength: 2)
+                    if entry.hasTrackedQuota {
+                        Text(DashboardL10n.format("menubar.pulse.quota_remaining_format", "Left %lld%%", remainingPct))
+                            .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
+                    } else {
+                        Text(todayCompact).font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
+                    }
                 }
-                Gauge(value: entry.usedFraction, in: 0...1) { Text(entry.displayName) }
-                    .gaugeStyle(.accessoryLinearCapacity)
-                    .tint(tint)
+                if entry.hasTrackedQuota {
+                    Gauge(value: entry.usedFraction, in: 0...1) { Text(entry.displayName) }
+                        .gaugeStyle(.accessoryLinearCapacity).tint(tint)
+                } else {
+                    Divider().padding(.vertical, 2)
+                }
+                HStack(spacing: 4) {
+                    Text("7d \(periodCompact)")
+                    Spacer(minLength: 2)
+                    if let secUsed = entry.secondaryQuotaUsed, let secLabel = entry.secondaryQuotaLabel {
+                        Text("\(secLabel) \(Int((secUsed * 100).rounded()))%")
+                    } else if entry.hasTrackedQuota {
+                        Text("\(usedPct)%")
+                    } else {
+                        Text("\(entry.interactionCount) calls")
+                    }
+                }
+                .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
             }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: hoveredCLIEntryID = entry.id
+            case .ended: if hoveredCLIEntryID == entry.id { hoveredCLIEntryID = nil }
+            }
+        }
     }
     private func topActionsSection(items: [DashboardActionItem]) -> some View {
         MenuBarTopActionsCard(
@@ -337,12 +410,6 @@ public struct MenuBarStatusView: View {
             .frame(minHeight: 28)
 
             Spacer(minLength: 4)
-
-            Button { perform(.refresh) } label: {
-                Image(systemName: "arrow.clockwise").frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(Copy.refreshAction)
 
             Button { perform(.showAbout) } label: {
                 Image(systemName: "info.circle").frame(width: 28, height: 28)
@@ -457,39 +524,25 @@ private struct MenuBarTopActionsCard: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Button {
-                    if completedActionIDs.contains(item.id) {
-                        completedActionIDs.remove(item.id)
-                    } else {
-                        completedActionIDs.insert(item.id)
-                    }
+                    if completedActionIDs.contains(item.id) { completedActionIDs.remove(item.id) } else { completedActionIDs.insert(item.id) }
                     DashboardWorkspaceStore.shared.toggleActionItem(id: item.id)
                 } label: {
                     Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isDone ? Color.green : Color.secondary)
-                        .frame(width: 20, height: 20)
+                        .foregroundStyle(isDone ? Color.green : Color.secondary).frame(width: 20, height: 20)
                 }
                 .buttonStyle(.borderless)
 
                 Button {
-                    if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
-                        NSWorkspace.shared.open(url)
-                    }
+                    if let urlStr = item.externalURLString, let url = URL(string: urlStr) { NSWorkspace.shared.open(url) }
                     DashboardWorkspaceStore.shared.openDashboardWindow(section: .actionItems)
                     onOpenBriefing()
                 } label: {
                     HStack(spacing: 5) {
                         Text(item.priority.label)
-                            .font(.caption2.weight(.bold))
-                            .monospacedDigit()
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
+                            .font(.caption2.weight(.bold)).monospacedDigit().padding(.horizontal, 5).padding(.vertical, 2)
                             .background(DashboardSemanticColorPalette.color(for: item.priority.health).opacity(0.16), in: Capsule())
                             .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
-                        Text(item.title)
-                            .font(.caption.weight(.medium))
-                            .strikethrough(isDone)
-                            .foregroundStyle(isDone ? .secondary : .primary)
-                            .lineLimit(1)
+                        Text(item.title).font(.caption.weight(.medium)).strikethrough(isDone).foregroundStyle(isDone ? .secondary : .primary).lineLimit(1)
                         Spacer(minLength: 4)
                     }
                     .contentShape(Rectangle())
@@ -504,17 +557,12 @@ private struct MenuBarTopActionsCard: View {
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: copiedActionID == item.id ? "checkmark" : "doc.on.doc")
-                            Text(
-                                copiedActionID == item.id
-                                    ? DashboardL10n.tr("dashboard.actions.copied", "Copied")
-                                    : DashboardL10n.tr("dashboard.actions.copy_command", "Copy Command")
-                            )
+                            Text(copiedActionID == item.id ? DashboardL10n.tr("dashboard.actions.copied", "Copied") : DashboardL10n.tr("dashboard.actions.copy_command", "Copy Command"))
                         }
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(copiedActionID == item.id ? Color.green : Color.accentColor)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.bordered).controlSize(.mini)
                 } else if let urlStr = item.externalURLString, let url = URL(string: urlStr) {
                     Button {
                         NSWorkspace.shared.open(url)
@@ -526,16 +574,11 @@ private struct MenuBarTopActionsCard: View {
                         }
                         .font(.caption2.weight(.medium))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.bordered).controlSize(.mini)
                 }
             }
             if !isDone {
-                Text(item.summary)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 26)
-                    .lineLimit(2)
+                Text(item.summary).font(.caption2).foregroundStyle(.secondary).padding(.leading, 26).lineLimit(2)
             }
         }
     }

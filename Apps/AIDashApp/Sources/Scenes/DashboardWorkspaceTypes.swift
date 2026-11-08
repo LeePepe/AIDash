@@ -141,32 +141,19 @@ public struct KPIMetricItem: Codable, Sendable, Equatable, Identifiable {
     public let symbolName: String
 
     public init(
-        id: String,
-        label: String,
-        formattedValue: String,
-        unit: String? = nil,
-        deltaText: String,
-        direction: DashboardDeltaDirection = .flat,
-        health: DashboardSemanticHealth = .healthy,
-        symbolName: String = "chart.bar.fill"
+        id: String, label: String, formattedValue: String, unit: String? = nil,
+        deltaText: String, direction: DashboardDeltaDirection = .flat,
+        health: DashboardSemanticHealth = .healthy, symbolName: String = "chart.bar.fill"
     ) {
-        self.id = id
-        self.label = label
-        self.formattedValue = formattedValue
-        self.unit = unit
-        self.deltaText = deltaText
-        self.direction = direction
-        self.health = health
-        self.symbolName = symbolName
+        self.id = id; self.label = label; self.formattedValue = formattedValue; self.unit = unit
+        self.deltaText = deltaText; self.direction = direction; self.health = health; self.symbolName = symbolName
     }
 }
 
 public enum DashboardChartTimeGranularity: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
     case sevenDayDaily = "7d_daily"
     case threeDayHourly = "3d_hourly"
-
     public var id: String { rawValue }
-
     public var displayTitle: String {
         switch self {
         case .sevenDayDaily: return DashboardL10n.tr("dashboard.chart_time.7d_daily", "7d · Daily")
@@ -176,13 +163,8 @@ public enum DashboardChartTimeGranularity: String, CaseIterable, Codable, Sendab
 }
 
 public enum DashboardTokenKindFilter: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
-    case all
-    case input
-    case output
-    case cache
-
+    case all, input, output, cache
     public var id: String { rawValue }
-
     public var displayTitle: String {
         switch self {
         case .all: return DashboardL10n.tr("dashboard.token_kind.all", "Total")
@@ -201,10 +183,7 @@ public struct DailyKindBarSegment: Sendable, Equatable, Identifiable {
     public let category: String
     public let cliFilter: DashboardCLIFilter
     public let tokens: UInt64
-
-    public var tokenMillions: Double {
-        Double(tokens) / 1_000_000.0
-    }
+    public var tokenMillions: Double { Double(tokens) / 1_000_000.0 }
 }
 
 public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
@@ -222,31 +201,15 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
     public let bucketDate: Date?
 
     public init(
-        id: String,
-        bucketLabel: String,
-        category: String,
-        cliFilter: DashboardCLIFilter,
-        invocations: Int,
-        successRate: Double,
-        costUSD: Double,
-        totalTokens: UInt64 = 0,
-        inputTokens: UInt64 = 0,
-        outputTokens: UInt64 = 0,
-        cacheTokens: UInt64 = 0,
-        bucketDate: Date? = nil
+        id: String, bucketLabel: String, category: String, cliFilter: DashboardCLIFilter,
+        invocations: Int, successRate: Double, costUSD: Double,
+        totalTokens: UInt64 = 0, inputTokens: UInt64 = 0, outputTokens: UInt64 = 0,
+        cacheTokens: UInt64 = 0, bucketDate: Date? = nil
     ) {
-        self.id = id
-        self.bucketLabel = bucketLabel
-        self.category = category
-        self.cliFilter = cliFilter
-        self.invocations = invocations
-        self.successRate = successRate
-        self.costUSD = costUSD
-        self.totalTokens = totalTokens
-        self.inputTokens = inputTokens
-        self.outputTokens = outputTokens
-        self.cacheTokens = cacheTokens
-        self.bucketDate = bucketDate
+        self.id = id; self.bucketLabel = bucketLabel; self.category = category; self.cliFilter = cliFilter
+        self.invocations = invocations; self.successRate = successRate; self.costUSD = costUSD
+        self.totalTokens = totalTokens; self.inputTokens = inputTokens; self.outputTokens = outputTokens
+        self.cacheTokens = cacheTokens; self.bucketDate = bucketDate
     }
 
     public func tokens(for kind: DashboardTokenKindFilter) -> UInt64 {
@@ -346,6 +309,104 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         }
         return segments
     }
+
+    public static func nearestHourlyBucketLabel(to targetDate: Date, in activePoints: [TrendDataPoint]) -> String? {
+        var bestLabel: String?
+        var bestDistance = TimeInterval.greatestFiniteMagnitude
+        for pt in activePoints {
+            guard let date = pt.bucketDate else { continue }
+            let dist = abs(date.timeIntervalSince(targetDate))
+            if dist < bestDistance {
+                bestDistance = dist
+                bestLabel = pt.bucketLabel
+            }
+        }
+        return bestLabel
+    }
+
+    public static func hoverSummary(
+        forBucket bucketLabel: String,
+        in raw: [TrendDataPoint],
+        granularity: DashboardChartTimeGranularity
+    ) -> TrendBucketHoverSummary? {
+        let active = points(from: raw, granularity: granularity)
+        let matching = active.filter { $0.bucketLabel == bucketLabel }
+        guard !matching.isEmpty else { return nil }
+        var totalTok: UInt64 = 0
+        var inTok: UInt64 = 0
+        var outTok: UInt64 = 0
+        var cacheTok: UInt64 = 0
+        var runs = 0
+        var byCLI: [DashboardCLIFilter: (category: String, tokens: UInt64)] = [:]
+        for pt in matching {
+            totalTok += pt.totalTokens
+            inTok += pt.inputTokens
+            outTok += pt.outputTokens
+            cacheTok += pt.cacheTokens
+            runs += pt.invocations
+            let prev = byCLI[pt.cliFilter]?.tokens ?? 0
+            byCLI[pt.cliFilter] = (pt.category, prev + pt.totalTokens)
+        }
+        let breakdown = byCLI.map { (cli: $0.key, category: $0.value.category, tokens: $0.value.tokens) }
+            .sorted { $0.tokens > $1.tokens }
+        return TrendBucketHoverSummary(
+            bucketLabel: bucketLabel,
+            totalTokens: totalTok,
+            inputTokens: inTok,
+            outputTokens: outTok,
+            cacheTokens: cacheTok,
+            invocations: runs,
+            cliBreakdown: breakdown
+        )
+    }
+}
+
+public struct TrendBucketHoverSummary: Sendable, Equatable {
+    public struct CLIShare: Sendable, Equatable {
+        public let cli: DashboardCLIFilter
+        public let category: String
+        public let tokens: UInt64
+    }
+
+    public let bucketLabel: String
+    public let totalTokens: UInt64
+    public let inputTokens: UInt64
+    public let outputTokens: UInt64
+    public let cacheTokens: UInt64
+    public let invocations: Int
+    public let cliShares: [CLIShare]
+
+    public init(
+        bucketLabel: String,
+        totalTokens: UInt64,
+        inputTokens: UInt64,
+        outputTokens: UInt64,
+        cacheTokens: UInt64,
+        invocations: Int,
+        cliBreakdown: [(cli: DashboardCLIFilter, category: String, tokens: UInt64)]
+    ) {
+        self.bucketLabel = bucketLabel
+        self.totalTokens = totalTokens
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheTokens = cacheTokens
+        self.invocations = invocations
+        self.cliShares = cliBreakdown.map { CLIShare(cli: $0.cli, category: $0.category, tokens: $0.tokens) }
+    }
+
+    public var formattedReadout: String {
+        let topCLIs = cliShares.prefix(3).map { "\($0.cli.shortLabel) \(DashboardTokenFormatter.compact($0.tokens))" }.joined(separator: " · ")
+        let split = DashboardL10n.format(
+            "dashboard.chart.hover_split_format",
+            "%@ · Total %@ (In %@ · Out %@ · Cache %@)",
+            bucketLabel,
+            DashboardTokenFormatter.compact(totalTokens),
+            DashboardTokenFormatter.compact(inputTokens),
+            DashboardTokenFormatter.compact(outputTokens),
+            DashboardTokenFormatter.compact(cacheTokens)
+        )
+        return topCLIs.isEmpty ? split : "\(split)  |  \(topCLIs)"
+    }
 }
 
 public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
@@ -363,93 +424,82 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
     public let quotaUsedOverride: Double?
     public let quotaLabel: String?
     public let periodTotalTokens: UInt64
+    public let secondaryQuotaUsed: Double?
+    public let secondaryQuotaLabel: String?
+    public let quotaResetText: String?
 
     public init(
-        id: String,
-        cliFilter: DashboardCLIFilter,
-        displayName: String,
-        modelTag: String,
-        todayCostUSD: Double,
-        periodCostUSD: Double,
-        quotaLimitUSD: Double,
-        activeTokens: UInt64,
-        cacheTokens: UInt64,
-        interactionCount: UInt64,
-        isAvailable: Bool = true,
-        quotaUsedOverride: Double? = nil,
-        quotaLabel: String? = nil,
-        periodTotalTokens: UInt64? = nil
+        id: String, cliFilter: DashboardCLIFilter, displayName: String, modelTag: String,
+        todayCostUSD: Double, periodCostUSD: Double, quotaLimitUSD: Double,
+        activeTokens: UInt64, cacheTokens: UInt64, interactionCount: UInt64,
+        isAvailable: Bool = true, quotaUsedOverride: Double? = nil, quotaLabel: String? = nil,
+        periodTotalTokens: UInt64? = nil, secondaryQuotaUsed: Double? = nil,
+        secondaryQuotaLabel: String? = nil, quotaResetText: String? = nil
     ) {
-        self.id = id
-        self.cliFilter = cliFilter
-        self.displayName = displayName
-        self.modelTag = modelTag
-        self.todayCostUSD = todayCostUSD
-        self.periodCostUSD = periodCostUSD
-        self.quotaLimitUSD = quotaLimitUSD
-        self.activeTokens = activeTokens
-        self.cacheTokens = cacheTokens
-        self.interactionCount = interactionCount
-        self.isAvailable = isAvailable
-        self.quotaUsedOverride = quotaUsedOverride
-        self.quotaLabel = quotaLabel
+        self.id = id; self.cliFilter = cliFilter; self.displayName = displayName; self.modelTag = modelTag
+        self.todayCostUSD = todayCostUSD; self.periodCostUSD = periodCostUSD; self.quotaLimitUSD = quotaLimitUSD
+        self.activeTokens = activeTokens; self.cacheTokens = cacheTokens; self.interactionCount = interactionCount
+        self.isAvailable = isAvailable; self.quotaUsedOverride = quotaUsedOverride; self.quotaLabel = quotaLabel
         self.periodTotalTokens = periodTotalTokens ?? ((activeTokens + cacheTokens) * 7)
+        self.secondaryQuotaUsed = secondaryQuotaUsed; self.secondaryQuotaLabel = secondaryQuotaLabel
+        self.quotaResetText = quotaResetText
     }
 
-    public var totalTokens: UInt64 {
-        activeTokens + cacheTokens
-    }
-
+    public var totalTokens: UInt64 { activeTokens + cacheTokens }
     public var usedFraction: Double {
-        if let quotaUsedOverride {
-            return min(max(quotaUsedOverride, 0), 1)
-        }
+        if let quotaUsedOverride { return min(max(quotaUsedOverride, 0), 1) }
         guard quotaLimitUSD > 0 else { return 0 }
         return min(max(todayCostUSD / quotaLimitUSD, 0), 1)
     }
-
+    public var remainingFraction: Double { max(0, 1.0 - usedFraction) }
+    public var cacheHitFraction: Double { totalTokens > 0 ? Double(cacheTokens) / Double(totalTokens) : 0 }
+    public var hasTrackedQuota: Bool { quotaLabel != nil || cliFilter != .copilot }
     public var health: DashboardSemanticHealth {
         guard isAvailable else { return .neutral }
-        if usedFraction >= 0.90 { return .critical }
-        if usedFraction >= 0.75 { return .warning }
+        if !hasTrackedQuota { return .healthy }
+        return usedFraction >= 0.90 ? .critical : (usedFraction >= 0.75 ? .warning : .healthy)
+    }
+}
+
+public struct QuotaPoolSummary: Sendable, Equatable {
+    public let trackedCount: Int
+    public let averageUsedFraction: Double
+    public let averageRemainingFraction: Double
+    public let idleChannelCount: Int
+    public let pressuredChannelCount: Int
+    public let recommendedEntry: CLICostQuotaEntry?
+
+    public static func summarize(entries: [CLICostQuotaEntry]) -> QuotaPoolSummary {
+        let tracked = entries.filter { $0.isAvailable && $0.hasTrackedQuota }
+        guard !tracked.isEmpty else {
+            return QuotaPoolSummary(trackedCount: 0, averageUsedFraction: 0, averageRemainingFraction: 1, idleChannelCount: 0, pressuredChannelCount: 0, recommendedEntry: nil)
+        }
+        let avgUsed = min(max(tracked.reduce(0.0) { $0 + $1.usedFraction } / Double(tracked.count), 0), 1)
+        let idle = tracked.filter { $0.usedFraction < 0.25 }.count
+        let pressured = tracked.filter { $0.usedFraction >= 0.75 }.count
+        let recommended = tracked.min { lhs, rhs in
+            abs(lhs.usedFraction - rhs.usedFraction) > 0.01 ? lhs.usedFraction < rhs.usedFraction : lhs.periodTotalTokens < rhs.periodTotalTokens
+        }
+        return QuotaPoolSummary(trackedCount: tracked.count, averageUsedFraction: avgUsed, averageRemainingFraction: max(0, 1.0 - avgUsed), idleChannelCount: idle, pressuredChannelCount: pressured, recommendedEntry: recommended)
+    }
+
+    public var health: DashboardSemanticHealth {
+        if averageUsedFraction >= 0.85 { return .critical }
+        if averageUsedFraction >= 0.65 || (pressuredChannelCount > 0 && idleChannelCount > 0) { return .warning }
         return .healthy
     }
 }
 
 public enum DashboardActionPriority: Int, CaseIterable, Codable, Sendable, Equatable, Comparable {
-    case p0 = 0
-    case p1 = 1
-    case p2 = 2
-
-    public static func < (lhs: Self, rhs: Self) -> Bool {
-        lhs.rawValue < rhs.rawValue
-    }
-
-    public var label: String {
-        switch self {
-        case .p0: return "P0"
-        case .p1: return "P1"
-        case .p2: return "P2"
-        }
-    }
-
-    public var health: DashboardSemanticHealth {
-        switch self {
-        case .p0: return .critical
-        case .p1: return .warning
-        case .p2: return .neutral
-        }
-    }
+    case p0 = 0, p1 = 1, p2 = 2
+    public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+    public var label: String { self == .p0 ? "P0" : (self == .p1 ? "P1" : "P2") }
+    public var health: DashboardSemanticHealth { self == .p0 ? .critical : (self == .p1 ? .warning : .neutral) }
 }
 
 public enum DashboardActionFilter: String, CaseIterable, Sendable, Equatable, Identifiable {
-    case all = "All"
-    case pending = "Pending"
-    case completed = "Completed"
-    case highPriorityOnly = "P0 / P1"
-
+    case all = "All", pending = "Pending", completed = "Completed", highPriorityOnly = "P0 / P1"
     public var id: String { rawValue }
-
     public var displayTitle: String {
         switch self {
         case .all: return DashboardL10n.tr("dashboard.action_filter.all", "All")
@@ -461,12 +511,8 @@ public enum DashboardActionFilter: String, CaseIterable, Sendable, Equatable, Id
 }
 
 public enum DashboardActionSort: String, CaseIterable, Sendable, Equatable, Identifiable {
-    case priority = "Priority"
-    case source = "Source"
-    case title = "Title"
-
+    case priority = "Priority", source = "Source", title = "Title"
     public var id: String { rawValue }
-
     public var displayTitle: String {
         switch self {
         case .priority: return DashboardL10n.tr("dashboard.action_sort.priority", "Priority")
@@ -490,29 +536,15 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public let backingItemRef: String?
 
     public init(
-        id: String,
-        title: String,
-        summary: String,
-        sourceTag: String,
-        cliFilter: DashboardCLIFilter = .all,
-        priority: DashboardActionPriority = .p1,
-        isCompleted: Bool = false,
-        command: String? = nil,
-        externalURLString: String? = nil,
-        backingCardId: String? = nil,
-        backingItemRef: String? = nil
+        id: String, title: String, summary: String, sourceTag: String,
+        cliFilter: DashboardCLIFilter = .all, priority: DashboardActionPriority = .p1,
+        isCompleted: Bool = false, command: String? = nil, externalURLString: String? = nil,
+        backingCardId: String? = nil, backingItemRef: String? = nil
     ) {
-        self.id = id
-        self.title = title
-        self.summary = summary
-        self.sourceTag = sourceTag
-        self.cliFilter = cliFilter
-        self.priority = priority
-        self.isCompleted = isCompleted
-        self.command = command
-        self.externalURLString = externalURLString
-        self.backingCardId = backingCardId
-        self.backingItemRef = backingItemRef
+        self.id = id; self.title = title; self.summary = summary; self.sourceTag = sourceTag
+        self.cliFilter = cliFilter; self.priority = priority; self.isCompleted = isCompleted
+        self.command = command; self.externalURLString = externalURLString
+        self.backingCardId = backingCardId; self.backingItemRef = backingItemRef
     }
 }
 
@@ -530,35 +562,18 @@ public struct AgentRankingRow: Codable, Sendable, Equatable, Identifiable {
     public let recentIssue: String?
 
     public init(
-        id: String,
-        agentName: String,
-        cliFilter: DashboardCLIFilter,
-        providerName: String,
-        runs: Int,
-        totalTokens: UInt64,
-        successRate: Double,
-        avgDurationSeconds: Double,
-        costUSD: Double,
-        detailSummary: String,
-        recentIssue: String? = nil
+        id: String, agentName: String, cliFilter: DashboardCLIFilter, providerName: String,
+        runs: Int, totalTokens: UInt64, successRate: Double, avgDurationSeconds: Double,
+        costUSD: Double, detailSummary: String, recentIssue: String? = nil
     ) {
-        self.id = id
-        self.agentName = agentName
-        self.cliFilter = cliFilter
-        self.providerName = providerName
-        self.runs = runs
-        self.totalTokens = totalTokens
-        self.successRate = successRate
-        self.avgDurationSeconds = avgDurationSeconds
-        self.costUSD = costUSD
-        self.detailSummary = detailSummary
-        self.recentIssue = recentIssue
+        self.id = id; self.agentName = agentName; self.cliFilter = cliFilter; self.providerName = providerName
+        self.runs = runs; self.totalTokens = totalTokens; self.successRate = successRate
+        self.avgDurationSeconds = avgDurationSeconds; self.costUSD = costUSD
+        self.detailSummary = detailSummary; self.recentIssue = recentIssue
     }
 
     public var health: DashboardSemanticHealth {
-        if successRate >= 0.95 { return .healthy }
-        if successRate >= 0.85 { return .warning }
-        return .critical
+        successRate >= 0.95 ? .healthy : (successRate >= 0.85 ? .warning : .critical)
     }
 }
 
