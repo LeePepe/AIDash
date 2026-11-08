@@ -333,6 +333,10 @@ struct DashboardWorkspaceTests {
         #expect(store.todayGrandTotalTokens > 0)
         #expect(store.periodGrandTotalTokens >= store.todayGrandTotalTokens)
         #expect(store.filteredTrendPoints.contains { $0.totalTokens > 0 })
+        #expect(!store.actionItems.contains(where: { $0.id.hasPrefix("quota-") }))
+        let pool = QuotaPoolSummary.summarize(entries: store.cliEntries)
+        #expect(pool.trackedCount >= 3)
+        #expect(pool.recommendedEntry != nil)
         #expect(LiveDashboardTelemetryReader.sanitizeSQLToken("2026-11-07") == "2026-11-07")
         store.openDashboardWindow(section: .actionItems)
         #expect(store.selectedSection == .actionItems)
@@ -364,6 +368,37 @@ struct DashboardWorkspaceTests {
         #expect(TrendDataPoint.points(from: hourlySample, granularity: .threeDayHourly).count == 2)
         #expect(TrendDataPoint.points(from: hourlySample, granularity: .sevenDayDaily).first?.totalTokens == 1_500_000)
         #expect(TrendDataPoint.dailyKindBarSegments(from: hourlySample).count == 3)
+        let dailyHover = try #require(TrendDataPoint.hoverSummary(forBucket: "11-08", in: hourlySample, granularity: .sevenDayDaily))
+        #expect(dailyHover.totalTokens == 1_500_000)
+        #expect(dailyHover.inputTokens == 300_000)
+        #expect(dailyHover.outputTokens == 150_000)
+        #expect(dailyHover.cacheTokens == 1_050_000)
+        #expect(dailyHover.invocations == 15)
+        #expect(dailyHover.formattedReadout.contains("1.5M"))
+        let nearestBucket = TrendDataPoint.nearestHourlyBucketLabel(
+            to: Date(timeIntervalSince1970: 1_762_567_500),
+            in: hourlySample
+        )
+        #expect(nearestBucket == "2026-11-08 10:00")
+        let hourlyHover = try #require(TrendDataPoint.hoverSummary(forBucket: "2026-11-08 10:00", in: hourlySample, granularity: .threeDayHourly))
+        #expect(hourlyHover.totalTokens == 1_000_000)
+        #expect(hourlyHover.inputTokens == 200_000)
+        #expect(hourlyHover.outputTokens == 100_000)
+        #expect(hourlyHover.cacheTokens == 700_000)
+        #expect(hourlyHover.cliShares.first?.cli == .codex)
+
+        let snap = sampleSnapshot()
+        let prefs = MenuBarDisplayPreferences(persistToDefaults: false)
+        #expect(prefs.badgeMetric == .todayTokens)
+        #expect(MenuBarBadgeMetric.todayTokens.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries).contains("tok"))
+        #expect(MenuBarBadgeMetric.sevenDayTokens.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries).contains("7d"))
+        #expect(MenuBarBadgeMetric.cpu.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries) == " CPU 34%")
+        #expect(MenuBarBadgeMetric.memory.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries) == " Mem 18/32G")
+        #expect(MenuBarBadgeMetric.storage.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries).contains("Disk"))
+        #expect(MenuBarBadgeMetric.cpuAndMemory.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries) == " CPU 34% · 18/32G")
+        prefs.defaultChartGranularity = .threeDayHourly
+        #expect(prefs.defaultChartGranularity == .threeDayHourly)
+        _ = DashboardSettingsPageView(store: store, prefs: prefs).body
         let proposalsURL = tempDir.appendingPathComponent("proposals.jsonl")
         let proposalsSample = """
         {"id":"p1","ts":"2026-11-08T00:00:00Z","agent":"retro-loop","title":"Shrink Review Ping-Pong","detail":"R1 fail 55%","priority":"high","status":"pending"}

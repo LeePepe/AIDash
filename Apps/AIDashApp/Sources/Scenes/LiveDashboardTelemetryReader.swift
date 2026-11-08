@@ -9,17 +9,23 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
     public let claudeFiveHourUsedFraction: Double?
     public let cursorWeeklyUsedFraction: Double?
     public let grokSevenDayUsedFraction: Double?
+    public let claudeResetText: String?
+    public let cursorResetText: String?
 
     public init(
         claudeSevenDayUsedFraction: Double? = nil,
         claudeFiveHourUsedFraction: Double? = nil,
         cursorWeeklyUsedFraction: Double? = nil,
-        grokSevenDayUsedFraction: Double? = nil
+        grokSevenDayUsedFraction: Double? = nil,
+        claudeResetText: String? = nil,
+        cursorResetText: String? = nil
     ) {
         self.claudeSevenDayUsedFraction = claudeSevenDayUsedFraction
         self.claudeFiveHourUsedFraction = claudeFiveHourUsedFraction
         self.cursorWeeklyUsedFraction = cursorWeeklyUsedFraction
         self.grokSevenDayUsedFraction = grokSevenDayUsedFraction
+        self.claudeResetText = claudeResetText
+        self.cursorResetText = cursorResetText
     }
 }
 
@@ -62,6 +68,27 @@ public enum LiveDashboardTelemetryReader {
             || FileManager.default.fileExists(atPath: warehouseURL.path)
         guard hasAnyDatabase else { return nil }
 
+        let kimiStats = queryKimiStats(homeURL: homeURL, dateString: dateString)
+        let entries = buildCLIEntries(
+            quotas: quotas, codexStats: codexStats,
+            copilotSessionStats: copilotSessionStats, copilotRavenStats: copilotRavenStats,
+            claudeRavenStats: claudeRavenStats, claudeWarehouseStats: claudeWarehouseStats,
+            kimiStats: kimiStats
+        )
+        let rankings = queryRealRankings(ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString, fallbackEntries: entries)
+        let trends = querySevenDayTrends(
+            ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString,
+            kimiDailyBuckets: kimiStats.dailyBuckets, fallbackEntries: entries
+        )
+        return (entries, rankings, trends)
+    }
+
+    private static func buildCLIEntries(
+        quotas: RealQuotaSnapshot, codexStats: CLIWindowStats,
+        copilotSessionStats: CLIWindowStats, copilotRavenStats: CLIWindowStats,
+        claudeRavenStats: CLIWindowStats, claudeWarehouseStats: CLIWindowStats,
+        kimiStats: KimiTelemetryStats
+    ) -> [CLICostQuotaEntry] {
         let claudeDayIn = claudeRavenStats.dayIn + claudeWarehouseStats.dayIn
         let claudeDayOut = claudeRavenStats.dayOut + claudeWarehouseStats.dayOut
         let claudeDayCache = claudeRavenStats.dayCache + claudeWarehouseStats.dayCache
@@ -69,10 +96,8 @@ public enum LiveDashboardTelemetryReader {
         let claudeWeekIn = claudeRavenStats.weekIn + claudeWarehouseStats.weekIn
         let claudeWeekOut = claudeRavenStats.weekOut + claudeWarehouseStats.weekOut
         let claudeWeekCache = claudeRavenStats.weekCache + claudeWarehouseStats.weekCache
-
         let claudeTodayCost = computeCostUSD(input: claudeDayIn, output: claudeDayOut, cache: claudeDayCache, inRate: 3.0, outRate: 15.0, cacheRate: 0.30)
         let claudeWeekCost = computeCostUSD(input: claudeWeekIn, output: claudeWeekOut, cache: claudeWeekCache, inRate: 3.0, outRate: 15.0, cacheRate: 0.30)
-
         let codexTodayCost = computeCostUSD(input: codexStats.dayIn, output: codexStats.dayOut, cache: codexStats.dayCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
         let codexWeekCost = computeCostUSD(input: codexStats.weekIn, output: codexStats.weekOut, cache: codexStats.weekCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
 
@@ -84,66 +109,45 @@ public enum LiveDashboardTelemetryReader {
         let copilotWeekIn = max(copilotSessionStats.weekIn, copilotRavenStats.weekIn)
         let copilotWeekOut = max(copilotSessionStats.weekOut, copilotRavenStats.weekOut)
         let copilotWeekCache = max(copilotSessionStats.weekCache, copilotRavenStats.weekCache)
-
         let copilotTodayCost = computeCostUSD(input: copilotDayIn, output: copilotDayOut, cache: copilotDayCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
         let copilotWeekCost = computeCostUSD(input: copilotWeekIn, output: copilotWeekOut, cache: copilotWeekCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
 
-        let copilotWeekTotal = copilotWeekIn + copilotWeekOut + copilotWeekCache
-        let codexWeekTotal = codexStats.weekIn + codexStats.weekOut + codexStats.weekCache
-        let claudeWeekTotal = claudeWeekIn + claudeWeekOut + claudeWeekCache
-        let kimiStats = queryKimiStats(homeURL: homeURL, dateString: dateString)
-
         let weeklyQuotaLabel = DashboardL10n.tr("dashboard.quota.weekly_label", "7d Quota")
         let claudeQuotaLabel = DashboardL10n.tr("dashboard.quota.claude_7d_label", "Pro 7d Quota")
-
-        let entries: [CLICostQuotaEntry] = [
+        return [
             CLICostQuotaEntry(
-                id: "cli-claude", cliFilter: .claude, displayName: "Claude Code",
-                modelTag: "Claude Pro (5h / 7d)",
+                id: "cli-claude", cliFilter: .claude, displayName: "Claude Code", modelTag: "Claude Pro (5h / 7d)",
                 todayCostUSD: claudeTodayCost, periodCostUSD: claudeWeekCost, quotaLimitUSD: 100.0,
-                activeTokens: claudeDayIn + claudeDayOut, cacheTokens: claudeDayCache,
-                interactionCount: claudeDayRuns, isAvailable: true,
-                quotaUsedOverride: quotas.claudeSevenDayUsedFraction ?? 0.0,
-                quotaLabel: claudeQuotaLabel, periodTotalTokens: claudeWeekTotal
+                activeTokens: claudeDayIn + claudeDayOut, cacheTokens: claudeDayCache, interactionCount: claudeDayRuns,
+                isAvailable: true, quotaUsedOverride: quotas.claudeSevenDayUsedFraction ?? 0.0,
+                quotaLabel: claudeQuotaLabel, periodTotalTokens: claudeWeekIn + claudeWeekOut + claudeWeekCache,
+                secondaryQuotaUsed: quotas.claudeFiveHourUsedFraction, secondaryQuotaLabel: "5h", quotaResetText: quotas.claudeResetText
             ),
             CLICostQuotaEntry(
                 id: "cli-codex", cliFilter: .codex, displayName: "Codex CLI",
                 modelTag: codexStats.modelsSummary.isEmpty ? "gpt-6.1-sol / gemini-4-argon" : codexStats.modelsSummary,
                 todayCostUSD: codexTodayCost, periodCostUSD: codexWeekCost, quotaLimitUSD: 100.0,
-                activeTokens: codexStats.dayIn + codexStats.dayOut, cacheTokens: codexStats.dayCache,
-                interactionCount: codexStats.dayRuns, isAvailable: true,
-                quotaUsedOverride: quotas.cursorWeeklyUsedFraction ?? 0.0,
-                quotaLabel: weeklyQuotaLabel, periodTotalTokens: codexWeekTotal
+                activeTokens: codexStats.dayIn + codexStats.dayOut, cacheTokens: codexStats.dayCache, interactionCount: codexStats.dayRuns,
+                isAvailable: true, quotaUsedOverride: quotas.cursorWeeklyUsedFraction ?? 0.0,
+                quotaLabel: weeklyQuotaLabel, periodTotalTokens: codexStats.weekIn + codexStats.weekOut + codexStats.weekCache,
+                quotaResetText: quotas.cursorResetText
             ),
             CLICostQuotaEntry(
-                id: "cli-kimi", cliFilter: .kimi, displayName: "Kimi CLI",
-                modelTag: "kimi-code/k3",
+                id: "cli-kimi", cliFilter: .kimi, displayName: "Kimi CLI", modelTag: "kimi-code/k3",
                 todayCostUSD: 0.0, periodCostUSD: 0.0, quotaLimitUSD: 100.0,
-                activeTokens: kimiStats.dayTokens, cacheTokens: 0,
-                interactionCount: kimiStats.dayRuns, isAvailable: true,
-                quotaUsedOverride: kimiStats.quotaUsedFraction,
+                activeTokens: kimiStats.dayTokens, cacheTokens: 0, interactionCount: kimiStats.dayRuns,
+                isAvailable: true, quotaUsedOverride: kimiStats.quotaUsedFraction,
                 quotaLabel: weeklyQuotaLabel, periodTotalTokens: kimiStats.weekTokens
             ),
             CLICostQuotaEntry(
                 id: "cli-copilot", cliFilter: .copilot, displayName: "Copilot CLI",
                 modelTag: copilotSessionStats.modelsSummary.isEmpty ? "gemini-4-argon / gpt-5.6-luna" : copilotSessionStats.modelsSummary,
                 todayCostUSD: copilotTodayCost, periodCostUSD: copilotWeekCost, quotaLimitUSD: 100.0,
-                activeTokens: copilotDayIn + copilotDayOut, cacheTokens: copilotDayCache,
-                interactionCount: copilotDayRuns, isAvailable: true,
-                quotaUsedOverride: 0.0,
-                quotaLabel: nil, periodTotalTokens: copilotWeekTotal
+                activeTokens: copilotDayIn + copilotDayOut, cacheTokens: copilotDayCache, interactionCount: copilotDayRuns,
+                isAvailable: true, quotaUsedOverride: 0.0, quotaLabel: nil,
+                periodTotalTokens: copilotWeekIn + copilotWeekOut + copilotWeekCache
             )
         ]
-
-        let rankings = queryRealRankings(ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString, fallbackEntries: entries)
-        let trends = querySevenDayTrends(
-            ravenURL: ravenURL,
-            copilotURL: copilotURL,
-            dateString: dateString,
-            kimiDailyBuckets: kimiStats.dailyBuckets,
-            fallbackEntries: entries
-        )
-        return (entries, rankings, trends)
     }
 
     private static func computeCostUSD(input: UInt64, output: UInt64, cache: UInt64, inRate: Double, outRate: Double, cacheRate: Double) -> Double {
@@ -155,6 +159,8 @@ public enum LiveDashboardTelemetryReader {
         var claude5h: Double?
         var cursorWeekly: Double?
         var grok7d: Double?
+        var claudeReset: String?
+        var cursorReset: String?
         if let data = try? Data(contentsOf: magpieQuotasURL),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for (key, val) in root {
@@ -162,8 +168,10 @@ public enum LiveDashboardTelemetryReader {
                 if key.hasPrefix("claude") {
                     claude7d = windowUsedFraction(in: windows, matching: "7 day") ?? claude7d
                     claude5h = windowUsedFraction(in: windows, matching: "5 hour") ?? claude5h
+                    claudeReset = windowResetText(in: windows, matching: "7 day") ?? claudeReset
                 } else if key.hasPrefix("cursor") {
                     cursorWeekly = windowUsedFraction(in: windows, matching: "Weekly") ?? cursorWeekly
+                    cursorReset = windowResetText(in: windows, matching: "Weekly") ?? cursorReset
                 } else if key.hasPrefix("grok") {
                     grok7d = windowUsedFraction(in: windows, matching: nil) ?? grok7d
                 }
@@ -174,7 +182,8 @@ public enum LiveDashboardTelemetryReader {
         }
         return RealQuotaSnapshot(
             claudeSevenDayUsedFraction: claude7d, claudeFiveHourUsedFraction: claude5h,
-            cursorWeeklyUsedFraction: cursorWeekly, grokSevenDayUsedFraction: grok7d
+            cursorWeeklyUsedFraction: cursorWeekly, grokSevenDayUsedFraction: grok7d,
+            claudeResetText: claudeReset, cursorResetText: cursorReset
         )
     }
 
@@ -192,6 +201,21 @@ public enum LiveDashboardTelemetryReader {
             if let used = (win["used"] as? NSNumber)?.doubleValue {
                 return min(max(used / 100.0, 0), 1)
             }
+        }
+        return nil
+    }
+
+    private static func windowResetText(in windows: [[String: Any]], matching substring: String?) -> String? {
+        for win in windows {
+            let name = (win["name"] as? String) ?? ""
+            if let substring, !name.contains(substring) { continue }
+            guard let raw = win["resetsAt"] as? String, !raw.isEmpty else { continue }
+            if raw.count >= 16 {
+                let monthDay = String(raw.dropFirst(5).prefix(5))
+                let hm = String(raw.dropFirst(11).prefix(5))
+                return "Reset \(monthDay) \(hm)"
+            }
+            return raw
         }
         return nil
     }

@@ -1,7 +1,7 @@
 # AIDash Agent Instructions
 
-This file is read by automated agents (Multica TL, Multica Fullstack,
-Multica Reviewer, Claude Code, Codex CLI, Hermes, GitHub Copilot, etc.)
+This file is read by automated agents (`m2-dispatcher` / `M2-Dispatcher`, `team-lead` Steering,
+Writer, Reviewer, Claude Code, Codex CLI, Hermes, GitHub Copilot, etc.)
 when they work on this repo. Keep it short and authoritative.
 
 ## Constitution
@@ -58,9 +58,9 @@ before doing anything material.** It governs every decision below.
   red-lines / gate 的单一结构化来源;`tech-context.md` 是 leaf 指向的深入参考。
 - `scripts/context/audit` 必须让每个 tracked file 恰好落到一个 leaf 或带原因的
   exclusion。路由、依赖或 manifest 改动和 audit 修复同一个 commit 落地。
-- 改动只落在 **1 个层** → 一个 agent 直接做。
-- 改动跨 **2+ 层** → 任务太大,**按层拆**成 N 个子任务;每个子任务 = 一层 =
-  一个独立可 build/test 的 commit。
+- 改动只落在 **1 个层** → 归属 1 个 Task 切片（不跨层拆碎；`M2-Dispatcher` 与后台 `Steering`/`Writer` 的派发边界仍遵循全局 `m2-dispatcher` / `team-lead` 合同：凡 `>3` 文件或含编译安装，`M2-Dispatcher` 确认简单 Spec 后必须通过 `herdr-dispatch.sh` 派后台执行，严禁在入口会话内联直接改业务代码）。
+- 改动跨 **2+ 层** → 按层拆成 N 个 Task 切片；每个切片 = 一层 =
+  一个独立可 build/test 的 commit（同一 Goal 共用同一分支连续 commit，收口最多提 1 个 PR）。
 - 单层内仍很大 → 按技术切面拆(lib / 接口 / UI / 格式化 / fixture / 文档 / 迁移)。
 - 做完发现别层也要动 → **记为新任务,不扩展原任务**。
 - 用行数/文件数当"任务大小"阈值是脆弱的;**layer 边界才是 scope 单元**。
@@ -181,13 +181,11 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
 
 ## Git workflow
 
-- **Worktree per task.** Multica Fullstack agents create
-  `/tmp/aidash-<task>/` worktrees; do not pollute the user's local
-  `~/Development/AIDash/` checkout. New worktree's first step:
+- **One branch per Goal (`1 Goal = 1 Branch / 最多 1 PR`).** Background `Steering` / `Writer` agents work on the Goal branch or dedicated worktree; do not block the interactive `M2-Dispatcher` entry session on `>3`-file edits or heavy builds. New worktree's first step:
   `git config core.hooksPath scripts/hooks`.
 - **Conventional commits.** `feat:`, `fix:`, `refactor:`, `test:`,
   `docs:`, `chore:`.
-- **PR is the unit of merge.** Each PR closes one Multica issue.
+- **PR is the unit of merge.** Each Goal closes one Linear `TIA` issue (or maps to one Goal PR).
 - **`main` is protected.** Three gates guard every change (发现→修复解耦):
   1. **Local `pre-commit` hook** (`scripts/hooks/pre-commit`) — 递归 resolve 暂存
      路径,先 audit 唯一归类,再跑 affected leaf 的 local gates;SPM leaf 是

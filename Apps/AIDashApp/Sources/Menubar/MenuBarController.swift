@@ -13,6 +13,8 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     private var statusHostingView: NSHostingView<AnyView>?
     private var computerRefreshTimer: Timer?
     private var tokenRefreshTimer: Timer?
+    private var preferencesObserver: NSObjectProtocol?
+    private var isMenuOpen = false
 
     internal var statusItemForTesting: NSStatusItem? { statusItem }
     internal var statusStateForTesting: MenuBarStatusViewState { statusState }
@@ -64,6 +66,15 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         statusItem = item
         updateMenuPresentation()
         startPeriodicRefresh()
+        preferencesObserver = NotificationCenter.default.addObserver(
+            forName: .menuBarDisplayPreferencesDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateMenuPresentation()
+            }
+        }
     }
 
     private func hostedStatusView() -> NSHostingView<AnyView> {
@@ -113,7 +124,12 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     public func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
         refreshStatus()
+    }
+
+    public func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
     }
 
     public func refreshComputerSections() {
@@ -141,6 +157,10 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         tokenRefreshTimer?.invalidate()
         computerRefreshTimer = nil
         tokenRefreshTimer = nil
+        if let preferencesObserver {
+            NotificationCenter.default.removeObserver(preferencesObserver)
+            self.preferencesObserver = nil
+        }
     }
 
     private func startPeriodicRefresh() {
@@ -151,6 +171,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
                 return
             }
             MainActor.assumeIsolated {
+                guard !self.isMenuOpen else { return }
                 self.refreshComputerSections()
             }
         }
@@ -160,6 +181,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
                 return
             }
             MainActor.assumeIsolated {
+                guard !self.isMenuOpen else { return }
                 self.refreshTokenSection()
             }
         }
@@ -182,8 +204,10 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         item.button?.toolTip = summaryText
         if case let .populated(snapshot) = statusState {
             let entries = DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage)
-            let grandTotal = entries.reduce(UInt64(0)) { $0 + $1.totalTokens }
-            item.button?.title = " \(DashboardTokenFormatter.compact(grandTotal)) tok"
+            item.button?.title = MenuBarDisplayPreferences.shared.badgeMetric.formattedStatusBarTitle(
+                snapshot: snapshot,
+                entries: entries
+            )
         } else {
             item.button?.title = ""
         }

@@ -15,31 +15,20 @@ public struct SolidModularCardContainer<HeaderAccessory: View, Content: View>: V
     @Environment(\.colorSchemeContrast) private var contrast
 
     public init(
-        title: String,
-        subtitle: String? = nil,
-        symbolName: String,
-        @ViewBuilder accessory: () -> HeaderAccessory,
-        @ViewBuilder content: () -> Content
+        title: String, subtitle: String? = nil, symbolName: String,
+        @ViewBuilder accessory: () -> HeaderAccessory, @ViewBuilder content: () -> Content
     ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.symbolName = symbolName
-        self.accessory = accessory()
-        self.content = content()
+        self.title = title; self.subtitle = subtitle; self.symbolName = symbolName
+        self.accessory = accessory(); self.content = content()
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Label(title, systemImage: symbolName)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
+                    Label(title, systemImage: symbolName).font(.headline).foregroundStyle(.primary)
                     if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 8)
@@ -51,38 +40,18 @@ public struct SolidModularCardContainer<HeaderAccessory: View, Content: View>: V
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(
-                    reduceTransparency
-                        ? Color(nsColor: .windowBackgroundColor)
-                        : Color(nsColor: .controlBackgroundColor)
-                )
+                .fill(reduceTransparency ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor))
         )
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(
-                    contrast == .increased
-                        ? Color.primary.opacity(0.28)
-                        : Color(nsColor: .separatorColor),
-                    lineWidth: contrast == .increased ? 1.5 : 1
-                )
+                .stroke(contrast == .increased ? Color.primary.opacity(0.28) : Color(nsColor: .separatorColor), lineWidth: contrast == .increased ? 1.5 : 1)
         }
     }
 }
 
 extension SolidModularCardContainer where HeaderAccessory == EmptyView {
-    public init(
-        title: String,
-        subtitle: String? = nil,
-        symbolName: String,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.init(
-            title: title,
-            subtitle: subtitle,
-            symbolName: symbolName,
-            accessory: { EmptyView() },
-            content: content
-        )
+    public init(title: String, subtitle: String? = nil, symbolName: String, @ViewBuilder content: () -> Content) {
+        self.init(title: title, subtitle: subtitle, symbolName: symbolName, accessory: { EmptyView() }, content: content)
     }
 }
 
@@ -169,47 +138,25 @@ public struct SystemTelemetryStripView: View {
     }
 
     private func telemetryGaugeTile(
-        title: String,
-        symbol: String,
-        valueText: String,
-        detailText: String,
-        fraction: Double,
-        health: DashboardSemanticHealth
+        title: String, symbol: String, valueText: String,
+        detailText: String, fraction: Double, health: DashboardSemanticHealth
     ) -> some View {
         let clamped = min(max(fraction, 0), 1)
         let tint = DashboardSemanticColorPalette.color(for: health)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .foregroundStyle(tint)
-                Text(title)
-                    .font(.subheadline.weight(.medium))
+                Image(systemName: symbol).foregroundStyle(tint)
+                Text(title).font(.subheadline.weight(.medium))
                 Spacer(minLength: 4)
-                Image(systemName: health.symbolName)
-                    .foregroundStyle(tint)
-                    .accessibilityHidden(true)
-                Text(valueText)
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
+                Image(systemName: health.symbolName).foregroundStyle(tint).accessibilityHidden(true)
+                Text(valueText).font(.subheadline.weight(.semibold)).monospacedDigit().contentTransition(.numericText())
             }
-            Gauge(value: clamped, in: 0...1) {
-                Text(title)
-            }
-            .gaugeStyle(.accessoryLinearCapacity)
-            .tint(tint)
-            Text(detailText)
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            Gauge(value: clamped, in: 0...1) { Text(title) }.gaugeStyle(.accessoryLinearCapacity).tint(tint)
+            Text(detailText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
         .accessibilityElement(children: .combine)
     }
 }
@@ -227,13 +174,8 @@ public struct KPISummaryCardView: View {
             subtitle: DashboardL10n.tr("dashboard.card.kpi.subtitle", "Key invocations, efficiency, cost, and action status"),
             symbolName: "gauge.with.dots.needle.33percent"
         ) {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 185, maximum: 300), spacing: 12)],
-                spacing: 12
-            ) {
-                ForEach(metrics) { metric in
-                    metricTile(metric)
-                }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 185, maximum: 300), spacing: 12)], spacing: 12) {
+                ForEach(metrics) { metric in metricTile(metric) }
             }
         }
     }
@@ -242,44 +184,22 @@ public struct KPISummaryCardView: View {
         let semanticColor = DashboardSemanticColorPalette.color(for: metric.health)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(metric.label)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Text(metric.label).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 4)
-                Image(systemName: metric.symbolName)
-                    .foregroundStyle(semanticColor)
-                    .accessibilityHidden(true)
+                Image(systemName: metric.symbolName).foregroundStyle(semanticColor).accessibilityHidden(true)
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(metric.formattedValue)
-                    .font(.system(.title, design: .rounded, weight: .semibold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                if let unit = metric.unit {
-                    Text(unit)
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+                Text(metric.formattedValue).font(.system(.title, design: .rounded, weight: .semibold)).monospacedDigit().contentTransition(.numericText())
+                if let unit = metric.unit { Text(unit).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
             }
             HStack(spacing: 4) {
-                Image(systemName: metric.direction.symbolName)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(semanticColor)
-                Text(metric.deltaText)
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Image(systemName: metric.direction.symbolName).font(.caption2.weight(.bold)).foregroundStyle(semanticColor)
+                Text(metric.deltaText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
         .accessibilityElement(children: .combine)
     }
 }
@@ -289,7 +209,7 @@ public struct TrendChartCardView: View {
     public let selectedCategory: String?
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
-    @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayDaily
+    @State private var timeGranularity: DashboardChartTimeGranularity = MenuBarDisplayPreferences.shared.defaultChartGranularity
 
     public init(
         points: [TrendDataPoint],
@@ -308,18 +228,19 @@ public struct TrendChartCardView: View {
         let dailySegments = TrendDataPoint.dailyKindBarSegments(from: points)
         return SolidModularCardContainer(
             title: DashboardL10n.tr("dashboard.card.trend.title", "Agent Invocations & Spend by CLI"),
-            subtitle: DashboardL10n.tr("dashboard.card.trend.subtitle", "Click any bar to cross-filter tables and actionable items below"),
+            subtitle: DashboardL10n.tr("dashboard.card.trend.subtitle", "Hover bars for exact breakdown; click below to cross-filter"),
             symbolName: "chart.bar.xaxis"
         ) {
             HStack(spacing: 8) {
                 Picker(DashboardL10n.tr("dashboard.chart_time.picker_label", "Time Granularity"), selection: $timeGranularity) {
-                    ForEach(DashboardChartTimeGranularity.allCases) { gran in
-                        Text(gran.displayTitle).tag(gran)
+                    ForEach(DashboardChartTimeGranularity.allCases) { gran in Text(gran.displayTitle).tag(gran) }
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 190)
+                .onChange(of: timeGranularity) { _, newValue in
+                    if MenuBarDisplayPreferences.shared.defaultChartGranularity != newValue {
+                        MenuBarDisplayPreferences.shared.defaultChartGranularity = newValue
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 190)
 
                 if let selectedCategory {
                     Button {
@@ -338,49 +259,14 @@ public struct TrendChartCardView: View {
             }
         } content: {
             let categoryTotals = Self.groupedCategoryTotals(from: activePoints, kind: .all)
-            VStack(alignment: .leading, spacing: 12) {
-                if timeGranularity == .threeDayHourly, activePoints.contains(where: { $0.bucketDate != nil }) {
-                    Chart(activePoints) { point in
-                        if let date = point.bucketDate {
-                            let isSelected = selectedCategory == nil || selectedCategory == point.category
-                            let tokenMillions = Double(point.totalTokens) / 1_000_000.0
-                            AreaMark(
-                                x: .value("Time", date),
-                                y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
-                            )
-                            .foregroundStyle(by: .value("CLI", point.category))
-                            .opacity(isSelected ? 0.25 : 0.08)
-                            .interpolationMethod(.monotone)
-
-                            LineMark(
-                                x: .value("Time", date),
-                                y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
-                            )
-                            .foregroundStyle(by: .value("CLI", point.category))
-                            .lineStyle(StrokeStyle(lineWidth: 2.0))
-                            .opacity(isSelected ? 1.0 : 0.30)
-                            .interpolationMethod(.monotone)
-                        }
-                    }
-                    .frame(height: 210)
-                    .chartLegend(position: .bottom, alignment: .leading)
-                    .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
-                } else {
-                    Chart(dailySegments) { seg in
-                        let isSelected = selectedCategory == nil || selectedCategory == seg.category
-                        BarMark(
-                            x: .value("Date", seg.bucketLabel),
-                            y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), seg.tokenMillions)
-                        )
-                        .position(by: .value("Kind", seg.kindTitle))
-                        .foregroundStyle(by: .value("CLI", seg.category))
-                        .opacity(isSelected ? 1.0 : 0.30)
-                    }
-                    .chartYScale(type: .symmetricLog(slopeAtZero: 0.1))
-                    .frame(height: 210)
-                    .chartLegend(position: .bottom, alignment: .leading)
-                    .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
-                }
+            VStack(alignment: .leading, spacing: 10) {
+                TrendChartInteractiveCanvas(
+                    rawPoints: points,
+                    activePoints: activePoints,
+                    dailySegments: dailySegments,
+                    selectedCategory: selectedCategory,
+                    timeGranularity: timeGranularity
+                )
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -427,6 +313,141 @@ public struct TrendChartCardView: View {
     }
 }
 
+@MainActor
+private struct TrendChartInteractiveCanvas: View {
+    let rawPoints: [TrendDataPoint]
+    let activePoints: [TrendDataPoint]
+    let dailySegments: [DailyKindBarSegment]
+    let selectedCategory: String?
+    let timeGranularity: DashboardChartTimeGranularity
+    @State private var hoveredBucketLabel: String?
+
+    var body: some View {
+        let hoverSummary = hoveredBucketLabel.flatMap {
+            TrendDataPoint.hoverSummary(forBucket: $0, in: rawPoints, granularity: timeGranularity)
+        }
+        VStack(alignment: .leading, spacing: 8) {
+            scrubReadoutSlot(summary: hoverSummary)
+            if timeGranularity == .threeDayHourly, activePoints.contains(where: { $0.bucketDate != nil }) {
+                hourlyTrendChart
+            } else {
+                dailyBarChart
+            }
+        }
+    }
+
+    private func scrubReadoutSlot(summary: TrendBucketHoverSummary?) -> some View {
+        let totalTok = activePoints.reduce(UInt64(0)) { $0 + $1.totalTokens }
+        let totalIn = activePoints.reduce(UInt64(0)) { $0 + $1.inputTokens }
+        let totalOut = activePoints.reduce(UInt64(0)) { $0 + $1.outputTokens }
+        let totalCache = activePoints.reduce(UInt64(0)) { $0 + $1.cacheTokens }
+        let totalCalls = activePoints.reduce(0) { $0 + $1.invocations }
+
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Image(systemName: summary == nil ? "chart.bar.xaxis" : "chart.bar.doc.horizontal.fill")
+                    .font(.caption).foregroundStyle(summary == nil ? Color.secondary : Color.accentColor)
+                Text(summary?.bucketLabel ?? timeGranularity.displayTitle).font(.caption.weight(.bold)).monospacedDigit()
+                Text(DashboardL10n.format("dashboard.chart.hover_total_calls_format", "Total %@ · %lld calls", DashboardTokenFormatter.compact(summary?.totalTokens ?? totalTok), summary?.invocations ?? totalCalls))
+                    .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(Color.accentColor)
+                Spacer(minLength: 4)
+                Text(DashboardL10n.format("dashboard.chart.hover_io_cache_format", "In %@ · Out %@ · Cache %@", DashboardTokenFormatter.compact(summary?.inputTokens ?? totalIn), DashboardTokenFormatter.compact(summary?.outputTokens ?? totalOut), DashboardTokenFormatter.compact(summary?.cacheTokens ?? totalCache)))
+                    .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
+            }
+            if let summary, !summary.cliShares.isEmpty {
+                Text(summary.cliShares.map { "\($0.cli.shortLabel) \(DashboardTokenFormatter.compact($0.tokens))" }.joined(separator: " · "))
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                Text(periodCLISummaryText).font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 46, maxHeight: 46, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    private var periodCLISummaryText: String {
+        var byCLI: [DashboardCLIFilter: UInt64] = [:]
+        for pt in activePoints { byCLI[pt.cliFilter, default: 0] += pt.totalTokens }
+        return byCLI.sorted { $0.value > $1.value }.map { "\($0.key.shortLabel) \(DashboardTokenFormatter.compact($0.value))" }.joined(separator: " · ")
+    }
+
+    private var hourlyTrendChart: some View {
+        Chart {
+            ForEach(activePoints) { point in
+                if let date = point.bucketDate {
+                    let isSelected = selectedCategory == nil || selectedCategory == point.category
+                    let tokenMillions = Double(point.totalTokens) / 1_000_000.0
+                    AreaMark(x: .value("Time", date), y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions))
+                        .foregroundStyle(by: .value("CLI", point.category)).opacity(isSelected ? 0.25 : 0.08).interpolationMethod(.monotone)
+                    LineMark(x: .value("Time", date), y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions))
+                        .foregroundStyle(by: .value("CLI", point.category)).lineStyle(StrokeStyle(lineWidth: 2.0)).opacity(isSelected ? 1.0 : 0.30).interpolationMethod(.monotone)
+                }
+            }
+            if let hoveredBucketLabel, let hoveredDate = activePoints.first(where: { $0.bucketLabel == hoveredBucketLabel })?.bucketDate {
+                RuleMark(x: .value("Time", hoveredDate)).foregroundStyle(Color.accentColor.opacity(0.55)).lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            }
+        }
+        .frame(height: 210).chartLegend(position: .bottom, alignment: .leading)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
+                    guard case let .active(location) = phase, let plotFrame = proxy.plotFrame else {
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
+                        return
+                    }
+                    let xPos = location.x - geo[plotFrame].origin.x
+                    guard xPos >= 0, xPos <= geo[plotFrame].width, let date: Date = proxy.value(atX: xPos) else {
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
+                        return
+                    }
+                    let next = TrendDataPoint.nearestHourlyBucketLabel(to: date, in: activePoints)
+                    if hoveredBucketLabel != next { hoveredBucketLabel = next }
+                }
+            }
+        }
+        .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
+    }
+
+    private var dailyBarChart: some View {
+        Chart {
+            ForEach(dailySegments) { seg in
+                let isSelected = selectedCategory == nil || selectedCategory == seg.category
+                let isHovered = hoveredBucketLabel == nil || hoveredBucketLabel == seg.bucketLabel
+                BarMark(x: .value("Date", seg.bucketLabel), y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), seg.tokenMillions))
+                    .position(by: .value("Kind", seg.kindTitle))
+                    .foregroundStyle(by: .value("CLI", seg.category))
+                    .opacity((isSelected && isHovered) ? 1.0 : 0.32)
+            }
+            if let hoveredBucketLabel {
+                RuleMark(x: .value("Date", hoveredBucketLabel))
+                    .foregroundStyle(Color.accentColor.opacity(0.45))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            }
+        }
+        .chartYScale(type: .symmetricLog(slopeAtZero: 0.1))
+        .frame(height: 210)
+        .chartLegend(position: .bottom, alignment: .leading)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
+                    guard case let .active(location) = phase, let plotFrame = proxy.plotFrame else {
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
+                        return
+                    }
+                    let xPos = location.x - geo[plotFrame].origin.x
+                    guard xPos >= 0, xPos <= geo[plotFrame].width, let bucket: String = proxy.value(atX: xPos) else {
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
+                        return
+                    }
+                    if hoveredBucketLabel != bucket { hoveredBucketLabel = bucket }
+                }
+            }
+        }
+        .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
+    }
+}
+
 public struct CLICostQuotaCardView: View {
     public let entries: [CLICostQuotaEntry]
     public let todayTotalUSD: Double
@@ -445,9 +466,10 @@ public struct CLICostQuotaCardView: View {
     public var body: some View {
         let todayTotal = entries.reduce(UInt64(0)) { $0 + $1.totalTokens }
         let periodTotal = entries.reduce(UInt64(0)) { $0 + $1.periodTotalTokens }
+        let pool = QuotaPoolSummary.summarize(entries: entries)
         return SolidModularCardContainer(
             title: DashboardL10n.tr("dashboard.card.cli_cost.title", "Multi-CLI Token & Quota Monitor"),
-            subtitle: DashboardL10n.tr("dashboard.card.cli_cost.subtitle", "Today total tokens, 7-day volume, and quota utilization"),
+            subtitle: DashboardL10n.tr("dashboard.card.cli_cost.subtitle", "Overall quota pool balance, routing recommendation, and multi-window telemetry"),
             symbolName: "sparkles"
         ) {
             HStack(spacing: 12) {
@@ -466,70 +488,108 @@ public struct CLICostQuotaCardView: View {
             }
             .font(.caption)
         } content: {
-            VStack(spacing: 10) {
-                ForEach(entries) { entry in
-                    cliQuotaRow(entry)
+            VStack(alignment: .leading, spacing: 10) {
+                quotaPoolOverviewStrip(pool: pool)
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(minimum: 240), spacing: 10),
+                        GridItem(.flexible(minimum: 240), spacing: 10)
+                    ],
+                    spacing: 10
+                ) {
+                    ForEach(entries) { entry in
+                        cliQuotaTile(entry)
+                    }
                 }
             }
         }
     }
 
-    private func cliQuotaRow(_ entry: CLICostQuotaEntry) -> some View {
+    private func quotaPoolOverviewStrip(pool: QuotaPoolSummary) -> some View {
+        let poolTint = DashboardSemanticColorPalette.color(for: pool.health)
+        let avgUsedPct = Int((pool.averageUsedFraction * 100).rounded())
+        let avgRemPct = max(0, 100 - avgUsedPct)
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chart.pie.fill").foregroundStyle(poolTint)
+                    Text(DashboardL10n.tr("dashboard.quota.pool_title", "Overall Quota Pool")).font(.caption.weight(.semibold))
+                    Text(DashboardL10n.format("dashboard.quota.pool_used_rem_format", "Used %lld%% · Left %lld%%", avgUsedPct, avgRemPct))
+                        .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(poolTint)
+                }
+                Gauge(value: pool.averageUsedFraction, in: 0...1) {
+                    Text(DashboardL10n.tr("dashboard.quota.pool_title", "Overall Quota Pool"))
+                }
+                .gaugeStyle(.accessoryLinearCapacity).tint(poolTint).frame(maxWidth: 220)
+            }
+            Divider().frame(height: 28)
+            if let rec = pool.recommendedEntry {
+                let recRemPct = Int((rec.remainingFraction * 100).rounded())
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch").foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(DashboardL10n.format("dashboard.quota.recommend_route_format", "Recommended Route: %@ (%lld%% remaining)", rec.displayName, recRemPct))
+                            .font(.caption.weight(.semibold)).foregroundStyle(.primary)
+                        Text(DashboardL10n.format("dashboard.quota.balance_hint_format", "%lld idle channel(s) (<25%% used) · %lld high-load channel(s)", pool.idleChannelCount, pool.pressuredChannelCount))
+                            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    private func cliQuotaTile(_ entry: CLICostQuotaEntry) -> some View {
         let tint = DashboardSemanticColorPalette.color(for: entry.health)
         let todayCompact = DashboardTokenFormatter.compact(entry.totalTokens)
         let periodCompact = DashboardTokenFormatter.compact(entry.periodTotalTokens)
+        let usedPct = Int((entry.usedFraction * 100).rounded())
+        let remPct = max(0, 100 - usedPct)
+        let cachePct = Int((entry.cacheHitFraction * 100).rounded())
+
         return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: entry.health.symbolName)
-                    .foregroundStyle(tint)
-                Text(entry.displayName)
-                    .font(.body.weight(.medium))
-                Text(entry.modelTag)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
+            HStack(spacing: 6) {
+                Image(systemName: entry.health.symbolName).foregroundStyle(tint)
+                Text(entry.displayName).font(.subheadline.weight(.semibold))
+                Text(entry.modelTag).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 6)
                 if let quotaLabel = entry.quotaLabel {
-                    Text(DashboardL10n.format("dashboard.cli_cost.tokens_and_quota_format", "%@ tok · %@", todayCompact, quotaLabel))
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
+                    Text("\(quotaLabel) · \(DashboardL10n.format("menubar.pulse.quota_remaining_format", "Left %lld%%", remPct))")
+                        .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
                 } else {
-                    Text("\(todayCompact) tok")
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                }
-                if entry.quotaLabel != nil {
-                    Text("\(Int((entry.usedFraction * 100).rounded()))%")
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(tint)
-                        .frame(width: 40, alignment: .trailing)
+                    Text(DashboardL10n.tr("dashboard.quota.token_metered", "Token Metered"))
+                        .font(.caption2.weight(.medium)).padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.14), in: Capsule()).foregroundStyle(Color.accentColor)
                 }
             }
             if entry.quotaLabel != nil {
-                Gauge(value: entry.usedFraction, in: 0...1) {
-                    Text(entry.displayName)
-                }
-                .gaugeStyle(.accessoryLinearCapacity)
-                .tint(tint)
+                Gauge(value: entry.usedFraction, in: 0...1) { Text(entry.displayName) }
+                    .gaugeStyle(.accessoryLinearCapacity).tint(tint)
+            } else {
+                Divider().padding(.vertical, 2)
             }
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Text(DashboardL10n.format("dashboard.cli_cost.total_tokens_format", "Today: %@ tok", todayCompact))
                 Text(DashboardL10n.format("dashboard.cli_cost.period_tokens_format", "7d: %@ tok", periodCompact))
+                Text("Cache \(cachePct)%")
                 Spacer(minLength: 4)
-                Text(DashboardL10n.format("dashboard.cli_cost.sessions_format", "Calls: %@", entry.interactionCount.formatted(.number)))
+                if let secUsed = entry.secondaryQuotaUsed, let secLabel = entry.secondaryQuotaLabel {
+                    Text("\(secLabel): \(Int((secUsed * 100).rounded()))%").foregroundStyle(.secondary)
+                }
+                if let resetText = entry.quotaResetText {
+                    Text(resetText).foregroundStyle(.secondary)
+                } else {
+                    Text(DashboardL10n.format("dashboard.cli_cost.sessions_format", "Calls: %@", entry.interactionCount.formatted(.number)))
+                }
             }
-            .font(.caption)
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
+            .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .help("\(entry.displayName) (\(entry.modelTag)) — Today \(todayCompact) tok (Active \(DashboardTokenFormatter.compact(entry.activeTokens)) · Cache \(DashboardTokenFormatter.compact(entry.cacheTokens))) · 7d \(periodCompact) tok · Calls \(entry.interactionCount)")
         .accessibilityElement(children: .combine)
     }
 }
