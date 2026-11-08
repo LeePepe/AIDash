@@ -5005,6 +5005,96 @@
         }
       }
     },
+    "dashboard.lens.trends": {
+      "comment": "Segmented lens title for Token Trends on Overview.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token Trends"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "趋势分析"
+          }
+        }
+      }
+    },
+    "dashboard.lens.rankings": {
+      "comment": "Segmented lens title for M2 / M1 Ranking on Overview.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "M2 / M1 Ranking"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "M2/M1 排行"
+          }
+        }
+      }
+    },
+    "dashboard.lens.actions": {
+      "comment": "Segmented lens title for Actionable Items on Overview.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actionable Items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可推进事项"
+          }
+        }
+      }
+    },
+    "dashboard.lens.section_title": {
+      "comment": "Header title for the folded Overview workbench lens section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytical & Execution Workbench"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "深度分析与推进工作台"
+          }
+        }
+      }
+    },
+    "dashboard.lens.picker_label": {
+      "comment": "Accessibility label for the Overview workbench lens picker.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workbench Lens"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作台视角"
+          }
+        }
+      }
+    },
     "dashboard.chart.hover_calls_format": {
       "comment": "Hovered chart bucket invocation call count.",
       "extractionState": "manual",

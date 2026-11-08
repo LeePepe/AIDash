@@ -3,9 +3,35 @@ import AppKit
 import SwiftUI
 import AIDashUI
 
+public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Identifiable {
+    case trends
+    case rankings
+    case actionItems
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .trends: return DashboardL10n.tr("dashboard.lens.trends", "Token Trends")
+        case .rankings: return DashboardL10n.tr("dashboard.lens.rankings", "M2 / M1 Ranking")
+        case .actionItems: return DashboardL10n.tr("dashboard.lens.actions", "Actionable Items")
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .trends: return "chart.bar.xaxis"
+        case .rankings: return "tablecells"
+        case .actionItems: return "checklist"
+        }
+    }
+}
+
 public struct ActionItemsCardView: View {
     @Bindable public var store: DashboardWorkspaceStore
     public var onToggleDone: ((String, String, Bool) -> Void)?
+    @State private var expandedActionID: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
         store: DashboardWorkspaceStore,
@@ -126,84 +152,84 @@ public struct ActionItemsCardView: View {
 
     private func actionItemRow(_ item: DashboardActionItem) -> some View {
         let priorityColor = DashboardSemanticColorPalette.color(for: item.priority.health)
-        return HStack(alignment: .top, spacing: 10) {
-            Toggle(
-                isOn: Binding(
-                    get: { item.isCompleted },
-                    set: { _ in store.toggleActionItem(id: item.id, onToggleDone: onToggleDone) }
-                )
-            ) {
-                EmptyView()
-            }
-            .toggleStyle(.checkbox)
-            .frame(minWidth: 28, minHeight: 28)
-            .accessibilityLabel(DashboardL10n.format("dashboard.actions.mark_completed_format", "Mark %@ as completed", item.title))
+        let effectiveExpandedID = expandedActionID ?? store.filteredActionItems.first(where: { !$0.isCompleted })?.id
+        let isExpanded = effectiveExpandedID == item.id
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
+                Toggle(
+                    isOn: Binding(
+                        get: { item.isCompleted },
+                        set: { _ in store.toggleActionItem(id: item.id, onToggleDone: onToggleDone) }
+                    )
+                ) {
+                    EmptyView()
+                }
+                .toggleStyle(.checkbox)
+                .frame(minWidth: 28, minHeight: 28)
+                .accessibilityLabel(DashboardL10n.format("dashboard.actions.mark_completed_format", "Mark %@ as completed", item.title))
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(item.priority.label)
-                        .font(.caption2.weight(.bold))
-                        .monospacedDigit()
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(priorityColor.opacity(0.16), in: Capsule())
-                        .foregroundStyle(priorityColor)
-                    Text(item.sourceTag)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Text(item.title)
-                        .font(.body.weight(.medium))
-                        .strikethrough(item.isCompleted)
-                        .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                Button {
+                    let toggleBlock = { expandedActionID = isExpanded ? "__none__" : item.id }
+                    if reduceMotion { toggleBlock() } else {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { toggleBlock() }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(item.priority.label)
+                            .font(.caption2.weight(.bold)).monospacedDigit().padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(priorityColor.opacity(0.16), in: Capsule()).foregroundStyle(priorityColor)
+                        Text(item.sourceTag).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        Text(item.title).font(.body.weight(.medium)).strikethrough(item.isCompleted)
+                            .foregroundStyle(item.isCompleted ? .secondary : .primary).lineLimit(1)
+                        Spacer(minLength: 6)
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
                 }
-                Text(item.summary)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if let command = item.command {
-                    Text("$ \(command)")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                .buttonStyle(.plain)
+
+                actionRowAccessoryButtons(item)
             }
-            Spacer(minLength: 8)
-            HStack(spacing: 6) {
-                if let command = item.command {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(command, forType: .string)
-                        store.lastCopiedActionID = item.id
-                    } label: {
-                        Label(
-                            store.lastCopiedActionID == item.id
-                                ? DashboardL10n.tr("dashboard.actions.copied", "Copied")
-                                : DashboardL10n.tr("dashboard.actions.copy_command", "Copy Command"),
-                            systemImage: store.lastCopiedActionID == item.id ? "checkmark" : "doc.on.doc"
-                        )
-                        .contentTransition(.symbolEffect(.replace))
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.summary).font(.subheadline).foregroundStyle(.secondary)
+                    if let command = item.command {
+                        Text("$ \(command)").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .frame(minHeight: 28)
                 }
-                if let urlString = item.externalURLString, let url = URL(string: urlString) {
-                    Button {
-                        NSWorkspace.shared.open(url)
-                    } label: {
-                        Label(DashboardL10n.tr("dashboard.actions.open_link", "Open"), systemImage: "arrow.up.right.square")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .frame(minHeight: 28)
-                }
+                .padding(.leading, 38)
             }
         }
         .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    private func actionRowAccessoryButtons(_ item: DashboardActionItem) -> some View {
+        HStack(spacing: 6) {
+            if let command = item.command {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    store.lastCopiedActionID = item.id
+                } label: {
+                    Label(
+                        store.lastCopiedActionID == item.id
+                            ? DashboardL10n.tr("dashboard.actions.copied", "Copied")
+                            : DashboardL10n.tr("dashboard.actions.copy_command", "Copy Command"),
+                        systemImage: store.lastCopiedActionID == item.id ? "checkmark" : "doc.on.doc"
+                    )
+                    .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
+            }
+            if let urlString = item.externalURLString, let url = URL(string: urlString) {
+                Button { NSWorkspace.shared.open(url) } label: {
+                    Label(DashboardL10n.tr("dashboard.actions.open_link", "Open"), systemImage: "arrow.up.right.square")
+                }
+                .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
+            }
+        }
     }
 }
 
@@ -296,6 +322,7 @@ public struct RankingTableCardView: View {
 public struct AIDashMacWorkspaceView: View {
     @State private var store: DashboardWorkspaceStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var activeOverviewLens: OverviewWorkbenchLens = .trends
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -325,53 +352,82 @@ public struct AIDashMacWorkspaceView: View {
     }
 
     private var workspaceTopControlBar: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 6) {
-                Button { store.selectPreviousDate() } label: { Image(systemName: "chevron.left") }
-                    .disabled(!store.canSelectPreviousDate)
-                Text(store.selectedDateString)
-                    .font(.subheadline.weight(.medium))
-                    .monospacedDigit()
-                Button { store.selectNextDate() } label: { Image(systemName: "chevron.right") }
-                    .disabled(!store.canSelectNextDate)
-                Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) { store.selectToday() }
-                    .controlSize(.small)
-            }
-            Spacer(minLength: 8)
-            Picker(DashboardL10n.tr("dashboard.toolbar.cli_scope", "CLI Scope"), selection: $store.selectedCLI) {
-                ForEach(DashboardCLIFilter.allCases) { cli in
-                    Text(cli.shortLabel).tag(cli)
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Button { store.selectPreviousDate() } label: { Image(systemName: "chevron.left") }
+                        .disabled(!store.canSelectPreviousDate)
+                    Text(store.selectedDateString)
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
+                    Button { store.selectNextDate() } label: { Image(systemName: "chevron.right") }
+                        .disabled(!store.canSelectNextDate)
+                    Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) { store.selectToday() }
+                        .controlSize(.small)
                 }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 340)
-            Spacer(minLength: 8)
-            Button {
-                if reduceMotion {
-                    store.refreshFromProvider()
-                } else {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                        store.refreshFromProvider()
+                Spacer(minLength: 8)
+                Picker(DashboardL10n.tr("dashboard.toolbar.cli_scope", "CLI Scope"), selection: $store.selectedCLI) {
+                    ForEach(DashboardCLIFilter.allCases) { cli in
+                        Text(cli.shortLabel).tag(cli)
                     }
                 }
-            } label: {
-                Label(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"), systemImage: "arrow.clockwise")
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 320)
+                Spacer(minLength: 8)
+                if case let .populated(snapshot) = store.systemState {
+                    hardwareCompanionPill(snapshot: snapshot)
+                }
+                Button {
+                    if reduceMotion {
+                        store.refreshFromProvider()
+                    } else {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+                            store.refreshFromProvider()
+                        }
+                    }
+                } label: {
+                    Label(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"), systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .keyboardShortcut("r", modifiers: .command)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .keyboardShortcut("r", modifiers: .command)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .glassEffect(.regular, in: .rect(cornerRadius: 12))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func hardwareCompanionPill(snapshot: MenuBarSystemSnapshot) -> some View {
+        let cpuPct = Int((snapshot.cpu.usage * 100).rounded())
+        let memStr = MenuBarStatusView.compactMemoryPair(used: snapshot.memory.usedBytes, total: snapshot.memory.totalBytes)
+        let isWarn = snapshot.cpu.usage >= 0.75 || snapshot.memory.pressure != .normal
+        let tint: Color = isWarn ? .orange : .secondary
+        return Button {
+            store.selectedSection = .systemAndCosts
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "cpu").font(.caption2).foregroundStyle(tint)
+                Text("CPU \(cpuPct)% · \(memStr)")
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.75), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(
+            DashboardL10n.format(
+                "dashboard.telemetry.load_avg_format",
+                "Load %.1f / %.1f / %.1f",
+                snapshot.cpu.loadOneMinute,
+                snapshot.cpu.loadFiveMinutes,
+                snapshot.cpu.loadFifteenMinutes
+            )
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-        }
     }
 
     private var sidebarContent: some View {
@@ -415,21 +471,22 @@ public struct AIDashMacWorkspaceView: View {
     private func workspaceDetailContent(snapshot: MenuBarSystemSnapshot) -> some View {
         switch store.selectedSection {
         case .overview:
-            SystemTelemetryStripView(snapshot: snapshot)
-            KPISummaryCardView(metrics: store.effectiveKPIMetrics)
-            TrendChartCardView(
-                points: store.filteredTrendPoints,
-                selectedCategory: store.selectedChartCategory,
-                onSelectCategory: { store.toggleChartCategory($0) },
-                onClearSelection: { store.clearChartSelection() }
-            )
+            // Axis Y Cap: Strictly 3 Visual Container Groups (Overview -> Zoom & Filter -> Details-on-Demand Lens)
+            KPISummaryCardView(metrics: store.effectiveKPIMetrics) { metricID in
+                switch metricID {
+                case "kpi-invocations", "kpi-efficiency": activeOverviewLens = .rankings
+                case "kpi-actions": activeOverviewLens = .actionItems
+                default: activeOverviewLens = .trends
+                }
+            }
             CLICostQuotaCardView(
                 entries: store.filteredCLIEntries,
                 todayTotalUSD: store.todayTotalCostUSD,
-                periodTotalUSD: store.periodTotalCostUSD
+                periodTotalUSD: store.periodTotalCostUSD,
+                selectedCategory: store.selectedChartCategory,
+                onSelectCategory: { store.toggleChartCategory($0) }
             )
-            ActionItemsCardView(store: store, onToggleDone: onToggleDone)
-            RankingTableCardView(store: store)
+            overviewWorkbenchLensSection
         case .agentEfficiency:
             KPISummaryCardView(metrics: store.effectiveKPIMetrics)
             TrendChartCardView(
@@ -447,17 +504,65 @@ public struct AIDashMacWorkspaceView: View {
             CLICostQuotaCardView(
                 entries: store.filteredCLIEntries,
                 todayTotalUSD: store.todayTotalCostUSD,
-                periodTotalUSD: store.periodTotalCostUSD
+                periodTotalUSD: store.periodTotalCostUSD,
+                selectedCategory: store.selectedChartCategory,
+                onSelectCategory: { store.toggleChartCategory($0) }
             )
             TrendChartCardView(
                 points: store.filteredTrendPoints,
                 selectedCategory: store.selectedChartCategory,
                 onSelectCategory: { store.toggleChartCategory($0) },
-                onClearSelection: { store.clearChartSelection() }
+                onClearSelection: { store.clearChartSelection() },
+                showInlineCrossFilterPills: false
             )
         case .settings:
             DashboardSettingsPageView(store: store)
         }
+    }
+
+    private var overviewWorkbenchLensSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Label(
+                    DashboardL10n.tr("dashboard.lens.section_title", "Analytical & Execution Workbench"),
+                    systemImage: "rectangle.3.group"
+                )
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Picker(DashboardL10n.tr("dashboard.lens.picker_label", "Workbench Lens"), selection: $activeOverviewLens) {
+                    ForEach(OverviewWorkbenchLens.allCases) { lens in
+                        Text(lensTitleWithBadge(lens)).tag(lens)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 380)
+            }
+            .padding(.horizontal, 4)
+
+            switch activeOverviewLens {
+            case .trends:
+                TrendChartCardView(
+                    points: store.filteredTrendPoints,
+                    selectedCategory: store.selectedChartCategory,
+                    onSelectCategory: { store.toggleChartCategory($0) },
+                    onClearSelection: { store.clearChartSelection() },
+                    showInlineCrossFilterPills: false
+                )
+            case .rankings:
+                RankingTableCardView(store: store)
+            case .actionItems:
+                ActionItemsCardView(store: store, onToggleDone: onToggleDone)
+            }
+        }
+    }
+
+    private func lensTitleWithBadge(_ lens: OverviewWorkbenchLens) -> String {
+        if lens == .actionItems && store.pendingActionCount > 0 {
+            return "\(lens.title) (\(store.pendingActionCount))"
+        }
+        return lens.title
     }
 }
 #endif

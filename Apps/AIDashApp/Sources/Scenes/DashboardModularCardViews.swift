@@ -163,9 +163,11 @@ public struct SystemTelemetryStripView: View {
 
 public struct KPISummaryCardView: View {
     public let metrics: [KPIMetricItem]
+    public var onSelectMetric: ((String) -> Void)?
 
-    public init(metrics: [KPIMetricItem]) {
+    public init(metrics: [KPIMetricItem], onSelectMetric: ((String) -> Void)? = nil) {
         self.metrics = metrics
+        self.onSelectMetric = onSelectMetric
     }
 
     public var body: some View {
@@ -182,24 +184,30 @@ public struct KPISummaryCardView: View {
 
     private func metricTile(_ metric: KPIMetricItem) -> some View {
         let semanticColor = DashboardSemanticColorPalette.color(for: metric.health)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text(metric.label).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 4)
-                Image(systemName: metric.symbolName).foregroundStyle(semanticColor).accessibilityHidden(true)
+        return Button {
+            onSelectMetric?(metric.id)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(metric.label).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Image(systemName: metric.symbolName).foregroundStyle(semanticColor).accessibilityHidden(true)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(metric.formattedValue).font(.system(.title, design: .rounded, weight: .semibold)).monospacedDigit().contentTransition(.numericText())
+                    if let unit = metric.unit { Text(unit).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: metric.direction.symbolName).font(.caption2.weight(.bold)).foregroundStyle(semanticColor)
+                    Text(metric.deltaText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(metric.formattedValue).font(.system(.title, design: .rounded, weight: .semibold)).monospacedDigit().contentTransition(.numericText())
-                if let unit = metric.unit { Text(unit).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
-            }
-            HStack(spacing: 4) {
-                Image(systemName: metric.direction.symbolName).font(.caption2.weight(.bold)).foregroundStyle(semanticColor)
-                Text(metric.deltaText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
-            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+            .contentShape(Rectangle())
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
     }
 }
@@ -209,18 +217,17 @@ public struct TrendChartCardView: View {
     public let selectedCategory: String?
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
+    public var showInlineCrossFilterPills: Bool
     @State private var timeGranularity: DashboardChartTimeGranularity = MenuBarDisplayPreferences.shared.defaultChartGranularity
 
     public init(
-        points: [TrendDataPoint],
-        selectedCategory: String?,
-        onSelectCategory: @escaping (String) -> Void,
-        onClearSelection: @escaping () -> Void
+        points: [TrendDataPoint], selectedCategory: String?,
+        onSelectCategory: @escaping (String) -> Void, onClearSelection: @escaping () -> Void,
+        showInlineCrossFilterPills: Bool = true
     ) {
-        self.points = points
-        self.selectedCategory = selectedCategory
-        self.onSelectCategory = onSelectCategory
-        self.onClearSelection = onClearSelection
+        self.points = points; self.selectedCategory = selectedCategory
+        self.onSelectCategory = onSelectCategory; self.onClearSelection = onClearSelection
+        self.showInlineCrossFilterPills = showInlineCrossFilterPills
     }
 
     public var body: some View {
@@ -243,53 +250,36 @@ public struct TrendChartCardView: View {
                 }
 
                 if let selectedCategory {
-                    Button {
-                        onClearSelection()
-                    } label: {
-                        Label(
-                            DashboardL10n.format("dashboard.chart.clear_filter_format", "Filter: %@ ×", selectedCategory),
-                            systemImage: "line.3.horizontal.decrease.circle.fill"
-                        )
+                    Button { onClearSelection() } label: {
+                        Label(DashboardL10n.format("dashboard.chart.clear_filter_format", "Filter: %@ ×", selectedCategory), systemImage: "line.3.horizontal.decrease.circle.fill")
                             .font(.caption.weight(.medium))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .frame(minHeight: 28)
+                    .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
                 }
             }
         } content: {
             let categoryTotals = Self.groupedCategoryTotals(from: activePoints, kind: .all)
             VStack(alignment: .leading, spacing: 10) {
                 TrendChartInteractiveCanvas(
-                    rawPoints: points,
-                    activePoints: activePoints,
-                    dailySegments: dailySegments,
-                    selectedCategory: selectedCategory,
-                    timeGranularity: timeGranularity
+                    rawPoints: points, activePoints: activePoints,
+                    dailySegments: dailySegments, selectedCategory: selectedCategory, timeGranularity: timeGranularity
                 )
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        ForEach(categoryTotals, id: \.category) { item in
-                            let active = selectedCategory == item.category
-                            Button {
-                                onSelectCategory(item.category)
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: active ? "checkmark.circle.fill" : "circle")
-                                    Text(item.category)
-                                    Text("\(DashboardTokenFormatter.compact(item.tokens)) tok")
-                                        .monospacedDigit()
+                if showInlineCrossFilterPills {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:")).font(.caption).foregroundStyle(.secondary)
+                            ForEach(categoryTotals, id: \.category) { item in
+                                let active = selectedCategory == item.category
+                                Button { onSelectCategory(item.category) } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: active ? "checkmark.circle.fill" : "circle")
+                                        Text(item.category)
+                                        Text("\(DashboardTokenFormatter.compact(item.tokens)) tok").monospacedDigit()
+                                    }
+                                    .font(.caption)
                                 }
-                                .font(.caption)
+                                .buttonStyle(.bordered).tint(active ? .accentColor : .secondary).controlSize(.small).frame(minHeight: 28)
                             }
-                            .buttonStyle(.bordered)
-                            .tint(active ? .accentColor : .secondary)
-                            .controlSize(.small)
-                            .frame(minHeight: 28)
                         }
                     }
                 }
@@ -452,15 +442,15 @@ public struct CLICostQuotaCardView: View {
     public let entries: [CLICostQuotaEntry]
     public let todayTotalUSD: Double
     public let periodTotalUSD: Double
+    public var selectedCategory: String?
+    public var onSelectCategory: ((String) -> Void)?
 
     public init(
-        entries: [CLICostQuotaEntry],
-        todayTotalUSD: Double,
-        periodTotalUSD: Double
+        entries: [CLICostQuotaEntry], todayTotalUSD: Double, periodTotalUSD: Double,
+        selectedCategory: String? = nil, onSelectCategory: ((String) -> Void)? = nil
     ) {
-        self.entries = entries
-        self.todayTotalUSD = todayTotalUSD
-        self.periodTotalUSD = periodTotalUSD
+        self.entries = entries; self.todayTotalUSD = todayTotalUSD; self.periodTotalUSD = periodTotalUSD
+        self.selectedCategory = selectedCategory; self.onSelectCategory = onSelectCategory
     }
 
     public var body: some View {
@@ -565,23 +555,38 @@ public struct CLICostQuotaCardView: View {
         let todayCompact = DashboardTokenFormatter.compact(entry.totalTokens)
         let periodCompact = DashboardTokenFormatter.compact(entry.periodTotalTokens)
         let cachePct = Int((entry.cacheHitFraction * 100).rounded())
+        let isSelected = selectedCategory == entry.displayName || selectedCategory == entry.cliFilter.rawValue
         let tailText = entry.cacheTokens > 0
             ? "7d \(periodCompact) · Cache \(cachePct)%"
             : "7d \(periodCompact) · \(entry.interactionCount) calls"
 
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(entry.displayName).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 2)
-                if isTopVolume { Image(systemName: "flame.fill").font(.caption2).foregroundStyle(Color.accentColor) }
+        return Button {
+            onSelectCategory?(entry.displayName)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
+                    Text(entry.displayName).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 2)
+                    if isSelected {
+                        Image(systemName: "line.3.horizontal.decrease.circle.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                    } else if isTopVolume {
+                        Image(systemName: "flame.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                    }
+                }
+                Text(todayCompact)
+                    .font(.system(.title2, design: .monospaced, weight: .bold))
+                    .foregroundStyle(isTopVolume || isSelected ? Color.accentColor : Color.primary).contentTransition(.numericText())
+                Text(tailText).font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
             }
-            Text(todayCompact)
-                .font(.system(.title2, design: .monospaced, weight: .bold))
-                .foregroundStyle(isTopVolume ? Color.accentColor : Color.primary).contentTransition(.numericText())
-            Text(tailText).font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            }
+            .contentShape(Rectangle())
         }
-        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .buttonStyle(.plain)
         .help("\(entry.displayName) (\(entry.modelTag)) — Today \(todayCompact) tok (Active \(DashboardTokenFormatter.compact(entry.activeTokens)) · Cache \(DashboardTokenFormatter.compact(entry.cacheTokens))) · 7d \(periodCompact) tok")
         .accessibilityElement(children: .combine)
     }
