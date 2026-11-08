@@ -341,30 +341,24 @@ private struct TrendChartInteractiveCanvas: View {
     }
 
     private func hoverOverlayBadge(summary: TrendBucketHoverSummary) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "chart.bar.doc.horizontal.fill")
-                .font(.caption)
-                .foregroundStyle(Color.accentColor)
-            Text(summary.formattedReadout)
-                .font(.caption.weight(.medium))
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            Text(DashboardL10n.format("dashboard.chart.hover_calls_format", "%lld calls", summary.invocations))
-                .font(.caption2.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Image(systemName: "chart.bar.doc.horizontal.fill").font(.caption).foregroundStyle(Color.accentColor)
+                Text(summary.bucketLabel).font(.caption.weight(.bold)).monospacedDigit()
+                Text(DashboardL10n.format("dashboard.chart.hover_total_calls_format", "Total %@ · %lld calls", DashboardTokenFormatter.compact(summary.totalTokens), summary.invocations))
+                    .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(Color.accentColor)
+                Text("·").foregroundStyle(.secondary)
+                Text(DashboardL10n.format("dashboard.chart.hover_io_cache_format", "In %@ · Out %@ · Cache %@", DashboardTokenFormatter.compact(summary.inputTokens), DashboardTokenFormatter.compact(summary.outputTokens), DashboardTokenFormatter.compact(summary.cacheTokens)))
+                    .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.primary)
+            }
+            if !summary.cliShares.isEmpty {
+                Text(summary.cliShares.map { "\($0.cli.shortLabel) \(DashboardTokenFormatter.compact($0.tokens))" }.joined(separator: " · "))
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.95))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor).opacity(0.95)))
+        .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
     }
 
     private var hourlyTrendChart: some View {
