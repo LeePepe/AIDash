@@ -35,7 +35,7 @@ public struct MenuBarStatusView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var completedActionIDs: Set<String> = []
     @State private var copiedActionID: String?
-    @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayDaily
+    @State private var timeGranularity: DashboardChartTimeGranularity = MenuBarDisplayPreferences.shared.defaultChartGranularity
 
     public init(
         state: MenuBarStatusViewState,
@@ -83,10 +83,11 @@ public struct MenuBarStatusView: View {
         let todayTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.totalTokens }
         let periodTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.periodTotalTokens }
         let pendingActions = Array(DashboardWorkspaceStore.deriveActionItems(from: snapshot, cliEntries: cliEntries).filter { !$0.isCompleted }.prefix(3))
+        let prefs = MenuBarDisplayPreferences.shared
         return VStack(alignment: .leading, spacing: 12) {
-            telemetryGaugeStrip(snapshot)
+            if prefs.showPopoverSystemTelemetry { telemetryGaugeStrip(snapshot) }
             cliTokenAndQuotaSection(entries: cliEntries, trendPoints: trendPoints, todayTotal: todayTotal, periodTotal: periodTotal)
-            topActionsSection(items: pendingActions)
+            if prefs.showPopoverActionItems { topActionsSection(items: pendingActions) }
         }
     }
 
@@ -267,23 +268,27 @@ public struct MenuBarStatusView: View {
             Button { perform(.openBriefing) } label: {
                 Label(Copy.openBriefing, systemImage: "macwindow").font(.caption.weight(.semibold))
             }
-            .buttonStyle(.glassProminent)
-            .controlSize(.small)
-            .frame(minHeight: 28)
+            .buttonStyle(.glassProminent).controlSize(.small).frame(minHeight: 28)
 
             Spacer(minLength: 4)
+
+            Button {
+                DashboardWorkspaceStore.shared.openDashboardWindow(section: .settings)
+                perform(.openBriefing)
+            } label: {
+                Image(systemName: "gearshape").frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless).accessibilityLabel(DashboardL10n.tr("dashboard.section.settings", "Settings"))
 
             Button { perform(.showAbout) } label: {
                 Image(systemName: "info.circle").frame(width: 28, height: 28)
             }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(Copy.about)
+            .buttonStyle(.borderless).accessibilityLabel(Copy.about)
 
             Button(role: .destructive) { perform(.quit) } label: {
                 Image(systemName: "power").frame(width: 28, height: 28)
             }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(Copy.quit)
+            .buttonStyle(.borderless).accessibilityLabel(Copy.quit)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Copy.actions)

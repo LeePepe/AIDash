@@ -4447,6 +4447,420 @@
         }
       }
     },
+    "dashboard.section.settings": {
+      "comment": "Sidebar section title for Settings.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置"
+          }
+        }
+      }
+    },
+    "settings.menubar.card_title": {
+      "comment": "Title of the MenuBar status bar display configuration card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MenuBar Status Bar Display"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MenuBar 顶栏显示内容"
+          }
+        }
+      }
+    },
+    "settings.menubar.card_subtitle": {
+      "comment": "Subtitle of the MenuBar status bar display configuration card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the live metric shown next to the AIDash icon in the macOS top menu bar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择 macOS 屏幕右上角状态栏图标旁实时展示的数据指标"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.today_tokens": {
+      "comment": "Option title for Today Token Total in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today Token Total"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日 Token 总量"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.today_tokens_desc": {
+      "comment": "Description for Today Token Total in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today total tokens across all CLIs (Input + Output + Cache)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日全渠道累计 Token 总量（含输入 + 输出 + 缓存）"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.7d_tokens": {
+      "comment": "Option title for 7-Day Token Total in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7-Day Token Total"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7日 Token 总量"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.7d_tokens_desc": {
+      "comment": "Description for 7-Day Token Total in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rolling 7-day cumulative token volume"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "近 7 天全渠道滚动累计 Token 总量"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.cpu": {
+      "comment": "Option title for CPU Usage in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU Usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU 占用率"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.cpu_desc": {
+      "comment": "Description for CPU Usage in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Real-time system CPU utilization percentage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机实时 CPU 总体占用百分比"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.memory": {
+      "comment": "Option title for Memory Usage in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory Usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内存占用"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.memory_desc": {
+      "comment": "Description for Memory Usage in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used / total physical memory in GB"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已用内存 / 总物理内存容量 (GB)"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.storage": {
+      "comment": "Option title for Available Disk Space in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available Disk Space"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁盘可用空间"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.storage_desc": {
+      "comment": "Description for Available Disk Space in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free space remaining on system volume"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统主磁盘剩余可用空间"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.cpu_memory": {
+      "comment": "Option title for combined CPU and Memory in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU + Memory"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU + 内存"
+          }
+        }
+      }
+    },
+    "settings.menubar.metric.cpu_memory_desc": {
+      "comment": "Description for combined CPU and Memory in MenuBar status bar.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Combined CPU percentage and memory usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同时展示 CPU 占用百分比与物理内存占用"
+          }
+        }
+      }
+    },
+    "settings.popover.card_title": {
+      "comment": "Title of the MenuBar popover layout configuration card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MenuBar Popover Layout & Defaults"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MenuBar 弹窗模块与默认视图"
+          }
+        }
+      }
+    },
+    "settings.popover.card_subtitle": {
+      "comment": "Subtitle of the MenuBar popover layout configuration card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure which sections appear inside the 360pt menu bar popover"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "控制点开菜单栏弹窗时展示的功能板块与默认时间粒度"
+          }
+        }
+      }
+    },
+    "settings.popover.show_telemetry": {
+      "comment": "Toggle label to show system telemetry strip in MenuBar popover.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show System Telemetry Strip (CPU / Memory / Storage)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在弹窗中显示「本机实时状态（CPU / 内存 / 磁盘）」"
+          }
+        }
+      }
+    },
+    "settings.popover.show_telemetry_desc": {
+      "comment": "Description for system telemetry strip toggle.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Display the three real-time hardware capacity gauges at the top of the popover"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在菜单栏弹窗顶部显示 CPU、内存和磁盘三个实时容量指示器"
+          }
+        }
+      }
+    },
+    "settings.popover.show_actions": {
+      "comment": "Toggle label to show top actionable items in MenuBar popover.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Top Actionable Items Section"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在弹窗中显示「待推进事项」"
+          }
+        }
+      }
+    },
+    "settings.popover.show_actions_desc": {
+      "comment": "Description for top actionable items toggle.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Display pending workflow blockers and improvement proposals at the bottom of the popover"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当存在未完成的阻塞任务或改进提案时，在弹窗底部展示快捷操作"
+          }
+        }
+      }
+    },
+    "settings.popover.default_granularity": {
+      "comment": "Picker label for default chart time granularity in MenuBar popover.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default Chart Time Granularity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图表默认时间粒度"
+          }
+        }
+      }
+    },
+    "settings.popover.default_granularity_desc": {
+      "comment": "Description for default chart time granularity picker.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default time window when opening the MenuBar token trend chart"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点开菜单栏弹窗时，Token 趋势图默认选中的时间维度"
+          }
+        }
+      }
+    },
     "dashboard.chart.hover_calls_format": {
       "comment": "Hovered chart bucket invocation call count.",
       "extractionState": "manual",

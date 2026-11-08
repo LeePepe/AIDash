@@ -310,7 +310,9 @@ public struct AIDashMacWorkspaceView: View {
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    workspaceTopControlBar
+                    if store.selectedSection != .settings {
+                        workspaceTopControlBar
+                    }
                     if case let .populated(snapshot) = store.systemState {
                         workspaceDetailContent(snapshot: snapshot)
                     }
@@ -404,7 +406,7 @@ public struct AIDashMacWorkspaceView: View {
             return store.pendingActionCount
         case .systemAndCosts:
             return store.highestQuotaWarningCount
-        case .agentEfficiency:
+        case .agentEfficiency, .settings:
             return 0
         }
     }
@@ -453,6 +455,8 @@ public struct AIDashMacWorkspaceView: View {
                 onSelectCategory: { store.toggleChartCategory($0) },
                 onClearSelection: { store.clearChartSelection() }
             )
+        case .settings:
+            DashboardSettingsPageView(store: store)
         }
     }
 }
