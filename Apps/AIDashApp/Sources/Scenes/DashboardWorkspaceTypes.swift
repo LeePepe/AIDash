@@ -35,6 +35,7 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
     case agentEfficiency
     case actionItems
     case systemAndCosts
+    case settings
 
     public var id: String { rawValue }
 
@@ -48,6 +49,8 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
             return DashboardL10n.tr("dashboard.section.action_items", "Actionable Items")
         case .systemAndCosts:
             return DashboardL10n.tr("dashboard.section.system_costs", "System & CLI Costs")
+        case .settings:
+            return DashboardL10n.tr("dashboard.section.settings", "Settings")
         }
     }
 
@@ -57,6 +60,7 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
         case .agentEfficiency: return "waveform.path.ecg"
         case .actionItems: return "checklist"
         case .systemAndCosts: return "creditcard.and.123"
+        case .settings: return "gearshape"
         }
     }
 }
