@@ -30,15 +30,17 @@ public struct SolidModularCardContainer<HeaderAccessory: View, Content: View>: V
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Label(title, systemImage: symbolName)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(title, systemImage: symbolName)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 accessory
@@ -287,8 +289,7 @@ public struct TrendChartCardView: View {
     public let selectedCategory: String?
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
-    @State private var tokenKindFilter: DashboardTokenKindFilter = .all
-    @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayHourly
+    @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayDaily
 
     public init(
         points: [TrendDataPoint],
@@ -304,6 +305,7 @@ public struct TrendChartCardView: View {
 
     public var body: some View {
         let activePoints = TrendDataPoint.points(from: points, granularity: timeGranularity)
+        let dailySegments = TrendDataPoint.dailyKindBarSegments(from: points)
         return SolidModularCardContainer(
             title: DashboardL10n.tr("dashboard.card.trend.title", "Agent Invocations & Spend by CLI"),
             subtitle: DashboardL10n.tr("dashboard.card.trend.subtitle", "Click any bar to cross-filter tables and actionable items below"),
@@ -316,15 +318,8 @@ public struct TrendChartCardView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 220)
-
-                Picker(DashboardL10n.tr("dashboard.token_kind.picker_label", "Token Type"), selection: $tokenKindFilter) {
-                    ForEach(DashboardTokenKindFilter.allCases) { kind in
-                        Text(kind.displayTitle).tag(kind)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 210)
+                .labelsHidden()
+                .frame(width: 190)
 
                 if let selectedCategory {
                     Button {
@@ -342,13 +337,13 @@ public struct TrendChartCardView: View {
                 }
             }
         } content: {
-            let categoryTotals = Self.groupedCategoryTotals(from: activePoints, kind: tokenKindFilter)
+            let categoryTotals = Self.groupedCategoryTotals(from: activePoints, kind: .all)
             VStack(alignment: .leading, spacing: 12) {
-                if timeGranularity != .sevenDayDaily, activePoints.contains(where: { $0.bucketDate != nil }) {
+                if timeGranularity == .threeDayHourly, activePoints.contains(where: { $0.bucketDate != nil }) {
                     Chart(activePoints) { point in
                         if let date = point.bucketDate {
                             let isSelected = selectedCategory == nil || selectedCategory == point.category
-                            let tokenMillions = Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0
+                            let tokenMillions = Double(point.totalTokens) / 1_000_000.0
                             AreaMark(
                                 x: .value("Time", date),
                                 y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
@@ -367,46 +362,49 @@ public struct TrendChartCardView: View {
                             .interpolationMethod(.monotone)
                         }
                     }
-                    .frame(height: 195)
+                    .frame(height: 210)
                     .chartLegend(position: .bottom, alignment: .leading)
                     .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
                 } else {
-                    Chart(activePoints) { point in
-                        let isSelected = selectedCategory == nil || selectedCategory == point.category
-                        let tokenMillions = Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0
+                    Chart(dailySegments) { seg in
+                        let isSelected = selectedCategory == nil || selectedCategory == seg.category
                         BarMark(
-                            x: .value("Date", point.bucketLabel),
-                            y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
+                            x: .value("Date", seg.bucketLabel),
+                            y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), seg.tokenMillions)
                         )
-                        .foregroundStyle(by: .value("CLI", point.category))
+                        .position(by: .value("Kind", seg.kindTitle))
+                        .foregroundStyle(by: .value("CLI", seg.category))
                         .opacity(isSelected ? 1.0 : 0.30)
                     }
-                    .frame(height: 195)
+                    .chartYScale(type: .symmetricLog(slopeAtZero: 0.1))
+                    .frame(height: 210)
                     .chartLegend(position: .bottom, alignment: .leading)
                     .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
                 }
 
-                HStack(spacing: 8) {
-                    Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ForEach(categoryTotals, id: \.category) { item in
-                        let active = selectedCategory == item.category
-                        Button {
-                            onSelectCategory(item.category)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: active ? "checkmark.circle.fill" : "circle")
-                                Text(item.category)
-                                Text("\(DashboardTokenFormatter.compact(item.tokens)) tok")
-                                    .monospacedDigit()
-                            }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:"))
                             .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(categoryTotals, id: \.category) { item in
+                            let active = selectedCategory == item.category
+                            Button {
+                                onSelectCategory(item.category)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: active ? "checkmark.circle.fill" : "circle")
+                                    Text(item.category)
+                                    Text("\(DashboardTokenFormatter.compact(item.tokens)) tok")
+                                        .monospacedDigit()
+                                }
+                                .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(active ? .accentColor : .secondary)
+                            .controlSize(.small)
+                            .frame(minHeight: 28)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(active ? .accentColor : .secondary)
-                        .controlSize(.small)
-                        .frame(minHeight: 28)
                     }
                 }
             }
@@ -502,17 +500,21 @@ public struct CLICostQuotaCardView: View {
                         .monospacedDigit()
                         .contentTransition(.numericText())
                 }
-                Text("\(Int((entry.usedFraction * 100).rounded()))%")
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(tint)
-                    .frame(width: 40, alignment: .trailing)
+                if entry.quotaLabel != nil {
+                    Text("\(Int((entry.usedFraction * 100).rounded()))%")
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(tint)
+                        .frame(width: 40, alignment: .trailing)
+                }
             }
-            Gauge(value: entry.usedFraction, in: 0...1) {
-                Text(entry.displayName)
+            if entry.quotaLabel != nil {
+                Gauge(value: entry.usedFraction, in: 0...1) {
+                    Text(entry.displayName)
+                }
+                .gaugeStyle(.accessoryLinearCapacity)
+                .tint(tint)
             }
-            .gaugeStyle(.accessoryLinearCapacity)
-            .tint(tint)
             HStack(spacing: 12) {
                 Text(DashboardL10n.format("dashboard.cli_cost.total_tokens_format", "Today: %@ tok", todayCompact))
                 Text(DashboardL10n.format("dashboard.cli_cost.period_tokens_format", "7d: %@ tok", periodCompact))

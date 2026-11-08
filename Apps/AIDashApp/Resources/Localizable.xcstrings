@@ -973,6 +973,24 @@
         }
       }
     },
+    "dashboard.chart_time.3d_hourly": {
+      "comment": "3-day hourly time granularity option.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3d · Hourly"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3天·按小时"
+          }
+        }
+      }
+    },
     "dashboard.chart_time.7d_daily": {
       "comment": "7-day daily time granularity option.",
       "extractionState": "manual",

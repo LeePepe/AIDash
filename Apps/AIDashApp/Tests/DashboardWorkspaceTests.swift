@@ -361,9 +361,9 @@ struct DashboardWorkspaceTests {
                 cacheTokens: 350_000, bucketDate: Date(timeIntervalSince1970: 1_762_570_800)
             )
         ]
-        #expect(TrendDataPoint.points(from: hourlySample, granularity: .sevenDayHourly).count == 2)
-        #expect(TrendDataPoint.points(from: hourlySample, granularity: .twentyFourHourHourly).count == 2)
+        #expect(TrendDataPoint.points(from: hourlySample, granularity: .threeDayHourly).count == 2)
         #expect(TrendDataPoint.points(from: hourlySample, granularity: .sevenDayDaily).first?.totalTokens == 1_500_000)
+        #expect(TrendDataPoint.dailyKindBarSegments(from: hourlySample).count == 3)
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
         _ = ActionItemsCardView(store: store).body
     }

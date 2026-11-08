@@ -162,17 +162,15 @@ public struct KPIMetricItem: Codable, Sendable, Equatable, Identifiable {
 }
 
 public enum DashboardChartTimeGranularity: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
-    case sevenDayHourly = "7d_hourly"
-    case twentyFourHourHourly = "24h_hourly"
     case sevenDayDaily = "7d_daily"
+    case threeDayHourly = "3d_hourly"
 
     public var id: String { rawValue }
 
     public var displayTitle: String {
         switch self {
-        case .sevenDayHourly: return DashboardL10n.tr("dashboard.chart_time.7d_hourly", "7d · Hourly")
-        case .twentyFourHourHourly: return DashboardL10n.tr("dashboard.chart_time.24h_hourly", "24h · Hourly")
         case .sevenDayDaily: return DashboardL10n.tr("dashboard.chart_time.7d_daily", "7d · Daily")
+        case .threeDayHourly: return DashboardL10n.tr("dashboard.chart_time.3d_hourly", "3d · Hourly")
         }
     }
 }
@@ -192,6 +190,20 @@ public enum DashboardTokenKindFilter: String, CaseIterable, Codable, Sendable, E
         case .output: return DashboardL10n.tr("dashboard.token_kind.output", "Output")
         case .cache: return DashboardL10n.tr("dashboard.token_kind.cache", "Cache")
         }
+    }
+}
+
+public struct DailyKindBarSegment: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let bucketLabel: String
+    public let kind: DashboardTokenKindFilter
+    public let kindTitle: String
+    public let category: String
+    public let cliFilter: DashboardCLIFilter
+    public let tokens: UInt64
+
+    public var tokenMillions: Double {
+        Double(tokens) / 1_000_000.0
     }
 }
 
@@ -261,11 +273,9 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         let hasHourlyDates = raw.contains { $0.bucketDate != nil }
         guard hasHourlyDates else { return raw }
         switch granularity {
-        case .sevenDayHourly:
-            return raw.sorted { ($0.bucketDate ?? .distantPast) < ($1.bucketDate ?? .distantPast) }
-        case .twentyFourHourHourly:
+        case .threeDayHourly:
             let maxDate = raw.compactMap(\.bucketDate).max() ?? Date()
-            let cutoff = maxDate.addingTimeInterval(-24 * 3600)
+            let cutoff = maxDate.addingTimeInterval(-72 * 3600)
             return raw
                 .filter { ($0.bucketDate ?? .distantPast) >= cutoff }
                 .sorted { ($0.bucketDate ?? .distantPast) < ($1.bucketDate ?? .distantPast) }
@@ -311,6 +321,30 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
             }
             return result
         }
+    }
+
+    public static func dailyKindBarSegments(from raw: [TrendDataPoint]) -> [DailyKindBarSegment] {
+        let dailyPoints = points(from: raw, granularity: .sevenDayDaily)
+        var segments: [DailyKindBarSegment] = []
+        let kinds: [DashboardTokenKindFilter] = [.input, .output, .cache]
+        for pt in dailyPoints {
+            for kind in kinds {
+                let tok = pt.tokens(for: kind)
+                guard tok > 0 else { continue }
+                segments.append(
+                    DailyKindBarSegment(
+                        id: "seg-\(pt.bucketLabel)-\(kind.rawValue)-\(pt.cliFilter.rawValue)",
+                        bucketLabel: pt.bucketLabel,
+                        kind: kind,
+                        kindTitle: kind.displayTitle,
+                        category: pt.category,
+                        cliFilter: pt.cliFilter,
+                        tokens: tok
+                    )
+                )
+            }
+        }
+        return segments
     }
 }
 

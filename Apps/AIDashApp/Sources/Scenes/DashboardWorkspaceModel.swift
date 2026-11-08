@@ -180,12 +180,12 @@ public final class DashboardWorkspaceStore {
     private static func makeOrReuseDashboardWindow(store: DashboardWorkspaceStore) -> NSWindow {
         if let win = standaloneDashboardWindow { return win }
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 740),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 1160, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
         win.title = "AIDash"
-        win.minSize = NSSize(width: 880, height: 580)
+        win.minSize = NSSize(width: 920, height: 600)
         win.isReleasedWhenClosed = false
         win.center()
         win.contentView = NSHostingView(rootView: AIDashMacWorkspaceView(store: store))

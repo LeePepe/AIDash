@@ -309,7 +309,8 @@ public struct AIDashMacWorkspaceView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
+                    workspaceTopControlBar
                     if case let .populated(snapshot) = store.systemState {
                         workspaceDetailContent(snapshot: snapshot)
                     }
@@ -318,57 +319,56 @@ public struct AIDashMacWorkspaceView: View {
                 .frame(maxWidth: 1280, alignment: .leading)
             }
             .background(Color(nsColor: .underPageBackgroundColor))
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    HStack(spacing: 6) {
-                        Button {
-                            store.selectPreviousDate()
-                        } label: {
-                            Image(systemName: "chevron.left")
-                        }
-                        .disabled(!store.canSelectPreviousDate)
+        }
+    }
 
-                        Text(store.selectedDateString)
-                            .font(.subheadline.weight(.medium))
-                            .monospacedDigit()
-
-                        Button {
-                            store.selectNextDate()
-                        } label: {
-                            Image(systemName: "chevron.right")
-                        }
-                        .disabled(!store.canSelectNextDate)
-
-                        Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) {
-                            store.selectToday()
-                        }
-                        .controlSize(.small)
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    Picker(DashboardL10n.tr("dashboard.toolbar.cli_scope", "CLI Scope"), selection: $store.selectedCLI) {
-                        ForEach(DashboardCLIFilter.allCases) { cli in
-                            Text(cli.shortLabel).tag(cli)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 280)
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        if reduceMotion {
-                            store.refreshFromProvider()
-                        } else {
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                                store.refreshFromProvider()
-                            }
-                        }
-                    } label: {
-                        Label(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"), systemImage: "arrow.clockwise")
-                    }
-                    .keyboardShortcut("r", modifiers: .command)
+    private var workspaceTopControlBar: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Button { store.selectPreviousDate() } label: { Image(systemName: "chevron.left") }
+                    .disabled(!store.canSelectPreviousDate)
+                Text(store.selectedDateString)
+                    .font(.subheadline.weight(.medium))
+                    .monospacedDigit()
+                Button { store.selectNextDate() } label: { Image(systemName: "chevron.right") }
+                    .disabled(!store.canSelectNextDate)
+                Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) { store.selectToday() }
+                    .controlSize(.small)
+            }
+            Spacer(minLength: 8)
+            Picker(DashboardL10n.tr("dashboard.toolbar.cli_scope", "CLI Scope"), selection: $store.selectedCLI) {
+                ForEach(DashboardCLIFilter.allCases) { cli in
+                    Text(cli.shortLabel).tag(cli)
                 }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 340)
+            Spacer(minLength: 8)
+            Button {
+                if reduceMotion {
+                    store.refreshFromProvider()
+                } else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+                        store.refreshFromProvider()
+                    }
+                }
+            } label: {
+                Label(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"), systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .keyboardShortcut("r", modifiers: .command)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
         }
     }
 

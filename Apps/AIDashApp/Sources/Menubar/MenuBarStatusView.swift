@@ -35,8 +35,7 @@ public struct MenuBarStatusView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var completedActionIDs: Set<String> = []
     @State private var copiedActionID: String?
-    @State private var tokenKindFilter: DashboardTokenKindFilter = .all
-    @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayHourly
+    @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayDaily
 
     public init(
         state: MenuBarStatusViewState,
@@ -208,11 +207,7 @@ public struct MenuBarStatusView: View {
             $0.cliFilter == .claude || $0.cliFilter == .codex || $0.cliFilter == .kimi
         }
         let activePoints = TrendDataPoint.points(from: trendPoints, granularity: timeGranularity)
-        let todayPrefix = DashboardWorkspaceStore.todayDateString()
-        let filteredToday = trendPoints
-            .filter { $0.bucketLabel.hasPrefix(todayPrefix) }
-            .reduce(UInt64(0)) { $0 + $1.tokens(for: tokenKindFilter) }
-        let filteredPeriod = activePoints.reduce(UInt64(0)) { $0 + $1.tokens(for: tokenKindFilter) }
+        let dailySegments = TrendDataPoint.dailyKindBarSegments(from: trendPoints)
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(DashboardL10n.tr("menubar.pulse.cli_cost_quota", "CLI TOKEN & QUOTA MONITOR"))
@@ -223,8 +218,8 @@ public struct MenuBarStatusView: View {
                     DashboardL10n.format(
                         "menubar.pulse.today_tokens_format",
                         "Today %@ · 7d %@",
-                        DashboardTokenFormatter.compact(tokenKindFilter == .all ? todayTotal : filteredToday),
-                        DashboardTokenFormatter.compact(tokenKindFilter == .all && timeGranularity != .twentyFourHourHourly ? periodTotal : filteredPeriod)
+                        DashboardTokenFormatter.compact(todayTotal),
+                        DashboardTokenFormatter.compact(periodTotal)
                     )
                 )
                 .font(.caption.weight(.semibold))
@@ -241,16 +236,7 @@ public struct MenuBarStatusView: View {
                 .labelsHidden()
                 .controlSize(.small)
 
-                Picker(DashboardL10n.tr("dashboard.token_kind.picker_label", "Token Type"), selection: $tokenKindFilter) {
-                    ForEach(DashboardTokenKindFilter.allCases) { kind in
-                        Text(kind.displayTitle).tag(kind)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-
-                menuBarTokenChart(points: activePoints)
+                menuBarTokenChart(points: activePoints, dailySegments: dailySegments)
 
                 Divider()
 
@@ -267,11 +253,11 @@ public struct MenuBarStatusView: View {
     }
 
     @ViewBuilder
-    private func menuBarTokenChart(points: [TrendDataPoint]) -> some View {
-        if timeGranularity != .sevenDayDaily, points.contains(where: { $0.bucketDate != nil }) {
+    private func menuBarTokenChart(points: [TrendDataPoint], dailySegments: [DailyKindBarSegment]) -> some View {
+        if timeGranularity == .threeDayHourly, points.contains(where: { $0.bucketDate != nil }) {
             Chart(points) { point in
                 if let date = point.bucketDate {
-                    let valM = Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0
+                    let valM = Double(point.totalTokens) / 1_000_000.0
                     AreaMark(
                         x: .value("Time", date),
                         y: .value("Tokens (M)", valM)
@@ -290,17 +276,19 @@ public struct MenuBarStatusView: View {
                 }
             }
             .chartLegend(position: .bottom, alignment: .leading)
-            .frame(height: 112)
+            .frame(height: 118)
         } else {
-            Chart(points) { point in
+            Chart(dailySegments) { seg in
                 BarMark(
-                    x: .value("Date", point.bucketLabel),
-                    y: .value("Tokens (M)", Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0)
+                    x: .value("Date", seg.bucketLabel),
+                    y: .value("Tokens (M)", seg.tokenMillions)
                 )
-                .foregroundStyle(by: .value("CLI", point.category))
+                .position(by: .value("Kind", seg.kindTitle))
+                .foregroundStyle(by: .value("CLI", seg.category))
             }
+            .chartYScale(type: .symmetricLog(slopeAtZero: 0.1))
             .chartLegend(position: .bottom, alignment: .leading)
-            .frame(height: 112)
+            .frame(height: 118)
         }
     }
 
