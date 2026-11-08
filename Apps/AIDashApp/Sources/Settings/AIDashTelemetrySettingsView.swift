@@ -292,26 +292,6 @@ public struct DashboardSettingsPageView: View {
                     }
                 }
                 .toggleStyle(.switch)
-
-                Divider()
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(DashboardL10n.tr("settings.popover.default_granularity", "Default Chart Time Granularity"))
-                            .font(.subheadline.weight(.medium))
-                        Text(DashboardL10n.tr("settings.popover.default_granularity_desc", "Default time window when opening the MenuBar token trend chart"))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 12)
-                    Picker(DashboardL10n.tr("dashboard.chart_time.picker_label", "Time Granularity"), selection: $prefs.defaultChartGranularity) {
-                        ForEach(DashboardChartTimeGranularity.allCases) { gran in
-                            Text(gran.displayTitle).tag(gran)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 190)
-                }
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
