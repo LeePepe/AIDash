@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import AppKit
 import Foundation
 import Observation
@@ -267,6 +268,9 @@ public final class DashboardWorkspaceStore {
         if let cardId = updated.backingCardId, let itemRef = updated.backingItemRef {
             onToggleDone?(cardId, itemRef, updated.isCompleted)
         }
+        if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
+            LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
+        }
     }
 
     public var pendingActionCount: Int {
@@ -363,9 +367,33 @@ public final class DashboardWorkspaceStore {
         let totalRuns = rows.reduce(0) { $0 + $1.runs }
         let avgSuccess = rows.isEmpty ? 0.968 : rows.reduce(0.0) { $0 + $1.successRate } / Double(rows.count)
         let avgDuration = rows.isEmpty ? 12.4 : rows.reduce(0.0) { $0 + $1.avgDurationSeconds } / Double(rows.count)
-        let totalSpend = todayTotalCostUSD
         let pendingCount = filteredActionItems.filter { !$0.isCompleted }.count
         let pendingHealth: DashboardSemanticHealth = p0PendingCount > 0 ? .critical : (pendingCount > 0 ? .warning : .healthy)
+        let liveEff = LiveDashboardTelemetryReader.loadLiveEfficiencySummary()
+
+        let effDelta: String
+        let effHealth: DashboardSemanticHealth
+        if let liveEff, liveEff.reviewedTasksCount > 0 {
+            let r1PassPct = Int(((1.0 - liveEff.r1ReviewFailRate) * 100).rounded())
+            effDelta = "Review R1 Pass \(r1PassPct)% (\(liveEff.round3PlusCount) r3+) · P90 TTFT \(String(format: "%.1fs", liveEff.p90TTFTSeconds))"
+            effHealth = liveEff.r1ReviewFailRate > 0.15 ? .warning : (avgSuccess >= 0.95 ? .healthy : .warning)
+        } else {
+            effDelta = avgSuccess >= 0.95
+                ? DashboardL10n.tr("dashboard.kpi.efficiency.target_met", "Target >= 95% met")
+                : DashboardL10n.tr("dashboard.kpi.efficiency.below_target", "Below 95% target")
+            effHealth = avgSuccess >= 0.95 ? .healthy : .warning
+        }
+
+        let costDelta: String
+        if highestQuotaWarningCount > 0 {
+            costDelta = DashboardL10n.format("dashboard.kpi.cost.near_quota_format", "%lld CLI near quota", highestQuotaWarningCount)
+        } else if let liveEff, liveEff.cacheHitRate > 0 {
+            let cachePct = String(format: "%.1f%%", liveEff.cacheHitRate * 100)
+            let steerPct = String(format: "%.1f%%", liveEff.steeringTokenShare * 100)
+            costDelta = "Cache Hit \(cachePct) · Steering \(steerPct)"
+        } else {
+            costDelta = DashboardL10n.tr("dashboard.kpi.cost.within_budget", "Quota healthy")
+        }
 
         return [
             KPIMetricItem(
@@ -385,11 +413,9 @@ public final class DashboardWorkspaceStore {
                 label: DashboardL10n.tr("dashboard.kpi.efficiency.label", "Success & Latency"),
                 formattedValue: String(format: "%.1f%%", avgSuccess * 100),
                 unit: DashboardL10n.format("dashboard.kpi.efficiency.unit_format", "%.1fs avg", avgDuration),
-                deltaText: avgSuccess >= 0.95
-                    ? DashboardL10n.tr("dashboard.kpi.efficiency.target_met", "Target >= 95% met")
-                    : DashboardL10n.tr("dashboard.kpi.efficiency.below_target", "Below 95% target"),
-                direction: avgSuccess >= 0.95 ? .up : .down,
-                health: avgSuccess >= 0.95 ? .healthy : .warning,
+                deltaText: effDelta,
+                direction: effHealth == .healthy ? .up : .down,
+                health: effHealth,
                 symbolName: "waveform.path.ecg"
             ),
             KPIMetricItem(
@@ -397,9 +423,7 @@ public final class DashboardWorkspaceStore {
                 label: DashboardL10n.tr("dashboard.kpi.cost.label", "Today Total Tokens"),
                 formattedValue: DashboardTokenFormatter.compact(todayGrandTotalTokens),
                 unit: DashboardL10n.format("dashboard.kpi.tokens.period_unit_format", "7d %@", DashboardTokenFormatter.compact(periodGrandTotalTokens)),
-                deltaText: highestQuotaWarningCount > 0
-                    ? DashboardL10n.format("dashboard.kpi.cost.near_quota_format", "%lld CLI near quota", highestQuotaWarningCount)
-                    : DashboardL10n.tr("dashboard.kpi.cost.within_budget", "Quota healthy"),
+                deltaText: costDelta,
                 direction: highestQuotaWarningCount > 0 ? .up : .flat,
                 health: highestQuotaWarningCount > 0 ? .warning : .healthy,
                 symbolName: "sparkles"
@@ -543,6 +567,7 @@ extension DashboardWorkspaceStore {
                 priority: entry.health == .critical ? .p0 : .p1, isCompleted: false, command: "aidash schema list --quiet"
             ))
         }
+        result.append(contentsOf: LiveDashboardTelemetryReader.loadLiveImprovementActionItems())
         if result.isEmpty && !LiveDashboardTelemetryReader.isLiveEnvironment {
             result = [
                 DashboardActionItem(

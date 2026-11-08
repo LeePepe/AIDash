@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import Darwin
 import Foundation
 import SQLite3
@@ -572,6 +573,153 @@ extension LiveDashboardTelemetryReader {
             }
         }
         return rows.isEmpty ? DashboardWorkspaceStore.deriveRankingRows(from: fallbackEntries) : rows
+    }
+
+    public struct LiveEfficiencySummary: Sendable, Equatable {
+        public var r1ReviewFailRate: Double = 0
+        public var reviewedTasksCount: Int = 0
+        public var round3PlusCount: Int = 0
+        public var p90TTFTSeconds: Double = 0
+        public var cacheHitRate: Double = 0
+        public var steeringTokenShare: Double = 0
+    }
+
+    public static func loadLiveEfficiencySummary(homeURL: URL? = nil) -> LiveEfficiencySummary? {
+        guard isLiveEnvironment else { return nil }
+        let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        var summary = LiveEfficiencySummary()
+        populateWarehouseReviewSummary(&summary, whURL: home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db"))
+        populateMagpieEfficiencySummary(&summary, magpieURL: home.appendingPathComponent(".config/magpie/usage.jsonl"))
+        return summary
+    }
+
+    private static func populateWarehouseReviewSummary(_ summary: inout LiveEfficiencySummary, whURL: URL) {
+        guard let db = openReadOnlySQLite(path: whURL.path) else { return }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT COUNT(*), SUM(CASE WHEN r1_fail > 0 OR max_round >= 2 THEN 1 ELSE 0 END), SUM(CASE WHEN max_round >= 3 THEN 1 ELSE 0 END)
+        FROM (SELECT goal_id, task_id, MAX(round_no) as max_round, SUM(CASE WHEN round_no = 1 AND v5_verdict = 'FAIL' THEN 1 ELSE 0 END) as r1_fail
+              FROM fact_gtt_task_run WHERE role_name IN ('reviewer', 'code_reviewer', 'planner_reviewer') GROUP BY goal_id, task_id);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return }
+        let total = Int(max(sqlite3_column_int64(stmt, 0), 0))
+        let failed = Int(max(sqlite3_column_int64(stmt, 1), 0))
+        summary.reviewedTasksCount = total
+        summary.round3PlusCount = Int(max(sqlite3_column_int64(stmt, 2), 0))
+        if total > 0 { summary.r1ReviewFailRate = Double(failed) / Double(total) }
+    }
+
+    private static func populateMagpieEfficiencySummary(_ summary: inout LiveEfficiencySummary, magpieURL: URL) {
+        guard let text = try? String(contentsOf: magpieURL, encoding: .utf8) else { return }
+        var ttfts: [Int] = [], totalIn: UInt64 = 0, totalCR: UInt64 = 0, totalAll: UInt64 = 0, steeringAll: UInt64 = 0
+        for line in text.split(separator: "\n").suffix(2000) {
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            let inT = (obj["in"] as? NSNumber)?.uint64Value ?? 0
+            let outT = (obj["out"] as? NSNumber)?.uint64Value ?? 0
+            let crT = (obj["cache_read"] as? NSNumber)?.uint64Value ?? 0
+            let req = (obj["req"] as? String) ?? (obj["model"] as? String) ?? ""
+            let tok = inT + outT + crT
+            totalIn += inT; totalCR += crT; totalAll += tok
+            if req.contains("steering") { steeringAll += tok }
+            if let ttft = (obj["ttft_ms"] as? NSNumber)?.intValue, ttft > 0 { ttfts.append(ttft) }
+        }
+        if !ttfts.isEmpty {
+            ttfts.sort()
+            summary.p90TTFTSeconds = Double(ttfts[Int(Double(ttfts.count) * 0.9)]) / 1000.0
+        }
+        if (totalIn + totalCR) > 0 { summary.cacheHitRate = Double(totalCR) / Double(totalIn + totalCR) }
+        if totalAll > 0 { summary.steeringTokenShare = Double(steeringAll) / Double(totalAll) }
+    }
+
+    public static func loadLiveImprovementActionItems(homeURL: URL? = nil) -> [DashboardActionItem] {
+        guard isLiveEnvironment else { return [] }
+        let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let proposalsURL = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
+        let whURL = home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
+        return parsePendingProposals(fromURL: proposalsURL) + querySlowCIActionItems(whURL: whURL)
+    }
+
+    public static func parsePendingProposals(fromURL proposalsURL: URL) -> [DashboardActionItem] {
+        guard let text = try? String(contentsOf: proposalsURL, encoding: .utf8) else { return [] }
+        var byId: [String: [String: Any]] = [:], order: [String] = [], items: [DashboardActionItem] = []
+        for line in text.split(separator: "\n") {
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let pid = (obj["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !pid.isEmpty else { continue }
+            if byId[pid] == nil { order.append(pid) }
+            var merged = byId[pid] ?? [:]
+            for (k, v) in obj { merged[k] = v }
+            byId[pid] = merged
+        }
+        for pid in order {
+            guard let obj = byId[pid], ((obj["status"] as? String)?.lowercased() ?? "pending") == "pending",
+                  let title = obj["title"] as? String, !title.isEmpty else { continue }
+            let detail = (obj["detail"] as? String) ?? ""
+            let agent = (obj["agent"] as? String) ?? "retro-loop"
+            let rawPrio = ((obj["priority"] as? String) ?? "high").lowercased()
+            let prio: DashboardActionPriority = rawPrio == "high" ? .p0 : (rawPrio == "medium" ? .p1 : .p2)
+            let escaped = title.replacingOccurrences(of: "\"", with: "\\\"")
+            items.append(DashboardActionItem(
+                id: "proposal-\(pid)", title: title, summary: detail.isEmpty ? "Proposed by \(agent)" : detail,
+                sourceTag: agent, cliFilter: .all, priority: prio, isCompleted: false,
+                command: "python3 ~/Development/user-skills/skills/team-lead/scripts/linear-sync.py idea --title \"\(escaped)\" --mode auto",
+                backingCardId: "proposals", backingItemRef: "proposal://\(pid)"
+            ))
+        }
+        return items
+    }
+
+    private static func querySlowCIActionItems(whURL: URL) -> [DashboardActionItem] {
+        guard let db = openReadOnlySQLite(path: whURL.path) else { return [] }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT repo_key, job_name, COUNT(*), ROUND(AVG(exec_sec), 0), ROUND(AVG(queue_wait_sec), 0)
+        FROM fact_ci_job_run GROUP BY repo_key, job_name
+        HAVING COUNT(*) >= 3 AND (AVG(exec_sec) > 600 OR AVG(queue_wait_sec) > 120)
+        ORDER BY AVG(exec_sec) + AVG(queue_wait_sec) DESC LIMIT 4;
+        """
+        var stmt: OpaquePointer?, items: [DashboardActionItem] = []
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let repo = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+            let job = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            let runs = Int(sqlite3_column_int64(stmt, 2)), avgExec = Int(sqlite3_column_int64(stmt, 3)), avgWait = Int(sqlite3_column_int64(stmt, 4))
+            let execMin = String(format: "%.1fm", Double(avgExec) / 60.0), waitMin = String(format: "%.1fm", Double(avgWait) / 60.0)
+            let slug = "\(repo)-\(job)".replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: " ", with: "-")
+            let title = avgExec > 600 ? "CI 超 10m 保底线：\(repo) · \(job) 平均 \(execMin)" : "Runner 排队拥堵：\(repo) · \(job) 平均排队 \(waitMin)"
+            items.append(DashboardActionItem(
+                id: "ci-improve-\(slug)", title: title,
+                summary: "样本 \(runs) 次 · 平均执行 \(execMin) · 平均排队 \(waitMin)。建议启用编译缓存或合并单 Runner 并发 Job。",
+                sourceTag: "CI Improve", cliFilter: .all, priority: avgExec > 900 ? .p0 : .p1, isCompleted: false,
+                command: "python3 ~/Development/user-skills/skills/retro-loop/scripts/retro_story_engine.py discover"
+            ))
+        }
+        return items
+    }
+
+    public static func persistProposalStatus(item: DashboardActionItem, homeURL: URL? = nil) {
+        let pid = String(item.id.dropFirst("proposal-".count))
+        let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let proposalsURL = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
+        let record: [String: String] = [
+            "id": pid,
+            "ts": ISO8601DateFormatter().string(from: Date()),
+            "agent": item.sourceTag,
+            "title": item.title,
+            "detail": item.summary,
+            "status": item.isCompleted ? "dismissed" : "pending"
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: record),
+              let line = String(data: data, encoding: .utf8),
+              let handle = try? FileHandle(forWritingTo: proposalsURL) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data((line + "\n").utf8))
     }
 }
 #endif

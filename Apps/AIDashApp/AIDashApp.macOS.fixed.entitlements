@@ -8,6 +8,7 @@
     <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
     <array>
         <string>/Development/AIDash/aidata/</string>
+        <string>/Development/handoff/</string>
         <string>/.copilot/</string>
         <string>/.claude/</string>
         <string>/.codex/</string>

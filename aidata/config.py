@@ -39,7 +39,7 @@ AIDATA_SYNC_STORAGE_ACCOUNT = ""
 AIDATA_SYNC_CONTAINER = "telemetry-raw"
 AIDATA_SYNC_PREFIX = "aidata-sync/v1"
 GTT_RUNTIME_PROFILES_YAML = (
-    HOME / "Development" / "user-skills" / "skills" / "goal-task"
+    HOME / "Development" / "user-skills" / "skills" / "team-lead"
     / "references" / "runtime-profiles.yaml"
 )
 WORKTREES_ROOT = HOME / "Development" / "worktrees"

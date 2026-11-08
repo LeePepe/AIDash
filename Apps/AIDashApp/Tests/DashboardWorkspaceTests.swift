@@ -364,6 +364,16 @@ struct DashboardWorkspaceTests {
         #expect(TrendDataPoint.points(from: hourlySample, granularity: .threeDayHourly).count == 2)
         #expect(TrendDataPoint.points(from: hourlySample, granularity: .sevenDayDaily).first?.totalTokens == 1_500_000)
         #expect(TrendDataPoint.dailyKindBarSegments(from: hourlySample).count == 3)
+        let proposalsURL = tempDir.appendingPathComponent("proposals.jsonl")
+        let proposalsSample = """
+        {"id":"p1","ts":"2026-11-08T00:00:00Z","agent":"retro-loop","title":"Shrink Review Ping-Pong","detail":"R1 fail 55%","priority":"high","status":"pending"}
+        {"id":"p2","ts":"2026-11-08T00:00:00Z","agent":"retro-loop","title":"Old item","status":"dismissed"}
+        """
+        try proposalsSample.write(to: proposalsURL, atomically: true, encoding: .utf8)
+        let parsedProposals = LiveDashboardTelemetryReader.parsePendingProposals(fromURL: proposalsURL)
+        #expect(parsedProposals.count == 1)
+        #expect(parsedProposals.first?.id == "proposal-p1")
+        #expect(parsedProposals.first?.priority == .p0)
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
         _ = ActionItemsCardView(store: store).body
     }
