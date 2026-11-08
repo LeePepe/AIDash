@@ -559,7 +559,7 @@ extension LiveDashboardTelemetryReader {
                  WHEN client_name LIKE 'codex-tui%' THEN 'Codex TUI (Interactive)'
                  WHEN client_name LIKE 'codex_cli_rs%' THEN 'Codex CLI (Rust)'
                  WHEN client_name LIKE 'magpie-router%' THEN 'Magpie Router'
-                 WHEN client_name LIKE 'magpie%' THEN 'Copilot / Magpie Agent'
+                 WHEN client_name LIKE 'magpie%' THEN 'Copilot (Magpie Gateway)'
                  WHEN client_name LIKE 'claude%' THEN 'Claude Code Agent'
                  ELSE client_name END as role_group,
             CASE WHEN client_name LIKE 'codex%' THEN 'codex'
@@ -570,8 +570,12 @@ extension LiveDashboardTelemetryReader {
             SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
             AVG(latency_ms) / 1000.0,
             1.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
-        FROM requests WHERE date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)'
-        GROUP BY role_group, effective_model ORDER BY runs DESC LIMIT 10;
+        FROM requests
+        WHERE date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)'
+          AND COALESCE(NULLIF(resolved_model, ''), NULLIF(model, ''), '') NOT LIKE 'group/%'
+        GROUP BY role_group, effective_model
+        HAVING (SUM(COALESCE(input_tokens,0)) + SUM(COALESCE(output_tokens,0)) + SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0))) > 0
+        ORDER BY runs DESC LIMIT 10;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
@@ -613,36 +617,36 @@ extension LiveDashboardTelemetryReader {
         defer { sqlite3_close(db) }
         let sql = """
         SELECT
-            CASE WHEN model LIKE '%steering%' THEN 'Steering / TL Agent'
-                 WHEN model LIKE '%coding%' THEN 'Code Writer Agent'
-                 WHEN model LIKE '%reviewing%' THEN 'Code Reviewer Agent'
-                 ELSE 'Copilot CLI Session' END as role_group,
-            COALESCE(NULLIF(model, ''), 'default') as effective_model,
+            'Copilot CLI (Direct)' as role_group,
+            COALESCE(NULLIF(copilot_usage_model, ''), NULLIF(model, ''), 'default') as effective_model,
             COUNT(*) as runs,
-            SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-            AVG(COALESCE(duration_ms, 8500)) / 1000.0
-        FROM assistant_usage_events WHERE substr(created_at, 1, 10) = '\(safeDate)'
-        GROUP BY role_group, effective_model ORDER BY runs DESC LIMIT 8;
+            SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)) as total_tok,
+            AVG(COALESCE(duration_ms, 8500)) / 1000.0,
+            1.0 * SUM(CASE WHEN COALESCE(finish_reason, '') != 'error' THEN 1 ELSE 0 END) / COUNT(*)
+        FROM assistant_usage_events
+        WHERE substr(created_at, 1, 10) = '\(safeDate)'
+          AND COALESCE(NULLIF(copilot_usage_model, ''), NULLIF(model, ''), '') NOT LIKE 'group/%'
+        GROUP BY effective_model
+        HAVING total_tok > 0
+        ORDER BY runs DESC LIMIT 8;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
         defer { sqlite3_finalize(stmt) }
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Copilot CLI"
+            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Copilot CLI (Direct)"
             let model = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "default"
             let runs = Int(max(sqlite3_column_int64(stmt, 2), 0))
             let totalTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
             let avgSec = max(sqlite3_column_double(stmt, 4), 0.5)
+            let okRate = min(max(sqlite3_column_double(stmt, 5), 0), 1)
             guard runs > 0 else { continue }
-            if role == "Copilot CLI Session" && rows.contains(where: { $0.cliFilter == .copilot && $0.agentName.hasSuffix("· \(model)") }) {
-                continue
-            }
             let provider = DashboardCLIFilter.copilot.rawValue
             rows.append(
                 AgentRankingRow(
                     id: "copilot-session-\(role)-\(model)", agentName: "\(role) · \(model)",
                     cliFilter: .copilot, providerName: provider, runs: runs, totalTokens: totalTok,
-                    successRate: 0.992, avgDurationSeconds: avgSec, costUSD: 0,
+                    successRate: okRate, avgDurationSeconds: avgSec, costUSD: 0,
                     detailSummary: DashboardL10n.format(
                         "dashboard.ranking.total_detail_format", "%@ (%@) · Total %@ tok · %lld runs",
                         provider, model, DashboardTokenFormatter.compact(totalTok), runs
