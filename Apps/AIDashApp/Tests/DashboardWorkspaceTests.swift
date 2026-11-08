@@ -347,6 +347,23 @@ struct DashboardWorkspaceTests {
             #expect(firstPoint.tokens(for: .all) == firstPoint.totalTokens)
             #expect(firstPoint.tokens(for: .input) + firstPoint.tokens(for: .output) + firstPoint.tokens(for: .cache) == firstPoint.totalTokens)
         }
+        let hourlySample = [
+            TrendDataPoint(
+                id: "h1", bucketLabel: "2026-11-08 10:00", category: "Codex CLI",
+                cliFilter: .codex, invocations: 10, successRate: 1.0, costUSD: 0,
+                totalTokens: 1_000_000, inputTokens: 200_000, outputTokens: 100_000,
+                cacheTokens: 700_000, bucketDate: Date(timeIntervalSince1970: 1_762_567_200)
+            ),
+            TrendDataPoint(
+                id: "h2", bucketLabel: "2026-11-08 11:00", category: "Codex CLI",
+                cliFilter: .codex, invocations: 5, successRate: 1.0, costUSD: 0,
+                totalTokens: 500_000, inputTokens: 100_000, outputTokens: 50_000,
+                cacheTokens: 350_000, bucketDate: Date(timeIntervalSince1970: 1_762_570_800)
+            )
+        ]
+        #expect(TrendDataPoint.points(from: hourlySample, granularity: .sevenDayHourly).count == 2)
+        #expect(TrendDataPoint.points(from: hourlySample, granularity: .twentyFourHourHourly).count == 2)
+        #expect(TrendDataPoint.points(from: hourlySample, granularity: .sevenDayDaily).first?.totalTokens == 1_500_000)
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
         _ = ActionItemsCardView(store: store).body
     }

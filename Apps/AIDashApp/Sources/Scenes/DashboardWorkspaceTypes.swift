@@ -161,6 +161,22 @@ public struct KPIMetricItem: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public enum DashboardChartTimeGranularity: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
+    case sevenDayHourly = "7d_hourly"
+    case twentyFourHourHourly = "24h_hourly"
+    case sevenDayDaily = "7d_daily"
+
+    public var id: String { rawValue }
+
+    public var displayTitle: String {
+        switch self {
+        case .sevenDayHourly: return DashboardL10n.tr("dashboard.chart_time.7d_hourly", "7d · Hourly")
+        case .twentyFourHourHourly: return DashboardL10n.tr("dashboard.chart_time.24h_hourly", "24h · Hourly")
+        case .sevenDayDaily: return DashboardL10n.tr("dashboard.chart_time.7d_daily", "7d · Daily")
+        }
+    }
+}
+
 public enum DashboardTokenKindFilter: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
     case all
     case input
@@ -191,6 +207,7 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
     public let inputTokens: UInt64
     public let outputTokens: UInt64
     public let cacheTokens: UInt64
+    public let bucketDate: Date?
 
     public init(
         id: String,
@@ -203,7 +220,8 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         totalTokens: UInt64 = 0,
         inputTokens: UInt64 = 0,
         outputTokens: UInt64 = 0,
-        cacheTokens: UInt64 = 0
+        cacheTokens: UInt64 = 0,
+        bucketDate: Date? = nil
     ) {
         self.id = id
         self.bucketLabel = bucketLabel
@@ -216,6 +234,7 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.cacheTokens = cacheTokens
+        self.bucketDate = bucketDate
     }
 
     public func tokens(for kind: DashboardTokenKindFilter) -> UInt64 {
@@ -224,6 +243,73 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         case .input: return inputTokens
         case .output: return outputTokens
         case .cache: return cacheTokens
+        }
+    }
+
+    private struct DailyAggregate {
+        var inTok: UInt64 = 0
+        var outTok: UInt64 = 0
+        var cacheTok: UInt64 = 0
+        var runs: Int = 0
+        var total: UInt64 { inTok + outTok + cacheTok }
+    }
+
+    public static func points(
+        from raw: [TrendDataPoint],
+        granularity: DashboardChartTimeGranularity
+    ) -> [TrendDataPoint] {
+        let hasHourlyDates = raw.contains { $0.bucketDate != nil }
+        guard hasHourlyDates else { return raw }
+        switch granularity {
+        case .sevenDayHourly:
+            return raw.sorted { ($0.bucketDate ?? .distantPast) < ($1.bucketDate ?? .distantPast) }
+        case .twentyFourHourHourly:
+            let maxDate = raw.compactMap(\.bucketDate).max() ?? Date()
+            let cutoff = maxDate.addingTimeInterval(-24 * 3600)
+            return raw
+                .filter { ($0.bucketDate ?? .distantPast) >= cutoff }
+                .sorted { ($0.bucketDate ?? .distantPast) < ($1.bucketDate ?? .distantPast) }
+        case .sevenDayDaily:
+            var dayOrder: [String] = []
+            var grouped: [String: [DashboardCLIFilter: DailyAggregate]] = [:]
+            for pt in raw {
+                let dayKey = pt.bucketLabel.count >= 10
+                    ? String(pt.bucketLabel.prefix(10).suffix(5))
+                    : pt.bucketLabel
+                if grouped[dayKey] == nil { dayOrder.append(dayKey) }
+                var cliMap = grouped[dayKey, default: [:]]
+                let prev = cliMap[pt.cliFilter] ?? DailyAggregate()
+                cliMap[pt.cliFilter] = DailyAggregate(
+                    inTok: prev.inTok + pt.inputTokens,
+                    outTok: prev.outTok + pt.outputTokens,
+                    cacheTok: prev.cacheTok + pt.cacheTokens,
+                    runs: prev.runs + pt.invocations
+                )
+                grouped[dayKey] = cliMap
+            }
+            var result: [TrendDataPoint] = []
+            for day in dayOrder.sorted() {
+                guard let cliMap = grouped[day] else { continue }
+                for cli in [DashboardCLIFilter.copilot, .codex, .claude, .kimi] {
+                    guard let s = cliMap[cli], s.total > 0 else { continue }
+                    result.append(
+                        TrendDataPoint(
+                            id: "daily-\(day)-\(cli.rawValue)",
+                            bucketLabel: day,
+                            category: cli.rawValue,
+                            cliFilter: cli,
+                            invocations: s.runs,
+                            successRate: 0.99,
+                            costUSD: 0,
+                            totalTokens: s.total,
+                            inputTokens: s.inTok,
+                            outputTokens: s.outTok,
+                            cacheTokens: s.cacheTok
+                        )
+                    )
+                }
+            }
+            return result
         }
     }
 }

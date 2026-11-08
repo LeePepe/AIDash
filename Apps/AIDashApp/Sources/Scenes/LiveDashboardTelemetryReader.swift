@@ -145,30 +145,15 @@ public enum LiveDashboardTelemetryReader {
         return (entries, rankings, trends)
     }
 
-    private static func computeCostUSD(
-        input: UInt64,
-        output: UInt64,
-        cache: UInt64,
-        inRate: Double,
-        outRate: Double,
-        cacheRate: Double
-    ) -> Double {
-        let inCost = (Double(input) / 1_000_000.0) * inRate
-        let outCost = (Double(output) / 1_000_000.0) * outRate
-        let cacheCost = (Double(cache) / 1_000_000.0) * cacheRate
-        return inCost + outCost + cacheCost
+    private static func computeCostUSD(input: UInt64, output: UInt64, cache: UInt64, inRate: Double, outRate: Double, cacheRate: Double) -> Double {
+        (Double(input) / 1_000_000.0) * inRate + (Double(output) / 1_000_000.0) * outRate + (Double(cache) / 1_000_000.0) * cacheRate
     }
 
-    public static func readQuotas(
-        magpieQuotasURL: URL,
-        claudeFallbackURL: URL,
-        fallbackUsage: CLITokenUsageSnapshot
-    ) -> RealQuotaSnapshot {
+    public static func readQuotas(magpieQuotasURL: URL, claudeFallbackURL: URL, fallbackUsage: CLITokenUsageSnapshot) -> RealQuotaSnapshot {
         var claude7d: Double?
         var claude5h: Double?
         var cursorWeekly: Double?
         var grok7d: Double?
-
         if let data = try? Data(contentsOf: magpieQuotasURL),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for (key, val) in root {
@@ -183,16 +168,12 @@ public enum LiveDashboardTelemetryReader {
                 }
             }
         }
-
         if let fallbackClaude = readClaudeFallbackQuota(url: claudeFallbackURL, fallbackUsage: fallbackUsage) {
             claude7d = max(claude7d ?? 0, fallbackClaude)
         }
-
         return RealQuotaSnapshot(
-            claudeSevenDayUsedFraction: claude7d,
-            claudeFiveHourUsedFraction: claude5h,
-            cursorWeeklyUsedFraction: cursorWeekly,
-            grokSevenDayUsedFraction: grok7d
+            claudeSevenDayUsedFraction: claude7d, claudeFiveHourUsedFraction: claude5h,
+            cursorWeeklyUsedFraction: cursorWeekly, grokSevenDayUsedFraction: grok7d
         )
     }
 
@@ -368,6 +349,11 @@ extension LiveDashboardTelemetryReader {
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.timeZone = TimeZone.current
         fmt.dateFormat = "yyyy-MM-dd"
+        let hrFmt = DateFormatter()
+        hrFmt.calendar = fmt.calendar
+        hrFmt.locale = fmt.locale
+        hrFmt.timeZone = fmt.timeZone
+        hrFmt.dateFormat = "yyyy-MM-dd HH:00"
         let targetDate = fmt.date(from: dateString) ?? Date()
         let cutoffSec = targetDate.timeIntervalSince1970 - 6.0 * 86_400.0
         let endSec = targetDate.timeIntervalSince1970 + 86_400.0
@@ -397,13 +383,15 @@ extension LiveDashboardTelemetryReader {
                       let tsMs = (rec["time"] as? NSNumber)?.doubleValue else { continue }
                 let sec = tsMs / 1000.0
                 guard sec >= cutoffSec && sec <= endSec else { continue }
-                let dayStr = fmt.string(from: Date(timeIntervalSince1970: sec))
-                let prev = buckets[dayStr] ?? (0, 0)
-                buckets[dayStr] = (prev.tokens + tok, prev.runs + 1)
+                let hrStr = hrFmt.string(from: Date(timeIntervalSince1970: sec))
+                let prev = buckets[hrStr] ?? (0, 0)
+                buckets[hrStr] = (prev.tokens + tok, prev.runs + 1)
             }
         }
 
-        let dayStat = buckets[dateString] ?? (0, 0)
+        let dayStat = buckets.reduce((tokens: UInt64(0), runs: 0)) { acc, pair in
+            pair.key.hasPrefix(dateString) ? (acc.tokens + pair.value.tokens, acc.runs + pair.value.runs) : acc
+        }
         let weekTok = buckets.values.reduce(UInt64(0)) { $0 + $1.tokens }
         let isExhausted = latestExhaustedTs > 0 && latestExhaustedTs >= latestCompletedTs
         let quotaFraction = isExhausted ? 1.0 : min(Double(weekTok) / 6_200_000.0, 0.99)
@@ -428,52 +416,49 @@ extension LiveDashboardTelemetryReader {
     }
 
     static func querySevenDayTrends(
-        ravenURL: URL,
-        copilotURL: URL,
-        dateString: String,
-        kimiDailyBuckets: [String: (tokens: UInt64, runs: Int)] = [:],
-        fallbackEntries: [CLICostQuotaEntry]
+        ravenURL: URL, copilotURL: URL, dateString: String,
+        kimiDailyBuckets: [String: (tokens: UInt64, runs: Int)] = [:], fallbackEntries: [CLICostQuotaEntry]
     ) -> [TrendDataPoint] {
         let safeDate = sanitizeSQLToken(dateString)
-        var dailyMap: [String: [DashboardCLIFilter: DailyTokenBucket]] = [:]
-        for (day, stat) in kimiDailyBuckets where stat.tokens > 0 {
+        let hrFmt = DateFormatter()
+        hrFmt.calendar = Calendar(identifier: .gregorian)
+        hrFmt.locale = Locale(identifier: "en_US_POSIX")
+        hrFmt.timeZone = TimeZone.current
+        hrFmt.dateFormat = "yyyy-MM-dd HH:mm"
+
+        var bucketMap: [String: [DashboardCLIFilter: DailyTokenBucket]] = [:]
+        for (hrKey, stat) in kimiDailyBuckets where stat.tokens > 0 {
             let inTok = UInt64(Double(stat.tokens) * 0.85)
-            let outTok = stat.tokens - inTok
-            var dayDict = dailyMap[day, default: [:]]
-            dayDict[.kimi] = DailyTokenBucket(input: inTok, output: outTok, cache: 0, runs: stat.runs)
-            dailyMap[day] = dayDict
+            bucketMap[hrKey, default: [:]][.kimi] = DailyTokenBucket(input: inTok, output: stat.tokens - inTok, cache: 0, runs: stat.runs)
         }
 
         if let db = openReadOnlySQLite(path: ravenURL.path) {
             defer { sqlite3_close(db) }
             let sql = """
-            SELECT
-                date(timestamp/1000, 'unixepoch', 'localtime') as d,
-                CASE WHEN client_name LIKE 'codex%' THEN 'codex'
-                     WHEN client_name LIKE 'claude%' THEN 'claude' ELSE 'copilot' END as cli_kind,
-                SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
+            SELECT strftime('%Y-%m-%d %H:00', timestamp/1000, 'unixepoch', 'localtime') as hr,
+                   CASE WHEN client_name LIKE 'codex%' THEN 'codex'
+                        WHEN client_name LIKE 'claude%' THEN 'claude' ELSE 'copilot' END as cli_kind,
+                   SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+                   SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
             FROM requests
             WHERE timestamp >= (strftime('%s', '\(safeDate)', '-6 days') * 1000)
               AND date(timestamp/1000, 'unixepoch', 'localtime') <= '\(safeDate)'
-            GROUP BY d, cli_kind;
+            GROUP BY hr, cli_kind;
             """
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
                 defer { sqlite3_finalize(stmt) }
                 while sqlite3_step(stmt) == SQLITE_ROW {
-                    guard let dayPtr = sqlite3_column_text(stmt, 0),
-                          let kindPtr = sqlite3_column_text(stmt, 1) else { continue }
-                    let day = String(cString: dayPtr)
+                    guard let hrPtr = sqlite3_column_text(stmt, 0), let kindPtr = sqlite3_column_text(stmt, 1) else { continue }
+                    let hrKey = String(cString: hrPtr)
                     let kind = String(cString: kindPtr)
-                    let inTok = UInt64(max(sqlite3_column_int64(stmt, 2), 0))
-                    let outTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
-                    let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 4), 0))
-                    let runs = Int(max(sqlite3_column_int64(stmt, 5), 0))
                     let cli: DashboardCLIFilter = kind == "codex" ? .codex : (kind == "claude" ? .claude : .copilot)
-                    var dayDict = dailyMap[day, default: [:]]
-                    dayDict[cli] = DailyTokenBucket(input: inTok, output: outTok, cache: cacheTok, runs: runs)
-                    dailyMap[day] = dayDict
+                    bucketMap[hrKey, default: [:]][cli] = DailyTokenBucket(
+                        input: UInt64(max(sqlite3_column_int64(stmt, 2), 0)),
+                        output: UInt64(max(sqlite3_column_int64(stmt, 3), 0)),
+                        cache: UInt64(max(sqlite3_column_int64(stmt, 4), 0)),
+                        runs: Int(max(sqlite3_column_int64(stmt, 5), 0))
+                    )
                 }
             }
         }
@@ -481,46 +466,44 @@ extension LiveDashboardTelemetryReader {
         if let db = openReadOnlySQLite(path: copilotURL.path) {
             defer { sqlite3_close(db) }
             let sql = """
-            SELECT
-                substr(created_at, 1, 10) as d,
-                SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
+            SELECT strftime('%Y-%m-%d %H:00', created_at, 'localtime') as hr,
+                   SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+                   SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
             FROM assistant_usage_events
             WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-6 days')
               AND substr(created_at, 1, 10) <= '\(safeDate)'
-            GROUP BY d;
+            GROUP BY hr;
             """
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
                 defer { sqlite3_finalize(stmt) }
                 while sqlite3_step(stmt) == SQLITE_ROW {
-                    guard let dayPtr = sqlite3_column_text(stmt, 0) else { continue }
-                    let day = String(cString: dayPtr)
+                    guard let hrPtr = sqlite3_column_text(stmt, 0) else { continue }
+                    let hrKey = String(cString: hrPtr)
                     let inTok = UInt64(max(sqlite3_column_int64(stmt, 1), 0))
                     let outTok = UInt64(max(sqlite3_column_int64(stmt, 2), 0))
                     let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
                     let runs = Int(max(sqlite3_column_int64(stmt, 4), 0))
-                    var dayDict = dailyMap[day, default: [:]]
-                    let prev = dayDict[.copilot] ?? DailyTokenBucket()
+                    let prev = bucketMap[hrKey]?[.copilot] ?? DailyTokenBucket()
                     if (inTok + outTok + cacheTok) > prev.total {
-                        dayDict[.copilot] = DailyTokenBucket(input: inTok, output: outTok, cache: cacheTok, runs: max(prev.runs, runs))
-                        dailyMap[day] = dayDict
+                        bucketMap[hrKey, default: [:]][.copilot] = DailyTokenBucket(input: inTok, output: outTok, cache: cacheTok, runs: max(prev.runs, runs))
                     }
                 }
             }
         }
 
         var points: [TrendDataPoint] = []
-        for day in dailyMap.keys.sorted() {
-            let shortDay = day.count >= 10 ? String(day.suffix(5)) : day
-            guard let cliDict = dailyMap[day] else { continue }
+        for hrKey in bucketMap.keys.sorted() {
+            guard let cliDict = bucketMap[hrKey] else { continue }
+            let parsedDate = hrFmt.date(from: hrKey)
             for cli in [DashboardCLIFilter.copilot, .codex, .claude, .kimi] {
                 guard let stat = cliDict[cli], stat.total > 0 else { continue }
                 points.append(
                     TrendDataPoint(
-                        id: "trend-\(day)-\(cli.rawValue)", bucketLabel: shortDay, category: cli.rawValue,
+                        id: "trend-\(hrKey)-\(cli.rawValue)", bucketLabel: hrKey, category: cli.rawValue,
                         cliFilter: cli, invocations: stat.runs, successRate: 0.99, costUSD: 0,
-                        totalTokens: stat.total, inputTokens: stat.input, outputTokens: stat.output, cacheTokens: stat.cache
+                        totalTokens: stat.total, inputTokens: stat.input, outputTokens: stat.output,
+                        cacheTokens: stat.cache, bucketDate: parsedDate
                     )
                 )
             }

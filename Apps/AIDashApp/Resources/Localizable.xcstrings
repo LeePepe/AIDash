@@ -955,6 +955,78 @@
         }
       }
     },
+    "dashboard.chart_time.24h_hourly": {
+      "comment": "24-hour hourly time granularity option.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "24h · Hourly"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "24小时·按小时"
+          }
+        }
+      }
+    },
+    "dashboard.chart_time.7d_daily": {
+      "comment": "7-day daily time granularity option.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7d · Daily"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7天·按天"
+          }
+        }
+      }
+    },
+    "dashboard.chart_time.7d_hourly": {
+      "comment": "7-day hourly time granularity option.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7d · Hourly"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7天·按小时"
+          }
+        }
+      }
+    },
+    "dashboard.chart_time.picker_label": {
+      "comment": "Accessibility label for chart time granularity picker.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time Granularity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "时间维度"
+          }
+        }
+      }
+    },
     "dashboard.cli.all": {
       "comment": "All CLIs filter segment label.",
       "extractionState": "manual",

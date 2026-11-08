@@ -288,6 +288,7 @@ public struct TrendChartCardView: View {
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
     @State private var tokenKindFilter: DashboardTokenKindFilter = .all
+    @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayHourly
 
     public init(
         points: [TrendDataPoint],
@@ -302,19 +303,28 @@ public struct TrendChartCardView: View {
     }
 
     public var body: some View {
-        SolidModularCardContainer(
+        let activePoints = TrendDataPoint.points(from: points, granularity: timeGranularity)
+        return SolidModularCardContainer(
             title: DashboardL10n.tr("dashboard.card.trend.title", "Agent Invocations & Spend by CLI"),
             subtitle: DashboardL10n.tr("dashboard.card.trend.subtitle", "Click any bar to cross-filter tables and actionable items below"),
             symbolName: "chart.bar.xaxis"
         ) {
             HStack(spacing: 8) {
+                Picker(DashboardL10n.tr("dashboard.chart_time.picker_label", "Time Granularity"), selection: $timeGranularity) {
+                    ForEach(DashboardChartTimeGranularity.allCases) { gran in
+                        Text(gran.displayTitle).tag(gran)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+
                 Picker(DashboardL10n.tr("dashboard.token_kind.picker_label", "Token Type"), selection: $tokenKindFilter) {
                     ForEach(DashboardTokenKindFilter.allCases) { kind in
                         Text(kind.displayTitle).tag(kind)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 220)
+                .frame(width: 210)
 
                 if let selectedCategory {
                     Button {
@@ -332,21 +342,49 @@ public struct TrendChartCardView: View {
                 }
             }
         } content: {
-            let categoryTotals = Self.groupedCategoryTotals(from: points, kind: tokenKindFilter)
+            let categoryTotals = Self.groupedCategoryTotals(from: activePoints, kind: tokenKindFilter)
             VStack(alignment: .leading, spacing: 12) {
-                Chart(points) { point in
-                    let isSelected = selectedCategory == nil || selectedCategory == point.category
-                    let tokenMillions = Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0
-                    BarMark(
-                        x: .value("Date", point.bucketLabel),
-                        y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
-                    )
-                    .foregroundStyle(by: .value("CLI", point.category))
-                    .opacity(isSelected ? 1.0 : 0.30)
+                if timeGranularity != .sevenDayDaily, activePoints.contains(where: { $0.bucketDate != nil }) {
+                    Chart(activePoints) { point in
+                        if let date = point.bucketDate {
+                            let isSelected = selectedCategory == nil || selectedCategory == point.category
+                            let tokenMillions = Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0
+                            AreaMark(
+                                x: .value("Time", date),
+                                y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
+                            )
+                            .foregroundStyle(by: .value("CLI", point.category))
+                            .opacity(isSelected ? 0.25 : 0.08)
+                            .interpolationMethod(.monotone)
+
+                            LineMark(
+                                x: .value("Time", date),
+                                y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
+                            )
+                            .foregroundStyle(by: .value("CLI", point.category))
+                            .lineStyle(StrokeStyle(lineWidth: 2.0))
+                            .opacity(isSelected ? 1.0 : 0.30)
+                            .interpolationMethod(.monotone)
+                        }
+                    }
+                    .frame(height: 195)
+                    .chartLegend(position: .bottom, alignment: .leading)
+                    .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
+                } else {
+                    Chart(activePoints) { point in
+                        let isSelected = selectedCategory == nil || selectedCategory == point.category
+                        let tokenMillions = Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0
+                        BarMark(
+                            x: .value("Date", point.bucketLabel),
+                            y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
+                        )
+                        .foregroundStyle(by: .value("CLI", point.category))
+                        .opacity(isSelected ? 1.0 : 0.30)
+                    }
+                    .frame(height: 195)
+                    .chartLegend(position: .bottom, alignment: .leading)
+                    .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
                 }
-                .frame(height: 195)
-                .chartLegend(position: .bottom, alignment: .leading)
-                .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
 
                 HStack(spacing: 8) {
                     Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:"))
