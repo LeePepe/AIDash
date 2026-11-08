@@ -176,12 +176,11 @@ public struct MenuBarStatusView: View {
                     rawPoints: trendPoints,
                     activePoints: activePoints,
                     dailySegments: dailySegments,
-                    timeGranularity: timeGranularity
+                    timeGranularity: timeGranularity,
+                    pool: pool
                 )
 
                 Divider()
-
-                menuBarQuotaPoolStrip(pool: pool)
 
                 Grid(horizontalSpacing: 8, verticalSpacing: 8) {
                     GridRow {
@@ -201,22 +200,6 @@ public struct MenuBarStatusView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
             .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
-        }
-    }
-
-    private func menuBarQuotaPoolStrip(pool: QuotaPoolSummary) -> some View {
-        let poolTint = DashboardSemanticColorPalette.color(for: pool.health)
-        let remPct = max(0, 100 - Int((pool.averageUsedFraction * 100).rounded()))
-        return HStack(spacing: 6) {
-            Image(systemName: "arrow.triangle.branch").font(.caption2.weight(.semibold)).foregroundStyle(poolTint)
-            Text(DashboardL10n.format("menubar.pulse.pool_remaining_format", "Pool Left %lld%%", remPct))
-                .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(poolTint)
-            Spacer(minLength: 4)
-            if let rec = pool.recommendedEntry {
-                let recRem = Int((rec.remainingFraction * 100).rounded())
-                Text(DashboardL10n.format("menubar.pulse.route_recommend_format", "Route → %@ (%lld%% left)", rec.cliFilter.shortLabel, recRem))
-                    .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
-            }
         }
     }
 
@@ -369,46 +352,69 @@ private struct MenuBarInteractiveTokenChart: View {
     let activePoints: [TrendDataPoint]
     let dailySegments: [DailyKindBarSegment]
     let timeGranularity: DashboardChartTimeGranularity
+    let pool: QuotaPoolSummary
     @State private var hoveredBucketLabel: String?
 
     var body: some View {
         let summary = hoveredBucketLabel.flatMap {
             TrendDataPoint.hoverSummary(forBucket: $0, in: rawPoints, granularity: timeGranularity)
         }
-        Group {
+        VStack(alignment: .leading, spacing: 6) {
+            scrubHeaderSlot(summary: summary)
             if timeGranularity == .threeDayHourly, activePoints.contains(where: { $0.bucketDate != nil }) {
                 hourlyChart
             } else {
                 dailyChart
             }
         }
-        .overlay(alignment: .topLeading) {
-            if let summary {
-                hoverFloatingBadge(summary: summary)
-                    .allowsHitTesting(false)
-            }
-        }
     }
 
-    private func hoverFloatingBadge(summary: TrendBucketHoverSummary) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(summary.bucketLabel).font(.caption2.weight(.bold)).monospacedDigit()
-                Spacer(minLength: 4)
-                Text(DashboardL10n.format("dashboard.chart.hover_total_calls_format", "Total %@ · %lld calls", DashboardTokenFormatter.compact(summary.totalTokens), summary.invocations))
-                    .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(Color.accentColor)
-            }
-            Text(DashboardL10n.format("dashboard.chart.hover_io_cache_format", "In %@ · Out %@ · Cache %@", DashboardTokenFormatter.compact(summary.inputTokens), DashboardTokenFormatter.compact(summary.outputTokens), DashboardTokenFormatter.compact(summary.cacheTokens)))
-                .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.primary)
-            if !summary.cliShares.isEmpty {
+    private func scrubHeaderSlot(summary: TrendBucketHoverSummary?) -> some View {
+        let totalIn = activePoints.reduce(UInt64(0)) { $0 + $1.inputTokens }
+        let totalOut = activePoints.reduce(UInt64(0)) { $0 + $1.outputTokens }
+        let totalCache = activePoints.reduce(UInt64(0)) { $0 + $1.cacheTokens }
+        let poolTint = DashboardSemanticColorPalette.color(for: pool.health)
+        let remPct = max(0, 100 - Int((pool.averageUsedFraction * 100).rounded()))
+
+        return VStack(alignment: .leading, spacing: 3) {
+            if let summary {
+                HStack(spacing: 6) {
+                    Text(summary.bucketLabel).font(.caption2.weight(.bold)).monospacedDigit()
+                    Spacer(minLength: 4)
+                    Text(DashboardL10n.format("dashboard.chart.hover_total_calls_format", "Total %@ · %lld calls", DashboardTokenFormatter.compact(summary.totalTokens), summary.invocations))
+                        .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(Color.accentColor)
+                }
+                Text(DashboardL10n.format("dashboard.chart.hover_io_cache_format", "In %@ · Out %@ · Cache %@", DashboardTokenFormatter.compact(summary.inputTokens), DashboardTokenFormatter.compact(summary.outputTokens), DashboardTokenFormatter.compact(summary.cacheTokens)))
+                    .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
                 Text(summary.cliShares.map { "\($0.cli.shortLabel) \(DashboardTokenFormatter.compact($0.tokens))" }.joined(separator: " · "))
-                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(2)
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch").font(.caption2.weight(.semibold)).foregroundStyle(poolTint)
+                    Text(DashboardL10n.format("menubar.pulse.pool_remaining_format", "Pool Left %lld%%", remPct))
+                        .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(poolTint)
+                    Spacer(minLength: 4)
+                    if let rec = pool.recommendedEntry {
+                        let recRem = Int((rec.remainingFraction * 100).rounded())
+                        Text(DashboardL10n.format("menubar.pulse.route_recommend_format", "Route → %@ (%lld%% left)", rec.cliFilter.shortLabel, recRem))
+                            .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
+                    }
+                }
+                Text(DashboardL10n.format("dashboard.chart.hover_io_cache_format", "In %@ · Out %@ · Cache %@", DashboardTokenFormatter.compact(totalIn), DashboardTokenFormatter.compact(totalOut), DashboardTokenFormatter.compact(totalCache)))
+                    .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                Text(periodCLISummaryText)
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor).opacity(0.95)))
-        .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        .frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    private var periodCLISummaryText: String {
+        var byCLI: [DashboardCLIFilter: UInt64] = [:]
+        for pt in activePoints { byCLI[pt.cliFilter, default: 0] += pt.totalTokens }
+        return byCLI.sorted { $0.value > $1.value }.map { "\($0.key.shortLabel) \(DashboardTokenFormatter.compact($0.value))" }.joined(separator: " · ")
     }
 
     private var hourlyChart: some View {
@@ -417,24 +423,16 @@ private struct MenuBarInteractiveTokenChart: View {
                 if let date = point.bucketDate {
                     let valM = Double(point.totalTokens) / 1_000_000.0
                     AreaMark(x: .value("Time", date), y: .value("Tokens (M)", valM))
-                        .foregroundStyle(by: .value("CLI", point.category))
-                        .opacity(0.24)
-                        .interpolationMethod(.monotone)
+                        .foregroundStyle(by: .value("CLI", point.category)).opacity(0.24).interpolationMethod(.monotone)
                     LineMark(x: .value("Time", date), y: .value("Tokens (M)", valM))
-                        .foregroundStyle(by: .value("CLI", point.category))
-                        .lineStyle(StrokeStyle(lineWidth: 1.5))
-                        .interpolationMethod(.monotone)
+                        .foregroundStyle(by: .value("CLI", point.category)).lineStyle(StrokeStyle(lineWidth: 1.5)).interpolationMethod(.monotone)
                 }
             }
-            if let hoveredBucketLabel,
-               let hoveredDate = activePoints.first(where: { $0.bucketLabel == hoveredBucketLabel })?.bucketDate {
-                RuleMark(x: .value("Time", hoveredDate))
-                    .foregroundStyle(Color.accentColor.opacity(0.55))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            if let hoveredBucketLabel, let hoveredDate = activePoints.first(where: { $0.bucketLabel == hoveredBucketLabel })?.bucketDate {
+                RuleMark(x: .value("Time", hoveredDate)).foregroundStyle(Color.accentColor.opacity(0.55)).lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
             }
         }
-        .chartLegend(position: .bottom, alignment: .leading)
-        .frame(height: 118)
+        .chartLegend(position: .bottom, alignment: .leading).frame(height: 118)
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
