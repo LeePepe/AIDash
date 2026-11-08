@@ -25,6 +25,12 @@ TODAY="$(TZ=Asia/Shanghai date +%Y-%m-%d)"
 
 echo "[aidata-digest] $(date) — chain start (report_date=$TODAY)"
 
+# Step 0: Incremental watermarked daily cleanup (worktrees + completed goal logs)
+if [ -f "$HOME/Development/user-skills/skills/team-lead/scripts/git-gc.py" ]; then
+  python3 "$HOME/Development/user-skills/skills/team-lead/scripts/git-gc.py" daily-cleanup \
+    || echo "[aidata-digest]   ! daily-cleanup warning (non-fatal)"
+fi
+
 # L1 collect — per-source with a wall-clock budget so no single slow/hung source
 # (e.g. multica_run's per-issue CLI walk, or an az SSO stall) blocks the whole
 # chain. Each source is incremental (watermarks), so a timed-out source resumes
@@ -60,6 +66,12 @@ done
 
 python3 cli.py normalize
 python3 cli.py merge
+
+# Step 1.5: Compute M1-M5 Agent Efficiency & auto-propose breached items into proposals.jsonl
+if [ -f "$HOME/Development/user-skills/skills/retro-loop/scripts/retro_story_engine.py" ]; then
+  python3 "$HOME/Development/user-skills/skills/retro-loop/scripts/retro_story_engine.py" agent-efficiency --auto-propose \
+    || echo "[aidata-digest]   ! agent-efficiency auto-propose warning (non-fatal)"
+fi
 
 # L5: build + archive (必成) + best-effort AIDash push (非阻塞). --llm adds the
 # guarded polish; it too falls back to the pure template on any failure.

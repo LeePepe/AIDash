@@ -25,7 +25,7 @@ def _now() -> str:
 
 
 def _default_linear_runner(title: str, description: str) -> int:
-    script = Path.home() / "Development/user-skills/skills/goal-task/scripts/linear-sync.py"
+    script = Path.home() / "Development/user-skills/skills/team-lead/scripts/linear-sync.py"
     result = subprocess.run(
         [str(script), "idea", "--title", title, "--description", description,
          "--mode", "auto"],

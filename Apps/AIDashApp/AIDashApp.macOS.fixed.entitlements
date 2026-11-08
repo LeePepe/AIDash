@@ -8,9 +8,12 @@
     <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
     <array>
         <string>/Development/AIDash/aidata/</string>
+        <string>/Development/handoff/</string>
         <string>/.copilot/</string>
         <string>/.claude/</string>
         <string>/.codex/</string>
+        <string>/.kimi-code/</string>
+        <string>/.kimi/</string>
         <string>/.config/claude/</string>
         <string>/.config/magpie/</string>
         <string>/Library/Application Support/raven/</string>

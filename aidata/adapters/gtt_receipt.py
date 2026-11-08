@@ -134,21 +134,47 @@ def _field(text: str, names: tuple[str, ...]) -> str | None:
 
 
 def _role_from_name(role: str) -> str:
-    role = role.lower().strip()
-    return {
-        "analyst": "planner",
-        "explorer": "explorer",
-        "reviewer": "reviewer",
-        "review": "reviewer",
-        "rev": "reviewer",
-        "writer": "writer",
-        "pr-monitor": "pr_monitor",
-        "prmon": "pr_monitor",
-        "code-reviewer": "code_reviewer",
-        "planner-reviewer": "planner_reviewer",
-        "writer-escalated": "writer_escalated",
-        "worker.writer": "writer",
-    }.get(role, role.replace("-", "_"))
+    raw = role.lower().strip()
+    for token, canonical in (
+        ("planner_reviewer", "planner_reviewer"),
+        ("planner-reviewer", "planner_reviewer"),
+        ("code_reviewer", "code_reviewer"),
+        ("code-reviewer", "code_reviewer"),
+        ("writer_escalated", "writer_escalated"),
+        ("writer-escalated", "writer_escalated"),
+        ("pr_monitor", "pr_monitor"),
+        ("pr-monitor", "pr_monitor"),
+        ("prmon", "pr_monitor"),
+        ("reviewer", "reviewer"),
+        ("review", "reviewer"),
+        ("rev", "reviewer"),
+        ("explorer", "explorer"),
+        ("explore", "explorer"),
+        ("exp", "explorer"),
+        ("designer", "designer"),
+        ("planner", "planner"),
+        ("writer", "writer"),
+        ("analyst", "planner"),
+    ):
+        if raw == token or token in raw:
+            return canonical
+    return raw.replace("-", "_")
+
+
+def _canonical_v5(raw_v5: str | None, failure_text: str) -> str | None:
+    combined = f"{raw_v5 or ''} {failure_text}".upper()
+    if any(m in combined for m in (
+        "FAILED_CHECK", "FAIL_FAST_CHECK_FAILURE", "PR_CHECK_FAILED",
+        "PR_CONFLICT", "CHANGES REQUESTED", "CHANGES_REQUESTED", "V5=FAIL",
+    )) or re.search(r"\bFAIL(?:ED)?\b", (raw_v5 or "").upper()):
+        return "FAIL"
+    if re.search(r"\bCONCERNS?\b", (raw_v5 or "").upper()):
+        return "CONCERNS"
+    if re.search(r"\bWAIVED\b", (raw_v5 or "").upper()):
+        return "WAIVED"
+    if re.search(r"\b(?:PASS(?:ED)?|APPROVED)\b", (raw_v5 or "").upper()):
+        return "PASS"
+    return raw_v5.strip("*` ") if raw_v5 else None
 
 
 _TASK_DDL = """
@@ -222,35 +248,39 @@ def normalize() -> int:
         prefix = match.group("prefix")
         known_roles = (
             "writer-escalated", "planner-reviewer", "code-reviewer", "pr-monitor",
-            "reviewer", "explorer", "designer", "planner", "writer", "prmon",
-            "rev", "review",
+            "reviewer", "explorer", "explore", "designer", "planner", "writer",
+            "prmon", "rev", "review", "exp", "demo", "impl", "fix",
         )
         role_from_name = next(
             (role for role in sorted(known_roles, key=len, reverse=True)
-             if prefix == role or prefix.endswith(f"-{role}")),
+             if prefix == role or prefix.endswith(f"-{role}") or prefix.startswith(f"{role}-")),
             None,
         )
+        if role_from_name in ("demo", "impl", "fix"):
+            inferred_file_role = "writer"
+        else:
+            inferred_file_role = role_from_name
         if role_from_name and prefix.endswith(f"-{role_from_name}"):
             task_id = prefix[:-len(role_from_name) - 1]
         elif role_from_name and prefix == role_from_name:
             task_id = _field(content, ("Task", "Task ID")) or prefix
         else:
             task_id = prefix
-        role = _field(content, ("Role", "Role / Model")) or _role_from_name(role_from_name or "unknown")
-        role = _role_from_name(role.split("/", 1)[0].strip())
+        raw_role_field = _field(content, ("Role", "Role / Model"))
+        role = _role_from_name(raw_role_field or inferred_file_role or "writer")
         status = (_field(content, ("Status", "Outcome", "Result")) or "completed").lower()
-        v5 = _field(content, ("V5",))
+        v5 = _field(content, ("V5", "Review Conclusion", "Verdict", "Conclusion"))
         failure_text = " ".join(
             value for value in (
                 _field(content, ("Outcome",)), _field(content, ("Result",)),
                 _field(content, ("Status",)), v5,
             ) if value
         ).upper()
-        if any(marker in failure_text for marker in (
-            "FAILED_CHECK", "FAIL_FAST_CHECK_FAILURE", "PR_CHECK_FAILED",
-            "PR_CONFLICT", "CHANGES REQUESTED", "V5=FAIL",
-        )):
+        canon_v5 = _canonical_v5(v5, failure_text)
+        if canon_v5 == "FAIL":
             status, v5 = "failed", "FAIL"
+        elif canon_v5:
+            v5 = canon_v5
         goal = str(record.get("goal_id", "unknown"))
         machine_id = str(record.get("machine_id", "unknown")).lower()
         uid = f"{machine_id}:{rel or name}"

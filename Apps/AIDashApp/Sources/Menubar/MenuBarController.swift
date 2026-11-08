@@ -28,15 +28,17 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     private func installStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let icon = NSImage(
-            systemSymbolName: "chart.bar.doc.horizontal",
+            systemSymbolName: "gauge.with.dots.needle.33percent",
             accessibilityDescription: Self.appName
         ) {
             icon.isTemplate = true
             icon.size = NSSize(width: 18, height: 18)
             item.button?.image = icon
+            item.button?.imagePosition = .imageLeading
         }
+        item.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
 
         let menu = NSMenu()
         menu.delegate = self
@@ -98,7 +100,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         let view = hostedStatusView()
         view.layoutSubtreeIfNeeded()
         let fitting = view.fittingSize
-        view.frame.size = NSSize(width: 380, height: max(fitting.height, 1))
+        view.frame.size = NSSize(width: 360, height: max(fitting.height, 1))
         return view
     }
 
@@ -178,6 +180,13 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         guard let item = statusItem else { return }
         panelItem?.view = sizedHostedStatusView()
         item.button?.toolTip = summaryText
+        if case let .populated(snapshot) = statusState {
+            let entries = DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage)
+            let grandTotal = entries.reduce(UInt64(0)) { $0 + $1.totalTokens }
+            item.button?.title = " \(DashboardTokenFormatter.compact(grandTotal)) tok"
+        } else {
+            item.button?.title = ""
+        }
         for (tag, title) in zip(1001...1008, summaryTitles) {
             item.menu?.item(withTag: tag)?.title = title
         }
@@ -216,8 +225,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openBriefing() {
-        NSApp.activate(ignoringOtherApps: true)
-        NotificationCenter.default.post(name: .openBriefingWindow, object: nil)
+        DashboardWorkspaceStore.shared.openDashboardWindow(section: .overview)
     }
 
     @objc private func showAbout() {

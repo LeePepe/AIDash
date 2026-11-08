@@ -1,4 +1,4 @@
-"""Collect and normalize goal-task ledgers, including exported bundles."""
+"""Collect and normalize team-lead ledgers, including exported bundles."""
 
 from __future__ import annotations
 
