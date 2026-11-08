@@ -1,6 +1,6 @@
 # AIDash Agent Instructions
 
-This file is read by automated agents (`coordinator` M2, `team-lead` Steering,
+This file is read by automated agents (`m2-dispatcher` / `M2-Dispatcher`, `team-lead` Steering,
 Writer, Reviewer, Claude Code, Codex CLI, Hermes, GitHub Copilot, etc.)
 when they work on this repo. Keep it short and authoritative.
 
@@ -58,7 +58,7 @@ before doing anything material.** It governs every decision below.
   red-lines / gate 的单一结构化来源;`tech-context.md` 是 leaf 指向的深入参考。
 - `scripts/context/audit` 必须让每个 tracked file 恰好落到一个 leaf 或带原因的
   exclusion。路由、依赖或 manifest 改动和 audit 修复同一个 commit 落地。
-- 改动只落在 **1 个层** → 归属 1 个 Task 切片（不跨层拆碎；前台协调入口 M2 与后台 `Steering`/`Writer` 的派发边界仍遵循全局 `coordinator` / `team-lead` 合同：凡 `>3` 文件或含编译安装，M2 确认简单 Spec 后必须通过 `herdr-dispatch.sh` 派后台执行，严禁在入口会话内联直接改业务代码）。
+- 改动只落在 **1 个层** → 归属 1 个 Task 切片（不跨层拆碎；`M2-Dispatcher` 与后台 `Steering`/`Writer` 的派发边界仍遵循全局 `m2-dispatcher` / `team-lead` 合同：凡 `>3` 文件或含编译安装，`M2-Dispatcher` 确认简单 Spec 后必须通过 `herdr-dispatch.sh` 派后台执行，严禁在入口会话内联直接改业务代码）。
 - 改动跨 **2+ 层** → 按层拆成 N 个 Task 切片；每个切片 = 一层 =
   一个独立可 build/test 的 commit（同一 Goal 共用同一分支连续 commit，收口最多提 1 个 PR）。
 - 单层内仍很大 → 按技术切面拆(lib / 接口 / UI / 格式化 / fixture / 文档 / 迁移)。
@@ -181,7 +181,7 @@ xcodebuild -scheme aidash -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO 
 
 ## Git workflow
 
-- **One branch per Goal (`1 Goal = 1 Branch / 最多 1 PR`).** Background `Steering` / `Writer` agents work on the Goal branch or dedicated worktree; do not block the interactive M2 entry session on `>3`-file edits or heavy builds. New worktree's first step:
+- **One branch per Goal (`1 Goal = 1 Branch / 最多 1 PR`).** Background `Steering` / `Writer` agents work on the Goal branch or dedicated worktree; do not block the interactive `M2-Dispatcher` entry session on `>3`-file edits or heavy builds. New worktree's first step:
   `git config core.hooksPath scripts/hooks`.
 - **Conventional commits.** `feat:`, `fix:`, `refactor:`, `test:`,
   `docs:`, `chore:`.
