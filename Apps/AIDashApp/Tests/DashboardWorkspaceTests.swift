@@ -380,6 +380,9 @@ struct DashboardWorkspaceTests {
             in: hourlySample
         )
         #expect(nearestBucket == "2026-11-08 10:00")
+        let hourlyHover = try #require(TrendDataPoint.hoverSummary(forBucket: "2026-11-08 10:00", in: hourlySample, granularity: .threeDayHourly))
+        #expect(hourlyHover.totalTokens == 1_000_000)
+        #expect(hourlyHover.cliShares.first?.cli == .codex)
         let proposalsURL = tempDir.appendingPathComponent("proposals.jsonl")
         let proposalsSample = """
         {"id":"p1","ts":"2026-11-08T00:00:00Z","agent":"retro-loop","title":"Shrink Review Ping-Pong","detail":"R1 fail 55%","priority":"high","status":"pending"}

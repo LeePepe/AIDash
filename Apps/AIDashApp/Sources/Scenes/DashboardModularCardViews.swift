@@ -210,7 +210,6 @@ public struct TrendChartCardView: View {
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
     @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayDaily
-    @State private var hoveredBucketLabel: String?
 
     public init(
         points: [TrendDataPoint],
@@ -227,9 +226,6 @@ public struct TrendChartCardView: View {
     public var body: some View {
         let activePoints = TrendDataPoint.points(from: points, granularity: timeGranularity)
         let dailySegments = TrendDataPoint.dailyKindBarSegments(from: points)
-        let hoverSummary = hoveredBucketLabel.flatMap {
-            TrendDataPoint.hoverSummary(forBucket: $0, in: points, granularity: timeGranularity)
-        }
         return SolidModularCardContainer(
             title: DashboardL10n.tr("dashboard.card.trend.title", "Agent Invocations & Spend by CLI"),
             subtitle: DashboardL10n.tr("dashboard.card.trend.subtitle", "Hover bars for exact breakdown; click below to cross-filter"),
@@ -263,13 +259,13 @@ public struct TrendChartCardView: View {
         } content: {
             let categoryTotals = Self.groupedCategoryTotals(from: activePoints, kind: .all)
             VStack(alignment: .leading, spacing: 10) {
-                hoverReadoutBar(summary: hoverSummary)
-
-                if timeGranularity == .threeDayHourly, activePoints.contains(where: { $0.bucketDate != nil }) {
-                    hourlyTrendChart(activePoints: activePoints)
-                } else {
-                    dailyBarChart(dailySegments: dailySegments)
-                }
+                TrendChartInteractiveCanvas(
+                    rawPoints: points,
+                    activePoints: activePoints,
+                    dailySegments: dailySegments,
+                    selectedCategory: selectedCategory,
+                    timeGranularity: timeGranularity
+                )
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -300,39 +296,78 @@ public struct TrendChartCardView: View {
         }
     }
 
-    private func hoverReadoutBar(summary: TrendBucketHoverSummary?) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: summary == nil ? "cursorarrow.motionlines" : "chart.bar.doc.horizontal.fill")
-                .font(.caption)
-                .foregroundStyle(summary == nil ? Color.secondary : Color.accentColor)
-            if let summary {
-                Text(summary.formattedReadout)
-                    .font(.caption.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text(DashboardL10n.format("dashboard.chart.hover_calls_format", "%lld calls", summary.invocations))
-                    .font(.caption2.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(DashboardL10n.tr("dashboard.chart.hover_hint", "Hover over any bar or point to inspect Input / Output / Cache & per-CLI tokens"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
+    private static func groupedCategoryTotals(
+        from points: [TrendDataPoint],
+        kind: DashboardTokenKindFilter
+    ) -> [(category: String, tokens: UInt64)] {
+        var order: [String] = []
+        var sums: [String: UInt64] = [:]
+        for p in points {
+            if sums[p.category] == nil {
+                order.append(p.category)
             }
+            sums[p.category, default: 0] += p.tokens(for: kind)
+        }
+        return order.map { ($0, sums[$0] ?? 0) }
+    }
+}
+
+@MainActor
+private struct TrendChartInteractiveCanvas: View {
+    let rawPoints: [TrendDataPoint]
+    let activePoints: [TrendDataPoint]
+    let dailySegments: [DailyKindBarSegment]
+    let selectedCategory: String?
+    let timeGranularity: DashboardChartTimeGranularity
+    @State private var hoveredBucketLabel: String?
+
+    var body: some View {
+        let hoverSummary = hoveredBucketLabel.flatMap {
+            TrendDataPoint.hoverSummary(forBucket: $0, in: rawPoints, granularity: timeGranularity)
+        }
+        Group {
+            if timeGranularity == .threeDayHourly, activePoints.contains(where: { $0.bucketDate != nil }) {
+                hourlyTrendChart
+            } else {
+                dailyBarChart
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let hoverSummary {
+                hoverOverlayBadge(summary: hoverSummary)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func hoverOverlayBadge(summary: TrendBucketHoverSummary) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chart.bar.doc.horizontal.fill")
+                .font(.caption)
+                .foregroundStyle(Color.accentColor)
+            Text(summary.formattedReadout)
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text(DashboardL10n.format("dashboard.chart.hover_calls_format", "%lld calls", summary.invocations))
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.95))
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
     }
 
-    private func hourlyTrendChart(activePoints: [TrendDataPoint]) -> some View {
+    private var hourlyTrendChart: some View {
         Chart {
             ForEach(activePoints) { point in
                 if let date = point.bucketDate {
@@ -362,22 +397,23 @@ public struct TrendChartCardView: View {
             GeometryReader { geo in
                 Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
                     guard case let .active(location) = phase, let plotFrame = proxy.plotFrame else {
-                        hoveredBucketLabel = nil
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
                         return
                     }
                     let xPos = location.x - geo[plotFrame].origin.x
                     guard xPos >= 0, xPos <= geo[plotFrame].width, let date: Date = proxy.value(atX: xPos) else {
-                        hoveredBucketLabel = nil
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
                         return
                     }
-                    hoveredBucketLabel = TrendDataPoint.nearestHourlyBucketLabel(to: date, in: activePoints)
+                    let next = TrendDataPoint.nearestHourlyBucketLabel(to: date, in: activePoints)
+                    if hoveredBucketLabel != next { hoveredBucketLabel = next }
                 }
             }
         }
         .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
     }
 
-    private func dailyBarChart(dailySegments: [DailyKindBarSegment]) -> some View {
+    private var dailyBarChart: some View {
         Chart {
             ForEach(dailySegments) { seg in
                 let isSelected = selectedCategory == nil || selectedCategory == seg.category
@@ -400,34 +436,19 @@ public struct TrendChartCardView: View {
             GeometryReader { geo in
                 Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
                     guard case let .active(location) = phase, let plotFrame = proxy.plotFrame else {
-                        hoveredBucketLabel = nil
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
                         return
                     }
                     let xPos = location.x - geo[plotFrame].origin.x
                     guard xPos >= 0, xPos <= geo[plotFrame].width, let bucket: String = proxy.value(atX: xPos) else {
-                        hoveredBucketLabel = nil
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
                         return
                     }
-                    hoveredBucketLabel = bucket
+                    if hoveredBucketLabel != bucket { hoveredBucketLabel = bucket }
                 }
             }
         }
         .accessibilityLabel(DashboardL10n.tr("dashboard.chart.accessibility_label", "Agent invocations by CLI chart"))
-    }
-
-    private static func groupedCategoryTotals(
-        from points: [TrendDataPoint],
-        kind: DashboardTokenKindFilter
-    ) -> [(category: String, tokens: UInt64)] {
-        var order: [String] = []
-        var sums: [String: UInt64] = [:]
-        for p in points {
-            if sums[p.category] == nil {
-                order.append(p.category)
-            }
-            sums[p.category, default: 0] += p.tokens(for: kind)
-        }
-        return order.map { ($0, sums[$0] ?? 0) }
     }
 }
 
@@ -435,7 +456,6 @@ public struct CLICostQuotaCardView: View {
     public let entries: [CLICostQuotaEntry]
     public let todayTotalUSD: Double
     public let periodTotalUSD: Double
-    @State private var hoveredEntryID: String?
 
     public init(
         entries: [CLICostQuotaEntry],
@@ -533,7 +553,6 @@ public struct CLICostQuotaCardView: View {
         let usedPct = Int((entry.usedFraction * 100).rounded())
         let remPct = max(0, 100 - usedPct)
         let cachePct = Int((entry.cacheHitFraction * 100).rounded())
-        let isHovered = hoveredEntryID == entry.id
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -574,13 +593,6 @@ public struct CLICostQuotaCardView: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
-        .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(isHovered ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1) }
-        .onContinuousHover { phase in
-            switch phase {
-            case .active: hoveredEntryID = entry.id
-            case .ended: if hoveredEntryID == entry.id { hoveredEntryID = nil }
-            }
-        }
         .help("\(entry.displayName) (\(entry.modelTag)) — Today \(todayCompact) tok (Active \(DashboardTokenFormatter.compact(entry.activeTokens)) · Cache \(DashboardTokenFormatter.compact(entry.cacheTokens))) · 7d \(periodCompact) tok · Calls \(entry.interactionCount)")
         .accessibilityElement(children: .combine)
     }

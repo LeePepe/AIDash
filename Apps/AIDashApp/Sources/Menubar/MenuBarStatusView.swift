@@ -36,8 +36,6 @@ public struct MenuBarStatusView: View {
     @State private var completedActionIDs: Set<String> = []
     @State private var copiedActionID: String?
     @State private var timeGranularity: DashboardChartTimeGranularity = .sevenDayDaily
-    @State private var hoveredBucketLabel: String?
-    @State private var hoveredCLIEntryID: String?
 
     public init(
         state: MenuBarStatusViewState,
@@ -146,10 +144,6 @@ public struct MenuBarStatusView: View {
         let activePoints = TrendDataPoint.points(from: trendPoints, granularity: timeGranularity)
         let dailySegments = TrendDataPoint.dailyKindBarSegments(from: trendPoints)
         let pool = QuotaPoolSummary.summarize(entries: entries)
-        let hoverSummary = hoveredBucketLabel.flatMap {
-            TrendDataPoint.hoverSummary(forBucket: $0, in: trendPoints, granularity: timeGranularity)
-        }
-        let hoveredCLI = entries.first { $0.id == hoveredCLIEntryID }
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(DashboardL10n.tr("menubar.pulse.cli_cost_quota", "CLI TOKEN & QUOTA MONITOR"))
@@ -178,9 +172,12 @@ public struct MenuBarStatusView: View {
                 .labelsHidden()
                 .controlSize(.small)
 
-                menuBarHoverReadoutStrip(chartSummary: hoverSummary, hoveredCLI: hoveredCLI)
-
-                menuBarTokenChart(points: activePoints, dailySegments: dailySegments)
+                MenuBarInteractiveTokenChart(
+                    rawPoints: trendPoints,
+                    activePoints: activePoints,
+                    dailySegments: dailySegments,
+                    timeGranularity: timeGranularity
+                )
 
                 Divider()
 
@@ -207,32 +204,6 @@ public struct MenuBarStatusView: View {
         }
     }
 
-    private func menuBarHoverReadoutStrip(chartSummary: TrendBucketHoverSummary?, hoveredCLI: CLICostQuotaEntry?) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: (chartSummary != nil || hoveredCLI != nil) ? "chart.bar.doc.horizontal.fill" : "cursorarrow.motionlines")
-                .font(.caption2).foregroundStyle((chartSummary != nil || hoveredCLI != nil) ? Color.accentColor : Color.secondary)
-            if let chartSummary {
-                Text(chartSummary.formattedReadout).font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
-            } else if let hoveredCLI {
-                Text(
-                    DashboardL10n.format(
-                        "menubar.pulse.cli_hover_detail_format", "%@ · Today %@ (Act %@ · Cache %@) · 7d %@",
-                        hoveredCLI.cliFilter.shortLabel, DashboardTokenFormatter.compact(hoveredCLI.totalTokens),
-                        DashboardTokenFormatter.compact(hoveredCLI.activeTokens), DashboardTokenFormatter.compact(hoveredCLI.cacheTokens),
-                        DashboardTokenFormatter.compact(hoveredCLI.periodTotalTokens)
-                    )
-                )
-                .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
-            } else {
-                Text(DashboardL10n.tr("menubar.pulse.hover_hint", "Hover bars or CLI cards to inspect exact token & quota breakdown"))
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 2)
-        }
-        .padding(.horizontal, 6).padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
-    }
-
     private func menuBarQuotaPoolStrip(pool: QuotaPoolSummary) -> some View {
         let poolTint = DashboardSemanticColorPalette.color(for: pool.health)
         let remPct = max(0, 100 - Int((pool.averageUsedFraction * 100).rounded()))
@@ -245,93 +216,6 @@ public struct MenuBarStatusView: View {
                 let recRem = Int((rec.remainingFraction * 100).rounded())
                 Text(DashboardL10n.format("menubar.pulse.route_recommend_format", "Route → %@ (%lld%% left)", rec.cliFilter.shortLabel, recRem))
                     .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func menuBarTokenChart(points: [TrendDataPoint], dailySegments: [DailyKindBarSegment]) -> some View {
-        if timeGranularity == .threeDayHourly, points.contains(where: { $0.bucketDate != nil }) {
-            menuBarHourlyChart(points: points)
-        } else {
-            menuBarDailyChart(dailySegments: dailySegments)
-        }
-    }
-
-    private func menuBarHourlyChart(points: [TrendDataPoint]) -> some View {
-        Chart {
-            ForEach(points) { point in
-                if let date = point.bucketDate {
-                    let valM = Double(point.totalTokens) / 1_000_000.0
-                    AreaMark(x: .value("Time", date), y: .value("Tokens (M)", valM))
-                        .foregroundStyle(by: .value("CLI", point.category))
-                        .opacity(0.24)
-                        .interpolationMethod(.monotone)
-                    LineMark(x: .value("Time", date), y: .value("Tokens (M)", valM))
-                        .foregroundStyle(by: .value("CLI", point.category))
-                        .lineStyle(StrokeStyle(lineWidth: 1.5))
-                        .interpolationMethod(.monotone)
-                }
-            }
-            if let hoveredBucketLabel,
-               let hoveredDate = points.first(where: { $0.bucketLabel == hoveredBucketLabel })?.bucketDate {
-                RuleMark(x: .value("Time", hoveredDate))
-                    .foregroundStyle(Color.accentColor.opacity(0.55))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
-            }
-        }
-        .chartLegend(position: .bottom, alignment: .leading)
-        .frame(height: 118)
-        .chartOverlay { proxy in
-            GeometryReader { geo in
-                Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
-                    guard case let .active(loc) = phase, let plotFrame = proxy.plotFrame else {
-                        hoveredBucketLabel = nil
-                        return
-                    }
-                    let xPos = loc.x - geo[plotFrame].origin.x
-                    guard xPos >= 0, xPos <= geo[plotFrame].width, let date: Date = proxy.value(atX: xPos) else {
-                        hoveredBucketLabel = nil
-                        return
-                    }
-                    hoveredBucketLabel = TrendDataPoint.nearestHourlyBucketLabel(to: date, in: points)
-                }
-            }
-        }
-    }
-
-    private func menuBarDailyChart(dailySegments: [DailyKindBarSegment]) -> some View {
-        Chart {
-            ForEach(dailySegments) { seg in
-                let isHovered = hoveredBucketLabel == nil || hoveredBucketLabel == seg.bucketLabel
-                BarMark(x: .value("Date", seg.bucketLabel), y: .value("Tokens (M)", seg.tokenMillions))
-                    .position(by: .value("Kind", seg.kindTitle))
-                    .foregroundStyle(by: .value("CLI", seg.category))
-                    .opacity(isHovered ? 1.0 : 0.35)
-            }
-            if let hoveredBucketLabel {
-                RuleMark(x: .value("Date", hoveredBucketLabel))
-                    .foregroundStyle(Color.accentColor.opacity(0.50))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
-            }
-        }
-        .chartYScale(type: .symmetricLog(slopeAtZero: 0.1))
-        .chartLegend(position: .bottom, alignment: .leading)
-        .frame(height: 118)
-        .chartOverlay { proxy in
-            GeometryReader { geo in
-                Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
-                    guard case let .active(loc) = phase, let plotFrame = proxy.plotFrame else {
-                        hoveredBucketLabel = nil
-                        return
-                    }
-                    let xPos = loc.x - geo[plotFrame].origin.x
-                    guard xPos >= 0, xPos <= geo[plotFrame].width, let bucket: String = proxy.value(atX: xPos) else {
-                        hoveredBucketLabel = nil
-                        return
-                    }
-                    hoveredBucketLabel = bucket
-                }
             }
         }
     }
@@ -383,12 +267,7 @@ public struct MenuBarStatusView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onContinuousHover { phase in
-            switch phase {
-            case .active: hoveredCLIEntryID = entry.id
-            case .ended: if hoveredCLIEntryID == entry.id { hoveredCLIEntryID = nil }
-            }
-        }
+        .help("\(entry.displayName) · Today \(todayCompact) (Active \(DashboardTokenFormatter.compact(entry.activeTokens)) · Cache \(DashboardTokenFormatter.compact(entry.cacheTokens))) · 7d \(periodCompact)")
     }
     private func topActionsSection(items: [DashboardActionItem]) -> some View {
         MenuBarTopActionsCard(
@@ -481,6 +360,135 @@ public struct MenuBarStatusView: View {
 
     internal static func resolveLocalized(_ key: String, _ value: String) -> String {
         Copy.resolveLocalized(key, value)
+    }
+}
+
+@MainActor
+private struct MenuBarInteractiveTokenChart: View {
+    let rawPoints: [TrendDataPoint]
+    let activePoints: [TrendDataPoint]
+    let dailySegments: [DailyKindBarSegment]
+    let timeGranularity: DashboardChartTimeGranularity
+    @State private var hoveredBucketLabel: String?
+
+    var body: some View {
+        let summary = hoveredBucketLabel.flatMap {
+            TrendDataPoint.hoverSummary(forBucket: $0, in: rawPoints, granularity: timeGranularity)
+        }
+        Group {
+            if timeGranularity == .threeDayHourly, activePoints.contains(where: { $0.bucketDate != nil }) {
+                hourlyChart
+            } else {
+                dailyChart
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let summary {
+                hoverFloatingBadge(summary: summary)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func hoverFloatingBadge(summary: TrendBucketHoverSummary) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(
+                DashboardL10n.format(
+                    "dashboard.chart.hover_split_format", "%@ · Total %@ (In %@ · Out %@ · Cache %@)",
+                    summary.bucketLabel, DashboardTokenFormatter.compact(summary.totalTokens),
+                    DashboardTokenFormatter.compact(summary.inputTokens), DashboardTokenFormatter.compact(summary.outputTokens),
+                    DashboardTokenFormatter.compact(summary.cacheTokens)
+                )
+            )
+            .font(.caption2.weight(.semibold)).monospacedDigit().lineLimit(1)
+
+            if !summary.cliShares.isEmpty {
+                Text(summary.cliShares.prefix(3).map { "\($0.cli.shortLabel) \(DashboardTokenFormatter.compact($0.tokens))" }.joined(separator: " · "))
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 7).padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor).opacity(0.94)))
+        .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+    }
+
+    private var hourlyChart: some View {
+        Chart {
+            ForEach(activePoints) { point in
+                if let date = point.bucketDate {
+                    let valM = Double(point.totalTokens) / 1_000_000.0
+                    AreaMark(x: .value("Time", date), y: .value("Tokens (M)", valM))
+                        .foregroundStyle(by: .value("CLI", point.category))
+                        .opacity(0.24)
+                        .interpolationMethod(.monotone)
+                    LineMark(x: .value("Time", date), y: .value("Tokens (M)", valM))
+                        .foregroundStyle(by: .value("CLI", point.category))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                        .interpolationMethod(.monotone)
+                }
+            }
+            if let hoveredBucketLabel,
+               let hoveredDate = activePoints.first(where: { $0.bucketLabel == hoveredBucketLabel })?.bucketDate {
+                RuleMark(x: .value("Time", hoveredDate))
+                    .foregroundStyle(Color.accentColor.opacity(0.55))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            }
+        }
+        .chartLegend(position: .bottom, alignment: .leading)
+        .frame(height: 118)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
+                    guard case let .active(loc) = phase, let plotFrame = proxy.plotFrame else {
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
+                        return
+                    }
+                    let xPos = loc.x - geo[plotFrame].origin.x
+                    guard xPos >= 0, xPos <= geo[plotFrame].width, let date: Date = proxy.value(atX: xPos) else {
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
+                        return
+                    }
+                    let next = TrendDataPoint.nearestHourlyBucketLabel(to: date, in: activePoints)
+                    if hoveredBucketLabel != next { hoveredBucketLabel = next }
+                }
+            }
+        }
+    }
+
+    private var dailyChart: some View {
+        Chart {
+            ForEach(dailySegments) { seg in
+                let isHovered = hoveredBucketLabel == nil || hoveredBucketLabel == seg.bucketLabel
+                BarMark(x: .value("Date", seg.bucketLabel), y: .value("Tokens (M)", seg.tokenMillions))
+                    .position(by: .value("Kind", seg.kindTitle))
+                    .foregroundStyle(by: .value("CLI", seg.category))
+                    .opacity(isHovered ? 1.0 : 0.35)
+            }
+            if let hoveredBucketLabel {
+                RuleMark(x: .value("Date", hoveredBucketLabel))
+                    .foregroundStyle(Color.accentColor.opacity(0.50))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            }
+        }
+        .chartYScale(type: .symmetricLog(slopeAtZero: 0.1))
+        .chartLegend(position: .bottom, alignment: .leading)
+        .frame(height: 118)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle()).onContinuousHover { phase in
+                    guard case let .active(loc) = phase, let plotFrame = proxy.plotFrame else {
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
+                        return
+                    }
+                    let xPos = loc.x - geo[plotFrame].origin.x
+                    guard xPos >= 0, xPos <= geo[plotFrame].width, let bucket: String = proxy.value(atX: xPos) else {
+                        if hoveredBucketLabel != nil { hoveredBucketLabel = nil }
+                        return
+                    }
+                    if hoveredBucketLabel != bucket { hoveredBucketLabel = bucket }
+                }
+            }
+        }
     }
 }
 
