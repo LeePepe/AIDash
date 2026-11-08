@@ -4987,6 +4987,24 @@
         }
       }
     },
+    "dashboard.ranking.col_model": {
+      "comment": "Table column header for concrete LLM model name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实际模型"
+          }
+        }
+      }
+    },
     "dashboard.chart.hover_calls_format": {
       "comment": "Hovered chart bucket invocation call count.",
       "extractionState": "manual",

@@ -555,6 +555,7 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
 public struct AgentRankingRow: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let agentName: String
+    public let modelName: String
     public let cliFilter: DashboardCLIFilter
     public let providerName: String
     public let runs: Int
@@ -566,11 +567,11 @@ public struct AgentRankingRow: Codable, Sendable, Equatable, Identifiable {
     public let recentIssue: String?
 
     public init(
-        id: String, agentName: String, cliFilter: DashboardCLIFilter, providerName: String,
+        id: String, agentName: String, modelName: String = "", cliFilter: DashboardCLIFilter, providerName: String,
         runs: Int, totalTokens: UInt64, successRate: Double, avgDurationSeconds: Double,
         costUSD: Double, detailSummary: String, recentIssue: String? = nil
     ) {
-        self.id = id; self.agentName = agentName; self.cliFilter = cliFilter; self.providerName = providerName
+        self.id = id; self.agentName = agentName; self.modelName = modelName; self.cliFilter = cliFilter; self.providerName = providerName
         self.runs = runs; self.totalTokens = totalTokens; self.successRate = successRate
         self.avgDurationSeconds = avgDurationSeconds; self.costUSD = costUSD
         self.detailSummary = detailSummary; self.recentIssue = recentIssue

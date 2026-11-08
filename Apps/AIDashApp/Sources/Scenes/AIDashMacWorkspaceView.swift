@@ -237,27 +237,27 @@ public struct RankingTableCardView: View {
         } content: {
             VStack(alignment: .leading, spacing: 12) {
                 Table(store.filteredRankingRows, selection: $store.selectedRankingRowID) {
-                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_role", "Agent Role"), value: \.agentName)
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_role", "M2 / M1 Role"), value: \.agentName)
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_model", "Model")) { row in
+                        Text(row.modelName.isEmpty ? row.providerName : row.modelName)
+                            .font(.system(.caption, design: .monospaced, weight: .medium))
+                    }
                     TableColumn(DashboardL10n.tr("dashboard.ranking.col_provider", "CLI Provider"), value: \.providerName)
                     TableColumn(DashboardL10n.tr("dashboard.ranking.col_runs", "Runs")) { row in
                         Text(row.runs.formatted(.number))
                             .monospacedDigit()
                     }
                     TableColumn(DashboardL10n.tr("dashboard.ranking.col_tokens", "Tokens")) { row in
-                        Text(row.totalTokens.formatted(.number))
+                        Text(DashboardTokenFormatter.compact(row.totalTokens))
                             .monospacedDigit()
                     }
-                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_success", "Success Rate")) { row in
+                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_latency", "Avg Latency")) { row in
                         HStack(spacing: 4) {
                             Image(systemName: row.health.symbolName)
                                 .foregroundStyle(DashboardSemanticColorPalette.color(for: row.health))
-                            Text(String(format: "%.1f%%", row.successRate * 100))
+                            Text(DashboardL10n.format("dashboard.ranking.latency_value_format", "%.1fs", row.avgDurationSeconds))
                                 .monospacedDigit()
                         }
-                    }
-                    TableColumn(DashboardL10n.tr("dashboard.ranking.col_latency", "Avg Latency")) { row in
-                        Text(DashboardL10n.format("dashboard.ranking.latency_value_format", "%.1fs", row.avgDurationSeconds))
-                            .monospacedDigit()
                     }
                 }
                 .tableStyle(.inset(alternatesRowBackgrounds: true))
@@ -268,7 +268,7 @@ public struct RankingTableCardView: View {
                         Image(systemName: "info.circle.fill")
                             .foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("\(selected.agentName) · \(selected.providerName)")
+                            Text("\(selected.agentName) · \(selected.modelName.isEmpty ? selected.providerName : selected.modelName)")
                                 .font(.subheadline.weight(.semibold))
                             Text(selected.detailSummary)
                                 .font(.caption)

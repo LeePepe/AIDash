@@ -541,11 +541,79 @@ extension LiveDashboardTelemetryReader {
     ) -> [AgentRankingRow] {
         var rows: [AgentRankingRow] = []
         let safeDate = sanitizeSQLToken(dateString)
-        appendRavenRankingRows(&rows, ravenURL: ravenURL, safeDate: safeDate)
+        let magpieUsageURL = ravenURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".config/magpie/usage.jsonl")
+        appendMagpieRoleRankingRows(&rows, magpieURL: magpieUsageURL, datePrefix: safeDate)
         appendCopilotSessionRankingRows(&rows, copilotURL: copilotURL, safeDate: safeDate)
+        appendRavenRankingRows(&rows, ravenURL: ravenURL, safeDate: safeDate)
         appendFallbackChannelRows(&rows, fallbackEntries: fallbackEntries)
-        rows.sort { $0.runs != $1.runs ? $0.runs > $1.runs : $0.totalTokens > $1.totalTokens }
+        rows.sort { $0.totalTokens != $1.totalTokens ? $0.totalTokens > $1.totalTokens : $0.runs > $1.runs }
         return rows.isEmpty ? DashboardWorkspaceStore.deriveRankingRows(from: fallbackEntries) : Array(rows.prefix(12))
+    }
+
+    private struct RoleModelStat {
+        var role: String = ""
+        var model: String = ""
+        var cli: DashboardCLIFilter = .copilot
+        var calls: Int = 0
+        var turns: Int = 0
+        var tokens: UInt64 = 0
+        var okCount: Int = 0
+        var totalMs: Double = 0
+    }
+
+    private static func appendMagpieRoleRankingRows(
+        _ rows: inout [AgentRankingRow], magpieURL: URL, datePrefix: String
+    ) {
+        guard let text = try? String(contentsOf: magpieURL, encoding: .utf8) else { return }
+        var map: [String: RoleModelStat] = [:]
+        for line in text.split(separator: "\n") where line.contains(datePrefix) {
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ts = obj["t"] as? String, ts.hasPrefix(datePrefix) else { continue }
+            let req = (obj["req"] as? String) ?? ""
+            let model = (obj["served"] as? String) ?? (obj["model"] as? String) ?? ""
+            let agent = (obj["agent"] as? String) ?? "copilot"
+            guard !model.isEmpty, model != "microsoft-decision-1", req != "router" else { continue }
+            let inT = (obj["in"] as? NSNumber)?.uint64Value ?? 0
+            let outT = (obj["out"] as? NSNumber)?.uint64Value ?? 0
+            let crT = (obj["cache_read"] as? NSNumber)?.uint64Value ?? 0
+            let cwT = (obj["cache_write"] as? NSNumber)?.uint64Value ?? 0
+            let tok = inT + outT + crT + cwT
+            let status = (obj["status"] as? NSNumber)?.intValue ?? 0
+            let ms = (obj["ms"] as? NSNumber)?.doubleValue ?? 0
+            let isStop = ((obj["stop"] as? String) ?? "") == "stop"
+            let role: String = req.contains("steering") ? "M1 · Steering (TL)"
+                : (req.contains("coding-escalated") ? "M1 · Writer (Escalated)"
+                : (req.contains("coding") ? "M1 · Writer"
+                : (req.contains("review") ? "M1 · Reviewer" : "M2 · Dispatcher (CLI)")))
+            let cli: DashboardCLIFilter = agent.contains("codex") ? .codex : (agent.contains("claude") ? .claude : .copilot)
+            let key = "\(role)|\(model)|\(cli.rawValue)"
+            var cur = map[key] ?? RoleModelStat(role: role, model: model, cli: cli)
+            cur.calls += 1
+            if isStop { cur.turns += 1 }
+            cur.tokens += tok
+            if (200...299).contains(status) { cur.okCount += 1 }
+            cur.totalMs += ms
+            map[key] = cur
+        }
+        for (key, s) in map where s.tokens > 0 {
+            let avgSec = max((s.totalMs / Double(max(s.calls, 1))) / 1000.0, 0.1)
+            let okRate = Double(s.okCount) / Double(max(s.calls, 1))
+            rows.append(
+                AgentRankingRow(
+                    id: "magpie-\(key)", agentName: s.role, modelName: s.model,
+                    cliFilter: s.cli, providerName: s.cli.rawValue,
+                    runs: s.calls, totalTokens: s.tokens, successRate: okRate, avgDurationSeconds: avgSec, costUSD: 0,
+                    detailSummary: "\(s.role) · \(s.model) (\(s.cli.rawValue)) · \(max(s.turns, 1)) turns / \(s.calls) API calls · \(DashboardTokenFormatter.compact(s.tokens)) tok",
+                    recentIssue: nil
+                )
+            )
+        }
     }
 
     private static func appendRavenRankingRows(
@@ -555,13 +623,11 @@ extension LiveDashboardTelemetryReader {
         defer { sqlite3_close(db) }
         let sql = """
         SELECT
-            CASE WHEN client_name LIKE 'codex_exec%' THEN 'Codex Worker (codex_exec)'
-                 WHEN client_name LIKE 'codex-tui%' THEN 'Codex TUI (Interactive)'
-                 WHEN client_name LIKE 'codex_cli_rs%' THEN 'Codex CLI (Rust)'
-                 WHEN client_name LIKE 'magpie-router%' THEN 'Magpie Router'
-                 WHEN client_name LIKE 'magpie%' THEN 'Copilot (Magpie Gateway)'
-                 WHEN client_name LIKE 'claude%' THEN 'Claude Code Agent'
-                 ELSE client_name END as role_group,
+            CASE WHEN client_name LIKE 'codex_exec%' THEN 'M1 · Writer (codex_exec)'
+                 WHEN client_name LIKE 'codex-tui%' THEN 'M2 · Dispatcher (Codex)'
+                 WHEN client_name LIKE 'codex_cli_rs%' THEN 'M2 · Dispatcher (Codex)'
+                 WHEN client_name LIKE 'claude%' THEN 'M1 · Steering (Claude)'
+                 ELSE 'M1 · Worker' END as role_group,
             CASE WHEN client_name LIKE 'codex%' THEN 'codex'
                  WHEN client_name LIKE 'claude%' THEN 'claude' ELSE 'copilot' END as cli_kind,
             COALESCE(NULLIF(resolved_model, ''), NULLIF(model, ''), 'default') as effective_model,
@@ -572,6 +638,7 @@ extension LiveDashboardTelemetryReader {
             1.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
         FROM requests
         WHERE date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)'
+          AND client_name NOT LIKE 'magpie%'
           AND COALESCE(NULLIF(resolved_model, ''), NULLIF(model, ''), '') NOT LIKE 'group/%'
         GROUP BY role_group, effective_model
         HAVING (SUM(COALESCE(input_tokens,0)) + SUM(COALESCE(output_tokens,0)) + SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0))) > 0
@@ -581,7 +648,7 @@ extension LiveDashboardTelemetryReader {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
         defer { sqlite3_finalize(stmt) }
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Agent"
+            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "M1 · Worker"
             let kind = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "copilot"
             let model = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "default"
             let runs = Int(max(sqlite3_column_int64(stmt, 3), 0))
@@ -590,14 +657,14 @@ extension LiveDashboardTelemetryReader {
             let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 6), 0))
             let avgSec = max(sqlite3_column_double(stmt, 7), 0.1)
             let okRate = min(max(sqlite3_column_double(stmt, 8), 0), 1)
-            guard runs > 0 else { continue }
             let cliFilter: DashboardCLIFilter = kind == "codex" ? .codex : (kind == "claude" ? .claude : .copilot)
-            let providerName = cliFilter.rawValue
             let totalTok = inTok + outTok + cacheTok
+            guard runs > 0, !rows.contains(where: { $0.cliFilter == cliFilter && $0.modelName == model }) else { continue }
+            let providerName = cliFilter.rawValue
             let cost = computeCostUSD(input: inTok, output: outTok, cache: cacheTok, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
             rows.append(
                 AgentRankingRow(
-                    id: "raven-rank-\(role)-\(model)", agentName: "\(role) · \(model)",
+                    id: "raven-rank-\(role)-\(model)", agentName: role, modelName: model,
                     cliFilter: cliFilter, providerName: providerName, runs: runs, totalTokens: totalTok,
                     successRate: okRate, avgDurationSeconds: avgSec, costUSD: cost,
                     detailSummary: DashboardL10n.format(
@@ -617,12 +684,14 @@ extension LiveDashboardTelemetryReader {
         defer { sqlite3_close(db) }
         let sql = """
         SELECT
-            'Copilot CLI (Direct)' as role_group,
+            CASE WHEN model LIKE '%flash%' THEN 'M1 · PR Monitor / Task'
+                 ELSE 'M2 · Dispatcher (CLI)' END as role_group,
             COALESCE(NULLIF(copilot_usage_model, ''), NULLIF(model, ''), 'default') as effective_model,
             COUNT(*) as runs,
             SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)) as total_tok,
             AVG(COALESCE(duration_ms, 8500)) / 1000.0,
-            1.0 * SUM(CASE WHEN COALESCE(finish_reason, '') != 'error' THEN 1 ELSE 0 END) / COUNT(*)
+            1.0 * SUM(CASE WHEN COALESCE(finish_reason, '') != 'error' THEN 1 ELSE 0 END) / COUNT(*),
+            COUNT(DISTINCT session_id || '-' || COALESCE(turn_index, 0)) as turns
         FROM assistant_usage_events
         WHERE substr(created_at, 1, 10) = '\(safeDate)'
           AND COALESCE(NULLIF(copilot_usage_model, ''), NULLIF(model, ''), '') NOT LIKE 'group/%'
@@ -634,23 +703,21 @@ extension LiveDashboardTelemetryReader {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
         defer { sqlite3_finalize(stmt) }
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Copilot CLI (Direct)"
+            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "M2 · Dispatcher (CLI)"
             let model = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "default"
             let runs = Int(max(sqlite3_column_int64(stmt, 2), 0))
             let totalTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
             let avgSec = max(sqlite3_column_double(stmt, 4), 0.5)
             let okRate = min(max(sqlite3_column_double(stmt, 5), 0), 1)
+            let turns = Int(max(sqlite3_column_int64(stmt, 6), 1))
             guard runs > 0 else { continue }
             let provider = DashboardCLIFilter.copilot.rawValue
             rows.append(
                 AgentRankingRow(
-                    id: "copilot-session-\(role)-\(model)", agentName: "\(role) · \(model)",
+                    id: "copilot-session-\(role)-\(model)", agentName: role, modelName: model,
                     cliFilter: .copilot, providerName: provider, runs: runs, totalTokens: totalTok,
                     successRate: okRate, avgDurationSeconds: avgSec, costUSD: 0,
-                    detailSummary: DashboardL10n.format(
-                        "dashboard.ranking.total_detail_format", "%@ (%@) · Total %@ tok · %lld runs",
-                        provider, model, DashboardTokenFormatter.compact(totalTok), runs
-                    ),
+                    detailSummary: "\(role) · \(model) (\(provider)) · \(turns) turns / \(runs) API calls · \(DashboardTokenFormatter.compact(totalTok)) tok",
                     recentIssue: nil
                 )
             )
@@ -663,10 +730,10 @@ extension LiveDashboardTelemetryReader {
         for entry in fallbackEntries where entry.interactionCount > 0 && entry.totalTokens > 0 {
             let existingTok = rows.filter { $0.cliFilter == entry.cliFilter }.reduce(UInt64(0)) { $0 + $1.totalTokens }
             guard existingTok == 0 else { continue }
-            let roleLabel = entry.cliFilter == .kimi ? "Kimi Coding Agent" : (entry.cliFilter == .claude ? "Claude Direct Agent" : entry.displayName)
+            let roleLabel = entry.cliFilter == .kimi ? "M1 · Reviewer / Research" : (entry.cliFilter == .claude ? "M1 · Steering (Claude)" : "M2 · Dispatcher (CLI)")
             rows.append(
                 AgentRankingRow(
-                    id: "direct-rank-\(entry.id)", agentName: "\(roleLabel) · \(entry.modelTag)",
+                    id: "direct-rank-\(entry.id)", agentName: roleLabel, modelName: entry.modelTag,
                     cliFilter: entry.cliFilter, providerName: entry.displayName,
                     runs: Int(entry.interactionCount), totalTokens: entry.totalTokens,
                     successRate: entry.health == .critical ? 0.94 : 0.99, avgDurationSeconds: 8.4, costUSD: entry.todayCostUSD,

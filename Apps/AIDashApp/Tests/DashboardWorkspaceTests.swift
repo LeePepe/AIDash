@@ -420,7 +420,8 @@ struct DashboardWorkspaceTests {
             dateString: todayStr,
             fallbackEntries: store.cliEntries
         )
-        let rustCodexRow = try #require(ranked.first(where: { $0.agentName.contains("Codex CLI (Rust)") }))
+        let rustCodexRow = try #require(ranked.first(where: { $0.agentName.contains("M2 · Dispatcher (Codex)") }))
+        #expect(rustCodexRow.modelName == "gpt-5.6-luna")
         #expect(rustCodexRow.runs == 2)
         #expect(rustCodexRow.totalTokens == 3500)
         #expect(abs(rustCodexRow.successRate - 0.5) < 0.001)
