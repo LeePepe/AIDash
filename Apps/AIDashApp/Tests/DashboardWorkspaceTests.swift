@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import SQLite3
 import SwiftUI
 import Testing
 #if AIDASHAPP_LOGIC_TESTS
@@ -399,6 +400,27 @@ struct DashboardWorkspaceTests {
         prefs.defaultChartGranularity = .threeDayHourly
         #expect(prefs.defaultChartGranularity == .threeDayHourly)
         #expect(store.cliEntries.filter(\.hasTrackedQuota).count == 3)
+        let ravenDB = tempDir.appendingPathComponent("raven.db")
+        var db: OpaquePointer?
+        #expect(sqlite3_open(ravenDB.path, &db) == SQLITE_OK)
+        if let db {
+            let sql = """
+            CREATE TABLE requests (timestamp INTEGER, client_name TEXT, model TEXT, resolved_model TEXT, input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER, latency_ms REAL, status_code INTEGER);
+            INSERT INTO requests VALUES (1794100000000, 'codex_cli_rs/0.167.0', 'gpt-5.6-luna', 'gpt-5.6-luna', 1000, 500, 2000, 0, 4200, 200);
+            INSERT INTO requests VALUES (1794100001000, 'codex_cli_rs/0.167.0', 'gpt-5.6-luna', '', 0, 0, 0, 0, 1200, 500);
+            """
+            #expect(sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK)
+            sqlite3_close(db)
+        }
+        let ranked = LiveDashboardTelemetryReader.queryRealRankings(
+            ravenURL: ravenDB,
+            copilotURL: tempDir.appendingPathComponent("missing-copilot.db"),
+            dateString: "2026-11-08",
+            fallbackEntries: store.cliEntries
+        )
+        let rustCodexRow = try #require(ranked.first(where: { $0.agentName.contains("Codex CLI (Rust)") }))
+        #expect(rustCodexRow.runs == 2)
+        #expect(abs(rustCodexRow.successRate - 0.5) < 0.001)
         _ = DashboardSettingsPageView(store: store, prefs: prefs).body
         let proposalsURL = tempDir.appendingPathComponent("proposals.jsonl")
         let proposalsSample = """

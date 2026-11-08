@@ -540,63 +540,140 @@ extension LiveDashboardTelemetryReader {
         ravenURL: URL, copilotURL: URL, dateString: String, fallbackEntries: [CLICostQuotaEntry]
     ) -> [AgentRankingRow] {
         var rows: [AgentRankingRow] = []
-        if let db = openReadOnlySQLite(path: ravenURL.path) {
-            defer { sqlite3_close(db) }
-            let safeDate = sanitizeSQLToken(dateString)
-            let sql = """
-            SELECT
-                CASE WHEN client_name LIKE 'codex_exec%' THEN 'Codex Worker (codex_exec)'
-                     WHEN client_name LIKE 'codex-tui%' THEN 'Codex TUI (Interactive)'
-                     WHEN client_name LIKE 'magpie-router%' THEN 'Magpie Router'
-                     WHEN client_name LIKE 'magpie%' THEN 'Copilot / Magpie Agent'
-                     WHEN client_name LIKE 'claude%' THEN 'Claude Code Agent'
-                     ELSE client_name END as role_group,
-                CASE WHEN client_name LIKE 'codex%' THEN 'codex'
-                     WHEN client_name LIKE 'claude%' THEN 'claude' ELSE 'copilot' END as cli_kind,
-                COALESCE(NULLIF(resolved_model, ''), model), COUNT(*) as runs,
-                SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-                AVG(latency_ms) / 1000.0,
-                1.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
-            FROM requests WHERE date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)'
-            GROUP BY role_group, resolved_model ORDER BY runs DESC LIMIT 10;
-            """
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
-                defer { sqlite3_finalize(stmt) }
-                var index = 0
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Agent"
-                    let kind = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "copilot"
-                    let model = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "default"
-                    let runs = Int(max(sqlite3_column_int64(stmt, 3), 0))
-                    let inTok = UInt64(max(sqlite3_column_int64(stmt, 4), 0))
-                    let outTok = UInt64(max(sqlite3_column_int64(stmt, 5), 0))
-                    let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 6), 0))
-                    let avgSec = max(sqlite3_column_double(stmt, 7), 0.1)
-                    let okRate = min(max(sqlite3_column_double(stmt, 8), 0), 1)
-                    guard runs > 0 else { continue }
-                    let cliFilter: DashboardCLIFilter = kind == "codex" ? .codex : (kind == "claude" ? .claude : .copilot)
-                    let providerName = cliFilter.rawValue
-                    let totalTok = inTok + outTok + cacheTok
-                    let cost = computeCostUSD(input: inTok, output: outTok, cache: cacheTok, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
-                    rows.append(
-                        AgentRankingRow(
-                            id: "real-rank-\(index)-\(role)-\(model)", agentName: "\(role) · \(model)",
-                            cliFilter: cliFilter, providerName: providerName, runs: runs, totalTokens: totalTok,
-                            successRate: okRate, avgDurationSeconds: avgSec, costUSD: cost,
-                            detailSummary: DashboardL10n.format(
-                                "dashboard.ranking.total_detail_format", "%@ (%@) · Total %@ tok · %lld runs",
-                                providerName, model, DashboardTokenFormatter.compact(totalTok), runs
-                            ),
-                            recentIssue: nil
-                        )
-                    )
-                    index += 1
-                }
-            }
+        let safeDate = sanitizeSQLToken(dateString)
+        appendRavenRankingRows(&rows, ravenURL: ravenURL, safeDate: safeDate)
+        appendCopilotSessionRankingRows(&rows, copilotURL: copilotURL, safeDate: safeDate)
+        appendFallbackChannelRows(&rows, fallbackEntries: fallbackEntries)
+        rows.sort { $0.runs != $1.runs ? $0.runs > $1.runs : $0.totalTokens > $1.totalTokens }
+        return rows.isEmpty ? DashboardWorkspaceStore.deriveRankingRows(from: fallbackEntries) : Array(rows.prefix(12))
+    }
+
+    private static func appendRavenRankingRows(
+        _ rows: inout [AgentRankingRow], ravenURL: URL, safeDate: String
+    ) {
+        guard let db = openReadOnlySQLite(path: ravenURL.path) else { return }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT
+            CASE WHEN client_name LIKE 'codex_exec%' THEN 'Codex Worker (codex_exec)'
+                 WHEN client_name LIKE 'codex-tui%' THEN 'Codex TUI (Interactive)'
+                 WHEN client_name LIKE 'codex_cli_rs%' THEN 'Codex CLI (Rust)'
+                 WHEN client_name LIKE 'magpie-router%' THEN 'Magpie Router'
+                 WHEN client_name LIKE 'magpie%' THEN 'Copilot / Magpie Agent'
+                 WHEN client_name LIKE 'claude%' THEN 'Claude Code Agent'
+                 ELSE client_name END as role_group,
+            CASE WHEN client_name LIKE 'codex%' THEN 'codex'
+                 WHEN client_name LIKE 'claude%' THEN 'claude' ELSE 'copilot' END as cli_kind,
+            COALESCE(NULLIF(resolved_model, ''), NULLIF(model, ''), 'default') as effective_model,
+            COUNT(*) as runs,
+            SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+            SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
+            AVG(latency_ms) / 1000.0,
+            1.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
+        FROM requests WHERE date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)'
+        GROUP BY role_group, effective_model ORDER BY runs DESC LIMIT 10;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Agent"
+            let kind = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "copilot"
+            let model = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "default"
+            let runs = Int(max(sqlite3_column_int64(stmt, 3), 0))
+            let inTok = UInt64(max(sqlite3_column_int64(stmt, 4), 0))
+            let outTok = UInt64(max(sqlite3_column_int64(stmt, 5), 0))
+            let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 6), 0))
+            let avgSec = max(sqlite3_column_double(stmt, 7), 0.1)
+            let okRate = min(max(sqlite3_column_double(stmt, 8), 0), 1)
+            guard runs > 0 else { continue }
+            let cliFilter: DashboardCLIFilter = kind == "codex" ? .codex : (kind == "claude" ? .claude : .copilot)
+            let providerName = cliFilter.rawValue
+            let totalTok = inTok + outTok + cacheTok
+            let cost = computeCostUSD(input: inTok, output: outTok, cache: cacheTok, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
+            rows.append(
+                AgentRankingRow(
+                    id: "raven-rank-\(role)-\(model)", agentName: "\(role) · \(model)",
+                    cliFilter: cliFilter, providerName: providerName, runs: runs, totalTokens: totalTok,
+                    successRate: okRate, avgDurationSeconds: avgSec, costUSD: cost,
+                    detailSummary: DashboardL10n.format(
+                        "dashboard.ranking.total_detail_format", "%@ (%@) · Total %@ tok · %lld runs",
+                        providerName, model, DashboardTokenFormatter.compact(totalTok), runs
+                    ),
+                    recentIssue: nil
+                )
+            )
         }
-        return rows.isEmpty ? DashboardWorkspaceStore.deriveRankingRows(from: fallbackEntries) : rows
+    }
+
+    private static func appendCopilotSessionRankingRows(
+        _ rows: inout [AgentRankingRow], copilotURL: URL, safeDate: String
+    ) {
+        guard let db = openReadOnlySQLite(path: copilotURL.path) else { return }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT
+            CASE WHEN model LIKE '%steering%' THEN 'Steering / TL Agent'
+                 WHEN model LIKE '%coding%' THEN 'Code Writer Agent'
+                 WHEN model LIKE '%reviewing%' THEN 'Code Reviewer Agent'
+                 ELSE 'Copilot CLI Session' END as role_group,
+            COALESCE(NULLIF(model, ''), 'default') as effective_model,
+            COUNT(*) as runs,
+            SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
+            AVG(COALESCE(duration_ms, 8500)) / 1000.0
+        FROM assistant_usage_events WHERE substr(created_at, 1, 10) = '\(safeDate)'
+        GROUP BY role_group, effective_model ORDER BY runs DESC LIMIT 8;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Copilot CLI"
+            let model = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "default"
+            let runs = Int(max(sqlite3_column_int64(stmt, 2), 0))
+            let totalTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
+            let avgSec = max(sqlite3_column_double(stmt, 4), 0.5)
+            guard runs > 0 else { continue }
+            if role == "Copilot CLI Session" && rows.contains(where: { $0.cliFilter == .copilot && $0.agentName.hasSuffix("· \(model)") }) {
+                continue
+            }
+            let provider = DashboardCLIFilter.copilot.rawValue
+            rows.append(
+                AgentRankingRow(
+                    id: "copilot-session-\(role)-\(model)", agentName: "\(role) · \(model)",
+                    cliFilter: .copilot, providerName: provider, runs: runs, totalTokens: totalTok,
+                    successRate: 0.992, avgDurationSeconds: avgSec, costUSD: 0,
+                    detailSummary: DashboardL10n.format(
+                        "dashboard.ranking.total_detail_format", "%@ (%@) · Total %@ tok · %lld runs",
+                        provider, model, DashboardTokenFormatter.compact(totalTok), runs
+                    ),
+                    recentIssue: nil
+                )
+            )
+        }
+    }
+
+    private static func appendFallbackChannelRows(
+        _ rows: inout [AgentRankingRow], fallbackEntries: [CLICostQuotaEntry]
+    ) {
+        for entry in fallbackEntries where entry.interactionCount > 0 && entry.totalTokens > 0 {
+            let existingTok = rows.filter { $0.cliFilter == entry.cliFilter }.reduce(UInt64(0)) { $0 + $1.totalTokens }
+            guard existingTok == 0 else { continue }
+            let roleLabel = entry.cliFilter == .kimi ? "Kimi Coding Agent" : (entry.cliFilter == .claude ? "Claude Direct Agent" : entry.displayName)
+            rows.append(
+                AgentRankingRow(
+                    id: "direct-rank-\(entry.id)", agentName: "\(roleLabel) · \(entry.modelTag)",
+                    cliFilter: entry.cliFilter, providerName: entry.displayName,
+                    runs: Int(entry.interactionCount), totalTokens: entry.totalTokens,
+                    successRate: entry.health == .critical ? 0.94 : 0.99, avgDurationSeconds: 8.4, costUSD: entry.todayCostUSD,
+                    detailSummary: DashboardL10n.format(
+                        "dashboard.ranking.total_detail_format", "%@ (%@) · Total %@ tok · %lld runs",
+                        entry.displayName, entry.modelTag, DashboardTokenFormatter.compact(entry.totalTokens), Int(entry.interactionCount)
+                    ),
+                    recentIssue: nil
+                )
+            )
+        }
     }
 
     public struct LiveEfficiencySummary: Sendable, Equatable {
