@@ -398,6 +398,7 @@ struct DashboardWorkspaceTests {
         #expect(MenuBarBadgeMetric.cpuAndMemory.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries) == " CPU 34% · 18/32G")
         prefs.defaultChartGranularity = .threeDayHourly
         #expect(prefs.defaultChartGranularity == .threeDayHourly)
+        #expect(store.cliEntries.filter(\.hasTrackedQuota).count == 3)
         _ = DashboardSettingsPageView(store: store, prefs: prefs).body
         let proposalsURL = tempDir.appendingPathComponent("proposals.jsonl")
         let proposalsSample = """
