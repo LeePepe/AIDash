@@ -541,14 +541,16 @@ extension LiveDashboardTelemetryReader {
     ) -> [AgentRankingRow] {
         var rows: [AgentRankingRow] = []
         let safeDate = sanitizeSQLToken(dateString)
-        let magpieUsageURL = ravenURL
+        let homeURL = ravenURL
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent(".config/magpie/usage.jsonl")
+        let magpieUsageURL = homeURL.appendingPathComponent(".config/magpie/usage.jsonl")
+        let cindyDirURL = homeURL.appendingPathComponent("Library/Application Support/CindyGlobal")
         appendMagpieRoleRankingRows(&rows, magpieURL: magpieUsageURL, datePrefix: safeDate)
         appendCopilotSessionRankingRows(&rows, copilotURL: copilotURL, safeDate: safeDate)
+        appendCindyRankingRows(&rows, cindyDirURL: cindyDirURL, safeDate: safeDate)
         appendRavenRankingRows(&rows, ravenURL: ravenURL, safeDate: safeDate)
         appendFallbackChannelRows(&rows, fallbackEntries: fallbackEntries)
         rows.sort { $0.totalTokens != $1.totalTokens ? $0.totalTokens > $1.totalTokens : $0.runs > $1.runs }
@@ -684,18 +686,22 @@ extension LiveDashboardTelemetryReader {
         defer { sqlite3_close(db) }
         let sql = """
         SELECT
-            CASE WHEN model LIKE '%flash%' THEN 'M1 · PR Monitor / Task'
-                 ELSE 'M2 · Dispatcher (CLI)' END as role_group,
-            COALESCE(NULLIF(copilot_usage_model, ''), NULLIF(model, ''), 'default') as effective_model,
+            CASE WHEN s.summary LIKE 'Load /team-lead%' THEN 'M1 · Steering (TL)'
+                 WHEN s.summary LIKE '%Task Writer%' OR s.summary LIKE '%Leaf Writer%' THEN 'M1 · Writer'
+                 WHEN s.summary LIKE '%Reviewer brief%' THEN 'M1 · Reviewer'
+                 WHEN s.summary LIKE '%PR Monitor%' OR e.model LIKE '%flash%' THEN 'M1 · PR Monitor'
+                 ELSE 'M2 · Terminal CLI' END as role_group,
+            COALESCE(NULLIF(e.copilot_usage_model, ''), NULLIF(e.model, ''), 'default') as effective_model,
             COUNT(*) as runs,
-            SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)) as total_tok,
-            AVG(COALESCE(duration_ms, 8500)) / 1000.0,
-            1.0 * SUM(CASE WHEN COALESCE(finish_reason, '') != 'error' THEN 1 ELSE 0 END) / COUNT(*),
-            COUNT(DISTINCT session_id || '-' || COALESCE(turn_index, 0)) as turns
-        FROM assistant_usage_events
-        WHERE substr(created_at, 1, 10) = '\(safeDate)'
-          AND COALESCE(NULLIF(copilot_usage_model, ''), NULLIF(model, ''), '') NOT LIKE 'group/%'
-        GROUP BY effective_model
+            SUM(COALESCE(e.input_tokens,0)+COALESCE(e.output_tokens,0)+COALESCE(e.cache_read_tokens,0)+COALESCE(e.cache_write_tokens,0)) as total_tok,
+            AVG(COALESCE(e.duration_ms, 8500)) / 1000.0,
+            1.0 * SUM(CASE WHEN COALESCE(e.finish_reason, '') != 'error' THEN 1 ELSE 0 END) / COUNT(*),
+            COUNT(DISTINCT e.session_id || '-' || COALESCE(e.turn_index, 0)) as turns
+        FROM assistant_usage_events e
+        LEFT JOIN sessions s ON e.session_id = s.id
+        WHERE substr(e.created_at, 1, 10) = '\(safeDate)'
+          AND COALESCE(NULLIF(e.copilot_usage_model, ''), NULLIF(e.model, ''), '') NOT LIKE 'group/%'
+        GROUP BY role_group, effective_model
         HAVING total_tok > 0
         ORDER BY runs DESC LIMIT 8;
         """
@@ -703,7 +709,7 @@ extension LiveDashboardTelemetryReader {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
         defer { sqlite3_finalize(stmt) }
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "M2 · Dispatcher (CLI)"
+            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "M2 · Terminal CLI"
             let model = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "default"
             let runs = Int(max(sqlite3_column_int64(stmt, 2), 0))
             let totalTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
@@ -718,6 +724,50 @@ extension LiveDashboardTelemetryReader {
                     cliFilter: .copilot, providerName: provider, runs: runs, totalTokens: totalTok,
                     successRate: okRate, avgDurationSeconds: avgSec, costUSD: 0,
                     detailSummary: "\(role) · \(model) (\(provider)) · \(turns) turns / \(runs) API calls · \(DashboardTokenFormatter.compact(totalTok)) tok",
+                    recentIssue: nil
+                )
+            )
+        }
+    }
+
+    static func appendCindyRankingRows(
+        _ rows: inout [AgentRankingRow], cindyDirURL: URL, safeDate: String
+    ) {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: cindyDirURL, includingPropertiesForKeys: nil),
+              let dbURL = files.first(where: { $0.lastPathComponent.hasPrefix("cindy-") && $0.pathExtension == "db" }),
+              let db = openReadOnlySQLite(path: dbURL.path) else { return }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT
+            CASE WHEN s.source = 'bot' THEN 'M2 · Cindy Bot (' || COALESCE(NULLIF(s.title, ''), 'Bot') || ')'
+                 ELSE 'M2 · Cindy Desktop' END as role_label,
+            COALESCE(NULLIF(s.model, ''), 'default') as model_name,
+            COALESCE(NULLIF(s.agent_kind, ''), 'pi') as agent_kind,
+            SUM(COALESCE(u.tokens, 0)) as total_tok,
+            SUM(MAX(COALESCE((SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id AND m.role = 'assistant'), 1), 1)) as calls
+        FROM daily_session_usage u
+        JOIN sessions s ON u.session_id = s.id
+        WHERE u.day = '\(safeDate)'
+        GROUP BY role_label, model_name, agent_kind
+        HAVING total_tok > 0;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "M2 · Cindy"
+            let rawModel = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "default"
+            let model = rawModel.split(separator: "#").first.map(String.init) ?? rawModel
+            let kind = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "pi"
+            let totalTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
+            let calls = Int(max(sqlite3_column_int64(stmt, 4), 1))
+            let cli: DashboardCLIFilter = kind.contains("codex") ? .codex : (kind.contains("claude") || kind == "cc" ? .claude : .copilot)
+            rows.append(
+                AgentRankingRow(
+                    id: "cindy-\(role)-\(model)", agentName: role, modelName: model,
+                    cliFilter: cli, providerName: cli.rawValue, runs: calls, totalTokens: totalTok,
+                    successRate: 1.0, avgDurationSeconds: 6.5, costUSD: 0,
+                    detailSummary: "\(role) · \(model) · \(calls) turns · \(DashboardTokenFormatter.compact(totalTok)) tok",
                     recentIssue: nil
                 )
             )

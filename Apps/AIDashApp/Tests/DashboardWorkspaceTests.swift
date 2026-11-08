@@ -425,6 +425,29 @@ struct DashboardWorkspaceTests {
         #expect(rustCodexRow.runs == 2)
         #expect(rustCodexRow.totalTokens == 3500)
         #expect(abs(rustCodexRow.successRate - 0.5) < 0.001)
+
+        let cindyDB = tempDir.appendingPathComponent("cindy-test.db")
+        var cdb: OpaquePointer?
+        #expect(sqlite3_open(cindyDB.path, &cdb) == SQLITE_OK)
+        if let cdb {
+            let csql = """
+            CREATE TABLE sessions (id TEXT, title TEXT, model TEXT, agent_kind TEXT, source TEXT);
+            CREATE TABLE daily_session_usage (day TEXT, session_id TEXT, tokens INTEGER);
+            CREATE TABLE messages (session_id TEXT, role TEXT);
+            INSERT INTO sessions VALUES ('s1', 'CindyChat', 'gemini-4-argon', 'pi', 'desktop');
+            INSERT INTO sessions VALUES ('s2', 'mimo', 'gpt-6.1-sol', 'codex', 'bot');
+            INSERT INTO daily_session_usage VALUES ('\(todayStr)', 's1', 1600000);
+            INSERT INTO daily_session_usage VALUES ('\(todayStr)', 's2', 22000);
+            INSERT INTO messages VALUES ('s1', 'assistant');
+            INSERT INTO messages VALUES ('s1', 'assistant');
+            """
+            #expect(sqlite3_exec(cdb, csql, nil, nil, nil) == SQLITE_OK)
+            sqlite3_close(cdb)
+        }
+        var cindyRows: [AgentRankingRow] = []
+        LiveDashboardTelemetryReader.appendCindyRankingRows(&cindyRows, cindyDirURL: tempDir, safeDate: todayStr)
+        #expect(cindyRows.contains(where: { $0.agentName == "M2 · Cindy Desktop" && $0.modelName == "gemini-4-argon" }))
+        #expect(cindyRows.contains(where: { $0.agentName == "M2 · Cindy Bot (mimo)" && $0.modelName == "gpt-6.1-sol" }))
         _ = DashboardSettingsPageView(store: store, prefs: prefs).body
         let proposalsURL = tempDir.appendingPathComponent("proposals.jsonl")
         let proposalsSample = """
