@@ -450,6 +450,7 @@ struct DashboardWorkspaceTests {
         #expect(cindyRows.contains(where: { $0.agentName == "M2 · Cindy Bot (mimo)" && $0.modelName == "gpt-6.1-sol" }))
         #expect(OverviewWorkbenchLens.allCases.count == 3)
         #expect(!OverviewWorkbenchLens.trends.title.isEmpty)
+        #expect(OverviewWorkbenchLens.rankings.symbolName == "tablecells")
         _ = DashboardSettingsPageView(store: store, prefs: prefs).body
         let proposalsURL = tempDir.appendingPathComponent("proposals.jsonl")
         let proposalsSample = """

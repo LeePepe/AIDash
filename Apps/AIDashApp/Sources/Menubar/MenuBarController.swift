@@ -14,6 +14,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     private var computerRefreshTimer: Timer?
     private var tokenRefreshTimer: Timer?
     private var preferencesObserver: NSObjectProtocol?
+    private var activationObserver: NSObjectProtocol?
     private var isMenuOpen = false
 
     internal var statusItemForTesting: NSStatusItem? { statusItem }
@@ -73,6 +74,20 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.updateMenuPresentation()
+            }
+        }
+        if LiveDashboardTelemetryReader.isLiveEnvironment {
+            activationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                MainActor.assumeIsolated {
+                    let hasVisibleMain = NSApp?.windows.contains { $0.isVisible && $0.canBecomeMain && !$0.className.contains("StatusBar") } ?? false
+                    if !hasVisibleMain {
+                        DashboardWorkspaceStore.shared.openDashboardWindow(section: DashboardWorkspaceStore.shared.selectedSection)
+                    }
+                }
             }
         }
     }
@@ -160,6 +175,10 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         if let preferencesObserver {
             NotificationCenter.default.removeObserver(preferencesObserver)
             self.preferencesObserver = nil
+        }
+        if let activationObserver {
+            NotificationCenter.default.removeObserver(activationObserver)
+            self.activationObserver = nil
         }
     }
 
