@@ -504,7 +504,9 @@ extension DashboardWorkspaceStore {
 
     static func deriveTrendPoints(from entries: [CLICostQuotaEntry]) -> [TrendDataPoint] {
         entries.map { entry in
-            TrendDataPoint(
+            let inTok = UInt64(Double(entry.activeTokens) * 0.72)
+            let outTok = entry.activeTokens - inTok
+            return TrendDataPoint(
                 id: "trend-\(entry.id)",
                 bucketLabel: entry.cliFilter.shortLabel,
                 category: entry.displayName,
@@ -512,7 +514,10 @@ extension DashboardWorkspaceStore {
                 invocations: Int(entry.interactionCount),
                 successRate: entry.health == .critical ? 0.91 : 0.99,
                 costUSD: entry.todayCostUSD,
-                totalTokens: entry.activeTokens + entry.cacheTokens
+                totalTokens: entry.activeTokens + entry.cacheTokens,
+                inputTokens: inTok,
+                outputTokens: outTok,
+                cacheTokens: entry.cacheTokens
             )
         }
     }

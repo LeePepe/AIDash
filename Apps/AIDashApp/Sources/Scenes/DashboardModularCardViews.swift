@@ -287,6 +287,7 @@ public struct TrendChartCardView: View {
     public let selectedCategory: String?
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
+    @State private var tokenKindFilter: DashboardTokenKindFilter = .all
 
     public init(
         points: [TrendDataPoint],
@@ -306,26 +307,36 @@ public struct TrendChartCardView: View {
             subtitle: DashboardL10n.tr("dashboard.card.trend.subtitle", "Click any bar to cross-filter tables and actionable items below"),
             symbolName: "chart.bar.xaxis"
         ) {
-            if let selectedCategory {
-                Button {
-                    onClearSelection()
-                } label: {
-                    Label(
-                        DashboardL10n.format("dashboard.chart.clear_filter_format", "Filter: %@ ×", selectedCategory),
-                        systemImage: "line.3.horizontal.decrease.circle.fill"
-                    )
-                        .font(.caption.weight(.medium))
+            HStack(spacing: 8) {
+                Picker(DashboardL10n.tr("dashboard.token_kind.picker_label", "Token Type"), selection: $tokenKindFilter) {
+                    ForEach(DashboardTokenKindFilter.allCases) { kind in
+                        Text(kind.displayTitle).tag(kind)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(minHeight: 28)
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+
+                if let selectedCategory {
+                    Button {
+                        onClearSelection()
+                    } label: {
+                        Label(
+                            DashboardL10n.format("dashboard.chart.clear_filter_format", "Filter: %@ ×", selectedCategory),
+                            systemImage: "line.3.horizontal.decrease.circle.fill"
+                        )
+                            .font(.caption.weight(.medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(minHeight: 28)
+                }
             }
         } content: {
-            let categoryTotals = Self.groupedCategoryTotals(from: points)
+            let categoryTotals = Self.groupedCategoryTotals(from: points, kind: tokenKindFilter)
             VStack(alignment: .leading, spacing: 12) {
                 Chart(points) { point in
                     let isSelected = selectedCategory == nil || selectedCategory == point.category
-                    let tokenMillions = Double(point.totalTokens) / 1_000_000.0
+                    let tokenMillions = Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0
                     BarMark(
                         x: .value("Date", point.bucketLabel),
                         y: .value(DashboardL10n.tr("dashboard.chart.axis_invocations", "Total Tokens (M)"), tokenMillions)
@@ -364,14 +375,17 @@ public struct TrendChartCardView: View {
         }
     }
 
-    private static func groupedCategoryTotals(from points: [TrendDataPoint]) -> [(category: String, tokens: UInt64)] {
+    private static func groupedCategoryTotals(
+        from points: [TrendDataPoint],
+        kind: DashboardTokenKindFilter
+    ) -> [(category: String, tokens: UInt64)] {
         var order: [String] = []
         var sums: [String: UInt64] = [:]
         for p in points {
             if sums[p.category] == nil {
                 order.append(p.category)
             }
-            sums[p.category, default: 0] += p.totalTokens
+            sums[p.category, default: 0] += p.tokens(for: kind)
         }
         return order.map { ($0, sums[$0] ?? 0) }
     }

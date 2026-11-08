@@ -161,6 +161,24 @@ public struct KPIMetricItem: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public enum DashboardTokenKindFilter: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
+    case all
+    case input
+    case output
+    case cache
+
+    public var id: String { rawValue }
+
+    public var displayTitle: String {
+        switch self {
+        case .all: return DashboardL10n.tr("dashboard.token_kind.all", "Total")
+        case .input: return DashboardL10n.tr("dashboard.token_kind.input", "Input")
+        case .output: return DashboardL10n.tr("dashboard.token_kind.output", "Output")
+        case .cache: return DashboardL10n.tr("dashboard.token_kind.cache", "Cache")
+        }
+    }
+}
+
 public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let bucketLabel: String
@@ -170,6 +188,9 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
     public let successRate: Double
     public let costUSD: Double
     public let totalTokens: UInt64
+    public let inputTokens: UInt64
+    public let outputTokens: UInt64
+    public let cacheTokens: UInt64
 
     public init(
         id: String,
@@ -179,7 +200,10 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         invocations: Int,
         successRate: Double,
         costUSD: Double,
-        totalTokens: UInt64 = 0
+        totalTokens: UInt64 = 0,
+        inputTokens: UInt64 = 0,
+        outputTokens: UInt64 = 0,
+        cacheTokens: UInt64 = 0
     ) {
         self.id = id
         self.bucketLabel = bucketLabel
@@ -189,6 +213,18 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
         self.successRate = successRate
         self.costUSD = costUSD
         self.totalTokens = totalTokens
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheTokens = cacheTokens
+    }
+
+    public func tokens(for kind: DashboardTokenKindFilter) -> UInt64 {
+        switch kind {
+        case .all: return totalTokens
+        case .input: return inputTokens
+        case .output: return outputTokens
+        case .cache: return cacheTokens
+        }
     }
 }
 

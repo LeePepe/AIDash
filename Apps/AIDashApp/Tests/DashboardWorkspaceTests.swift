@@ -343,6 +343,10 @@ struct DashboardWorkspaceTests {
         #expect(store.pendingActionCount == 0)
         #expect(store.completedActionCount >= 1)
         #expect(store.cliEntries.contains(where: { $0.cliFilter == .kimi }))
+        if let firstPoint = store.trendPoints.first {
+            #expect(firstPoint.tokens(for: .all) == firstPoint.totalTokens)
+            #expect(firstPoint.tokens(for: .input) + firstPoint.tokens(for: .output) + firstPoint.tokens(for: .cache) == firstPoint.totalTokens)
+        }
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
         _ = ActionItemsCardView(store: store).body
     }

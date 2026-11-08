@@ -2197,6 +2197,96 @@
         }
       }
     },
+    "dashboard.token_kind.all": {
+      "comment": "All token types filter option.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        }
+      }
+    },
+    "dashboard.token_kind.cache": {
+      "comment": "Cache tokens filter option.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缓存"
+          }
+        }
+      }
+    },
+    "dashboard.token_kind.input": {
+      "comment": "Input tokens filter option.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Input"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入"
+          }
+        }
+      }
+    },
+    "dashboard.token_kind.output": {
+      "comment": "Output tokens filter option.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Output"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输出"
+          }
+        }
+      }
+    },
+    "dashboard.token_kind.picker_label": {
+      "comment": "Accessibility label for token type segmented picker.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token Type"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token 类型"
+          }
+        }
+      }
+    },
     "dashboard.toolbar.cli_scope": {
       "comment": "Toolbar segmented picker label for CLI scope.",
       "extractionState": "manual",

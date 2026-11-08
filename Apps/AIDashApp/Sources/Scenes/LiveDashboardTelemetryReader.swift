@@ -419,6 +419,14 @@ extension LiveDashboardTelemetryReader {
         return stats
     }
 
+    struct DailyTokenBucket {
+        var input: UInt64 = 0
+        var output: UInt64 = 0
+        var cache: UInt64 = 0
+        var runs: Int = 0
+        var total: UInt64 { input + output + cache }
+    }
+
     static func querySevenDayTrends(
         ravenURL: URL,
         copilotURL: URL,
@@ -427,10 +435,12 @@ extension LiveDashboardTelemetryReader {
         fallbackEntries: [CLICostQuotaEntry]
     ) -> [TrendDataPoint] {
         let safeDate = sanitizeSQLToken(dateString)
-        var dailyMap: [String: [DashboardCLIFilter: (tokens: UInt64, runs: Int)]] = [:]
+        var dailyMap: [String: [DashboardCLIFilter: DailyTokenBucket]] = [:]
         for (day, stat) in kimiDailyBuckets where stat.tokens > 0 {
+            let inTok = UInt64(Double(stat.tokens) * 0.85)
+            let outTok = stat.tokens - inTok
             var dayDict = dailyMap[day, default: [:]]
-            dayDict[.kimi] = stat
+            dayDict[.kimi] = DailyTokenBucket(input: inTok, output: outTok, cache: 0, runs: stat.runs)
             dailyMap[day] = dayDict
         }
 
@@ -439,13 +449,10 @@ extension LiveDashboardTelemetryReader {
             let sql = """
             SELECT
                 date(timestamp/1000, 'unixepoch', 'localtime') as d,
-                CASE
-                    WHEN client_name LIKE 'codex%' THEN 'codex'
-                    WHEN client_name LIKE 'claude%' THEN 'claude'
-                    ELSE 'copilot'
-                END as cli_kind,
-                SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-                COUNT(*)
+                CASE WHEN client_name LIKE 'codex%' THEN 'codex'
+                     WHEN client_name LIKE 'claude%' THEN 'claude' ELSE 'copilot' END as cli_kind,
+                SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
             FROM requests
             WHERE timestamp >= (strftime('%s', '\(safeDate)', '-6 days') * 1000)
               AND date(timestamp/1000, 'unixepoch', 'localtime') <= '\(safeDate)'
@@ -459,11 +466,13 @@ extension LiveDashboardTelemetryReader {
                           let kindPtr = sqlite3_column_text(stmt, 1) else { continue }
                     let day = String(cString: dayPtr)
                     let kind = String(cString: kindPtr)
-                    let tok = UInt64(max(sqlite3_column_int64(stmt, 2), 0))
-                    let runs = Int(max(sqlite3_column_int64(stmt, 3), 0))
+                    let inTok = UInt64(max(sqlite3_column_int64(stmt, 2), 0))
+                    let outTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
+                    let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 4), 0))
+                    let runs = Int(max(sqlite3_column_int64(stmt, 5), 0))
                     let cli: DashboardCLIFilter = kind == "codex" ? .codex : (kind == "claude" ? .claude : .copilot)
                     var dayDict = dailyMap[day, default: [:]]
-                    dayDict[cli] = (tok, runs)
+                    dayDict[cli] = DailyTokenBucket(input: inTok, output: outTok, cache: cacheTok, runs: runs)
                     dailyMap[day] = dayDict
                 }
             }
@@ -474,8 +483,8 @@ extension LiveDashboardTelemetryReader {
             let sql = """
             SELECT
                 substr(created_at, 1, 10) as d,
-                SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-                COUNT(*)
+                SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
             FROM assistant_usage_events
             WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-6 days')
               AND substr(created_at, 1, 10) <= '\(safeDate)'
@@ -487,12 +496,16 @@ extension LiveDashboardTelemetryReader {
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     guard let dayPtr = sqlite3_column_text(stmt, 0) else { continue }
                     let day = String(cString: dayPtr)
-                    let tok = UInt64(max(sqlite3_column_int64(stmt, 1), 0))
-                    let runs = Int(max(sqlite3_column_int64(stmt, 2), 0))
+                    let inTok = UInt64(max(sqlite3_column_int64(stmt, 1), 0))
+                    let outTok = UInt64(max(sqlite3_column_int64(stmt, 2), 0))
+                    let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
+                    let runs = Int(max(sqlite3_column_int64(stmt, 4), 0))
                     var dayDict = dailyMap[day, default: [:]]
-                    let prev = dayDict[.copilot] ?? (0, 0)
-                    dayDict[.copilot] = (max(prev.tokens, tok), max(prev.runs, runs))
-                    dailyMap[day] = dayDict
+                    let prev = dayDict[.copilot] ?? DailyTokenBucket()
+                    if (inTok + outTok + cacheTok) > prev.total {
+                        dayDict[.copilot] = DailyTokenBucket(input: inTok, output: outTok, cache: cacheTok, runs: max(prev.runs, runs))
+                        dailyMap[day] = dayDict
+                    }
                 }
             }
         }
@@ -502,17 +515,12 @@ extension LiveDashboardTelemetryReader {
             let shortDay = day.count >= 10 ? String(day.suffix(5)) : day
             guard let cliDict = dailyMap[day] else { continue }
             for cli in [DashboardCLIFilter.copilot, .codex, .claude, .kimi] {
-                guard let stat = cliDict[cli], stat.tokens > 0 else { continue }
+                guard let stat = cliDict[cli], stat.total > 0 else { continue }
                 points.append(
                     TrendDataPoint(
-                        id: "trend-\(day)-\(cli.rawValue)",
-                        bucketLabel: shortDay,
-                        category: cli.rawValue,
-                        cliFilter: cli,
-                        invocations: stat.runs,
-                        successRate: 0.99,
-                        costUSD: 0,
-                        totalTokens: stat.tokens
+                        id: "trend-\(day)-\(cli.rawValue)", bucketLabel: shortDay, category: cli.rawValue,
+                        cliFilter: cli, invocations: stat.runs, successRate: 0.99, costUSD: 0,
+                        totalTokens: stat.total, inputTokens: stat.input, outputTokens: stat.output, cacheTokens: stat.cache
                     )
                 )
             }

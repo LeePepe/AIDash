@@ -35,6 +35,7 @@ public struct MenuBarStatusView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var completedActionIDs: Set<String> = []
     @State private var copiedActionID: String?
+    @State private var tokenKindFilter: DashboardTokenKindFilter = .all
 
     public init(
         state: MenuBarStatusViewState,
@@ -205,6 +206,11 @@ public struct MenuBarStatusView: View {
         let quotaEntries = entries.filter {
             $0.cliFilter == .claude || $0.cliFilter == .codex || $0.cliFilter == .kimi
         }
+        let latestDay = trendPoints.map(\.bucketLabel).last
+        let filteredToday = latestDay.map { day in
+            trendPoints.filter { $0.bucketLabel == day }.reduce(UInt64(0)) { $0 + $1.tokens(for: tokenKindFilter) }
+        } ?? todayTotal
+        let filteredPeriod = trendPoints.reduce(UInt64(0)) { $0 + $1.tokens(for: tokenKindFilter) }
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(DashboardL10n.tr("menubar.pulse.cli_cost_quota", "CLI TOKEN & QUOTA MONITOR"))
@@ -215,8 +221,8 @@ public struct MenuBarStatusView: View {
                     DashboardL10n.format(
                         "menubar.pulse.today_tokens_format",
                         "Today %@ · 7d %@",
-                        DashboardTokenFormatter.compact(todayTotal),
-                        DashboardTokenFormatter.compact(periodTotal)
+                        DashboardTokenFormatter.compact(tokenKindFilter == .all ? todayTotal : filteredToday),
+                        DashboardTokenFormatter.compact(tokenKindFilter == .all ? periodTotal : filteredPeriod)
                     )
                 )
                 .font(.caption.weight(.semibold))
@@ -224,10 +230,19 @@ public struct MenuBarStatusView: View {
                 .contentTransition(.numericText())
             }
             VStack(alignment: .leading, spacing: 10) {
+                Picker(DashboardL10n.tr("dashboard.token_kind.picker_label", "Token Type"), selection: $tokenKindFilter) {
+                    ForEach(DashboardTokenKindFilter.allCases) { kind in
+                        Text(kind.displayTitle).tag(kind)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+
                 Chart(trendPoints) { point in
                     BarMark(
                         x: .value("Date", point.bucketLabel),
-                        y: .value("Tokens (M)", Double(point.totalTokens) / 1_000_000.0)
+                        y: .value("Tokens (M)", Double(point.tokens(for: tokenKindFilter)) / 1_000_000.0)
                     )
                     .foregroundStyle(by: .value("CLI", point.category))
                 }
