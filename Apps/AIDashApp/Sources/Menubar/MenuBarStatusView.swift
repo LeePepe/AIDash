@@ -391,24 +391,23 @@ private struct MenuBarInteractiveTokenChart: View {
     }
 
     private func hoverFloatingBadge(summary: TrendBucketHoverSummary) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(
-                DashboardL10n.format(
-                    "dashboard.chart.hover_split_format", "%@ · Total %@ (In %@ · Out %@ · Cache %@)",
-                    summary.bucketLabel, DashboardTokenFormatter.compact(summary.totalTokens),
-                    DashboardTokenFormatter.compact(summary.inputTokens), DashboardTokenFormatter.compact(summary.outputTokens),
-                    DashboardTokenFormatter.compact(summary.cacheTokens)
-                )
-            )
-            .font(.caption2.weight(.semibold)).monospacedDigit().lineLimit(1)
-
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(summary.bucketLabel).font(.caption2.weight(.bold)).monospacedDigit()
+                Spacer(minLength: 4)
+                Text(DashboardL10n.format("dashboard.chart.hover_total_calls_format", "Total %@ · %lld calls", DashboardTokenFormatter.compact(summary.totalTokens), summary.invocations))
+                    .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(Color.accentColor)
+            }
+            Text(DashboardL10n.format("dashboard.chart.hover_io_cache_format", "In %@ · Out %@ · Cache %@", DashboardTokenFormatter.compact(summary.inputTokens), DashboardTokenFormatter.compact(summary.outputTokens), DashboardTokenFormatter.compact(summary.cacheTokens)))
+                .font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(.primary)
             if !summary.cliShares.isEmpty {
-                Text(summary.cliShares.prefix(3).map { "\($0.cli.shortLabel) \(DashboardTokenFormatter.compact($0.tokens))" }.joined(separator: " · "))
-                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                Text(summary.cliShares.map { "\($0.cli.shortLabel) \(DashboardTokenFormatter.compact($0.tokens))" }.joined(separator: " · "))
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(.horizontal, 7).padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor).opacity(0.94)))
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor).opacity(0.95)))
         .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
     }
 

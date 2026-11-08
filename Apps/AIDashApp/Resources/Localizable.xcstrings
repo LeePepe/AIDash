@@ -4393,6 +4393,42 @@
         }
       }
     },
+    "dashboard.chart.hover_total_calls_format": {
+      "comment": "Hovered chart bucket total tokens and invocation count.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total %@ · %lld calls"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总量 %@ · %lld 次"
+          }
+        }
+      }
+    },
+    "dashboard.chart.hover_io_cache_format": {
+      "comment": "Hovered chart bucket Input, Output, and Cache token split.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In %@ · Out %@ · Cache %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入 %@ · 输出 %@ · 缓存 %@"
+          }
+        }
+      }
+    },
     "dashboard.chart.hover_calls_format": {
       "comment": "Hovered chart bucket invocation call count.",
       "extractionState": "manual",
