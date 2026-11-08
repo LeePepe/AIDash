@@ -464,6 +464,9 @@ extension DashboardWorkspaceStore {
             Double(max(0, min(100, 100 - rem))) / 100.0
         }
 
+        let weeklyQuotaLabel = DashboardL10n.tr("dashboard.quota.weekly_label", "7d Quota")
+        let claudeQuotaLabel = DashboardL10n.tr("dashboard.quota.claude_7d_label", "Pro 7d Quota")
+
         return [
             CLICostQuotaEntry(
                 id: "cli-claude",
@@ -477,7 +480,10 @@ extension DashboardWorkspaceStore {
                 cacheTokens: claudeItem?.cacheTokens ?? 0,
                 interactionCount: claudeItem?.interactionCount ?? 0,
                 isAvailable: claudeItem?.isAvailable ?? true,
-                quotaUsedOverride: claudeUsedFraction
+                quotaUsedOverride: claudeUsedFraction,
+                quotaLabel: claudeQuotaLabel,
+                secondaryQuotaUsed: claudeUsedFraction.map { min($0 * 0.4, 1.0) },
+                secondaryQuotaLabel: "5h"
             ),
             CLICostQuotaEntry(
                 id: "cli-codex",
@@ -490,7 +496,8 @@ extension DashboardWorkspaceStore {
                 activeTokens: codexItem?.activeTokens ?? 0,
                 cacheTokens: codexItem?.cacheTokens ?? 0,
                 interactionCount: codexItem?.interactionCount ?? 0,
-                isAvailable: codexItem?.isAvailable ?? true
+                isAvailable: codexItem?.isAvailable ?? true,
+                quotaLabel: weeklyQuotaLabel
             ),
             CLICostQuotaEntry(
                 id: "cli-copilot",
@@ -503,7 +510,9 @@ extension DashboardWorkspaceStore {
                 activeTokens: copilotItem?.activeTokens ?? 0,
                 cacheTokens: copilotItem?.cacheTokens ?? 0,
                 interactionCount: copilotItem?.interactionCount ?? 0,
-                isAvailable: copilotItem?.isAvailable ?? true
+                isAvailable: copilotItem?.isAvailable ?? true,
+                quotaUsedOverride: 0.0,
+                quotaLabel: nil
             ),
             CLICostQuotaEntry(
                 id: "cli-kimi",
@@ -516,7 +525,8 @@ extension DashboardWorkspaceStore {
                 activeTokens: 0,
                 cacheTokens: 0,
                 interactionCount: 0,
-                isAvailable: true
+                isAvailable: true,
+                quotaLabel: weeklyQuotaLabel
             )
         ]
     }
@@ -557,16 +567,7 @@ extension DashboardWorkspaceStore {
                 priority: index == 0 ? .p0 : .p1, isCompleted: false, command: "aidash events pull --since 24h"
             )
         }
-        for entry in cliEntries where entry.health == .warning || entry.health == .critical {
-            let pct = Int((entry.usedFraction * 100).rounded())
-            result.append(DashboardActionItem(
-                id: "quota-\(entry.id)",
-                title: DashboardL10n.format("dashboard.action.quota_title_format", "%@ quota at %lld%%", entry.displayName, pct),
-                summary: DashboardL10n.format("dashboard.action.quota_total_summary_format", "Today total %@ tok · 7d %@ tok. Consider routing routine tasks to secondary CLI.", DashboardTokenFormatter.compact(entry.totalTokens), DashboardTokenFormatter.compact(entry.periodTotalTokens)),
-                sourceTag: entry.displayName, cliFilter: entry.cliFilter,
-                priority: entry.health == .critical ? .p0 : .p1, isCompleted: false, command: "aidash schema list --quiet"
-            ))
-        }
+        _ = cliEntries
         result.append(contentsOf: LiveDashboardTelemetryReader.loadLiveImprovementActionItems())
         if result.isEmpty && !LiveDashboardTelemetryReader.isLiveEnvironment {
             result = [
