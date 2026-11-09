@@ -131,3 +131,65 @@ def test_starred_refs_are_read_from_normalized_events(tmp_path, monkeypatch):
         lambda name: db if name == "aidash_events" else tmp_path / name,
     )
     assert sources._fetch_starred_refs() == ("owner/starred",)
+
+
+@pytest.mark.unit
+def test_event_bridge_linear_done_undone_and_star_external_id(tmp_path):
+    proposals = tmp_path / "proposals.jsonl"
+    proposals.write_text(json.dumps({
+        "id": "p2", "ts": "2026-11-09T00:00:00Z", "agent": "retro",
+        "title": "Unify Todo SSOT", "detail": "Promote to Linear", "priority": "high",
+        "status": "pending",
+    }) + "\n", encoding="utf-8")
+    status_calls: list[tuple[str, str]] = []
+
+    def fake_status_runner(issue_id: str, state: str) -> int:
+        status_calls.append((issue_id, state))
+        return 0 if issue_id != "TIA-999" else 1
+
+    result = event_bridge.process_user_events(
+        [
+            {"action": "done", "itemRef": "linear://TIA-90", "timestamp": "2026-11-09T01:00:00Z"},
+            {"action": "done", "itemRef": "TIA-91", "timestamp": "2026-11-09T01:00:00Z"},
+            {"action": "undone", "itemRef": "linear://TIA-91", "timestamp": "2026-11-09T02:00:00Z"},
+            {"action": "done", "itemRef": "linear://TIA-999", "timestamp": "2026-11-09T03:00:00Z"},
+            {"action": "star", "itemRef": "proposal://p2"},
+        ],
+        proposals_path=proposals,
+        linear_runner=lambda title, detail: (0, "TIA-95"),
+        linear_status_runner=fake_status_runner,
+    )
+    assert result["resolved"] == 1
+    assert result["undone"] == 1
+    assert result["promoted"] == 1
+    assert result["errors"] == 1
+    assert ("TIA-90", "Done") in status_calls
+    assert ("TIA-91", "Todo") in status_calls
+    assert ("TIA-999", "Done") in status_calls
+    lines = [
+        json.loads(line)
+        for line in proposals.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert lines[-1]["status"] == "approved"
+    assert lines[-1]["external_id"] == "TIA-95"
+
+
+@pytest.mark.unit
+def test_default_linear_runner_parses_issue_identifier(monkeypatch, tmp_path):
+    script = tmp_path / "linear-sync.py"
+    script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    monkeypatch.setattr(event_bridge, "LINEAR_SYNC_SCRIPT", script)
+
+    class FakeProc:
+        returncode = 0
+        stdout = json.dumps({
+            "ok": True,
+            "command": "idea",
+            "issue": {"identifier": "TIA-96"},
+        })
+
+    monkeypatch.setattr(event_bridge.subprocess, "run", lambda *a, **k: FakeProc())
+    rc, external_id = event_bridge._default_linear_runner("Title", "Desc")
+    assert rc == 0
+    assert external_id == "TIA-96"

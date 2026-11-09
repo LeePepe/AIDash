@@ -130,6 +130,15 @@ GECKO_DB = HOME / "Library" / "Application Support" / "ai.hexly.gecko" / "gecko.
 # multica CLI binary (falls back to PATH lookup if this exact path is absent)
 MULTICA_BIN = "/opt/homebrew/bin/multica"
 
+# Linear sync script and team key (linear_issue source). Degrades to 0 when
+# the script or Linear credentials are absent (ADR-23).
+LINEAR_SYNC_SCRIPT = (
+    HOME / "Development" / "user-skills" / "skills" / "team-lead"
+    / "scripts" / "linear-sync.py"
+)
+LINEAR_TEAM_KEY = "TIA"
+LINEAR_UPDATED_WINDOW_DAYS = 14
+
 # Models that have NO published price, and so are deliberately measured in
 # TOKENS ONLY — `cost_usd` stays NULL for their rows, on purpose.
 #
@@ -277,6 +286,7 @@ SOURCES = (
     "raven",
     "claude_jsonl",
     "multica_issue",
+    "linear_issue",
     "multica_run",
     "multica_comment",
     "claude_job",
@@ -316,6 +326,7 @@ SCHEDULED_SOURCES = (
     "codex_prompts",
     "kimi_prompts",
     "multica_issue",
+    "linear_issue",
     "multica_run",
     "multica_comment",
     "claude_job",
@@ -347,6 +358,7 @@ MERGE_SOURCES = (
     "raven",
     "claude_jsonl",
     "multica_issue",
+    "linear_issue",
     "multica_run",
     "claude_job",
     "pr_cache",

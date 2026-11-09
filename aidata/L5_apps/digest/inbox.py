@@ -93,13 +93,15 @@ def _pending_issues(cap: int = 6) -> list[InboxItem]:
     si = cols.index("status")
     out = []
     for r in rows[:cap]:
+        ident = str(r[ii])
         status = str(r[si])
         blocked = status == "blocked"
+        ref = f"linear://{ident}" if ident.upper().startswith("TIA-") else ident
         out.append(InboxItem(
-            f"[{status}] {r[ii]!s} {str(r[ti])[:44]}",
+            f"[{status}] {ident} {str(r[ti])[:44]}",
             "high" if blocked else "medium",
             "卡顿" if blocked else "计划",
-            str(r[ii]),
+            ref,
             "blocked" if blocked else "planned",
             "Owner" if blocked else "",
         ))
@@ -141,7 +143,7 @@ def _embedded_timestamp(line: str) -> float | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=timezone.utc)  # noqa: UP017
     return parsed.timestamp()
 
 
