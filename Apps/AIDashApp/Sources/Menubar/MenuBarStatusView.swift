@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import AppKit
 import Charts
 import SwiftUI
@@ -185,14 +186,9 @@ public struct MenuBarStatusView: View {
                 Divider()
 
                 Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-                    GridRow {
-                        ForEach(Array(entries.prefix(2))) { entry in
-                            cliPopoverTile(entry)
-                        }
-                    }
-                    if entries.count > 2 {
+                    ForEach(Array(stride(from: 0, to: entries.count, by: 2)), id: \.self) { startIndex in
                         GridRow {
-                            ForEach(Array(entries.dropFirst(2).prefix(2))) { entry in
+                            ForEach(entries[startIndex..<min(startIndex + 2, entries.count)]) { entry in
                                 cliPopoverTile(entry)
                             }
                         }
@@ -220,28 +216,41 @@ public struct MenuBarStatusView: View {
                     Image(systemName: entry.health.symbolName).font(.caption2).foregroundStyle(tint)
                     Text(entry.cliFilter.shortLabel).font(.caption.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                     Spacer(minLength: 2)
-                    if entry.hasTrackedQuota {
+                    if let badge = entry.authState.badgeTitle {
+                        Text(badge)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(tint)
+                            .lineLimit(1)
+                    } else if entry.hasTrackedQuota {
                         Text(DashboardL10n.format("menubar.pulse.quota_remaining_format", "Left %lld%%", remainingPct))
                             .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
                     } else {
                         Text(todayCompact).font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
                     }
                 }
-                if entry.hasTrackedQuota {
+                if entry.authState.isAuthError {
+                    Divider().padding(.vertical, 2)
+                } else if entry.hasTrackedQuota {
                     Gauge(value: entry.usedFraction, in: 0...1) { EmptyView() }
                         .gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
                 } else {
                     Divider().padding(.vertical, 2)
                 }
                 HStack(spacing: 4) {
-                    Text("7d \(periodCompact)")
-                    Spacer(minLength: 2)
-                    if let secUsed = entry.secondaryQuotaUsed, let secLabel = entry.secondaryQuotaLabel {
-                        Text("\(secLabel) \(Int((secUsed * 100).rounded()))%")
-                    } else if entry.hasTrackedQuota {
-                        Text("\(usedPct)%")
+                    if let hint = entry.authState.loginCommandHint, !entry.authState.isAuthenticated {
+                        Text(hint)
+                            .foregroundStyle(tint)
+                            .lineLimit(1)
                     } else {
-                        Text("\(entry.interactionCount) calls")
+                        Text("7d \(periodCompact)")
+                        Spacer(minLength: 2)
+                        if let secUsed = entry.secondaryQuotaUsed, let secLabel = entry.secondaryQuotaLabel {
+                            Text("\(secLabel) \(Int((secUsed * 100).rounded()))%")
+                        } else if entry.hasTrackedQuota {
+                            Text("\(usedPct)%")
+                        } else {
+                            Text("\(entry.interactionCount) calls")
+                        }
                     }
                 }
                 .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
@@ -252,7 +261,7 @@ public struct MenuBarStatusView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("\(entry.displayName) · Today \(todayCompact) (Active \(DashboardTokenFormatter.compact(entry.activeTokens)) · Cache \(DashboardTokenFormatter.compact(entry.cacheTokens))) · 7d \(periodCompact)")
+        .help("\(entry.displayName) · \(entry.authState.statusReasonText ?? "Today \(todayCompact)") · 7d \(periodCompact)")
     }
     private func topActionsSection(items: [DashboardActionItem]) -> some View {
         MenuBarTopActionsCard(

@@ -63,23 +63,13 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(summaryMenuItem(title: Self.memoryStatusTitle, tag: 1002))
         menu.addItem(summaryMenuItem(title: Self.storageStatusTitle, tag: 1003))
         menu.addItem(summaryMenuItem(title: Self.tokenStatusTitle, tag: 1004))
-        var tag = 1005
-        for cli in AgentCLIKind.allCases {
-            menu.addItem(summaryMenuItem(title: Self.cliTokenSummary(cli: cli, usage: nil), tag: tag))
-            tag += 1
+        for (offset, cli) in [AgentCLIKind.claude, .codex, .copilot].enumerated() {
+            menu.addItem(summaryMenuItem(title: Self.cliTokenSummary(cli: cli, usage: nil), tag: 1005 + offset))
         }
         menu.addItem(summaryMenuItem(title: Self.networkStatusTitle, tag: 1008))
 
         backingMenu = menu
-        if LiveDashboardTelemetryReader.isLiveEnvironment {
-            item.menu = nil
-            item.button?.target = self
-            item.button?.action = #selector(toggleStatusItemPanel(_:))
-            item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            configurePopoverPanel()
-        } else {
-            item.menu = menu
-        }
+        item.menu = menu
         statusItem = item
         updateMenuPresentation()
         startPeriodicRefresh()
@@ -292,11 +282,6 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     public func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
         refreshStatus()
-        Self.configureWindowForFullScreenMenuBar(panelItem?.view?.window ?? statusHostingView?.window)
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            Self.configureWindowForFullScreenMenuBar(self.panelItem?.view?.window ?? self.statusHostingView?.window)
-        }
     }
 
     public func menuDidClose(_ menu: NSMenu) {

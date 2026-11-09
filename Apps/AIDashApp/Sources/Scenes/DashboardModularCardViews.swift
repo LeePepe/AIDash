@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import AppKit
 import Charts
 import SwiftUI
@@ -455,7 +456,7 @@ public struct CLICostQuotaCardView: View {
 
     public var body: some View {
         let pool = QuotaPoolSummary.summarize(entries: entries)
-        let quotaEntries = entries.filter(\.hasTrackedQuota)
+        let quotaEntries = entries.filter { $0.hasTrackedQuota || !$0.authState.isAuthenticated }
         let throughputEntries = entries.sorted { $0.totalTokens > $1.totalTokens }
         return SolidModularCardContainer(
             title: DashboardL10n.tr("dashboard.card.cli_cost.title", "Multi-CLI Token & Quota Monitor"),
@@ -506,47 +507,71 @@ public struct CLICostQuotaCardView: View {
         let usedPct = Int((entry.usedFraction * 100).rounded())
         let remPct = max(0, 100 - usedPct)
         let badgeColor: Color = isRecommended ? .accentColor : tint
-        let badgeText = isRecommended ? DashboardL10n.tr("dashboard.quota.recommended_badge", "⚡ Recommended") : entry.health.label
+        let badgeText = entry.authState.badgeTitle
+            ?? (isRecommended ? DashboardL10n.tr("dashboard.quota.recommended_badge", "⚡ Recommended") : entry.health.label)
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Text(entry.displayName).font(.subheadline.weight(.bold)).lineLimit(1)
                 Spacer(minLength: 4)
-                Text(badgeText)
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(badgeColor.opacity(0.15), in: Capsule())
-                    .foregroundStyle(badgeColor)
+                HStack(spacing: 4) {
+                    if !entry.authState.isAuthenticated {
+                        Image(systemName: entry.health.symbolName).font(.caption2)
+                    }
+                    Text(badgeText)
+                }
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(badgeColor.opacity(0.15), in: Capsule())
+                .foregroundStyle(badgeColor)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(remPct)%")
-                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+            if let authBadge = entry.authState.badgeTitle, entry.authState.isAuthError {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: entry.health.symbolName)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(tint)
+                    Text(authBadge)
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(tint)
+                    Spacer(minLength: 4)
+                }
+                Divider().padding(.vertical, 3)
+                Text(entry.authState.statusReasonText ?? "")
+                    .font(.caption2.weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(tint)
-                    .contentTransition(.numericText())
-                Text(DashboardL10n.tr("dashboard.quota.remaining_short", "remaining"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 4)
-            }
-            Gauge(value: entry.usedFraction, in: 0...1) { EmptyView() }
-                .gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
-            HStack(spacing: 6) {
-                if let secUsed = entry.secondaryQuotaUsed, let secLabel = entry.secondaryQuotaLabel {
-                    Text("\(secLabel): \(Int((secUsed * 100).rounded()))%")
-                } else {
-                    Text(DashboardL10n.format("dashboard.quota.used_short_format", "Used %lld%%", usedPct))
+                    .lineLimit(1)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("\(remPct)%")
+                        .font(.system(size: 28, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(tint)
+                        .contentTransition(.numericText())
+                    Text(DashboardL10n.tr("dashboard.quota.remaining_short", "remaining"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
                 }
-                Spacer(minLength: 4)
-                Text(entry.quotaResetText ?? entry.quotaLabel ?? "")
+                Gauge(value: entry.usedFraction, in: 0...1) { EmptyView() }
+                    .gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
+                HStack(spacing: 6) {
+                    if let secUsed = entry.secondaryQuotaUsed, let secLabel = entry.secondaryQuotaLabel {
+                        Text("\(secLabel): \(Int((secUsed * 100).rounded()))%")
+                    } else {
+                        Text(DashboardL10n.format("dashboard.quota.used_short_format", "Used %lld%%", usedPct))
+                    }
+                    Spacer(minLength: 4)
+                    Text(entry.authState.statusReasonText ?? entry.quotaResetText ?? entry.quotaLabel ?? "")
+                }
+                .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
             }
-            .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(isRecommended ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1.5)
+                .stroke(!entry.authState.isAuthenticated ? tint.opacity(0.45) : (isRecommended ? Color.accentColor.opacity(0.45) : Color.clear), lineWidth: 1.5)
         }
         .accessibilityElement(children: .combine)
     }
@@ -556,9 +581,15 @@ public struct CLICostQuotaCardView: View {
         let periodCompact = DashboardTokenFormatter.compact(entry.periodTotalTokens)
         let cachePct = Int((entry.cacheHitFraction * 100).rounded())
         let isSelected = selectedCategory == entry.displayName || selectedCategory == entry.cliFilter.rawValue
-        let tailText = entry.cacheTokens > 0
-            ? "7d \(periodCompact) · Cache \(cachePct)%"
-            : "7d \(periodCompact) · \(entry.interactionCount) calls"
+        let tint = DashboardSemanticColorPalette.color(for: entry.health)
+        let tailText: String = {
+            if let hint = entry.authState.loginCommandHint, !entry.authState.isAuthenticated {
+                return "7d \(periodCompact) · \(hint)"
+            }
+            return entry.cacheTokens > 0
+                ? "7d \(periodCompact) · Cache \(cachePct)%"
+                : "7d \(periodCompact) · \(entry.interactionCount) calls"
+        }()
 
         return Button {
             onSelectCategory?(entry.displayName)
@@ -567,7 +598,15 @@ public struct CLICostQuotaCardView: View {
                 HStack(spacing: 4) {
                     Text(entry.displayName).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: 2)
-                    if isSelected {
+                    if let badge = entry.authState.badgeTitle {
+                        HStack(spacing: 3) {
+                            Image(systemName: entry.health.symbolName)
+                            Text(badge)
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .lineLimit(1)
+                    } else if isSelected {
                         Image(systemName: "line.3.horizontal.decrease.circle.fill").font(.caption2).foregroundStyle(Color.accentColor)
                     } else if isTopVolume {
                         Image(systemName: "flame.fill").font(.caption2).foregroundStyle(Color.accentColor)
@@ -576,7 +615,10 @@ public struct CLICostQuotaCardView: View {
                 Text(todayCompact)
                     .font(.system(.title2, design: .monospaced, weight: .bold))
                     .foregroundStyle(isTopVolume || isSelected ? Color.accentColor : Color.primary).contentTransition(.numericText())
-                Text(tailText).font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                Text(tailText)
+                    .font(.caption2).monospacedDigit()
+                    .foregroundStyle(entry.authState.isAuthenticated ? Color.secondary : tint)
+                    .lineLimit(1)
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
@@ -587,7 +629,7 @@ public struct CLICostQuotaCardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("\(entry.displayName) (\(entry.modelTag)) — Today \(todayCompact) tok (Active \(DashboardTokenFormatter.compact(entry.activeTokens)) · Cache \(DashboardTokenFormatter.compact(entry.cacheTokens))) · 7d \(periodCompact) tok")
+        .help("\(entry.displayName) (\(entry.modelTag)) — \(entry.authState.statusReasonText ?? "Today \(todayCompact) tok") · 7d \(periodCompact) tok")
         .accessibilityElement(children: .combine)
     }
 }

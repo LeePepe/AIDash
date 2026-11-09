@@ -11,6 +11,9 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
     public let grokSevenDayUsedFraction: Double?
     public let claudeResetText: String?
     public let cursorResetText: String?
+    public let grokResetText: String?
+    public let claudeReadAtDate: Date?
+    public let grokReadAtDate: Date?
 
     public init(
         claudeSevenDayUsedFraction: Double? = nil,
@@ -18,7 +21,10 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
         cursorWeeklyUsedFraction: Double? = nil,
         grokSevenDayUsedFraction: Double? = nil,
         claudeResetText: String? = nil,
-        cursorResetText: String? = nil
+        cursorResetText: String? = nil,
+        grokResetText: String? = nil,
+        claudeReadAtDate: Date? = nil,
+        grokReadAtDate: Date? = nil
     ) {
         self.claudeSevenDayUsedFraction = claudeSevenDayUsedFraction
         self.claudeFiveHourUsedFraction = claudeFiveHourUsedFraction
@@ -26,6 +32,9 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
         self.grokSevenDayUsedFraction = grokSevenDayUsedFraction
         self.claudeResetText = claudeResetText
         self.cursorResetText = cursorResetText
+        self.grokResetText = grokResetText
+        self.claudeReadAtDate = claudeReadAtDate
+        self.grokReadAtDate = grokReadAtDate
     }
 }
 
@@ -47,7 +56,9 @@ public enum LiveDashboardTelemetryReader {
     public static func loadDataset(
         forDate dateString: String,
         homeURL: URL,
-        fallbackUsage: CLITokenUsageSnapshot
+        fallbackUsage: CLITokenUsageSnapshot,
+        includeSystemBinaries: Bool = isLiveEnvironment,
+        now: Date = Date()
     ) -> (entries: [CLICostQuotaEntry], rankings: [AgentRankingRow], trends: [TrendDataPoint])? {
         let ravenURL = homeURL.appendingPathComponent("Library/Application Support/raven/raven.db")
         let copilotURL = homeURL.appendingPathComponent(".copilot/session-store.db")
@@ -55,135 +66,449 @@ public enum LiveDashboardTelemetryReader {
         let quotasURL = homeURL.appendingPathComponent(".config/magpie/quotas.json")
         let claudeQuotaURL = homeURL.appendingPathComponent(".config/claude/gtt-weekly-remaining-pct.json")
 
-        let quotas = readQuotas(magpieQuotasURL: quotasURL, claudeFallbackURL: claudeQuotaURL, fallbackUsage: fallbackUsage)
+        let quotas = readQuotas(
+            magpieQuotasURL: quotasURL,
+            claudeFallbackURL: claudeQuotaURL,
+            fallbackUsage: fallbackUsage,
+            now: now
+        )
 
         let codexStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "codex", dateString: dateString)
         let copilotSessionStats = queryCopilotSessionStats(dbURL: copilotURL, dateString: dateString)
         let copilotRavenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "magpie", dateString: dateString)
         let claudeRavenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "claude", dateString: dateString)
         let claudeWarehouseStats = queryWarehouseClaudeStats(dbURL: warehouseURL, dateString: dateString)
+        let kimiStats = queryKimiStats(homeURL: homeURL, dateString: dateString)
+        let grokStats = queryGrokStats(homeURL: homeURL, ravenURL: ravenURL, dateString: dateString)
+        let deepseekStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "deepseek", dateString: dateString)
 
         let hasAnyDatabase = FileManager.default.fileExists(atPath: ravenURL.path)
             || FileManager.default.fileExists(atPath: copilotURL.path)
             || FileManager.default.fileExists(atPath: warehouseURL.path)
+            || FileManager.default.fileExists(atPath: quotasURL.path)
+            || FileManager.default.fileExists(atPath: homeURL.appendingPathComponent(".kimi-code").path)
+            || FileManager.default.fileExists(atPath: homeURL.appendingPathComponent(".grok").path)
         guard hasAnyDatabase else { return nil }
 
-        let kimiStats = queryKimiStats(homeURL: homeURL, dateString: dateString)
         let entries = buildCLIEntries(
-            quotas: quotas, codexStats: codexStats,
-            copilotSessionStats: copilotSessionStats, copilotRavenStats: copilotRavenStats,
-            claudeRavenStats: claudeRavenStats, claudeWarehouseStats: claudeWarehouseStats,
-            kimiStats: kimiStats
+            homeURL: homeURL,
+            includeSystemBinaries: includeSystemBinaries,
+            now: now,
+            quotas: quotas,
+            codexStats: codexStats,
+            copilotSessionStats: copilotSessionStats,
+            copilotRavenStats: copilotRavenStats,
+            claudeRavenStats: claudeRavenStats,
+            claudeWarehouseStats: claudeWarehouseStats,
+            kimiStats: kimiStats,
+            grokStats: grokStats,
+            deepseekStats: deepseekStats
         )
         let rankings = queryRealRankings(ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString, fallbackEntries: entries)
         let trends = querySevenDayTrends(
             ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString,
-            kimiDailyBuckets: kimiStats.dailyBuckets, fallbackEntries: entries
+            kimiDailyBuckets: kimiStats.dailyBuckets, grokDailyBuckets: grokStats.dailyBuckets,
+            fallbackEntries: entries
         )
         return (entries, rankings, trends)
     }
 
+    public static func isCLIInstalled(
+        _ cli: AgentCLIKind,
+        homeURL: URL,
+        includeSystemBinaries: Bool = isLiveEnvironment
+    ) -> Bool {
+        let fm = FileManager.default
+        let binaryName: String
+        var candidatePaths: [URL] = []
+        switch cli {
+        case .claude:
+            binaryName = "claude"
+            candidatePaths = [
+                homeURL.appendingPathComponent(".local/bin/claude"),
+                homeURL.appendingPathComponent(".claude"),
+                homeURL.appendingPathComponent(".config/claude/gtt-weekly-remaining-pct.json")
+            ]
+        case .codex:
+            binaryName = "codex"
+            candidatePaths = [
+                homeURL.appendingPathComponent(".local/bin/codex"),
+                homeURL.appendingPathComponent(".codex/config.toml"),
+                homeURL.appendingPathComponent(".codex/sessions")
+            ]
+        case .copilot:
+            binaryName = "copilot"
+            candidatePaths = [
+                homeURL.appendingPathComponent(".local/bin/copilot"),
+                homeURL.appendingPathComponent(".copilot/config.json"),
+                homeURL.appendingPathComponent(".copilot/session-store.db")
+            ]
+        case .kimi:
+            binaryName = "kimi"
+            candidatePaths = [
+                homeURL.appendingPathComponent(".kimi-code/bin/kimi"),
+                homeURL.appendingPathComponent(".local/bin/kimi"),
+                homeURL.appendingPathComponent(".kimi-code/session_index.jsonl"),
+                homeURL.appendingPathComponent(".kimi-code/credentials/kimi-code.json"),
+                homeURL.appendingPathComponent(".kimi/credentials/kimi-code.json")
+            ]
+        case .grok:
+            binaryName = "grok"
+            candidatePaths = [
+                homeURL.appendingPathComponent(".grok/bin/grok"),
+                homeURL.appendingPathComponent(".local/bin/grok"),
+                homeURL.appendingPathComponent(".grok/auth.json"),
+                homeURL.appendingPathComponent(".grok/config.toml"),
+                homeURL.appendingPathComponent(".grok/sessions")
+            ]
+        case .deepseek:
+            binaryName = "deepseek"
+            candidatePaths = [
+                homeURL.appendingPathComponent(".local/bin/deepseek"),
+                homeURL.appendingPathComponent(".deepseek/config.json"),
+                homeURL.appendingPathComponent(".deepseek/config.toml"),
+                homeURL.appendingPathComponent(".deepseek/auth.json"),
+                homeURL.appendingPathComponent(".deepseek/sessions")
+            ]
+        }
+        if includeSystemBinaries {
+            candidatePaths.append(URL(fileURLWithPath: "/opt/homebrew/bin/\(binaryName)"))
+            candidatePaths.append(URL(fileURLWithPath: "/usr/local/bin/\(binaryName)"))
+        }
+        return candidatePaths.contains { fm.fileExists(atPath: $0.path) }
+    }
+
+    public static func detectClaudeAuthState(
+        homeURL: URL,
+        quotas: RealQuotaSnapshot,
+        now: Date = Date()
+    ) -> CLIAuthState {
+        let loginsURL = homeURL.appendingPathComponent(".config/magpie/logins.json")
+        guard let data = try? Data(contentsOf: loginsURL),
+              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            if let readAt = quotas.claudeReadAtDate, now.timeIntervalSince(readAt) <= 86_400 {
+                return .authenticated
+            }
+            return .notLoggedIn(loginCommand: "claude login")
+        }
+        guard let claudeLogin = items.first(where: { ($0["agent"] as? String) == "claude" }) else {
+            return .notLoggedIn(loginCommand: "claude login")
+        }
+        if let auth = claudeLogin["auth"] as? [String: Any],
+           let oauth = auth["claudeAiOauth"] as? [String: Any],
+           let expiresMs = (oauth["expiresAt"] as? NSNumber)?.doubleValue,
+           expiresMs / 1000.0 < now.timeIntervalSince1970 {
+            let reason = DashboardL10n.format("dashboard.auth.expired_hint_format", "Auth expired · run %@", "claude login")
+            return .authExpired(reason: reason, loginCommand: "claude login")
+        }
+        if let readAt = quotas.claudeReadAtDate {
+            if now.timeIntervalSince(readAt) > 86_400 {
+                let reason = DashboardL10n.format("dashboard.auth.expired_hint_format", "Auth expired · run %@", "claude login")
+                return .authExpired(reason: reason, loginCommand: "claude login")
+            }
+            return .authenticated
+        }
+        if quotas.claudeSevenDayUsedFraction != nil {
+            return .authenticated
+        }
+        return .notLoggedIn(loginCommand: "claude login")
+    }
+
+    public static func detectKimiAuthState(
+        homeURL: URL,
+        kimiStats: KimiTelemetryStats,
+        now: Date = Date()
+    ) -> CLIAuthState {
+        if kimiStats.isQuotaExhausted {
+            return .quotaExhausted(
+                reason: DashboardL10n.tr("dashboard.auth.kimi_quota_exhausted", "Weekly quota exhausted (429)")
+            )
+        }
+        let credCandidates = [
+            homeURL.appendingPathComponent(".kimi-code/credentials/kimi-code.json"),
+            homeURL.appendingPathComponent(".kimi/credentials/kimi-code.json")
+        ]
+        guard let credURL = credCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+              let data = try? Data(contentsOf: credURL),
+              !data.isEmpty,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .notLoggedIn(loginCommand: "kimi login")
+        }
+        let token = (obj["access_token"] as? String) ?? ""
+        if token.isEmpty {
+            return .notLoggedIn(loginCommand: "kimi login")
+        }
+        if let expiresAt = (obj["expires_at"] as? NSNumber)?.doubleValue {
+            let expSec = expiresAt > 10_000_000_000 ? expiresAt / 1000.0 : expiresAt
+            if expSec < now.timeIntervalSince1970 && kimiStats.latestCompletedTimestamp <= expSec {
+                let reason = DashboardL10n.format("dashboard.auth.login_expired_hint_format", "Login expired · run %@", "kimi login")
+                return .authExpired(reason: reason, loginCommand: "kimi login")
+            }
+        }
+        return .authenticated
+    }
+
+    public static func detectGrokAuthState(
+        homeURL: URL,
+        quotas: RealQuotaSnapshot,
+        now: Date = Date()
+    ) -> CLIAuthState {
+        let authURL = homeURL.appendingPathComponent(".grok/auth.json")
+        let pluginAuthURL = homeURL.appendingPathComponent(".config/magpie/plugin-auth.json")
+        var grokExpiresDate: Date?
+        var hasGrokAuthEntry = false
+
+        if let data = try? Data(contentsOf: authURL),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for (_, val) in root {
+                guard let entry = val as? [String: Any] else { continue }
+                hasGrokAuthEntry = true
+                if let expStr = entry["expires_at"] as? String, let parsed = parseISO8601Date(expStr) {
+                    grokExpiresDate = parsed
+                } else if let expNum = (entry["expires_at"] as? NSNumber)?.doubleValue {
+                    let sec = expNum > 10_000_000_000 ? expNum / 1000.0 : expNum
+                    grokExpiresDate = Date(timeIntervalSince1970: sec)
+                }
+            }
+        }
+
+        var pluginValid = false
+        if let pData = try? Data(contentsOf: pluginAuthURL),
+           let pRoot = try? JSONSerialization.jsonObject(with: pData) as? [String: Any],
+           let grokPlugin = pRoot["grok"] as? [String: Any],
+           let expMs = (grokPlugin["expires"] as? NSNumber)?.doubleValue {
+            hasGrokAuthEntry = true
+            let sec = expMs > 10_000_000_000 ? expMs / 1000.0 : expMs
+            if sec >= now.timeIntervalSince1970 {
+                pluginValid = true
+            }
+        }
+
+        if !hasGrokAuthEntry && quotas.grokSevenDayUsedFraction == nil {
+            return .notLoggedIn(loginCommand: "grok login")
+        }
+        if let expDate = grokExpiresDate, expDate < now, !pluginValid {
+            let reason = DashboardL10n.format("dashboard.auth.expired_hint_format", "Auth expired · run %@", "grok login")
+            return .authExpired(reason: reason, loginCommand: "grok login")
+        }
+        return .authenticated
+    }
+
+    // swiftlint:disable:next function_parameter_count
     private static func buildCLIEntries(
-        quotas: RealQuotaSnapshot, codexStats: CLIWindowStats,
-        copilotSessionStats: CLIWindowStats, copilotRavenStats: CLIWindowStats,
-        claudeRavenStats: CLIWindowStats, claudeWarehouseStats: CLIWindowStats,
-        kimiStats: KimiTelemetryStats
+        homeURL: URL,
+        includeSystemBinaries: Bool,
+        now: Date,
+        quotas: RealQuotaSnapshot,
+        codexStats: CLIWindowStats,
+        copilotSessionStats: CLIWindowStats,
+        copilotRavenStats: CLIWindowStats,
+        claudeRavenStats: CLIWindowStats,
+        claudeWarehouseStats: CLIWindowStats,
+        kimiStats: KimiTelemetryStats,
+        grokStats: GrokTelemetryStats,
+        deepseekStats: CLIWindowStats
     ) -> [CLICostQuotaEntry] {
-        let claudeDayIn = claudeRavenStats.dayIn + claudeWarehouseStats.dayIn
-        let claudeDayOut = claudeRavenStats.dayOut + claudeWarehouseStats.dayOut
-        let claudeDayCache = claudeRavenStats.dayCache + claudeWarehouseStats.dayCache
-        let claudeDayRuns = claudeRavenStats.dayRuns + claudeWarehouseStats.dayRuns
-        let claudeWeekIn = claudeRavenStats.weekIn + claudeWarehouseStats.weekIn
-        let claudeWeekOut = claudeRavenStats.weekOut + claudeWarehouseStats.weekOut
-        let claudeWeekCache = claudeRavenStats.weekCache + claudeWarehouseStats.weekCache
-        let claudeTodayCost = computeCostUSD(input: claudeDayIn, output: claudeDayOut, cache: claudeDayCache, inRate: 3.0, outRate: 15.0, cacheRate: 0.30)
-        let claudeWeekCost = computeCostUSD(input: claudeWeekIn, output: claudeWeekOut, cache: claudeWeekCache, inRate: 3.0, outRate: 15.0, cacheRate: 0.30)
-        let codexTodayCost = computeCostUSD(input: codexStats.dayIn, output: codexStats.dayOut, cache: codexStats.dayCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
-        let codexWeekCost = computeCostUSD(input: codexStats.weekIn, output: codexStats.weekOut, cache: codexStats.weekCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
-
-        let useCopilotRaven = copilotSessionStats.dayRuns == 0 && copilotRavenStats.dayRuns > 0
-        let copilotDayIn = useCopilotRaven ? copilotRavenStats.dayIn : copilotSessionStats.dayIn
-        let copilotDayOut = useCopilotRaven ? copilotRavenStats.dayOut : copilotSessionStats.dayOut
-        let copilotDayCache = useCopilotRaven ? copilotRavenStats.dayCache : copilotSessionStats.dayCache
-        let copilotDayRuns = useCopilotRaven ? copilotRavenStats.dayRuns : copilotSessionStats.dayRuns
-        let copilotWeekIn = max(copilotSessionStats.weekIn, copilotRavenStats.weekIn)
-        let copilotWeekOut = max(copilotSessionStats.weekOut, copilotRavenStats.weekOut)
-        let copilotWeekCache = max(copilotSessionStats.weekCache, copilotRavenStats.weekCache)
-        let copilotTodayCost = computeCostUSD(input: copilotDayIn, output: copilotDayOut, cache: copilotDayCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
-        let copilotWeekCost = computeCostUSD(input: copilotWeekIn, output: copilotWeekOut, cache: copilotWeekCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
-
         let weeklyQuotaLabel = DashboardL10n.tr("dashboard.quota.weekly_label", "7d Quota")
         let claudeQuotaLabel = DashboardL10n.tr("dashboard.quota.claude_7d_label", "Pro 7d Quota")
-        return [
-            CLICostQuotaEntry(
-                id: "cli-claude", cliFilter: .claude, displayName: "Claude Code", modelTag: "Claude Pro (5h / 7d)",
-                todayCostUSD: claudeTodayCost, periodCostUSD: claudeWeekCost, quotaLimitUSD: 100.0,
-                activeTokens: claudeDayIn + claudeDayOut, cacheTokens: claudeDayCache, interactionCount: claudeDayRuns,
-                isAvailable: true, quotaUsedOverride: quotas.claudeSevenDayUsedFraction ?? 0.0,
-                quotaLabel: claudeQuotaLabel, periodTotalTokens: claudeWeekIn + claudeWeekOut + claudeWeekCache,
-                secondaryQuotaUsed: quotas.claudeFiveHourUsedFraction, secondaryQuotaLabel: "5h", quotaResetText: quotas.claudeResetText
-            ),
-            CLICostQuotaEntry(
-                id: "cli-codex", cliFilter: .codex, displayName: "Codex CLI",
-                modelTag: codexStats.modelsSummary.isEmpty ? "gpt-6.1-sol / gemini-4-argon" : codexStats.modelsSummary,
-                todayCostUSD: codexTodayCost, periodCostUSD: codexWeekCost, quotaLimitUSD: 100.0,
-                activeTokens: codexStats.dayIn + codexStats.dayOut, cacheTokens: codexStats.dayCache, interactionCount: codexStats.dayRuns,
-                isAvailable: true, quotaUsedOverride: quotas.cursorWeeklyUsedFraction ?? 0.0,
-                quotaLabel: weeklyQuotaLabel, periodTotalTokens: codexStats.weekIn + codexStats.weekOut + codexStats.weekCache,
-                quotaResetText: quotas.cursorResetText
-            ),
-            CLICostQuotaEntry(
-                id: "cli-kimi", cliFilter: .kimi, displayName: "Kimi CLI", modelTag: "kimi-code/k3",
-                todayCostUSD: 0.0, periodCostUSD: 0.0, quotaLimitUSD: 100.0,
-                activeTokens: kimiStats.dayTokens, cacheTokens: 0, interactionCount: kimiStats.dayRuns,
-                isAvailable: true, quotaUsedOverride: kimiStats.quotaUsedFraction,
-                quotaLabel: weeklyQuotaLabel, periodTotalTokens: kimiStats.weekTokens
-            ),
-            CLICostQuotaEntry(
-                id: "cli-copilot", cliFilter: .copilot, displayName: "Copilot CLI",
-                modelTag: copilotSessionStats.modelsSummary.isEmpty ? "gemini-4-argon / gpt-5.6-luna" : copilotSessionStats.modelsSummary,
-                todayCostUSD: copilotTodayCost, periodCostUSD: copilotWeekCost, quotaLimitUSD: 100.0,
-                activeTokens: copilotDayIn + copilotDayOut, cacheTokens: copilotDayCache, interactionCount: copilotDayRuns,
-                isAvailable: true, quotaUsedOverride: 0.0, quotaLabel: nil,
-                periodTotalTokens: copilotWeekIn + copilotWeekOut + copilotWeekCache
+        var entries: [CLICostQuotaEntry] = []
+
+        if isCLIInstalled(.claude, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
+            entries.append(makeClaudeEntry(homeURL: homeURL, now: now, quotas: quotas, claudeRavenStats: claudeRavenStats, claudeWarehouseStats: claudeWarehouseStats, claudeQuotaLabel: claudeQuotaLabel))
+        }
+
+        if isCLIInstalled(.codex, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
+            entries.append(makeCodexEntry(homeURL: homeURL, quotas: quotas, codexStats: codexStats, weeklyQuotaLabel: weeklyQuotaLabel))
+        }
+
+        if isCLIInstalled(.kimi, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
+            let kimiAuth = detectKimiAuthState(homeURL: homeURL, kimiStats: kimiStats, now: now)
+            let isExhausted = (kimiAuth.badgeTitle == DashboardL10n.tr("dashboard.auth.badge_quota_exhausted", "Quota Exhausted"))
+            entries.append(
+                CLICostQuotaEntry(
+                    id: "cli-kimi", cliFilter: .kimi, displayName: "Kimi CLI", modelTag: "kimi-code/k3",
+                    todayCostUSD: 0.0, periodCostUSD: 0.0, quotaLimitUSD: 100.0,
+                    activeTokens: kimiStats.dayTokens, cacheTokens: 0, interactionCount: kimiStats.dayRuns,
+                    isAvailable: true, quotaUsedOverride: isExhausted ? 1.0 : nil,
+                    quotaLabel: isExhausted ? weeklyQuotaLabel : nil,
+                    periodTotalTokens: kimiStats.weekTokens, authState: kimiAuth
+                )
             )
-        ]
+        }
+
+        if isCLIInstalled(.copilot, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
+            entries.append(makeCopilotEntry(homeURL: homeURL, copilotSessionStats: copilotSessionStats, copilotRavenStats: copilotRavenStats))
+        }
+
+        if isCLIInstalled(.grok, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
+            let grokAuth = detectGrokAuthState(homeURL: homeURL, quotas: quotas, now: now)
+            let grokQuota = grokAuth == .authenticated ? quotas.grokSevenDayUsedFraction : nil
+            entries.append(
+                CLICostQuotaEntry(
+                    id: "cli-grok", cliFilter: .grok, displayName: "Grok CLI",
+                    modelTag: grokStats.modelsSummary.isEmpty ? "grok-4.7-build" : grokStats.modelsSummary,
+                    todayCostUSD: grokStats.dayCostUSD, periodCostUSD: grokStats.weekCostUSD, quotaLimitUSD: 100.0,
+                    activeTokens: grokStats.dayActiveTokens, cacheTokens: grokStats.dayCacheTokens, interactionCount: grokStats.dayRuns,
+                    isAvailable: true, quotaUsedOverride: grokQuota,
+                    quotaLabel: grokQuota != nil ? weeklyQuotaLabel : nil,
+                    periodTotalTokens: grokStats.weekTotalTokens,
+                    quotaResetText: grokAuth == .authenticated ? quotas.grokResetText : nil,
+                    authState: grokAuth
+                )
+            )
+        }
+
+        if isCLIInstalled(.deepseek, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
+            let hasDeepSeekConfig = FileManager.default.fileExists(atPath: homeURL.appendingPathComponent(".deepseek/config.json").path)
+                || FileManager.default.fileExists(atPath: homeURL.appendingPathComponent(".deepseek/config.toml").path)
+                || FileManager.default.fileExists(atPath: homeURL.appendingPathComponent(".deepseek/auth.json").path)
+                || (deepseekStats.weekIn + deepseekStats.weekOut) > 0
+            let deepseekAuth: CLIAuthState = hasDeepSeekConfig ? .authenticated : .notLoggedIn(loginCommand: "deepseek login")
+            entries.append(
+                CLICostQuotaEntry(
+                    id: "cli-deepseek", cliFilter: .deepseek, displayName: "DeepSeek CLI",
+                    modelTag: deepseekStats.modelsSummary.isEmpty ? "deepseek-chat / reasoner" : deepseekStats.modelsSummary,
+                    todayCostUSD: 0.0, periodCostUSD: 0.0, quotaLimitUSD: 100.0,
+                    activeTokens: deepseekStats.dayIn + deepseekStats.dayOut, cacheTokens: deepseekStats.dayCache,
+                    interactionCount: deepseekStats.dayRuns,
+                    isAvailable: true, quotaUsedOverride: nil, quotaLabel: nil,
+                    periodTotalTokens: deepseekStats.weekIn + deepseekStats.weekOut + deepseekStats.weekCache,
+                    authState: deepseekAuth
+                )
+            )
+        }
+
+        return entries
+    }
+
+    private static func makeClaudeEntry(
+        homeURL: URL, now: Date, quotas: RealQuotaSnapshot,
+        claudeRavenStats: CLIWindowStats, claudeWarehouseStats: CLIWindowStats, claudeQuotaLabel: String
+    ) -> CLICostQuotaEntry {
+        let dayIn = claudeRavenStats.dayIn + claudeWarehouseStats.dayIn
+        let dayOut = claudeRavenStats.dayOut + claudeWarehouseStats.dayOut
+        let dayCache = claudeRavenStats.dayCache + claudeWarehouseStats.dayCache
+        let dayRuns = claudeRavenStats.dayRuns + claudeWarehouseStats.dayRuns
+        let weekIn = claudeRavenStats.weekIn + claudeWarehouseStats.weekIn
+        let weekOut = claudeRavenStats.weekOut + claudeWarehouseStats.weekOut
+        let weekCache = claudeRavenStats.weekCache + claudeWarehouseStats.weekCache
+        let todayCost = computeCostUSD(input: dayIn, output: dayOut, cache: dayCache, inRate: 3.0, outRate: 15.0, cacheRate: 0.30)
+        let weekCost = computeCostUSD(input: weekIn, output: weekOut, cache: weekCache, inRate: 3.0, outRate: 15.0, cacheRate: 0.30)
+        let auth = detectClaudeAuthState(homeURL: homeURL, quotas: quotas, now: now)
+        let validQuota = auth == .authenticated ? quotas.claudeSevenDayUsedFraction : nil
+        return CLICostQuotaEntry(
+            id: "cli-claude", cliFilter: .claude, displayName: "Claude Code", modelTag: "Claude Pro (5h / 7d)",
+            todayCostUSD: todayCost, periodCostUSD: weekCost, quotaLimitUSD: 100.0,
+            activeTokens: dayIn + dayOut, cacheTokens: dayCache, interactionCount: dayRuns,
+            isAvailable: true, quotaUsedOverride: validQuota,
+            quotaLabel: auth == .authenticated && validQuota != nil ? claudeQuotaLabel : nil,
+            periodTotalTokens: weekIn + weekOut + weekCache,
+            secondaryQuotaUsed: auth == .authenticated ? quotas.claudeFiveHourUsedFraction : nil,
+            secondaryQuotaLabel: auth == .authenticated ? "5h" : nil,
+            quotaResetText: auth == .authenticated ? quotas.claudeResetText : nil,
+            authState: auth
+        )
+    }
+
+    private static func makeCodexEntry(
+        homeURL: URL, quotas: RealQuotaSnapshot, codexStats: CLIWindowStats, weeklyQuotaLabel: String
+    ) -> CLICostQuotaEntry {
+        let todayCost = computeCostUSD(input: codexStats.dayIn, output: codexStats.dayOut, cache: codexStats.dayCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
+        let weekCost = computeCostUSD(input: codexStats.weekIn, output: codexStats.weekOut, cache: codexStats.weekCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
+        let hasConfig = FileManager.default.fileExists(atPath: homeURL.appendingPathComponent(".codex/config.toml").path)
+            || codexStats.weekIn + codexStats.weekOut > 0
+            || quotas.cursorWeeklyUsedFraction != nil
+        let auth: CLIAuthState = hasConfig ? .authenticated : .notLoggedIn(loginCommand: "codex login")
+        return CLICostQuotaEntry(
+            id: "cli-codex", cliFilter: .codex, displayName: "Codex CLI",
+            modelTag: codexStats.modelsSummary.isEmpty ? "gpt-6.1-sol / gemini-4-argon" : codexStats.modelsSummary,
+            todayCostUSD: todayCost, periodCostUSD: weekCost, quotaLimitUSD: 100.0,
+            activeTokens: codexStats.dayIn + codexStats.dayOut, cacheTokens: codexStats.dayCache, interactionCount: codexStats.dayRuns,
+            isAvailable: true, quotaUsedOverride: quotas.cursorWeeklyUsedFraction ?? 0.0,
+            quotaLabel: auth == .authenticated ? weeklyQuotaLabel : nil,
+            periodTotalTokens: codexStats.weekIn + codexStats.weekOut + codexStats.weekCache,
+            quotaResetText: quotas.cursorResetText, authState: auth
+        )
+    }
+
+    private static func makeCopilotEntry(
+        homeURL: URL, copilotSessionStats: CLIWindowStats, copilotRavenStats: CLIWindowStats
+    ) -> CLICostQuotaEntry {
+        let useRaven = copilotSessionStats.dayRuns == 0 && copilotRavenStats.dayRuns > 0
+        let dayIn = useRaven ? copilotRavenStats.dayIn : copilotSessionStats.dayIn
+        let dayOut = useRaven ? copilotRavenStats.dayOut : copilotSessionStats.dayOut
+        let dayCache = useRaven ? copilotRavenStats.dayCache : copilotSessionStats.dayCache
+        let dayRuns = useRaven ? copilotRavenStats.dayRuns : copilotSessionStats.dayRuns
+        let weekIn = max(copilotSessionStats.weekIn, copilotRavenStats.weekIn)
+        let weekOut = max(copilotSessionStats.weekOut, copilotRavenStats.weekOut)
+        let weekCache = max(copilotSessionStats.weekCache, copilotRavenStats.weekCache)
+        let todayCost = computeCostUSD(input: dayIn, output: dayOut, cache: dayCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
+        let weekCost = computeCostUSD(input: weekIn, output: weekOut, cache: weekCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
+        let hasConfig = FileManager.default.fileExists(atPath: homeURL.appendingPathComponent(".copilot/config.json").path)
+            || FileManager.default.fileExists(atPath: homeURL.appendingPathComponent(".copilot/session-store.db").path)
+            || (weekIn + weekOut) > 0
+        let auth: CLIAuthState = hasConfig ? .authenticated : .notLoggedIn(loginCommand: "copilot login")
+        return CLICostQuotaEntry(
+            id: "cli-copilot", cliFilter: .copilot, displayName: "Copilot CLI",
+            modelTag: copilotSessionStats.modelsSummary.isEmpty ? "gemini-4-argon / gpt-5.6-luna" : copilotSessionStats.modelsSummary,
+            todayCostUSD: todayCost, periodCostUSD: weekCost, quotaLimitUSD: 100.0,
+            activeTokens: dayIn + dayOut, cacheTokens: dayCache, interactionCount: dayRuns,
+            isAvailable: true, quotaUsedOverride: 0.0, quotaLabel: nil,
+            periodTotalTokens: weekIn + weekOut + weekCache, authState: auth
+        )
     }
 
     private static func computeCostUSD(input: UInt64, output: UInt64, cache: UInt64, inRate: Double, outRate: Double, cacheRate: Double) -> Double {
         (Double(input) / 1_000_000.0) * inRate + (Double(output) / 1_000_000.0) * outRate + (Double(cache) / 1_000_000.0) * cacheRate
     }
 
-    public static func readQuotas(magpieQuotasURL: URL, claudeFallbackURL: URL, fallbackUsage: CLITokenUsageSnapshot) -> RealQuotaSnapshot {
+    public static func readQuotas(
+        magpieQuotasURL: URL,
+        claudeFallbackURL: URL,
+        fallbackUsage: CLITokenUsageSnapshot,
+        now: Date = Date()
+    ) -> RealQuotaSnapshot {
         var claude7d: Double?
         var claude5h: Double?
         var cursorWeekly: Double?
         var grok7d: Double?
         var claudeReset: String?
         var cursorReset: String?
+        var grokReset: String?
+        var claudeReadAt: Date?
+        var grokReadAt: Date?
         if let data = try? Data(contentsOf: magpieQuotasURL),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for (key, val) in root {
                 let windows = extractWindows(from: val)
+                let readAt = extractReadAtDate(from: val)
                 if key.hasPrefix("claude") {
-                    claude7d = windowUsedFraction(in: windows, matching: "7 day") ?? claude7d
-                    claude5h = windowUsedFraction(in: windows, matching: "5 hour") ?? claude5h
-                    claudeReset = windowResetText(in: windows, matching: "7 day") ?? claudeReset
+                    claudeReadAt = readAt ?? claudeReadAt
+                    let isStale = readAt.map { now.timeIntervalSince($0) > 86_400 } ?? false
+                    if !isStale {
+                        claude7d = windowUsedFraction(in: windows, matching: "7 day") ?? claude7d
+                        claude5h = windowUsedFraction(in: windows, matching: "5 hour") ?? claude5h
+                        claudeReset = windowResetText(in: windows, matching: "7 day") ?? claudeReset
+                    }
                 } else if key.hasPrefix("cursor") {
                     cursorWeekly = windowUsedFraction(in: windows, matching: "Weekly") ?? cursorWeekly
                     cursorReset = windowResetText(in: windows, matching: "Weekly") ?? cursorReset
                 } else if key.hasPrefix("grok") {
+                    grokReadAt = readAt ?? grokReadAt
                     grok7d = windowUsedFraction(in: windows, matching: nil) ?? grok7d
+                    grokReset = windowResetText(in: windows, matching: nil) ?? grokReset
                 }
             }
         }
-        if let fallbackClaude = readClaudeFallbackQuota(url: claudeFallbackURL, fallbackUsage: fallbackUsage) {
+        if claudeReadAt == nil,
+           let fallbackClaude = readClaudeFallbackQuota(url: claudeFallbackURL, fallbackUsage: fallbackUsage, now: now) {
             claude7d = max(claude7d ?? 0, fallbackClaude)
         }
         return RealQuotaSnapshot(
             claudeSevenDayUsedFraction: claude7d, claudeFiveHourUsedFraction: claude5h,
             cursorWeeklyUsedFraction: cursorWeekly, grokSevenDayUsedFraction: grok7d,
-            claudeResetText: claudeReset, cursorResetText: cursorReset
+            claudeResetText: claudeReset, cursorResetText: cursorReset, grokResetText: grokReset,
+            claudeReadAtDate: claudeReadAt, grokReadAtDate: grokReadAt
         )
     }
 
@@ -192,6 +517,24 @@ public enum LiveDashboardTelemetryReader {
               let quota = entry["quota"] as? [String: Any],
               let windows = quota["windows"] as? [[String: Any]] else { return [] }
         return windows
+    }
+
+    private static func extractReadAtDate(from rawEntry: Any) -> Date? {
+        guard let entry = rawEntry as? [String: Any] else { return nil }
+        let quota = entry["quota"] as? [String: Any]
+        if let raw = (quota?["readAt"] as? String) ?? (entry["at"] as? String) {
+            return parseISO8601Date(raw)
+        }
+        return nil
+    }
+
+    internal static func parseISO8601Date(_ raw: String) -> Date? {
+        let frac = ISO8601DateFormatter()
+        frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = frac.date(from: raw) { return d }
+        let std = ISO8601DateFormatter()
+        std.formatOptions = [.withInternetDateTime]
+        return std.date(from: raw)
     }
 
     private static func windowUsedFraction(in windows: [[String: Any]], matching substring: String?) -> Double? {
@@ -220,10 +563,16 @@ public enum LiveDashboardTelemetryReader {
         return nil
     }
 
-    private static func readClaudeFallbackQuota(url: URL, fallbackUsage: CLITokenUsageSnapshot) -> Double? {
+    private static func readClaudeFallbackQuota(url: URL, fallbackUsage: CLITokenUsageSnapshot, now: Date) -> Double? {
         if let data = try? Data(contentsOf: url),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let used = (obj["used_percentage"] as? NSNumber)?.doubleValue {
+            if let measuredAt = (obj["measured_at"] as? NSNumber)?.doubleValue {
+                let sec = measuredAt > 10_000_000_000 ? measuredAt / 1000.0 : measuredAt
+                if now.timeIntervalSince1970 - sec > 86_400 {
+                    return nil
+                }
+            }
             return min(max(used / 100.0, 0), 1)
         }
         if let rem = fallbackUsage.claudeWeeklyRemainingPercent {
@@ -344,25 +693,34 @@ extension LiveDashboardTelemetryReader {
         return executeWindowStatsQuery(dbURL: dbURL, sql: sql, hasModelsColumn: false, defaultModels: "claude-opus / sonnet")
     }
 
-    struct KimiTelemetryStats {
-        var dayTokens: UInt64 = 0
-        var dayRuns: UInt64 = 0
-        var weekTokens: UInt64 = 0
-        var quotaUsedFraction: Double = 0.0
-        var dailyBuckets: [String: (tokens: UInt64, runs: Int)] = [:]
+    public struct KimiTelemetryStats: Sendable, Equatable {
+        public var dayTokens: UInt64 = 0
+        public var dayRuns: UInt64 = 0
+        public var weekTokens: UInt64 = 0
+        public var isQuotaExhausted: Bool = false
+        public var latestCompletedTimestamp: Double = 0
+        public var dailyBuckets: [String: (tokens: UInt64, runs: Int)] = [:]
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.dayTokens == rhs.dayTokens
+                && lhs.dayRuns == rhs.dayRuns
+                && lhs.weekTokens == rhs.weekTokens
+                && lhs.isQuotaExhausted == rhs.isQuotaExhausted
+                && lhs.latestCompletedTimestamp == rhs.latestCompletedTimestamp
+        }
     }
 
     private static var cachedKimiKey: String?
     private static var cachedKimiStats: KimiTelemetryStats?
 
-    static func queryKimiStats(homeURL: URL, dateString: String) -> KimiTelemetryStats {
+    public static func queryKimiStats(homeURL: URL, dateString: String) -> KimiTelemetryStats {
         let kimiRoot = homeURL.appendingPathComponent(".kimi-code")
         let indexURL = kimiRoot.appendingPathComponent("session_index.jsonl")
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: indexURL.path),
               let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 else {
             return KimiTelemetryStats()
         }
-        let cacheKey = "\(dateString)-\(Int(mtime))"
+        let cacheKey = "\(homeURL.path)-\(dateString)-\(Int(mtime))"
         if cachedKimiKey == cacheKey, let cached = cachedKimiStats {
             return cached
         }
@@ -396,35 +754,53 @@ extension LiveDashboardTelemetryReader {
                   let wMtime = (wAttrs[.modificationDate] as? Date)?.timeIntervalSince1970,
                   wMtime >= cutoffSec,
                   let wireText = try? String(contentsOf: wireURL, encoding: .utf8) else { continue }
-            if wireText.contains("APIProviderQuotaExhaustedError") {
-                latestExhaustedTs = max(latestExhaustedTs, wMtime)
-            } else if wireText.contains("\"prompt.completed\"") {
-                latestCompletedTs = max(latestCompletedTs, wMtime)
+            var sessionLastExhausted = 0.0
+            var sessionLastCompleted = 0.0
+            for wLine in wireText.split(separator: "\n") {
+                if wLine.contains("APIProviderQuotaExhaustedError") {
+                    if let wData = wLine.data(using: .utf8),
+                       let rec = try? JSONSerialization.jsonObject(with: wData) as? [String: Any],
+                       let tsMs = (rec["time"] as? NSNumber)?.doubleValue {
+                        sessionLastExhausted = max(sessionLastExhausted, tsMs / 1000.0)
+                    } else {
+                        sessionLastExhausted = max(sessionLastExhausted, wMtime)
+                    }
+                } else if wLine.contains("\"prompt.completed\"") {
+                    if let wData = wLine.data(using: .utf8),
+                       let rec = try? JSONSerialization.jsonObject(with: wData) as? [String: Any],
+                       let tsMs = (rec["time"] as? NSNumber)?.doubleValue {
+                        sessionLastCompleted = max(sessionLastCompleted, tsMs / 1000.0)
+                    } else {
+                        sessionLastCompleted = max(sessionLastCompleted, wMtime + 0.001)
+                    }
+                }
+                if wLine.contains("token_counting.turn_recorded") {
+                    guard let wData = wLine.data(using: .utf8),
+                          let rec = try? JSONSerialization.jsonObject(with: wData) as? [String: Any],
+                          let tok = (rec["tokens"] as? NSNumber)?.uint64Value,
+                          let tsMs = (rec["time"] as? NSNumber)?.doubleValue else { continue }
+                    let sec = tsMs / 1000.0
+                    guard sec >= cutoffSec && sec <= endSec else { continue }
+                    let hrStr = hrFmt.string(from: Date(timeIntervalSince1970: sec))
+                    let prev = buckets[hrStr] ?? (0, 0)
+                    buckets[hrStr] = (prev.tokens + tok, prev.runs + 1)
+                }
             }
-            for wLine in wireText.split(separator: "\n") where wLine.contains("token_counting.turn_recorded") {
-                guard let wData = wLine.data(using: .utf8),
-                      let rec = try? JSONSerialization.jsonObject(with: wData) as? [String: Any],
-                      let tok = (rec["tokens"] as? NSNumber)?.uint64Value,
-                      let tsMs = (rec["time"] as? NSNumber)?.doubleValue else { continue }
-                let sec = tsMs / 1000.0
-                guard sec >= cutoffSec && sec <= endSec else { continue }
-                let hrStr = hrFmt.string(from: Date(timeIntervalSince1970: sec))
-                let prev = buckets[hrStr] ?? (0, 0)
-                buckets[hrStr] = (prev.tokens + tok, prev.runs + 1)
-            }
+            latestExhaustedTs = max(latestExhaustedTs, sessionLastExhausted)
+            latestCompletedTs = max(latestCompletedTs, sessionLastCompleted)
         }
 
         let dayStat = buckets.reduce((tokens: UInt64(0), runs: 0)) { acc, pair in
             pair.key.hasPrefix(dateString) ? (acc.tokens + pair.value.tokens, acc.runs + pair.value.runs) : acc
         }
         let weekTok = buckets.values.reduce(UInt64(0)) { $0 + $1.tokens }
-        let isExhausted = latestExhaustedTs > 0 && latestExhaustedTs >= latestCompletedTs
-        let quotaFraction = isExhausted ? 1.0 : min(Double(weekTok) / 6_200_000.0, 0.99)
+        let isExhausted = latestExhaustedTs > 0 && latestExhaustedTs > latestCompletedTs
         let stats = KimiTelemetryStats(
             dayTokens: dayStat.tokens,
             dayRuns: UInt64(dayStat.runs),
             weekTokens: weekTok,
-            quotaUsedFraction: quotaFraction,
+            isQuotaExhausted: isExhausted,
+            latestCompletedTimestamp: latestCompletedTs,
             dailyBuckets: buckets
         )
         cachedKimiKey = cacheKey
@@ -440,9 +816,93 @@ extension LiveDashboardTelemetryReader {
         var total: UInt64 { input + output + cache }
     }
 
+    struct GrokTelemetryStats {
+        var dayActiveTokens: UInt64 = 0
+        var dayCacheTokens: UInt64 = 0
+        var dayRuns: UInt64 = 0
+        var weekTotalTokens: UInt64 = 0
+        var dayCostUSD: Double = 0.0
+        var weekCostUSD: Double = 0.0
+        var modelsSummary: String = ""
+        var dailyBuckets: [String: DailyTokenBucket] = [:]
+    }
+
+    static func queryGrokStats(homeURL: URL, ravenURL: URL, dateString: String) -> GrokTelemetryStats {
+        let ravenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "grok", dateString: dateString)
+        var stats = GrokTelemetryStats(
+            dayActiveTokens: ravenStats.dayIn + ravenStats.dayOut,
+            dayCacheTokens: ravenStats.dayCache,
+            dayRuns: ravenStats.dayRuns,
+            weekTotalTokens: ravenStats.weekIn + ravenStats.weekOut + ravenStats.weekCache,
+            modelsSummary: ravenStats.modelsSummary
+        )
+        let sessionsRoot = homeURL.appendingPathComponent(".grok/sessions")
+        guard let enumerator = FileManager.default.enumerator(
+            at: sessionsRoot,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return stats
+        }
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone.current
+        fmt.dateFormat = "yyyy-MM-dd"
+        let hrFmt = DateFormatter()
+        hrFmt.calendar = fmt.calendar
+        hrFmt.locale = fmt.locale
+        hrFmt.timeZone = fmt.timeZone
+        hrFmt.dateFormat = "yyyy-MM-dd HH:00"
+        let targetDate = fmt.date(from: dateString) ?? Date()
+        let cutoffSec = targetDate.timeIntervalSince1970 - 6.0 * 86_400.0
+        let endSec = targetDate.timeIntervalSince1970 + 86_400.0
+
+        var models = Set<String>()
+        for case let fileURL as URL in enumerator where fileURL.lastPathComponent == "usage.json" {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let turns = obj["turns"] as? [[String: Any]] else { continue }
+            for turn in turns {
+                guard let endedAt = turn["endedAt"] as? String,
+                      let date = parseISO8601Date(endedAt) else { continue }
+                let sec = date.timeIntervalSince1970
+                guard sec >= cutoffSec && sec <= endSec else { continue }
+                let inTok = (turn["inputTokens"] as? NSNumber)?.uint64Value ?? 0
+                let outTok = (turn["outputTokens"] as? NSNumber)?.uint64Value ?? 0
+                let cacheTok = ((turn["cachedReadTokens"] as? NSNumber)?.uint64Value ?? 0)
+                    + ((turn["cacheCreationTokens"] as? NSNumber)?.uint64Value ?? 0)
+                let calls = max((turn["modelCalls"] as? NSNumber)?.intValue ?? 1, 1)
+                if let modelId = turn["primaryModelId"] as? String, !modelId.isEmpty {
+                    models.insert(modelId)
+                }
+                let hrKey = hrFmt.string(from: date)
+                let prev = stats.dailyBuckets[hrKey] ?? DailyTokenBucket()
+                stats.dailyBuckets[hrKey] = DailyTokenBucket(
+                    input: prev.input + inTok,
+                    output: prev.output + outTok,
+                    cache: prev.cache + cacheTok,
+                    runs: prev.runs + calls
+                )
+                stats.weekTotalTokens += inTok + outTok + cacheTok
+                if hrKey.hasPrefix(dateString) {
+                    stats.dayActiveTokens += inTok + outTok
+                    stats.dayCacheTokens += cacheTok
+                    stats.dayRuns += UInt64(calls)
+                }
+            }
+        }
+        if stats.modelsSummary.isEmpty && !models.isEmpty {
+            stats.modelsSummary = models.sorted().joined(separator: " / ")
+        }
+        return stats
+    }
+
     static func querySevenDayTrends(
         ravenURL: URL, copilotURL: URL, dateString: String,
-        kimiDailyBuckets: [String: (tokens: UInt64, runs: Int)] = [:], fallbackEntries: [CLICostQuotaEntry]
+        kimiDailyBuckets: [String: (tokens: UInt64, runs: Int)] = [:],
+        grokDailyBuckets: [String: DailyTokenBucket] = [:],
+        fallbackEntries: [CLICostQuotaEntry]
     ) -> [TrendDataPoint] {
         let safeDate = sanitizeSQLToken(dateString)
         let hrFmt = DateFormatter()
@@ -456,72 +916,17 @@ extension LiveDashboardTelemetryReader {
             let inTok = UInt64(Double(stat.tokens) * 0.85)
             bucketMap[hrKey, default: [:]][.kimi] = DailyTokenBucket(input: inTok, output: stat.tokens - inTok, cache: 0, runs: stat.runs)
         }
-
-        if let db = openReadOnlySQLite(path: ravenURL.path) {
-            defer { sqlite3_close(db) }
-            let sql = """
-            SELECT strftime('%Y-%m-%d %H:00', timestamp/1000, 'unixepoch', 'localtime') as hr,
-                   CASE WHEN client_name LIKE 'codex%' THEN 'codex'
-                        WHEN client_name LIKE 'claude%' THEN 'claude' ELSE 'copilot' END as cli_kind,
-                   SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-                   SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
-            FROM requests
-            WHERE timestamp >= (strftime('%s', '\(safeDate)', '-6 days') * 1000)
-              AND date(timestamp/1000, 'unixepoch', 'localtime') <= '\(safeDate)'
-            GROUP BY hr, cli_kind;
-            """
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
-                defer { sqlite3_finalize(stmt) }
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    guard let hrPtr = sqlite3_column_text(stmt, 0), let kindPtr = sqlite3_column_text(stmt, 1) else { continue }
-                    let hrKey = String(cString: hrPtr)
-                    let kind = String(cString: kindPtr)
-                    let cli: DashboardCLIFilter = kind == "codex" ? .codex : (kind == "claude" ? .claude : .copilot)
-                    bucketMap[hrKey, default: [:]][cli] = DailyTokenBucket(
-                        input: UInt64(max(sqlite3_column_int64(stmt, 2), 0)),
-                        output: UInt64(max(sqlite3_column_int64(stmt, 3), 0)),
-                        cache: UInt64(max(sqlite3_column_int64(stmt, 4), 0)),
-                        runs: Int(max(sqlite3_column_int64(stmt, 5), 0))
-                    )
-                }
-            }
+        for (hrKey, stat) in grokDailyBuckets where stat.total > 0 {
+            bucketMap[hrKey, default: [:]][.grok] = stat
         }
-
-        if let db = openReadOnlySQLite(path: copilotURL.path) {
-            defer { sqlite3_close(db) }
-            let sql = """
-            SELECT strftime('%Y-%m-%d %H:00', created_at, 'localtime') as hr,
-                   SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-                   SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
-            FROM assistant_usage_events
-            WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-6 days')
-              AND substr(created_at, 1, 10) <= '\(safeDate)'
-            GROUP BY hr;
-            """
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
-                defer { sqlite3_finalize(stmt) }
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    guard let hrPtr = sqlite3_column_text(stmt, 0) else { continue }
-                    let hrKey = String(cString: hrPtr)
-                    let inTok = UInt64(max(sqlite3_column_int64(stmt, 1), 0))
-                    let outTok = UInt64(max(sqlite3_column_int64(stmt, 2), 0))
-                    let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
-                    let runs = Int(max(sqlite3_column_int64(stmt, 4), 0))
-                    let prev = bucketMap[hrKey]?[.copilot] ?? DailyTokenBucket()
-                    if (inTok + outTok + cacheTok) > prev.total {
-                        bucketMap[hrKey, default: [:]][.copilot] = DailyTokenBucket(input: inTok, output: outTok, cache: cacheTok, runs: max(prev.runs, runs))
-                    }
-                }
-            }
-        }
+        populateRavenTrendBuckets(&bucketMap, ravenURL: ravenURL, safeDate: safeDate)
+        populateCopilotTrendBuckets(&bucketMap, copilotURL: copilotURL, safeDate: safeDate)
 
         var points: [TrendDataPoint] = []
         for hrKey in bucketMap.keys.sorted() {
             guard let cliDict = bucketMap[hrKey] else { continue }
             let parsedDate = hrFmt.date(from: hrKey)
-            for cli in [DashboardCLIFilter.copilot, .codex, .claude, .kimi] {
+            for cli in [DashboardCLIFilter.copilot, .codex, .claude, .kimi, .grok, .deepseek] {
                 guard let stat = cliDict[cli], stat.total > 0 else { continue }
                 points.append(
                     TrendDataPoint(
@@ -534,6 +939,76 @@ extension LiveDashboardTelemetryReader {
             }
         }
         return points.isEmpty ? DashboardWorkspaceStore.deriveTrendPoints(from: fallbackEntries) : points
+    }
+
+    private static func populateRavenTrendBuckets(
+        _ bucketMap: inout [String: [DashboardCLIFilter: DailyTokenBucket]],
+        ravenURL: URL, safeDate: String
+    ) {
+        guard let db = openReadOnlySQLite(path: ravenURL.path) else { return }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT strftime('%Y-%m-%d %H:00', timestamp/1000, 'unixepoch', 'localtime') as hr,
+               CASE WHEN client_name LIKE 'codex%' THEN 'codex'
+                    WHEN client_name LIKE 'claude%' THEN 'claude'
+                    WHEN client_name LIKE 'grok%' THEN 'grok'
+                    WHEN client_name LIKE 'deepseek%' THEN 'deepseek'
+                    ELSE 'copilot' END as cli_kind,
+               SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+               SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
+        FROM requests
+        WHERE timestamp >= (strftime('%s', '\(safeDate)', '-6 days') * 1000)
+          AND date(timestamp/1000, 'unixepoch', 'localtime') <= '\(safeDate)'
+        GROUP BY hr, cli_kind;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let hrPtr = sqlite3_column_text(stmt, 0), let kindPtr = sqlite3_column_text(stmt, 1) else { continue }
+            let hrKey = String(cString: hrPtr)
+            let kind = String(cString: kindPtr)
+            let cli: DashboardCLIFilter = kind == "codex" ? .codex
+                : (kind == "claude" ? .claude : (kind == "grok" ? .grok : (kind == "deepseek" ? .deepseek : .copilot)))
+            bucketMap[hrKey, default: [:]][cli] = DailyTokenBucket(
+                input: UInt64(max(sqlite3_column_int64(stmt, 2), 0)),
+                output: UInt64(max(sqlite3_column_int64(stmt, 3), 0)),
+                cache: UInt64(max(sqlite3_column_int64(stmt, 4), 0)),
+                runs: Int(max(sqlite3_column_int64(stmt, 5), 0))
+            )
+        }
+    }
+
+    private static func populateCopilotTrendBuckets(
+        _ bucketMap: inout [String: [DashboardCLIFilter: DailyTokenBucket]],
+        copilotURL: URL, safeDate: String
+    ) {
+        guard let db = openReadOnlySQLite(path: copilotURL.path) else { return }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT strftime('%Y-%m-%d %H:00', created_at, 'localtime') as hr,
+               SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+               SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
+        FROM assistant_usage_events
+        WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-6 days')
+          AND substr(created_at, 1, 10) <= '\(safeDate)'
+        GROUP BY hr;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let hrPtr = sqlite3_column_text(stmt, 0) else { continue }
+            let hrKey = String(cString: hrPtr)
+            let inTok = UInt64(max(sqlite3_column_int64(stmt, 1), 0))
+            let outTok = UInt64(max(sqlite3_column_int64(stmt, 2), 0))
+            let cacheTok = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
+            let runs = Int(max(sqlite3_column_int64(stmt, 4), 0))
+            let prev = bucketMap[hrKey]?[.copilot] ?? DailyTokenBucket()
+            if (inTok + outTok + cacheTok) > prev.total {
+                bucketMap[hrKey, default: [:]][.copilot] = DailyTokenBucket(input: inTok, output: outTok, cache: cacheTok, runs: max(prev.runs, runs))
+            }
+        }
     }
 
     static func queryRealRankings(

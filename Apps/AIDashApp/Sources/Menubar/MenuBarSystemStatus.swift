@@ -11,6 +11,9 @@ public enum AgentCLIKind: String, CaseIterable, Sendable, Equatable, Identifiabl
     case claude = "Claude Code"
     case codex = "Codex CLI"
     case copilot = "Copilot CLI"
+    case kimi = "Kimi CLI"
+    case grok = "Grok CLI"
+    case deepseek = "DeepSeek CLI"
     public var id: String { rawValue }
 }
 
@@ -611,7 +614,18 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     }
     private func fileSystemID(for path: String) -> (Int32, Int32)? { var info = statfs(); guard path.withCString({ statfs($0, &info) == 0 }) else { return nil }; return (info.f_fsid.val.0, info.f_fsid.val.1) }
     private func captureTokenUsage() -> CLITokenUsageSnapshot {
-        let items = AgentCLIKind.allCases.map { cli in readTokenUsage(cli: cli, paths: cli == .claude ? tokenDatabasePaths.claude : cli == .codex ? tokenDatabasePaths.codex : tokenDatabasePaths.copilot) }
+        let items = AgentCLIKind.allCases.map { cli in
+            switch cli {
+            case .claude:
+                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.claude)
+            case .codex:
+                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.codex)
+            case .copilot:
+                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.copilot)
+            case .kimi, .grok, .deepseek:
+                return readTokenUsage(cli: cli, paths: [])
+            }
+        }
         return CLITokenUsageSnapshot(items: items, claudeWeeklyRemainingPercent: readQuota())
     }
     private func readTokenUsage(cli: AgentCLIKind, paths: [URL]) -> CLITokenUsageItem {
@@ -620,6 +634,7 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         case .claude: queries = ["SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_creation),0), COUNT(*) FROM fact_turn;", "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_creation),0), COUNT(*) FROM turn;"]
         case .codex: queries = ["SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_write),0), COUNT(*) FROM fact_request WHERE client IN ('codex-tui', 'codex_exec');", "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_write),0), COUNT(*) FROM req;"]
         case .copilot: queries = ["SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) + COALESCE(SUM(cache_write_tokens),0), COUNT(*) FROM assistant_usage_events;"]
+        case .kimi, .grok, .deepseek: queries = []
         }
         for path in paths { for query in queries { if let values = readSQLite(path: path.path, query: query) { return CLITokenUsageItem(cli: cli, inputTokens: values.0, outputTokens: values.1, cacheTokens: values.2, isAvailable: true, interactionCount: values.3) } } }
         return CLITokenUsageItem(cli: cli, inputTokens: 0, outputTokens: 0, cacheTokens: 0, isAvailable: false)
@@ -650,13 +665,18 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     // swiftlint:enable large_tuple
     private func readQuota() -> Int? {
         var urls = [tokenDatabasePaths.claudeQuotaFileURL, tokenDatabasePaths.magpieQuotaFileURL].compactMap { $0 }
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+        let isLive = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
+        if isLive {
             urls.append(Self.realUserHomeDirectoryURL().appendingPathComponent(".config/magpie/quotas.json"))
         }
+        let now = Date()
         for url in urls {
             guard let data = try? Data(contentsOf: url),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if let value = object["weekly_remaining_pct"] as? NSNumber {
+                if isLive, let measuredAt = (object["measured_at"] as? NSNumber)?.doubleValue {
+                    if now.timeIntervalSince1970 - measuredAt > 86_400 { continue }
+                }
                 return value.intValue
             }
             if let claude = object["claude"] as? [String: Any],

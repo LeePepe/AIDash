@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import Foundation
 import AIDashCore
 
@@ -71,6 +72,8 @@ public enum DashboardCLIFilter: String, CaseIterable, Codable, Sendable, Equatab
     case codex = "Codex CLI"
     case copilot = "Copilot CLI"
     case kimi = "Kimi CLI"
+    case grok = "Grok CLI"
+    case deepseek = "DeepSeek CLI"
 
     public var id: String { rawValue }
 
@@ -81,6 +84,68 @@ public enum DashboardCLIFilter: String, CaseIterable, Codable, Sendable, Equatab
         case .codex: return "Codex"
         case .copilot: return "Copilot"
         case .kimi: return "Kimi"
+        case .grok: return "Grok"
+        case .deepseek: return "DeepSeek"
+        }
+    }
+}
+
+public enum CLIAuthState: Codable, Sendable, Equatable {
+    case authenticated
+    case authExpired(reason: String, loginCommand: String)
+    case quotaExhausted(reason: String)
+    case notLoggedIn(loginCommand: String)
+
+    public var isAuthenticated: Bool {
+        if case .authenticated = self { return true }
+        return false
+    }
+
+    public var isAuthError: Bool {
+        switch self {
+        case .authExpired, .notLoggedIn: return true
+        case .authenticated, .quotaExhausted: return false
+        }
+    }
+
+    public var badgeTitle: String? {
+        switch self {
+        case .authenticated:
+            return nil
+        case .authExpired:
+            return DashboardL10n.tr("dashboard.auth.badge_expired", "Auth Expired")
+        case .notLoggedIn:
+            return DashboardL10n.tr("dashboard.auth.badge_not_logged_in", "Not Logged In")
+        case .quotaExhausted:
+            return DashboardL10n.tr("dashboard.auth.badge_quota_exhausted", "Quota Exhausted")
+        }
+    }
+
+    public var statusReasonText: String? {
+        switch self {
+        case .authenticated:
+            return nil
+        case let .authExpired(reason, loginCommand):
+            return reason.isEmpty
+                ? DashboardL10n.format("dashboard.auth.run_login_format", "Run %@", loginCommand)
+                : reason
+        case let .notLoggedIn(loginCommand):
+            return DashboardL10n.format("dashboard.auth.not_logged_in_hint_format", "Not logged in · run %@", loginCommand)
+        case let .quotaExhausted(reason):
+            return reason.isEmpty
+                ? DashboardL10n.tr("dashboard.auth.badge_quota_exhausted", "Quota Exhausted")
+                : reason
+        }
+    }
+
+    public var loginCommandHint: String? {
+        switch self {
+        case .authenticated:
+            return nil
+        case let .authExpired(_, loginCommand), let .notLoggedIn(loginCommand):
+            return DashboardL10n.format("dashboard.auth.run_login_format", "Run %@", loginCommand)
+        case let .quotaExhausted(reason):
+            return reason
         }
     }
 }
@@ -267,7 +332,7 @@ public struct TrendDataPoint: Codable, Sendable, Equatable, Identifiable {
             var result: [TrendDataPoint] = []
             for day in dayOrder.sorted() {
                 guard let cliMap = grouped[day] else { continue }
-                for cli in [DashboardCLIFilter.copilot, .codex, .claude, .kimi] {
+                for cli in [DashboardCLIFilter.copilot, .codex, .claude, .kimi, .grok, .deepseek] {
                     guard let s = cliMap[cli], s.total > 0 else { continue }
                     result.append(
                         TrendDataPoint(
@@ -431,6 +496,7 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
     public let secondaryQuotaUsed: Double?
     public let secondaryQuotaLabel: String?
     public let quotaResetText: String?
+    public let authState: CLIAuthState
 
     public init(
         id: String, cliFilter: DashboardCLIFilter, displayName: String, modelTag: String,
@@ -438,7 +504,8 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
         activeTokens: UInt64, cacheTokens: UInt64, interactionCount: UInt64,
         isAvailable: Bool = true, quotaUsedOverride: Double? = nil, quotaLabel: String? = nil,
         periodTotalTokens: UInt64? = nil, secondaryQuotaUsed: Double? = nil,
-        secondaryQuotaLabel: String? = nil, quotaResetText: String? = nil
+        secondaryQuotaLabel: String? = nil, quotaResetText: String? = nil,
+        authState: CLIAuthState = .authenticated
     ) {
         self.id = id; self.cliFilter = cliFilter; self.displayName = displayName; self.modelTag = modelTag
         self.todayCostUSD = todayCostUSD; self.periodCostUSD = periodCostUSD; self.quotaLimitUSD = quotaLimitUSD
@@ -446,22 +513,33 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
         self.isAvailable = isAvailable; self.quotaUsedOverride = quotaUsedOverride; self.quotaLabel = quotaLabel
         self.periodTotalTokens = periodTotalTokens ?? ((activeTokens + cacheTokens) * 7)
         self.secondaryQuotaUsed = secondaryQuotaUsed; self.secondaryQuotaLabel = secondaryQuotaLabel
-        self.quotaResetText = quotaResetText
+        self.quotaResetText = quotaResetText; self.authState = authState
     }
 
     public var totalTokens: UInt64 { activeTokens + cacheTokens }
     public var usedFraction: Double {
+        if case .quotaExhausted = authState { return 1.0 }
         if let quotaUsedOverride { return min(max(quotaUsedOverride, 0), 1) }
         guard quotaLimitUSD > 0 else { return 0 }
         return min(max(todayCostUSD / quotaLimitUSD, 0), 1)
     }
     public var remainingFraction: Double { max(0, 1.0 - usedFraction) }
     public var cacheHitFraction: Double { totalTokens > 0 ? Double(cacheTokens) / Double(totalTokens) : 0 }
-    public var hasTrackedQuota: Bool { quotaLabel != nil || cliFilter != .copilot }
+    public var hasTrackedQuota: Bool {
+        if case .quotaExhausted = authState { return true }
+        return quotaLabel != nil
+    }
     public var health: DashboardSemanticHealth {
         guard isAvailable else { return .neutral }
-        if !hasTrackedQuota { return .healthy }
-        return usedFraction >= 0.90 ? .critical : (usedFraction >= 0.75 ? .warning : .healthy)
+        switch authState {
+        case .authExpired, .notLoggedIn:
+            return .warning
+        case .quotaExhausted:
+            return .critical
+        case .authenticated:
+            if !hasTrackedQuota { return .healthy }
+            return usedFraction >= 0.90 ? .critical : (usedFraction >= 0.75 ? .warning : .healthy)
+        }
     }
 }
 
@@ -474,7 +552,7 @@ public struct QuotaPoolSummary: Sendable, Equatable {
     public let recommendedEntry: CLICostQuotaEntry?
 
     public static func summarize(entries: [CLICostQuotaEntry]) -> QuotaPoolSummary {
-        let tracked = entries.filter { $0.isAvailable && $0.hasTrackedQuota }
+        let tracked = entries.filter { $0.isAvailable && $0.authState == .authenticated && $0.hasTrackedQuota }
         guard !tracked.isEmpty else {
             return QuotaPoolSummary(trackedCount: 0, averageUsedFraction: 0, averageRemainingFraction: 1, idleChannelCount: 0, pressuredChannelCount: 0, recommendedEntry: nil)
         }
