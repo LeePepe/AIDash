@@ -72,6 +72,7 @@ public struct BriefingWindowScene: Scene {
         #if os(macOS)
         .defaultSize(width: 1120, height: 740)
         .windowResizability(.contentMinSize)
+        .windowToolbarStyle(.unified)
         #endif
     }
 

@@ -652,6 +652,21 @@ struct DashboardWorkspaceTests {
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
         #expect(store.liveEfficiencySummary == nil)
         #expect(store.effectiveKPIMetrics.count == 4)
+
+        for section in DashboardWorkspaceSection.allCases {
+            store.selectedSection = section
+            #expect(!store.selectedSection.title.isEmpty)
+            _ = AIDashMacWorkspaceView(store: store).body
+        }
+        store.selectedSection = .overview
+        if store.canSelectPreviousDate {
+            let originalDate = store.selectedDateString
+            store.selectPreviousDate()
+            #expect(store.selectedDateString != originalDate)
+            #expect(store.canSelectNextDate)
+            store.selectToday()
+            #expect(store.selectedDateString == originalDate)
+        }
     }
 }
 #endif

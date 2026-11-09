@@ -187,6 +187,7 @@ public final class DashboardWorkspaceStore {
             backing: .buffered, defer: false
         )
         win.title = "AIDash"
+        win.toolbarStyle = .unified
         win.minSize = NSSize(width: 920, height: 600)
         win.isReleasedWhenClosed = false
         win.center()
