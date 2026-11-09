@@ -89,6 +89,7 @@ public enum LiveDashboardTelemetryReader {
         let copilotRavenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "magpie", dateString: dateString)
         let claudeRavenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "claude", dateString: dateString)
         let claudeWarehouseStats = queryWarehouseClaudeStats(dbURL: warehouseURL, dateString: dateString)
+        let deviceTokenStats = queryDeviceTokenStats(dbURL: warehouseURL, dateString: dateString)
         let kimiStats = queryKimiStats(homeURL: homeURL, dateString: dateString)
         let grokStats = queryGrokStats(homeURL: homeURL, ravenURL: ravenURL, dateString: dateString)
         let deepseekStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "deepseek", dateString: dateString)
@@ -112,12 +113,13 @@ public enum LiveDashboardTelemetryReader {
             claudeRavenStats: claudeRavenStats,
             claudeWarehouseStats: claudeWarehouseStats,
             kimiStats: kimiStats,
+            deviceTokenStats: deviceTokenStats,
             grokStats: grokStats,
             deepseekStats: deepseekStats
         )
         let rankings = queryRealRankings(ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString, fallbackEntries: entries)
         let trends = querySevenDayTrends(
-            ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString,
+            ravenURL: ravenURL, copilotURL: copilotURL, warehouseURL: warehouseURL, dateString: dateString,
             kimiDailyBuckets: kimiStats.dailyBuckets, grokDailyBuckets: grokStats.dailyBuckets,
             fallbackEntries: entries
         )
@@ -317,19 +319,33 @@ public enum LiveDashboardTelemetryReader {
         claudeRavenStats: CLIWindowStats,
         claudeWarehouseStats: CLIWindowStats,
         kimiStats: KimiTelemetryStats,
+        deviceTokenStats: DeviceTokenStats,
         grokStats: GrokTelemetryStats,
         deepseekStats: CLIWindowStats
     ) -> [CLICostQuotaEntry] {
         let weeklyQuotaLabel = DashboardL10n.tr("dashboard.quota.weekly_label", "7d Quota")
         let claudeQuotaLabel = DashboardL10n.tr("dashboard.quota.claude_7d_label", "Pro 7d Quota")
+        let mergedCodex = deviceTokenStats.byCLI[.codex] ?? codexStats
+        let mergedCopilot = deviceTokenStats.byCLI[.copilot] ?? (copilotSessionStats.dayRuns == 0 && copilotRavenStats.dayRuns > 0 ? copilotRavenStats : copilotSessionStats)
+        let mergedClaude = deviceTokenStats.byCLI[.claude] ?? CLIWindowStats(
+            dayRuns: claudeRavenStats.dayRuns + claudeWarehouseStats.dayRuns,
+            dayIn: claudeRavenStats.dayIn + claudeWarehouseStats.dayIn,
+            dayOut: claudeRavenStats.dayOut + claudeWarehouseStats.dayOut,
+            dayCache: claudeRavenStats.dayCache + claudeWarehouseStats.dayCache,
+            weekIn: claudeRavenStats.weekIn + claudeWarehouseStats.weekIn,
+            weekOut: claudeRavenStats.weekOut + claudeWarehouseStats.weekOut,
+            weekCache: claudeRavenStats.weekCache + claudeWarehouseStats.weekCache,
+            modelsSummary: claudeRavenStats.modelsSummary
+        )
+        let emptyStats = CLIWindowStats()
         var entries: [CLICostQuotaEntry] = []
 
         if isCLIInstalled(.claude, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
-            entries.append(makeClaudeEntry(homeURL: homeURL, now: now, quotas: quotas, claudeRavenStats: claudeRavenStats, claudeWarehouseStats: claudeWarehouseStats, claudeQuotaLabel: claudeQuotaLabel))
+            entries.append(makeClaudeEntry(homeURL: homeURL, now: now, quotas: quotas, claudeRavenStats: mergedClaude, claudeWarehouseStats: emptyStats, claudeQuotaLabel: claudeQuotaLabel, deviceContributions: deviceTokenStats.contributions[.claude] ?? []))
         }
 
         if isCLIInstalled(.codex, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
-            entries.append(makeCodexEntry(homeURL: homeURL, quotas: quotas, codexStats: codexStats, weeklyQuotaLabel: weeklyQuotaLabel))
+            entries.append(makeCodexEntry(homeURL: homeURL, quotas: quotas, codexStats: mergedCodex, weeklyQuotaLabel: weeklyQuotaLabel, deviceContributions: deviceTokenStats.contributions[.codex] ?? []))
         }
 
         if isCLIInstalled(.kimi, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
@@ -349,13 +365,14 @@ public enum LiveDashboardTelemetryReader {
                     secondaryQuotaUsed: kimi5hQuota,
                     secondaryQuotaLabel: kimi5hQuota != nil ? "5h" : nil,
                     quotaResetText: isAuthenticated ? quotas.kimiResetText : nil,
-                    authState: kimiAuth
+                    authState: kimiAuth,
+                    deviceContributions: deviceTokenStats.contributions[.kimi] ?? []
                 )
             )
         }
 
         if isCLIInstalled(.copilot, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
-            entries.append(makeCopilotEntry(homeURL: homeURL, copilotSessionStats: copilotSessionStats, copilotRavenStats: copilotRavenStats))
+            entries.append(makeCopilotEntry(homeURL: homeURL, copilotSessionStats: mergedCopilot, copilotRavenStats: emptyStats, deviceContributions: deviceTokenStats.contributions[.copilot] ?? []))
         }
 
         if isCLIInstalled(.grok, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
@@ -401,7 +418,8 @@ public enum LiveDashboardTelemetryReader {
 
     private static func makeClaudeEntry(
         homeURL: URL, now: Date, quotas: RealQuotaSnapshot,
-        claudeRavenStats: CLIWindowStats, claudeWarehouseStats: CLIWindowStats, claudeQuotaLabel: String
+        claudeRavenStats: CLIWindowStats, claudeWarehouseStats: CLIWindowStats, claudeQuotaLabel: String,
+        deviceContributions: [DeviceTokenContribution] = []
     ) -> CLICostQuotaEntry {
         let dayIn = claudeRavenStats.dayIn + claudeWarehouseStats.dayIn
         let dayOut = claudeRavenStats.dayOut + claudeWarehouseStats.dayOut
@@ -424,12 +442,14 @@ public enum LiveDashboardTelemetryReader {
             secondaryQuotaUsed: auth == .authenticated ? quotas.claudeFiveHourUsedFraction : nil,
             secondaryQuotaLabel: auth == .authenticated ? "5h" : nil,
             quotaResetText: auth == .authenticated ? quotas.claudeResetText : nil,
-            authState: auth
+            authState: auth,
+            deviceContributions: deviceContributions
         )
     }
 
     private static func makeCodexEntry(
-        homeURL: URL, quotas: RealQuotaSnapshot, codexStats: CLIWindowStats, weeklyQuotaLabel: String
+        homeURL: URL, quotas: RealQuotaSnapshot, codexStats: CLIWindowStats, weeklyQuotaLabel: String,
+        deviceContributions: [DeviceTokenContribution] = []
     ) -> CLICostQuotaEntry {
         let todayCost = computeCostUSD(input: codexStats.dayIn, output: codexStats.dayOut, cache: codexStats.dayCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
         let weekCost = computeCostUSD(input: codexStats.weekIn, output: codexStats.weekOut, cache: codexStats.weekCache, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
@@ -445,12 +465,14 @@ public enum LiveDashboardTelemetryReader {
             isAvailable: true, quotaUsedOverride: quotas.cursorWeeklyUsedFraction ?? 0.0,
             quotaLabel: auth == .authenticated ? weeklyQuotaLabel : nil,
             periodTotalTokens: codexStats.weekIn + codexStats.weekOut + codexStats.weekCache,
-            quotaResetText: quotas.cursorResetText, authState: auth
+            quotaResetText: quotas.cursorResetText, authState: auth,
+            deviceContributions: deviceContributions
         )
     }
 
     private static func makeCopilotEntry(
-        homeURL: URL, copilotSessionStats: CLIWindowStats, copilotRavenStats: CLIWindowStats
+        homeURL: URL, copilotSessionStats: CLIWindowStats, copilotRavenStats: CLIWindowStats,
+        deviceContributions: [DeviceTokenContribution] = []
     ) -> CLICostQuotaEntry {
         let useRaven = copilotSessionStats.dayRuns == 0 && copilotRavenStats.dayRuns > 0
         let dayIn = useRaven ? copilotRavenStats.dayIn : copilotSessionStats.dayIn
@@ -472,7 +494,8 @@ public enum LiveDashboardTelemetryReader {
             todayCostUSD: todayCost, periodCostUSD: weekCost, quotaLimitUSD: 100.0,
             activeTokens: dayIn + dayOut, cacheTokens: dayCache, interactionCount: dayRuns,
             isAvailable: true, quotaUsedOverride: 0.0, quotaLabel: nil,
-            periodTotalTokens: weekIn + weekOut + weekCache, authState: auth
+            periodTotalTokens: weekIn + weekOut + weekCache, authState: auth,
+            deviceContributions: deviceContributions
         )
     }
 
@@ -778,6 +801,102 @@ extension LiveDashboardTelemetryReader {
         return executeWindowStatsQuery(dbURL: dbURL, sql: sql, hasModelsColumn: false, defaultModels: "claude-opus / sonnet")
     }
 
+    struct DeviceTokenStats {
+        var byCLI: [DashboardCLIFilter: CLIWindowStats] = [:]
+        var contributions: [DashboardCLIFilter: [DeviceTokenContribution]] = [:]
+        var hourlyBuckets: [String: [DashboardCLIFilter: DailyTokenBucket]] = [:]
+
+        var hasRows: Bool { !byCLI.isEmpty }
+    }
+
+    static func queryDeviceTokenStats(dbURL: URL, dateString: String) -> DeviceTokenStats {
+        let safeDate = sanitizeSQLToken(dateString)
+        guard let db = openReadOnlySQLite(path: dbURL.path) else { return DeviceTokenStats() }
+        defer { sqlite3_close(db) }
+        var result = DeviceTokenStats()
+        let aggregateSQL = """
+        SELECT device_id, machine_alias, cli,
+               SUM(CASE WHEN cst_day = '\(safeDate)' THEN input_tokens ELSE 0 END),
+               SUM(CASE WHEN cst_day = '\(safeDate)' THEN output_tokens ELSE 0 END),
+               SUM(CASE WHEN cst_day = '\(safeDate)' THEN cache_read + cache_write ELSE 0 END),
+               SUM(CASE WHEN cst_day = '\(safeDate)' THEN invocations ELSE 0 END),
+               SUM(input_tokens), SUM(output_tokens), SUM(cache_read + cache_write), SUM(invocations),
+               SUM(total_tokens)
+        FROM fact_device_token_daily
+        WHERE device_id != '__all__'
+          AND cst_day BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)'
+        GROUP BY device_id, machine_alias, cli;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, aggregateSQL, -1, &stmt, nil) == SQLITE_OK, let stmt else { return result }
+        defer { sqlite3_finalize(stmt) }
+        // swiftlint:disable large_tuple
+        var perCLI: [DashboardCLIFilter: (day: UInt64, period: UInt64, runs: UInt64, dayCache: UInt64, dayInput: UInt64, dayOutput: UInt64, periodCache: UInt64, periodInput: UInt64, periodOutput: UInt64)] = [:]
+        var perDevice: [DashboardCLIFilter: [(id: String, alias: String, day: UInt64, period: UInt64)]] = [:]
+        // swiftlint:enable large_tuple
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let devicePtr = sqlite3_column_text(stmt, 0), let cliPtr = sqlite3_column_text(stmt, 2) else { continue }
+            guard let cli = deviceCLI(String(cString: cliPtr)) else { continue }
+            let deviceID = String(cString: devicePtr)
+            let alias = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? deviceID
+            let dayInput = UInt64(max(sqlite3_column_int64(stmt, 3), 0))
+            let dayOutput = UInt64(max(sqlite3_column_int64(stmt, 4), 0))
+            let dayCache = UInt64(max(sqlite3_column_int64(stmt, 5), 0))
+            let dayRuns = UInt64(max(sqlite3_column_int64(stmt, 6), 0))
+            let periodInput = UInt64(max(sqlite3_column_int64(stmt, 7), 0))
+            let periodOutput = UInt64(max(sqlite3_column_int64(stmt, 8), 0))
+            let periodCache = UInt64(max(sqlite3_column_int64(stmt, 9), 0))
+            let periodTokens = UInt64(max(sqlite3_column_int64(stmt, 11), 0))
+            let dayTokens = dayInput + dayOutput
+            let previous = perCLI[cli] ?? (0, 0, 0, 0, 0, 0, 0, 0, 0)
+            perCLI[cli] = (
+                previous.day + dayTokens, previous.period + periodInput + periodOutput + periodCache,
+                previous.runs + dayRuns, previous.dayCache + dayCache, previous.dayInput + dayInput,
+                previous.dayOutput + dayOutput, previous.periodCache + periodCache,
+                previous.periodInput + periodInput, previous.periodOutput + periodOutput
+            )
+            perDevice[cli, default: []].append((deviceID, alias, dayTokens, periodTokens))
+        }
+        for (cli, totals) in perCLI {
+            result.byCLI[cli] = CLIWindowStats(dayRuns: totals.runs, dayIn: totals.dayInput, dayOut: totals.dayOutput, dayCache: totals.dayCache, weekIn: totals.periodInput, weekOut: totals.periodOutput, weekCache: totals.periodCache)
+            let devices = perDevice[cli] ?? []
+            let total = devices.reduce(UInt64(0)) { $0 + $1.period }
+            result.contributions[cli] = devices.map { device in
+                DeviceTokenContribution(id: "device-\(cli.rawValue)-\(device.id)", deviceID: device.id, machineAlias: device.alias, todayTokens: device.day, periodTokens: device.period, shareFraction: total > 0 ? Double(device.period) / Double(total) : 0)
+            }.sorted { $0.periodTokens > $1.periodTokens }
+        }
+
+        let hourlySQL = """
+        SELECT hour_bucket, cli, SUM(input_tokens), SUM(output_tokens), SUM(cache_read + cache_write), SUM(invocations)
+        FROM fact_device_token_daily
+        WHERE device_id != '__all__'
+          AND cst_day BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)'
+        GROUP BY hour_bucket, cli;
+        """
+        var hourlyStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, hourlySQL, -1, &hourlyStmt, nil) == SQLITE_OK, let hourlyStmt else { return result }
+        defer { sqlite3_finalize(hourlyStmt) }
+        while sqlite3_step(hourlyStmt) == SQLITE_ROW {
+            guard let hourPtr = sqlite3_column_text(hourlyStmt, 0), let cliPtr = sqlite3_column_text(hourlyStmt, 1), let cli = deviceCLI(String(cString: cliPtr)) else { continue }
+            result.hourlyBuckets[String(cString: hourPtr), default: [:]][cli] = DailyTokenBucket(
+                input: UInt64(max(sqlite3_column_int64(hourlyStmt, 2), 0)),
+                output: UInt64(max(sqlite3_column_int64(hourlyStmt, 3), 0)),
+                cache: UInt64(max(sqlite3_column_int64(hourlyStmt, 4), 0)),
+                runs: Int(max(sqlite3_column_int64(hourlyStmt, 5), 0))
+            )
+        }
+        return result
+    }
+
+    private static func deviceCLI(_ raw: String) -> DashboardCLIFilter? {
+        let value = raw.lowercased()
+        if value.contains("claude") || value == "cc" { return .claude }
+        if value.contains("codex") { return .codex }
+        if value.contains("copilot") || value.contains("magpie") { return .copilot }
+        if value.contains("kimi") { return .kimi }
+        return nil
+    }
+
     public struct KimiTelemetryStats: Sendable, Equatable {
         public var dayTokens: UInt64 = 0
         public var dayRuns: UInt64 = 0
@@ -984,7 +1103,7 @@ extension LiveDashboardTelemetryReader {
     }
 
     static func querySevenDayTrends(
-        ravenURL: URL, copilotURL: URL, dateString: String,
+        ravenURL: URL, copilotURL: URL, warehouseURL: URL, dateString: String,
         kimiDailyBuckets: [String: (tokens: UInt64, runs: Int)] = [:],
         grokDailyBuckets: [String: DailyTokenBucket] = [:],
         fallbackEntries: [CLICostQuotaEntry]
@@ -997,7 +1116,9 @@ extension LiveDashboardTelemetryReader {
         hrFmt.dateFormat = "yyyy-MM-dd HH:mm"
 
         var bucketMap: [String: [DashboardCLIFilter: DailyTokenBucket]] = [:]
+        let deviceTrendStats = queryDeviceTokenStats(dbURL: warehouseURL, dateString: dateString)
         for (hrKey, stat) in kimiDailyBuckets where stat.tokens > 0 {
+            guard deviceTrendStats.byCLI[.kimi] == nil else { continue }
             let inTok = UInt64(Double(stat.tokens) * 0.85)
             bucketMap[hrKey, default: [:]][.kimi] = DailyTokenBucket(input: inTok, output: stat.tokens - inTok, cache: 0, runs: stat.runs)
         }
@@ -1006,6 +1127,11 @@ extension LiveDashboardTelemetryReader {
         }
         populateRavenTrendBuckets(&bucketMap, ravenURL: ravenURL, safeDate: safeDate)
         populateCopilotTrendBuckets(&bucketMap, copilotURL: copilotURL, safeDate: safeDate)
+        for (hour, cliBuckets) in deviceTrendStats.hourlyBuckets {
+            for (cli, bucket) in cliBuckets {
+                bucketMap[hour, default: [:]][cli] = bucket
+            }
+        }
 
         var points: [TrendDataPoint] = []
         for hrKey in bucketMap.keys.sorted() {

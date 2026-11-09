@@ -290,6 +290,42 @@ struct DashboardWorkspaceTests {
         }
     }
 
+    @Test("device token warehouse rows merge once and expose stable shares")
+    func deviceTokenRowsMergeOnceAndExposeShares() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-device-token-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let dbURL = tempDir.appendingPathComponent("warehouse.db")
+        var db: OpaquePointer?
+        #expect(sqlite3_open(dbURL.path, &db) == SQLITE_OK)
+        guard let db else { return }
+        defer { sqlite3_close(db) }
+        let schema = """
+        CREATE TABLE fact_device_token_daily (record_uid TEXT PRIMARY KEY, device_id TEXT, machine_alias TEXT, cst_day TEXT, hour_bucket TEXT, cli TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER, cache_read INTEGER, cache_write INTEGER, total_tokens INTEGER, invocations INTEGER, updated_at TEXT);
+        INSERT INTO fact_device_token_daily VALUES ('local-1','mac-local','Studio','2026-11-09','2026-11-09T08:00:00+08:00','codex-tui','gpt',100,50,20,0,150,2,'now');
+        INSERT INTO fact_device_token_daily VALUES ('remote-1','mac-remote','Laptop','2026-11-09','2026-11-09T08:00:00+08:00','codex-tui','gpt',300,50,0,10,350,3,'now');
+        INSERT INTO fact_device_token_daily VALUES ('remote-old','mac-remote','Laptop','2026-11-08','2026-11-08T08:00:00+08:00','codex-tui','gpt',100,50,0,0,150,1,'now');
+        INSERT INTO fact_device_token_daily VALUES ('all-1','__all__','All devices','2026-11-09','2026-11-09T08:00:00+08:00','codex-tui','gpt',400,100,20,10,500,5,'now');
+        """
+        #expect(sqlite3_exec(db, schema, nil, nil, nil) == SQLITE_OK)
+        let stats = LiveDashboardTelemetryReader.queryDeviceTokenStats(dbURL: dbURL, dateString: "2026-11-09")
+        let codex = try #require(stats.byCLI[.codex])
+        #expect(codex.dayIn == 400)
+        #expect(codex.dayOut == 100)
+        #expect(codex.dayCache == 30)
+        #expect(codex.weekIn == 500)
+        #expect(codex.weekOut == 150)
+        let devices = try #require(stats.contributions[.codex])
+        #expect(devices.count == 2)
+        #expect(devices.first?.machineAlias == "Laptop")
+        #expect(devices.first?.formattedShare == "76.9%")
+        let hourly = try #require(stats.hourlyBuckets["2026-11-09T08:00:00+08:00"]?[.codex])
+        #expect(hourly.input == 400)
+        #expect(hourly.output == 100)
+        #expect(hourly.cache == 30)
+        #expect(LiveDashboardTelemetryReader.queryDeviceTokenStats(dbURL: tempDir.appendingPathComponent("missing.db"), dateString: "2026-11-09").hasRows == false)
+    }
+
     @Test("LiveDashboardTelemetryReader parses real magpie quotas.json windows without fake caps")
     func liveTelemetryReaderParsesRealQuotas() throws {
         let tempDir = FileManager.default.temporaryDirectory
