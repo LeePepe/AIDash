@@ -18,6 +18,7 @@
         <string>/.config/magpie/</string>
         <string>/Library/Application Support/raven/</string>
         <string>/Library/Application Support/Falcon/</string>
+        <string>/Library/Application Support/CindyGlobal/</string>
     </array>
 </dict>
 </plist>

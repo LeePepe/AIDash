@@ -151,7 +151,7 @@ public struct SystemTelemetryStripView: View {
                 Image(systemName: health.symbolName).foregroundStyle(tint).accessibilityHidden(true)
                 Text(valueText).font(.subheadline.weight(.semibold)).monospacedDigit().contentTransition(.numericText())
             }
-            Gauge(value: clamped, in: 0...1) { Text(title) }.gaugeStyle(.accessoryLinearCapacity).tint(tint)
+            Gauge(value: clamped, in: 0...1) { EmptyView() }.gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
             Text(detailText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(12)
@@ -163,9 +163,11 @@ public struct SystemTelemetryStripView: View {
 
 public struct KPISummaryCardView: View {
     public let metrics: [KPIMetricItem]
+    public var onSelectMetric: ((String) -> Void)?
 
-    public init(metrics: [KPIMetricItem]) {
+    public init(metrics: [KPIMetricItem], onSelectMetric: ((String) -> Void)? = nil) {
         self.metrics = metrics
+        self.onSelectMetric = onSelectMetric
     }
 
     public var body: some View {
@@ -182,24 +184,30 @@ public struct KPISummaryCardView: View {
 
     private func metricTile(_ metric: KPIMetricItem) -> some View {
         let semanticColor = DashboardSemanticColorPalette.color(for: metric.health)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text(metric.label).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 4)
-                Image(systemName: metric.symbolName).foregroundStyle(semanticColor).accessibilityHidden(true)
+        return Button {
+            onSelectMetric?(metric.id)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(metric.label).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Image(systemName: metric.symbolName).foregroundStyle(semanticColor).accessibilityHidden(true)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(metric.formattedValue).font(.system(.title, design: .rounded, weight: .semibold)).monospacedDigit().contentTransition(.numericText())
+                    if let unit = metric.unit { Text(unit).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: metric.direction.symbolName).font(.caption2.weight(.bold)).foregroundStyle(semanticColor)
+                    Text(metric.deltaText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(metric.formattedValue).font(.system(.title, design: .rounded, weight: .semibold)).monospacedDigit().contentTransition(.numericText())
-                if let unit = metric.unit { Text(unit).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
-            }
-            HStack(spacing: 4) {
-                Image(systemName: metric.direction.symbolName).font(.caption2.weight(.bold)).foregroundStyle(semanticColor)
-                Text(metric.deltaText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
-            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+            .contentShape(Rectangle())
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
     }
 }
@@ -209,18 +217,17 @@ public struct TrendChartCardView: View {
     public let selectedCategory: String?
     public let onSelectCategory: (String) -> Void
     public let onClearSelection: () -> Void
+    public var showInlineCrossFilterPills: Bool
     @State private var timeGranularity: DashboardChartTimeGranularity = MenuBarDisplayPreferences.shared.defaultChartGranularity
 
     public init(
-        points: [TrendDataPoint],
-        selectedCategory: String?,
-        onSelectCategory: @escaping (String) -> Void,
-        onClearSelection: @escaping () -> Void
+        points: [TrendDataPoint], selectedCategory: String?,
+        onSelectCategory: @escaping (String) -> Void, onClearSelection: @escaping () -> Void,
+        showInlineCrossFilterPills: Bool = true
     ) {
-        self.points = points
-        self.selectedCategory = selectedCategory
-        self.onSelectCategory = onSelectCategory
-        self.onClearSelection = onClearSelection
+        self.points = points; self.selectedCategory = selectedCategory
+        self.onSelectCategory = onSelectCategory; self.onClearSelection = onClearSelection
+        self.showInlineCrossFilterPills = showInlineCrossFilterPills
     }
 
     public var body: some View {
@@ -243,53 +250,36 @@ public struct TrendChartCardView: View {
                 }
 
                 if let selectedCategory {
-                    Button {
-                        onClearSelection()
-                    } label: {
-                        Label(
-                            DashboardL10n.format("dashboard.chart.clear_filter_format", "Filter: %@ ×", selectedCategory),
-                            systemImage: "line.3.horizontal.decrease.circle.fill"
-                        )
+                    Button { onClearSelection() } label: {
+                        Label(DashboardL10n.format("dashboard.chart.clear_filter_format", "Filter: %@ ×", selectedCategory), systemImage: "line.3.horizontal.decrease.circle.fill")
                             .font(.caption.weight(.medium))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .frame(minHeight: 28)
+                    .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
                 }
             }
         } content: {
             let categoryTotals = Self.groupedCategoryTotals(from: activePoints, kind: .all)
             VStack(alignment: .leading, spacing: 10) {
                 TrendChartInteractiveCanvas(
-                    rawPoints: points,
-                    activePoints: activePoints,
-                    dailySegments: dailySegments,
-                    selectedCategory: selectedCategory,
-                    timeGranularity: timeGranularity
+                    rawPoints: points, activePoints: activePoints,
+                    dailySegments: dailySegments, selectedCategory: selectedCategory, timeGranularity: timeGranularity
                 )
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        ForEach(categoryTotals, id: \.category) { item in
-                            let active = selectedCategory == item.category
-                            Button {
-                                onSelectCategory(item.category)
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: active ? "checkmark.circle.fill" : "circle")
-                                    Text(item.category)
-                                    Text("\(DashboardTokenFormatter.compact(item.tokens)) tok")
-                                        .monospacedDigit()
+                if showInlineCrossFilterPills {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            Text(DashboardL10n.tr("dashboard.chart.quick_filter", "Quick Cross-Filter:")).font(.caption).foregroundStyle(.secondary)
+                            ForEach(categoryTotals, id: \.category) { item in
+                                let active = selectedCategory == item.category
+                                Button { onSelectCategory(item.category) } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: active ? "checkmark.circle.fill" : "circle")
+                                        Text(item.category)
+                                        Text("\(DashboardTokenFormatter.compact(item.tokens)) tok").monospacedDigit()
+                                    }
+                                    .font(.caption)
                                 }
-                                .font(.caption)
+                                .buttonStyle(.bordered).tint(active ? .accentColor : .secondary).controlSize(.small).frame(minHeight: 28)
                             }
-                            .buttonStyle(.bordered)
-                            .tint(active ? .accentColor : .secondary)
-                            .controlSize(.small)
-                            .frame(minHeight: 28)
                         }
                     }
                 }
@@ -452,144 +442,152 @@ public struct CLICostQuotaCardView: View {
     public let entries: [CLICostQuotaEntry]
     public let todayTotalUSD: Double
     public let periodTotalUSD: Double
+    public var selectedCategory: String?
+    public var onSelectCategory: ((String) -> Void)?
 
     public init(
-        entries: [CLICostQuotaEntry],
-        todayTotalUSD: Double,
-        periodTotalUSD: Double
+        entries: [CLICostQuotaEntry], todayTotalUSD: Double, periodTotalUSD: Double,
+        selectedCategory: String? = nil, onSelectCategory: ((String) -> Void)? = nil
     ) {
-        self.entries = entries
-        self.todayTotalUSD = todayTotalUSD
-        self.periodTotalUSD = periodTotalUSD
+        self.entries = entries; self.todayTotalUSD = todayTotalUSD; self.periodTotalUSD = periodTotalUSD
+        self.selectedCategory = selectedCategory; self.onSelectCategory = onSelectCategory
     }
 
     public var body: some View {
-        let todayTotal = entries.reduce(UInt64(0)) { $0 + $1.totalTokens }
-        let periodTotal = entries.reduce(UInt64(0)) { $0 + $1.periodTotalTokens }
         let pool = QuotaPoolSummary.summarize(entries: entries)
+        let quotaEntries = entries.filter(\.hasTrackedQuota)
+        let throughputEntries = entries.sorted { $0.totalTokens > $1.totalTokens }
         return SolidModularCardContainer(
             title: DashboardL10n.tr("dashboard.card.cli_cost.title", "Multi-CLI Token & Quota Monitor"),
-            subtitle: DashboardL10n.tr("dashboard.card.cli_cost.subtitle", "Overall quota pool balance, routing recommendation, and multi-window telemetry"),
+            subtitle: DashboardL10n.tr("dashboard.card.cli_cost.subtitle_split", "Top: weekly quota headroom · Bottom: all-channel token throughput"),
             symbolName: "sparkles"
         ) {
-            HStack(spacing: 12) {
-                LabeledContent(DashboardL10n.tr("dashboard.cli_cost.today", "Today Total")) {
-                    Text(DashboardTokenFormatter.compact(todayTotal))
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                }
-                LabeledContent(DashboardL10n.tr("dashboard.cli_cost.cycle", "7d Total")) {
-                    Text(DashboardTokenFormatter.compact(periodTotal))
-                        .font(.subheadline)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .font(.caption)
+            poolHeaderPill(pool: pool)
         } content: {
-            VStack(alignment: .leading, spacing: 10) {
-                quotaPoolOverviewStrip(pool: pool)
-
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(minimum: 240), spacing: 10),
-                        GridItem(.flexible(minimum: 240), spacing: 10)
-                    ],
-                    spacing: 10
-                ) {
-                    ForEach(entries) { entry in
-                        cliQuotaTile(entry)
+            VStack(alignment: .leading, spacing: 12) {
+                if !quotaEntries.isEmpty {
+                    Text(DashboardL10n.tr("dashboard.quota.section_headroom", "1. QUOTA HEADROOM (CAPPED CHANNELS)"))
+                        .font(.system(.caption2, design: .rounded, weight: .bold)).foregroundStyle(.secondary)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 180), spacing: 10), count: min(max(quotaEntries.count, 1), 3)), spacing: 10) {
+                        ForEach(quotaEntries) { entry in quotaHeadroomCard(entry, isRecommended: entry.id == pool.recommendedEntry?.id) }
+                    }
+                }
+                Text(DashboardL10n.tr("dashboard.quota.section_throughput", "2. TOKEN THROUGHPUT (TODAY / 7D / CACHE)"))
+                    .font(.system(.caption2, design: .rounded, weight: .bold)).foregroundStyle(.secondary)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 140), spacing: 10), count: min(max(throughputEntries.count, 1), 4)), spacing: 10) {
+                    ForEach(throughputEntries) { entry in
+                        tokenThroughputCell(entry, isTopVolume: entry.id == throughputEntries.first?.id && entry.totalTokens > 0)
                     }
                 }
             }
         }
     }
 
-    private func quotaPoolOverviewStrip(pool: QuotaPoolSummary) -> some View {
+    private func poolHeaderPill(pool: QuotaPoolSummary) -> some View {
         let poolTint = DashboardSemanticColorPalette.color(for: pool.health)
-        let avgUsedPct = Int((pool.averageUsedFraction * 100).rounded())
-        let avgRemPct = max(0, 100 - avgUsedPct)
-        return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: "chart.pie.fill").foregroundStyle(poolTint)
-                    Text(DashboardL10n.tr("dashboard.quota.pool_title", "Overall Quota Pool")).font(.caption.weight(.semibold))
-                    Text(DashboardL10n.format("dashboard.quota.pool_used_rem_format", "Used %lld%% · Left %lld%%", avgUsedPct, avgRemPct))
-                        .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(poolTint)
-                }
-                Gauge(value: pool.averageUsedFraction, in: 0...1) {
-                    Text(DashboardL10n.tr("dashboard.quota.pool_title", "Overall Quota Pool"))
-                }
-                .gaugeStyle(.accessoryLinearCapacity).tint(poolTint).frame(maxWidth: 220)
-            }
-            Divider().frame(height: 28)
+        let avgRemPct = max(0, 100 - Int((pool.averageUsedFraction * 100).rounded()))
+        let text: String = {
             if let rec = pool.recommendedEntry {
-                let recRemPct = Int((rec.remainingFraction * 100).rounded())
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.branch").foregroundStyle(Color.accentColor)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(DashboardL10n.format("dashboard.quota.recommend_route_format", "Recommended Route: %@ (%lld%% remaining)", rec.displayName, recRemPct))
-                            .font(.caption.weight(.semibold)).foregroundStyle(.primary)
-                        Text(DashboardL10n.format("dashboard.quota.balance_hint_format", "%lld idle channel(s) (<25%% used) · %lld high-load channel(s)", pool.idleChannelCount, pool.pressuredChannelCount))
-                            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
+                return DashboardL10n.format("dashboard.quota.pool_pill_format", "Pool Left %lld%% · Route → %@", avgRemPct, rec.displayName)
             }
-            Spacer(minLength: 4)
+            return DashboardL10n.format("menubar.pulse.pool_remaining_format", "Pool Left %lld%%", avgRemPct)
+        }()
+        return HStack(spacing: 5) {
+            Image(systemName: "bolt.horizontal.circle.fill").font(.caption2)
+            Text(text).font(.caption.weight(.semibold)).monospacedDigit()
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(poolTint.opacity(0.14), in: Capsule())
+        .foregroundStyle(poolTint)
     }
 
-    private func cliQuotaTile(_ entry: CLICostQuotaEntry) -> some View {
+    private func quotaHeadroomCard(_ entry: CLICostQuotaEntry, isRecommended: Bool) -> some View {
         let tint = DashboardSemanticColorPalette.color(for: entry.health)
-        let todayCompact = DashboardTokenFormatter.compact(entry.totalTokens)
-        let periodCompact = DashboardTokenFormatter.compact(entry.periodTotalTokens)
         let usedPct = Int((entry.usedFraction * 100).rounded())
         let remPct = max(0, 100 - usedPct)
-        let cachePct = Int((entry.cacheHitFraction * 100).rounded())
+        let badgeColor: Color = isRecommended ? .accentColor : tint
+        let badgeText = isRecommended ? DashboardL10n.tr("dashboard.quota.recommended_badge", "⚡ Recommended") : entry.health.label
 
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: entry.health.symbolName).foregroundStyle(tint)
-                Text(entry.displayName).font(.subheadline.weight(.semibold))
-                Text(entry.modelTag).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 6)
-                if let quotaLabel = entry.quotaLabel {
-                    Text("\(quotaLabel) · \(DashboardL10n.format("menubar.pulse.quota_remaining_format", "Left %lld%%", remPct))")
-                        .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
-                } else {
-                    Text(DashboardL10n.tr("dashboard.quota.token_metered", "Token Metered"))
-                        .font(.caption2.weight(.medium)).padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.accentColor.opacity(0.14), in: Capsule()).foregroundStyle(Color.accentColor)
-                }
-            }
-            if entry.quotaLabel != nil {
-                Gauge(value: entry.usedFraction, in: 0...1) { Text(entry.displayName) }
-                    .gaugeStyle(.accessoryLinearCapacity).tint(tint)
-            } else {
-                Divider().padding(.vertical, 2)
-            }
-            HStack(spacing: 8) {
-                Text(DashboardL10n.format("dashboard.cli_cost.total_tokens_format", "Today: %@ tok", todayCompact))
-                Text(DashboardL10n.format("dashboard.cli_cost.period_tokens_format", "7d: %@ tok", periodCompact))
-                Text("Cache \(cachePct)%")
+                Text(entry.displayName).font(.subheadline.weight(.bold)).lineLimit(1)
                 Spacer(minLength: 4)
+                Text(badgeText)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(badgeColor.opacity(0.15), in: Capsule())
+                    .foregroundStyle(badgeColor)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text("\(remPct)%")
+                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(tint)
+                    .contentTransition(.numericText())
+                Text(DashboardL10n.tr("dashboard.quota.remaining_short", "remaining"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+            }
+            Gauge(value: entry.usedFraction, in: 0...1) { EmptyView() }
+                .gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
+            HStack(spacing: 6) {
                 if let secUsed = entry.secondaryQuotaUsed, let secLabel = entry.secondaryQuotaLabel {
-                    Text("\(secLabel): \(Int((secUsed * 100).rounded()))%").foregroundStyle(.secondary)
-                }
-                if let resetText = entry.quotaResetText {
-                    Text(resetText).foregroundStyle(.secondary)
+                    Text("\(secLabel): \(Int((secUsed * 100).rounded()))%")
                 } else {
-                    Text(DashboardL10n.format("dashboard.cli_cost.sessions_format", "Calls: %@", entry.interactionCount.formatted(.number)))
+                    Text(DashboardL10n.format("dashboard.quota.used_short_format", "Used %lld%%", usedPct))
                 }
+                Spacer(minLength: 4)
+                Text(entry.quotaResetText ?? entry.quotaLabel ?? "")
             }
             .font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
-        .help("\(entry.displayName) (\(entry.modelTag)) — Today \(todayCompact) tok (Active \(DashboardTokenFormatter.compact(entry.activeTokens)) · Cache \(DashboardTokenFormatter.compact(entry.cacheTokens))) · 7d \(periodCompact) tok · Calls \(entry.interactionCount)")
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(isRecommended ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1.5)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tokenThroughputCell(_ entry: CLICostQuotaEntry, isTopVolume: Bool) -> some View {
+        let todayCompact = DashboardTokenFormatter.compact(entry.totalTokens)
+        let periodCompact = DashboardTokenFormatter.compact(entry.periodTotalTokens)
+        let cachePct = Int((entry.cacheHitFraction * 100).rounded())
+        let isSelected = selectedCategory == entry.displayName || selectedCategory == entry.cliFilter.rawValue
+        let tailText = entry.cacheTokens > 0
+            ? "7d \(periodCompact) · Cache \(cachePct)%"
+            : "7d \(periodCompact) · \(entry.interactionCount) calls"
+
+        return Button {
+            onSelectCategory?(entry.displayName)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
+                    Text(entry.displayName).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 2)
+                    if isSelected {
+                        Image(systemName: "line.3.horizontal.decrease.circle.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                    } else if isTopVolume {
+                        Image(systemName: "flame.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                    }
+                }
+                Text(todayCompact)
+                    .font(.system(.title2, design: .monospaced, weight: .bold))
+                    .foregroundStyle(isTopVolume || isSelected ? Color.accentColor : Color.primary).contentTransition(.numericText())
+                Text(tailText).font(.caption2).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(entry.displayName) (\(entry.modelTag)) — Today \(todayCompact) tok (Active \(DashboardTokenFormatter.compact(entry.activeTokens)) · Cache \(DashboardTokenFormatter.compact(entry.cacheTokens))) · 7d \(periodCompact) tok")
         .accessibilityElement(children: .combine)
     }
 }

@@ -15,9 +15,17 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     private var tokenRefreshTimer: Timer?
     private var preferencesObserver: NSObjectProtocol?
     private var isMenuOpen = false
+    private var backingMenu: NSMenu?
+    private var popoverPanel: NSPanel?
+    private var globalMouseMonitor: Any?
+    private var localMouseMonitor: Any?
+    private var resignKeyObserver: NSObjectProtocol?
 
     internal var statusItemForTesting: NSStatusItem? { statusItem }
     internal var statusStateForTesting: MenuBarStatusViewState { statusState }
+    internal var menuForTesting: NSMenu? { statusItem?.menu ?? backingMenu }
+    internal var popoverPanelForTesting: NSPanel? { popoverPanel }
+    internal var isPanelOpenForTesting: Bool { isMenuOpen }
 
     public convenience override init() {
         self.init(statusProvider: LiveMenuBarSystemStatusProvider())
@@ -62,7 +70,16 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(summaryMenuItem(title: Self.networkStatusTitle, tag: 1008))
 
-        item.menu = menu
+        backingMenu = menu
+        if LiveDashboardTelemetryReader.isLiveEnvironment {
+            item.menu = nil
+            item.button?.target = self
+            item.button?.action = #selector(toggleStatusItemPanel(_:))
+            item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            configurePopoverPanel()
+        } else {
+            item.menu = menu
+        }
         statusItem = item
         updateMenuPresentation()
         startPeriodicRefresh()
@@ -74,6 +91,155 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             MainActor.assumeIsolated {
                 self?.updateMenuPresentation()
             }
+        }
+        if LiveDashboardTelemetryReader.isLiveEnvironment {
+            Self.installAppReopenHandlerIfNeeded()
+        }
+    }
+
+    private static var reopenObserverInstalled = false
+    private static var appDelegateProxy: MenuBarAppReopenDelegate?
+
+    private static func installAppReopenHandlerIfNeeded() {
+        guard !reopenObserverInstalled else { return }
+        reopenObserverInstalled = true
+        let proxy = MenuBarAppReopenDelegate()
+        appDelegateProxy = proxy
+        NSApplication.shared.delegate = proxy
+    }
+
+    internal static func shouldOpenDashboardOnReopen(hasVisibleMainWindow: Bool) -> Bool {
+        !hasVisibleMainWindow
+    }
+
+    internal static func configureWindowForFullScreenMenuBar(_ window: NSWindow?) {
+        guard let window else { return }
+        window.collectionBehavior.insert([.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle])
+        if window.level.rawValue < NSWindow.Level.popUpMenu.rawValue {
+            window.level = .popUpMenu
+        }
+    }
+
+    internal static func makeFullScreenStatusPanel(contentView: NSView) -> NSPanel {
+        let fitting = contentView.fittingSize
+        let size = NSSize(width: 360, height: max(fitting.height, 1))
+        let panel = FullScreenMenuBarPanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.nonactivatingPanel, .borderless],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        configureWindowForFullScreenMenuBar(panel)
+        panel.contentView = contentView
+        return panel
+    }
+
+    private func configurePopoverPanel() {
+        let view = sizedHostedStatusView()
+        let panel = Self.makeFullScreenStatusPanel(contentView: view)
+        self.popoverPanel = panel
+        resignKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.closeStatusItemPanel()
+            }
+        }
+    }
+
+    @objc internal func toggleStatusItemPanel(_ sender: Any?) {
+        if isMenuOpen {
+            closeStatusItemPanel()
+        } else {
+            showStatusItemPanel()
+        }
+    }
+
+    internal func showStatusItemPanel() {
+        isMenuOpen = true
+        refreshStatus()
+        guard let button = statusItem?.button else { return }
+        let view = sizedHostedStatusView()
+        let panel = popoverPanel ?? Self.makeFullScreenStatusPanel(contentView: view)
+        if popoverPanel == nil {
+            popoverPanel = panel
+        }
+        panel.contentView = view
+        Self.configureWindowForFullScreenMenuBar(panel)
+        let fitting = view.fittingSize
+        let panelSize = NSSize(width: 360, height: max(fitting.height, 1))
+
+        if let buttonWindow = button.window {
+            let buttonRectInWindow = button.convert(button.bounds, to: nil)
+            let buttonScreenRect = buttonWindow.convertToScreen(buttonRectInWindow)
+            let screen = buttonWindow.screen ?? NSScreen.main
+            let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            var originX = round(buttonScreenRect.midX - panelSize.width / 2)
+            originX = max(visibleFrame.minX + 8, min(originX, visibleFrame.maxX - panelSize.width - 8))
+            let originY = buttonScreenRect.minY - panelSize.height - 6
+            panel.setFrame(NSRect(origin: NSPoint(x: originX, y: originY), size: panelSize), display: true)
+        } else {
+            panel.setContentSize(panelSize)
+        }
+
+        button.highlight(true)
+        panel.orderFrontRegardless()
+        panel.makeKey()
+        installClickOutsideMonitors()
+    }
+
+    internal func closeStatusItemPanel() {
+        guard isMenuOpen || popoverPanel?.isVisible == true else { return }
+        isMenuOpen = false
+        statusItem?.button?.highlight(false)
+        popoverPanel?.orderOut(nil)
+        removeClickOutsideMonitors()
+    }
+
+    private func installClickOutsideMonitors() {
+        removeClickOutsideMonitors()
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.closeStatusItemPanel()
+            }
+        }
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+        ) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if event.type == .keyDown, event.keyCode == 53 {
+                    self.closeStatusItemPanel()
+                    return
+                }
+                if let panel = self.popoverPanel,
+                   event.window !== panel,
+                   event.window !== self.statusItem?.button?.window {
+                    self.closeStatusItemPanel()
+                }
+            }
+            return event
+        }
+    }
+
+    private func removeClickOutsideMonitors() {
+        if let globalMouseMonitor {
+            NSEvent.removeMonitor(globalMouseMonitor)
+            self.globalMouseMonitor = nil
+        }
+        if let localMouseMonitor {
+            NSEvent.removeMonitor(localMouseMonitor)
+            self.localMouseMonitor = nil
         }
     }
 
@@ -126,6 +292,11 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     public func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
         refreshStatus()
+        Self.configureWindowForFullScreenMenuBar(panelItem?.view?.window ?? statusHostingView?.window)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            Self.configureWindowForFullScreenMenuBar(self.panelItem?.view?.window ?? self.statusHostingView?.window)
+        }
     }
 
     public func menuDidClose(_ menu: NSMenu) {
@@ -161,6 +332,11 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             NotificationCenter.default.removeObserver(preferencesObserver)
             self.preferencesObserver = nil
         }
+        if let resignKeyObserver {
+            NotificationCenter.default.removeObserver(resignKeyObserver)
+            self.resignKeyObserver = nil
+        }
+        removeClickOutsideMonitors()
     }
 
     private func startPeriodicRefresh() {
@@ -200,7 +376,13 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func updateMenuPresentation() {
         guard let item = statusItem else { return }
-        panelItem?.view = sizedHostedStatusView()
+        let view = sizedHostedStatusView()
+        if popoverPanel != nil {
+            popoverPanel?.contentView = view
+            popoverPanel?.setContentSize(view.frame.size)
+        } else {
+            panelItem?.view = view
+        }
         item.button?.toolTip = summaryText
         if case let .populated(snapshot) = statusState {
             let entries = DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage)
@@ -211,8 +393,9 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         } else {
             item.button?.title = ""
         }
+        let targetMenu = item.menu ?? backingMenu
         for (tag, title) in zip(1001...1008, summaryTitles) {
-            item.menu?.item(withTag: tag)?.title = title
+            targetMenu?.item(withTag: tag)?.title = title
         }
     }
 
@@ -259,6 +442,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func cancelMenuTracking() {
         statusItem?.menu?.cancelTracking()
+        closeStatusItemPanel()
     }
 
     static var appName: String {
@@ -387,5 +571,26 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
 
 public extension Notification.Name {
     static let openBriefingWindow = Notification.Name("openBriefingWindow")
+}
+
+@MainActor
+private final class FullScreenMenuBarPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+@MainActor
+private final class MenuBarAppReopenDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        let hasVisibleMain = sender.windows.contains {
+            $0.isVisible && $0.canBecomeMain && !$0.className.contains("StatusBar")
+        }
+        if MenuBarController.shouldOpenDashboardOnReopen(hasVisibleMainWindow: hasVisibleMain) {
+            DashboardWorkspaceStore.shared.openDashboardWindow(
+                section: DashboardWorkspaceStore.shared.selectedSection
+            )
+        }
+        return true
+    }
 }
 #endif

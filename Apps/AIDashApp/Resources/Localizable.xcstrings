@@ -4861,6 +4861,240 @@
         }
       }
     },
+    "dashboard.card.cli_cost.subtitle_split": {
+      "comment": "Subtitle for Scheme C split quota headroom and token throughput card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Top: weekly quota headroom · Bottom: all-channel token throughput"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上区监控周配额水位 · 下区对比全渠道 Token 吞吐量"
+          }
+        }
+      }
+    },
+    "dashboard.quota.section_headroom": {
+      "comment": "Section header for Quota Headroom in Scheme C.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1. QUOTA HEADROOM (CAPPED CHANNELS)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1. 渠道配额水位（仅限额渠道）"
+          }
+        }
+      }
+    },
+    "dashboard.quota.section_throughput": {
+      "comment": "Section header for Token Throughput in Scheme C.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2. TOKEN THROUGHPUT (TODAY / 7D / CACHE)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2. 全渠道 Token 吞吐量（今日 / 7日 / 缓存率）"
+          }
+        }
+      }
+    },
+    "dashboard.quota.pool_pill_format": {
+      "comment": "Header pill format showing overall quota pool remaining and recommended route.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pool Left %lld%% · Route → %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度池剩余 %lld%% · 优先调度 %@"
+          }
+        }
+      }
+    },
+    "dashboard.quota.recommended_badge": {
+      "comment": "Badge shown on the recommended CLI quota card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚡ Recommended"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚡ 优先调度"
+          }
+        }
+      }
+    },
+    "dashboard.quota.remaining_short": {
+      "comment": "Short label next to the large remaining percentage numeral.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "remaining"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剩余"
+          }
+        }
+      }
+    },
+    "dashboard.quota.used_short_format": {
+      "comment": "Short used percentage label in quota card footer.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used %lld%%"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已用 %lld%%"
+          }
+        }
+      }
+    },
+    "dashboard.ranking.col_model": {
+      "comment": "Table column header for concrete LLM model name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实际模型"
+          }
+        }
+      }
+    },
+    "dashboard.lens.trends": {
+      "comment": "Segmented lens title for Token Trends on Overview.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token Trends"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "趋势分析"
+          }
+        }
+      }
+    },
+    "dashboard.lens.rankings": {
+      "comment": "Segmented lens title for M2 / M1 Ranking on Overview.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "M2 / M1 Ranking"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "M2/M1 排行"
+          }
+        }
+      }
+    },
+    "dashboard.lens.actions": {
+      "comment": "Segmented lens title for Actionable Items on Overview.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actionable Items"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可推进事项"
+          }
+        }
+      }
+    },
+    "dashboard.lens.section_title": {
+      "comment": "Header title for the folded Overview workbench lens section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytical & Execution Workbench"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "深度分析与推进工作台"
+          }
+        }
+      }
+    },
+    "dashboard.lens.picker_label": {
+      "comment": "Accessibility label for the Overview workbench lens picker.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workbench Lens"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作台视角"
+          }
+        }
+      }
+    },
     "dashboard.chart.hover_calls_format": {
       "comment": "Hovered chart bucket invocation call count.",
       "extractionState": "manual",

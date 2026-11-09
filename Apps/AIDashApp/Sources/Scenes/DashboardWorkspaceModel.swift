@@ -592,14 +592,14 @@ extension DashboardWorkspaceStore {
         entries.enumerated().map { idx, entry in
             let roleName: String
             switch idx {
-            case 0: roleName = DashboardL10n.tr("dashboard.role.steering", "Steering / Architect")
-            case 1: roleName = DashboardL10n.tr("dashboard.role.writer_reviewer", "Code Writer & Reviewer")
-            case 2: roleName = DashboardL10n.tr("dashboard.role.cli_assistant", "Interactive CLI Assistant")
-            default: roleName = DashboardL10n.tr("dashboard.role.research_audit", "Research & Audit Worker")
+            case 0: roleName = DashboardL10n.tr("dashboard.role.steering", "M1 · Steering (TL)")
+            case 1: roleName = DashboardL10n.tr("dashboard.role.writer_reviewer", "M1 · Writer")
+            case 2: roleName = DashboardL10n.tr("dashboard.role.cli_assistant", "M2 · Dispatcher (CLI)")
+            default: roleName = DashboardL10n.tr("dashboard.role.research_audit", "M1 · Reviewer")
             }
             let pct = Int((entry.usedFraction * 100).rounded())
             return AgentRankingRow(
-                id: "rank-\(entry.id)", agentName: roleName, cliFilter: entry.cliFilter, providerName: entry.displayName,
+                id: "rank-\(entry.id)", agentName: roleName, modelName: entry.modelTag, cliFilter: entry.cliFilter, providerName: entry.displayName,
                 runs: max(Int(entry.interactionCount), 45), totalTokens: entry.totalTokens,
                 successRate: entry.health == .critical ? 0.924 : (0.978 - Double(idx) * 0.008),
                 avgDurationSeconds: 9.5 + Double(idx) * 3.2, costUSD: entry.todayCostUSD,

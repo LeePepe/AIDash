@@ -544,6 +544,16 @@ import SQLite3
 }
 
 @MainActor
+@Test func fullScreenMenuBarPanelUsesAuxiliaryNonActivatingBehavior() async throws {
+    let panel = MenuBarController.makeFullScreenStatusPanel(contentView: NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 480)))
+    #expect(panel.styleMask.contains([.nonactivatingPanel, .borderless]))
+    #expect(panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]))
+    #expect(panel.level == .popUpMenu && panel.canBecomeKey && !panel.canBecomeMain && !panel.hidesOnDeactivate)
+    #expect(MenuBarController.shouldOpenDashboardOnReopen(hasVisibleMainWindow: false))
+    #expect(!MenuBarController.shouldOpenDashboardOnReopen(hasVisibleMainWindow: true))
+}
+
+@MainActor
 private final class MenuBarStatusProviderSpy: MenuBarSystemStatusProviding {
     var computerStatusCallCount = 0
     var tokenStatusCallCount = 0
