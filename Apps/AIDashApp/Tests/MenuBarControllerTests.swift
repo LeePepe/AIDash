@@ -545,6 +545,19 @@ import SQLite3
 
 @MainActor
 @Test func fullScreenMenuBarPanelUsesAuxiliaryNonActivatingBehavior() async throws {
+    let controller = MenuBarController(statusProvider: MenuBarStatusProviderSpy())
+    defer {
+        controller.stopPeriodicRefresh()
+        if let item = controller.statusItemForTesting {
+            NSStatusBar.system.removeStatusItem(item)
+        }
+    }
+    let menu = try #require(controller.statusItemForTesting?.menu)
+    controller.menuWillOpen(menu)
+    #expect(controller.isPanelOpenForTesting)
+    controller.menuDidClose(menu)
+    #expect(!controller.isPanelOpenForTesting)
+
     let panel = MenuBarController.makeFullScreenStatusPanel(contentView: NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 480)))
     #expect(panel.styleMask.contains([.nonactivatingPanel, .borderless]))
     #expect(panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]))

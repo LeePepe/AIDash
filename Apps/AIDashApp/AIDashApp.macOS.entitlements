@@ -29,6 +29,10 @@
 		<string>/.codex/</string>
 		<string>/.kimi-code/</string>
 		<string>/.kimi/</string>
+		<string>/.grok/</string>
+		<string>/.deepseek/</string>
+		<string>/.local/bin/</string>
+		<string>/opt/homebrew/bin/</string>
 		<string>/.config/claude/</string>
 		<string>/.config/magpie/</string>
 		<string>/Library/Application Support/raven/</string>

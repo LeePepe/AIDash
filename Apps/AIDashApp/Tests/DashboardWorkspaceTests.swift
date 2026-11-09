@@ -336,7 +336,7 @@ struct DashboardWorkspaceTests {
         #expect(store.filteredTrendPoints.contains { $0.totalTokens > 0 })
         #expect(!store.actionItems.contains(where: { $0.id.hasPrefix("quota-") }))
         let pool = QuotaPoolSummary.summarize(entries: store.cliEntries)
-        #expect(pool.trackedCount >= 3)
+        #expect(pool.trackedCount >= 2)
         #expect(pool.recommendedEntry != nil)
         #expect(LiveDashboardTelemetryReader.sanitizeSQLToken("2026-11-07") == "2026-11-07")
         store.openDashboardWindow(section: .actionItems)
@@ -399,7 +399,7 @@ struct DashboardWorkspaceTests {
         #expect(MenuBarBadgeMetric.cpuAndMemory.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries) == " CPU 34% · 18/32G")
         prefs.defaultChartGranularity = .threeDayHourly
         #expect(prefs.defaultChartGranularity == .threeDayHourly)
-        #expect(store.cliEntries.filter(\.hasTrackedQuota).count == 3)
+        #expect(store.cliEntries.filter(\.hasTrackedQuota).count == 2)
         let ravenDB = tempDir.appendingPathComponent("raven.db")
         let todayStr = DashboardWorkspaceStore.todayDateString()
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -469,6 +469,127 @@ struct DashboardWorkspaceTests {
         #expect(parsedProposals.first?.priority == .p0)
         _ = MenuBarStatusView(state: .populated(sampleSnapshot())).body
         _ = ActionItemsCardView(store: store).body
+    }
+
+    @Test("6-CLI auto-detection omits uninstalled DeepSeek and computes accurate auth/quota states for Kimi, Claude, and Grok")
+    func sixCLIAutoDetectionAndAuthErrorStates() throws {
+        #expect(AgentCLIKind.allCases == [.claude, .codex, .copilot, .kimi, .grok, .deepseek])
+        #expect(DashboardCLIFilter.allCases == [.all, .claude, .codex, .copilot, .kimi, .grok, .deepseek])
+
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-6cli-home-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
+
+        let now = Date(timeIntervalSince1970: 1_794_208_800)
+        try FileManager.default.createDirectory(at: tempHome.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: tempHome.appendingPathComponent(".codex"), withIntermediateDirectories: true)
+        try Data("model = \"gpt-5\"\n".utf8).write(to: tempHome.appendingPathComponent(".codex/config.toml"))
+        try FileManager.default.createDirectory(at: tempHome.appendingPathComponent(".copilot"), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: tempHome.appendingPathComponent(".copilot/config.json"))
+        try FileManager.default.createDirectory(at: tempHome.appendingPathComponent(".kimi-code/credentials"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: tempHome.appendingPathComponent(".grok/sessions/s1"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: tempHome.appendingPathComponent(".config/magpie"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: tempHome.appendingPathComponent(".config/claude"), withIntermediateDirectories: true)
+
+        #expect(LiveDashboardTelemetryReader.isCLIInstalled(.claude, homeURL: tempHome, includeSystemBinaries: false))
+        #expect(LiveDashboardTelemetryReader.isCLIInstalled(.codex, homeURL: tempHome, includeSystemBinaries: false))
+        #expect(LiveDashboardTelemetryReader.isCLIInstalled(.copilot, homeURL: tempHome, includeSystemBinaries: false))
+        #expect(!LiveDashboardTelemetryReader.isCLIInstalled(.deepseek, homeURL: tempHome, includeSystemBinaries: false))
+
+        let staleClaudeFallback = tempHome.appendingPathComponent(".config/claude/gtt-weekly-remaining-pct.json")
+        try Data("{\"weekly_remaining_pct\":91,\"used_percentage\":9,\"measured_at\":\(now.timeIntervalSince1970 - 200_000)}".utf8)
+            .write(to: staleClaudeFallback)
+
+        let quotasURL = tempHome.appendingPathComponent(".config/magpie/quotas.json")
+        let quotasJSON = """
+        {
+          "claude/user@example.com": {
+            "at": "2026-11-05T00:00:00Z",
+            "quota": {
+              "provider": "claude",
+              "readAt": "2026-11-05T00:00:00Z",
+              "windows": [{"name": "7 days", "used": 9.0}]
+            }
+          },
+          "cursor/user@example.com": {
+            "at": "2026-11-09T07:00:00Z",
+            "quota": {
+              "provider": "cursor",
+              "readAt": "2026-11-09T07:00:00Z",
+              "windows": [{"name": "Weekly", "used": 28.0, "resetsAt": "2026-11-10T05:06:39.748Z"}]
+            }
+          },
+          "grok/user@example.com": {
+            "at": "2026-11-09T07:00:00Z",
+            "quota": {
+              "provider": "grok",
+              "readAt": "2026-11-09T07:00:00Z",
+              "windows": [{"name": "7 days", "used": 27.0, "resetsAt": "2026-11-10T05:06:39.748Z"}]
+            }
+          }
+        }
+        """
+        try Data(quotasJSON.utf8).write(to: quotasURL)
+
+        let expiredKimiCred = tempHome.appendingPathComponent(".kimi-code/credentials/kimi-code.json")
+        try Data("{\"access_token\":\"tok\",\"expires_at\":\(Int(now.timeIntervalSince1970 - 7200))}".utf8)
+            .write(to: expiredKimiCred)
+
+        let grokAuthURL = tempHome.appendingPathComponent(".grok/auth.json")
+        try Data("{\"https://auth.x.ai::client\":{\"expires_at\":\"2026-11-01T00:00:00Z\"}}".utf8)
+            .write(to: grokAuthURL)
+
+        let dataset = try #require(
+            LiveDashboardTelemetryReader.loadDataset(
+                forDate: "2026-11-09",
+                homeURL: tempHome,
+                fallbackUsage: CLITokenUsageSnapshot(items: []),
+                includeSystemBinaries: false,
+                now: now
+            )
+        )
+        #expect(!dataset.entries.contains(where: { $0.cliFilter == .deepseek }))
+
+        let claudeEntry = try #require(dataset.entries.first(where: { $0.cliFilter == .claude }))
+        #expect(claudeEntry.authState == .notLoggedIn(loginCommand: "claude login"))
+        #expect(claudeEntry.health == .warning)
+        #expect(claudeEntry.authState.badgeTitle != nil)
+
+        let kimiEntry = try #require(dataset.entries.first(where: { $0.cliFilter == .kimi }))
+        #expect(kimiEntry.authState.isAuthError)
+        #expect(kimiEntry.quotaLabel == nil)
+        #expect(!kimiEntry.hasTrackedQuota)
+
+        let grokEntry = try #require(dataset.entries.first(where: { $0.cliFilter == .grok }))
+        #expect(grokEntry.authState.isAuthError)
+
+        let pool = QuotaPoolSummary.summarize(entries: dataset.entries)
+        #expect(pool.trackedCount == 1)
+        #expect(pool.recommendedEntry?.cliFilter == .codex)
+
+        try Data("{\"grok\":{\"expires\":\(Int((now.timeIntervalSince1970 + 3600) * 1000))}}".utf8)
+            .write(to: tempHome.appendingPathComponent(".config/magpie/plugin-auth.json"))
+        try Data("{\"access_token\":\"tok\",\"expires_at\":\(Int(now.timeIntervalSince1970 + 7200))}".utf8)
+            .write(to: expiredKimiCred)
+        let refreshedDataset = try #require(
+            LiveDashboardTelemetryReader.loadDataset(
+                forDate: "2026-11-09",
+                homeURL: tempHome,
+                fallbackUsage: CLITokenUsageSnapshot(items: []),
+                includeSystemBinaries: false,
+                now: now
+            )
+        )
+        let refreshedGrok = try #require(refreshedDataset.entries.first(where: { $0.cliFilter == .grok }))
+        #expect(refreshedGrok.authState == .authenticated)
+        #expect(abs((refreshedGrok.quotaUsedOverride ?? -1) - 0.27) < 0.0001)
+        let refreshedKimi = try #require(refreshedDataset.entries.first(where: { $0.cliFilter == .kimi }))
+        #expect(refreshedKimi.authState == .authenticated)
+        #expect(refreshedKimi.quotaLabel == nil)
+        #expect(refreshedKimi.health == .healthy)
+
+        _ = CLICostQuotaCardView(entries: dataset.entries, todayTotalUSD: 0, periodTotalUSD: 0).body
     }
 }
 #endif

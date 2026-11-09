@@ -305,6 +305,16 @@ public final class DashboardWorkspaceStore {
         return categoryName == selectedChartCategory || cli.rawValue == selectedChartCategory || cli.shortLabel == selectedChartCategory
     }
 
+    public var availableCLIFilters: [DashboardCLIFilter] {
+        var filters: [DashboardCLIFilter] = [.all]
+        for cli in DashboardCLIFilter.allCases where cli != .all {
+            if cliEntries.contains(where: { $0.cliFilter == cli }) {
+                filters.append(cli)
+            }
+        }
+        return filters.count > 1 ? filters : DashboardCLIFilter.allCases
+    }
+
     public var filteredCLIEntries: [CLICostQuotaEntry] {
         cliEntries.filter { entry in
             matchesActiveCLIFilter(entry.cliFilter)
@@ -526,7 +536,8 @@ extension DashboardWorkspaceStore {
                 cacheTokens: 0,
                 interactionCount: 0,
                 isAvailable: true,
-                quotaLabel: weeklyQuotaLabel
+                quotaUsedOverride: nil,
+                quotaLabel: nil
             )
         ]
     }

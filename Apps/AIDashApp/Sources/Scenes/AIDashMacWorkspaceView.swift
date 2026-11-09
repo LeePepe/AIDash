@@ -367,13 +367,13 @@ public struct AIDashMacWorkspaceView: View {
                 }
                 Spacer(minLength: 8)
                 Picker(DashboardL10n.tr("dashboard.toolbar.cli_scope", "CLI Scope"), selection: $store.selectedCLI) {
-                    ForEach(DashboardCLIFilter.allCases) { cli in
+                    ForEach(store.availableCLIFilters) { cli in
                         Text(cli.shortLabel).tag(cli)
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(maxWidth: 320)
+                .frame(maxWidth: 420)
                 Spacer(minLength: 8)
                 if case let .populated(snapshot) = store.systemState {
                     hardwareCompanionPill(snapshot: snapshot)
