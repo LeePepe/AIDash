@@ -653,5 +653,41 @@ struct DashboardWorkspaceTests {
         #expect(store.liveEfficiencySummary == nil)
         #expect(store.effectiveKPIMetrics.count == 4)
     }
+
+    @Test("pluggable TodoSyncProviderMode preferences persist to todo-sync.json and support standalone local mode")
+    func todoSyncProviderModePreferencesAndConfigBridge() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-todo-sync-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let configURL = tempDir.appendingPathComponent("todo-sync.json")
+
+        let prefs = MenuBarDisplayPreferences(persistToDefaults: false, todoSyncConfigFileURL: configURL)
+        #expect(prefs.todoSyncProviderMode == .auto)
+        #expect(prefs.todoSyncTeamKey == "TIA")
+        #expect(TodoSyncProviderMode.allCases == [.auto, .localOnly, .linear])
+
+        for mode in TodoSyncProviderMode.allCases {
+            #expect(!mode.title.isEmpty)
+            #expect(!mode.subtitle.isEmpty)
+            #expect(!mode.symbolName.isEmpty)
+        }
+
+        prefs.todoSyncProviderMode = .localOnly
+        let localData = try Data(contentsOf: configURL)
+        let localJSON = try #require(JSONSerialization.jsonObject(with: localData) as? [String: String])
+        #expect(localJSON["provider"] == "local")
+        #expect(localJSON["teamKey"] == "TIA")
+
+        prefs.todoSyncProviderMode = .linear
+        prefs.todoSyncTeamKey = "  eng "
+        #expect(prefs.todoSyncTeamKey == "ENG")
+        let linearData = try Data(contentsOf: configURL)
+        let linearJSON = try #require(JSONSerialization.jsonObject(with: linearData) as? [String: String])
+        #expect(linearJSON["provider"] == "linear")
+        #expect(linearJSON["teamKey"] == "ENG")
+
+        let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
+        _ = DashboardSettingsPageView(store: store, prefs: prefs).body
+    }
 }
 #endif

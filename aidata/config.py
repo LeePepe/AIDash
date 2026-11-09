@@ -139,6 +139,14 @@ LINEAR_SYNC_SCRIPT = (
 LINEAR_TEAM_KEY = "TIA"
 LINEAR_UPDATED_WINDOW_DAYS = 14
 
+# Pluggable Todo/Issue Sync Provider settings (TodoSyncProvider v1):
+#   "auto"   — use Linear when linear-sync.py is available, else local-only
+#   "local"  — standalone local-only mode (persists to LOCAL_TODOS_PATH)
+#   "linear" — Linear SSOT mode via LINEAR_SYNC_SCRIPT
+TODO_SYNC_CONFIG_PATH = HOME / ".config" / "aidash" / "todo-sync.json"
+TODO_SYNC_PROVIDER = "auto"
+LOCAL_TODOS_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "local_todos.jsonl"
+
 # Models that have NO published price, and so are deliberately measured in
 # TOKENS ONLY — `cost_usd` stays NULL for their rows, on purpose.
 #

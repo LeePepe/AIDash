@@ -40,6 +40,9 @@ def test_linear_issue_registered_in_sources_and_merge():
     assert config.LINEAR_SYNC_SCRIPT.name == "linear-sync.py"
     assert isinstance(config.LINEAR_UPDATED_WINDOW_DAYS, int)
     assert config.LINEAR_UPDATED_WINDOW_DAYS >= 7
+    assert config.TODO_SYNC_PROVIDER == "auto"
+    assert config.TODO_SYNC_CONFIG_PATH.name == "todo-sync.json"
+    assert config.LOCAL_TODOS_PATH.name == "local_todos.jsonl"
 
 
 @pytest.mark.unit

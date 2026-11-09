@@ -12,6 +12,7 @@ shape per TodoSyncProvider v1 (`spec.md` §2.2).
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -24,6 +25,8 @@ from config import (
     LINEAR_SYNC_SCRIPT,
     LINEAR_TEAM_KEY,
     LINEAR_UPDATED_WINDOW_DAYS,
+    TODO_SYNC_CONFIG_PATH,
+    TODO_SYNC_PROVIDER,
 )
 from rawio import read_raw, write_raw
 from state import get_watermark, set_watermark
@@ -32,6 +35,31 @@ SOURCE = "linear_issue"
 _LIMIT = 250
 _BLOCKED_LABELS = {"blocked", "needs decision", "need_go"}
 _NUMBER_RE = re.compile(r"-(\d+)$")
+_LOCAL_DISABLED_MODES = {"local", "none", "off", "disabled", "local_only", "local-only"}
+
+
+def _is_linear_sync_enabled(config_path: Path | None = None) -> tuple[bool, str]:
+    """Return `(enabled, team_key)` based on env, todo-sync.json, and config defaults."""
+    env_mode = os.environ.get("AIDASH_TODO_SYNC_PROVIDER", "").strip().lower()
+    env_team = os.environ.get("AIDASH_TODO_SYNC_TEAM_KEY", "").strip().upper()
+
+    file_mode = ""
+    file_team = ""
+    path = Path(config_path or TODO_SYNC_CONFIG_PATH)
+    if path.is_file():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                file_mode = str(payload.get("provider") or "").strip().lower()
+                file_team = str(payload.get("teamKey") or "").strip().upper()
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    mode = env_mode or file_mode or str(TODO_SYNC_PROVIDER or "auto").strip().lower()
+    team_key = env_team or file_team or str(LINEAR_TEAM_KEY or "").strip().upper()
+    if mode in _LOCAL_DISABLED_MODES or not team_key:
+        return False, team_key
+    return True, team_key
 
 
 def _linear_sync_script() -> Path | None:
@@ -99,15 +127,16 @@ def _fresh_for_team(
 
 def collect(now: datetime | None = None) -> int:
     """Window-read Linear team issues; append fresh edits; advance watermark."""
-    if not LINEAR_TEAM_KEY or _linear_sync_script() is None:
+    enabled, team_key = _is_linear_sync_enabled()
+    if not enabled or _linear_sync_script() is None:
         return 0
     now = now or datetime.now(timezone.utc)  # noqa: UP017
     cutoff = (now - timedelta(days=LINEAR_UPDATED_WINDOW_DAYS)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    key = f"{SOURCE}:{LINEAR_TEAM_KEY}"
+    key = f"{SOURCE}:{team_key}"
     watermark = get_watermark(key)
-    issues = _list_team_issues(LINEAR_TEAM_KEY)
+    issues = _list_team_issues(team_key)
     fresh = _fresh_for_team(issues, watermark, cutoff)
     if not fresh:
         return 0

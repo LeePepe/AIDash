@@ -89,6 +89,17 @@ def test_collect_degrades_to_zero_when_script_absent(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
+def test_collect_skips_when_provider_mode_is_local(canned_linear, monkeypatch, tmp_path):
+    _, written = canned_linear
+    cfg_path = tmp_path / "todo-sync.json"
+    cfg_path.write_text(json.dumps({"provider": "local", "teamKey": "TIA"}), encoding="utf-8")
+    monkeypatch.setattr(li, "TODO_SYNC_CONFIG_PATH", cfg_path)
+    monkeypatch.delenv("AIDASH_TODO_SYNC_PROVIDER", raising=False)
+    assert li.collect(now=NOW) == 0
+    assert written == []
+
+
+@pytest.mark.unit
 def test_collect_degrades_to_zero_when_subprocess_fails(monkeypatch, tmp_path):
     script = tmp_path / "linear-sync.py"
     script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")

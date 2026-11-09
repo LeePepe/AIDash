@@ -1,9 +1,8 @@
-"""Bridge AIDash user events back into proposal, Linear, alert, and Falcon state."""
+"""Bridge AIDash user events back into proposal, pluggable TodoSyncProvider, alert, and Falcon state."""
 
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 import subprocess
 from collections.abc import Callable
@@ -11,16 +10,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config import LINEAR_SYNC_SCRIPT, PROPOSALS_PATH
+from config import LINEAR_SYNC_SCRIPT, LOCAL_TODOS_PATH, PROPOSALS_PATH
 
 from L5_apps.digest.proposals import read_pending
-
-_LINEAR_REF_RE = re.compile(r"^(?:linear://)?(TIA-\d+)$", re.IGNORECASE)
-
-
-def _extract_linear_id(ref: str) -> str | None:
-    match = _LINEAR_REF_RE.match((ref or "").strip())
-    return match.group(1).upper() if match else None
+from L5_apps.digest.todo_sync_provider import (
+    LinearTodoSyncProvider,
+    LocalTodoSyncProvider,
+    TodoSyncProvider,
+    _coerce_idea_result,
+    resolve_todo_sync_provider,
+)
 
 
 def _append_jsonl(path: Path, record: dict) -> None:
@@ -77,26 +76,33 @@ def _default_linear_status_runner(issue_id: str, state: str) -> int:
     return result.returncode
 
 
-def _coerce_idea_result(raw: Any) -> tuple[int, str | None]:
-    if isinstance(raw, tuple) and len(raw) == 2:
-        rc, ident = raw
-        return int(rc), (str(ident).strip() if ident else None)
-    if isinstance(raw, dict):
-        issue = raw.get("issue") if isinstance(raw.get("issue"), dict) else {}
-        ident = issue.get("identifier") or raw.get("identifier")
-        rc = 0 if raw.get("ok", True) else 1
-        return rc, (str(ident).strip() if ident else None)
-    return int(raw), None
+def _canonicalize_event_ref(
+    raw_ref: str,
+    active_provider: TodoSyncProvider,
+    local_provider: LocalTodoSyncProvider,
+) -> str:
+    parsed_active = active_provider.parse_ref(raw_ref)
+    if parsed_active is not None:
+        return active_provider.format_ref(parsed_active)
+    parsed_local = local_provider.parse_ref(raw_ref)
+    if parsed_local is not None:
+        return local_provider.format_ref(parsed_local)
+    return raw_ref
 
 
-def _latest_events(events: list[dict]) -> dict[str, dict]:
+def _latest_events(
+    events: list[dict],
+    active_provider: TodoSyncProvider | None = None,
+    local_provider: LocalTodoSyncProvider | None = None,
+) -> dict[str, dict]:
+    provider = active_provider or LinearTodoSyncProvider(script_path=Path(LINEAR_SYNC_SCRIPT))
+    local_prov = local_provider or LocalTodoSyncProvider(local_todos_path=LOCAL_TODOS_PATH)
     latest: dict[str, dict] = {}
     for event in events:
         raw_ref = str(event.get("item_ref") or event.get("itemRef") or "").strip()
         action = str(event.get("action") or "").strip().lower()
         if raw_ref and action in {"done", "undone"}:
-            linear_id = _extract_linear_id(raw_ref)
-            ref = f"linear://{linear_id}" if linear_id else raw_ref
+            ref = _canonicalize_event_ref(raw_ref, provider, local_prov)
             stamp = str(event.get("timestamp") or event.get("ts") or "")
             current = latest.get(ref)
             if current is None or stamp >= str(current.get("_stamp", "")):
@@ -156,26 +162,52 @@ def process_user_events(
     proposals_path: Path | None = None,
     falcon_db_path: Path | None = None,
     attention_status_path: Path | None = None,
+    local_todos_path: Path | None = None,
+    provider: TodoSyncProvider | str | None = None,
     linear_runner: Callable[[str, str], Any] | None = None,
     linear_status_runner: Callable[[str, str], int] | None = None,
 ) -> dict:
     """Apply latest-wins event reductions and return explicit bridge counts."""
     proposal_path = proposals_path or PROPOSALS_PATH
-    runner = linear_runner or _default_linear_runner
-    status_runner = linear_status_runner or _default_linear_status_runner
+    local_path = local_todos_path or LOCAL_TODOS_PATH
+    local_provider = LocalTodoSyncProvider(local_todos_path=local_path)
+    if (
+        provider is None
+        and (linear_runner is not None or linear_status_runner is not None)
+    ):
+        active_provider: TodoSyncProvider = LinearTodoSyncProvider(
+            script_path=Path(LINEAR_SYNC_SCRIPT),
+            idea_runner=linear_runner or _default_linear_runner,
+            status_runner=linear_status_runner or _default_linear_status_runner,
+        )
+    else:
+        active_provider = resolve_todo_sync_provider(
+            provider,
+            local_todos_path=local_path,
+            linear_script_path=Path(LINEAR_SYNC_SCRIPT),
+        )
+
     result = {
         "resolved": 0, "undone": 0, "promoted": 0, "falcon_starred": 0,
         "ignored": 0, "errors": 0,
     }
     pending = {proposal.id: proposal for proposal in read_pending(proposal_path)}
 
-    for ref, event in _latest_events(events).items():
+    for ref, event in _latest_events(events, active_provider, local_provider).items():
         action = str(event.get("action") or "").lower()
-        linear_id = _extract_linear_id(ref)
-        if linear_id is not None:
-            target_state = "Done" if action == "done" else "Todo"
+        provider_id = active_provider.parse_ref(ref)
+        target_provider: TodoSyncProvider | None = None
+        if provider_id is not None:
+            target_provider = active_provider
+        else:
+            local_id = local_provider.parse_ref(ref)
+            if local_id is not None:
+                provider_id = local_id
+                target_provider = local_provider
+
+        if provider_id is not None and target_provider is not None:
             try:
-                rc = status_runner(linear_id, target_state)
+                rc = target_provider.sync_status(provider_id, action)
             except (OSError, subprocess.SubprocessError):
                 rc = 1
             if rc == 0:
@@ -224,7 +256,7 @@ def process_user_events(
                 continue
             try:
                 rc, external_id = _coerce_idea_result(
-                    runner(proposal.title, proposal.detail)
+                    active_provider.promote_proposal(proposal.title, proposal.detail)
                 )
             except (OSError, subprocess.SubprocessError):
                 rc, external_id = 1, None
