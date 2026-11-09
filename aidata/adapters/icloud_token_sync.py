@@ -2,7 +2,10 @@
 
 The iCloud Drive directory is a local filesystem boundary only.  Each device
 publishes one atomic JSONL snapshot; normalization deduplicates records by the
-stable record UID before L3 consumes the clean database.
+stable record UID before L3 consumes the clean database. Copilot has no clean
+adapter, and kimi_prompts stores text provenance, not usage: read their native
+assistant_usage_events and wire usage.record events read-only instead. Kimi's
+token_counting.turn_recorded is a context estimate, not billable token usage.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from cleanio import write_clean
-from config import ICLOUD_TOKEN_SYNC_DIR, clean_path, raw_source_dir
+from config import HOME, ICLOUD_TOKEN_SYNC_DIR, KIMI_SESSIONS_DIR, clean_path
 from rawio import read_raw, write_raw_snapshot
 
 SOURCE = "icloud_token_sync"
@@ -95,20 +98,77 @@ def _cst_parts(value: Any, epoch_seconds: bool = False) -> tuple[str, str] | Non
         return None
 
 
+def _kimi_rows(device_id: str, alias: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for path in KIMI_SESSIONS_DIR.glob("**/wire.jsonl"):
+        try:
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict) or record.get("type") != "usage.record":
+                        continue
+                    if record.get("usageScope") not in (None, "turn"):
+                        continue
+                    usage = record.get("usage")
+                    parts = _cst_parts(record.get("time"))
+                    if not parts or not isinstance(usage, dict) or not usage:
+                        continue
+                    item = {
+                        "input_tokens": usage.get("inputOther"),
+                        "output_tokens": usage.get("output"),
+                        "cache_read": usage.get("inputCacheRead"),
+                        "cache_write": usage.get("inputCacheCreation"),
+                    }
+                    try:
+                        rows.append(_usage(device_id, alias, parts, "kimi", record.get("model"), item))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+        except OSError:
+            continue
+    return rows
+
+
 def _clean_rows(source: str, device_id: str, alias: str) -> list[dict[str, Any]]:
-    db = clean_path(source)
+    if source == "kimi_prompts":
+        return _kimi_rows(device_id, alias)
+    db = HOME / ".copilot" / "session-store.db" if source == "copilot" else clean_path(source)
     if not db.exists():
         return []
     rows: list[dict[str, Any]] = []
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
-            table = {row[1] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            table_name = "req" if source == "raven" and "req" in table else "turn" if source == "claude_jsonl" and "turn" in table else "session" if source == "state_db" and "session" in table else None
-            if table_name is None:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            table_name = {
+                "raven": "req", "claude_jsonl": "turn", "state_db": "session",
+                "copilot": "assistant_usage_events",
+            }.get(source)
+            if table_name not in tables:
                 return []
             columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})")}
-            if source == "raven":
+            if source == "copilot":
+                selected = [name for name in (
+                    "created_at", "model", "copilot_usage_model", "input_tokens", "output_tokens",
+                    "cache_read_tokens", "cache_write_tokens",
+                ) if name in columns]
+                if "created_at" not in columns:
+                    return []
+                for row in conn.execute(f"SELECT {', '.join(selected)} FROM assistant_usage_events"):
+                    item = dict(zip(selected, row))
+                    parts = _cst_parts(item.get("created_at"))
+                    if not parts:
+                        continue
+                    item["cache_read"] = item.get("cache_read_tokens")
+                    item["cache_write"] = item.get("cache_write_tokens")
+                    model = item.get("copilot_usage_model") or item.get("model")
+                    try:
+                        rows.append(_usage(device_id, alias, parts, "copilot", model, item))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+            elif source == "raven":
                 selected = [name for name in ("ts", "client", "model_canon", "model", "input_tokens", "output_tokens", "cache_read", "cache_write", "total_tokens") if name in columns]
                 for row in conn.execute(f"SELECT {', '.join(selected)} FROM req"):
                     item = dict(zip(selected, row))
