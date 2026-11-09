@@ -649,6 +649,7 @@ extension LiveDashboardTelemetryReader {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
         defer { sqlite3_finalize(stmt) }
+        let preRavenRows = rows
         while sqlite3_step(stmt) == SQLITE_ROW {
             let role = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "M1 · Worker"
             let kind = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "copilot"
@@ -661,7 +662,9 @@ extension LiveDashboardTelemetryReader {
             let okRate = min(max(sqlite3_column_double(stmt, 8), 0), 1)
             let cliFilter: DashboardCLIFilter = kind == "codex" ? .codex : (kind == "claude" ? .claude : .copilot)
             let totalTok = inTok + outTok + cacheTok
-            guard runs > 0, !rows.contains(where: { $0.cliFilter == cliFilter && $0.modelName == model }) else { continue }
+            guard runs > 0,
+                  !preRavenRows.contains(where: { $0.cliFilter == cliFilter && $0.modelName == model }),
+                  !rows.contains(where: { $0.agentName == role && $0.cliFilter == cliFilter && $0.modelName == model }) else { continue }
             let providerName = cliFilter.rawValue
             let cost = computeCostUSD(input: inTok, output: outTok, cache: cacheTok, inRate: 1.25, outRate: 10.0, cacheRate: 0.125)
             rows.append(

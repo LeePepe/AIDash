@@ -410,6 +410,7 @@ struct DashboardWorkspaceTests {
             CREATE TABLE requests (timestamp INTEGER, client_name TEXT, model TEXT, resolved_model TEXT, input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER, latency_ms REAL, status_code INTEGER);
             INSERT INTO requests VALUES (\(nowMs), 'codex_cli_rs/0.167.0', 'gpt-5.6-luna', 'gpt-5.6-luna', 1000, 500, 2000, 0, 4200, 200);
             INSERT INTO requests VALUES (\(nowMs), 'codex_cli_rs/0.167.0', 'gpt-5.6-luna', '', 0, 0, 0, 0, 1200, 500);
+            INSERT INTO requests VALUES (\(nowMs), 'codex_exec/0.167.0', 'gpt-5.6-luna', 'gpt-5.6-luna', 2000, 800, 1000, 0, 3100, 200);
             """
             #expect(sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK)
             sqlite3_close(db)
@@ -425,6 +426,10 @@ struct DashboardWorkspaceTests {
         #expect(rustCodexRow.runs == 2)
         #expect(rustCodexRow.totalTokens == 3500)
         #expect(abs(rustCodexRow.successRate - 0.5) < 0.001)
+        let execCodexRow = try #require(ranked.first(where: { $0.agentName.contains("M1 · Writer (codex_exec)") }))
+        #expect(execCodexRow.modelName == "gpt-5.6-luna")
+        #expect(execCodexRow.runs == 1)
+        #expect(execCodexRow.totalTokens == 3800)
 
         let cindyDB = tempDir.appendingPathComponent("cindy-test.db")
         var cdb: OpaquePointer?
