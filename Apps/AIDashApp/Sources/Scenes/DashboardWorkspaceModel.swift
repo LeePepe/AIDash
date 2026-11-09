@@ -37,6 +37,7 @@ public final class DashboardWorkspaceStore {
     public private(set) var cliEntries: [CLICostQuotaEntry] = []
     public private(set) var actionItems: [DashboardActionItem] = []
     public private(set) var rankingRows: [AgentRankingRow] = []
+    public private(set) var liveEfficiencySummary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
     public private(set) var modularDescriptors: [ModularDashboardDescriptor] = DashboardWorkspaceStore.defaultDescriptors
 
     private let statusProvider: any MenuBarSystemStatusProviding
@@ -223,6 +224,9 @@ public final class DashboardWorkspaceStore {
         }
         actionItems = nextActions
         rankingRows = customRankings ?? liveDataset?.rankings ?? Self.deriveRankingRows(from: derivedCLIs)
+        liveEfficiencySummary = (customCLIs == nil && customRankings == nil)
+            ? LiveDashboardTelemetryReader.loadLiveEfficiencySummary()
+            : nil
         if selectedRankingRowID == nil {
             selectedRankingRowID = rankingRows.first?.id
         }
@@ -379,7 +383,7 @@ public final class DashboardWorkspaceStore {
         let avgDuration = rows.isEmpty ? 12.4 : rows.reduce(0.0) { $0 + $1.avgDurationSeconds } / Double(rows.count)
         let pendingCount = filteredActionItems.filter { !$0.isCompleted }.count
         let pendingHealth: DashboardSemanticHealth = p0PendingCount > 0 ? .critical : (pendingCount > 0 ? .warning : .healthy)
-        let liveEff = LiveDashboardTelemetryReader.loadLiveEfficiencySummary()
+        let liveEff = liveEfficiencySummary
 
         let effDelta: String
         let effHealth: DashboardSemanticHealth

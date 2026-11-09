@@ -591,5 +591,67 @@ struct DashboardWorkspaceTests {
 
         _ = CLICostQuotaCardView(entries: dataset.entries, todayTotalUSD: 0, periodTotalUSD: 0).body
     }
+
+    @Test("one-click terminal login command validation, sidebar footer sections, and tail-read telemetry caching work as specified")
+    func terminalLoginSidebarFooterAndTelemetryTailCache() throws {
+        #expect(DashboardWorkspaceSection.primaryNavigationSections == [
+            .overview,
+            .agentEfficiency,
+            .actionItems,
+            .systemAndCosts
+        ])
+        #expect(!DashboardWorkspaceSection.primaryNavigationSections.contains(.settings))
+        #expect(DashboardWorkspaceSection.allCases.contains(.settings))
+
+        #expect(CLIAuthState.authenticated.loginCommand == nil)
+        #expect(CLIAuthState.quotaExhausted(reason: "429").loginCommand == nil)
+        #expect(CLIAuthState.notLoggedIn(loginCommand: "claude login").loginCommand == "claude login")
+        #expect(CLIAuthState.authExpired(reason: "expired", loginCommand: "kimi login").loginCommand == "kimi login")
+
+        #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("  claude   login ") == "claude login")
+        #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("KIMI LOGIN") == "kimi login")
+        #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("grok login") == "grok login")
+        #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("codex login") == "codex login")
+        #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("copilot login") == "copilot login")
+        #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("deepseek login") == "deepseek login")
+        #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("claude login; rm -rf /") == nil)
+        #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("curl http://evil") == nil)
+
+        #expect(CLITerminalLoginLauncher.launchLoginInTerminal(command: "claude login") == true)
+        #expect(CLITerminalLoginLauncher.launchLoginInTerminal(command: "invalid && bad") == false)
+        let scriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-cli-login.command")
+        let scriptText = try String(contentsOf: scriptURL, encoding: .utf8)
+        #expect(scriptText.contains("claude login"))
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-tail-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        let usageDir = tempDir.appendingPathComponent(".config/magpie", isDirectory: true)
+        try FileManager.default.createDirectory(at: usageDir, withIntermediateDirectories: true)
+        let usageURL = usageDir.appendingPathComponent("usage.jsonl")
+        var lines: [String] = []
+        for idx in 0..<200 {
+            lines.append("{\"t\":\"2026-11-09T10:00:00Z\",\"req\":\"group/steering\",\"served\":\"gpt-6.1-sol\",\"agent\":\"copilot\",\"in\":1000,\"out\":200,\"cache_read\":4000,\"status\":200,\"ms\":1200,\"ttft_ms\":\(300 + idx)}")
+        }
+        try (lines.joined(separator: "\n") + "\n").write(to: usageURL, atomically: true, encoding: .utf8)
+
+        let tail = LiveDashboardTelemetryReader.readTailLines(of: usageURL, maxBytes: 1024)
+        #expect(!tail.isEmpty)
+        #expect(tail.utf8.count <= 1024)
+        #expect(!tail.hasPrefix(",\"req\":"))
+
+        let eff1 = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: tempDir))
+        let eff2 = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: tempDir))
+        #expect(eff1 == eff2)
+        #expect(eff1.cacheHitRate > 0.7)
+        #expect(eff1.steeringTokenShare > 0.9)
+        #expect(eff1.p90TTFTSeconds > 0.4)
+
+        let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
+        #expect(store.liveEfficiencySummary == nil)
+        #expect(store.effectiveKPIMetrics.count == 4)
+    }
 }
 #endif

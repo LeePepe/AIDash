@@ -536,11 +536,28 @@ public struct CLICostQuotaCardView: View {
                     Spacer(minLength: 4)
                 }
                 Divider().padding(.vertical, 3)
-                Text(entry.authState.statusReasonText ?? "")
-                    .font(.caption2.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(tint)
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(entry.authState.statusReasonText ?? "")
+                        .font(.caption2.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(tint)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let cmd = entry.authState.loginCommand {
+                        Button {
+                            CLITerminalLoginLauncher.launchLoginInTerminal(command: cmd)
+                        } label: {
+                            Label(
+                                DashboardL10n.tr("dashboard.auth.login_terminal_button", "Login in Terminal"),
+                                systemImage: "terminal.fill"
+                            )
+                            .font(.caption2.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(tint)
+                        .controlSize(.small)
+                    }
+                }
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text("\(remPct)%")
@@ -592,7 +609,11 @@ public struct CLICostQuotaCardView: View {
         }()
 
         return Button {
-            onSelectCategory?(entry.displayName)
+            if let cmd = entry.authState.loginCommand {
+                CLITerminalLoginLauncher.launchLoginInTerminal(command: cmd)
+            } else {
+                onSelectCategory?(entry.displayName)
+            }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
@@ -600,7 +621,7 @@ public struct CLICostQuotaCardView: View {
                     Spacer(minLength: 2)
                     if let badge = entry.authState.badgeTitle {
                         HStack(spacing: 3) {
-                            Image(systemName: entry.health.symbolName)
+                            Image(systemName: entry.authState.loginCommand != nil ? "terminal.fill" : entry.health.symbolName)
                             Text(badge)
                         }
                         .font(.caption2.weight(.semibold))
@@ -615,10 +636,18 @@ public struct CLICostQuotaCardView: View {
                 Text(todayCompact)
                     .font(.system(.title2, design: .monospaced, weight: .bold))
                     .foregroundStyle(isTopVolume || isSelected ? Color.accentColor : Color.primary).contentTransition(.numericText())
-                Text(tailText)
-                    .font(.caption2).monospacedDigit()
-                    .foregroundStyle(entry.authState.isAuthenticated ? Color.secondary : tint)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(tailText)
+                        .font(.caption2).monospacedDigit()
+                        .foregroundStyle(entry.authState.isAuthenticated ? Color.secondary : tint)
+                        .lineLimit(1)
+                    if entry.authState.loginCommand != nil {
+                        Spacer(minLength: 2)
+                        Image(systemName: "terminal.fill")
+                            .font(.caption2)
+                            .foregroundStyle(tint)
+                    }
+                }
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))

@@ -1,12 +1,18 @@
 #if os(macOS)
 // swiftlint:disable file_length
+import AppKit
 import Foundation
 import AIDashCore
 
 public enum DashboardL10n {
     public static func tr(_ key: String, _ defaultValue: String) -> String {
         let resolved = Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
-        if resolved.isEmpty || resolved == key || resolved.hasPrefix("dashboard.") || resolved.hasPrefix("menubar.") {
+        if resolved.isEmpty
+            || resolved == key
+            || resolved.hasPrefix("dashboard.")
+            || resolved.hasPrefix("menubar.")
+            || resolved.hasPrefix("settings.")
+            || resolved.hasPrefix("telemetry.") {
             return defaultValue
         }
         return resolved
@@ -37,6 +43,10 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
     case actionItems
     case systemAndCosts
     case settings
+
+    public static var primaryNavigationSections: [DashboardWorkspaceSection] {
+        [.overview, .agentEfficiency, .actionItems, .systemAndCosts]
+    }
 
     public var id: String { rawValue }
 
@@ -147,6 +157,68 @@ public enum CLIAuthState: Codable, Sendable, Equatable {
         case let .quotaExhausted(reason):
             return reason
         }
+    }
+
+    public var loginCommand: String? {
+        switch self {
+        case let .authExpired(_, loginCommand), let .notLoggedIn(loginCommand):
+            return loginCommand
+        case .authenticated, .quotaExhausted:
+            return nil
+        }
+    }
+}
+
+@MainActor
+public enum CLITerminalLoginLauncher {
+    private static let allowedCommands: Set<String> = [
+        "claude login",
+        "kimi login",
+        "grok login",
+        "codex login",
+        "copilot login",
+        "deepseek login"
+    ]
+
+    public static func sanitizedLoginCommand(_ raw: String) -> String? {
+        let normalized = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+            .lowercased()
+        return allowedCommands.contains(normalized) ? normalized : nil
+    }
+
+    @discardableResult
+    public static func launchLoginInTerminal(command: String) -> Bool {
+        guard let sanitized = sanitizedLoginCommand(command) else { return false }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sanitized, forType: .string)
+
+        let scriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-cli-login.command")
+        let scriptContents = """
+        #!/bin/zsh
+        clear
+        printf '\\033[1;36m=== AIDash CLI Re-Authentication ===\\033[0m\\n'
+        printf 'Running: %s\\n\\n' "\(sanitized)"
+        \(sanitized)
+        exec /bin/zsh -l
+        """
+        do {
+            try scriptContents.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        } catch {
+            return false
+        }
+
+        if LiveDashboardTelemetryReader.isLiveEnvironment {
+            let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.open([scriptURL], withApplicationAt: terminalURL, configuration: config)
+        }
+        return true
     }
 }
 
