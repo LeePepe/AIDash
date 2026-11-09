@@ -284,21 +284,29 @@ public final class DashboardWorkspaceStore {
         _ item: DashboardActionItem,
         socketPath: String? = nil
     ) -> Bool {
-        let ok: Bool
         if let socketPath {
-            ok = HerdrSocketClient.dispatchActionItemToHerdr(item, socketPath: socketPath)
-        } else if LiveDashboardTelemetryReader.isLiveEnvironment {
-            ok = HerdrSocketClient.dispatchActionItemToHerdr(item)
-        } else {
-            let cmd = HerdrSocketClient.buildM2Command(for: item)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(cmd, forType: .string)
-            ok = true
+            let ok = HerdrSocketClient.dispatchActionItemToHerdr(item, socketPath: socketPath)
+            if ok { lastDispatchedActionID = item.id }
+            return ok
         }
-        if ok {
-            lastDispatchedActionID = item.id
+        let cmd = HerdrSocketClient.buildM2Command(for: item)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(cmd, forType: .string)
+        lastDispatchedActionID = item.id
+        if LiveDashboardTelemetryReader.isLiveEnvironment {
+            let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+            let projectDir = HerdrSocketClient.resolveProjectDirectory(for: item, homeURL: homeURL)
+            let label = "m2-\(projectDir.lastPathComponent)"
+            Task.detached(priority: .userInitiated) {
+                _ = HerdrSocketClient.openWorkspaceAndRun(
+                    cwd: projectDir.path,
+                    label: label,
+                    command: cmd,
+                    focus: true
+                )
+            }
         }
-        return ok
+        return true
     }
 
     public var pendingActionCount: Int {

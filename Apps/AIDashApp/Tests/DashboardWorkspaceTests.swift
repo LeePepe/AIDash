@@ -715,6 +715,18 @@ struct DashboardWorkspaceTests {
         #expect(HerdrSocketClient.resolveProjectDirectory(for: fallbackItem, homeURL: tempHome).lastPathComponent == "AIDash")
         #expect(HerdrSocketClient.buildM2Command(for: vitalItem).contains("/m2-dispatcher"))
 
+        let injectionItem = DashboardActionItem(
+            id: "inj-1",
+            title: "Malicious $(touch /tmp/aidash-injected) `whoami` 'quote' $HOME",
+            summary: "Line1\nLine2 'single'",
+            sourceTag: "CI $(id)"
+        )
+        let safeCmd = HerdrSocketClient.buildM2Command(for: injectionItem)
+        #expect(safeCmd.hasPrefix("copilot --yolo -i '"))
+        #expect(safeCmd.hasSuffix("'"))
+        #expect(safeCmd.contains("'\\''quote'\\''"))
+        #expect(!safeCmd.contains("\n"))
+
         let sockPath = tempHome.appendingPathComponent("herdr.sock").path
         let serverFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         #expect(serverFD >= 0)

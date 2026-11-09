@@ -170,19 +170,28 @@ public enum CLIAuthState: Codable, Sendable, Equatable {
     }
 }
 
-@MainActor
 public enum HerdrSocketClient {
-    public static func defaultSocketPath(
+    nonisolated public static func currentUserHomeDirectoryURL() -> URL {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
+           let pw = getpwuid(getuid()),
+           let homePtr = pw.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: homePtr), isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    nonisolated public static func defaultSocketPath(
         homeURL: URL? = nil
     ) -> String {
-        let resolvedHome = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let resolvedHome = homeURL ?? currentUserHomeDirectoryURL()
         return resolvedHome.appendingPathComponent(".config/herdr/herdr.sock").path
     }
 
-    public static func sendRequest(
+    nonisolated public static func sendRequest(
         method: String,
         params: [String: Any],
-        socketPath: String? = nil
+        socketPath: String? = nil,
+        timeoutMilliseconds: Int = 600
     ) -> [String: Any]? {
         let resolvedSocketPath = socketPath ?? defaultSocketPath()
         guard resolvedSocketPath.utf8.count < 104 else { return nil }
@@ -191,7 +200,11 @@ public enum HerdrSocketClient {
         guard fd >= 0 else { return nil }
         defer { Darwin.close(fd) }
 
-        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        let clampedMs = max(50, min(timeoutMilliseconds, 5_000))
+        var timeout = timeval(
+            tv_sec: clampedMs / 1000,
+            tv_usec: __darwin_suseconds_t((clampedMs % 1000) * 1000)
+        )
         _ = withUnsafePointer(to: &timeout) { ptr in
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, ptr, socklen_t(MemoryLayout<timeval>.size))
         }
@@ -253,7 +266,7 @@ public enum HerdrSocketClient {
     }
 
     @discardableResult
-    public static func openWorkspaceAndRun(
+    nonisolated public static func openWorkspaceAndRun(
         cwd: String,
         label: String,
         command: String,
@@ -289,12 +302,15 @@ public enum HerdrSocketClient {
             return false
         }
 
-        if focus && LiveDashboardTelemetryReader.isLiveEnvironment {
-            activateHerdrApplication()
+        if focus && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+            Task { @MainActor in
+                activateHerdrApplication()
+            }
         }
         return true
     }
 
+    @MainActor
     private static func activateHerdrApplication() {
         let runningApps = NSWorkspace.shared.runningApplications
         if let app = runningApps.first(where: { app in
@@ -306,11 +322,11 @@ public enum HerdrSocketClient {
         }
     }
 
-    public static func resolveProjectDirectory(
+    nonisolated public static func resolveProjectDirectory(
         for item: DashboardActionItem,
         homeURL: URL? = nil
     ) -> URL {
-        let resolvedHome = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let resolvedHome = homeURL ?? currentUserHomeDirectoryURL()
         let devURL = resolvedHome.appendingPathComponent("Development", isDirectory: true)
         let defaultRepoURL = devURL.appendingPathComponent("AIDash", isDirectory: true)
         let combinedText = "\(item.title) \(item.summary) \(item.command ?? "")"
@@ -362,15 +378,21 @@ public enum HerdrSocketClient {
         return dirLookup["aidash"] ?? defaultRepoURL
     }
 
-    public static func buildM2Command(for item: DashboardActionItem) -> String {
-        let rawPrompt = "/m2-dispatcher 请在当前项目处理该可推进事项：[\(item.sourceTag)] \(item.title) — \(item.summary)"
-        let sanitizedPrompt = rawPrompt
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+    nonisolated public static func shellSingleQuoted(_ raw: String) -> String {
+        let normalized = raw
+            .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
-        return "copilot --yolo -i \"\(sanitizedPrompt)\""
+            .replacingOccurrences(of: "\0", with: "")
+        let escaped = normalized.replacingOccurrences(of: "'", with: "'\\''")
+        return "'\(escaped)'"
     }
 
+    nonisolated public static func buildM2Command(for item: DashboardActionItem) -> String {
+        let rawPrompt = "/m2-dispatcher 请在当前项目处理该可推进事项：[\(item.sourceTag)] \(item.title) — \(item.summary)"
+        return "copilot --yolo -i \(shellSingleQuoted(rawPrompt))"
+    }
+
+    @MainActor
     @discardableResult
     public static func dispatchActionItemToHerdr(
         _ item: DashboardActionItem,
@@ -395,7 +417,7 @@ public enum HerdrSocketClient {
 
 @MainActor
 public enum CLITerminalLoginLauncher {
-    private static let allowedCommands: Set<String> = [
+    nonisolated private static let allowedCommands: Set<String> = [
         "claude login",
         "kimi login",
         "grok login",
@@ -404,7 +426,7 @@ public enum CLITerminalLoginLauncher {
         "deepseek login"
     ]
 
-    public static func sanitizedLoginCommand(_ raw: String) -> String? {
+    nonisolated public static func sanitizedLoginCommand(_ raw: String) -> String? {
         let normalized = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: \.isWhitespace)
@@ -427,10 +449,10 @@ public enum CLITerminalLoginLauncher {
         try? FileManager.default.removeItem(at: legacyScriptURL)
 
         let cliSlug = sanitized.split(separator: " ").first.map(String.init) ?? "cli"
-        let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let homePath = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL().path
         if let socketPath {
             return HerdrSocketClient.openWorkspaceAndRun(
-                cwd: homeURL.path,
+                cwd: homePath,
                 label: "login-\(cliSlug)",
                 command: sanitized,
                 focus: true,
@@ -438,12 +460,14 @@ public enum CLITerminalLoginLauncher {
             )
         }
         if LiveDashboardTelemetryReader.isLiveEnvironment {
-            return HerdrSocketClient.openWorkspaceAndRun(
-                cwd: homeURL.path,
-                label: "login-\(cliSlug)",
-                command: sanitized,
-                focus: true
-            )
+            Task.detached(priority: .userInitiated) {
+                _ = HerdrSocketClient.openWorkspaceAndRun(
+                    cwd: homePath,
+                    label: "login-\(cliSlug)",
+                    command: sanitized,
+                    focus: true
+                )
+            }
         }
         return true
     }
@@ -928,7 +952,6 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         self.backingCardId = backingCardId; self.backingItemRef = backingItemRef
     }
 
-    @MainActor
     public var projectFolderName: String {
         HerdrSocketClient.resolveProjectDirectory(for: self).lastPathComponent
     }
