@@ -5,8 +5,11 @@
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
     <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
     <array>
+        <string>/Development/</string>
         <string>/Development/AIDash/aidata/</string>
         <string>/Development/handoff/</string>
         <string>/.copilot/</string>
@@ -23,6 +26,14 @@
         <string>/Library/Application Support/raven/</string>
         <string>/Library/Application Support/Falcon/</string>
         <string>/Library/Application Support/CindyGlobal/</string>
+    </array>
+    <key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+    <array>
+        <string>/.config/herdr/</string>
+    </array>
+    <key>com.apple.security.temporary-exception.sbpl</key>
+    <array>
+        <string>(allow network-outbound (remote unix-socket))</string>
     </array>
 </dict>
 </plist>

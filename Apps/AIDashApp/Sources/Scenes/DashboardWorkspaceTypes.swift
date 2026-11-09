@@ -1,6 +1,7 @@
 #if os(macOS)
 // swiftlint:disable file_length
 import AppKit
+import Darwin
 import Foundation
 import AIDashCore
 
@@ -170,6 +171,229 @@ public enum CLIAuthState: Codable, Sendable, Equatable {
 }
 
 @MainActor
+public enum HerdrSocketClient {
+    public static func defaultSocketPath(
+        homeURL: URL? = nil
+    ) -> String {
+        let resolvedHome = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        return resolvedHome.appendingPathComponent(".config/herdr/herdr.sock").path
+    }
+
+    public static func sendRequest(
+        method: String,
+        params: [String: Any],
+        socketPath: String? = nil
+    ) -> [String: Any]? {
+        let resolvedSocketPath = socketPath ?? defaultSocketPath()
+        guard resolvedSocketPath.utf8.count < 104 else { return nil }
+
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        defer { Darwin.close(fd) }
+
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        _ = withUnsafePointer(to: &timeout) { ptr in
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, ptr, socklen_t(MemoryLayout<timeval>.size))
+        }
+        _ = withUnsafePointer(to: &timeout) { ptr in
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, ptr, socklen_t(MemoryLayout<timeval>.size))
+        }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(resolvedSocketPath.utf8CString)
+        let maxSunPathCount = MemoryLayout.size(ofValue: addr.sun_path)
+        guard pathBytes.count <= maxSunPathCount else { return nil }
+        withUnsafeMutableBytes(of: &addr.sun_path) { rawBuf in
+            for (idx, byte) in pathBytes.enumerated() where idx < rawBuf.count {
+                rawBuf[idx] = UInt8(bitPattern: byte)
+            }
+        }
+        addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+
+        let connectResult = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connectResult == 0 else { return nil }
+
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "method": method,
+            "params": params
+        ]
+        guard let payloadData = try? JSONSerialization.data(withJSONObject: envelope) else {
+            return nil
+        }
+        var wireBytes = [UInt8](payloadData)
+        wireBytes.append(0x0A)
+
+        var totalSent = 0
+        while totalSent < wireBytes.count {
+            let written = wireBytes.withUnsafeBytes { rawBuf -> Int in
+                guard let base = rawBuf.baseAddress else { return -1 }
+                return Darwin.send(fd, base.advanced(by: totalSent), wireBytes.count - totalSent, 0)
+            }
+            if written <= 0 { return nil }
+            totalSent += written
+        }
+
+        var responseData = Data()
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = Darwin.recv(fd, &chunk, chunk.count, 0)
+            if count <= 0 { break }
+            responseData.append(contentsOf: chunk[0..<count])
+            if responseData.contains(0x0A) { break }
+        }
+        guard !responseData.isEmpty else { return nil }
+        let trimmed = responseData.split(separator: 0x0A).first.map { Data($0) } ?? responseData
+        return (try? JSONSerialization.jsonObject(with: trimmed)) as? [String: Any]
+    }
+
+    @discardableResult
+    public static func openWorkspaceAndRun(
+        cwd: String,
+        label: String,
+        command: String,
+        focus: Bool = true,
+        socketPath: String? = nil
+    ) -> Bool {
+        let createParams: [String: Any] = [
+            "cwd": cwd,
+            "label": label,
+            "focus": focus
+        ]
+        guard let createResp = sendRequest(method: "workspace.create", params: createParams, socketPath: socketPath),
+              let result = createResp["result"] as? [String: Any],
+              let rootPane = result["root_pane"] as? [String: Any],
+              let paneId = rootPane["pane_id"] as? String,
+              !paneId.isEmpty else {
+            return false
+        }
+
+        guard let textResp = sendRequest(
+            method: "pane.send_text",
+            params: ["pane_id": paneId, "text": command],
+            socketPath: socketPath
+        ), textResp["error"] == nil else {
+            return false
+        }
+
+        guard let keyResp = sendRequest(
+            method: "pane.send_keys",
+            params: ["pane_id": paneId, "keys": ["enter"]],
+            socketPath: socketPath
+        ), keyResp["error"] == nil else {
+            return false
+        }
+
+        if focus && LiveDashboardTelemetryReader.isLiveEnvironment {
+            activateHerdrApplication()
+        }
+        return true
+    }
+
+    private static func activateHerdrApplication() {
+        let runningApps = NSWorkspace.shared.runningApplications
+        if let app = runningApps.first(where: { app in
+            let name = (app.localizedName ?? "").lowercased()
+            let bundleId = (app.bundleIdentifier ?? "").lowercased()
+            return name.contains("herdr") || bundleId.contains("herdr") || name.contains("ghostty") || bundleId.contains("ghostty")
+        }) {
+            app.activate()
+        }
+    }
+
+    public static func resolveProjectDirectory(
+        for item: DashboardActionItem,
+        homeURL: URL? = nil
+    ) -> URL {
+        let resolvedHome = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let devURL = resolvedHome.appendingPathComponent("Development", isDirectory: true)
+        let defaultRepoURL = devURL.appendingPathComponent("AIDash", isDirectory: true)
+        let combinedText = "\(item.title) \(item.summary) \(item.command ?? "")"
+
+        let subdirs = (try? FileManager.default.contentsOfDirectory(
+            at: devURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        var dirLookup: [String: URL] = [:]
+        for url in subdirs {
+            dirLookup[url.lastPathComponent.lowercased()] = url
+        }
+
+        if let regex = try? NSRegularExpression(pattern: "(?:LeePepe|tianpeili)/([A-Za-z0-9_.-]+)", options: [.caseInsensitive]) {
+            let nsRange = NSRange(combinedText.startIndex..<combinedText.endIndex, in: combinedText)
+            if let match = regex.firstMatch(in: combinedText, options: [], range: nsRange),
+               match.numberOfRanges > 1,
+               let repoRange = Range(match.range(at: 1), in: combinedText) {
+                let candidateName = String(combinedText[repoRange])
+                if let matchedDir = dirLookup[candidateName.lowercased()] {
+                    return matchedDir
+                }
+                return devURL.appendingPathComponent(candidateName, isDirectory: true)
+            }
+        }
+
+        let orderedCandidates = [
+            "VitalStride",
+            "VoxPocket",
+            "VoxKit",
+            "demoUI",
+            "Financial",
+            "falcon",
+            "raven",
+            "shared-design-system",
+            "shared-ci",
+            "user-skills",
+            "AIDash"
+        ]
+        let lowerCombined = combinedText.lowercased()
+        for candidate in orderedCandidates where lowerCombined.contains(candidate.lowercased()) {
+            if let matchedDir = dirLookup[candidate.lowercased()] {
+                return matchedDir
+            }
+            return devURL.appendingPathComponent(candidate, isDirectory: true)
+        }
+
+        return dirLookup["aidash"] ?? defaultRepoURL
+    }
+
+    public static func buildM2Command(for item: DashboardActionItem) -> String {
+        let rawPrompt = "/m2-dispatcher 请在当前项目处理该可推进事项：[\(item.sourceTag)] \(item.title) — \(item.summary)"
+        let sanitizedPrompt = rawPrompt
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+        return "copilot --yolo -i \"\(sanitizedPrompt)\""
+    }
+
+    @discardableResult
+    public static func dispatchActionItemToHerdr(
+        _ item: DashboardActionItem,
+        homeURL: URL? = nil,
+        socketPath: String? = nil
+    ) -> Bool {
+        let resolvedHome = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let projectDir = resolveProjectDirectory(for: item, homeURL: resolvedHome)
+        let command = buildM2Command(for: item)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        let label = "m2-\(projectDir.lastPathComponent)"
+        return openWorkspaceAndRun(
+            cwd: projectDir.path,
+            label: label,
+            command: command,
+            focus: true,
+            socketPath: socketPath
+        )
+    }
+}
+
+@MainActor
 public enum CLITerminalLoginLauncher {
     private static let allowedCommands: Set<String> = [
         "claude login",
@@ -190,33 +414,36 @@ public enum CLITerminalLoginLauncher {
     }
 
     @discardableResult
-    public static func launchLoginInTerminal(command: String) -> Bool {
+    public static func launchLoginInTerminal(
+        command: String,
+        socketPath: String? = nil
+    ) -> Bool {
         guard let sanitized = sanitizedLoginCommand(command) else { return false }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(sanitized, forType: .string)
 
-        let scriptURL = FileManager.default.temporaryDirectory
+        let legacyScriptURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("aidash-cli-login.command")
-        let scriptContents = """
-        #!/bin/zsh
-        clear
-        printf '\\033[1;36m=== AIDash CLI Re-Authentication ===\\033[0m\\n'
-        printf 'Running: %s\\n\\n' "\(sanitized)"
-        \(sanitized)
-        exec /bin/zsh -l
-        """
-        do {
-            try scriptContents.write(to: scriptURL, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
-        } catch {
-            return false
-        }
+        try? FileManager.default.removeItem(at: legacyScriptURL)
 
+        let cliSlug = sanitized.split(separator: " ").first.map(String.init) ?? "cli"
+        let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        if let socketPath {
+            return HerdrSocketClient.openWorkspaceAndRun(
+                cwd: homeURL.path,
+                label: "login-\(cliSlug)",
+                command: sanitized,
+                focus: true,
+                socketPath: socketPath
+            )
+        }
         if LiveDashboardTelemetryReader.isLiveEnvironment {
-            let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = true
-            NSWorkspace.shared.open([scriptURL], withApplicationAt: terminalURL, configuration: config)
+            return HerdrSocketClient.openWorkspaceAndRun(
+                cwd: homeURL.path,
+                label: "login-\(cliSlug)",
+                command: sanitized,
+                focus: true
+            )
         }
         return true
     }
@@ -699,6 +926,11 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         self.cliFilter = cliFilter; self.priority = priority; self.isCompleted = isCompleted
         self.command = command; self.externalURLString = externalURLString
         self.backingCardId = backingCardId; self.backingItemRef = backingItemRef
+    }
+
+    @MainActor
+    public var projectFolderName: String {
+        HerdrSocketClient.resolveProjectDirectory(for: self).lastPathComponent
     }
 }
 
