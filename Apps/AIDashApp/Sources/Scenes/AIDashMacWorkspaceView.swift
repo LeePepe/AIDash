@@ -338,7 +338,6 @@ public struct AIDashMacWorkspaceView: View {
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    workspaceTopControlBar
                     if case let .populated(snapshot) = store.systemState {
                         workspaceDetailContent(snapshot: snapshot)
                     }
@@ -347,88 +346,83 @@ public struct AIDashMacWorkspaceView: View {
                 .frame(maxWidth: 1280, alignment: .leading)
             }
             .background(Color(nsColor: .underPageBackgroundColor))
+            .navigationTitle(store.selectedSection.title)
+            .toolbar {
+                if store.selectedSection != .settings {
+                    ToolbarItem(placement: .principal) {
+                        unifiedDateNavigationToolbarCluster
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    HStack(spacing: 8) {
+                        if case let .populated(snapshot) = store.systemState {
+                            hardwareCompanionPill(snapshot: snapshot)
+                        }
+                        refreshToolbarButton
+                    }
+                }
+            }
         }
     }
 
-    private var workspaceTopControlBar: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 14) {
-                Label(store.selectedSection.title, systemImage: store.selectedSection.symbolName)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                if store.selectedSection != .settings {
-                    Divider()
-                        .frame(height: 18)
-
-                    HStack(spacing: 6) {
-                        Button {
-                            store.selectPreviousDate()
-                        } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(!store.canSelectPreviousDate)
-
-                        HStack(spacing: 5) {
-                            Image(systemName: "calendar")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(store.selectedDateString)
-                                .font(.subheadline.weight(.semibold))
-                                .monospacedDigit()
-                        }
-
-                        Button {
-                            store.selectNextDate()
-                        } label: {
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(!store.canSelectNextDate)
-
-                        Divider()
-                            .frame(height: 14)
-
-                        Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) {
-                            store.selectToday()
-                        }
-                        .buttonStyle(.borderless)
-                        .font(.caption.weight(.semibold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color(nsColor: .windowBackgroundColor).opacity(0.65), in: Capsule())
-                }
-
-                Spacer(minLength: 8)
-
-                if case let .populated(snapshot) = store.systemState {
-                    hardwareCompanionPill(snapshot: snapshot)
-                }
-
-                Button {
-                    if reduceMotion {
-                        store.refreshFromProvider()
-                    } else {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                            store.refreshFromProvider()
-                        }
-                    }
-                } label: {
-                    Label(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"), systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .keyboardShortcut("r", modifiers: .command)
+    private var unifiedDateNavigationToolbarCluster: some View {
+        HStack(spacing: 6) {
+            Button {
+                store.selectPreviousDate()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.caption.weight(.semibold))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .glassEffect(.regular, in: .rect(cornerRadius: 14))
+            .buttonStyle(.borderless)
+            .disabled(!store.canSelectPreviousDate)
+
+            HStack(spacing: 5) {
+                Image(systemName: "calendar")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(store.selectedDateString)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+            }
+
+            Button {
+                store.selectNextDate()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderless)
+            .disabled(!store.canSelectNextDate)
+
+            Divider()
+                .frame(height: 14)
+
+            Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) {
+                store.selectToday()
+            }
+            .buttonStyle(.borderless)
+            .font(.caption.weight(.semibold))
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.65), in: Capsule())
+    }
+
+    private var refreshToolbarButton: some View {
+        Button {
+            if reduceMotion {
+                store.refreshFromProvider()
+            } else {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+                    store.refreshFromProvider()
+                }
+            }
+        } label: {
+            Label(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"), systemImage: "arrow.clockwise")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .keyboardShortcut("r", modifiers: .command)
     }
 
     private func hardwareCompanionPill(snapshot: MenuBarSystemSnapshot) -> some View {
