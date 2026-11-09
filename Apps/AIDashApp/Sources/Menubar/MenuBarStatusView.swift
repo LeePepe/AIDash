@@ -208,8 +208,12 @@ public struct MenuBarStatusView: View {
         let todayCompact = DashboardTokenFormatter.compact(entry.totalTokens)
         let periodCompact = DashboardTokenFormatter.compact(entry.periodTotalTokens)
         return Button {
-            DashboardWorkspaceStore.shared.openDashboardWindow(section: .systemAndCosts, cliFilter: entry.cliFilter)
-            perform(.openBriefing)
+            if let cmd = entry.authState.loginCommand {
+                CLITerminalLoginLauncher.launchLoginInTerminal(command: cmd)
+            } else {
+                DashboardWorkspaceStore.shared.openDashboardWindow(section: .systemAndCosts, cliFilter: entry.cliFilter)
+                perform(.openBriefing)
+            }
         } label: {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 4) {
@@ -237,7 +241,14 @@ public struct MenuBarStatusView: View {
                     Divider().padding(.vertical, 2)
                 }
                 HStack(spacing: 4) {
-                    if let hint = entry.authState.loginCommandHint, !entry.authState.isAuthenticated {
+                    if entry.authState.loginCommand != nil {
+                        Image(systemName: "terminal.fill")
+                            .foregroundStyle(tint)
+                        Text(DashboardL10n.tr("dashboard.auth.login_terminal_button", "Login in Terminal"))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(tint)
+                            .lineLimit(1)
+                    } else if let hint = entry.authState.loginCommandHint, !entry.authState.isAuthenticated {
                         Text(hint)
                             .foregroundStyle(tint)
                             .lineLimit(1)

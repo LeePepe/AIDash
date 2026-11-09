@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import AppKit
 import SwiftUI
 import AIDashUI
@@ -337,9 +338,7 @@ public struct AIDashMacWorkspaceView: View {
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if store.selectedSection != .settings {
-                        workspaceTopControlBar
-                    }
+                    workspaceTopControlBar
                     if case let .populated(snapshot) = store.systemState {
                         workspaceDetailContent(snapshot: snapshot)
                     }
@@ -352,32 +351,65 @@ public struct AIDashMacWorkspaceView: View {
     }
 
     private var workspaceTopControlBar: some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 12) {
-                HStack(spacing: 6) {
-                    Button { store.selectPreviousDate() } label: { Image(systemName: "chevron.left") }
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 14) {
+                Label(store.selectedSection.title, systemImage: store.selectedSection.symbolName)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                if store.selectedSection != .settings {
+                    Divider()
+                        .frame(height: 18)
+
+                    HStack(spacing: 6) {
+                        Button {
+                            store.selectPreviousDate()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderless)
                         .disabled(!store.canSelectPreviousDate)
-                    Text(store.selectedDateString)
-                        .font(.subheadline.weight(.medium))
-                        .monospacedDigit()
-                    Button { store.selectNextDate() } label: { Image(systemName: "chevron.right") }
+
+                        HStack(spacing: 5) {
+                            Image(systemName: "calendar")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(store.selectedDateString)
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                        }
+
+                        Button {
+                            store.selectNextDate()
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderless)
                         .disabled(!store.canSelectNextDate)
-                    Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) { store.selectToday() }
-                        .controlSize(.small)
-                }
-                Spacer(minLength: 8)
-                Picker(DashboardL10n.tr("dashboard.toolbar.cli_scope", "CLI Scope"), selection: $store.selectedCLI) {
-                    ForEach(store.availableCLIFilters) { cli in
-                        Text(cli.shortLabel).tag(cli)
+
+                        Divider()
+                            .frame(height: 14)
+
+                        Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) {
+                            store.selectToday()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption.weight(.semibold))
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color(nsColor: .windowBackgroundColor).opacity(0.65), in: Capsule())
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 420)
+
                 Spacer(minLength: 8)
+
                 if case let .populated(snapshot) = store.systemState {
                     hardwareCompanionPill(snapshot: snapshot)
                 }
+
                 Button {
                     if reduceMotion {
                         store.refreshFromProvider()
@@ -393,9 +425,9 @@ public struct AIDashMacWorkspaceView: View {
                 .controlSize(.small)
                 .keyboardShortcut("r", modifiers: .command)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .glassEffect(.regular, in: .rect(cornerRadius: 12))
+            .glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
     }
 
@@ -433,7 +465,7 @@ public struct AIDashMacWorkspaceView: View {
     private var sidebarContent: some View {
         List(selection: $store.selectedSection) {
             Section(DashboardL10n.tr("dashboard.sidebar.title", "AIDash Workspace")) {
-                ForEach(DashboardWorkspaceSection.allCases) { section in
+                ForEach(DashboardWorkspaceSection.primaryNavigationSections) { section in
                     Label(section.title, systemImage: section.symbolName)
                         .badge(badgeCount(for: section))
                         .tag(section)
@@ -441,18 +473,43 @@ public struct AIDashMacWorkspaceView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 8, height: 8)
-                Text(DashboardL10n.format("dashboard.sidebar.today_tokens_format", "Today %@ tok", DashboardTokenFormatter.compact(store.todayGrandTotalTokens)))
-                    .font(.caption.weight(.medium))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                Spacer(minLength: 4)
+            VStack(spacing: 0) {
+                Divider()
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 8, height: 8)
+                    Text(DashboardL10n.format("dashboard.sidebar.today_tokens_format", "Today %@ tok", DashboardTokenFormatter.compact(store.todayGrandTotalTokens)))
+                        .font(.caption.weight(.medium))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button {
+                        store.selectedSection = .settings
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: DashboardWorkspaceSection.settings.symbolName)
+                            Text(DashboardWorkspaceSection.settings.title)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(
+                            store.selectedSection == .settings
+                                ? Color.accentColor.opacity(0.18)
+                                : Color(nsColor: .windowBackgroundColor).opacity(0.75),
+                            in: Capsule()
+                        )
+                        .foregroundStyle(store.selectedSection == .settings ? Color.accentColor : Color.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(",", modifiers: .command)
+                    .accessibilityLabel(DashboardWorkspaceSection.settings.title)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
         }
     }
 
