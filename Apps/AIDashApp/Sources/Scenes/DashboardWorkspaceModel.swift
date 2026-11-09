@@ -292,20 +292,27 @@ public final class DashboardWorkspaceStore {
         let cmd = HerdrSocketClient.buildM2Command(for: item)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(cmd, forType: .string)
-        lastDispatchedActionID = item.id
         if LiveDashboardTelemetryReader.isLiveEnvironment {
             let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
             let projectDir = HerdrSocketClient.resolveProjectDirectory(for: item, homeURL: homeURL)
             let label = "m2-\(projectDir.lastPathComponent)"
-            Task.detached(priority: .userInitiated) {
-                _ = HerdrSocketClient.openWorkspaceAndRun(
+            let itemID = item.id
+            Task.detached(priority: .userInitiated) { [weak self] in
+                let ok = HerdrSocketClient.openWorkspaceAndRun(
                     cwd: projectDir.path,
                     label: label,
                     command: cmd,
                     focus: true
                 )
+                if ok {
+                    await MainActor.run {
+                        self?.lastDispatchedActionID = itemID
+                    }
+                }
             }
+            return true
         }
+        lastDispatchedActionID = item.id
         return true
     }
 

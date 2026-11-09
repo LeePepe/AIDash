@@ -783,6 +783,9 @@ struct DashboardWorkspaceTests {
         #expect(dispatched == true)
 
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: [vitalItem])
+        let missingSockPath = tempHome.appendingPathComponent("missing.sock").path
+        #expect(store.dispatchActionToHerdr(vitalItem, socketPath: missingSockPath) == false)
+        #expect(store.lastDispatchedActionID == nil)
         #expect(store.dispatchActionToHerdr(vitalItem) == true)
         #expect(store.lastDispatchedActionID == vitalItem.id)
     }

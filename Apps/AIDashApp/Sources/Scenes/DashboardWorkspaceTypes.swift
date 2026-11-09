@@ -200,6 +200,11 @@ public enum HerdrSocketClient {
         guard fd >= 0 else { return nil }
         defer { Darwin.close(fd) }
 
+        var noSigPipe: Int32 = 1
+        _ = withUnsafePointer(to: &noSigPipe) { ptr in
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, ptr, socklen_t(MemoryLayout<Int32>.size))
+        }
+
         let clampedMs = max(50, min(timeoutMilliseconds, 5_000))
         var timeout = timeval(
             tv_sec: clampedMs / 1000,
