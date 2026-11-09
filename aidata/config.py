@@ -55,6 +55,14 @@ HERMES_MEMORY_DB = HOME / ".hermes" / "memory_store.db"
 HERMES_MEMORY_MD_DIR = HOME / ".hermes" / "memories"
 MULTICA_CONFIG = HOME / ".multica" / "config.json"
 
+# iCloud Drive token shards. The environment override is test-friendly and the
+# local config hook below remains the only place for machine-specific paths.
+ICLOUD_TOKEN_SYNC_DIR = Path(os.environ.get(
+    "AIDATA_ICLOUD_TOKEN_SYNC_DIR",
+    str(HOME / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+        / "AIDash" / "token-sync" / "v1"),
+))
+
 # Collected-tools stockpile (save-tool skill): one Markdown note per tool, each
 # carrying a github.com/owner/repo URL. This is the CURATED watchlist for the
 # GitHub tool-radar source (github_repo). Scanning the folder keeps the radar

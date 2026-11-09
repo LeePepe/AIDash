@@ -23,6 +23,7 @@ from config import (
     WAREHOUSE_DB,
     clean_path,
 )
+from adapters.icloud_token_sync import local_device_id
 
 
 def _load_prices(conn: sqlite3.Connection) -> None:
@@ -382,6 +383,22 @@ def run_merge() -> dict[str, int]:
                 "SELECT count(*) FROM fact_request").fetchone()[0]
             _detach(conn, "rv")
 
+        # --- fact_device_token_daily (iCloud token shards) ---
+        # The shard is optional. When it has not run yet, backfill only the
+        # local device from already-merged facts so the first warehouse is
+        # useful without double-counting a device that has exported a shard.
+        if _attach(conn, "icloud_token_sync", "its"):
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_device_token_daily
+                  (record_uid, device_id, machine_alias, cst_day, hour_bucket,
+                   cli, model, input_tokens, output_tokens, cache_read,
+                   cache_write, total_tokens, invocations, updated_at)
+                SELECT record_uid, device_id, machine_alias, cst_day, hour_bucket,
+                       cli, model, input_tokens, output_tokens, cache_read,
+                       cache_write, total_tokens, invocations, updated_at
+                FROM its.device_token_usage
+            """)
+            _detach(conn, "its")
         # --- fact_turn (claude_jsonl) ---
         if _attach(conn, "claude_jsonl", "cj"):
             cj_columns = {
@@ -403,6 +420,48 @@ def run_merge() -> dict[str, int]:
             counts["fact_turn"] = conn.execute(
                 "SELECT count(*) FROM fact_turn").fetchone()[0]
             _detach(conn, "cj")
+
+        # Backfill the local device only when no local shard was merged. This
+        # keeps a first-run warehouse useful while avoiding local double-counts.
+        device_id = local_device_id()
+        if conn.execute(
+            "SELECT 1 FROM fact_device_token_daily WHERE device_id = ? LIMIT 1",
+            (device_id,),
+        ).fetchone() is None:
+            conn.execute("""
+                INSERT OR IGNORE INTO fact_device_token_daily
+                  (record_uid, device_id, machine_alias, cst_day, hour_bucket,
+                   cli, model, input_tokens, output_tokens, cache_read,
+                   cache_write, total_tokens, invocations, updated_at)
+                SELECT 'backfill:' || ? || ':' || cst_day || ':' || hour_bucket || ':' || cli || ':' || model,
+                       ?, ?, cst_day, hour_bucket, cli, model,
+                       SUM(input_tokens), SUM(output_tokens), SUM(cache_read),
+                       SUM(cache_write), SUM(input_tokens + output_tokens),
+                       SUM(invocations), datetime('now')
+                FROM (
+                    SELECT date(ts / 1000, 'unixepoch', '+8 hours') AS cst_day,
+                           strftime('%Y-%m-%dT%H:00:00+08:00', ts / 1000, 'unixepoch', '+8 hours') AS hour_bucket,
+                           client AS cli, COALESCE(model_canon, model, 'unknown') AS model,
+                           COALESCE(input_tokens, 0) AS input_tokens,
+                           COALESCE(output_tokens, 0) AS output_tokens,
+                           COALESCE(cache_read, 0) AS cache_read,
+                           COALESCE(cache_write, 0) AS cache_write,
+                           1 AS invocations
+                    FROM fact_request
+                    UNION ALL
+                    SELECT date(ts, '+8 hours'),
+                           strftime('%Y-%m-%dT%H:00:00+08:00', ts, '+8 hours'),
+                           'claude-code', COALESCE(model, 'unknown'),
+                           COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
+                           COALESCE(cache_read, 0), COALESCE(cache_creation, 0), 1
+                    FROM fact_turn
+                    WHERE role = 'assistant'
+                )
+                GROUP BY cst_day, hour_bucket, cli, model
+            """, (device_id, device_id, device_id))
+        counts["fact_device_token_daily"] = conn.execute(
+            "SELECT count(*) FROM fact_device_token_daily"
+        ).fetchone()[0]
 
         # --- fact_issue (multica_issue) ---
         if _attach(conn, "multica_issue", "mi"):
