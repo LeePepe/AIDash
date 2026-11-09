@@ -111,7 +111,7 @@ public struct MenuBarStatusView: View {
                     )
                     compactGaugeCell(
                         label: DashboardL10n.tr("menubar.status.storage", "Storage"),
-                        valueText: ByteCountFormatter.string(fromByteCount: Int64(snapshot.storage.systemVolume.availableBytes), countStyle: .binary),
+                        valueText: Self.compactStorageAvailable(snapshot.storage.systemVolume.availableBytes),
                         fraction: snapshot.storage.systemVolume.usageFraction,
                         health: snapshot.storage.systemVolume.usageFraction >= 0.90 ? .critical : .healthy
                     )
@@ -124,12 +124,12 @@ public struct MenuBarStatusView: View {
         let tint = DashboardSemanticColorPalette.color(for: health)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
-                Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 2)
-                Text(valueText).font(.caption.weight(.semibold)).monospacedDigit().contentTransition(.numericText()).lineLimit(1)
+                Text(valueText).font(.caption.weight(.semibold)).monospacedDigit().contentTransition(.numericText()).lineLimit(1).fixedSize(horizontal: true, vertical: false)
             }
-            Gauge(value: min(max(fraction, 0), 1), in: 0...1) { Text(label) }
-                .gaugeStyle(.accessoryLinearCapacity).tint(tint)
+            Gauge(value: min(max(fraction, 0), 1), in: 0...1) { EmptyView() }
+                .gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,8 +228,8 @@ public struct MenuBarStatusView: View {
                     }
                 }
                 if entry.hasTrackedQuota {
-                    Gauge(value: entry.usedFraction, in: 0...1) { Text(entry.displayName) }
-                        .gaugeStyle(.accessoryLinearCapacity).tint(tint)
+                    Gauge(value: entry.usedFraction, in: 0...1) { EmptyView() }
+                        .gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
                 } else {
                     Divider().padding(.vertical, 2)
                 }
@@ -333,23 +333,22 @@ public struct MenuBarStatusView: View {
         reduceTransparency ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor)
     }
 
-    internal static func formatLoadAverages(one: Double, five: Double, fifteen: Double) -> String {
-        String(format: "%.1f / %.1f / %.1f", one, five, fifteen)
-    }
+    internal static func formatLoadAverages(one: Double, five: Double, fifteen: Double) -> String { String(format: "%.1f / %.1f / %.1f", one, five, fifteen) }
 
     internal static func compactMemoryPair(used: UInt64, total: UInt64) -> String {
-        guard used > 0 || total > 0 else { return "0 / 0 GB" }
-        return String(format: "%.1f / %.1f GB", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
+        (used > 0 || total > 0) ? String(format: "%.1f / %.1f GB", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0) : "0 / 0 GB"
     }
 
     private static func compactMemoryShort(used: UInt64, total: UInt64) -> String {
-        guard total > 0 else { return "0GB" }
-        return String(format: "%.0f/%.0fG", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0)
+        total > 0 ? String(format: "%.0f/%.0fG", Double(used) / 1_073_741_824.0, Double(total) / 1_073_741_824.0) : "0G"
     }
 
-    internal static func resolveLocalized(_ key: String, _ value: String) -> String {
-        Copy.resolveLocalized(key, value)
+    internal static func compactStorageAvailable(_ availableBytes: UInt64) -> String {
+        let gib = Double(availableBytes) / 1_073_741_824.0
+        return gib >= 100 ? String(format: "%.0fG", gib) : (gib >= 10 ? String(format: "%.1fG", gib) : String(format: "%.2fG", max(gib, 0)))
     }
+
+    internal static func resolveLocalized(_ key: String, _ value: String) -> String { Copy.resolveLocalized(key, value) }
 }
 
 @MainActor

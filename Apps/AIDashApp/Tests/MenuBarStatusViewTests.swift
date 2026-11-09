@@ -45,6 +45,8 @@ struct MenuBarStatusViewTests {
             )
         )
         _ = MenuBarStatusView(state: .populated(snapshot)).body
+        #expect(MenuBarStatusView.compactStorageAvailable(69_814_691_430) == "65.0G")
+        #expect(MenuBarStatusView.compactStorageAvailable(280 * 1_073_741_824) == "280G")
     }
 }
 #endif

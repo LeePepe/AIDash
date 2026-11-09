@@ -151,7 +151,7 @@ public struct SystemTelemetryStripView: View {
                 Image(systemName: health.symbolName).foregroundStyle(tint).accessibilityHidden(true)
                 Text(valueText).font(.subheadline.weight(.semibold)).monospacedDigit().contentTransition(.numericText())
             }
-            Gauge(value: clamped, in: 0...1) { Text(title) }.gaugeStyle(.accessoryLinearCapacity).tint(tint)
+            Gauge(value: clamped, in: 0...1) { EmptyView() }.gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
             Text(detailText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(12)
@@ -529,8 +529,8 @@ public struct CLICostQuotaCardView: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
             }
-            Gauge(value: entry.usedFraction, in: 0...1) { Text(entry.displayName) }
-                .gaugeStyle(.accessoryLinearCapacity).tint(tint)
+            Gauge(value: entry.usedFraction, in: 0...1) { EmptyView() }
+                .gaugeStyle(.accessoryLinearCapacity).labelsHidden().tint(tint)
             HStack(spacing: 6) {
                 if let secUsed = entry.secondaryQuotaUsed, let secLabel = entry.secondaryQuotaLabel {
                     Text("\(secLabel): \(Int((secUsed * 100).rounded()))%")
