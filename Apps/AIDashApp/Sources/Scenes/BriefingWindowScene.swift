@@ -62,11 +62,6 @@ public struct BriefingWindowScene: Scene {
                 minHeight: AIDashWindowGeometry.macMinHeight
             )
             .windowDismissBehavior(.disabled)
-            .toolbar {
-                ToolbarItem {
-                    telemetrySettingsMenu
-                }
-            }
             #else
             .overlay(alignment: .topTrailing) {
                 telemetrySettingsMenu
@@ -80,6 +75,7 @@ public struct BriefingWindowScene: Scene {
         #endif
     }
 
+    #if !os(macOS)
     @ViewBuilder
     private var telemetrySettingsMenu: some View {
         if AIDashTelemetrySettingsPlacement.isAvailable(
@@ -103,11 +99,10 @@ public struct BriefingWindowScene: Scene {
             ),
             systemImage: "gearshape"
         )
-        #if !os(macOS)
         .frame(minWidth: 44, minHeight: 44)
         .contentShape(Rectangle())
-        #endif
     }
+    #endif
 }
 
 private struct BriefingSceneStateView: View {

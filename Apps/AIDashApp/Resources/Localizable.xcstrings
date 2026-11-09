@@ -805,6 +805,24 @@
         }
       }
     },
+    "dashboard.auth.login_terminal_button": {
+      "comment": "Action button to launch Terminal.app and execute the CLI login command.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Login in Terminal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "终端一键登录"
+          }
+        }
+      }
+    },
     "dashboard.auth.not_logged_in_hint_format": {
       "extractionState": "manual",
       "localizations": {
@@ -5389,6 +5407,60 @@
           "stringUnit": {
             "state": "translated",
             "value": "在菜单栏弹窗顶部显示 CPU、内存和磁盘三个实时容量指示器"
+          }
+        }
+      }
+    },
+    "settings.telemetry.card_subtitle": {
+      "comment": "Subtitle of the privacy and anonymous telemetry settings card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage optional anonymous product telemetry and startup performance metrics"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理可选的匿名产品使用统计与启动性能指标采集"
+          }
+        }
+      }
+    },
+    "settings.telemetry.card_title": {
+      "comment": "Title of the privacy and anonymous telemetry settings card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Privacy & Anonymous Telemetry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐私与匿名遥测"
+          }
+        }
+      }
+    },
+    "settings.telemetry.send_usage_desc": {
+      "comment": "Description for the send usage data toggle in Settings.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only anonymous GUI launch duration and briefing view events are recorded; no briefing content or prompts are ever collected."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅记录匿名的界面启动耗时与简报浏览次数，绝不采集任何简报内容或 Prompt。"
           }
         }
       }

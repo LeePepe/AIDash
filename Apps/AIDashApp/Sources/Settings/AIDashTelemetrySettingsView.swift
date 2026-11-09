@@ -172,6 +172,12 @@ public final class MenuBarDisplayPreferences {
 public struct DashboardSettingsPageView: View {
     @Bindable public var store: DashboardWorkspaceStore
     @Bindable public var prefs: MenuBarDisplayPreferences
+    @State private var sendUsageData: Bool = {
+        if case .establishedEnabled = AIDashTelemetryPreferences().state {
+            return true
+        }
+        return false
+    }()
 
     public init(store: DashboardWorkspaceStore, prefs: MenuBarDisplayPreferences? = nil) {
         self.store = store
@@ -182,6 +188,7 @@ public struct DashboardSettingsPageView: View {
         VStack(alignment: .leading, spacing: 16) {
             menuBarBadgeCard
             popoverModulesCard
+            telemetryPrivacyCard
         }
     }
 
@@ -292,6 +299,37 @@ public struct DashboardSettingsPageView: View {
                     }
                 }
                 .toggleStyle(.switch)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        }
+    }
+
+    private var telemetryPrivacyCard: some View {
+        SolidModularCardContainer(
+            title: DashboardL10n.tr("settings.telemetry.card_title", "Privacy & Anonymous Telemetry"),
+            subtitle: DashboardL10n.tr("settings.telemetry.card_subtitle", "Manage optional anonymous product telemetry and startup performance metrics"),
+            symbolName: "hand.raised.fill"
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $sendUsageData) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(DashboardL10n.tr("telemetry.settings.send_usage_data", "Send usage data"))
+                            .font(.subheadline.weight(.medium))
+                        Text(DashboardL10n.tr("settings.telemetry.send_usage_desc", "Only anonymous GUI launch duration and briefing view events are recorded; no briefing content or prompts are ever collected."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .onChange(of: sendUsageData) { _, enabled in
+                    let updatedState = AIDashTelemetryPreferences().setConsent(enabled)
+                    if case .establishedEnabled = updatedState {
+                        sendUsageData = true
+                    } else {
+                        sendUsageData = false
+                    }
+                }
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))

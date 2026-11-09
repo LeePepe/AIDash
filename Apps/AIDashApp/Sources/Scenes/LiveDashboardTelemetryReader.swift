@@ -1043,10 +1043,46 @@ extension LiveDashboardTelemetryReader {
         var totalMs: Double = 0
     }
 
+    private static var cachedMagpieRankingKey: String?
+    private static var cachedMagpieRankingRows: [AgentRankingRow]?
+    private static var cachedLiveEfficiencyKey: String?
+    private static var cachedLiveEfficiencySummary: LiveEfficiencySummary?
+
+    public static func readTailLines(of fileURL: URL, maxBytes: Int = 524_288) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return "" }
+        defer { try? handle.close() }
+        let fileSize = (try? handle.seekToEnd()) ?? 0
+        guard fileSize > 0 else { return "" }
+        let limit = UInt64(max(maxBytes, 1))
+        let startOffset = fileSize > limit ? (fileSize - limit) : 0
+        try? handle.seek(toOffset: startOffset)
+        guard let data = try? handle.readToEnd(), !data.isEmpty,
+              let decoded = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { return "" }
+        if startOffset > 0, let newlineIdx = decoded.firstIndex(of: "\n") {
+            return String(decoded[decoded.index(after: newlineIdx)...])
+        }
+        return decoded
+    }
+
+    private static func fileCacheSignature(for fileURL: URL) -> String {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path) else {
+            return "\(fileURL.path)-missing"
+        }
+        let mtime = Int((attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
+        let size = (attrs[.size] as? NSNumber)?.uint64Value ?? 0
+        return "\(fileURL.path)-\(mtime)-\(size)"
+    }
+
     private static func appendMagpieRoleRankingRows(
         _ rows: inout [AgentRankingRow], magpieURL: URL, datePrefix: String
     ) {
-        guard let text = try? String(contentsOf: magpieURL, encoding: .utf8) else { return }
+        let cacheKey = "\(fileCacheSignature(for: magpieURL))-\(datePrefix)"
+        if cachedMagpieRankingKey == cacheKey, let cached = cachedMagpieRankingRows {
+            rows.append(contentsOf: cached)
+            return
+        }
+        let text = readTailLines(of: magpieURL)
+        guard !text.isEmpty else { return }
         var map: [String: RoleModelStat] = [:]
         for line in text.split(separator: "\n") where line.contains(datePrefix) {
             guard let data = line.data(using: .utf8),
@@ -1078,10 +1114,11 @@ extension LiveDashboardTelemetryReader {
             cur.totalMs += ms
             map[key] = cur
         }
+        var built: [AgentRankingRow] = []
         for (key, s) in map where s.tokens > 0 {
             let avgSec = max((s.totalMs / Double(max(s.calls, 1))) / 1000.0, 0.1)
             let okRate = Double(s.okCount) / Double(max(s.calls, 1))
-            rows.append(
+            built.append(
                 AgentRankingRow(
                     id: "magpie-\(key)", agentName: s.role, modelName: s.model,
                     cliFilter: s.cli, providerName: s.cli.rawValue,
@@ -1091,6 +1128,9 @@ extension LiveDashboardTelemetryReader {
                 )
             )
         }
+        cachedMagpieRankingKey = cacheKey
+        cachedMagpieRankingRows = built
+        rows.append(contentsOf: built)
     }
 
     private static func appendRavenRankingRows(
@@ -1285,11 +1325,19 @@ extension LiveDashboardTelemetryReader {
     }
 
     public static func loadLiveEfficiencySummary(homeURL: URL? = nil) -> LiveEfficiencySummary? {
-        guard isLiveEnvironment else { return nil }
+        guard isLiveEnvironment || homeURL != nil else { return nil }
         let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let whURL = home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
+        let magpieURL = home.appendingPathComponent(".config/magpie/usage.jsonl")
+        let cacheKey = "\(fileCacheSignature(for: whURL))|\(fileCacheSignature(for: magpieURL))"
+        if cachedLiveEfficiencyKey == cacheKey, let cached = cachedLiveEfficiencySummary {
+            return cached
+        }
         var summary = LiveEfficiencySummary()
-        populateWarehouseReviewSummary(&summary, whURL: home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db"))
-        populateMagpieEfficiencySummary(&summary, magpieURL: home.appendingPathComponent(".config/magpie/usage.jsonl"))
+        populateWarehouseReviewSummary(&summary, whURL: whURL)
+        populateMagpieEfficiencySummary(&summary, magpieURL: magpieURL)
+        cachedLiveEfficiencyKey = cacheKey
+        cachedLiveEfficiencySummary = summary
         return summary
     }
 
@@ -1313,7 +1361,8 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func populateMagpieEfficiencySummary(_ summary: inout LiveEfficiencySummary, magpieURL: URL) {
-        guard let text = try? String(contentsOf: magpieURL, encoding: .utf8) else { return }
+        let text = readTailLines(of: magpieURL)
+        guard !text.isEmpty else { return }
         var ttfts: [Int] = [], totalIn: UInt64 = 0, totalCR: UInt64 = 0, totalAll: UInt64 = 0, steeringAll: UInt64 = 0
         for line in text.split(separator: "\n").suffix(2000) {
             guard let data = line.data(using: .utf8),
