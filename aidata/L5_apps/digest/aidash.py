@@ -594,11 +594,45 @@ def _overview_sections(sections: dict[str, list[str]]) -> list[dict]:
     return out
 
 
+def _token_device_card(mmdd: str, reported_day: str, raven) -> Card | None:
+    """Render merged token totals and neutral per-device contribution rows."""
+    bundle = getattr(raven, "token_devices", None)
+    if bundle is None or bundle.health.state != "ok":
+        return None
+    rows = [row for row in bundle.rows if row.day == reported_day]
+    if not rows:
+        return None
+    total = next((row for row in rows if row.device_id == "__all__"), None)
+    devices = [row for row in rows if row.device_id != "__all__"]
+    if total is None:
+        return None
+    total_text = (
+        f"input {total.input_tokens:.0f} · output {total.output_tokens:.0f} · "
+        f"cache {total.cache_read + total.cache_write:.0f} · "
+        f"total {total.total_tokens:.0f} · invocations {total.invocations:.0f}"
+    )
+    items = [{
+        "label": "合计",
+        "value": total.total_tokens,
+        "valueText": total_text,
+    }]
+    items.extend({
+        "label": row.machine_alias or row.device_id,
+        "value": row.total_tokens,
+        "valueText": f"{row.share_pct:.2f}% · {row.total_tokens:.0f} tokens",
+    } for row in devices)
+    return Card(
+        _kuid(mmdd, 55), "barList", "wide",
+        {"title": "多设备 Token", "items": items}, style="neutral"
+    )
+
+
 def _overview_container(mmdd: str, reported_day: str, must_see: str,
                         sections: dict[str, list[str]],
                         metric_items: list[dict] | None = None,
                         delivery: "DeliveryState | None" = None,
-                        report_date: str = "") -> Container:
+                        report_date: str = "",
+                        token_device_card: Card | None = None) -> Container:
     """总览: bounded independent KPIs, then the focal digest card."""
     cards: list[Card] = []
     for index, item in enumerate((metric_items or [])[:OVERVIEW_KPI_LIMIT], start=101):
@@ -609,6 +643,8 @@ def _overview_container(mmdd: str, reported_day: str, must_see: str,
             {"items": [dict(item)]},
             style="accent",
         ))
+    if token_device_card is not None:
+        cards.append(token_device_card)
     digest_payload = {
         "title": f"AI 使用日报 {reported_day}",
         "body": _plain_summary(must_see),
@@ -1691,10 +1727,14 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
         item for item in preferred
         if item.get("label") in {"成本", "请求数", "会话数", "自动化占比"}
     ]
-    containers = [_overview_container(mmdd, reported_day, must_see, sections,
-                                      metric_items=overview_metrics,
-                                      delivery=delivery,
-                                      report_date=report_date)]
+    containers = [_overview_container(
+        mmdd, reported_day, must_see, sections,
+        metric_items=overview_metrics,
+        delivery=delivery,
+        report_date=report_date,
+        token_device_card=_token_device_card(
+            mmdd, reported_day, sources.raven),
+    )]
     containers.append(_default_plan_container(
         mmdd, sections, getattr(sources, "action_inbox", None)))
     return Briefing(reported_day, GENERATED_BY, tuple(containers))

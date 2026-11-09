@@ -26,6 +26,26 @@ class SourceHealth:
 
 
 @dataclass(frozen=True)
+class TokenDeviceRow:
+    day: str
+    device_id: str
+    machine_alias: str
+    input_tokens: float
+    output_tokens: float
+    cache_read: float
+    cache_write: float
+    total_tokens: float
+    invocations: float
+    share_pct: float
+
+
+@dataclass(frozen=True)
+class TokenDeviceTrends:
+    rows: tuple[TokenDeviceRow, ...]
+    health: SourceHealth
+
+
+@dataclass(frozen=True)
 class RavenTrends:
     cost: list[tuple[str, float]]
     tokens: list[tuple[str, float]]
@@ -35,6 +55,11 @@ class RavenTrends:
     pipeline_cancelled: list[tuple[str, float]]
     sessions: list[tuple[str, float]]
     health: SourceHealth
+    token_devices: TokenDeviceTrends = field(
+        default_factory=lambda: TokenDeviceTrends(
+            (), SourceHealth("token_devices", "skipped:未取")
+        )
+    )
 
 
 def _series(name: str, day_col: str, val_col: str) -> list[tuple[str, float]]:
@@ -43,8 +68,43 @@ def _series(name: str, day_col: str, val_col: str) -> list[tuple[str, float]]:
     return [(r[di], float(r[vi]) if r[vi] is not None else 0.0) for r in rows]
 
 
+def fetch_token_device_trends() -> TokenDeviceTrends:
+    """Fetch merged token totals and per-device shares; degrade independently."""
+    try:
+        rows, cols = serve.run_query("tokens/by-device")
+        index = {name: cols.index(name) for name in (
+            "cst_day", "device_id", "machine_alias", "input", "output",
+            "cache_read", "cache_write", "total_tokens", "invocations",
+            "share_pct",
+        )}
+        mapped = tuple(
+            TokenDeviceRow(
+                day=str(row[index["cst_day"]]),
+                device_id=str(row[index["device_id"]]),
+                machine_alias=str(row[index["machine_alias"]]),
+                input_tokens=float(row[index["input"]] or 0),
+                output_tokens=float(row[index["output"]] or 0),
+                cache_read=float(row[index["cache_read"]] or 0),
+                cache_write=float(row[index["cache_write"]] or 0),
+                total_tokens=float(row[index["total_tokens"]] or 0),
+                invocations=float(row[index["invocations"]] or 0),
+                share_pct=float(row[index["share_pct"]] or 0),
+            )
+            for row in rows
+        )
+        return TokenDeviceTrends(
+            mapped,
+            SourceHealth("token_devices", "ok" if mapped else "skipped:无数据"),
+        )
+    except Exception as exc:
+        return TokenDeviceTrends(
+            (), SourceHealth("token_devices", "error", str(exc)[:200])
+        )
+
+
 def fetch_raven_trends() -> RavenTrends:
     """Fetch all raven-derived trend series; degrade to empty + error health."""
+    token_devices = fetch_token_device_trends()
     try:
         cost_rows, cost_cols = serve.run_query("trend/daily-cost")
         di = cost_cols.index("day")
@@ -60,6 +120,7 @@ def fetch_raven_trends() -> RavenTrends:
             pipeline_completed=pipe_done, pipeline_cancelled=pipe_cx,
             sessions=sessions,
             health=SourceHealth(name="raven", state="ok"),
+            token_devices=token_devices,
         )
     except Exception as exc:  # degrade, never crash the digest
         empty: list[tuple[str, float]] = []
@@ -67,6 +128,7 @@ def fetch_raven_trends() -> RavenTrends:
             cost=empty, tokens=empty, requests=empty, waste=empty,
             pipeline_completed=empty, pipeline_cancelled=empty, sessions=empty,
             health=SourceHealth(name="raven", state="error", detail=str(exc)[:200]),
+            token_devices=token_devices,
         )
 
 
