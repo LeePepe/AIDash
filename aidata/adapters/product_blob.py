@@ -535,7 +535,7 @@ def _iter_raw_telemetry_records() -> list[dict[str, Any]]:
                 text = gzip.decompress(raw_bytes).decode("utf-8")
             else:
                 text = raw_bytes.decode("utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, EOFError, UnicodeDecodeError):
             continue
         for line_no, line in enumerate(text.splitlines(), start=1):
             stripped = line.strip()
