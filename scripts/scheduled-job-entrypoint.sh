@@ -10,61 +10,76 @@ fi
 
 state_root="$HOME/Library/Application Support/AIDash/jobs/$job_id"
 lock_dir="$state_root/.running.lock"
-pid_file="$lock_dir/pid"
 mkdir -p "$state_root"
 
-acquire_lock() {
-  if mkdir "$lock_dir" 2>/dev/null; then
-    printf '%s\n' "$$" > "$pid_file" 2>/dev/null || true
-    return 0
-  fi
-
-  if [[ -f "$pid_file" ]]; then
-    local holder_pid
-    holder_pid="$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')"
-    if [[ -n "$holder_pid" && "$holder_pid" =~ ^[0-9]+$ ]] && kill -0 "$holder_pid" 2>/dev/null; then
-      return 1
-    fi
-  fi
-
-  rm -f "$pid_file" 2>/dev/null || true
-  rmdir "$lock_dir" 2>/dev/null || true
-  if mkdir "$lock_dir" 2>/dev/null; then
-    printf '%s\n' "$$" > "$pid_file" 2>/dev/null || true
-    return 0
-  fi
-  return 1
-}
-
-if ! acquire_lock; then
-  /usr/bin/python3 - "$state_root/state.json" "$job_id" <<'PY'
-import json
-import sys
+exec /usr/bin/python3 - "$state_root" "$lock_dir" "$job_id" "$interpreter" "$script_path" <<'PY'
 from datetime import datetime, timezone
+import fcntl
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
-path = Path(sys.argv[1])
-job_id = sys.argv[2]
-now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-path.write_text(json.dumps({
-    "id": job_id,
-    "updatedAt": now,
-    "lastResult": "coalesced",
-    "lastRunAt": now,
-}, ensure_ascii=False) + "\n", encoding="utf-8")
+state_root = Path(sys.argv[1])
+lock_dir = Path(sys.argv[2])
+job_id = sys.argv[3]
+interpreter = sys.argv[4]
+script_path = sys.argv[5]
+
+lock_file_path = state_root / ".running.flock"
+state_path = state_root / "state.json"
+
+lock_fd = os.open(str(lock_file_path), os.O_CREAT | os.O_RDWR, 0o600)
+try:
+    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    os.close(lock_fd)
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    state_path.write_text(json.dumps({
+        "id": job_id,
+        "updatedAt": now,
+        "lastResult": "coalesced",
+        "lastRunAt": now,
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+    sys.exit(0)
+
+os.ftruncate(lock_fd, 0)
+os.write(lock_fd, f"{os.getpid()}\n".encode("utf-8"))
+try:
+    lock_dir.mkdir(exist_ok=True)
+except OSError:
+    pass
+
+try:
+    proc = subprocess.run([interpreter, script_path], close_fds=True)
+    exit_code = proc.returncode
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    default_result = "succeeded" if exit_code == 0 else "failed"
+    existing = {}
+    if state_path.exists():
+        try:
+            existing = json.loads(state_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+    if existing.get("id") != job_id or existing.get("lastResult") in (None, "coalesced"):
+        state_path.write_text(json.dumps({
+            "id": job_id,
+            "updatedAt": now,
+            "lastResult": default_result,
+            "lastRunAt": now,
+            "summary": existing.get("summary") or ("成功" if exit_code == 0 else f"exit {exit_code}"),
+            "overviewMd": existing.get("overviewMd") or ("运行完成" if exit_code == 0 else f"任务退出码 {exit_code}"),
+        }, ensure_ascii=False) + "\n", encoding="utf-8")
+finally:
+    try:
+        os.rmdir(lock_dir)
+    except OSError:
+        pass
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        os.close(lock_fd)
+
+sys.exit(exit_code)
 PY
-  exit 0
-fi
-
-cleanup_lock() {
-  local current_pid
-  current_pid="$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')"
-  if [[ "$current_pid" == "$$" ]]; then
-    rm -f "$pid_file" 2>/dev/null || true
-    rmdir "$lock_dir" 2>/dev/null || true
-  fi
-}
-trap 'cleanup_lock' EXIT INT TERM
-"$interpreter" "$script_path"
-exit_code=$?
-exit "$exit_code"

@@ -121,18 +121,26 @@ public struct ScheduledJobAction: Codable, Sendable, Equatable, Identifiable {
         selectedValues: [String: Set<String>]
     ) -> [ScheduledJobActionResponse] {
         controls.map { control in
-            let resolvedValue: String
             switch control.kind {
             case .multiSelect:
-                resolvedValue = selectedValues[control.id]?.sorted().joined(separator: ",")
+                let resolvedValue = selectedValues[control.id]?.sorted().joined(separator: ",")
                     ?? values[control.id]
                     ?? "确认"
+                return ScheduledJobActionResponse(controlID: control.id, value: resolvedValue, maxLength: nil)
             case .singleSelect:
-                resolvedValue = values[control.id] ?? control.options.first ?? "确认"
-            case .confirm, .textInput:
-                resolvedValue = values[control.id] ?? "确认"
+                let resolvedValue = values[control.id] ?? control.options.first ?? "确认"
+                return ScheduledJobActionResponse(controlID: control.id, value: resolvedValue, maxLength: nil)
+            case .confirm:
+                let resolvedValue = values[control.id] ?? "确认"
+                return ScheduledJobActionResponse(controlID: control.id, value: resolvedValue, maxLength: nil)
+            case .textInput:
+                let resolvedValue = values[control.id] ?? "确认"
+                return ScheduledJobActionResponse(
+                    controlID: control.id,
+                    value: resolvedValue,
+                    maxLength: control.effectiveMaxLength
+                )
             }
-            return ScheduledJobActionResponse(controlID: control.id, value: resolvedValue)
         }
     }
 }
@@ -141,9 +149,17 @@ public struct ScheduledJobActionResponse: Codable, Sendable, Equatable {
     public let controlID: String
     public let value: String
 
-    public init(controlID: String, value: String) {
+    public init(
+        controlID: String,
+        value: String,
+        maxLength: Int? = 80
+    ) {
         self.controlID = controlID
-        self.value = String(value.prefix(80))
+        if let maxLength {
+            self.value = String(value.prefix(min(max(maxLength, 0), 80)))
+        } else {
+            self.value = value
+        }
     }
 }
 

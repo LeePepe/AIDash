@@ -55,12 +55,53 @@ struct ScheduledPulseTests {
             .deletingLastPathComponent()
             .appendingPathComponent("scripts/scheduled-job-entrypoint.sh")
         let script = try String(contentsOf: scriptURL, encoding: .utf8)
-        #expect(script.contains("exit_code=$?"))
-        #expect(script.contains("kill -0 \"$holder_pid\""))
-        #expect(script.contains("if [[ \"$current_pid\" == \"$$\" ]]; then"))
-        #expect(script.contains("trap 'cleanup_lock' EXIT INT TERM"))
-        #expect(script.contains("rmdir \"$lock_dir\""))
+        #expect(script.contains("fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)"))
+        #expect(script.contains("exit_code = proc.returncode"))
+        #expect(script.contains("os.rmdir(lock_dir)"))
         #expect(!script.contains("exec \"$interpreter\""))
+
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-entrypoint-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
+
+        let childScriptURL = tempHome.appendingPathComponent("job.py")
+        try """
+        import sys, time
+        time.sleep(0.35)
+        sys.exit(0)
+        """.write(to: childScriptURL, atomically: true, encoding: .utf8)
+
+        func makeProcess() -> Process {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            proc.arguments = [scriptURL.path, "my-pr-supervisor", "/usr/bin/python3", childScriptURL.path]
+            var env = ProcessInfo.processInfo.environment
+            env["HOME"] = tempHome.path
+            proc.environment = env
+            return proc
+        }
+
+        let p1 = makeProcess()
+        let p2 = makeProcess()
+        try p1.run()
+        Thread.sleep(forTimeInterval: 0.08)
+        try p2.run()
+        p2.waitUntilExit()
+        #expect(p2.terminationStatus == 0)
+
+        let jobDir = tempHome.appendingPathComponent("Library/Application Support/AIDash/jobs/my-pr-supervisor", isDirectory: true)
+        let coalescedData = try Data(contentsOf: jobDir.appendingPathComponent("state.json"))
+        let coalescedText = try #require(String(data: coalescedData, encoding: .utf8))
+        #expect(coalescedText.contains("\"lastResult\": \"coalesced\""))
+
+        p1.waitUntilExit()
+        #expect(p1.terminationStatus == 0)
+
+        let finalData = try Data(contentsOf: jobDir.appendingPathComponent("state.json"))
+        let finalText = try #require(String(data: finalData, encoding: .utf8))
+        #expect(finalText.contains("\"lastResult\": \"succeeded\""))
+        #expect(!FileManager.default.fileExists(atPath: jobDir.appendingPathComponent(".running.lock").path))
     }
 
     @Test("acknowledging an action in one job does not hide a same-id action in another job")
