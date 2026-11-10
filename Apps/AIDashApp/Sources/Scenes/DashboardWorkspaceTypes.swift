@@ -206,6 +206,7 @@ public enum HerdrSocketClient {
         }
 
         let clampedMs = max(50, min(timeoutMilliseconds, 5_000))
+        let deadline = Date().addingTimeInterval(Double(clampedMs) / 1000.0)
         var timeout = timeval(
             tv_sec: clampedMs / 1000,
             tv_usec: __darwin_suseconds_t((clampedMs % 1000) * 1000)
@@ -249,6 +250,7 @@ public enum HerdrSocketClient {
 
         var totalSent = 0
         while totalSent < wireBytes.count {
+            guard Date() < deadline else { return nil }
             let written = wireBytes.withUnsafeBytes { rawBuf -> Int in
                 guard let base = rawBuf.baseAddress else { return -1 }
                 return Darwin.send(fd, base.advanced(by: totalSent), wireBytes.count - totalSent, 0)
@@ -259,7 +261,8 @@ public enum HerdrSocketClient {
 
         var responseData = Data()
         var chunk = [UInt8](repeating: 0, count: 4096)
-        while true {
+        let maxResponseBytes = 65_536
+        while responseData.count < maxResponseBytes, Date() < deadline {
             let count = Darwin.recv(fd, &chunk, chunk.count, 0)
             if count <= 0 { break }
             responseData.append(contentsOf: chunk[0..<count])
@@ -271,10 +274,11 @@ public enum HerdrSocketClient {
     }
 
     @discardableResult
-    nonisolated public static func openWorkspaceAndRun(
+    nonisolated public static func openWorkspaceAndStageText(
         cwd: String,
         label: String,
-        command: String,
+        stagedText: String,
+        submitWithEnter: Bool,
         focus: Bool = true,
         socketPath: String? = nil
     ) -> Bool {
@@ -293,18 +297,20 @@ public enum HerdrSocketClient {
 
         guard let textResp = sendRequest(
             method: "pane.send_text",
-            params: ["pane_id": paneId, "text": command],
+            params: ["pane_id": paneId, "text": stagedText],
             socketPath: socketPath
         ), textResp["error"] == nil else {
             return false
         }
 
-        guard let keyResp = sendRequest(
-            method: "pane.send_keys",
-            params: ["pane_id": paneId, "keys": ["enter"]],
-            socketPath: socketPath
-        ), keyResp["error"] == nil else {
-            return false
+        if submitWithEnter {
+            guard let keyResp = sendRequest(
+                method: "pane.send_keys",
+                params: ["pane_id": paneId, "keys": ["enter"]],
+                socketPath: socketPath
+            ), keyResp["error"] == nil else {
+                return false
+            }
         }
 
         if focus && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
@@ -313,6 +319,24 @@ public enum HerdrSocketClient {
             }
         }
         return true
+    }
+
+    @discardableResult
+    nonisolated public static func openWorkspaceAndRun(
+        cwd: String,
+        label: String,
+        command: String,
+        focus: Bool = true,
+        socketPath: String? = nil
+    ) -> Bool {
+        openWorkspaceAndStageText(
+            cwd: cwd,
+            label: label,
+            stagedText: command,
+            submitWithEnter: true,
+            focus: focus,
+            socketPath: socketPath
+        )
     }
 
     @MainActor
@@ -327,60 +351,67 @@ public enum HerdrSocketClient {
         }
     }
 
+    private static let repoSlashRegex = try? NSRegularExpression(
+        pattern: "(?:LeePepe|tianpeili)/([A-Za-z0-9_.-]+)",
+        options: [.caseInsensitive]
+    )
+
+    private static let orderedProjectCandidates = [
+        "VitalStride",
+        "VoxPocket",
+        "VoxKit",
+        "demoUI",
+        "Financial",
+        "falcon",
+        "raven",
+        "shared-design-system",
+        "shared-ci",
+        "user-skills",
+        "AIDash"
+    ]
+
+    nonisolated public static func inferProjectFolderName(
+        title: String,
+        summary: String,
+        command: String?
+    ) -> String {
+        let combinedText = "\(title) \(summary) \(command ?? "")"
+        if let regex = repoSlashRegex {
+            let nsRange = NSRange(combinedText.startIndex..<combinedText.endIndex, in: combinedText)
+            if let match = regex.firstMatch(in: combinedText, options: [], range: nsRange),
+               match.numberOfRanges > 1,
+               let repoRange = Range(match.range(at: 1), in: combinedText) {
+                let rawName = String(combinedText[repoRange])
+                if let canonical = orderedProjectCandidates.first(where: { $0.caseInsensitiveCompare(rawName) == .orderedSame }) {
+                    return canonical
+                }
+                return rawName
+            }
+        }
+        let lowerCombined = combinedText.lowercased()
+        for candidate in orderedProjectCandidates where lowerCombined.contains(candidate.lowercased()) {
+            return candidate
+        }
+        return "AIDash"
+    }
+
     nonisolated public static func resolveProjectDirectory(
         for item: DashboardActionItem,
         homeURL: URL? = nil
     ) -> URL {
         let resolvedHome = homeURL ?? currentUserHomeDirectoryURL()
         let devURL = resolvedHome.appendingPathComponent("Development", isDirectory: true)
-        let defaultRepoURL = devURL.appendingPathComponent("AIDash", isDirectory: true)
-        let combinedText = "\(item.title) \(item.summary) \(item.command ?? "")"
+        let folderName = inferProjectFolderName(title: item.title, summary: item.summary, command: item.command)
 
         let subdirs = (try? FileManager.default.contentsOfDirectory(
             at: devURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )) ?? []
-        var dirLookup: [String: URL] = [:]
-        for url in subdirs {
-            dirLookup[url.lastPathComponent.lowercased()] = url
+        if let matchedDir = subdirs.first(where: { $0.lastPathComponent.caseInsensitiveCompare(folderName) == .orderedSame }) {
+            return matchedDir
         }
-
-        if let regex = try? NSRegularExpression(pattern: "(?:LeePepe|tianpeili)/([A-Za-z0-9_.-]+)", options: [.caseInsensitive]) {
-            let nsRange = NSRange(combinedText.startIndex..<combinedText.endIndex, in: combinedText)
-            if let match = regex.firstMatch(in: combinedText, options: [], range: nsRange),
-               match.numberOfRanges > 1,
-               let repoRange = Range(match.range(at: 1), in: combinedText) {
-                let candidateName = String(combinedText[repoRange])
-                if let matchedDir = dirLookup[candidateName.lowercased()] {
-                    return matchedDir
-                }
-                return devURL.appendingPathComponent(candidateName, isDirectory: true)
-            }
-        }
-
-        let orderedCandidates = [
-            "VitalStride",
-            "VoxPocket",
-            "VoxKit",
-            "demoUI",
-            "Financial",
-            "falcon",
-            "raven",
-            "shared-design-system",
-            "shared-ci",
-            "user-skills",
-            "AIDash"
-        ]
-        let lowerCombined = combinedText.lowercased()
-        for candidate in orderedCandidates where lowerCombined.contains(candidate.lowercased()) {
-            if let matchedDir = dirLookup[candidate.lowercased()] {
-                return matchedDir
-            }
-            return devURL.appendingPathComponent(candidate, isDirectory: true)
-        }
-
-        return dirLookup["aidash"] ?? defaultRepoURL
+        return devURL.appendingPathComponent(folderName, isDirectory: true)
     }
 
     nonisolated public static func shellSingleQuoted(_ raw: String) -> String {
@@ -427,10 +458,11 @@ public enum HerdrSocketClient {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(command, forType: .string)
         let label = "m2-\(projectDir.lastPathComponent)"
-        return openWorkspaceAndRun(
+        return openWorkspaceAndStageText(
             cwd: projectDir.path,
             label: label,
-            command: command,
+            stagedText: command,
+            submitWithEnter: false,
             focus: true,
             socketPath: socketPath
         )
@@ -961,21 +993,24 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public let externalURLString: String?
     public let backingCardId: String?
     public let backingItemRef: String?
+    public let projectFolderName: String
 
     public init(
         id: String, title: String, summary: String, sourceTag: String,
         cliFilter: DashboardCLIFilter = .all, priority: DashboardActionPriority = .p1,
         isCompleted: Bool = false, command: String? = nil, externalURLString: String? = nil,
-        backingCardId: String? = nil, backingItemRef: String? = nil
+        backingCardId: String? = nil, backingItemRef: String? = nil,
+        projectFolderName: String? = nil
     ) {
         self.id = id; self.title = title; self.summary = summary; self.sourceTag = sourceTag
         self.cliFilter = cliFilter; self.priority = priority; self.isCompleted = isCompleted
         self.command = command; self.externalURLString = externalURLString
         self.backingCardId = backingCardId; self.backingItemRef = backingItemRef
-    }
-
-    public var projectFolderName: String {
-        HerdrSocketClient.resolveProjectDirectory(for: self).lastPathComponent
+        self.projectFolderName = projectFolderName ?? HerdrSocketClient.inferProjectFolderName(
+            title: title,
+            summary: summary,
+            command: command
+        )
     }
 }
 

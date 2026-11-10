@@ -757,7 +757,7 @@ struct DashboardWorkspaceTests {
         let serverReady = DispatchSemaphore(value: 0)
         let serverThread = Thread {
             serverReady.signal()
-            for idx in 0..<3 {
+            for idx in 0..<2 {
                 let clientFD = Darwin.accept(serverFD, nil, nil)
                 guard clientFD >= 0 else { break }
                 var buf = [UInt8](repeating: 0, count: 4096)
@@ -783,6 +783,7 @@ struct DashboardWorkspaceTests {
             socketPath: sockPath
         )
         #expect(dispatched == true)
+        #expect(vitalItem.projectFolderName == "VitalStride")
 
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: [vitalItem])
         let missingSockPath = tempHome.appendingPathComponent("missing.sock").path

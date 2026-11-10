@@ -298,10 +298,11 @@ public final class DashboardWorkspaceStore {
             let label = "m2-\(projectDir.lastPathComponent)"
             let itemID = item.id
             Task.detached(priority: .userInitiated) { [weak self] in
-                let ok = HerdrSocketClient.openWorkspaceAndRun(
+                let ok = HerdrSocketClient.openWorkspaceAndStageText(
                     cwd: projectDir.path,
                     label: label,
-                    command: cmd,
+                    stagedText: cmd,
+                    submitWithEnter: false,
                     focus: true
                 )
                 if ok {
