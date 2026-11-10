@@ -44,6 +44,12 @@ class Proposal:
     priority: str
     status: str
     ref: str = ""
+    app_name: str = ""
+    event_kind: str = ""
+    signature: str = ""
+    stack_top_symbol: str = ""
+    recommended_layer: str = ""
+    verify_cmd: str = ""
 
 
 def _coerce(obj: dict) -> Proposal | None:
@@ -66,7 +72,13 @@ def _coerce(obj: dict) -> Proposal | None:
         priority = "medium"
     status = str(obj.get("status", "pending")).strip().lower()
     detail = str(obj.get("detail", "")).strip()
-    ref = str(obj.get("ref", "")).strip()
+    ref = str(obj.get("ref", "") or "").strip()
+    app_name = str(obj.get("app_name", "") or "").strip()
+    event_kind = str(obj.get("event_kind", "") or "").strip().lower()
+    signature = str(obj.get("signature", "") or "").strip()
+    stack_top_symbol = str(obj.get("stack_top_symbol", "") or "").strip()
+    recommended_layer = str(obj.get("recommended_layer", "") or "").strip()
+    verify_cmd = str(obj.get("verify_cmd", "") or "").strip()
     return Proposal(
         id=pid,
         ts=ts,
@@ -76,6 +88,12 @@ def _coerce(obj: dict) -> Proposal | None:
         priority=priority,
         status=status,
         ref=ref,
+        app_name=app_name,
+        event_kind=event_kind,
+        signature=signature,
+        stack_top_symbol=stack_top_symbol,
+        recommended_layer=recommended_layer,
+        verify_cmd=verify_cmd,
     )
 
 

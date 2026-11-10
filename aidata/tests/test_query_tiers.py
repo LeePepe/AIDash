@@ -292,3 +292,88 @@ def test_cost_by_project_normalizes_blank_project_labels(tmp_path):
     assert rows[0][idx["project"]] == "AIDash"
     assert rows[0][idx["cost_usd"]] == 90.0
     assert rows[0][idx["bucket"]] == "project"
+
+
+def test_app_crash_and_perf_aggregates_7d_crash_and_p95_regression(tmp_path):
+    db = tmp_path / "warehouse.db"
+    sql_path = QUERIES / "retro" / "app_crash_and_perf.sql"
+    con = sqlite3.connect(db)
+    try:
+        con.execute(
+            """
+            CREATE TABLE fact_product_telemetry (
+                event_id TEXT PRIMARY KEY,
+                app_name TEXT NOT NULL,
+                app_version TEXT,
+                build_number TEXT,
+                platform TEXT,
+                event_kind TEXT NOT NULL,
+                signature TEXT,
+                stack_top_symbol TEXT,
+                metric_ms REAL,
+                occurred_at TEXT NOT NULL,
+                cst_day TEXT GENERATED ALWAYS AS (date(occurred_at, '+8 hours')) STORED
+            )
+            """
+        )
+        events = [
+            # Prior 7d baseline for AIDash perf (20 samples: 19 at 100ms, 1 outlier at 500ms -> P95 is 19th = 100ms)
+            *(
+                (f"e-prev-perf-{i}", "AIDash", "2.0", "100", "macos", "perf", "aidash.ready_scene", "BriefingView.body", 100.0, "2026-11-01T02:00:00Z")
+                for i in range(19)
+            ),
+            ("e-prev-perf-outlier", "AIDash", "2.0", "100", "macos", "perf", "aidash.ready_scene", "BriefingView.body", 500.0, "2026-11-01T02:05:00Z"),
+            ("e-prev-crash", "VoxPocket", "1.3", "40", "macos", "crash", "OLD_SIG", "OldSymbol.run", None, "2026-11-01T03:00:00Z"),
+            # Current 7d: AIDash has >20% P95 regression (20 samples: 19 at 150ms, 1 outlier at 900ms -> P95 is 19th = 150ms vs 100ms = +50%)
+            *(
+                (f"e-cur-perf-{i}", "AIDash", "2.1", "108", "macos", "perf", "aidash.ready_scene", "BriefingView.body", 150.0, "2026-11-09T02:00:00Z")
+                for i in range(19)
+            ),
+            ("e-cur-perf-outlier", "AIDash", "2.1", "108", "macos", "perf", "aidash.ready_scene", "BriefingView.body", 900.0, "2026-11-10T02:00:00Z"),
+            # Current 7d: VitalStride has a brand new crash signature; its 20 perf samples have 19 at 200ms and 1 outlier at 1000ms (P95 = 200ms, no regression)
+            ("e-cur-crash-1", "VitalStride", "1.1", "12", "ios", "crash", "EXC_BAD_ACCESS:HealthSync", "HealthSyncService.fetch()", None, "2026-11-10T04:00:00Z"),
+            *(
+                (f"e-prev-vs-{i}", "VitalStride", "1.0", "10", "ios", "perf", "vitalstride.launch", "AppDelegate.didFinish", 200.0, "2026-11-01T04:05:00Z")
+                for i in range(20)
+            ),
+            *(
+                (f"e-cur-perf-vs-{i}", "VitalStride", "1.1", "12", "ios", "perf", "vitalstride.launch", "AppDelegate.didFinish", 200.0, "2026-11-10T04:05:00Z")
+                for i in range(19)
+            ),
+            ("e-cur-perf-vs-outlier", "VitalStride", "1.1", "12", "ios", "perf", "vitalstride.launch", "AppDelegate.didFinish", 1000.0, "2026-11-10T04:06:00Z"),
+        ]
+        con.executemany(
+            "INSERT INTO fact_product_telemetry "
+            "(event_id, app_name, app_version, build_number, platform, event_kind, "
+            "signature, stack_top_symbol, metric_ms, occurred_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            events,
+        )
+        con.commit()
+        cur = con.execute(sql_path.read_text(encoding="utf-8"))
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        by_app = {r[cols.index("app_name")]: dict(zip(cols, r)) for r in rows}
+    finally:
+        con.close()
+
+    assert set(by_app) == {"AIDash", "VitalStride"}
+    vs = by_app["VitalStride"]
+    assert vs["crash_count_7d"] == 1
+    assert vs["new_crash_signature_count"] == 1
+    assert vs["crash_free_rate_7d"] == round(1.0 - 1.0 / 21.0, 4)
+    assert vs["signature"] == "EXC_BAD_ACCESS:HealthSync"
+    assert vs["stack_top_symbol"] == "HealthSyncService.fetch()"
+    assert vs["p95_metric_ms_7d"] == 200.0
+    assert vs["p95_metric_ms_prev_7d"] == 200.0
+    assert vs["is_perf_regressed"] == 0
+
+    ad = by_app["AIDash"]
+    assert ad["crash_count_7d"] == 0
+    assert ad["new_crash_signature_count"] == 0
+    assert ad["crash_free_rate_7d"] == 1.0
+    assert ad["p95_metric_ms_7d"] == 150.0
+    assert ad["p95_metric_ms_prev_7d"] == 100.0
+    assert ad["p95_regression_pct"] == 50.0
+    assert ad["is_perf_regressed"] == 1
+

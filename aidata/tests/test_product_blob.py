@@ -5,9 +5,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from adapters import product_blob
 
 import cli
-import adapters.product_blob as product_blob
 
 CONTAINER_URL = "https://sampleacct.blob.core.windows.net/sample-container"
 PREFIX = "synthetic/v1"
@@ -498,3 +498,79 @@ def test_later_success_ignores_abandoned_stage_and_preserves_prior_batch(
     } == first_snapshot
     assert abandoned.exists()
     assert (abandoned / "partial").read_bytes() == b"partial"
+
+
+@pytest.mark.unit
+def test_normalize_parses_gzip_batches_and_jsonl_shards(monkeypatch, tmp_path):
+    import gzip
+    import sqlite3
+
+    import cleanio
+    import config
+    raw_dir = tmp_path / "raw"
+    clean_dir = tmp_path / "clean"
+    monkeypatch.setattr(product_blob, "RAW_DIR", raw_dir)
+    monkeypatch.setattr(cleanio, "CLEAN_DIR", clean_dir)
+    monkeypatch.setattr(config, "CLEAN_DIR", clean_dir)
+
+    batch_dir = raw_dir / "product_blob" / "batches" / "batch-1" / "VoxPocket" / "42" / "2026-11-10"
+    batch_dir.mkdir(parents=True)
+    ndjson_lines = [
+        json.dumps({
+            "event_id": "evt-crash-1",
+            "app_name": "VoxPocket",
+            "app_version": "1.4.0",
+            "build_number": "42",
+            "platform": "macos",
+            "event_kind": "crash",
+            "signature": "EXC_BAD_ACCESS:AudioEngine.start",
+            "stack_top_symbol": "AudioEngine.start()",
+            "metric_ms": None,
+            "occurred_at": "2026-11-10T08:00:00Z",
+        }),
+        json.dumps({
+            "name": "aidash.performance.ready_scene",
+            "properties": {
+                "app_name": "AIDash",
+                "app_version": "2.1.0",
+                "build_number": "108",
+                "platform": "macos",
+                "duration_ms": 480,
+                "stack_top_symbol": "BriefingScene.onAppear",
+            },
+            "timestamp": "2026-11-10T09:30:00Z",
+        }),
+    ]
+    (batch_dir / "events.ndjson.gz").write_bytes(
+        gzip.compress(("\n".join(ndjson_lines) + "\n").encode("utf-8"))
+    )
+
+    count = product_blob.normalize()
+    assert count == 2
+
+    db_path = clean_dir / "product_blob.db"
+    assert db_path.is_file()
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT event_id, app_name, app_version, build_number, platform, "
+            "event_kind, signature, stack_top_symbol, metric_ms, occurred_at "
+            "FROM product_telemetry ORDER BY app_name"
+        ).fetchall()
+    assert len(rows) == 2
+    assert rows[0][1] == "AIDash"
+    assert rows[0][5] == "perf"
+    assert rows[0][7] == "BriefingScene.onAppear"
+    assert rows[0][8] == 480.0
+    assert rows[1] == (
+        "evt-crash-1",
+        "VoxPocket",
+        "1.4.0",
+        "42",
+        "macos",
+        "crash",
+        "EXC_BAD_ACCESS:AudioEngine.start",
+        "AudioEngine.start()",
+        None,
+        "2026-11-10T08:00:00Z",
+    )
+

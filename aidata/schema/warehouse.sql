@@ -406,6 +406,23 @@ CREATE TABLE IF NOT EXISTS fact_release_delivery (
 );
 CREATE INDEX IF NOT EXISTS idx_release_delivery_cst_day ON fact_release_delivery(cst_day);
 
+CREATE TABLE IF NOT EXISTS fact_product_telemetry (
+    event_id TEXT PRIMARY KEY,
+    app_name TEXT NOT NULL,
+    app_version TEXT,
+    build_number TEXT,
+    platform TEXT,
+    event_kind TEXT NOT NULL,
+    signature TEXT,
+    stack_top_symbol TEXT,
+    metric_ms REAL,
+    occurred_at TEXT NOT NULL,
+    cst_day TEXT GENERATED ALWAYS AS (date(occurred_at, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_product_telemetry_cst_day ON fact_product_telemetry(cst_day);
+CREATE INDEX IF NOT EXISTS idx_product_telemetry_app_kind ON fact_product_telemetry(app_name, event_kind);
+
+
 -- ---------------------------------------------------------------------------
 -- dim_session — per-session rollup (populated during merge from facts).
 --

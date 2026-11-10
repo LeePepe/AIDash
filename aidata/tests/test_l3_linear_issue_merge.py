@@ -68,3 +68,51 @@ def test_merge_combines_multica_and_linear_issues(monkeypatch, tmp_path):
         ("MY-10", "todo", "medium", "ws-my", "AIDash", "2026-11-08"),
         ("TIA-90", "in_progress", "high", "linear:TIA", "Personal project", "2026-11-09"),
     ]
+
+
+@pytest.mark.unit
+def test_merge_loads_fact_product_telemetry(monkeypatch, tmp_path):
+    from adapters import product_blob
+
+    clean = tmp_path / "clean"
+    monkeypatch.setattr(cleanio, "CLEAN_DIR", clean)
+    monkeypatch.setattr(config, "CLEAN_DIR", clean)
+    monkeypatch.setattr(merge, "WAREHOUSE_DB", tmp_path / "warehouse.db")
+
+    cleanio.write_clean(
+        "product_blob",
+        "product_telemetry",
+        product_blob._TELEMETRY_DDL,
+        [
+            {
+                "event_id": "evt-1",
+                "app_name": "VitalStride",
+                "app_version": "1.2.0",
+                "build_number": "15",
+                "platform": "ios",
+                "event_kind": "crash",
+                "signature": "SIGABRT:WorkoutStore.save",
+                "stack_top_symbol": "WorkoutStore.save()",
+                "metric_ms": None,
+                "occurred_at": "2026-11-10T18:00:00Z",
+            }
+        ],
+        product_blob._TELEMETRY_COLS,
+    )
+
+    counts = merge.run_merge()
+    assert counts["fact_product_telemetry"] == 1
+    with sqlite3.connect(merge.WAREHOUSE_DB) as conn:
+        row = conn.execute(
+            "SELECT event_id, app_name, event_kind, signature, stack_top_symbol, cst_day "
+            "FROM fact_product_telemetry"
+        ).fetchone()
+    assert row == (
+        "evt-1",
+        "VitalStride",
+        "crash",
+        "SIGABRT:WorkoutStore.save",
+        "WorkoutStore.save()",
+        "2026-11-11",
+    )
+
