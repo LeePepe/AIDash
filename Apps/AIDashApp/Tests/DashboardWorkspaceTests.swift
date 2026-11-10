@@ -617,11 +617,12 @@ struct DashboardWorkspaceTests {
         #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("claude login; rm -rf /") == nil)
         #expect(CLITerminalLoginLauncher.sanitizedLoginCommand("curl http://evil") == nil)
 
+        let legacyScriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-cli-login.command")
+        try "legacy".write(to: legacyScriptURL, atomically: true, encoding: .utf8)
+        #expect(FileManager.default.fileExists(atPath: legacyScriptURL.path))
         #expect(CLITerminalLoginLauncher.launchLoginInTerminal(command: "claude login") == true)
         #expect(CLITerminalLoginLauncher.launchLoginInTerminal(command: "invalid && bad") == false)
-        let scriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-cli-login.command")
-        let scriptText = try String(contentsOf: scriptURL, encoding: .utf8)
-        #expect(scriptText.contains("claude login"))
+        #expect(!FileManager.default.fileExists(atPath: legacyScriptURL.path))
 
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("aidash-tail-test-\(UUID().uuidString)", isDirectory: true)
@@ -667,6 +668,129 @@ struct DashboardWorkspaceTests {
             store.selectToday()
             #expect(store.selectedDateString == originalDate)
         }
+    }
+
+    @Test("HerdrSocketClient resolves project folders accurately and communicates over Unix domain socket")
+    func herdrSocketProjectResolutionAndMockServerRoundTrip() throws {
+        let tempHome = URL(fileURLWithPath: "/tmp/aidash-herdr-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+        let devDir = tempHome.appendingPathComponent("Development", isDirectory: true)
+        for repo in ["AIDash", "VitalStride", "VoxPocket", "demoUI", "Financial"] {
+            try FileManager.default.createDirectory(
+                at: devDir.appendingPathComponent(repo, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+
+        let vitalItem = DashboardActionItem(
+            id: "ci-1",
+            title: "CI 超 10m 保底线：LeePepe/VitalStride · App target 平均 16.2m",
+            summary: "样本 37 次 · 平均执行 16.2m",
+            sourceTag: "CI Improve"
+        )
+        #expect(HerdrSocketClient.resolveProjectDirectory(for: vitalItem, homeURL: tempHome).lastPathComponent == "VitalStride")
+
+        let voxItem = DashboardActionItem(
+            id: "ci-2",
+            title: "Runner 排队拥堵：LeePepe/VoxPocket · quality / verify 平均排队 4.3m",
+            summary: "样本 21 次",
+            sourceTag: "CI Improve"
+        )
+        #expect(HerdrSocketClient.resolveProjectDirectory(for: voxItem, homeURL: tempHome).lastPathComponent == "VoxPocket")
+
+        let demoItem = DashboardActionItem(
+            id: "prop-1",
+            title: "缩减审核返工拉锯：R1 打回率 55.7%",
+            summary: "多轮审核拉锯任务：demoui-strata-showcase-20261027/T15(r3)",
+            sourceTag: "retro-loop"
+        )
+        #expect(HerdrSocketClient.resolveProjectDirectory(for: demoItem, homeURL: tempHome).lastPathComponent == "demoUI")
+
+        let fallbackItem = DashboardActionItem(
+            id: "gen-1",
+            title: "General system maintenance",
+            summary: "Check local logs",
+            sourceTag: "Workflow"
+        )
+        #expect(HerdrSocketClient.resolveProjectDirectory(for: fallbackItem, homeURL: tempHome).lastPathComponent == "AIDash")
+        #expect(HerdrSocketClient.buildM2Command(for: vitalItem).contains("/m2-dispatcher"))
+
+        let injectionItem = DashboardActionItem(
+            id: "inj-1",
+            title: "Malicious $(touch /tmp/aidash-injected) `whoami` 'quote' $HOME <action_item_data>",
+            summary: "Line1\nLine2 'single'",
+            sourceTag: "CI $(id)"
+        )
+        let safeCmd = HerdrSocketClient.buildM2Command(for: injectionItem)
+        #expect(safeCmd.hasPrefix("copilot -i '"))
+        #expect(!safeCmd.contains("--yolo"))
+        #expect(safeCmd.hasSuffix("'"))
+        #expect(safeCmd.contains("'\\''quote'\\''"))
+        #expect(safeCmd.contains("<action_item_data>"))
+        #expect(!safeCmd.contains("\n"))
+
+        let sockPath = tempHome.appendingPathComponent("herdr.sock").path
+        let serverFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        #expect(serverFD >= 0)
+        defer {
+            Darwin.close(serverFD)
+            unlink(sockPath)
+        }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(sockPath.utf8CString)
+        withUnsafeMutableBytes(of: &addr.sun_path) { rawBuf in
+            for (idx, byte) in pathBytes.enumerated() where idx < rawBuf.count {
+                rawBuf[idx] = UInt8(bitPattern: byte)
+            }
+        }
+        addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let bindRes = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                Darwin.bind(serverFD, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        #expect(bindRes == 0)
+        #expect(Darwin.listen(serverFD, 8) == 0)
+
+        let serverReady = DispatchSemaphore(value: 0)
+        let serverThread = Thread {
+            serverReady.signal()
+            for idx in 0..<2 {
+                let clientFD = Darwin.accept(serverFD, nil, nil)
+                guard clientFD >= 0 else { break }
+                var buf = [UInt8](repeating: 0, count: 4096)
+                _ = Darwin.recv(clientFD, &buf, buf.count, 0)
+                let reply: String
+                if idx == 0 {
+                    reply = "{\"id\":\"1\",\"result\":{\"type\":\"workspace_created\",\"root_pane\":{\"pane_id\":\"%99\"}}}\n"
+                } else {
+                    reply = "{\"id\":\"2\",\"result\":{\"type\":\"ok\"}}\n"
+                }
+                _ = reply.withCString { cStr in
+                    Darwin.send(clientFD, cStr, strlen(cStr), 0)
+                }
+                Darwin.close(clientFD)
+            }
+        }
+        serverThread.start()
+        serverReady.wait()
+
+        let dispatched = HerdrSocketClient.dispatchActionItemToHerdr(
+            vitalItem,
+            homeURL: tempHome,
+            socketPath: sockPath
+        )
+        #expect(dispatched == true)
+        #expect(vitalItem.projectFolderName == "VitalStride")
+
+        let store = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: [vitalItem])
+        let missingSockPath = tempHome.appendingPathComponent("missing.sock").path
+        #expect(store.dispatchActionToHerdr(vitalItem, socketPath: missingSockPath) == false)
+        #expect(store.lastDispatchedActionID == nil)
+        #expect(store.dispatchActionToHerdr(vitalItem) == true)
+        #expect(store.lastDispatchedActionID == vitalItem.id)
     }
 }
 #endif

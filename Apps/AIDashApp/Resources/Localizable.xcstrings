@@ -541,6 +541,42 @@
         }
       }
     },
+    "dashboard.actions.dispatched_herdr": {
+      "comment": "Button label after dispatching actionable item to Herdr.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent to Herdr"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已发至 Herdr"
+          }
+        }
+      }
+    },
+    "dashboard.actions.run_in_herdr": {
+      "comment": "Button label to dispatch actionable item to a new Herdr M2 workspace.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run in Herdr"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发至 Herdr"
+          }
+        }
+      }
+    },
     "dashboard.actions.empty_desc": {
       "comment": "Empty state description when no actionable items match filter.",
       "extractionState": "manual",

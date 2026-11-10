@@ -29,6 +29,7 @@ public final class DashboardWorkspaceStore {
     public var selectedRankingRowID: String?
     public var rankingAscending: Bool = false
     public var lastCopiedActionID: String?
+    public var lastDispatchedActionID: String?
     public var availableDates: [String] = DashboardWorkspaceStore.recentDateStrings()
     public var selectedDateString: String = DashboardWorkspaceStore.todayDateString()
 
@@ -276,6 +277,44 @@ public final class DashboardWorkspaceStore {
         if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
             LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
         }
+    }
+
+    @discardableResult
+    public func dispatchActionToHerdr(
+        _ item: DashboardActionItem,
+        socketPath: String? = nil
+    ) -> Bool {
+        if let socketPath {
+            let ok = HerdrSocketClient.dispatchActionItemToHerdr(item, socketPath: socketPath)
+            if ok { lastDispatchedActionID = item.id }
+            return ok
+        }
+        let cmd = HerdrSocketClient.buildM2Command(for: item)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(cmd, forType: .string)
+        if LiveDashboardTelemetryReader.isLiveEnvironment {
+            let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+            let projectDir = HerdrSocketClient.resolveProjectDirectory(for: item, homeURL: homeURL)
+            let label = "m2-\(projectDir.lastPathComponent)"
+            let itemID = item.id
+            Task.detached(priority: .userInitiated) { [weak self] in
+                let ok = HerdrSocketClient.openWorkspaceAndStageText(
+                    cwd: projectDir.path,
+                    label: label,
+                    stagedText: cmd,
+                    submitWithEnter: false,
+                    focus: true
+                )
+                if ok {
+                    await MainActor.run {
+                        self?.lastDispatchedActionID = itemID
+                    }
+                }
+            }
+            return true
+        }
+        lastDispatchedActionID = item.id
+        return true
     }
 
     public var pendingActionCount: Int {

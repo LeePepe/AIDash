@@ -53,14 +53,16 @@ public struct ActionItemsCardView: View {
             ),
             symbolName: "checklist"
         ) {
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
                 Picker(DashboardL10n.tr("dashboard.actions.filter_label", "Filter"), selection: $store.actionFilter) {
                     ForEach(DashboardActionFilter.allCases) { filter in
                         Text(filter.displayTitle).tag(filter)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 240)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
 
                 Menu {
                     Picker(DashboardL10n.tr("dashboard.actions.sort_by", "Sort By"), selection: $store.actionSort) {
@@ -76,6 +78,7 @@ public struct ActionItemsCardView: View {
                         .font(.caption)
                 }
                 .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(minHeight: 28)
             }
         } content: {
@@ -179,6 +182,12 @@ public struct ActionItemsCardView: View {
                         Text(item.priority.label)
                             .font(.caption2.weight(.bold)).monospacedDigit().padding(.horizontal, 6).padding(.vertical, 2)
                             .background(priorityColor.opacity(0.16), in: Capsule()).foregroundStyle(priorityColor)
+                        Label(item.projectFolderName, systemImage: "folder")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.12), in: Capsule())
+                            .foregroundStyle(Color.accentColor)
                         Text(item.sourceTag).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         Text(item.title).font(.body.weight(.medium)).strikethrough(item.isCompleted)
                             .foregroundStyle(item.isCompleted ? .secondary : .primary).lineLimit(1)
@@ -207,7 +216,23 @@ public struct ActionItemsCardView: View {
     }
 
     private func actionRowAccessoryButtons(_ item: DashboardActionItem) -> some View {
-        HStack(spacing: 6) {
+        let isDispatched = store.lastDispatchedActionID == item.id
+        return HStack(spacing: 6) {
+            Button {
+                store.dispatchActionToHerdr(item)
+            } label: {
+                Label(
+                    isDispatched
+                        ? DashboardL10n.tr("dashboard.actions.dispatched_herdr", "Sent to Herdr")
+                        : DashboardL10n.tr("dashboard.actions.run_in_herdr", "Run in Herdr"),
+                    systemImage: isDispatched ? "checkmark" : "terminal.fill"
+                )
+                .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .frame(minHeight: 28)
+
             if let command = item.command {
                 Button {
                     NSPasteboard.general.clearContents()
