@@ -373,7 +373,7 @@ public struct AIDashMacWorkspaceView: View {
             .background(Color(nsColor: .underPageBackgroundColor))
             .navigationTitle(store.selectedSection.title)
             .toolbar {
-                if store.selectedSection != .settings {
+                if store.selectedSection != .settings && store.selectedSection != .scheduledPulse {
                     ToolbarItem(placement: .principal) {
                         unifiedDateNavigationToolbarCluster
                     }
@@ -536,6 +536,8 @@ public struct AIDashMacWorkspaceView: View {
         switch section {
         case .overview, .actionItems:
             return store.pendingActionCount
+        case .scheduledPulse:
+            return store.scheduledPulseUnhealthyCount
         case .systemAndCosts:
             return store.highestQuotaWarningCount
         case .agentEfficiency, .settings:
@@ -563,6 +565,8 @@ public struct AIDashMacWorkspaceView: View {
                 onSelectCategory: { store.toggleChartCategory($0) }
             )
             overviewWorkbenchLensSection
+        case .scheduledPulse:
+            ScheduledPulsePageView(store: store)
         case .agentEfficiency:
             KPISummaryCardView(metrics: store.effectiveKPIMetrics)
             TrendChartCardView(

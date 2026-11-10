@@ -5536,6 +5536,978 @@
           }
         }
       }
+    },
+    "dashboard.section.scheduled_pulse": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled Pulse"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时脉搏"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.subtitle": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local scheduled jobs · read-only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机定时任务 · 只读"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.kpi.title": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled Pulse"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时脉搏"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.kpi.enabled": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enabled"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已启用"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.kpi.unhealthy": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unhealthy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不健康"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.kpi.last_tick": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last tick"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次心跳"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.board.title": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Job board"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "任务看板"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.board.subtitle": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash-owned schedulers"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash 自有调度器"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.filter.scheduler_label": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduler"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "调度器"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.filter.health_label": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Health"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "健康度"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.filter.scheduler_all": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.filter.scheduler_live": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行中"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.filter.scheduler_reserved": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reserved"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预留"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.filter.health_all": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.filter.health_healthy": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Healthy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正常"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.filter.health_unhealthy": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unhealthy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不健康"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.empty.title": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No scheduled jobs"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有读到定时任务"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.empty.description": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No jobs match the active filters."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有任务符合当前筛选条件。"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.column.status": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状态"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.column.name": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名称"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.column.source": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来源"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.column.cadence": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cadence"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "频率"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.column.last_run": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last run"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次运行"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.column.result": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Result"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "结果"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.inspector.title": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspector"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查器"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.inspector.subtitle": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected job details"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选任务详情"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.inspector.empty": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a row to view details"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择一行查看详情"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.inspector.cadence": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cadence"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "频率"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.inspector.last_run": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last run"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次运行"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.inspector.result": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Result"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "结果"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.inspector.copied": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已拷贝排查命令"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.inspector.copy": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy command hint"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拷贝排查命令"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.last_tick.never": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "—"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "—"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.last_run.never": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "—"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "—"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.job.aidata_digest": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "aidata Digest"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "aidata 摘要"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.job.pr_auto_review": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PR Auto Review"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PR 自动审查"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.job.my_pr_supervisor": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "My PR Supervisor"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "我的 PR 监督器"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.job.workiq_digest": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WorkIQ Digest"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WorkIQ 摘要"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.source.aidash": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash-owned"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AIDash 自有"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.cadence.daily_format": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily %02d:%02d"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每天 %02d:%02d"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.cadence.interval_format": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every %lld min"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每 %lld 分钟"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.cadence.reserved": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Later"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "稍后"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.health.healthy": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Healthy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正常"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.health.warning": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warning"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "警告"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.health.critical": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Critical"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "严重"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.health.expected_idle": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expected on · idle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应开却闲置"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.health.reserved": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Later"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "稍后"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.result.not_implemented": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not implemented"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未实现"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.result.ok": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正常"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.exception.failed": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "失败"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.exception.timeout": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timeout"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "超时未跑"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.exception.expected_off": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expected on but idle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应开却关"
+          }
+        }
+      }
+    },
+    "menubar.pulse.exceptions": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCHEDULED PULSE"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时脉搏"
+          }
+        }
+      }
+    },
+    "menubar.pulse.exceptions_count_format": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld issues"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个异常"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

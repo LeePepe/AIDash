@@ -62,6 +62,16 @@ public enum LiveDashboardTelemetryReader {
         return loadDataset(forDate: dateString, homeURL: home, fallbackUsage: fallbackUsage)
     }
 
+    public static func loadScheduledPulseSnapshot(
+        now: Date = Date(),
+        statuses: [ScheduledJobStatus]? = nil
+    ) -> ScheduledPulseSnapshot {
+        if let statuses {
+            return ScheduledPulseSnapshot(capturedAt: now, jobs: statuses)
+        }
+        return ScheduledPulseSnapshot.defaultSnapshot(now: now)
+    }
+
     public static func loadDataset(
         forDate dateString: String,
         homeURL: URL,

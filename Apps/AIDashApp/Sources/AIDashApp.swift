@@ -54,6 +54,9 @@ struct AIDashApp: App {
             if !outcome.isHealthy {
                 Self.recordLaunchAgentProblem(outcome)
             }
+            // Scheduled Pulse is additive: each live registry entry owns its
+            // own LaunchAgent label and never changes the XPC plist above.
+            _ = ScheduledPulseLaunchdInstaller.shared.registerLiveJobs()
         }
 
         // Start the XPC listener IMMEDIATELY — before any store loading —
