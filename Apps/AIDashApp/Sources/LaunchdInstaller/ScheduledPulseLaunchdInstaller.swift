@@ -100,6 +100,8 @@ public final class ScheduledPulseLaunchdInstaller {
         let home = homeURL ?? currentUserHomeDirectoryURL()
         guard definition.isLive, let program = definition.programPath(homeURL: home) else { return nil }
         let label = xmlEscaped(definition.launchAgentLabel)
+        let interpreter = definition.interpreterPath ?? "/usr/bin/python3"
+        let escapedInterpreter = xmlEscaped(interpreter)
         let escapedProgram = xmlEscaped(program)
         let cadenceXML: String
         switch definition.cadence {
@@ -123,7 +125,12 @@ public final class ScheduledPulseLaunchdInstaller {
         <dict>
         <key>Label</key><string>\(label)</string>
         <key>ProcessType</key><string>Interactive</string>
-        <key>Program</key><string>\(escapedProgram)</string>
+        <key>Program</key><string>\(escapedInterpreter)</string>
+        <key>ProgramArguments</key>
+        <array>
+        <string>\(escapedInterpreter)</string>
+        <string>\(escapedProgram)</string>
+        </array>
         \(cadenceXML)
         </dict>
         </plist>

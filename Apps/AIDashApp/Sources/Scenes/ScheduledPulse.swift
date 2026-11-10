@@ -82,6 +82,10 @@ public struct ScheduledJobDefinition: Sendable, Equatable, Identifiable {
         }
     }
 
+    public var interpreterPath: String? {
+        isLive ? "/usr/bin/python3" : nil
+    }
+
     public var commandHint: String? {
         guard isLive else { return nil }
         return "launchctl print gui/$(id -u)/\(launchAgentLabel)"
@@ -92,21 +96,21 @@ public enum ScheduledPulseRegistry {
     public static let jobs: [ScheduledJobDefinition] = [
         ScheduledJobDefinition(
             id: .myPRSupervisor,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "My PR Supervisor"),
+            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "监督我的 PR 并自动修复"),
             program: "~/Development/handoff/my-pr-supervisor/precheck.py",
             cadence: .interval(seconds: 300),
             isLive: true
         ),
         ScheduledJobDefinition(
             id: .prAutoReview,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.pr_auto_review", "PR Auto Review"),
+            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.pr_auto_review", "监督特定人的 PR（comment / approve）"),
             program: "~/Development/handoff/pr-auto-review/precheck.py",
             cadence: .interval(seconds: 300),
             isLive: true
         ),
         ScheduledJobDefinition(
             id: .workiqDigest,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.workiq_digest", "WorkIQ Digest"),
+            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.workiq_digest", "每天收集邮件 + Teams 并汇总"),
             program: nil,
             cadence: .reserved,
             isLive: false

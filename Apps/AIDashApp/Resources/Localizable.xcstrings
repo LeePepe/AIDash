@@ -6156,13 +6156,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "PR Auto Review"
+            "value": "监督特定人的 PR（comment / approve）"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "PR 自动审查"
+            "value": "监督特定人的 PR（comment / approve）"
           }
         }
       }
@@ -6174,13 +6174,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "My PR Supervisor"
+            "value": "监督我的 PR 并自动修复"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "我的 PR 监督器"
+            "value": "监督我的 PR 并自动修复"
           }
         }
       }
@@ -6192,13 +6192,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "WorkIQ Digest"
+            "value": "每天收集邮件 + Teams 并汇总"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "WorkIQ 摘要"
+            "value": "每天收集邮件 + Teams 并汇总"
           }
         }
       }

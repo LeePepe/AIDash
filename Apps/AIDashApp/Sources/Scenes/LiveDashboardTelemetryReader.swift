@@ -83,7 +83,7 @@ public enum LiveDashboardTelemetryReader {
         let domain = "gui/\(getuid())"
         let jobs = ScheduledPulseRegistry.liveJobs.map { definition in
             let result = effect(["print", "\(domain)/\(definition.launchAgentLabel)"])
-            return scheduledJobStatus(definition: definition, result: result, now: now)
+            return scheduledJobStatus(definition: definition, result: result)
         }
         let workiq = ScheduledPulseRegistry.reservedJobs.map {
             ScheduledJobStatus(definition: $0, health: .reserved)
@@ -93,17 +93,16 @@ public enum LiveDashboardTelemetryReader {
 
     private static func scheduledJobStatus(
         definition: ScheduledJobDefinition,
-        result: LaunchdAgentInstaller.LaunchctlResult,
-        now: Date
+        result: LaunchdAgentInstaller.LaunchctlResult
     ) -> ScheduledJobStatus {
-        let lastTick = parseLaunchdDate(from: result.stdout) ?? now
+        let parsedLastTick = parseLaunchdDate(from: result.stdout)
         guard result.succeeded else {
             let isAbsent = result.launchError == nil && (result.terminationStatus == 3 || result.terminationStatus == 113)
             return ScheduledJobStatus(
                 definition: definition,
                 health: isAbsent ? .expectedOnButIdle : .critical,
                 lastRun: parseLaunchdDate(from: result.stdout),
-                lastTick: isAbsent ? nil : lastTick,
+                lastTick: nil,
                 lastError: isAbsent ? nil : result.diagnosticSummary
             )
         }

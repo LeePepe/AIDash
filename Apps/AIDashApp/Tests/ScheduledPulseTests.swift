@@ -39,6 +39,10 @@ struct ScheduledPulseTests {
             .myPRSupervisor, .prAutoReview, .workiqDigest
         ])
         #expect(ScheduledPulseRegistry.liveJobs.count == 2)
+        #expect(ScheduledPulseRegistry.job(for: .myPRSupervisor)?.displayName == "监督我的 PR 并自动修复")
+        #expect(ScheduledPulseRegistry.job(for: .prAutoReview)?.displayName == "监督特定人的 PR（comment / approve）")
+        #expect(ScheduledPulseRegistry.job(for: .workiqDigest)?.displayName == "每天收集邮件 + Teams 并汇总")
+        #expect(ScheduledPulseSnapshot.defaultSnapshot(now: Date(timeIntervalSince1970: 0)).jobs.last?.health.label == "稍后")
         #expect(ScheduledPulseRegistry.reservedJobs.map(\.id) == [.workiqDigest])
         #expect(ScheduledPulseRegistry.job(for: .workiqDigest)?.program == nil)
         #expect(ScheduledPulseRegistry.job(for: .workiqDigest)?.cadence == .reserved)
@@ -57,7 +61,8 @@ struct ScheduledPulseTests {
                 PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
             )
             #expect(plist["Label"] as? String == definition.launchAgentLabel)
-            #expect(plist["Program"] as? String == program)
+            #expect(plist["Program"] as? String == "/usr/bin/python3")
+            #expect(plist["ProgramArguments"] as? [String] == ["/usr/bin/python3", program])
             #expect(plist["StartInterval"] as? Int == 300)
         }
 
@@ -196,6 +201,7 @@ struct ScheduledPulseTests {
         #expect(calls.allSatisfy { $0.count == 2 && $0[0] == "print" })
         #expect(calls.allSatisfy { $0[1].contains("com.tianpli.aidash.job.") })
         #expect(snapshot.jobs.first(where: { $0.id == .prAutoReview })?.health == .expectedOnButIdle)
+        #expect(snapshot.jobs.first(where: { $0.id == .prAutoReview })?.lastTick == nil)
         #expect(snapshot.jobs.first(where: { $0.id == .myPRSupervisor })?.health == .healthy)
         #expect(snapshot.jobs.first(where: { $0.id == .myPRSupervisor })?.lastTick != nil)
         #expect(snapshot.jobs.count == 3)
