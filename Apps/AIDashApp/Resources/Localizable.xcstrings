@@ -6149,6 +6149,24 @@
         }
       }
     },
+    "dashboard.scheduled_pulse.job.aidata_digest": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每日简报"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每日简报"
+          }
+        }
+      }
+    },
     "dashboard.scheduled_pulse.job.pr_auto_review": {
       "comment": "Scheduled Pulse UI copy.",
       "extractionState": "manual",
@@ -6156,13 +6174,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "监督特定人的 PR（comment / approve）"
+            "value": "特定人 PR"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "监督特定人的 PR（comment / approve）"
+            "value": "特定人 PR"
           }
         }
       }
@@ -6174,13 +6192,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "监督我的 PR 并自动修复"
+            "value": "我的 PR"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "监督我的 PR 并自动修复"
+            "value": "我的 PR"
           }
         }
       }

@@ -13,20 +13,27 @@ repository. It is intentionally short. When in doubt, re-read it.
 
 ### I. Agent-Authored, User-Read (NON-NEGOTIABLE)
 
-The app contains **no input fields, no chat, no compose surface**. Agents are
-the sole authors of all displayed content. The user's only briefing-content
-outbound channel is a small set of structured UI events (done / undone / star /
-hide, plus Team Workflow Audit finding acknowledgement and remediation-approval
-receipts) that are append-only and consumed by agents on their own schedule. An
-audit approval records Owner intent only: it never authorizes AIDash to
-remediate, mutate a source issue or run, create work, or dispatch an agent. The
-optional, explicit-consent GUI product telemetry defined by §GUI Product
-Telemetry is operational measurement, not briefing content or a new authoring
-channel. The app never modifies or interprets briefing content — it only
-renders what agents have published.
+The app contains **no briefing-content input fields, no chat, and no compose
+surface**. Agents are the sole authors of briefing content. The user's only
+briefing-content outbound channel is a small set of structured UI events (done /
+undone / star / hide, plus Team Workflow Audit finding acknowledgement and
+remediation-approval receipts) that are append-only and consumed by agents on
+their own schedule. An audit approval records Owner intent only: it never
+authorizes AIDash to remediate, mutate a source issue or run, create work, or
+dispatch an agent. The optional, explicit-consent GUI product telemetry defined
+by §GUI Product Telemetry is operational measurement, not briefing content or a
+new authoring channel. The app never modifies or interprets briefing content —
+it only renders what agents have published.
+
+The Job Framework is an additive operational exception: its main-window Need
+Actions/Todo controls may include confirm, selection, and a text input capped
+at 80 characters. Responses append only UserEvent receipts addressed to the
+owning job; they never mutate Briefing content, source issues/runs, or dispatch
+work. These controls are not part of the Briefing surface and never appear in
+the menubar.
 
 This principle constrains every design decision downstream. If a feature
-requires the user to type content, it does not belong in this app.
+requires the user to type briefing content, it does not belong in this app.
 
 ### II. Strict Separation: CLI Writes, App Reads, Both Sync via CloudKit
 
@@ -970,7 +977,25 @@ The constitution version follows MAJOR.MINOR.PATCH:
 
 ---
 
-**Version**: 1.14.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-10-15
+**Version**: 1.15.0 | **Ratified**: 2026-06-23 | **Last Amended**: 2026-11-10
+
+<!--
+1.15.0 — MINOR (additive operational Need Actions exception; no briefing
+content authoring or principle inversion).
+
+The Job Framework may render job-authored Need Actions/Todo controls in the
+main window, including textInput controls capped at 80 characters. User
+responses are append-only UserEvent receipts addressed to the owning job and
+never mutate Briefing content, source issues/runs, or dispatch work. Briefing
+surfaces remain input-free, and Need Actions never appear in the menubar.
+
+Migration note: this is an additive in-flight framework adoption. Existing
+Briefing, CardType, CloudKit, SwiftData, and UserEvent records remain valid;
+existing briefing controls keep their prior contract. The T-framework must
+adopt registry-driven jobs, state.json/actions.jsonl output, coalescing,
+owned launchd start/stop, and hostless verification without introducing a
+Briefing input or changing existing XPC/Hermes/Clockwork schedules.
+-->
 
 <!--
 1.14.0 — MINOR (material expansion with no principle removed or inverted).

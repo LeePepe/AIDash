@@ -96,6 +96,31 @@ public final class ScheduledPulseLaunchdInstaller {
         }
     }
 
+    public func start(jobID: ScheduledPulseJobID) -> RegistrationOutcome {
+        guard let definition = registry.first(where: { $0.id == jobID && $0.isLive }) else {
+            return .failed(jobID: jobID, reason: "job is not registered")
+        }
+        let domain = "gui/\(getuid())"
+        let url = plistURL(definition)
+        let result = launchctl(["bootstrap", domain, url.path])
+        return result.succeeded
+            ? .registered
+            : .failed(jobID: jobID, reason: result.diagnosticSummary)
+    }
+
+    public func stop(jobID: ScheduledPulseJobID) -> RegistrationOutcome {
+        guard let definition = registry.first(where: { $0.id == jobID && $0.isLive }) else {
+            return .failed(jobID: jobID, reason: "job is not registered")
+        }
+        let domain = "gui/\(getuid())"
+        let path = "\(domain)/\(definition.launchAgentLabel)"
+        let result = launchctl(["bootout", path])
+        if result.succeeded || (result.launchError == nil && (result.terminationStatus == 3 || result.terminationStatus == 113)) {
+            return .registered
+        }
+        return .failed(jobID: jobID, reason: result.diagnosticSummary)
+    }
+
     public static func plistData(for definition: ScheduledJobDefinition, homeURL: URL? = nil) -> Data? {
         let home = homeURL ?? currentUserHomeDirectoryURL()
         guard definition.isLive, let program = definition.programPath(homeURL: home) else { return nil }

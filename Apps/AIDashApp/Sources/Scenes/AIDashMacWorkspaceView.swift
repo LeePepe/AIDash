@@ -352,8 +352,13 @@ public struct AIDashMacWorkspaceView: View {
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(store: DashboardWorkspaceStore? = nil) {
-        _store = State(initialValue: store ?? DashboardWorkspaceStore.shared)
+    public init(
+        store: DashboardWorkspaceStore? = nil,
+        scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Void)? = nil
+    ) {
+        let resolvedStore = store ?? DashboardWorkspaceStore.shared
+        resolvedStore.scheduledActionWriter = scheduledActionWriter
+        _store = State(initialValue: resolvedStore)
     }
 
     public var body: some View {
@@ -537,7 +542,7 @@ public struct AIDashMacWorkspaceView: View {
         case .overview, .actionItems:
             return store.pendingActionCount
         case .scheduledPulse:
-            return store.scheduledPulseUnhealthyCount
+            return store.scheduledJobFrameworkSnapshot.entries.filter(\.isProblem).count
         case .systemAndCosts:
             return store.highestQuotaWarningCount
         case .agentEfficiency, .settings:

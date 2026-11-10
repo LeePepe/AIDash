@@ -212,7 +212,11 @@ private struct StarFeedbackScope: View {
         // here from `@Query` and injected alongside.
         Group {
             #if os(macOS)
-            AIDashMacWorkspaceView()
+            AIDashMacWorkspaceView(
+                scheduledActionWriter: { action, responses in
+                    writer.acknowledgeScheduledJobAction(action: action, responses: responses)
+                }
+            )
             #else
             BriefingView()
             #endif

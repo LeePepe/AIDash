@@ -1,10 +1,10 @@
 #if os(macOS)
 import Foundation
 
-public enum ScheduledPulseJobID: String, CaseIterable, Sendable, Equatable, Identifiable {
+public enum ScheduledPulseJobID: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
     case myPRSupervisor = "my-pr-supervisor"
     case prAutoReview = "pr-auto-review"
-    case workiqDigest = "workiq-digest"
+    case aidataDigest = "aidata-digest"
 
     public var id: String { rawValue }
 }
@@ -77,13 +77,14 @@ public struct ScheduledJobDefinition: Sendable, Equatable, Identifiable {
             return homeURL.appendingPathComponent("Development/handoff/pr-auto-review/precheck.py").path
         case .myPRSupervisor:
             return homeURL.appendingPathComponent("Development/handoff/my-pr-supervisor/precheck.py").path
-        case .workiqDigest:
-            return nil
+        case .aidataDigest:
+            return homeURL.appendingPathComponent("Development/AIDash/aidata/scripts/aidata_digest_run.sh").path
         }
     }
 
     public var interpreterPath: String? {
-        isLive ? "/usr/bin/python3" : nil
+        guard isLive else { return nil }
+        return id == .aidataDigest ? "/bin/zsh" : "/usr/bin/python3"
     }
 
     public var commandHint: String? {
@@ -96,24 +97,24 @@ public enum ScheduledPulseRegistry {
     public static let jobs: [ScheduledJobDefinition] = [
         ScheduledJobDefinition(
             id: .myPRSupervisor,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "监督我的 PR 并自动修复"),
+            displayName: "我的 PR",
             program: "~/Development/handoff/my-pr-supervisor/precheck.py",
             cadence: .interval(seconds: 300),
             isLive: true
         ),
         ScheduledJobDefinition(
             id: .prAutoReview,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.pr_auto_review", "监督特定人的 PR（comment / approve）"),
+            displayName: "特定人 PR",
             program: "~/Development/handoff/pr-auto-review/precheck.py",
             cadence: .interval(seconds: 300),
             isLive: true
         ),
         ScheduledJobDefinition(
-            id: .workiqDigest,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.workiq_digest", "每天收集邮件 + Teams 并汇总"),
-            program: nil,
-            cadence: .reserved,
-            isLive: false
+            id: .aidataDigest,
+            displayName: "每日简报",
+            program: "aidata/scripts/aidata_digest_run.sh",
+            cadence: .daily(hour: 4, minute: 0, timeZoneIdentifier: "Asia/Shanghai"),
+            isLive: true
         )
     ]
 

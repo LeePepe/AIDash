@@ -155,6 +155,26 @@ final class UserEventWriter {
         ))
         try? context.save()
     }
+
+    func acknowledgeScheduledJobAction(
+        action: ScheduledJobAction,
+        responses: [ScheduledJobActionResponse]
+    ) {
+        let context = ModelContext(container)
+        let responseData = try? JSONEncoder().encode(responses)
+        let responseText = responseData.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let event = UserEventModel(
+            id: UUID().uuidString,
+            timestamp: Date(),
+            device: DeviceIdentifier.current(),
+            cardId: "scheduled-pulse/\(action.jobID.rawValue)",
+            action: .acknowledgeJobAction,
+            itemRef: "\(action.id)|\(responseText)",
+            cardType: "scheduledPulse"
+        )
+        context.insert(event)
+        try? context.save()
+    }
 }
 
 // MARK: - Done latest-wins inference (MY-1372 / T102, spec 003 §8)

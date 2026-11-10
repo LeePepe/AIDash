@@ -34,6 +34,7 @@ public struct MenuBarStatusView: View {
     public let onQuit: () -> Void
     public let onOpenScheduledPulse: () -> Void
     public let scheduledPulseSnapshot: ScheduledPulseSnapshot?
+    public let scheduledJobFrameworkSnapshot: ScheduledJobFrameworkSnapshot?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var completedActionIDs: Set<String> = []
@@ -49,12 +50,14 @@ public struct MenuBarStatusView: View {
         onOpenScheduledPulse: @escaping () -> Void = {
             DashboardWorkspaceStore.shared.openDashboardWindow(section: .scheduledPulse)
         },
-        scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil
+        scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil,
+        scheduledJobFrameworkSnapshot: ScheduledJobFrameworkSnapshot? = nil
     ) {
         self.state = state; self.onRefresh = onRefresh; self.onOpenBriefing = onOpenBriefing
         self.onShowAbout = onShowAbout; self.onQuit = onQuit
         self.onOpenScheduledPulse = onOpenScheduledPulse
         self.scheduledPulseSnapshot = scheduledPulseSnapshot
+        self.scheduledJobFrameworkSnapshot = scheduledJobFrameworkSnapshot
     }
 
     public enum Action: Sendable, Equatable { case refresh, openBriefing, showAbout, quit }
@@ -91,20 +94,16 @@ public struct MenuBarStatusView: View {
         let trendPoints = liveDataset?.trends ?? DashboardWorkspaceStore.deriveTrendPoints(from: cliEntries)
         let todayTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.totalTokens }
         let periodTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.periodTotalTokens }
-        let pendingActions = Array(DashboardWorkspaceStore.deriveActionItems(from: snapshot, cliEntries: cliEntries).filter { !$0.isCompleted }.prefix(3))
-        let pulseSnapshot = scheduledPulseSnapshot
+        let frameworkSnapshot = scheduledJobFrameworkSnapshot
             ?? (LiveDashboardTelemetryReader.isLiveEnvironment
-                ? DashboardWorkspaceStore.shared.scheduledPulseSnapshot
-                : ScheduledPulseSnapshot.defaultSnapshot())
-        let pulseExceptions = ScheduledPulseLogic.exceptions(from: pulseSnapshot)
+                ? DashboardWorkspaceStore.shared.scheduledJobFrameworkSnapshot
+                : ScheduledJobFrameworkSnapshot(capturedAt: .now, entries: []))
         let prefs = MenuBarDisplayPreferences.shared
         return VStack(alignment: .leading, spacing: 12) {
             if prefs.showPopoverSystemTelemetry { telemetryGaugeStrip(snapshot) }
             cliTokenAndQuotaSection(entries: cliEntries, trendPoints: trendPoints, todayTotal: todayTotal, periodTotal: periodTotal)
-            if !pulseExceptions.isEmpty {
-                pulseExceptionsSection(rows: pulseExceptions)
-            } else if prefs.showPopoverActionItems {
-                topActionsSection(items: pendingActions)
+            if prefs.showPopoverActionItems {
+                scheduledJobsSection(snapshot: frameworkSnapshot)
             }
         }
     }
@@ -291,6 +290,18 @@ public struct MenuBarStatusView: View {
         .buttonStyle(.plain)
         .help("\(entry.displayName) · \(entry.authState.statusReasonText ?? "Today \(todayCompact)") · 7d \(periodCompact)")
     }
+    private func scheduledJobsSection(snapshot: ScheduledJobFrameworkSnapshot) -> some View {
+        MenuBarScheduledJobsCard(
+            snapshot: snapshot,
+            solidCardColor: solidCardColor,
+            onOpenProblem: { entry in
+                DashboardWorkspaceStore.shared.selectedFrameworkJobID = entry.id
+                DashboardWorkspaceStore.shared.scheduledPulseTab = .needActions
+                onOpenScheduledPulse()
+            }
+        )
+    }
+
     private func pulseExceptionsSection(rows: [ScheduledJobStatus]) -> some View {
         MenuBarPulseExceptionsCard(
             rows: rows,
@@ -536,6 +547,52 @@ private struct MenuBarInteractiveTokenChart: View {
                 }
             }
         }
+    }
+}
+
+@MainActor
+private struct MenuBarScheduledJobsCard: View {
+    let snapshot: ScheduledJobFrameworkSnapshot
+    let solidCardColor: Color
+    let onOpenProblem: (ScheduledJobFrameworkEntry) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("定时任务")
+                .font(.system(.caption2, design: .rounded, weight: .semibold))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(snapshot.entries) { entry in
+                    if entry.isProblem {
+                        Button { onOpenProblem(entry) } label: {
+                            row(entry)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        row(entry)
+                    }
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        }
+    }
+
+    private func row(_ entry: ScheduledJobFrameworkEntry) -> some View {
+        HStack(spacing: 8) {
+            Text(entry.definition.displayName)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(entry.isSuccess ? "✓" : "✗")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(entry.isSuccess ? .green : .orange)
+        }
+        .frame(minHeight: 28)
+        .contentShape(Rectangle())
     }
 }
 

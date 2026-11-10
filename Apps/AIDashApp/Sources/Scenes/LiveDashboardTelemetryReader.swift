@@ -48,6 +48,7 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 public enum LiveDashboardTelemetryReader {
     public static var isLiveEnvironment: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
@@ -136,6 +137,111 @@ public enum LiveDashboardTelemetryReader {
             }
         }
         return nil
+    }
+
+    public typealias ScheduledJobFileReader = @MainActor (URL) -> Data?
+
+    public static let productionScheduledJobFileReader: ScheduledJobFileReader = { url in
+        try? Data(contentsOf: url)
+    }
+
+    public static func loadScheduledJobFrameworkSnapshot(
+        now: Date = Date(),
+        fileReader: ScheduledJobFileReader? = nil,
+        homeURL: URL? = nil
+    ) -> ScheduledJobFrameworkSnapshot {
+        guard isLiveEnvironment || fileReader != nil || homeURL != nil else {
+            return ScheduledJobFrameworkSnapshot(capturedAt: now, entries: [])
+        }
+        let resolvedHome = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let read = fileReader ?? productionScheduledJobFileReader
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let root = resolvedHome.appendingPathComponent("Library/Application Support/AIDash/jobs", isDirectory: true)
+        let entries = ScheduledPulseRegistry.liveJobs.map { definition in
+            let directory = root.appendingPathComponent(definition.id.rawValue, isDirectory: true)
+            let state = readState(
+                from: directory.appendingPathComponent("state.json"),
+                definition: definition,
+                decoder: decoder,
+                read: read
+            )
+            let actions = readActions(
+                from: directory.appendingPathComponent("actions.jsonl"),
+                definition: definition,
+                decoder: decoder,
+                read: read
+            )
+            return ScheduledJobFrameworkEntry(definition: definition, state: state, actions: actions)
+        }
+        return ScheduledJobFrameworkSnapshot(capturedAt: now, entries: entries)
+    }
+
+    private static func readState(
+        from url: URL,
+        definition: ScheduledJobDefinition,
+        decoder: JSONDecoder,
+        read: ScheduledJobFileReader
+    ) -> ScheduledJobState? {
+        guard let data = read(url),
+              let state = try? decoder.decode(ScheduledJobState.self, from: data),
+              state.id == definition.id else { return nil }
+        return state
+    }
+
+    private static func readActions(
+        from url: URL,
+        definition: ScheduledJobDefinition,
+        decoder: JSONDecoder,
+        read: ScheduledJobFileReader
+    ) -> [ScheduledJobAction] {
+        guard let data = read(url),
+              let text = String(data: data, encoding: .utf8) else { return [] }
+        return text.split(whereSeparator: \.isNewline).compactMap { line in
+            let lineData = Data(line.utf8)
+            if let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let rawControls = object["controls"] as? [[String: Any]],
+                  !rawControls.isEmpty,
+                  let id = object["id"] as? String,
+                  let jobRaw = object["jobID"] as? String,
+                  let jobID = ScheduledPulseJobID(rawValue: jobRaw),
+                  jobID == definition.id,
+                  let title = object["title"] as? String,
+                  let description = object["descriptionMd"] as? String {
+                let controls = rawControls.compactMap { item -> ScheduledJobActionControl? in
+                    guard let controlID = item["id"] as? String,
+                          let kindRaw = item["kind"] as? String,
+                          let kind = ScheduledJobActionControlKind(rawValue: kindRaw),
+                          let controlTitle = item["title"] as? String else { return nil }
+                    return ScheduledJobActionControl(id: controlID, kind: kind, title: controlTitle, options: item["options"] as? [String] ?? [], maxLength: item["maxLength"] as? Int)
+                }
+                return ScheduledJobAction(id: id, jobID: jobID, title: title, descriptionMd: description, controls: controls)
+            }
+            if let action = try? decoder.decode(ScheduledJobAction.self, from: lineData), action.jobID == definition.id {
+                return action
+            }
+            guard let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let id = object["id"] as? String,
+                  let jobRaw = object["jobID"] as? String,
+                  let jobID = ScheduledPulseJobID(rawValue: jobRaw),
+                  jobID == definition.id,
+                  let title = object["title"] as? String,
+                  let description = object["descriptionMd"] as? String else { return nil }
+            let controls = (object["controls"] as? [[String: Any]] ?? []).compactMap { item -> ScheduledJobActionControl? in
+                guard let controlID = item["id"] as? String,
+                      let kindRaw = item["kind"] as? String,
+                      let kind = ScheduledJobActionControlKind(rawValue: kindRaw),
+                      let title = item["title"] as? String else { return nil }
+                return ScheduledJobActionControl(
+                    id: controlID,
+                    kind: kind,
+                    title: title,
+                    options: item["options"] as? [String] ?? [],
+                    maxLength: item["maxLength"] as? Int
+                )
+            }
+            return ScheduledJobAction(id: id, jobID: jobID, title: title, descriptionMd: description, controls: controls)
+        }
     }
 
     public static func loadDataset(
