@@ -59,10 +59,15 @@ targets:
     sources:
       - path: Apps/AIDashApp/Sources
       - path: Apps/AIDashApp/Resources/Localizable.xcstrings
+      - path: Apps/AIDashApp/AppIcon.icon
+        type: file
+        buildPhase: resources
+        destinationFilters: [iOS, macOS]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(AIDASH_BUNDLE_ID)
         PRODUCT_NAME: AIDash
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Swift module name is pinned to AIDashApp (not the AIDash product name)
         # so `@testable import AIDashApp` in the app-target tests resolves.
         PRODUCT_MODULE_NAME: AIDashApp

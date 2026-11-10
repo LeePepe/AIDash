@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256">
+<defs><linearGradient id="front" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#F6FFD4"/><stop offset="100%" stop-color="#B6C787"/></linearGradient></defs>
+<path d="M 122.76 84.51 Q 128 76 133.24 84.51 L 154.76 119.49 Q 160 128 154.76 136.51 L 133.24 171.49 Q 128 180 122.76 171.49 L 101.24 136.51 Q 96 128 101.24 119.49 Z" fill="url(#front)"/>
+</svg>
