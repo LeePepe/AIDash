@@ -40,12 +40,12 @@ _CANONICAL_APP_NAMES = {
 
 def _infer_proposal_app_name(proposal: Proposal) -> str | None:
     if proposal.app_name:
-        return _CANONICAL_APP_NAMES.get(proposal.app_name.lower(), proposal.app_name)
+        return _CANONICAL_APP_NAMES.get(proposal.app_name.strip().lower())
     for text in (proposal.title, proposal.detail):
         match = _APP_NAME_TOKEN_RE.search(text or "")
         if match:
             token = match.group(1)
-            return _CANONICAL_APP_NAMES.get(token.lower(), token)
+            return _CANONICAL_APP_NAMES.get(token.lower())
     return None
 
 
@@ -64,10 +64,13 @@ def _is_crash_or_perf_proposal(proposal: Proposal) -> bool:
 
 def _default_dispatch_runner(proposal: Proposal, external_id: str | None) -> int:
     app_name = _infer_proposal_app_name(proposal)
-    if not app_name:
+    if app_name not in {"AIDash", "VitalStride", "VoxPocket", "Financial"}:
         return 1
-    repo_dir = HOME / "Development" / app_name
-    cwd = repo_dir if repo_dir.is_dir() else (HOME / "Development")
+    dev_root = (HOME / "Development").resolve()
+    repo_dir = (dev_root / app_name).resolve()
+    if not repo_dir.is_relative_to(dev_root) or not repo_dir.is_dir():
+        return 1
+    cwd = repo_dir
     slug = re.sub(r"[^a-z0-9-]+", "-", f"heal-{app_name.lower()}-{proposal.id.lower()}").strip("-")[:20]
     tl_name = f"{slug}-goal-tl-r1"
     issue_note = f" (Linear {external_id})" if external_id else ""
@@ -332,6 +335,8 @@ def process_user_events(
                 approved_record["dispatched"] = True
                 result["dispatched"] += 1
             else:
+                approved_record["dispatched"] = False
+                approved_record["dispatch_error"] = True
                 result["errors"] += 1
 
         _append_jsonl(proposal_path, approved_record)

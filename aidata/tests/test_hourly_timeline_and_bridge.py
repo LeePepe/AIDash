@@ -301,5 +301,20 @@ def test_event_bridge_crash_perf_star_and_auto_mode_with_dispatch(monkeypatch, t
     assert event_bridge._default_dispatch_runner(sample_prop, "TIA-201") == 0
     assert len(recorded_cmds) == 1
     assert "--new-workspace" in recorded_cmds[0]
-    assert str(app_repo) in recorded_cmds[0]
+    assert str(app_repo.resolve()) in recorded_cmds[0]
+
+    # Verify unknown or path-traversal app_name is rejected without running subprocess
+    unsafe_prop = event_bridge.Proposal(
+        id="crash-escape",
+        ts="2026-11-10T00:00:00Z",
+        agent="retro-loop",
+        title="Escape attempt",
+        detail="detail",
+        priority="high",
+        status="pending",
+        app_name="../../etc",
+        event_kind="crash",
+    )
+    assert event_bridge._default_dispatch_runner(unsafe_prop, "TIA-201") == 1
+    assert len(recorded_cmds) == 1
 
