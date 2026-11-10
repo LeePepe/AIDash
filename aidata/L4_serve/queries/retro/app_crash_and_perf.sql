@@ -91,11 +91,11 @@ perf_7d_ranked AS (
 perf_7d_p95 AS (
     SELECT
         app_name,
-        ROUND(MAX(metric_ms), 2) AS p95_metric_ms_7d,
+        ROUND(MIN(metric_ms), 2) AS p95_metric_ms_7d,
         MAX(stack_top_symbol) AS perf_stack_top_symbol,
         MAX(signature) AS perf_signature
     FROM perf_7d_ranked
-    WHERE rn >= CAST((cnt * 95 + 99) / 100 AS INTEGER)
+    WHERE rn = CAST((cnt * 95 + 99) / 100 AS INTEGER)
     GROUP BY app_name
 ),
 perf_prev_ranked AS (
@@ -110,9 +110,9 @@ perf_prev_ranked AS (
 perf_prev_p95 AS (
     SELECT
         app_name,
-        ROUND(MAX(metric_ms), 2) AS p95_metric_ms_prev_7d
+        ROUND(MIN(metric_ms), 2) AS p95_metric_ms_prev_7d
     FROM perf_prev_ranked
-    WHERE rn >= CAST((cnt * 95 + 99) / 100 AS INTEGER)
+    WHERE rn = CAST((cnt * 95 + 99) / 100 AS INTEGER)
     GROUP BY app_name
 )
 SELECT
