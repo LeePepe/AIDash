@@ -52,8 +52,6 @@ def _infer_proposal_app_name(proposal: Proposal) -> str | None:
 def _is_crash_or_perf_proposal(proposal: Proposal) -> bool:
     if proposal.event_kind in {"crash", "perf", "error"}:
         return True
-    if proposal.app_name or proposal.stack_top_symbol:
-        return True
     pid = proposal.id.lower()
     if any(tok in pid for tok in ("crash", "perf", "telemetry")):
         return True
@@ -310,10 +308,17 @@ def process_user_events(
             "priority": proposal.priority, "status": "approved",
             "source": "aidash",
         }
-        if proposal.app_name:
-            approved_record["app_name"] = proposal.app_name
-        if proposal.stack_top_symbol:
-            approved_record["stack_top_symbol"] = proposal.stack_top_symbol
+        for extra_attr in (
+            "app_name",
+            "event_kind",
+            "signature",
+            "stack_top_symbol",
+            "recommended_layer",
+            "verify_cmd",
+        ):
+            val = getattr(proposal, extra_attr, "")
+            if val:
+                approved_record[extra_attr] = val
         if external_id:
             approved_record["external_id"] = external_id
 
