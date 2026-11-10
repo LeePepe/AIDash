@@ -483,7 +483,7 @@ def _parse_telemetry_record(
             .replace("+00:00", "Z")
         )
     except ValueError:
-        pass
+        return None
 
     explicit_id = str(raw.get("event_id") or raw.get("id") or props.get("event_id") or "").strip()
     if explicit_id:
