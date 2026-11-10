@@ -355,6 +355,25 @@ def run_merge() -> dict[str, int]:
                 "SELECT count(*) FROM fact_release_delivery").fetchone()[0]
             _detach(conn, "rtf")
 
+        # --- Product app telemetry facts (product_blob) ---
+        if _attach(conn, "product_blob", "ptb"):
+            if _has_table(conn, "ptb", "product_telemetry"):
+                conn.execute("""
+                    INSERT OR REPLACE INTO fact_product_telemetry
+                      (event_id, app_name, app_version, build_number, platform,
+                       event_kind, signature, stack_top_symbol, metric_ms,
+                       occurred_at)
+                    SELECT event_id, app_name, app_version, build_number, platform,
+                           event_kind, signature, stack_top_symbol, metric_ms,
+                           occurred_at
+                    FROM ptb.product_telemetry
+                """)
+            counts["fact_product_telemetry"] = conn.execute(
+                "SELECT count(*) FROM fact_product_telemetry"
+            ).fetchone()[0]
+            _detach(conn, "ptb")
+
+
         # --- fact_request (raven) ---
         if _attach(conn, "raven", "rv"):
             # Clean databases are derived artifacts and may predate the cache
