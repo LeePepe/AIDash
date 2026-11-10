@@ -404,7 +404,7 @@ def run_merge() -> dict[str, int]:
                 "SELECT count(*) FROM fact_turn").fetchone()[0]
             _detach(conn, "cj")
 
-        # --- fact_issue (multica_issue) ---
+        # --- fact_issue (multica_issue + linear_issue) ---
         if _attach(conn, "multica_issue", "mi"):
             conn.execute("""
                 INSERT INTO fact_issue
@@ -417,6 +417,19 @@ def run_merge() -> dict[str, int]:
             counts["fact_issue"] = conn.execute(
                 "SELECT count(*) FROM fact_issue").fetchone()[0]
             _detach(conn, "mi")
+
+        if _attach(conn, "linear_issue", "li"):
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_issue
+                  (issue_id, issue_number, identifier, title, status, priority,
+                   created_at, workspace_id, updated_at, project_id)
+                SELECT issue_id, issue_number, identifier, title, status, priority,
+                       created_at, workspace_id, updated_at, project_id
+                FROM li.issue
+            """)
+            counts["fact_issue"] = conn.execute(
+                "SELECT count(*) FROM fact_issue").fetchone()[0]
+            _detach(conn, "li")
 
         # --- fact_task: multica runs + claude jobs ---
         n_task = 0

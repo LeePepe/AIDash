@@ -227,3 +227,23 @@ def test_recent_embedded_cron_timestamp_is_actionable(tmp_path):
     old = time.time() - 8 * 24 * 60 * 60
     os.utime(log, (old, old))
     assert "recent failure" in inbox_mod._default_log_reader(log)
+
+
+@pytest.mark.unit
+def test_pending_issues_emits_canonical_linear_ref_for_tia_items(monkeypatch):
+    def run_query(name, params=None):
+        if name == "inbox/pending-issues":
+            return (
+                [
+                    ("TIA-90", "Voice todo from VoxPocket", "todo", "high"),
+                    ("MY-12", "Legacy multica todo", "todo", "medium"),
+                ],
+                ["identifier", "title", "status", "priority"],
+            )
+        return ([], [])
+
+    monkeypatch.setattr(inbox_mod.serve, "run_query", run_query)
+    items = inbox_mod._pending_issues()
+    assert len(items) == 2
+    assert items[0].ref == "linear://TIA-90"
+    assert items[1].ref == "MY-12"

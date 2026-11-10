@@ -5501,6 +5501,186 @@
         }
       }
     },
+    "settings.todo_sync.card_subtitle": {
+      "comment": "Subtitle of the pluggable Todo & Issue Sync Integration settings card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run AIDash 100% standalone with local todos or connect to Linear as a cross-app Single Source of Truth"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "支持 100% 独立本地待办模式，或接入 Linear 作为跨应用统一待办事实源 (SSOT)"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.card_title": {
+      "comment": "Title of the pluggable Todo & Issue Sync Integration settings card.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Todo & Issue Sync Integration"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待办与 Issue 同步集成"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.mode.auto": {
+      "comment": "Option title for automatic TodoSyncProvider selection.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto (Linear when configured, else Local)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动识别（已配置时使用 Linear，否则本地独立运行）"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.mode.auto_desc": {
+      "comment": "Description for automatic TodoSyncProvider selection.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uses Linear SSOT when linear-sync.py is installed and falls back to standalone local todos otherwise"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检测到本机配置 linear-sync.py 时自动启用 Linear SSOT，未安装时自动回退到本地独立模式"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.mode.linear": {
+      "comment": "Option title for Linear SSOT sync mode.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Linear SSOT Sync Mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Linear 统一事实源模式 (SSOT)"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.mode.linear_desc": {
+      "comment": "Description for Linear SSOT sync mode.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Promotes starred proposals to Linear and bidirectionally syncs Done / Todo status with your Linear team"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将星标提案自动建单到 Linear，并与 Linear 团队双向同步完成 / 待办状态"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.mode.local": {
+      "comment": "Option title for standalone local-only todo sync mode.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standalone Local-Only Mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "纯本地独立模式 (Standalone)"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.mode.local_desc": {
+      "comment": "Description for standalone local-only todo sync mode.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "100% standalone mode with zero external Linear dependency; promoted proposals and todos stay on this Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "零外部依赖独立运行，采纳的改进提案与待办状态全部保存在本机"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.team_key_hint": {
+      "comment": "Helper text next to Linear team key field.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used for linear://<TEAM>-xx canonical sync refs"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用于生成 linear://<TEAM>-xx 跨端同步标识"
+          }
+        }
+      }
+    },
+    "settings.todo_sync.team_key_label": {
+      "comment": "Label for Linear team key text field.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Linear Team Key"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Linear 团队标识"
+          }
+        }
+      }
+    },
     "telemetry.settings.send_usage_data": {
       "comment": "The sole opt-in control for anonymous product telemetry.",
       "extractionState": "manual",
