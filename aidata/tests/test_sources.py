@@ -8,6 +8,8 @@ from L5_apps.digest.sources import (
     fetch_raven_trends,
     fetch_retro_ops_trends,
     RavenTrends,
+    TokenDeviceTrends,
+    fetch_token_device_trends,
 )
 
 _WAREHOUSE = Path(__file__).resolve().parent.parent / "L3_merge" / "warehouse.db"
@@ -38,6 +40,37 @@ def test_fetch_raven_trends_returns_series_and_ok_health():
 def test_source_health_dataclass_shape():
     h = SourceHealth(name="raven", state="ok", detail="")
     assert h.name == "raven" and h.state == "ok"
+
+
+@pytest.mark.unit
+def test_fetch_token_device_trends_maps_totals_and_shares(monkeypatch):
+    monkeypatch.setattr(
+        "L5_apps.digest.sources.serve.run_query",
+        lambda name: (
+            [
+                ("2026-11-08", "__all__", "All devices", 100, 40, 20, 10, 170, 3, 100),
+                ("2026-11-08", "phone", "Phone", 60, 20, 10, 5, 95, 2, 55.88),
+            ],
+            ["cst_day", "device_id", "machine_alias", "input", "output",
+             "cache_read", "cache_write", "total_tokens", "invocations", "share_pct"],
+        ),
+    )
+    bundle = fetch_token_device_trends()
+    assert isinstance(bundle, TokenDeviceTrends)
+    assert bundle.health.state == "ok"
+    assert bundle.rows[0].total_tokens == 170
+    assert bundle.rows[1].share_pct == 55.88
+
+
+@pytest.mark.unit
+def test_fetch_token_device_trends_degrades_on_query_failure(monkeypatch):
+    monkeypatch.setattr(
+        "L5_apps.digest.sources.serve.run_query",
+        lambda name: (_ for _ in ()).throw(RuntimeError("missing fact")),
+    )
+    bundle = fetch_token_device_trends()
+    assert bundle.rows == ()
+    assert bundle.health.state == "error"
 
 
 @pytest.mark.unit

@@ -10,7 +10,9 @@ import pytest
 import L5_apps.digest.app as app
 from L5_apps.digest.aidash import Briefing, Card, Container, PushResult
 from L5_apps.digest import aidash
-from L5_apps.digest.sources import RepoRadar, SourceHealth
+from L5_apps.digest.sources import (
+    RepoRadar, SourceHealth, TokenDeviceRow, TokenDeviceTrends,
+)
 
 from tests.test_digest_golden import (
     _FROZEN_TRENDS, _FROZEN_MULTICA, _FROZEN_ADO, _FROZEN_AUTOMATION,
@@ -80,6 +82,23 @@ def test_push_happy_path_still_returns_archive(frozen, monkeypatch):
     path = app.write_digest(REPORT_DATE, push_aidash=True)
     assert path.exists()
     assert path.name == "2026-07-09.md"
+
+
+@pytest.mark.unit
+def test_token_device_card_shows_merged_totals_and_share():
+    raven = type("Raven", (), {})()
+    raven.token_devices = TokenDeviceTrends(
+        rows=(
+            TokenDeviceRow("2026-11-08", "__all__", "All devices", 100, 40, 20, 10, 170, 3, 100),
+            TokenDeviceRow("2026-11-08", "phone", "Phone", 60, 20, 10, 5, 95, 2, 55.88),
+        ),
+        health=SourceHealth("token_devices", "ok"),
+    )
+    card = aidash._token_device_card("1108", "2026-11-08", raven)
+    assert card is not None
+    assert card.type == "barList"
+    assert card.payload["items"][0]["valueText"].startswith("input 100")
+    assert card.payload["items"][1]["valueText"] == "55.88% · 95 tokens"
 
 
 @pytest.mark.unit

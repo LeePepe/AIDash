@@ -55,6 +55,29 @@ CREATE INDEX IF NOT EXISTS idx_req_model_canon ON fact_request(model_canon);
 CREATE INDEX IF NOT EXISTS idx_req_cst_day ON fact_request(cst_day);
 
 -- ---------------------------------------------------------------------------
+-- fact_device_token_daily — grain = one device x CST day/hour x CLI x model.
+-- Source: iCloud Drive token shards. Cache measures stay separate from total.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fact_device_token_daily (
+    record_uid      TEXT PRIMARY KEY,
+    device_id       TEXT NOT NULL,
+    machine_alias   TEXT NOT NULL,
+    cst_day         TEXT NOT NULL,
+    hour_bucket     TEXT NOT NULL,
+    cli             TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    input_tokens    INTEGER NOT NULL DEFAULT 0,
+    output_tokens   INTEGER NOT NULL DEFAULT 0,
+    cache_read      INTEGER NOT NULL DEFAULT 0,
+    cache_write     INTEGER NOT NULL DEFAULT 0,
+    total_tokens    INTEGER NOT NULL DEFAULT 0,
+    invocations     INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_device_token_day ON fact_device_token_daily(cst_day);
+CREATE INDEX IF NOT EXISTS idx_device_token_device ON fact_device_token_daily(device_id);
+
+-- ---------------------------------------------------------------------------
 -- fact_turn — grain = one conversation turn. Source: claude jsonl assistant lines.
 -- session_id comes from camelCase `sessionId` (= filename). parent_session_id
 -- from snake_case `session_id` (resume/fork lineage — different value!).

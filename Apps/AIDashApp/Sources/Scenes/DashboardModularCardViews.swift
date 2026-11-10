@@ -607,6 +607,8 @@ public struct CLICostQuotaCardView: View {
                 ? "7d \(periodCompact) · Cache \(cachePct)%"
                 : "7d \(periodCompact) · \(entry.interactionCount) calls"
         }()
+        let deviceText = entry.deviceContributions.prefix(2).map { "\($0.machineAlias) \($0.formattedShare)" }.joined(separator: " · ")
+        let detailText = deviceText.isEmpty ? tailText : "\(tailText) · \(deviceText)"
 
         return Button {
             if let cmd = entry.authState.loginCommand {
@@ -637,7 +639,7 @@ public struct CLICostQuotaCardView: View {
                     .font(.system(.title2, design: .monospaced, weight: .bold))
                     .foregroundStyle(isTopVolume || isSelected ? Color.accentColor : Color.primary).contentTransition(.numericText())
                 HStack(spacing: 4) {
-                    Text(tailText)
+                    Text(detailText)
                         .font(.caption2).monospacedDigit()
                         .foregroundStyle(entry.authState.isAuthenticated ? Color.secondary : tint)
                         .lineLimit(1)

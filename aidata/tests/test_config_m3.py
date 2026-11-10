@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import config
+from cli import _load_adapter
 
 
 def _load_config_without_local(monkeypatch):
@@ -30,6 +31,16 @@ def _load_config_without_local(monkeypatch):
 def test_ado_pr_registered_in_sources_and_merge():
     assert "ado_pr" in config.SOURCES
     assert "ado_pr" in config.MERGE_SOURCES
+
+
+@pytest.mark.unit
+def test_icloud_token_sync_is_registered_and_reachable():
+    assert "icloud_token_sync" in config.SOURCES
+    assert "icloud_token_sync" in config.SCHEDULED_SOURCES
+    adapter = _load_adapter("icloud_token_sync")
+    assert adapter.SOURCE == "icloud_token_sync"
+    assert callable(adapter.collect)
+    assert callable(adapter.normalize)
 
 
 @pytest.mark.unit

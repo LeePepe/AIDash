@@ -855,6 +855,26 @@ public struct TrendBucketHoverSummary: Sendable, Equatable {
     }
 }
 
+public struct DeviceTokenContribution: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let deviceID: String
+    public let machineAlias: String
+    public let todayTokens: UInt64
+    public let periodTokens: UInt64
+    public let shareFraction: Double
+
+    public init(id: String, deviceID: String, machineAlias: String, todayTokens: UInt64, periodTokens: UInt64, shareFraction: Double) {
+        self.id = id
+        self.deviceID = deviceID
+        self.machineAlias = machineAlias
+        self.todayTokens = todayTokens
+        self.periodTokens = periodTokens
+        self.shareFraction = min(max(shareFraction, 0), 1)
+    }
+
+    public var formattedShare: String { String(format: "%.1f%%", shareFraction * 100) }
+}
+
 public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let cliFilter: DashboardCLIFilter
@@ -874,6 +894,7 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
     public let secondaryQuotaLabel: String?
     public let quotaResetText: String?
     public let authState: CLIAuthState
+    public let deviceContributions: [DeviceTokenContribution]
 
     public init(
         id: String, cliFilter: DashboardCLIFilter, displayName: String, modelTag: String,
@@ -882,7 +903,8 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
         isAvailable: Bool = true, quotaUsedOverride: Double? = nil, quotaLabel: String? = nil,
         periodTotalTokens: UInt64? = nil, secondaryQuotaUsed: Double? = nil,
         secondaryQuotaLabel: String? = nil, quotaResetText: String? = nil,
-        authState: CLIAuthState = .authenticated
+        authState: CLIAuthState = .authenticated,
+        deviceContributions: [DeviceTokenContribution] = []
     ) {
         self.id = id; self.cliFilter = cliFilter; self.displayName = displayName; self.modelTag = modelTag
         self.todayCostUSD = todayCostUSD; self.periodCostUSD = periodCostUSD; self.quotaLimitUSD = quotaLimitUSD
@@ -891,6 +913,7 @@ public struct CLICostQuotaEntry: Codable, Sendable, Equatable, Identifiable {
         self.periodTotalTokens = periodTotalTokens ?? ((activeTokens + cacheTokens) * 7)
         self.secondaryQuotaUsed = secondaryQuotaUsed; self.secondaryQuotaLabel = secondaryQuotaLabel
         self.quotaResetText = quotaResetText; self.authState = authState
+        self.deviceContributions = deviceContributions
     }
 
     public var totalTokens: UInt64 { activeTokens + cacheTokens }

@@ -20,6 +20,12 @@ from pathlib import Path
 PRODUCT_BLOB_CONTAINER_URL = ""
 PRODUCT_BLOB_PREFIX = ""
 
+# Optional local override for the iCloud Drive token shard directory.
+# Leave unset to use config.py's portable iCloud Drive default.
+# ICLOUD_TOKEN_SYNC_DIR = Path(os.path.expanduser(
+#     "~/Library/Mobile Documents/com~apple~CloudDocs/AIDash/token-sync/v1"
+# ))
+
 # ---------------------------------------------------------------------------
 # Multica workspaces the digest collects from (ADR-5 / EXT-2).
 # An allow-list of (workspace_uuid, friendly_name). The friendly name appears
