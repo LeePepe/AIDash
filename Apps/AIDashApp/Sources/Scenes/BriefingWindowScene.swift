@@ -222,7 +222,10 @@ private struct StarFeedbackScope: View {
                     writer.acknowledgeScheduledJobAction(action: action, responses: responses)
                 },
                 acknowledgedScheduledActionIDs: Set(scheduledActionEvents.compactMap { event in
-                    event.itemRef?.split(separator: "|", maxSplits: 1).first.map(String.init)
+                    guard let head = event.itemRef?.split(separator: "|", maxSplits: 1).first.map(String.init) else {
+                        return nil
+                    }
+                    return head.split(separator: ":", maxSplits: 1).last.map(String.init) ?? head
                 })
             )
             #else

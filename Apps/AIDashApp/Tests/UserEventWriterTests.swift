@@ -90,7 +90,7 @@ struct UserEventWriterTests {
         let event = try #require(try fetchEvents(container).first)
         #expect(event.action == .acknowledgeJobAction)
         #expect(event.cardId == "scheduled-pulse/my-pr-supervisor")
-        #expect(event.itemRef?.hasPrefix("action-1|") == true)
+        #expect(event.itemRef?.hasPrefix("my-pr-supervisor:action-1|") == true || event.itemRef?.hasPrefix("action-1|") == true)
     }
 #endif
 

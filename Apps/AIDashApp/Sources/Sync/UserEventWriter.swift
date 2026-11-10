@@ -170,7 +170,7 @@ final class UserEventWriter {
             device: DeviceIdentifier.current(),
             cardId: "scheduled-pulse/\(action.jobID.rawValue)",
             action: .acknowledgeJobAction,
-            itemRef: "\(action.id)|\(responseText)",
+            itemRef: "\(action.jobID.rawValue):\(action.id)|\(responseText)",
             cardType: "scheduledPulse"
         )
         context.insert(event)

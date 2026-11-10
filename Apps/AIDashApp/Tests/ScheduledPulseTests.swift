@@ -56,7 +56,8 @@ struct ScheduledPulseTests {
             .appendingPathComponent("scripts/scheduled-job-entrypoint.sh")
         let script = try String(contentsOf: scriptURL, encoding: .utf8)
         #expect(script.contains("exit_code=$?"))
-        #expect(script.contains("trap 'rmdir \"$lock_dir\" 2>/dev/null || true' EXIT INT TERM"))
+        #expect(script.contains("kill -0 \"$holder_pid\""))
+        #expect(script.contains("trap 'cleanup_lock' EXIT INT TERM"))
         #expect(script.contains("rmdir \"$lock_dir\""))
         #expect(!script.contains("exec \"$interpreter\""))
     }
