@@ -812,10 +812,29 @@ struct DashboardWorkspaceTests {
     func todoSyncProviderModePreferencesAndConfigBridge() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("aidash-todo-sync-test-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
         let configURL = tempDir.appendingPathComponent("todo-sync.json")
+        let defaults = UserDefaults.standard
+        let providerDefaultsKey = "aidash.todo_sync.provider_mode"
+        let teamDefaultsKey = "aidash.todo_sync.team_key"
+        let previousProvider = defaults.object(forKey: providerDefaultsKey)
+        let previousTeam = defaults.object(forKey: teamDefaultsKey)
+        defaults.removeObject(forKey: providerDefaultsKey)
+        defaults.removeObject(forKey: teamDefaultsKey)
+        defer {
+            if let previousProvider {
+                defaults.set(previousProvider, forKey: providerDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: providerDefaultsKey)
+            }
+            if let previousTeam {
+                defaults.set(previousTeam, forKey: teamDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: teamDefaultsKey)
+            }
+            try? FileManager.default.removeItem(at: tempDir)
+        }
 
-        let prefs = MenuBarDisplayPreferences(persistToDefaults: false, todoSyncConfigFileURL: configURL)
+        let prefs = MenuBarDisplayPreferences(persistToDefaults: true, todoSyncConfigFileURL: configURL)
         #expect(prefs.todoSyncProviderMode == .auto)
         #expect(prefs.todoSyncTeamKey == "TIA")
         #expect(TodoSyncProviderMode.allCases == [.auto, .localOnly, .linear])
@@ -835,6 +854,7 @@ struct DashboardWorkspaceTests {
         prefs.todoSyncProviderMode = .linear
         prefs.todoSyncTeamKey = "  eng "
         #expect(prefs.todoSyncTeamKey == "ENG")
+        #expect(defaults.string(forKey: teamDefaultsKey) == "ENG")
         let linearData = try Data(contentsOf: configURL)
         let linearJSON = try #require(JSONSerialization.jsonObject(with: linearData) as? [String: String])
         #expect(linearJSON["provider"] == "linear")

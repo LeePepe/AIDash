@@ -203,9 +203,8 @@ public final class MenuBarDisplayPreferences {
             let normalized = Self.normalizedTeamKey(todoSyncTeamKey)
             if todoSyncTeamKey != normalized {
                 todoSyncTeamKey = normalized
-                return
             }
-            if persistToDefaults { UserDefaults.standard.set(todoSyncTeamKey, forKey: Keys.todoSyncTeamKey) }
+            if persistToDefaults { UserDefaults.standard.set(normalized, forKey: Keys.todoSyncTeamKey) }
             writeTodoSyncConfigIfNeeded()
             NotificationCenter.default.post(name: .menuBarDisplayPreferencesDidChange, object: nil)
         }

@@ -51,6 +51,7 @@ _MAX_CRON_ERROR_AGE_DAYS = 7
 _ISO_TIMESTAMP = re.compile(
     r"\b20\d{2}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?\b"
 )
+_TIA_ISSUE_REF = re.compile(r"^(?:linear://)?(TIA-\d+)$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,9 @@ def _pending_issues(
             status = str(r[si])
             blocked = status == "blocked"
             ref = active_provider.format_ref(ident)
+            tia_match = _TIA_ISSUE_REF.fullmatch(ident.strip())
+            if tia_match:
+                ref = f"linear://{tia_match.group(1).upper()}"
             out.append(InboxItem(
                 f"[{status}] {ident} {str(r[ti])[:44]}",
                 "high" if blocked else "medium",
