@@ -28,6 +28,8 @@
     <key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
     <array>
         <string>/.config/herdr/</string>
+        <string>/Library/LaunchAgents/</string>
+        <string>/Library/Application Support/AIDash/jobs/</string>
     </array>
     <key>com.apple.security.temporary-exception.sbpl</key>
     <array>

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 from L5_apps.digest import aidash, event_bridge, sources, verify
@@ -318,3 +319,80 @@ def test_event_bridge_crash_perf_star_and_auto_mode_with_dispatch(monkeypatch, t
     assert event_bridge._default_dispatch_runner(unsafe_prop, "TIA-201") == 1
     assert len(recorded_cmds) == 1
 
+
+@pytest.mark.unit
+def test_event_bridge_knowledge_star_publishes_blog_and_approves_proposal(tmp_path):
+    proposals = tmp_path / "proposals.jsonl"
+    proposals.write_text(
+        json.dumps(
+            {
+                "id": "learn-wifi-invisible-light",
+                "ref": "knowledge://wifi-invisible-light",
+                "ts": "2026-11-10T00:00:00Z",
+                "agent": "knowledge-digest",
+                "title": "学习卡片：如果能看见 WiFi",
+                "detail": "R09 KEEP_PRIMARY",
+                "priority": "medium",
+                "status": "pending",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    blog_repo = tmp_path / "leepepe.github.io"
+    blog_repo.mkdir()
+    published_calls: list[tuple[str, Path, str]] = []
+
+    def fake_blog_runner(slug: str, repo_path: Path, mode: str) -> int:
+        published_calls.append((slug, repo_path, mode))
+        return 0
+
+    result = event_bridge.process_user_events(
+        [{"action": "star", "itemRef": "knowledge://wifi-invisible-light"}],
+        proposals_path=proposals,
+        blog_repo_path=blog_repo,
+        blog_mode="observe",
+        blog_publish_runner=fake_blog_runner,
+    )
+    assert result["blog_published"] == 1
+    assert result["promoted"] == 1
+    assert result["errors"] == 0
+    assert published_calls == [("wifi-invisible-light", blog_repo, "observe")]
+    records = [
+        json.loads(line)
+        for line in proposals.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records[-1]["id"] == "learn-wifi-invisible-light"
+    assert records[-1]["ref"] == "knowledge://wifi-invisible-light"
+    assert records[-1]["status"] == "approved"
+
+
+@pytest.mark.unit
+def test_default_blog_publish_runner_invokes_digest_vault(monkeypatch, tmp_path):
+    script = tmp_path / "digest_vault.py"
+    script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    blog_repo = tmp_path / "leepepe.github.io"
+    monkeypatch.setattr(event_bridge, "DIGEST_VAULT_SCRIPT", script)
+    captured_cmd: list[str] = []
+
+    class FakeProc:
+        returncode = 0
+        stdout = '{"ok": true}'
+
+    def fake_run(cmd, **_kwargs):
+        captured_cmd.extend(cmd)
+        return FakeProc()
+
+    monkeypatch.setattr(event_bridge.subprocess, "run", fake_run)
+    rc = event_bridge._default_blog_publish_runner(
+        "wifi-invisible-light",
+        blog_repo=blog_repo,
+        mode="observe",
+    )
+    assert rc == 0
+    assert "publish-blog" in captured_cmd
+    assert "--slug" in captured_cmd
+    assert "wifi-invisible-light" in captured_cmd
+    assert str(blog_repo) in captured_cmd

@@ -43,6 +43,7 @@ class Proposal:
     detail: str
     priority: str
     status: str
+    ref: str = ""
     app_name: str = ""
     event_kind: str = ""
     signature: str = ""
@@ -71,6 +72,7 @@ def _coerce(obj: dict) -> Proposal | None:
         priority = "medium"
     status = str(obj.get("status", "pending")).strip().lower()
     detail = str(obj.get("detail", "")).strip()
+    ref = str(obj.get("ref", "") or "").strip()
     app_name = str(obj.get("app_name", "") or "").strip()
     event_kind = str(obj.get("event_kind", "") or "").strip().lower()
     signature = str(obj.get("signature", "") or "").strip()
@@ -78,13 +80,14 @@ def _coerce(obj: dict) -> Proposal | None:
     recommended_layer = str(obj.get("recommended_layer", "") or "").strip()
     verify_cmd = str(obj.get("verify_cmd", "") or "").strip()
     return Proposal(
-        pid,
-        ts,
-        agent,
-        title,
-        detail,
-        priority,
-        status,
+        id=pid,
+        ts=ts,
+        agent=agent,
+        title=title,
+        detail=detail,
+        priority=priority,
+        status=status,
+        ref=ref,
         app_name=app_name,
         event_kind=event_kind,
         signature=signature,

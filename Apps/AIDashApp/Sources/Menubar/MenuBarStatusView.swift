@@ -32,6 +32,9 @@ public struct MenuBarStatusView: View {
     public let onOpenBriefing: () -> Void
     public let onShowAbout: () -> Void
     public let onQuit: () -> Void
+    public let onOpenScheduledPulse: () -> Void
+    public let scheduledPulseSnapshot: ScheduledPulseSnapshot?
+    public let scheduledJobFrameworkSnapshot: ScheduledJobFrameworkSnapshot?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var completedActionIDs: Set<String> = []
@@ -43,10 +46,18 @@ public struct MenuBarStatusView: View {
         onRefresh: @escaping () -> Void = {},
         onOpenBriefing: @escaping () -> Void = {},
         onShowAbout: @escaping () -> Void = {},
-        onQuit: @escaping () -> Void = {}
+        onQuit: @escaping () -> Void = {},
+        onOpenScheduledPulse: @escaping () -> Void = {
+            DashboardWorkspaceStore.shared.openDashboardWindow(section: .scheduledPulse)
+        },
+        scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil,
+        scheduledJobFrameworkSnapshot: ScheduledJobFrameworkSnapshot? = nil
     ) {
         self.state = state; self.onRefresh = onRefresh; self.onOpenBriefing = onOpenBriefing
         self.onShowAbout = onShowAbout; self.onQuit = onQuit
+        self.onOpenScheduledPulse = onOpenScheduledPulse
+        self.scheduledPulseSnapshot = scheduledPulseSnapshot
+        self.scheduledJobFrameworkSnapshot = scheduledJobFrameworkSnapshot
     }
 
     public enum Action: Sendable, Equatable { case refresh, openBriefing, showAbout, quit }
@@ -83,12 +94,15 @@ public struct MenuBarStatusView: View {
         let trendPoints = liveDataset?.trends ?? DashboardWorkspaceStore.deriveTrendPoints(from: cliEntries)
         let todayTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.totalTokens }
         let periodTotal = cliEntries.reduce(UInt64(0)) { $0 + $1.periodTotalTokens }
-        let pendingActions = Array(DashboardWorkspaceStore.deriveActionItems(from: snapshot, cliEntries: cliEntries).filter { !$0.isCompleted }.prefix(3))
+        let frameworkSnapshot = scheduledJobFrameworkSnapshot
+            ?? (LiveDashboardTelemetryReader.isLiveEnvironment
+                ? DashboardWorkspaceStore.shared.scheduledJobFrameworkSnapshot
+                : ScheduledJobFrameworkSnapshot(capturedAt: .now, entries: []))
         let prefs = MenuBarDisplayPreferences.shared
         return VStack(alignment: .leading, spacing: 12) {
             if prefs.showPopoverSystemTelemetry { telemetryGaugeStrip(snapshot) }
             cliTokenAndQuotaSection(entries: cliEntries, trendPoints: trendPoints, todayTotal: todayTotal, periodTotal: periodTotal)
-            if prefs.showPopoverActionItems { topActionsSection(items: pendingActions) }
+            scheduledJobsSection(snapshot: frameworkSnapshot)
         }
     }
 
@@ -274,6 +288,27 @@ public struct MenuBarStatusView: View {
         .buttonStyle(.plain)
         .help("\(entry.displayName) · \(entry.authState.statusReasonText ?? "Today \(todayCompact)") · 7d \(periodCompact)")
     }
+    private func scheduledJobsSection(snapshot: ScheduledJobFrameworkSnapshot) -> some View {
+        MenuBarScheduledJobsCard(
+            snapshot: snapshot,
+            solidCardColor: solidCardColor,
+            onOpenProblem: { entry in
+                let store = DashboardWorkspaceStore.shared
+                store.selectedFrameworkJobID = entry.id
+                store.scheduledPulseTab = entry.actions.isEmpty ? .overview : .needActions
+                onOpenScheduledPulse()
+            }
+        )
+    }
+
+    private func pulseExceptionsSection(rows: [ScheduledJobStatus]) -> some View {
+        MenuBarPulseExceptionsCard(
+            rows: rows,
+            solidCardColor: solidCardColor,
+            onOpenPulse: onOpenScheduledPulse
+        )
+    }
+
     private func topActionsSection(items: [DashboardActionItem]) -> some View {
         MenuBarTopActionsCard(
             items: items,
@@ -515,6 +550,105 @@ private struct MenuBarInteractiveTokenChart: View {
 }
 
 @MainActor
+private struct MenuBarScheduledJobsCard: View {
+    let snapshot: ScheduledJobFrameworkSnapshot
+    let solidCardColor: Color
+    let onOpenProblem: (ScheduledJobFrameworkEntry) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(DashboardL10n.tr("menubar.scheduled_jobs.title", "定时任务"))
+                .font(.system(.caption2, design: .rounded, weight: .semibold))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(snapshot.entries) { entry in
+                    if entry.isProblem {
+                        Button { onOpenProblem(entry) } label: {
+                            row(entry)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        row(entry)
+                    }
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        }
+    }
+
+    private func row(_ entry: ScheduledJobFrameworkEntry) -> some View {
+        HStack(spacing: 8) {
+            Text(entry.definition.displayName)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(entry.isSuccess ? "✓" : "✗")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(entry.isSuccess ? .green : .orange)
+        }
+        .frame(minHeight: 28)
+        .contentShape(Rectangle())
+    }
+}
+
+@MainActor
+private struct MenuBarPulseExceptionsCard: View {
+    let rows: [ScheduledJobStatus]
+    let solidCardColor: Color
+    let onOpenPulse: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(DashboardL10n.tr("menubar.pulse.exceptions", "SCHEDULED PULSE"))
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Text(DashboardL10n.format("menubar.pulse.exceptions_count_format", "%lld issues", rows.count))
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(rows.prefix(3)) { row in
+                    Button(action: onOpenPulse) {
+                        HStack(spacing: 7) {
+                            Image(systemName: row.health.semanticHealth.symbolName)
+                                .foregroundStyle(DashboardSemanticColorPalette.color(for: row.health.semanticHealth))
+                                .frame(width: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.definition.displayName)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Text(row.health.exceptionSubtitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(solidCardColor))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        }
+    }
+}
+
+@MainActor
 private struct MenuBarTopActionsCard: View {
     let items: [DashboardActionItem]
     let solidCardColor: Color
@@ -537,7 +671,7 @@ private struct MenuBarTopActionsCard: View {
                         .foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(pendingItems.prefix(2)) { item in
+                    ForEach(pendingItems.prefix(3)) { item in
                         actionRow(item)
                     }
                 }
