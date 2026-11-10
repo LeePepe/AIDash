@@ -62,14 +62,81 @@ public enum LiveDashboardTelemetryReader {
         return loadDataset(forDate: dateString, homeURL: home, fallbackUsage: fallbackUsage)
     }
 
+    public typealias ScheduledPulseLaunchctl = @MainActor ([String]) -> LaunchdAgentInstaller.LaunchctlResult
+
+    public static let productionScheduledPulseLaunchctl: ScheduledPulseLaunchctl = { args in
+        LaunchdAgentInstaller.runLaunchctl(args)
+    }
+
     public static func loadScheduledPulseSnapshot(
         now: Date = Date(),
-        statuses: [ScheduledJobStatus]? = nil
+        statuses: [ScheduledJobStatus]? = nil,
+        launchctl: ScheduledPulseLaunchctl? = nil
     ) -> ScheduledPulseSnapshot {
         if let statuses {
             return ScheduledPulseSnapshot(capturedAt: now, jobs: statuses)
         }
-        return ScheduledPulseSnapshot.defaultSnapshot(now: now)
+        guard isLiveEnvironment || launchctl != nil else {
+            return ScheduledPulseSnapshot.defaultSnapshot(now: now)
+        }
+        let effect = launchctl ?? productionScheduledPulseLaunchctl
+        let domain = "gui/\(getuid())"
+        let jobs = ScheduledPulseRegistry.liveJobs.map { definition in
+            let result = effect(["print", "\(domain)/\(definition.launchAgentLabel)"])
+            return scheduledJobStatus(definition: definition, result: result, now: now)
+        }
+        let workiq = ScheduledPulseRegistry.reservedJobs.map {
+            ScheduledJobStatus(definition: $0, health: .reserved)
+        }
+        return ScheduledPulseSnapshot(capturedAt: now, jobs: jobs + workiq)
+    }
+
+    private static func scheduledJobStatus(
+        definition: ScheduledJobDefinition,
+        result: LaunchdAgentInstaller.LaunchctlResult,
+        now: Date
+    ) -> ScheduledJobStatus {
+        let lastTick = parseLaunchdDate(from: result.stdout) ?? now
+        guard result.succeeded else {
+            let isAbsent = result.launchError == nil && (result.terminationStatus == 3 || result.terminationStatus == 113)
+            return ScheduledJobStatus(
+                definition: definition,
+                health: isAbsent ? .expectedOnButIdle : .critical,
+                lastRun: parseLaunchdDate(from: result.stdout),
+                lastTick: isAbsent ? nil : lastTick,
+                lastError: isAbsent ? nil : result.diagnosticSummary
+            )
+        }
+        let exitCode = parseLaunchdExitCode(from: result.stdout)
+        let health: ScheduledPulseHealth = exitCode.map { $0 == 0 ? .healthy : .critical } ?? .healthy
+        return ScheduledJobStatus(
+            definition: definition,
+            health: health,
+            lastRun: parseLaunchdDate(from: result.stdout),
+            lastTick: parseLaunchdDate(from: result.stdout),
+            lastError: health == .healthy ? nil : "last exit code \(exitCode ?? -1)"
+        )
+    }
+
+    private static func parseLaunchdExitCode(from output: String) -> Int32? {
+        for line in output.split(separator: "\n") {
+            let lower = line.lowercased()
+            guard lower.contains("last exit code") else { continue }
+            let number = line.split(whereSeparator: { !$0.isNumber && $0 != "-" }).last
+            if let number, let value = Int32(String(number)) { return value }
+        }
+        return nil
+    }
+
+    private static func parseLaunchdDate(from output: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        for line in output.split(separator: "\n") where line.lowercased().contains("last exit time") {
+            guard let value = line.split(separator: "=", maxSplits: 1).last else { continue }
+            if let date = formatter.date(from: value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return date
+            }
+        }
+        return nil
     }
 
     public static func loadDataset(

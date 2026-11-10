@@ -56,7 +56,8 @@ struct AIDashApp: App {
             }
             // Scheduled Pulse is additive: each live registry entry owns its
             // own LaunchAgent label and never changes the XPC plist above.
-            _ = ScheduledPulseLaunchdInstaller.shared.registerLiveJobs()
+            let pulseOutcomes = ScheduledPulseLaunchdInstaller.shared.registerLiveJobs()
+            Self.recordScheduledPulseProblems(pulseOutcomes)
         }
 
         // Start the XPC listener IMMEDIATELY — before any store loading —
@@ -146,8 +147,21 @@ struct AIDashApp: App {
         _ outcome: LaunchdAgentInstaller.RegistrationOutcome
     ) {
         guard case .failed(let reason) = outcome else { return }
+        appendLaunchdProblemLine("AIDash XPC LaunchAgent problem: \(reason)")
+    }
+
+    private static func recordScheduledPulseProblems(
+        _ outcomes: [ScheduledPulseLaunchdInstaller.RegistrationOutcome]
+    ) {
+        for outcome in outcomes {
+            guard let reason = outcome.failureDescription else { continue }
+            appendLaunchdProblemLine("Scheduled Pulse LaunchAgent problem: \(reason)")
+        }
+    }
+
+    private static func appendLaunchdProblemLine(_ message: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
-        let line = "\(stamp) — AIDash XPC LaunchAgent problem: \(reason)\n"
+        let line = "\(stamp) — \(message)\n"
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Development/AIDash/.aidash-state/aidash-push-errors.log")
         try? FileManager.default.createDirectory(

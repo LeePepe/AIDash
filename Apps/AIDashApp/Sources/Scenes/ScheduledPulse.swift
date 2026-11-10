@@ -2,9 +2,8 @@
 import Foundation
 
 public enum ScheduledPulseJobID: String, CaseIterable, Sendable, Equatable, Identifiable {
-    case aidataDigest = "aidata-digest"
-    case prAutoReview = "pr-auto-review"
     case myPRSupervisor = "my-pr-supervisor"
+    case prAutoReview = "pr-auto-review"
     case workiqDigest = "workiq-digest"
 
     public var id: String { rawValue }
@@ -71,6 +70,18 @@ public struct ScheduledJobDefinition: Sendable, Equatable, Identifiable {
         DashboardL10n.tr("dashboard.scheduled_pulse.source.aidash", "AIDash-owned")
     }
 
+    public func programPath(homeURL: URL) -> String? {
+        guard isLive else { return nil }
+        switch id {
+        case .prAutoReview:
+            return homeURL.appendingPathComponent("Development/handoff/pr-auto-review/precheck.py").path
+        case .myPRSupervisor:
+            return homeURL.appendingPathComponent("Development/handoff/my-pr-supervisor/precheck.py").path
+        case .workiqDigest:
+            return nil
+        }
+    }
+
     public var commandHint: String? {
         guard isLive else { return nil }
         return "launchctl print gui/$(id -u)/\(launchAgentLabel)"
@@ -80,23 +91,16 @@ public struct ScheduledJobDefinition: Sendable, Equatable, Identifiable {
 public enum ScheduledPulseRegistry {
     public static let jobs: [ScheduledJobDefinition] = [
         ScheduledJobDefinition(
-            id: .aidataDigest,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.aidata_digest", "aidata Digest"),
-            program: "aidata/scripts/aidata_digest_run.sh",
-            cadence: .daily(hour: 4, minute: 0, timeZoneIdentifier: "Asia/Shanghai"),
+            id: .myPRSupervisor,
+            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "My PR Supervisor"),
+            program: "~/Development/handoff/my-pr-supervisor/precheck.py",
+            cadence: .interval(seconds: 300),
             isLive: true
         ),
         ScheduledJobDefinition(
             id: .prAutoReview,
             displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.pr_auto_review", "PR Auto Review"),
             program: "~/Development/handoff/pr-auto-review/precheck.py",
-            cadence: .interval(seconds: 300),
-            isLive: true
-        ),
-        ScheduledJobDefinition(
-            id: .myPRSupervisor,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "My PR Supervisor"),
-            program: "~/Development/handoff/my-pr-supervisor/precheck.py",
             cadence: .interval(seconds: 300),
             isLive: true
         ),

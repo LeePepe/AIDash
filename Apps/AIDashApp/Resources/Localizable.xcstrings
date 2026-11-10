@@ -6149,24 +6149,6 @@
         }
       }
     },
-    "dashboard.scheduled_pulse.job.aidata_digest": {
-      "comment": "Scheduled Pulse UI copy.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "aidata Digest"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "aidata 摘要"
-          }
-        }
-      }
-    },
     "dashboard.scheduled_pulse.job.pr_auto_review": {
       "comment": "Scheduled Pulse UI copy.",
       "extractionState": "manual",

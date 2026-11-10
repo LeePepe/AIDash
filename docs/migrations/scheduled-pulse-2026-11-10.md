@@ -6,9 +6,8 @@
 
 ## Owned jobs
 
-The registry owns exactly three live jobs:
+The registry owns exactly two live jobs:
 
-- `aidata-digest`
 - `pr-auto-review`
 - `my-pr-supervisor`
 

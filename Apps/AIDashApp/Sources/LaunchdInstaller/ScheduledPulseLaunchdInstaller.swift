@@ -14,6 +14,13 @@ public final class ScheduledPulseLaunchdInstaller {
             if case .registered = self { return true }
             return false
         }
+
+        public var failureDescription: String? {
+            if case let .failed(jobID, reason) = self {
+                return "\(jobID.rawValue): \(reason)"
+            }
+            return nil
+        }
     }
 
     public enum Plan: Equatable, Sendable {
@@ -27,6 +34,7 @@ public final class ScheduledPulseLaunchdInstaller {
     public typealias DirectoryCreator = @MainActor (URL) throws -> Void
     public typealias PlistWriter = @MainActor (URL, Data) throws -> Void
     public typealias Launchctl = @MainActor (_ args: [String]) -> LaunchdAgentInstaller.LaunchctlResult
+    public typealias TimeZoneIdentifierProvider = @MainActor () -> String
 
     public static let productionLaunchctl: Launchctl = { args in
         LaunchdAgentInstaller.runLaunchctl(args)
@@ -38,6 +46,7 @@ public final class ScheduledPulseLaunchdInstaller {
     private let createDirectory: DirectoryCreator
     private let writePlist: PlistWriter
     private let launchctl: Launchctl
+    private let currentTimeZoneIdentifier: TimeZoneIdentifierProvider
 
     public init(
         registry: [ScheduledJobDefinition] = ScheduledPulseRegistry.jobs,
@@ -53,7 +62,8 @@ public final class ScheduledPulseLaunchdInstaller {
         writePlist: @escaping PlistWriter = { url, data in
             try data.write(to: url, options: .atomic)
         },
-        launchctl: @escaping Launchctl = ScheduledPulseLaunchdInstaller.productionLaunchctl
+        launchctl: @escaping Launchctl = ScheduledPulseLaunchdInstaller.productionLaunchctl,
+        currentTimeZoneIdentifier: @escaping TimeZoneIdentifierProvider = { TimeZone.current.identifier }
     ) {
         self.registry = registry
         self.plistURL = plistURL
@@ -61,11 +71,21 @@ public final class ScheduledPulseLaunchdInstaller {
         self.createDirectory = createDirectory
         self.writePlist = writePlist
         self.launchctl = launchctl
+        self.currentTimeZoneIdentifier = currentTimeZoneIdentifier
+    }
+
+    public static func plan(
+        installed: Data?,
+        expected: Data?,
+        isLive: Bool,
+        jobLoaded: Bool
+    ) -> Plan {
+        guard isLive else { return .skipReserved }
+        return installed == expected && jobLoaded ? .upToDate : .install
     }
 
     public static func plan(installed: Data?, expected: Data?, isLive: Bool) -> Plan {
-        guard isLive else { return .skipReserved }
-        return installed == expected ? .upToDate : .install
+        plan(installed: installed, expected: expected, isLive: isLive, jobLoaded: true)
     }
 
     @discardableResult
@@ -76,19 +96,19 @@ public final class ScheduledPulseLaunchdInstaller {
         }
     }
 
-    public static func plistData(for definition: ScheduledJobDefinition) -> Data? {
-        guard definition.isLive, let program = definition.program else { return nil }
+    public static func plistData(for definition: ScheduledJobDefinition, homeURL: URL? = nil) -> Data? {
+        let home = homeURL ?? currentUserHomeDirectoryURL()
+        guard definition.isLive, let program = definition.programPath(homeURL: home) else { return nil }
         let label = xmlEscaped(definition.launchAgentLabel)
         let escapedProgram = xmlEscaped(program)
         let cadenceXML: String
         switch definition.cadence {
-        case let .daily(hour, minute, timeZoneIdentifier):
+        case let .daily(hour, minute, _):
             cadenceXML = """
             <key>StartCalendarInterval</key>
             <dict>
             <key>Hour</key><integer>\(hour)</integer>
             <key>Minute</key><integer>\(minute)</integer>
-            <key>TimeZone</key><string>\(xmlEscaped(timeZoneIdentifier))</string>
             </dict>
             """
         case let .interval(seconds):
@@ -121,13 +141,36 @@ public final class ScheduledPulseLaunchdInstaller {
             .appendingPathComponent("\(definition.launchAgentLabel).plist")
     }
 
+    private enum JobState: Equatable {
+        case loaded
+        case absent
+        case commandFailure(String)
+    }
+
     private func register(_ definition: ScheduledJobDefinition) -> RegistrationOutcome {
         guard let data = Self.plistData(for: definition) else {
             return .failed(jobID: definition.id, reason: "missing live job plist definition")
         }
+        if case let .daily(_, _, requiredTimeZone) = definition.cadence,
+           currentTimeZoneIdentifier() != requiredTimeZone {
+            return .failed(
+                jobID: definition.id,
+                reason: "machine timezone \(currentTimeZoneIdentifier()) is not \(requiredTimeZone)"
+            )
+        }
+
         let url = plistURL(definition)
         let current = installedPlist(url)
-        switch Self.plan(installed: current, expected: data, isLive: definition.isLive) {
+        let domain = "gui/\(getuid())"
+        let jobPath = "\(domain)/\(definition.launchAgentLabel)"
+        let jobStateResult = launchctl(["print", jobPath])
+        let jobState = Self.classifyJobState(jobStateResult)
+        if case let .commandFailure(reason) = jobState {
+            return .failed(jobID: definition.id, reason: reason)
+        }
+        let jobLoaded = jobState == .loaded
+
+        switch Self.plan(installed: current, expected: data, isLive: definition.isLive, jobLoaded: jobLoaded) {
         case .skipReserved:
             return .registered
         case .upToDate:
@@ -140,13 +183,26 @@ public final class ScheduledPulseLaunchdInstaller {
                 return .failed(jobID: definition.id, reason: "write plist: \(error.localizedDescription)")
             }
 
-            let domain = "gui/\(getuid())"
+            if jobLoaded {
+                let bootoutResult = launchctl(["bootout", jobPath])
+                guard bootoutResult.succeeded else {
+                    return .failed(jobID: definition.id, reason: bootoutResult.diagnosticSummary)
+                }
+            }
             let result = launchctl(["bootstrap", domain, url.path])
             guard result.succeeded else {
                 return .failed(jobID: definition.id, reason: result.diagnosticSummary)
             }
             return .registered
         }
+    }
+
+    private static func classifyJobState(_ result: LaunchdAgentInstaller.LaunchctlResult) -> JobState {
+        if result.succeeded { return .loaded }
+        if result.launchError == nil, result.terminationStatus == 3 || result.terminationStatus == 113 {
+            return .absent
+        }
+        return .commandFailure(result.diagnosticSummary)
     }
 
     private static func currentUserHomeDirectoryURL() -> URL {
