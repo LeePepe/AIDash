@@ -1,4 +1,3 @@
--- aidata-tier: explore
 -- tokens/by-device — merged token totals and per-device contribution.
 -- Grain: one CST day x device. The __all__ row is the merged total; device
 -- rows retain source identity and share input+output token contribution.
