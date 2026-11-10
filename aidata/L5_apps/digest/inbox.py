@@ -211,10 +211,16 @@ def _proposals(read: Callable[[], list[Proposal]] | None = None) -> list[InboxIt
     out = []
     for p in pending:
         prio = p.priority if p.priority in _PRIO_RANK else "high"
+        explicit_ref = getattr(p, "ref", "") or ""
+        if explicit_ref:
+            ref = explicit_ref
+        elif str(p.id).startswith(("proposal://", "knowledge://")):
+            ref = str(p.id)
+        else:
+            ref = f"proposal://{p.id}"
         out.append(InboxItem(
             f"待决策（{p.agent}）：{p.title[:56]}", prio, "待决策",
-            (p.id if str(p.id).startswith("proposal://")
-             else f"proposal://{p.id}"), "decision", "Owner GO"))
+            ref, "decision", "Owner GO"))
     return out
 
 
