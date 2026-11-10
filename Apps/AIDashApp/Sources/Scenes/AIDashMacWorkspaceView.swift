@@ -354,7 +354,7 @@ public struct AIDashMacWorkspaceView: View {
 
     public init(
         store: DashboardWorkspaceStore? = nil,
-        scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Void)? = nil,
+        scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Bool)? = nil,
         acknowledgedScheduledActionIDs: Set<String> = []
     ) {
         let resolvedStore = store ?? DashboardWorkspaceStore.shared

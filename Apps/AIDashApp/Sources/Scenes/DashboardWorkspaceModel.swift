@@ -37,7 +37,7 @@ public final class DashboardWorkspaceStore {
     public var lastCopiedScheduledJobID: ScheduledPulseJobID?
     public var scheduledPulseTab: ScheduledPulsePageTab = .overview
     public var selectedFrameworkJobID: ScheduledPulseJobID?
-    public var scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Void)?
+    public var scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Bool)?
     public var acknowledgedScheduledActionIDs: Set<String> = [] {
         didSet {
             guard oldValue != acknowledgedScheduledActionIDs else { return }
@@ -287,7 +287,9 @@ public final class DashboardWorkspaceStore {
         _ action: ScheduledJobAction,
         responses: [ScheduledJobActionResponse]
     ) {
-        scheduledActionWriter?(action, responses)
+        if let scheduledActionWriter {
+            guard scheduledActionWriter(action, responses) else { return }
+        }
         acknowledgedScheduledActionIDs.insert(action.acknowledgementKey)
         let entries = scheduledJobFrameworkSnapshot.entries.map { entry in
             ScheduledJobFrameworkEntry(

@@ -157,10 +157,11 @@ final class UserEventWriter {
     }
 
 #if os(macOS)
+    @discardableResult
     func acknowledgeScheduledJobAction(
         action: ScheduledJobAction,
         responses: [ScheduledJobActionResponse]
-    ) {
+    ) -> Bool {
         let context = ModelContext(container)
         let responseData = try? JSONEncoder().encode(responses)
         let responseText = responseData.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
@@ -174,7 +175,12 @@ final class UserEventWriter {
             cardType: "scheduledPulse"
         )
         context.insert(event)
-        try? context.save()
+        do {
+            try context.save()
+            return true
+        } catch {
+            return false
+        }
     }
 #endif
 }

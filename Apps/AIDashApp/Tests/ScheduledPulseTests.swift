@@ -67,7 +67,17 @@ struct ScheduledPulseTests {
 
         let childScriptURL = tempHome.appendingPathComponent("job.py")
         try """
-        import sys, time
+        import json, os, sys, time
+        from pathlib import Path
+        state_path = Path(os.environ["HOME"]) / "Library/Application Support/AIDash/jobs/my-pr-supervisor/state.json"
+        state_path.write_text(json.dumps({
+            "id": "my-pr-supervisor",
+            "updatedAt": "2026-11-10T12:00:00Z",
+            "lastResult": "succeeded",
+            "lastRunAt": "2026-11-10T12:00:00Z",
+            "summary": "自定义汇总",
+            "overviewMd": "子任务自定义详情"
+        }, ensure_ascii=False) + "\\n", encoding="utf-8")
         time.sleep(0.5)
         sys.exit(0)
         """.write(to: childScriptURL, atomically: true, encoding: .utf8)
@@ -93,10 +103,7 @@ struct ScheduledPulseTests {
         try p2.run()
         p2.waitUntilExit()
         #expect(p2.terminationStatus == 0)
-
-        let coalescedData = try Data(contentsOf: jobDir.appendingPathComponent("state.json"))
-        let coalescedText = try #require(String(data: coalescedData, encoding: .utf8))
-        #expect(coalescedText.contains("\"lastResult\": \"coalesced\""))
+        #expect(FileManager.default.fileExists(atPath: jobDir.appendingPathComponent(".coalesced").path))
 
         p1.waitUntilExit()
         #expect(p1.terminationStatus == 0)
@@ -104,6 +111,7 @@ struct ScheduledPulseTests {
         let finalData = try Data(contentsOf: jobDir.appendingPathComponent("state.json"))
         let finalText = try #require(String(data: finalData, encoding: .utf8))
         #expect(finalText.contains("\"lastResult\": \"succeeded\""))
+        #expect(finalText.contains("\"summary\": \"自定义汇总\""))
         #expect(!FileManager.default.fileExists(atPath: jobDir.appendingPathComponent(".running.lock").path))
 
         try """

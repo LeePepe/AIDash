@@ -28,6 +28,7 @@ interpreter = sys.argv[4]
 script_path = sys.argv[5]
 
 lock_file_path = state_root / ".running.flock"
+coalesced_marker_path = state_root / ".coalesced"
 state_path = state_root / "state.json"
 
 lock_fd = os.open(str(lock_file_path), os.O_CREAT | os.O_RDWR, 0o600)
@@ -36,12 +37,10 @@ try:
 except BlockingIOError:
     os.close(lock_fd)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    state_path.write_text(json.dumps({
-        "id": job_id,
-        "updatedAt": now,
-        "lastResult": "coalesced",
-        "lastRunAt": now,
-    }, ensure_ascii=False) + "\n", encoding="utf-8")
+    try:
+        coalesced_marker_path.write_text(now + "\n", encoding="utf-8")
+    except OSError:
+        pass
     sys.exit(0)
 
 os.ftruncate(lock_fd, 0)
@@ -59,6 +58,10 @@ def state_signature(path: Path):
         return None
 
 try:
+    try:
+        coalesced_marker_path.unlink()
+    except OSError:
+        pass
     before_sig = state_signature(state_path)
     proc = subprocess.run([interpreter, script_path], close_fds=True)
     exit_code = proc.returncode
