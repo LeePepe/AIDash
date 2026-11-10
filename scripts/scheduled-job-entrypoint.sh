@@ -57,11 +57,14 @@ PY
 fi
 
 cleanup_lock() {
-  rm -f "$pid_file" 2>/dev/null || true
-  rmdir "$lock_dir" 2>/dev/null || true
+  local current_pid
+  current_pid="$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')"
+  if [[ "$current_pid" == "$$" ]]; then
+    rm -f "$pid_file" 2>/dev/null || true
+    rmdir "$lock_dir" 2>/dev/null || true
+  fi
 }
 trap 'cleanup_lock' EXIT INT TERM
 "$interpreter" "$script_path"
 exit_code=$?
-cleanup_lock
 exit "$exit_code"

@@ -108,6 +108,14 @@ public struct ScheduledJobAction: Codable, Sendable, Equatable, Identifiable {
         self.controls = controls
     }
 
+    public var acknowledgementKey: String {
+        "\(jobID.rawValue):\(id)"
+    }
+
+    public func isAcknowledged(in acknowledgedIDs: Set<String>) -> Bool {
+        acknowledgedIDs.contains(acknowledgementKey)
+    }
+
     public func resolvedResponses(
         values: [String: String],
         selectedValues: [String: Set<String>]
@@ -197,7 +205,7 @@ public enum ScheduledJobFrameworkLogic {
         from snapshot: ScheduledJobFrameworkSnapshot,
         acknowledgedIDs: Set<String>
     ) -> [ScheduledJobAction] {
-        snapshot.unacknowledgedActions.filter { !acknowledgedIDs.contains($0.id) }
+        snapshot.unacknowledgedActions.filter { !$0.isAcknowledged(in: acknowledgedIDs) }
     }
 
     public static func response(

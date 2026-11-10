@@ -45,7 +45,7 @@ public final class DashboardWorkspaceStore {
                 ScheduledJobFrameworkEntry(
                     definition: entry.definition,
                     state: entry.state,
-                    actions: entry.actions.filter { !acknowledgedScheduledActionIDs.contains($0.id) }
+                    actions: entry.actions.filter { !$0.isAcknowledged(in: acknowledgedScheduledActionIDs) }
                 )
             }
             scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(
@@ -288,12 +288,12 @@ public final class DashboardWorkspaceStore {
         responses: [ScheduledJobActionResponse]
     ) {
         scheduledActionWriter?(action, responses)
-        acknowledgedScheduledActionIDs.insert(action.id)
+        acknowledgedScheduledActionIDs.insert(action.acknowledgementKey)
         let entries = scheduledJobFrameworkSnapshot.entries.map { entry in
             ScheduledJobFrameworkEntry(
                 definition: entry.definition,
                 state: entry.state,
-                actions: entry.actions.filter { $0.id != action.id }
+                actions: entry.actions.filter { $0.acknowledgementKey != action.acknowledgementKey }
             )
         }
         scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(

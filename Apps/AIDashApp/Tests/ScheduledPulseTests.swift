@@ -57,9 +57,40 @@ struct ScheduledPulseTests {
         let script = try String(contentsOf: scriptURL, encoding: .utf8)
         #expect(script.contains("exit_code=$?"))
         #expect(script.contains("kill -0 \"$holder_pid\""))
+        #expect(script.contains("if [[ \"$current_pid\" == \"$$\" ]]; then"))
         #expect(script.contains("trap 'cleanup_lock' EXIT INT TERM"))
         #expect(script.contains("rmdir \"$lock_dir\""))
         #expect(!script.contains("exec \"$interpreter\""))
+    }
+
+    @Test("acknowledging an action in one job does not hide a same-id action in another job")
+    func acknowledgementIsScopedByJobIDAndActionID() {
+        let store = DashboardWorkspaceStore(snapshot: Self.menuSnapshot())
+        let action1 = ScheduledJobAction(
+            id: "shared-id",
+            jobID: .myPRSupervisor,
+            title: "My PR Action",
+            descriptionMd: "Action 1",
+            controls: []
+        )
+        let action2 = ScheduledJobAction(
+            id: "shared-id",
+            jobID: .prAutoReview,
+            title: "Watched PR Action",
+            descriptionMd: "Action 2",
+            controls: []
+        )
+        store.updateScheduledJobFrameworkSnapshot(
+            ScheduledJobFrameworkSnapshot(
+                capturedAt: .now,
+                entries: [
+                    ScheduledJobFrameworkEntry(definition: ScheduledPulseRegistry.jobs[0], state: nil, actions: [action1]),
+                    ScheduledJobFrameworkEntry(definition: ScheduledPulseRegistry.jobs[1], state: nil, actions: [action2])
+                ]
+            )
+        )
+        store.acknowledgeScheduledAction(action1, responses: [])
+        #expect(store.scheduledJobFrameworkSnapshot.unacknowledgedActions.map(\.jobID) == [.prAutoReview])
     }
 
     @Test("singleSelect control resolves to first option when user has not explicitly mutated values")
@@ -146,7 +177,7 @@ struct ScheduledPulseTests {
         let control = try #require(reader.unacknowledgedActions.first?.controls.last)
         #expect(control.effectiveMaxLength == 80)
         #expect(ScheduledJobActionResponse(controlID: "text", value: String(repeating: "x", count: 100)).value.count == 80)
-        #expect(ScheduledJobFrameworkLogic.unacknowledgedActions(from: reader, acknowledgedIDs: ["a1"]).isEmpty)
+        #expect(ScheduledJobFrameworkLogic.unacknowledgedActions(from: reader, acknowledgedIDs: ["pr-auto-review:a1"]).isEmpty)
         let reloaded = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
             now: now,
             fileReader: { url in
@@ -155,7 +186,7 @@ struct ScheduledPulseTests {
                 return nil
             },
             homeURL: home,
-            acknowledgedActionIDs: ["a1"]
+            acknowledgedActionIDs: ["pr-auto-review:a1"]
         )
         #expect(reloaded.unacknowledgedActions.isEmpty)
 
@@ -185,7 +216,7 @@ struct ScheduledPulseTests {
                 entries: [ScheduledJobFrameworkEntry(definition: definition, state: nil, actions: [action])]
             )
         )
-        store.acknowledgedScheduledActionIDs = ["initial-action"]
+        store.acknowledgedScheduledActionIDs = ["my-pr-supervisor:initial-action"]
         #expect(store.scheduledJobFrameworkSnapshot.unacknowledgedActions.isEmpty)
     }
 

@@ -225,7 +225,17 @@ private struct StarFeedbackScope: View {
                     guard let head = event.itemRef?.split(separator: "|", maxSplits: 1).first.map(String.init) else {
                         return nil
                     }
-                    return head.split(separator: ":", maxSplits: 1).last.map(String.init) ?? head
+                    if head.contains(":") {
+                        return head
+                    }
+                    let prefix = "scheduled-pulse/"
+                    if event.cardId.hasPrefix(prefix) {
+                        let jobRaw = String(event.cardId.dropFirst(prefix.count))
+                        if !jobRaw.isEmpty {
+                            return "\(jobRaw):\(head)"
+                        }
+                    }
+                    return head
                 })
             )
             #else

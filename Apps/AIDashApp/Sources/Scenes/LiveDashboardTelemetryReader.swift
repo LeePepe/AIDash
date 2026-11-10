@@ -169,7 +169,7 @@ public enum LiveDashboardTelemetryReader {
                 definition: definition,
                 decoder: decoder,
                 read: read
-            ).filter { !acknowledgedActionIDs.contains($0.id) }
+            ).filter { !$0.isAcknowledged(in: acknowledgedActionIDs) }
             return ScheduledJobFrameworkEntry(definition: definition, state: state, actions: actions)
         }
         return ScheduledJobFrameworkSnapshot(capturedAt: now, entries: entries)
