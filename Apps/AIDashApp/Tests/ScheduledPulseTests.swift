@@ -119,6 +119,15 @@ struct ScheduledPulseTests {
         let failedText = try #require(String(data: failedData, encoding: .utf8))
         #expect(failedText.contains("\"lastResult\": \"failed\""))
         #expect(failedText.contains("\"summary\": \"exit 2\""))
+
+        let snapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            now: .now,
+            homeURL: tempHome
+        )
+        let entry = try #require(snapshot.entries.first(where: { $0.id == .myPRSupervisor }))
+        #expect(entry.state?.lastResult == .failed)
+        #expect(entry.state?.lastRunAt != nil)
+        #expect(entry.state?.summary == "exit 2")
     }
 
     @Test("acknowledging an action in one job does not hide a same-id action in another job")

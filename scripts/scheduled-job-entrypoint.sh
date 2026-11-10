@@ -35,7 +35,7 @@ try:
     fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except BlockingIOError:
     os.close(lock_fd)
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     state_path.write_text(json.dumps({
         "id": job_id,
         "updatedAt": now,
@@ -63,7 +63,7 @@ try:
     proc = subprocess.run([interpreter, script_path], close_fds=True)
     exit_code = proc.returncode
     after_sig = state_signature(state_path)
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     default_result = "succeeded" if exit_code == 0 else "failed"
     existing = {}
     if state_path.exists():
