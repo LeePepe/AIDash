@@ -67,7 +67,16 @@ def _coerce(obj: dict) -> Proposal | None:
     status = str(obj.get("status", "pending")).strip().lower()
     detail = str(obj.get("detail", "")).strip()
     ref = str(obj.get("ref", "")).strip()
-    return Proposal(pid, ts, agent, title, detail, priority, status, ref)
+    return Proposal(
+        id=pid,
+        ts=ts,
+        agent=agent,
+        title=title,
+        detail=detail,
+        priority=priority,
+        status=status,
+        ref=ref,
+    )
 
 
 def read_pending(path: Path | None = None) -> list[Proposal]:

@@ -129,6 +129,35 @@ def _lookup_knowledge_proposal(
     return None
 
 
+def _publish_knowledge_blog_and_approve(
+    slug: str,
+    *,
+    matched_prop: Proposal | None,
+    proposal_path: Path,
+    blog_repo: Path,
+    blog_mode: str,
+    pub_runner: Callable[..., int],
+    result: dict[str, int],
+) -> None:
+    try:
+        rc = int(pub_runner(slug, blog_repo, blog_mode))
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        rc = 1
+    if rc == 0:
+        if matched_prop is not None:
+            _append_jsonl(proposal_path, {
+                "id": matched_prop.id,
+                "ref": f"knowledge://{slug}",
+                "status": "approved",
+                "ts": _now(),
+                "source": "aidash",
+            })
+            result["promoted"] += 1
+        result["blog_published"] += 1
+    else:
+        result["errors"] += 1
+
+
 def _canonicalize_event_ref(
     raw_ref: str,
     active_provider: TodoSyncProvider,
@@ -277,34 +306,35 @@ def process_user_events(
         if action == "undone":
             result["undone"] += 1
             continue
-        if ref.startswith("proposal://"):
-            if action == "done":
-                proposal = pending.get(ref.removeprefix("proposal://"))
-                if proposal is not None:
-                    _append_jsonl(proposal_path, {
-                        "id": proposal.id, "ts": proposal.ts,
-                        "agent": proposal.agent, "title": proposal.title,
-                        "detail": proposal.detail, "priority": proposal.priority,
-                        "status": "dismissed",
-                    })
-                    result["resolved"] += 1
-                else:
-                    result["ignored"] += 1
+        if ref.startswith("proposal://") and action == "done":
+            proposal = pending.get(ref.removeprefix("proposal://"))
+            if proposal is not None:
+                dismissed_rec = {
+                    "id": proposal.id, "ts": proposal.ts,
+                    "agent": proposal.agent, "title": proposal.title,
+                    "detail": proposal.detail, "priority": proposal.priority,
+                    "status": "dismissed",
+                }
+                if getattr(proposal, "ref", ""):
+                    dismissed_rec["ref"] = proposal.ref
+                _append_jsonl(proposal_path, dismissed_rec)
+                result["resolved"] += 1
+            else:
+                result["ignored"] += 1
             continue
-        if ref.startswith("knowledge://"):
-            if action == "done":
-                slug = ref.removeprefix("knowledge://").strip("/")
-                proposal = _lookup_knowledge_proposal(pending, slug)
-                if proposal is not None:
-                    _append_jsonl(proposal_path, {
-                        "id": proposal.id, "ref": ref, "ts": proposal.ts,
-                        "agent": proposal.agent, "title": proposal.title,
-                        "detail": proposal.detail, "priority": proposal.priority,
-                        "status": "dismissed",
-                    })
-                    result["resolved"] += 1
-                else:
-                    result["ignored"] += 1
+        if ref.startswith("knowledge://") and action == "done":
+            slug = ref.removeprefix("knowledge://").strip("/")
+            proposal = _lookup_knowledge_proposal(pending, slug)
+            if proposal is not None:
+                _append_jsonl(proposal_path, {
+                    "id": proposal.id, "ref": ref, "ts": proposal.ts,
+                    "agent": proposal.agent, "title": proposal.title,
+                    "detail": proposal.detail, "priority": proposal.priority,
+                    "status": "dismissed",
+                })
+                result["resolved"] += 1
+            else:
+                result["ignored"] += 1
             continue
         if (
             ref.startswith("gtt://")
@@ -328,27 +358,18 @@ def process_user_events(
             prop_ref = getattr(proposal, "ref", "") or ""
             if prop_ref.startswith("knowledge://"):
                 slug = prop_ref.removeprefix("knowledge://").strip("/")
-                pub_runner = blog_publish_runner or _default_blog_publish_runner
-                try:
-                    rc = int(
-                        pub_runner(
-                            slug,
-                            blog_repo_path or DEFAULT_BLOG_REPO,
-                            blog_mode,
-                        )
-                    )
-                except (OSError, subprocess.SubprocessError, TypeError, ValueError):
-                    rc = 1
-                if rc == 0:
-                    _append_jsonl(proposal_path, {
-                        "id": proposal.id, "ref": prop_ref,
-                        "status": "approved", "ts": _now(),
-                        "source": "aidash",
-                    })
-                    result["promoted"] += 1
-                    result["blog_published"] += 1
-                else:
-                    result["errors"] += 1
+                if not slug:
+                    result["ignored"] += 1
+                    continue
+                _publish_knowledge_blog_and_approve(
+                    slug,
+                    matched_prop=proposal,
+                    proposal_path=proposal_path,
+                    blog_repo=blog_repo_path or DEFAULT_BLOG_REPO,
+                    blog_mode=blog_mode,
+                    pub_runner=blog_publish_runner or _default_blog_publish_runner,
+                    result=result,
+                )
                 continue
             try:
                 rc, external_id = _coerce_idea_result(
@@ -372,29 +393,15 @@ def process_user_events(
             if not slug:
                 result["ignored"] += 1
                 continue
-            pub_runner = blog_publish_runner or _default_blog_publish_runner
-            try:
-                rc = int(
-                    pub_runner(
-                        slug,
-                        blog_repo_path or DEFAULT_BLOG_REPO,
-                        blog_mode,
-                    )
-                )
-            except (OSError, subprocess.SubprocessError, TypeError, ValueError):
-                rc = 1
-            if rc == 0:
-                matched_prop = _lookup_knowledge_proposal(pending, slug)
-                if matched_prop is not None:
-                    _append_jsonl(proposal_path, {
-                        "id": matched_prop.id, "ref": ref,
-                        "status": "approved", "ts": _now(),
-                        "source": "aidash",
-                    })
-                result["promoted"] += 1
-                result["blog_published"] += 1
-            else:
-                result["errors"] += 1
+            _publish_knowledge_blog_and_approve(
+                slug,
+                matched_prop=_lookup_knowledge_proposal(pending, slug),
+                proposal_path=proposal_path,
+                blog_repo=blog_repo_path or DEFAULT_BLOG_REPO,
+                blog_mode=blog_mode,
+                pub_runner=blog_publish_runner or _default_blog_publish_runner,
+                result=result,
+            )
         elif ref.startswith("falcon://request/"):
             request_id = ref.removeprefix("falcon://request/")
             if _star_falcon(falcon_db_path, request_id, _now()) if falcon_db_path else False:
