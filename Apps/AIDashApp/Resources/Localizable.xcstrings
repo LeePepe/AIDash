@@ -6149,6 +6149,266 @@
         }
       }
     },
+    "dashboard.scheduled_pulse.tab.overview": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总览"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总览"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.tab.need_actions": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要处理"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要处理"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.page_picker": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "页面"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "页面"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.result.title": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时任务结果"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时任务结果"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.result.subtitle": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按登记表动态汇总 · 只读产出"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按登记表动态汇总 · 只读产出"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.success": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "成功"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "成功"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.needs_attention": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要处理"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要处理"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.start": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启动"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启动"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stop": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.need_actions.title": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要处理"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要处理"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.need_actions.subtitle": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "任务自己声明控件；回执只写 UserEvent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "任务自己声明控件；回执只写 UserEvent"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.need_actions.empty": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有需要你拍板的事。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有需要你拍板的事。"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.need_actions.confirm": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确认"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确认"
+          }
+        }
+      }
+    },
+    "menubar.scheduled_jobs.title": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时任务"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时任务"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.no_summary": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "还没有汇总。"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "还没有汇总。"}}
+      }
+    },
     "dashboard.scheduled_pulse.job.aidata_digest": {
       "comment": "Scheduled Pulse UI copy.",
       "extractionState": "manual",

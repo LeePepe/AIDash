@@ -8,8 +8,8 @@ public enum ScheduledPulsePageTab: String, CaseIterable, Sendable, Equatable, Id
     public var id: String { rawValue }
     public var title: String {
         switch self {
-        case .overview: return "总览"
-        case .needActions: return "需要处理"
+        case .overview: return DashboardL10n.tr("dashboard.scheduled_pulse.tab.overview", "总览")
+        case .needActions: return DashboardL10n.tr("dashboard.scheduled_pulse.tab.need_actions", "需要处理")
         }
     }
 }

@@ -354,10 +354,12 @@ public struct AIDashMacWorkspaceView: View {
 
     public init(
         store: DashboardWorkspaceStore? = nil,
-        scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Void)? = nil
+        scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Void)? = nil,
+        acknowledgedScheduledActionIDs: Set<String> = []
     ) {
         let resolvedStore = store ?? DashboardWorkspaceStore.shared
         resolvedStore.scheduledActionWriter = scheduledActionWriter
+        resolvedStore.acknowledgedScheduledActionIDs = acknowledgedScheduledActionIDs
         _store = State(initialValue: resolvedStore)
     }
 

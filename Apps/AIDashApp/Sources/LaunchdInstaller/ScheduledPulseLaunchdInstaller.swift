@@ -123,9 +123,12 @@ public final class ScheduledPulseLaunchdInstaller {
 
     public static func plistData(for definition: ScheduledJobDefinition, homeURL: URL? = nil) -> Data? {
         let home = homeURL ?? currentUserHomeDirectoryURL()
-        guard definition.isLive, let program = definition.programPath(homeURL: home) else { return nil }
+        guard definition.isLive,
+              let program = definition.programPath(homeURL: home),
+              let entrypoint = definition.entrypointPath(homeURL: home) else { return nil }
         let label = xmlEscaped(definition.launchAgentLabel)
         let interpreter = definition.interpreterPath ?? "/usr/bin/python3"
+        let escapedEntrypoint = xmlEscaped(entrypoint)
         let escapedInterpreter = xmlEscaped(interpreter)
         let escapedProgram = xmlEscaped(program)
         let cadenceXML: String
@@ -150,9 +153,12 @@ public final class ScheduledPulseLaunchdInstaller {
         <dict>
         <key>Label</key><string>\(label)</string>
         <key>ProcessType</key><string>Interactive</string>
-        <key>Program</key><string>\(escapedInterpreter)</string>
+        <key>Program</key><string>/bin/zsh</string>
         <key>ProgramArguments</key>
         <array>
+        <string>/bin/zsh</string>
+        <string>\(escapedEntrypoint)</string>
+        <string>\(xmlEscaped(definition.id.rawValue))</string>
         <string>\(escapedInterpreter)</string>
         <string>\(escapedProgram)</string>
         </array>

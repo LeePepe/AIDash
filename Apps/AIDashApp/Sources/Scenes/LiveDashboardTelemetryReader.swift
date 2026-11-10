@@ -86,10 +86,7 @@ public enum LiveDashboardTelemetryReader {
             let result = effect(["print", "\(domain)/\(definition.launchAgentLabel)"])
             return scheduledJobStatus(definition: definition, result: result)
         }
-        let workiq = ScheduledPulseRegistry.reservedJobs.map {
-            ScheduledJobStatus(definition: $0, health: .reserved)
-        }
-        return ScheduledPulseSnapshot(capturedAt: now, jobs: jobs + workiq)
+        return ScheduledPulseSnapshot(capturedAt: now, jobs: jobs)
     }
 
     private static func scheduledJobStatus(
@@ -148,7 +145,8 @@ public enum LiveDashboardTelemetryReader {
     public static func loadScheduledJobFrameworkSnapshot(
         now: Date = Date(),
         fileReader: ScheduledJobFileReader? = nil,
-        homeURL: URL? = nil
+        homeURL: URL? = nil,
+        acknowledgedActionIDs: Set<String> = []
     ) -> ScheduledJobFrameworkSnapshot {
         guard isLiveEnvironment || fileReader != nil || homeURL != nil else {
             return ScheduledJobFrameworkSnapshot(capturedAt: now, entries: [])
@@ -171,7 +169,7 @@ public enum LiveDashboardTelemetryReader {
                 definition: definition,
                 decoder: decoder,
                 read: read
-            )
+            ).filter { !acknowledgedActionIDs.contains($0.id) }
             return ScheduledJobFrameworkEntry(definition: definition, state: state, actions: actions)
         }
         return ScheduledJobFrameworkSnapshot(capturedAt: now, entries: entries)

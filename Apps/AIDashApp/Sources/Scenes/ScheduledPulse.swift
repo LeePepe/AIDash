@@ -87,6 +87,11 @@ public struct ScheduledJobDefinition: Sendable, Equatable, Identifiable {
         return id == .aidataDigest ? "/bin/zsh" : "/usr/bin/python3"
     }
 
+    public func entrypointPath(homeURL: URL) -> String? {
+        guard isLive else { return nil }
+        return homeURL.appendingPathComponent("Development/AIDash/scripts/scheduled-job-entrypoint.sh").path
+    }
+
     public var commandHint: String? {
         guard isLive else { return nil }
         return "launchctl print gui/$(id -u)/\(launchAgentLabel)"

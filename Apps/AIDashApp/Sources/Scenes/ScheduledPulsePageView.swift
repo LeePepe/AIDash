@@ -12,7 +12,10 @@ public struct ScheduledPulsePageView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Picker("页面", selection: $store.scheduledPulseTab) {
+            Picker(
+                DashboardL10n.tr("dashboard.scheduled_pulse.page_picker", "页面"),
+                selection: $store.scheduledPulseTab
+            ) {
                 ForEach(ScheduledPulsePageTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
@@ -38,24 +41,33 @@ public struct ScheduledPulsePageView: View {
     private var overview: some View {
         VStack(alignment: .leading, spacing: 16) {
             SolidModularCardContainer(
-                title: "定时任务结果",
-                subtitle: "按登记表动态汇总 · 只读产出",
+                title: DashboardL10n.tr("dashboard.scheduled_pulse.result.title", "定时任务结果"),
+                subtitle: DashboardL10n.tr("dashboard.scheduled_pulse.result.subtitle", "按登记表动态汇总 · 只读产出"),
                 symbolName: "checkmark.circle"
             ) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(ScheduledJobFrameworkLogic.successStripText(for: store.scheduledJobFrameworkSnapshot))
-                        .font(.headline)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    ForEach(store.scheduledJobFrameworkSnapshot.entries) { entry in
+                        Button {
+                            select(entry)
+                        } label: {
+                            Text("\(entry.definition.displayName) \(entry.isSuccess ? "✓" : "✗")")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(entry.isSuccess ? .green : .orange)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(entry.definition.displayName)
+                    }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             if store.scheduledJobFrameworkSnapshot.allHaveNoState {
-                SolidModularCardContainer(title: "总览", subtitle: nil, symbolName: "text.alignleft") {
-                    Text("还没有汇总。")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                Text(DashboardL10n.tr("dashboard.scheduled_pulse.no_summary", "还没有汇总。"))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(store.scheduledJobFrameworkSnapshot.overviewEntries) { entry in
@@ -63,6 +75,8 @@ public struct ScheduledPulsePageView: View {
                     }
                 }
             }
+
+            frameworkControls
 
             if let installerError {
                 Text(installerError)
@@ -72,41 +86,50 @@ public struct ScheduledPulsePageView: View {
         }
     }
 
+    private var frameworkControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(store.scheduledJobFrameworkSnapshot.entries) { entry in
+                HStack(spacing: 8) {
+                    Text(entry.definition.displayName)
+                        .font(.caption.weight(.medium))
+                    Spacer(minLength: 4)
+                    Button(DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) {
+                        handle(store.startScheduledJob(entry.id))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    Button(DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止")) {
+                        handle(store.stopScheduledJob(entry.id))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
     private func overviewBlock(_ entry: ScheduledJobFrameworkEntry) -> some View {
         let isProblem = entry.isProblem
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text(entry.definition.displayName)
-                    .font(.headline)
+                Text(entry.definition.displayName).font(.headline)
                 Spacer(minLength: 4)
-                Text(entry.isSuccess ? "成功" : "需要处理")
+                Text(entry.isSuccess
+                    ? DashboardL10n.tr("dashboard.scheduled_pulse.success", "成功")
+                    : DashboardL10n.tr("dashboard.scheduled_pulse.needs_attention", "需要处理"))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(isProblem ? .orange : .green)
-                Button("启动") { handle(store.startScheduledJob(entry.id)) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                Button("停止") { handle(store.stopScheduledJob(entry.id)) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
             }
             if let overviewMd = entry.state?.overviewMd, !overviewMd.isEmpty {
-                Text(overviewMd)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(overviewMd).font(.body).fixedSize(horizontal: false, vertical: true)
             } else if let summary = entry.state?.summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(summary).font(.body).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .leading) {
-            if isProblem {
-                Rectangle().fill(Color.orange).frame(width: 3)
-            }
+            if isProblem { Rectangle().fill(Color.orange).frame(width: 3) }
         }
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
@@ -117,13 +140,13 @@ public struct ScheduledPulsePageView: View {
             store.selectedFrameworkJobID == nil || action.jobID == store.selectedFrameworkJobID
         }
         return SolidModularCardContainer(
-            title: "需要处理",
-            subtitle: "任务自己声明控件；回执只写 UserEvent",
+            title: DashboardL10n.tr("dashboard.scheduled_pulse.need_actions.title", "需要处理"),
+            subtitle: DashboardL10n.tr("dashboard.scheduled_pulse.need_actions.subtitle", "任务自己声明控件；回执只写 UserEvent"),
             symbolName: "checklist"
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 if actions.isEmpty {
-                    Text("没有需要你拍板的事。")
+                    Text(DashboardL10n.tr("dashboard.scheduled_pulse.need_actions.empty", "没有需要你拍板的事。"))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
                 } else {
@@ -135,6 +158,11 @@ public struct ScheduledPulsePageView: View {
                 }
             }
         }
+    }
+
+    private func select(_ entry: ScheduledJobFrameworkEntry) {
+        store.selectedFrameworkJobID = entry.id
+        store.scheduledPulseTab = entry.actions.isEmpty ? .overview : .needActions
     }
 
     private func handle(_ outcome: ScheduledPulseLaunchdInstaller.RegistrationOutcome) {
@@ -153,12 +181,10 @@ private struct ScheduledJobActionView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(action.title).font(.headline)
             Text(action.descriptionMd).font(.body).foregroundStyle(.secondary)
-            ForEach(action.controls) { control in
-                controlView(control)
-            }
+            ForEach(action.controls) { control in controlView(control) }
             HStack {
                 Spacer()
-                Button("确认") {
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.need_actions.confirm", "确认")) {
                     let responses = action.controls.map { control in
                         ScheduledJobActionResponse(
                             controlID: control.id,
@@ -181,13 +207,10 @@ private struct ScheduledJobActionView: View {
     private func controlView(_ control: ScheduledJobActionControl) -> some View {
         switch control.kind {
         case .confirm:
-            Label(control.title, systemImage: "checkmark.circle")
-                .font(.subheadline)
+            Label(control.title, systemImage: "checkmark.circle").font(.subheadline)
         case .singleSelect:
             Picker(control.title, selection: binding(for: control)) {
-                ForEach(control.options, id: \.self) { option in
-                    Text(option).tag(option)
-                }
+                ForEach(control.options, id: \.self) { option in Text(option).tag(option) }
             }
             .pickerStyle(.menu)
         case .multiSelect:

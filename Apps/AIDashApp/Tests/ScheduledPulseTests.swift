@@ -29,13 +29,14 @@ struct ScheduledPulseTests {
             (.prAutoReview, "/usr/bin/python3", "/Users/tester/Development/handoff/pr-auto-review/precheck.py"),
             (.aidataDigest, "/bin/zsh", "/Users/tester/Development/AIDash/aidata/scripts/aidata_digest_run.sh")
         ]
+        let wrapper = "/Users/tester/Development/AIDash/scripts/scheduled-job-entrypoint.sh"
         for (id, interpreter, program) in expected {
             let definition = try #require(ScheduledPulseRegistry.job(for: id))
             let data = try #require(ScheduledPulseLaunchdInstaller.plistData(for: definition, homeURL: home))
             let plist = try #require(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
             #expect(plist["Label"] as? String == definition.launchAgentLabel)
-            #expect(plist["Program"] as? String == interpreter)
-            #expect(plist["ProgramArguments"] as? [String] == [interpreter, program])
+            #expect(plist["Program"] as? String == "/bin/zsh")
+            #expect(plist["ProgramArguments"] as? [String] == ["/bin/zsh", wrapper, id.rawValue, interpreter, program])
             if id == .aidataDigest {
                 #expect(plist["StartCalendarInterval"] as? [String: Any] != nil)
                 #expect((plist["StartCalendarInterval"] as? [String: Any])?["TimeZone"] == nil)
@@ -99,6 +100,17 @@ struct ScheduledPulseTests {
         #expect(control.effectiveMaxLength == 80)
         #expect(ScheduledJobActionResponse(controlID: "text", value: String(repeating: "x", count: 100)).value.count == 80)
         #expect(ScheduledJobFrameworkLogic.unacknowledgedActions(from: reader, acknowledgedIDs: ["a1"]).isEmpty)
+        let reloaded = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            now: now,
+            fileReader: { url in
+                if url.lastPathComponent == "state.json" { return stateData }
+                if url.lastPathComponent == "actions.jsonl" && url.path.contains("pr-auto-review") { return actionData }
+                return nil
+            },
+            homeURL: home,
+            acknowledgedActionIDs: ["a1"]
+        )
+        #expect(reloaded.unacknowledgedActions.isEmpty)
 
         let empty = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
             now: now,

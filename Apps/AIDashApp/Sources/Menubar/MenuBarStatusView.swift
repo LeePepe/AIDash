@@ -102,9 +102,7 @@ public struct MenuBarStatusView: View {
         return VStack(alignment: .leading, spacing: 12) {
             if prefs.showPopoverSystemTelemetry { telemetryGaugeStrip(snapshot) }
             cliTokenAndQuotaSection(entries: cliEntries, trendPoints: trendPoints, todayTotal: todayTotal, periodTotal: periodTotal)
-            if prefs.showPopoverActionItems {
-                scheduledJobsSection(snapshot: frameworkSnapshot)
-            }
+            scheduledJobsSection(snapshot: frameworkSnapshot)
         }
     }
 
@@ -295,8 +293,9 @@ public struct MenuBarStatusView: View {
             snapshot: snapshot,
             solidCardColor: solidCardColor,
             onOpenProblem: { entry in
-                DashboardWorkspaceStore.shared.selectedFrameworkJobID = entry.id
-                DashboardWorkspaceStore.shared.scheduledPulseTab = .needActions
+                let store = DashboardWorkspaceStore.shared
+                store.selectedFrameworkJobID = entry.id
+                store.scheduledPulseTab = entry.actions.isEmpty ? .overview : .needActions
                 onOpenScheduledPulse()
             }
         )
@@ -558,7 +557,7 @@ private struct MenuBarScheduledJobsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("定时任务")
+            Text(DashboardL10n.tr("menubar.scheduled_jobs.title", "定时任务"))
                 .font(.system(.caption2, design: .rounded, weight: .semibold))
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {

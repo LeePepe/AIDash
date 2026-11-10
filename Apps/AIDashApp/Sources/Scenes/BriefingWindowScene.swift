@@ -183,6 +183,7 @@ private struct StarFeedbackScope: View {
     /// `doneItemRefs` set via `UserEventWriter.doneRefs(from:)`'s
     /// latest-wins reducer (spec 003 §8, spec 005 D3).
     @Query private var doneEvents: [UserEventModel]
+    @Query private var scheduledActionEvents: [UserEventModel]
 
     init(
         container: ModelContainer,
@@ -202,6 +203,10 @@ private struct StarFeedbackScope: View {
         _doneEvents = Query(filter: #Predicate {
             $0.actionRaw == doneRaw || $0.actionRaw == undoneRaw
         })
+        let scheduledActionRaw = UserEventAction.acknowledgeJobAction.rawValue
+        _scheduledActionEvents = Query(filter: #Predicate {
+            $0.actionRaw == scheduledActionRaw
+        })
     }
 
     var body: some View {
@@ -215,7 +220,10 @@ private struct StarFeedbackScope: View {
             AIDashMacWorkspaceView(
                 scheduledActionWriter: { action, responses in
                     writer.acknowledgeScheduledJobAction(action: action, responses: responses)
-                }
+                },
+                acknowledgedScheduledActionIDs: Set(scheduledActionEvents.compactMap { event in
+                    event.itemRef?.split(separator: "|", maxSplits: 1).first.map(String.init)
+                })
             )
             #else
             BriefingView()

@@ -37,6 +37,7 @@ public final class DashboardWorkspaceStore {
     public var scheduledPulseTab: ScheduledPulsePageTab = .overview
     public var selectedFrameworkJobID: ScheduledPulseJobID?
     public var scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Void)?
+    public var acknowledgedScheduledActionIDs: Set<String> = []
     public var availableDates: [String] = DashboardWorkspaceStore.recentDateStrings()
     public var selectedDateString: String = DashboardWorkspaceStore.todayDateString()
 
@@ -217,7 +218,9 @@ public final class DashboardWorkspaceStore {
         scheduledPulseSnapshot = LiveDashboardTelemetryReader.loadScheduledPulseSnapshot()
         scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
         selectedScheduledJobID = scheduledPulseSnapshot.jobs.first?.id
-        scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot()
+        scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            acknowledgedActionIDs: acknowledgedScheduledActionIDs
+        )
         if case let .populated(snapshot) = state {
             applySnapshot(snapshot)
         }
@@ -246,7 +249,9 @@ public final class DashboardWorkspaceStore {
     public func startScheduledJob(_ id: ScheduledPulseJobID) -> ScheduledPulseLaunchdInstaller.RegistrationOutcome {
         let outcome = ScheduledPulseLaunchdInstaller.shared.start(jobID: id)
         if outcome.isHealthy {
-            scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot()
+            scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+                acknowledgedActionIDs: acknowledgedScheduledActionIDs
+            )
         }
         return outcome
     }
@@ -255,7 +260,9 @@ public final class DashboardWorkspaceStore {
     public func stopScheduledJob(_ id: ScheduledPulseJobID) -> ScheduledPulseLaunchdInstaller.RegistrationOutcome {
         let outcome = ScheduledPulseLaunchdInstaller.shared.stop(jobID: id)
         if outcome.isHealthy {
-            scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot()
+            scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+                acknowledgedActionIDs: acknowledgedScheduledActionIDs
+            )
         }
         return outcome
     }
@@ -265,6 +272,7 @@ public final class DashboardWorkspaceStore {
         responses: [ScheduledJobActionResponse]
     ) {
         scheduledActionWriter?(action, responses)
+        acknowledgedScheduledActionIDs.insert(action.id)
         let entries = scheduledJobFrameworkSnapshot.entries.map { entry in
             ScheduledJobFrameworkEntry(
                 definition: entry.definition,
