@@ -72,6 +72,7 @@ struct UserEventWriterTests {
         #expect(try fetchEvents(container).count == 2)
     }
 
+#if os(macOS)
     @Test("scheduled Need Action acknowledgement appends an append-only UserEvent")
     func scheduledActionAcknowledgementAppendsEvent() throws {
         let (writer, container) = try makeWriter()
@@ -91,6 +92,7 @@ struct UserEventWriterTests {
         #expect(event.cardId == "scheduled-pulse/my-pr-supervisor")
         #expect(event.itemRef?.hasPrefix("action-1|") == true)
     }
+#endif
 
     // MARK: - Done write path (MY-1372 / T102, latest-wins)
 

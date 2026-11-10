@@ -156,6 +156,7 @@ final class UserEventWriter {
         try? context.save()
     }
 
+#if os(macOS)
     func acknowledgeScheduledJobAction(
         action: ScheduledJobAction,
         responses: [ScheduledJobActionResponse]
@@ -175,6 +176,7 @@ final class UserEventWriter {
         context.insert(event)
         try? context.save()
     }
+#endif
 }
 
 // MARK: - Done latest-wins inference (MY-1372 / T102, spec 003 §8)

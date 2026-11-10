@@ -107,6 +107,26 @@ public struct ScheduledJobAction: Codable, Sendable, Equatable, Identifiable {
         self.descriptionMd = descriptionMd
         self.controls = controls
     }
+
+    public func resolvedResponses(
+        values: [String: String],
+        selectedValues: [String: Set<String>]
+    ) -> [ScheduledJobActionResponse] {
+        controls.map { control in
+            let resolvedValue: String
+            switch control.kind {
+            case .multiSelect:
+                resolvedValue = selectedValues[control.id]?.sorted().joined(separator: ",")
+                    ?? values[control.id]
+                    ?? "确认"
+            case .singleSelect:
+                resolvedValue = values[control.id] ?? control.options.first ?? "确认"
+            case .confirm, .textInput:
+                resolvedValue = values[control.id] ?? "确认"
+            }
+            return ScheduledJobActionResponse(controlID: control.id, value: resolvedValue)
+        }
+    }
 }
 
 public struct ScheduledJobActionResponse: Codable, Sendable, Equatable {

@@ -55,9 +55,41 @@ struct ScheduledPulseTests {
             .deletingLastPathComponent()
             .appendingPathComponent("scripts/scheduled-job-entrypoint.sh")
         let script = try String(contentsOf: scriptURL, encoding: .utf8)
-        #expect(script.contains("status=$?"))
+        #expect(script.contains("exit_code=$?"))
+        #expect(script.contains("trap 'rmdir \"$lock_dir\" 2>/dev/null || true' EXIT INT TERM"))
         #expect(script.contains("rmdir \"$lock_dir\""))
         #expect(!script.contains("exec \"$interpreter\""))
+    }
+
+    @Test("singleSelect control resolves to first option when user has not explicitly mutated values")
+    func singleSelectResolvesDefaultFirstOption() {
+        let action = ScheduledJobAction(
+            id: "act-select",
+            jobID: .prAutoReview,
+            title: "Choose strategy",
+            descriptionMd: "Select an action",
+            controls: [
+                ScheduledJobActionControl(
+                    id: "strategy",
+                    kind: .singleSelect,
+                    title: "Strategy",
+                    options: ["Re-run CI", "Skip", "Escalate"]
+                ),
+                ScheduledJobActionControl(
+                    id: "confirm",
+                    kind: .confirm,
+                    title: "Confirm"
+                )
+            ]
+        )
+        let defaultResponses = action.resolvedResponses(values: [:], selectedValues: [:])
+        #expect(defaultResponses == [
+            ScheduledJobActionResponse(controlID: "strategy", value: "Re-run CI"),
+            ScheduledJobActionResponse(controlID: "confirm", value: "确认")
+        ])
+
+        let explicitResponses = action.resolvedResponses(values: ["strategy": "Escalate"], selectedValues: [:])
+        #expect(explicitResponses.first?.value == "Escalate")
     }
 
     @Test("owned start and stop use exact labels and never remove the plist")

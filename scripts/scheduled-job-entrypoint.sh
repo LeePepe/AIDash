@@ -32,8 +32,8 @@ PY
   exit 0
 fi
 
-trap - EXIT
+trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT INT TERM
 "$interpreter" "$script_path"
-status=$?
+exit_code=$?
 rmdir "$lock_dir" 2>/dev/null || true
-exit "$status"
+exit "$exit_code"

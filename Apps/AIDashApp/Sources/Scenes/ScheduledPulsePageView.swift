@@ -185,12 +185,10 @@ private struct ScheduledJobActionView: View {
             HStack {
                 Spacer()
                 Button(DashboardL10n.tr("dashboard.scheduled_pulse.need_actions.confirm", "确认")) {
-                    let responses = action.controls.map { control in
-                        ScheduledJobActionResponse(
-                            controlID: control.id,
-                            value: selectedValues[control.id]?.sorted().joined(separator: ",") ?? values[control.id] ?? "确认"
-                        )
-                    }
+                    let responses = action.resolvedResponses(
+                        values: values,
+                        selectedValues: selectedValues
+                    )
                     onAcknowledge(responses)
                 }
                 .buttonStyle(.borderedProminent)
