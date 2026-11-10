@@ -399,7 +399,7 @@ struct DashboardWorkspaceTests {
         #expect(MenuBarBadgeMetric.cpuAndMemory.formattedStatusBarTitle(snapshot: snap, entries: store.cliEntries) == " CPU 34% · 18/32G")
         prefs.defaultChartGranularity = .threeDayHourly
         #expect(prefs.defaultChartGranularity == .threeDayHourly)
-        #expect(store.cliEntries.filter(\.hasTrackedQuota).count == 2)
+        #expect(store.cliEntries.filter(\.hasTrackedQuota).count == 3)
         let ravenDB = tempDir.appendingPathComponent("raven.db")
         let todayStr = DashboardWorkspaceStore.todayDateString()
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -572,6 +572,16 @@ struct DashboardWorkspaceTests {
             .write(to: tempHome.appendingPathComponent(".config/magpie/plugin-auth.json"))
         try Data("{\"access_token\":\"tok\",\"expires_at\":\(Int(now.timeIntervalSince1970 + 7200))}".utf8)
             .write(to: expiredKimiCred)
+        let kimiUsagesPayload = """
+        {
+          "usage": {"limit":"100","used":"57","remaining":"43","resetTime":"2026-11-15T08:45:45.712409Z"},
+          "usages": {
+            "limit_5h": {"used_ratio": 0.0642, "reset_time": "2026-11-10T02:45:45Z"},
+            "limit_7d": {"used_ratio": 0.5657, "reset_time": "2026-11-15T08:45:45Z"}
+          }
+        }
+        """
+        try Data(kimiUsagesPayload.utf8).write(to: tempHome.appendingPathComponent(".kimi-code/usages.json"))
         let refreshedDataset = try #require(
             LiveDashboardTelemetryReader.loadDataset(
                 forDate: "2026-11-09",
@@ -586,7 +596,12 @@ struct DashboardWorkspaceTests {
         #expect(abs((refreshedGrok.quotaUsedOverride ?? -1) - 0.27) < 0.0001)
         let refreshedKimi = try #require(refreshedDataset.entries.first(where: { $0.cliFilter == .kimi }))
         #expect(refreshedKimi.authState == .authenticated)
-        #expect(refreshedKimi.quotaLabel == nil)
+        #expect(refreshedKimi.hasTrackedQuota == true)
+        #expect(refreshedKimi.quotaLabel != nil)
+        #expect(abs((refreshedKimi.quotaUsedOverride ?? 0) - 0.5657) < 0.001)
+        #expect(abs((refreshedKimi.secondaryQuotaUsed ?? 0) - 0.0642) < 0.001)
+        #expect(refreshedKimi.secondaryQuotaLabel == "5h")
+        #expect(refreshedKimi.quotaResetText == "Reset 11-15 08:45")
         #expect(refreshedKimi.health == .healthy)
 
         _ = CLICostQuotaCardView(entries: dataset.entries, todayTotalUSD: 0, periodTotalUSD: 0).body

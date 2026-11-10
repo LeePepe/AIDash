@@ -572,7 +572,7 @@ extension DashboardWorkspaceStore {
                 id: "cli-kimi",
                 cliFilter: .kimi,
                 displayName: "Kimi CLI",
-                modelTag: "kimi-k2.5-coding",
+                modelTag: "Kimi Code (5h / 7d)",
                 todayCostUSD: 0.0,
                 periodCostUSD: 0.0,
                 quotaLimitUSD: 15.0,
@@ -580,8 +580,8 @@ extension DashboardWorkspaceStore {
                 cacheTokens: 0,
                 interactionCount: 0,
                 isAvailable: true,
-                quotaUsedOverride: nil,
-                quotaLabel: nil
+                quotaUsedOverride: 0.0,
+                quotaLabel: weeklyQuotaLabel
             )
         ]
     }

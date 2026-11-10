@@ -9,9 +9,12 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
     public let claudeFiveHourUsedFraction: Double?
     public let cursorWeeklyUsedFraction: Double?
     public let grokSevenDayUsedFraction: Double?
+    public let kimiSevenDayUsedFraction: Double?
+    public let kimiFiveHourUsedFraction: Double?
     public let claudeResetText: String?
     public let cursorResetText: String?
     public let grokResetText: String?
+    public let kimiResetText: String?
     public let claudeReadAtDate: Date?
     public let grokReadAtDate: Date?
 
@@ -20,9 +23,12 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
         claudeFiveHourUsedFraction: Double? = nil,
         cursorWeeklyUsedFraction: Double? = nil,
         grokSevenDayUsedFraction: Double? = nil,
+        kimiSevenDayUsedFraction: Double? = nil,
+        kimiFiveHourUsedFraction: Double? = nil,
         claudeResetText: String? = nil,
         cursorResetText: String? = nil,
         grokResetText: String? = nil,
+        kimiResetText: String? = nil,
         claudeReadAtDate: Date? = nil,
         grokReadAtDate: Date? = nil
     ) {
@@ -30,9 +36,12 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
         self.claudeFiveHourUsedFraction = claudeFiveHourUsedFraction
         self.cursorWeeklyUsedFraction = cursorWeeklyUsedFraction
         self.grokSevenDayUsedFraction = grokSevenDayUsedFraction
+        self.kimiSevenDayUsedFraction = kimiSevenDayUsedFraction
+        self.kimiFiveHourUsedFraction = kimiFiveHourUsedFraction
         self.claudeResetText = claudeResetText
         self.cursorResetText = cursorResetText
         self.grokResetText = grokResetText
+        self.kimiResetText = kimiResetText
         self.claudeReadAtDate = claudeReadAtDate
         self.grokReadAtDate = grokReadAtDate
     }
@@ -65,10 +74,12 @@ public enum LiveDashboardTelemetryReader {
         let warehouseURL = homeURL.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
         let quotasURL = homeURL.appendingPathComponent(".config/magpie/quotas.json")
         let claudeQuotaURL = homeURL.appendingPathComponent(".config/claude/gtt-weekly-remaining-pct.json")
+        let kimiUsagesURL = homeURL.appendingPathComponent(".kimi-code/usages.json")
 
         let quotas = readQuotas(
             magpieQuotasURL: quotasURL,
             claudeFallbackURL: claudeQuotaURL,
+            kimiUsagesURL: kimiUsagesURL,
             fallbackUsage: fallbackUsage,
             now: now
         )
@@ -324,14 +335,21 @@ public enum LiveDashboardTelemetryReader {
         if isCLIInstalled(.kimi, homeURL: homeURL, includeSystemBinaries: includeSystemBinaries) {
             let kimiAuth = detectKimiAuthState(homeURL: homeURL, kimiStats: kimiStats, now: now)
             let isExhausted = (kimiAuth.badgeTitle == DashboardL10n.tr("dashboard.auth.badge_quota_exhausted", "Quota Exhausted"))
+            let isAuthenticated = (kimiAuth == .authenticated)
+            let kimi7dQuota: Double? = isExhausted ? 1.0 : (isAuthenticated ? (quotas.kimiSevenDayUsedFraction ?? 0.0) : nil)
+            let kimi5hQuota: Double? = isAuthenticated ? quotas.kimiFiveHourUsedFraction : nil
             entries.append(
                 CLICostQuotaEntry(
-                    id: "cli-kimi", cliFilter: .kimi, displayName: "Kimi CLI", modelTag: "kimi-code/k3",
+                    id: "cli-kimi", cliFilter: .kimi, displayName: "Kimi CLI", modelTag: "Kimi Code (5h / 7d)",
                     todayCostUSD: 0.0, periodCostUSD: 0.0, quotaLimitUSD: 100.0,
                     activeTokens: kimiStats.dayTokens, cacheTokens: 0, interactionCount: kimiStats.dayRuns,
-                    isAvailable: true, quotaUsedOverride: isExhausted ? 1.0 : nil,
-                    quotaLabel: isExhausted ? weeklyQuotaLabel : nil,
-                    periodTotalTokens: kimiStats.weekTokens, authState: kimiAuth
+                    isAvailable: true, quotaUsedOverride: kimi7dQuota,
+                    quotaLabel: (isAuthenticated || isExhausted) ? weeklyQuotaLabel : nil,
+                    periodTotalTokens: kimiStats.weekTokens,
+                    secondaryQuotaUsed: kimi5hQuota,
+                    secondaryQuotaLabel: kimi5hQuota != nil ? "5h" : nil,
+                    quotaResetText: isAuthenticated ? quotas.kimiResetText : nil,
+                    authState: kimiAuth
                 )
             )
         }
@@ -461,10 +479,13 @@ public enum LiveDashboardTelemetryReader {
     private static func computeCostUSD(input: UInt64, output: UInt64, cache: UInt64, inRate: Double, outRate: Double, cacheRate: Double) -> Double {
         (Double(input) / 1_000_000.0) * inRate + (Double(output) / 1_000_000.0) * outRate + (Double(cache) / 1_000_000.0) * cacheRate
     }
+}
 
+extension LiveDashboardTelemetryReader {
     public static func readQuotas(
         magpieQuotasURL: URL,
         claudeFallbackURL: URL,
+        kimiUsagesURL: URL? = nil,
         fallbackUsage: CLITokenUsageSnapshot,
         now: Date = Date()
     ) -> RealQuotaSnapshot {
@@ -472,9 +493,12 @@ public enum LiveDashboardTelemetryReader {
         var claude5h: Double?
         var cursorWeekly: Double?
         var grok7d: Double?
+        var kimi7d: Double?
+        var kimi5h: Double?
         var claudeReset: String?
         var cursorReset: String?
         var grokReset: String?
+        var kimiReset: String?
         var claudeReadAt: Date?
         var grokReadAt: Date?
         if let data = try? Data(contentsOf: magpieQuotasURL),
@@ -497,8 +521,22 @@ public enum LiveDashboardTelemetryReader {
                     grokReadAt = readAt ?? grokReadAt
                     grok7d = windowUsedFraction(in: windows, matching: nil) ?? grok7d
                     grokReset = windowResetText(in: windows, matching: nil) ?? grokReset
+                } else if key.hasPrefix("kimi") {
+                    kimi7d = windowUsedFraction(in: windows, matching: "7 day")
+                        ?? windowUsedFraction(in: windows, matching: nil)
+                        ?? kimi7d
+                    kimi5h = windowUsedFraction(in: windows, matching: "5 hour") ?? kimi5h
+                    kimiReset = windowResetText(in: windows, matching: "7 day")
+                        ?? windowResetText(in: windows, matching: nil)
+                        ?? kimiReset
                 }
             }
+        }
+        if let kimiUsagesURL,
+           let parsedKimi = parseKimiUsagesFile(url: kimiUsagesURL) {
+            kimi7d = parsedKimi.sevenDay ?? kimi7d
+            kimi5h = parsedKimi.fiveHour ?? kimi5h
+            kimiReset = parsedKimi.resetText ?? kimiReset
         }
         if claudeReadAt == nil,
            let fallbackClaude = readClaudeFallbackQuota(url: claudeFallbackURL, fallbackUsage: fallbackUsage, now: now) {
@@ -507,9 +545,61 @@ public enum LiveDashboardTelemetryReader {
         return RealQuotaSnapshot(
             claudeSevenDayUsedFraction: claude7d, claudeFiveHourUsedFraction: claude5h,
             cursorWeeklyUsedFraction: cursorWeekly, grokSevenDayUsedFraction: grok7d,
+            kimiSevenDayUsedFraction: kimi7d, kimiFiveHourUsedFraction: kimi5h,
             claudeResetText: claudeReset, cursorResetText: cursorReset, grokResetText: grokReset,
-            claudeReadAtDate: claudeReadAt, grokReadAtDate: grokReadAt
+            kimiResetText: kimiReset, claudeReadAtDate: claudeReadAt, grokReadAtDate: grokReadAt
         )
+    }
+
+    private static func parseKimiUsagesFile(
+        url: URL
+    ) -> (sevenDay: Double?, fiveHour: Double?, resetText: String?)? {
+        guard let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        var sevenDay: Double?
+        var fiveHour: Double?
+        var resetText: String?
+
+        if let usages = root["usages"] as? [String: Any] {
+            if let limit7d = usages["limit_7d"] as? [String: Any] {
+                if let ratio = (limit7d["used_ratio"] as? NSNumber)?.doubleValue {
+                    sevenDay = min(max(ratio, 0), 1)
+                }
+                if let rawReset = limit7d["reset_time"] as? String {
+                    resetText = formatResetTimestamp(rawReset)
+                }
+            }
+            if let limit5h = usages["limit_5h"] as? [String: Any],
+               let ratio = (limit5h["used_ratio"] as? NSNumber)?.doubleValue {
+                fiveHour = min(max(ratio, 0), 1)
+            }
+        }
+
+        if let usage = root["usage"] as? [String: Any] {
+            if sevenDay == nil {
+                let usedVal = (usage["used"] as? NSNumber)?.doubleValue ?? (usage["used"] as? String).flatMap(Double.init)
+                let limitVal = (usage["limit"] as? NSNumber)?.doubleValue ?? (usage["limit"] as? String).flatMap(Double.init)
+                if let usedVal, let limitVal, limitVal > 0 {
+                    sevenDay = min(max(usedVal / limitVal, 0), 1)
+                }
+            }
+            if resetText == nil, let rawReset = usage["resetTime"] as? String {
+                resetText = formatResetTimestamp(rawReset)
+            }
+        }
+        return (sevenDay, fiveHour, resetText)
+    }
+
+    private static func formatResetTimestamp(_ raw: String) -> String? {
+        guard !raw.isEmpty else { return nil }
+        if raw.count >= 16 {
+            let monthDay = String(raw.dropFirst(5).prefix(5))
+            let hm = String(raw.dropFirst(11).prefix(5))
+            return "Reset \(monthDay) \(hm)"
+        }
+        return raw
     }
 
     private static func extractWindows(from rawEntry: Any) -> [[String: Any]] {
@@ -553,12 +643,7 @@ public enum LiveDashboardTelemetryReader {
             let name = (win["name"] as? String) ?? ""
             if let substring, !name.contains(substring) { continue }
             guard let raw = win["resetsAt"] as? String, !raw.isEmpty else { continue }
-            if raw.count >= 16 {
-                let monthDay = String(raw.dropFirst(5).prefix(5))
-                let hm = String(raw.dropFirst(11).prefix(5))
-                return "Reset \(monthDay) \(hm)"
-            }
-            return raw
+            return formatResetTimestamp(raw)
         }
         return nil
     }
