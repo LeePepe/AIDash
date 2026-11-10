@@ -9,6 +9,7 @@ import AIDashCore
 
 @MainActor
 @Observable
+// swiftlint:disable:next type_body_length
 public final class DashboardWorkspaceStore {
     private static var _sharedInstance: DashboardWorkspaceStore?
     public static var shared: DashboardWorkspaceStore {
@@ -30,6 +31,29 @@ public final class DashboardWorkspaceStore {
     public var rankingAscending: Bool = false
     public var lastCopiedActionID: String?
     public var lastDispatchedActionID: String?
+    public var selectedScheduledJobID: ScheduledPulseJobID?
+    public var scheduledPulseSchedulerFilter: ScheduledPulseSchedulerFilter = .all
+    public var scheduledPulseHealthFilter: ScheduledPulseHealthFilter = .all
+    public var lastCopiedScheduledJobID: ScheduledPulseJobID?
+    public var scheduledPulseTab: ScheduledPulsePageTab = .overview
+    public var selectedFrameworkJobID: ScheduledPulseJobID?
+    public var scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Bool)?
+    public var acknowledgedScheduledActionIDs: Set<String> = [] {
+        didSet {
+            guard oldValue != acknowledgedScheduledActionIDs else { return }
+            let entries = scheduledJobFrameworkSnapshot.entries.map { entry in
+                ScheduledJobFrameworkEntry(
+                    definition: entry.definition,
+                    state: entry.state,
+                    actions: entry.actions.filter { !$0.isAcknowledged(in: acknowledgedScheduledActionIDs) }
+                )
+            }
+            scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(
+                capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
+                entries: entries
+            )
+        }
+    }
     public var availableDates: [String] = DashboardWorkspaceStore.recentDateStrings()
     public var selectedDateString: String = DashboardWorkspaceStore.todayDateString()
 
@@ -39,6 +63,8 @@ public final class DashboardWorkspaceStore {
     public private(set) var actionItems: [DashboardActionItem] = []
     public private(set) var rankingRows: [AgentRankingRow] = []
     public private(set) var liveEfficiencySummary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
+    public private(set) var scheduledPulseSnapshot: ScheduledPulseSnapshot = .defaultSnapshot()
+    public private(set) var scheduledJobFrameworkSnapshot: ScheduledJobFrameworkSnapshot = .init(capturedAt: Date(), entries: [])
     public private(set) var modularDescriptors: [ModularDashboardDescriptor] = DashboardWorkspaceStore.defaultDescriptors
 
     private let statusProvider: any MenuBarSystemStatusProviding
@@ -96,9 +122,14 @@ public final class DashboardWorkspaceStore {
         trendPoints: [TrendDataPoint]? = nil,
         cliEntries: [CLICostQuotaEntry]? = nil,
         actionItems: [DashboardActionItem]? = nil,
-        rankingRows: [AgentRankingRow]? = nil
+        rankingRows: [AgentRankingRow]? = nil,
+        scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil
     ) {
         self.statusProvider = LiveMenuBarSystemStatusProvider(tokenDatabasePaths: CLITokenDatabasePaths())
+        if let scheduledPulseSnapshot {
+            self.scheduledPulseSnapshot = scheduledPulseSnapshot
+            self.scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
+        }
         applySnapshot(
             snapshot,
             customTrends: trendPoints,
@@ -200,9 +231,122 @@ public final class DashboardWorkspaceStore {
     public func refreshFromProvider() {
         let state = statusProvider.captureStatusState()
         systemState = state
+        scheduledPulseSnapshot = LiveDashboardTelemetryReader.loadScheduledPulseSnapshot()
+        scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
+        selectedScheduledJobID = scheduledPulseSnapshot.jobs.first?.id
+        scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            acknowledgedActionIDs: acknowledgedScheduledActionIDs
+        )
         if case let .populated(snapshot) = state {
             applySnapshot(snapshot)
         }
+    }
+
+    public func updateScheduledPulseSnapshot(_ snapshot: ScheduledPulseSnapshot) {
+        scheduledPulseSnapshot = snapshot
+        scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: snapshot)
+        if let selectedScheduledJobID,
+           snapshot.jobs.contains(where: { $0.id == selectedScheduledJobID }) {
+            self.selectedScheduledJobID = selectedScheduledJobID
+        } else {
+            selectedScheduledJobID = snapshot.jobs.first?.id
+        }
+    }
+
+    public func updateScheduledJobFrameworkSnapshot(_ snapshot: ScheduledJobFrameworkSnapshot) {
+        scheduledJobFrameworkSnapshot = snapshot
+        if let selectedFrameworkJobID,
+           snapshot.entries.contains(where: { $0.id == selectedFrameworkJobID }) {
+            self.selectedFrameworkJobID = selectedFrameworkJobID
+        }
+    }
+
+    @discardableResult
+    public func startScheduledJob(_ id: ScheduledPulseJobID) -> ScheduledPulseLaunchdInstaller.RegistrationOutcome {
+        let outcome = ScheduledPulseLaunchdInstaller.shared.start(jobID: id)
+        if outcome.isHealthy {
+            scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+                acknowledgedActionIDs: acknowledgedScheduledActionIDs
+            )
+        }
+        return outcome
+    }
+
+    @discardableResult
+    public func stopScheduledJob(_ id: ScheduledPulseJobID) -> ScheduledPulseLaunchdInstaller.RegistrationOutcome {
+        let outcome = ScheduledPulseLaunchdInstaller.shared.stop(jobID: id)
+        if outcome.isHealthy {
+            scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+                acknowledgedActionIDs: acknowledgedScheduledActionIDs
+            )
+        }
+        return outcome
+    }
+
+    public func acknowledgeScheduledAction(
+        _ action: ScheduledJobAction,
+        responses: [ScheduledJobActionResponse]
+    ) {
+        if let scheduledActionWriter {
+            guard scheduledActionWriter(action, responses) else { return }
+        }
+        acknowledgedScheduledActionIDs.insert(action.acknowledgementKey)
+        let entries = scheduledJobFrameworkSnapshot.entries.map { entry in
+            ScheduledJobFrameworkEntry(
+                definition: entry.definition,
+                state: entry.state,
+                actions: entry.actions.filter { $0.acknowledgementKey != action.acknowledgementKey }
+            )
+        }
+        scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(
+            capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
+            entries: entries
+        )
+    }
+
+    public var scheduledPulseRows: [ScheduledJobStatus] {
+        ScheduledPulseLogic.filteredJobs(
+            from: scheduledPulseSnapshot,
+            scheduler: scheduledPulseSchedulerFilter,
+            health: scheduledPulseHealthFilter
+        )
+    }
+
+    public var selectedScheduledJob: ScheduledJobStatus? {
+        if let selectedScheduledJobID,
+           let selected = scheduledPulseRows.first(where: { $0.id == selectedScheduledJobID }) {
+            return selected
+        }
+        return scheduledPulseRows.first
+    }
+
+    public var scheduledPulseUnhealthyCount: Int {
+        scheduledPulseSnapshot.jobs.filter(\.isUnhealthy).count
+    }
+
+    public var scheduledPulseLastTick: Date? {
+        scheduledPulseSnapshot.jobs.compactMap(\.lastTick).max()
+    }
+
+    public func selectScheduledPulseKPI(_ metric: ScheduledPulseKPIMetric) {
+        switch metric {
+        case .enabled:
+            scheduledPulseSchedulerFilter = .live
+            scheduledPulseHealthFilter = .all
+        case .unhealthy:
+            scheduledPulseSchedulerFilter = .all
+            scheduledPulseHealthFilter = .unhealthy
+        case .lastTick:
+            scheduledPulseSchedulerFilter = .all
+            scheduledPulseHealthFilter = .all
+        }
+    }
+
+    public func copyScheduledJobCommand(_ status: ScheduledJobStatus) {
+        guard let command = status.definition.commandHint else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        lastCopiedScheduledJobID = status.id
     }
 
     private func applySnapshot(

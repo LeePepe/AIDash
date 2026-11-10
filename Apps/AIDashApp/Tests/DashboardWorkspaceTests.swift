@@ -611,6 +611,7 @@ struct DashboardWorkspaceTests {
     func terminalLoginSidebarFooterAndTelemetryTailCache() throws {
         #expect(DashboardWorkspaceSection.primaryNavigationSections == [
             .overview,
+            .scheduledPulse,
             .agentEfficiency,
             .actionItems,
             .systemAndCosts

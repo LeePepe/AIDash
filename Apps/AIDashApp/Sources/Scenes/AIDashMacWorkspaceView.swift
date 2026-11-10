@@ -352,8 +352,15 @@ public struct AIDashMacWorkspaceView: View {
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(store: DashboardWorkspaceStore? = nil) {
-        _store = State(initialValue: store ?? DashboardWorkspaceStore.shared)
+    public init(
+        store: DashboardWorkspaceStore? = nil,
+        scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Bool)? = nil,
+        acknowledgedScheduledActionIDs: Set<String> = []
+    ) {
+        let resolvedStore = store ?? DashboardWorkspaceStore.shared
+        resolvedStore.scheduledActionWriter = scheduledActionWriter
+        resolvedStore.acknowledgedScheduledActionIDs = acknowledgedScheduledActionIDs
+        _store = State(initialValue: resolvedStore)
     }
 
     public var body: some View {
@@ -373,7 +380,7 @@ public struct AIDashMacWorkspaceView: View {
             .background(Color(nsColor: .underPageBackgroundColor))
             .navigationTitle(store.selectedSection.title)
             .toolbar {
-                if store.selectedSection != .settings {
+                if store.selectedSection != .settings && store.selectedSection != .scheduledPulse {
                     ToolbarItem(placement: .principal) {
                         unifiedDateNavigationToolbarCluster
                     }
@@ -536,6 +543,8 @@ public struct AIDashMacWorkspaceView: View {
         switch section {
         case .overview, .actionItems:
             return store.pendingActionCount
+        case .scheduledPulse:
+            return store.scheduledJobFrameworkSnapshot.entries.filter(\.isProblem).count
         case .systemAndCosts:
             return store.highestQuotaWarningCount
         case .agentEfficiency, .settings:
@@ -563,6 +572,8 @@ public struct AIDashMacWorkspaceView: View {
                 onSelectCategory: { store.toggleChartCategory($0) }
             )
             overviewWorkbenchLensSection
+        case .scheduledPulse:
+            ScheduledPulsePageView(store: store)
         case .agentEfficiency:
             KPISummaryCardView(metrics: store.effectiveKPIMetrics)
             TrendChartCardView(
