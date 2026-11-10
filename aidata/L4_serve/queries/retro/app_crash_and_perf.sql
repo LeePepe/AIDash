@@ -77,43 +77,101 @@ new_crash_summary AS (
     FROM new_crash_sigs AS n1
     GROUP BY app_name
 ),
-perf_7d_ranked AS (
+perf_7d_sig_ranked AS (
     SELECT
         app_name,
+        COALESCE(signature, 'default_perf') AS perf_sig,
         metric_ms,
         stack_top_symbol,
-        signature,
-        ROW_NUMBER() OVER (PARTITION BY app_name ORDER BY metric_ms ASC) AS rn,
-        COUNT(*) OVER (PARTITION BY app_name) AS cnt
+        ROW_NUMBER() OVER (
+            PARTITION BY app_name, COALESCE(signature, 'default_perf')
+            ORDER BY metric_ms ASC
+        ) AS rn,
+        COUNT(*) OVER (
+            PARTITION BY app_name, COALESCE(signature, 'default_perf')
+        ) AS cnt
     FROM window_7d
     WHERE event_kind = 'perf' AND metric_ms IS NOT NULL
+),
+perf_7d_by_sig AS (
+    SELECT
+        app_name,
+        perf_sig,
+        ROUND(MIN(metric_ms), 2) AS p95_metric_ms_7d,
+        MAX(stack_top_symbol) AS perf_stack_top_symbol
+    FROM perf_7d_sig_ranked
+    WHERE rn = CAST((cnt * 95 + 99) / 100 AS INTEGER)
+    GROUP BY app_name, perf_sig
+),
+perf_prev_sig_ranked AS (
+    SELECT
+        app_name,
+        COALESCE(signature, 'default_perf') AS perf_sig,
+        metric_ms,
+        ROW_NUMBER() OVER (
+            PARTITION BY app_name, COALESCE(signature, 'default_perf')
+            ORDER BY metric_ms ASC
+        ) AS rn,
+        COUNT(*) OVER (
+            PARTITION BY app_name, COALESCE(signature, 'default_perf')
+        ) AS cnt
+    FROM window_prev_7d
+    WHERE event_kind = 'perf' AND metric_ms IS NOT NULL
+),
+perf_prev_by_sig AS (
+    SELECT
+        app_name,
+        perf_sig,
+        ROUND(MIN(metric_ms), 2) AS p95_metric_ms_prev_7d
+    FROM perf_prev_sig_ranked
+    WHERE rn = CAST((cnt * 95 + 99) / 100 AS INTEGER)
+    GROUP BY app_name, perf_sig
+),
+perf_joined AS (
+    SELECT
+        cur.app_name,
+        cur.perf_sig AS perf_signature,
+        cur.perf_stack_top_symbol,
+        cur.p95_metric_ms_7d,
+        prev.p95_metric_ms_prev_7d,
+        ROUND(
+            CASE
+                WHEN prev.p95_metric_ms_prev_7d IS NOT NULL AND prev.p95_metric_ms_prev_7d > 0
+                THEN ((cur.p95_metric_ms_7d - prev.p95_metric_ms_prev_7d) * 100.0) / prev.p95_metric_ms_prev_7d
+                ELSE 0.0
+            END,
+            2
+        ) AS reg_pct,
+        ROW_NUMBER() OVER (
+            PARTITION BY cur.app_name
+            ORDER BY
+                CASE
+                    WHEN prev.p95_metric_ms_prev_7d IS NOT NULL AND prev.p95_metric_ms_prev_7d > 0
+                    THEN ((cur.p95_metric_ms_7d - prev.p95_metric_ms_prev_7d) * 100.0) / prev.p95_metric_ms_prev_7d
+                    ELSE -1e9
+                END DESC,
+                cur.p95_metric_ms_7d DESC,
+                cur.perf_sig ASC
+        ) AS sig_rank
+    FROM perf_7d_by_sig AS cur
+    LEFT JOIN perf_prev_by_sig AS prev
+      ON prev.app_name = cur.app_name AND prev.perf_sig = cur.perf_sig
 ),
 perf_7d_p95 AS (
     SELECT
         app_name,
-        ROUND(MIN(metric_ms), 2) AS p95_metric_ms_7d,
-        MAX(stack_top_symbol) AS perf_stack_top_symbol,
-        MAX(signature) AS perf_signature
-    FROM perf_7d_ranked
-    WHERE rn = CAST((cnt * 95 + 99) / 100 AS INTEGER)
-    GROUP BY app_name
-),
-perf_prev_ranked AS (
-    SELECT
-        app_name,
-        metric_ms,
-        ROW_NUMBER() OVER (PARTITION BY app_name ORDER BY metric_ms ASC) AS rn,
-        COUNT(*) OVER (PARTITION BY app_name) AS cnt
-    FROM window_prev_7d
-    WHERE event_kind = 'perf' AND metric_ms IS NOT NULL
+        p95_metric_ms_7d,
+        p95_metric_ms_prev_7d,
+        perf_stack_top_symbol,
+        perf_signature
+    FROM perf_joined
+    WHERE sig_rank = 1
 ),
 perf_prev_p95 AS (
     SELECT
         app_name,
-        ROUND(MIN(metric_ms), 2) AS p95_metric_ms_prev_7d
-    FROM perf_prev_ranked
-    WHERE rn = CAST((cnt * 95 + 99) / 100 AS INTEGER)
-    GROUP BY app_name
+        p95_metric_ms_prev_7d
+    FROM perf_7d_p95
 )
 SELECT
     c.app_name,
