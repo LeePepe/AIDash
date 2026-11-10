@@ -251,6 +251,10 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
                 onQuit: { [weak self] in
                     self?.cancelMenuTracking()
                     NSApplication.shared.terminate(nil)
+                },
+                onOpenScheduledPulse: { [weak self] in
+                    self?.cancelMenuTracking()
+                    DashboardWorkspaceStore.shared.openDashboardWindow(section: .scheduledPulse)
                 }
             )
         )

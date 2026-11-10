@@ -40,13 +40,14 @@ public enum DashboardTokenFormatter {
 
 public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable, Identifiable {
     case overview
+    case scheduledPulse
     case agentEfficiency
     case actionItems
     case systemAndCosts
     case settings
 
     public static var primaryNavigationSections: [DashboardWorkspaceSection] {
-        [.overview, .agentEfficiency, .actionItems, .systemAndCosts]
+        [.overview, .scheduledPulse, .agentEfficiency, .actionItems, .systemAndCosts]
     }
 
     public var id: String { rawValue }
@@ -55,6 +56,8 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
         switch self {
         case .overview:
             return DashboardL10n.tr("dashboard.section.overview", "Overview")
+        case .scheduledPulse:
+            return DashboardL10n.tr("dashboard.section.scheduled_pulse", "Scheduled Pulse")
         case .agentEfficiency:
             return DashboardL10n.tr("dashboard.section.agent_efficiency", "Agent Efficiency")
         case .actionItems:
@@ -69,6 +72,7 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
     public var symbolName: String {
         switch self {
         case .overview: return "square.grid.2x2"
+        case .scheduledPulse: return "clock.badge.checkmark"
         case .agentEfficiency: return "waveform.path.ecg"
         case .actionItems: return "checklist"
         case .systemAndCosts: return "creditcard.and.123"

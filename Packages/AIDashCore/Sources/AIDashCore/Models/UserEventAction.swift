@@ -6,4 +6,5 @@ public enum UserEventAction: String, Codable, Sendable, CaseIterable {
     case unhide
     case acknowledgeFinding
     case approveRemediation
+    case acknowledgeJobAction
 }
