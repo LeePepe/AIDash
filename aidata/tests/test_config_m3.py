@@ -3,9 +3,8 @@ import builtins
 import importlib.util
 from pathlib import Path
 
-import pytest
-
 import config
+import pytest
 
 
 def _load_config_without_local(monkeypatch):
@@ -30,6 +29,20 @@ def _load_config_without_local(monkeypatch):
 def test_ado_pr_registered_in_sources_and_merge():
     assert "ado_pr" in config.SOURCES
     assert "ado_pr" in config.MERGE_SOURCES
+
+
+@pytest.mark.unit
+def test_linear_issue_registered_in_sources_and_merge():
+    assert "linear_issue" in config.SOURCES
+    assert "linear_issue" in config.MERGE_SOURCES
+    assert "linear_issue" in config.SCHEDULED_SOURCES
+    assert config.LINEAR_TEAM_KEY == "TIA"
+    assert config.LINEAR_SYNC_SCRIPT.name == "linear-sync.py"
+    assert isinstance(config.LINEAR_UPDATED_WINDOW_DAYS, int)
+    assert config.LINEAR_UPDATED_WINDOW_DAYS >= 7
+    assert config.TODO_SYNC_PROVIDER == "auto"
+    assert config.TODO_SYNC_CONFIG_PATH.name == "todo-sync.json"
+    assert config.LOCAL_TODOS_PATH.name == "local_todos.jsonl"
 
 
 @pytest.mark.unit

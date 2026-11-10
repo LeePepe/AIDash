@@ -29,6 +29,11 @@ from pathlib import Path
 import serve
 
 from L5_apps.digest.proposals import Proposal, read_pending
+from L5_apps.digest.todo_sync_provider import (
+    TodoSyncProvider,
+    read_open_local_todos,
+    resolve_todo_sync_provider,
+)
 
 # Error logs written by the AIDash push path / snapshot cron (类3c signals).
 _AIDASH_STATE = Path(os.path.expanduser("~")) / "Development" / "AIDash" / ".aidash-state"
@@ -46,6 +51,7 @@ _MAX_CRON_ERROR_AGE_DAYS = 7
 _ISO_TIMESTAMP = re.compile(
     r"\b20\d{2}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?\b"
 )
+_TIA_ISSUE_REF = re.compile(r"^(?:linear://)?(TIA-\d+)$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -81,29 +87,62 @@ def _stalled_prs() -> list[InboxItem]:
     return out
 
 
-def _pending_issues(cap: int = 6) -> list[InboxItem]:
+def _pending_issues(
+    cap: int = 6,
+    *,
+    provider: TodoSyncProvider | None = None,
+    local_todos_path: Path | None = None,
+) -> list[InboxItem]:
+    active_provider = provider or resolve_todo_sync_provider(
+        local_todos_path=local_todos_path
+    )
+    out: list[InboxItem] = []
+
     try:
         rows, cols = serve.run_query("inbox/pending-issues")
     except Exception:  # noqa: BLE001 - inbox sources degrade independently
-        return []
-    if not rows or not cols:
-        return []
-    ii = cols.index("identifier")
-    ti = cols.index("title")
-    si = cols.index("status")
-    out = []
-    for r in rows[:cap]:
-        status = str(r[si])
-        blocked = status == "blocked"
-        out.append(InboxItem(
-            f"[{status}] {r[ii]!s} {str(r[ti])[:44]}",
-            "high" if blocked else "medium",
-            "卡顿" if blocked else "计划",
-            str(r[ii]),
-            "blocked" if blocked else "planned",
-            "Owner" if blocked else "",
-        ))
-    return out
+        rows, cols = [], []
+
+    if rows and cols:
+        ii = cols.index("identifier")
+        ti = cols.index("title")
+        si = cols.index("status")
+        for r in rows[:cap]:
+            ident = str(r[ii])
+            status = str(r[si])
+            blocked = status == "blocked"
+            ref = active_provider.format_ref(ident)
+            tia_match = _TIA_ISSUE_REF.fullmatch(ident.strip())
+            if tia_match:
+                ref = f"linear://{tia_match.group(1).upper()}"
+            out.append(InboxItem(
+                f"[{status}] {ident} {str(r[ti])[:44]}",
+                "high" if blocked else "medium",
+                "卡顿" if blocked else "计划",
+                ref,
+                "blocked" if blocked else "planned",
+                "Owner" if blocked else "",
+            ))
+
+    if active_provider.name == "local" or local_todos_path is not None:
+        local_items = read_open_local_todos(local_todos_path)
+        for item in local_items:
+            if len(out) >= cap:
+                break
+            blocked = item.status == "blocked"
+            ref = active_provider.format_ref(item.id)
+            if not ref.startswith("local://"):
+                ref = f"local://{item.id}"
+            out.append(InboxItem(
+                f"[{item.status}] {item.id} {item.title[:44]}",
+                "high" if blocked else "medium",
+                "卡顿" if blocked else "计划",
+                ref,
+                "blocked" if blocked else "planned",
+                "Owner" if blocked else "",
+            ))
+
+    return out[:cap]
 
 
 def _downgrade_finding(downgrade_usd: float) -> list[InboxItem]:
@@ -141,7 +180,7 @@ def _embedded_timestamp(line: str) -> float | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=timezone.utc)  # noqa: UP017
     return parsed.timestamp()
 
 

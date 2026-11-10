@@ -808,5 +808,61 @@ struct DashboardWorkspaceTests {
         #expect(store.dispatchActionToHerdr(vitalItem) == true)
         #expect(store.lastDispatchedActionID == vitalItem.id)
     }
+
+    @Test("pluggable TodoSyncProviderMode preferences persist to todo-sync.json and support standalone local mode")
+    func todoSyncProviderModePreferencesAndConfigBridge() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-todo-sync-test-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempDir.appendingPathComponent("todo-sync.json")
+        let defaults = UserDefaults.standard
+        let providerDefaultsKey = "aidash.todo_sync.provider_mode"
+        let teamDefaultsKey = "aidash.todo_sync.team_key"
+        let previousProvider = defaults.object(forKey: providerDefaultsKey)
+        let previousTeam = defaults.object(forKey: teamDefaultsKey)
+        defaults.removeObject(forKey: providerDefaultsKey)
+        defaults.removeObject(forKey: teamDefaultsKey)
+        defer {
+            if let previousProvider {
+                defaults.set(previousProvider, forKey: providerDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: providerDefaultsKey)
+            }
+            if let previousTeam {
+                defaults.set(previousTeam, forKey: teamDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: teamDefaultsKey)
+            }
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        let prefs = MenuBarDisplayPreferences(persistToDefaults: true, todoSyncConfigFileURL: configURL)
+        #expect(prefs.todoSyncProviderMode == .auto)
+        #expect(prefs.todoSyncTeamKey == "TIA")
+        #expect(TodoSyncProviderMode.allCases == [.auto, .localOnly, .linear])
+
+        for mode in TodoSyncProviderMode.allCases {
+            #expect(!mode.title.isEmpty)
+            #expect(!mode.subtitle.isEmpty)
+            #expect(!mode.symbolName.isEmpty)
+        }
+
+        prefs.todoSyncProviderMode = .localOnly
+        let localData = try Data(contentsOf: configURL)
+        let localJSON = try #require(JSONSerialization.jsonObject(with: localData) as? [String: String])
+        #expect(localJSON["provider"] == "local")
+        #expect(localJSON["teamKey"] == "TIA")
+
+        prefs.todoSyncProviderMode = .linear
+        prefs.todoSyncTeamKey = "  eng "
+        #expect(prefs.todoSyncTeamKey == "ENG")
+        #expect(defaults.string(forKey: teamDefaultsKey) == "ENG")
+        let linearData = try Data(contentsOf: configURL)
+        let linearJSON = try #require(JSONSerialization.jsonObject(with: linearData) as? [String: String])
+        #expect(linearJSON["provider"] == "linear")
+        #expect(linearJSON["teamKey"] == "ENG")
+
+        let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
+        _ = DashboardSettingsPageView(store: store, prefs: prefs).body
+    }
 }
 #endif
