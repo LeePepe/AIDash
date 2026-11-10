@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config import LINEAR_SYNC_SCRIPT, LOCAL_TODOS_PATH, PROPOSALS_PATH
+from config import HOME, LINEAR_SYNC_SCRIPT, LOCAL_TODOS_PATH, PROPOSALS_PATH
 
-from L5_apps.digest.proposals import read_pending
+from L5_apps.digest.proposals import Proposal, read_pending
 from L5_apps.digest.todo_sync_provider import (
     LinearTodoSyncProvider,
     LocalTodoSyncProvider,
@@ -20,6 +20,17 @@ from L5_apps.digest.todo_sync_provider import (
     _coerce_idea_result,
     resolve_todo_sync_provider,
 )
+
+DIGEST_VAULT_SCRIPT = (
+    HOME
+    / "Development"
+    / "user-skills"
+    / "skills"
+    / "knowledge-digest"
+    / "scripts"
+    / "digest_vault.py"
+)
+DEFAULT_BLOG_REPO = HOME / "Development" / "leepepe.github.io"
 
 
 def _append_jsonl(path: Path, record: dict) -> None:
@@ -74,6 +85,77 @@ def _default_linear_status_runner(issue_id: str, state: str) -> int:
         timeout=30,
     )
     return result.returncode
+
+
+def _default_blog_publish_runner(
+    slug: str,
+    blog_repo: Path | None = None,
+    mode: str = "auto",
+) -> int:
+    script = Path(DIGEST_VAULT_SCRIPT)
+    target_blog_repo = blog_repo or DEFAULT_BLOG_REPO
+    result = subprocess.run(
+        [
+            "python3",
+            str(script),
+            "publish-blog",
+            "--slug",
+            slug,
+            "--blog-repo",
+            str(target_blog_repo),
+            "--mode",
+            mode,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return result.returncode
+
+
+def _lookup_knowledge_proposal(
+    pending: dict[str, Proposal],
+    slug: str,
+) -> Proposal | None:
+    target_ref = f"knowledge://{slug}"
+    for prop in pending.values():
+        if getattr(prop, "ref", "") == target_ref or prop.id in {
+            slug,
+            f"learn-{slug}",
+            target_ref,
+        }:
+            return prop
+    return None
+
+
+def _publish_knowledge_blog_and_approve(
+    slug: str,
+    *,
+    matched_prop: Proposal | None,
+    proposal_path: Path,
+    blog_repo: Path,
+    blog_mode: str,
+    pub_runner: Callable[..., int],
+    result: dict[str, int],
+) -> None:
+    try:
+        rc = int(pub_runner(slug, blog_repo, blog_mode))
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        rc = 1
+    if rc == 0:
+        if matched_prop is not None:
+            _append_jsonl(proposal_path, {
+                "id": matched_prop.id,
+                "ref": f"knowledge://{slug}",
+                "status": "approved",
+                "ts": _now(),
+                "source": "aidash",
+            })
+            result["promoted"] += 1
+        result["blog_published"] += 1
+    else:
+        result["errors"] += 1
 
 
 def _canonicalize_event_ref(
@@ -163,9 +245,12 @@ def process_user_events(
     falcon_db_path: Path | None = None,
     attention_status_path: Path | None = None,
     local_todos_path: Path | None = None,
+    blog_repo_path: Path | None = None,
+    blog_mode: str = "auto",
     provider: TodoSyncProvider | str | None = None,
     linear_runner: Callable[[str, str], Any] | None = None,
     linear_status_runner: Callable[[str, str], int] | None = None,
+    blog_publish_runner: Callable[..., int] | None = None,
 ) -> dict:
     """Apply latest-wins event reductions and return explicit bridge counts."""
     proposal_path = proposals_path or PROPOSALS_PATH
@@ -189,7 +274,7 @@ def process_user_events(
 
     result = {
         "resolved": 0, "undone": 0, "promoted": 0, "falcon_starred": 0,
-        "ignored": 0, "errors": 0,
+        "blog_published": 0, "ignored": 0, "errors": 0,
     }
     pending = {proposal.id: proposal for proposal in read_pending(proposal_path)}
 
@@ -221,19 +306,35 @@ def process_user_events(
         if action == "undone":
             result["undone"] += 1
             continue
-        if ref.startswith("proposal://"):
-            if action == "done":
-                proposal = pending.get(ref.removeprefix("proposal://"))
-                if proposal is not None:
-                    _append_jsonl(proposal_path, {
-                        "id": proposal.id, "ts": proposal.ts,
-                        "agent": proposal.agent, "title": proposal.title,
-                        "detail": proposal.detail, "priority": proposal.priority,
-                        "status": "dismissed",
-                    })
-                    result["resolved"] += 1
-                else:
-                    result["ignored"] += 1
+        if ref.startswith("proposal://") and action == "done":
+            proposal = pending.get(ref.removeprefix("proposal://"))
+            if proposal is not None:
+                dismissed_rec = {
+                    "id": proposal.id, "ts": proposal.ts,
+                    "agent": proposal.agent, "title": proposal.title,
+                    "detail": proposal.detail, "priority": proposal.priority,
+                    "status": "dismissed",
+                }
+                if getattr(proposal, "ref", ""):
+                    dismissed_rec["ref"] = proposal.ref
+                _append_jsonl(proposal_path, dismissed_rec)
+                result["resolved"] += 1
+            else:
+                result["ignored"] += 1
+            continue
+        if ref.startswith("knowledge://") and action == "done":
+            slug = ref.removeprefix("knowledge://").strip("/")
+            proposal = _lookup_knowledge_proposal(pending, slug)
+            if proposal is not None:
+                _append_jsonl(proposal_path, {
+                    "id": proposal.id, "ref": ref, "ts": proposal.ts,
+                    "agent": proposal.agent, "title": proposal.title,
+                    "detail": proposal.detail, "priority": proposal.priority,
+                    "status": "dismissed",
+                })
+                result["resolved"] += 1
+            else:
+                result["ignored"] += 1
             continue
         if (
             ref.startswith("gtt://")
@@ -254,6 +355,22 @@ def process_user_events(
             if proposal is None:
                 result["ignored"] += 1
                 continue
+            prop_ref = getattr(proposal, "ref", "") or ""
+            if prop_ref.startswith("knowledge://"):
+                slug = prop_ref.removeprefix("knowledge://").strip("/")
+                if not slug:
+                    result["ignored"] += 1
+                    continue
+                _publish_knowledge_blog_and_approve(
+                    slug,
+                    matched_prop=proposal,
+                    proposal_path=proposal_path,
+                    blog_repo=blog_repo_path or DEFAULT_BLOG_REPO,
+                    blog_mode=blog_mode,
+                    pub_runner=blog_publish_runner or _default_blog_publish_runner,
+                    result=result,
+                )
+                continue
             try:
                 rc, external_id = _coerce_idea_result(
                     active_provider.promote_proposal(proposal.title, proposal.detail)
@@ -271,6 +388,20 @@ def process_user_events(
                 result["promoted"] += 1
             else:
                 result["errors"] += 1
+        elif ref.startswith("knowledge://"):
+            slug = ref.removeprefix("knowledge://").strip("/")
+            if not slug:
+                result["ignored"] += 1
+                continue
+            _publish_knowledge_blog_and_approve(
+                slug,
+                matched_prop=_lookup_knowledge_proposal(pending, slug),
+                proposal_path=proposal_path,
+                blog_repo=blog_repo_path or DEFAULT_BLOG_REPO,
+                blog_mode=blog_mode,
+                pub_runner=blog_publish_runner or _default_blog_publish_runner,
+                result=result,
+            )
         elif ref.startswith("falcon://request/"):
             request_id = ref.removeprefix("falcon://request/")
             if _star_falcon(falcon_db_path, request_id, _now()) if falcon_db_path else False:
