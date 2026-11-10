@@ -9,6 +9,7 @@ import AIDashCore
 
 @MainActor
 @Observable
+// swiftlint:disable:next type_body_length
 public final class DashboardWorkspaceStore {
     private static var _sharedInstance: DashboardWorkspaceStore?
     public static var shared: DashboardWorkspaceStore {
@@ -37,7 +38,22 @@ public final class DashboardWorkspaceStore {
     public var scheduledPulseTab: ScheduledPulsePageTab = .overview
     public var selectedFrameworkJobID: ScheduledPulseJobID?
     public var scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Void)?
-    public var acknowledgedScheduledActionIDs: Set<String> = []
+    public var acknowledgedScheduledActionIDs: Set<String> = [] {
+        didSet {
+            guard oldValue != acknowledgedScheduledActionIDs else { return }
+            let entries = scheduledJobFrameworkSnapshot.entries.map { entry in
+                ScheduledJobFrameworkEntry(
+                    definition: entry.definition,
+                    state: entry.state,
+                    actions: entry.actions.filter { !acknowledgedScheduledActionIDs.contains($0.id) }
+                )
+            }
+            scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(
+                capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
+                entries: entries
+            )
+        }
+    }
     public var availableDates: [String] = DashboardWorkspaceStore.recentDateStrings()
     public var selectedDateString: String = DashboardWorkspaceStore.todayDateString()
 

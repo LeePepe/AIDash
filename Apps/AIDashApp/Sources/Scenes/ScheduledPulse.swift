@@ -102,21 +102,21 @@ public enum ScheduledPulseRegistry {
     public static let jobs: [ScheduledJobDefinition] = [
         ScheduledJobDefinition(
             id: .myPRSupervisor,
-            displayName: "我的 PR",
+            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "我的 PR"),
             program: "~/Development/handoff/my-pr-supervisor/precheck.py",
             cadence: .interval(seconds: 300),
             isLive: true
         ),
         ScheduledJobDefinition(
             id: .prAutoReview,
-            displayName: "特定人 PR",
+            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.pr_auto_review", "特定人 PR"),
             program: "~/Development/handoff/pr-auto-review/precheck.py",
             cadence: .interval(seconds: 300),
             isLive: true
         ),
         ScheduledJobDefinition(
             id: .aidataDigest,
-            displayName: "每日简报",
+            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.aidata_digest", "每日简报"),
             program: "aidata/scripts/aidata_digest_run.sh",
             cadence: .daily(hour: 4, minute: 0, timeZoneIdentifier: "Asia/Shanghai"),
             isLive: true

@@ -46,6 +46,20 @@ struct ScheduledPulseTests {
         }
     }
 
+    @Test("coalescing entrypoint releases its lock after the child exits")
+    func coalescingEntrypointReleasesLock() throws {
+        let scriptURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("scripts/scheduled-job-entrypoint.sh")
+        let script = try String(contentsOf: scriptURL, encoding: .utf8)
+        #expect(script.contains("status=$?"))
+        #expect(script.contains("rmdir \"$lock_dir\""))
+        #expect(!script.contains("exec \"$interpreter\""))
+    }
+
     @Test("owned start and stop use exact labels and never remove the plist")
     func startStopLabels() throws {
         let job = try #require(ScheduledPulseRegistry.job(for: .myPRSupervisor))
@@ -119,6 +133,27 @@ struct ScheduledPulseTests {
         )
         #expect(empty.allHaveNoState)
         #expect(empty.overviewEntries.isEmpty)
+    }
+
+    @Test("acknowledged actions disappear before the initial main-window render")
+    func initialAcknowledgementFiltering() {
+        let store = DashboardWorkspaceStore(snapshot: Self.menuSnapshot())
+        let action = ScheduledJobAction(
+            id: "initial-action",
+            jobID: .myPRSupervisor,
+            title: "确认",
+            descriptionMd: "确认",
+            controls: []
+        )
+        let definition = ScheduledPulseRegistry.jobs[0]
+        store.updateScheduledJobFrameworkSnapshot(
+            ScheduledJobFrameworkSnapshot(
+                capturedAt: .now,
+                entries: [ScheduledJobFrameworkEntry(definition: definition, state: nil, actions: [action])]
+            )
+        )
+        store.acknowledgedScheduledActionIDs = ["initial-action"]
+        #expect(store.scheduledJobFrameworkSnapshot.unacknowledgedActions.isEmpty)
     }
 
     @Test("same-id fires coalesce without queueing")

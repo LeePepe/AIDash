@@ -32,5 +32,8 @@ PY
   exit 0
 fi
 
-trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
-exec "$interpreter" "$script_path"
+trap - EXIT
+"$interpreter" "$script_path"
+status=$?
+rmdir "$lock_dir" 2>/dev/null || true
+exit "$status"
