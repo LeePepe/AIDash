@@ -112,6 +112,7 @@ public struct ScheduledJobAction: Codable, Sendable, Equatable, Identifiable {
         "\(jobID.rawValue):\(id)"
     }
 
+    /// Returns whether this action has been acknowledged by its `(jobID, action.id)` key.
     public func isAcknowledged(in acknowledgedIDs: Set<String>) -> Bool {
         acknowledgedIDs.contains(acknowledgementKey)
     }

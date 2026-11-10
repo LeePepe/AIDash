@@ -68,7 +68,7 @@ struct ScheduledPulseTests {
         let childScriptURL = tempHome.appendingPathComponent("job.py")
         try """
         import sys, time
-        time.sleep(0.35)
+        time.sleep(0.5)
         sys.exit(0)
         """.write(to: childScriptURL, atomically: true, encoding: .utf8)
 
@@ -82,15 +82,18 @@ struct ScheduledPulseTests {
             return proc
         }
 
+        let jobDir = tempHome.appendingPathComponent("Library/Application Support/AIDash/jobs/my-pr-supervisor", isDirectory: true)
+        let lockDirURL = jobDir.appendingPathComponent(".running.lock", isDirectory: true)
         let p1 = makeProcess()
         let p2 = makeProcess()
         try p1.run()
-        Thread.sleep(forTimeInterval: 0.08)
+        for _ in 0..<40 where !FileManager.default.fileExists(atPath: lockDirURL.path) {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
         try p2.run()
         p2.waitUntilExit()
         #expect(p2.terminationStatus == 0)
 
-        let jobDir = tempHome.appendingPathComponent("Library/Application Support/AIDash/jobs/my-pr-supervisor", isDirectory: true)
         let coalescedData = try Data(contentsOf: jobDir.appendingPathComponent("state.json"))
         let coalescedText = try #require(String(data: coalescedData, encoding: .utf8))
         #expect(coalescedText.contains("\"lastResult\": \"coalesced\""))
@@ -102,6 +105,20 @@ struct ScheduledPulseTests {
         let finalText = try #require(String(data: finalData, encoding: .utf8))
         #expect(finalText.contains("\"lastResult\": \"succeeded\""))
         #expect(!FileManager.default.fileExists(atPath: jobDir.appendingPathComponent(".running.lock").path))
+
+        try """
+        import sys
+        sys.exit(2)
+        """.write(to: childScriptURL, atomically: true, encoding: .utf8)
+        let p3 = makeProcess()
+        try p3.run()
+        p3.waitUntilExit()
+        #expect(p3.terminationStatus == 2)
+
+        let failedData = try Data(contentsOf: jobDir.appendingPathComponent("state.json"))
+        let failedText = try #require(String(data: failedData, encoding: .utf8))
+        #expect(failedText.contains("\"lastResult\": \"failed\""))
+        #expect(failedText.contains("\"summary\": \"exit 2\""))
     }
 
     @Test("acknowledging an action in one job does not hide a same-id action in another job")

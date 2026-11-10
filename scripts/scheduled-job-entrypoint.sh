@@ -51,9 +51,18 @@ try:
 except OSError:
     pass
 
+def state_signature(path: Path):
+    try:
+        st = path.stat()
+        return (st.st_mtime_ns, st.st_size, path.read_bytes())
+    except OSError:
+        return None
+
 try:
+    before_sig = state_signature(state_path)
     proc = subprocess.run([interpreter, script_path], close_fds=True)
     exit_code = proc.returncode
+    after_sig = state_signature(state_path)
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     default_result = "succeeded" if exit_code == 0 else "failed"
     existing = {}
@@ -62,14 +71,20 @@ try:
             existing = json.loads(state_path.read_text(encoding="utf-8"))
         except Exception:
             existing = {}
-    if existing.get("id") != job_id or existing.get("lastResult") in (None, "coalesced"):
+    child_updated_state = (
+        after_sig is not None
+        and after_sig != before_sig
+        and existing.get("id") == job_id
+        and existing.get("lastResult") not in (None, "coalesced")
+    )
+    if not child_updated_state:
         state_path.write_text(json.dumps({
             "id": job_id,
             "updatedAt": now,
             "lastResult": default_result,
             "lastRunAt": now,
-            "summary": existing.get("summary") or ("成功" if exit_code == 0 else f"exit {exit_code}"),
-            "overviewMd": existing.get("overviewMd") or ("运行完成" if exit_code == 0 else f"任务退出码 {exit_code}"),
+            "summary": "成功" if exit_code == 0 else f"exit {exit_code}",
+            "overviewMd": "运行完成" if exit_code == 0 else f"任务退出码 {exit_code}",
         }, ensure_ascii=False) + "\n", encoding="utf-8")
 finally:
     try:
