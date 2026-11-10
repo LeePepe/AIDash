@@ -1,0 +1,96 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "linear-gradient": [
+          "srgb:0.945,0.961,0.949,1.000",
+          "srgb:0.810,0.850,0.830,1.000"
+        ]
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "srgb:0.035,0.055,0.075,1.000",
+          "srgb:0.090,0.120,0.155,1.000"
+        ]
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "Concentric Cockpit Lens \u00b7 \u4e09\u5c42\u540c\u5fc3\u667a\u63a7\u89c6\u7a97",
+      "layers": [
+        {
+          "name": "Front Hero Layer",
+          "glass": true,
+          "opacity": 1.0,
+          "image-name-specializations": [
+            {
+              "value": "front-light.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "front-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "front-mono.svg"
+            }
+          ]
+        },
+        {
+          "name": "Mid Layer",
+          "glass": true,
+          "opacity": 0.68,
+          "image-name-specializations": [
+            {
+              "value": "mid-light.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "mid-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "mid-mono.svg"
+            }
+          ]
+        },
+        {
+          "name": "Back Layer",
+          "glass": true,
+          "opacity": 0.4,
+          "image-name-specializations": [
+            {
+              "value": "back-light.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "back-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "back-mono.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "individual",
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.28
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.45
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared",
+    "circles": []
+  }
+}
