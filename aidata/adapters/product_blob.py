@@ -511,6 +511,7 @@ def _parse_telemetry_record(
 
 def _iter_raw_telemetry_records() -> list[dict[str, Any]]:
     import gzip
+    import zlib
 
     product_root = RAW_DIR / SOURCE
     if not product_root.is_dir():
@@ -535,7 +536,7 @@ def _iter_raw_telemetry_records() -> list[dict[str, Any]]:
                 text = gzip.decompress(raw_bytes).decode("utf-8")
             else:
                 text = raw_bytes.decode("utf-8")
-        except (OSError, EOFError, UnicodeDecodeError):
+        except (OSError, EOFError, zlib.error, UnicodeDecodeError):
             continue
         for line_no, line in enumerate(text.splitlines(), start=1):
             stripped = line.strip()
