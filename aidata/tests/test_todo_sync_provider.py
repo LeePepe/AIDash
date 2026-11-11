@@ -303,6 +303,23 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
                 )
             ),
         },
+        {
+            "id": "evt-ack-undone",
+            "timestamp": "2026-11-11T09:03:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:linear-TIA-341|"
+                + json.dumps(
+                    [
+                        {"controlID": "decision", "value": "undone"},
+                        {"controlID": "note", "value": "Reopened"},
+                    ],
+                    ensure_ascii=False,
+                )
+            ),
+        },
     ]
 
     summary = event_bridge.process_user_events(
@@ -313,11 +330,15 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
         linear_comment_runner=lambda ident, body: comment_calls.append((ident, body)) or 0,
     )
     assert summary["resolved"] == 1
+    assert summary["undone"] == 1
     assert summary["promoted"] == 1
     assert summary["ignored"] == 1
     assert summary["errors"] == 0
-    assert status_calls == [("TIA-340", "Done")]
-    assert comment_calls == [("TIA-340", "[AIDash Action Items · Done] Verified on Mac mini")]
+    assert status_calls == [("TIA-340", "Done"), ("TIA-341", "Todo")]
+    assert comment_calls == [
+        ("TIA-340", "[AIDash Action Items · Done] Verified on Mac mini"),
+        ("TIA-341", "[AIDash Action Items · undone] Reopened"),
+    ]
     assert promoted_calls == [("缩减审核返工拉锯", "H1-H5 root cause details")]
 
     cursor_file = tmp_path / "cursor.json"

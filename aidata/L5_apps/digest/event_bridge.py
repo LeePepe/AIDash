@@ -673,10 +673,10 @@ def process_user_events(
                 issue_id = local_match.group(1).upper() if local_match else action_id
                 target_prov = local_provider
 
-            if decision_lower in {"done", "确认", "confirm", "resolve"} or "done" in decision_lower:
-                sync_action = "done"
-            elif "unblock" in decision_lower or decision_lower in {"todo", "reopen", "undone"}:
+            if "unblock" in decision_lower or decision_lower in {"todo", "reopen", "undone"}:
                 sync_action = "undone"
+            elif decision_lower in {"done", "确认", "confirm", "resolve", "mark done"}:
+                sync_action = "done"
             else:
                 result["ignored"] += 1
                 continue
@@ -710,7 +710,7 @@ def process_user_events(
                     or event.get("dispatch")
                 )
                 _promote_one(proposal, trigger_dispatch=should_dispatch)
-            elif decision_lower in {"done", "dismiss", "resolve"} or "done" in decision_lower:
+            elif decision_lower in {"done", "dismiss", "resolve", "mark done"}:
                 dismissed_rec = {
                     "id": proposal.id, "ts": proposal.ts,
                     "agent": proposal.agent, "title": proposal.title,
@@ -781,7 +781,7 @@ def process_user_events(
                 result["promoted"] += 1
             else:
                 result["errors"] += 1
-        elif decision_lower in {"done", "确认", "confirm"} or "done" in decision_lower:
+        elif decision_lower in {"done", "确认", "confirm", "resolve", "mark done"}:
             result["resolved"] += 1
         else:
             result["ignored"] += 1
