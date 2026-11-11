@@ -247,3 +247,55 @@ def test_pending_issues_emits_canonical_linear_ref_for_tia_items(monkeypatch):
     assert len(items) == 2
     assert items[0].ref == "linear://TIA-90"
     assert items[1].ref == "MY-12"
+
+
+@pytest.mark.unit
+def test_mail_and_work_watch_signals_surface_in_build_inbox(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(inbox_mod.serve, "run_query", lambda *_a, **_k: ([], []))
+    teams_db = tmp_path / "work_teams_bridge.db"
+    with sqlite3.connect(teams_db) as conn:
+        conn.execute(
+            "CREATE TABLE work_teams_item ("
+            "item_id TEXT, cursor TEXT, dedup_key TEXT, channel_kind TEXT, "
+            "sender_alias TEXT, title_preview TEXT, summary_preview TEXT, "
+            "has_mention INTEGER, needs_reply INTEGER, priority TEXT, replied INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO work_teams_item VALUES "
+            "('wt-1', '20261111T040000Z#wt-1', 'teams:wt-1', 'teams_mention', "
+            "'alice', 'Please review Q4 architecture', 'Need sign-off', 1, 1, 'high', 0), "
+            "('wt-2', '20261111T030000Z#wt-2', 'teams:wt-2', 'teams_mention', "
+            "'bob', 'Already replied thread', 'Done', 1, 1, 'high', 1)"
+        )
+
+    mail_db = tmp_path / "mail_inbox.db"
+    with sqlite3.connect(mail_db) as conn:
+        conn.execute(
+            "CREATE TABLE mail_inbox_item ("
+            "item_id TEXT, cursor TEXT, dedup_key TEXT, sender_domain TEXT, "
+            "subject_preview TEXT, snippet_preview TEXT, has_mention INTEGER, "
+            "is_todo INTEGER, priority TEXT, replied INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO mail_inbox_item VALUES "
+            "('m-1', '20261111T050000Z#m-1', 'mail:m-1', 'corp.example.com', "
+            "'Action required: approve release', 'Urgent todo', 0, 1, 'high', 0)"
+        )
+
+    items = build_inbox(
+        0.0,
+        proposals_reader=_no_proposals,
+        log_reader=_no_logs,
+        mail_db_path=mail_db,
+        teams_db_path=teams_db,
+    )
+    refs = [it.ref for it in items]
+    titles = " | ".join(it.title for it in items)
+    assert "teams:wt-1" in refs
+    assert "teams:wt-2" not in refs
+    assert "mail:m-1" in refs
+    assert "[Teams @我] alice" in titles
+    assert "[邮件待办] corp.example.com" in titles
+

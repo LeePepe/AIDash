@@ -109,6 +109,11 @@ def test_product_blob_config_surface_has_no_auth_or_secret_fields(monkeypatch):
 def test_scheduled_sources_are_unique_and_registered():
     assert len(config.SCHEDULED_SOURCES) == len(set(config.SCHEDULED_SOURCES))
     assert set(config.SCHEDULED_SOURCES) <= set(config.SOURCES)
+    assert "mail_inbox" in config.SOURCES
+    assert "work_teams_bridge" in config.SOURCES
+    assert config.MAIL_INBOX_ENABLE_JXA is False
+    assert config.MAIL_INBOX_DROP_DIR.name == "mail-inbox-drop"
+    assert config.WORK_TEAMS_DROP_DIR.name == "work-teams-drop"
 
 
 @pytest.mark.unit
