@@ -175,3 +175,161 @@ def test_event_bridge_and_inbox_work_in_standalone_local_mode(
     )
     assert res2["resolved"] == 1
     assert inbox._pending_issues(provider=local_provider, local_todos_path=local_todos) == []
+
+
+@pytest.mark.unit
+def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
+    proposals = tmp_path / "proposals.jsonl"
+    proposals.write_text(
+        json.dumps(
+            {
+                "id": "improve-m1-review-pingpong",
+                "ts": "2026-11-11T00:00:00Z",
+                "agent": "retro-loop",
+                "title": "缩减审核返工拉锯",
+                "detail": "H1-H5 root cause details",
+                "priority": "high",
+                "status": "pending",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    sample_items = [
+        inbox.InboxItem(
+            title="[in_progress] TIA-340 [Goal] dsh-action-items-unify",
+            priority="high",
+            bucket="卡顿",
+            ref="linear://TIA-340",
+            category="blocked",
+            waiting_on="Owner",
+        ),
+        inbox.InboxItem(
+            title="待决策（retro-loop）：缩减审核返工拉锯",
+            priority="high",
+            bucket="待决策",
+            ref="proposal://improve-m1-review-pingpong",
+            category="decision",
+            waiting_on="Owner GO",
+        ),
+        inbox.InboxItem(
+            title="[Teams @我] colleague: 请看 PR #303",
+            priority="high",
+            bucket="待决策",
+            ref="teams-msg-1",
+            category="work_watch",
+            waiting_on="Owner",
+        ),
+    ]
+    jobs_root = tmp_path / "jobs"
+    exported = inbox.export_job_actions(
+        sample_items,
+        jobs_root=jobs_root,
+        job_id="aidata-digest",
+        created_at="2026-11-11T08:00:00Z",
+        proposals_path=proposals,
+    )
+    assert exported is not None and exported.is_file()
+    assert (jobs_root / "my-pr-supervisor" / "actions.jsonl").is_file()
+    assert (jobs_root / "pr-auto-review" / "actions.jsonl").is_file()
+
+    lines = [
+        json.loads(line)
+        for line in exported.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [a["id"] for a in lines] == [
+        "linear-TIA-340",
+        "proposal-improve-m1-review-pingpong",
+        "work-watch-teams-msg-1",
+    ]
+    assert "H1-H5 root cause details" in lines[1]["descriptionMd"]
+
+    promoted_calls: list[tuple[str, str]] = []
+    status_calls: list[tuple[str, str]] = []
+    comment_calls: list[tuple[str, str]] = []
+
+    events = [
+        {
+            "id": "evt-ack-1",
+            "timestamp": "2026-11-11T09:00:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:linear-TIA-340|"
+                + json.dumps(
+                    [
+                        {"controlID": "decision", "value": "Done"},
+                        {"controlID": "note", "value": "Verified on Mac mini"},
+                    ],
+                    ensure_ascii=False,
+                )
+            ),
+        },
+        {
+            "id": "evt-ack-2",
+            "timestamp": "2026-11-11T09:01:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:proposal-improve-m1-review-pingpong|"
+                + json.dumps(
+                    [
+                        {"controlID": "decision", "value": "Promote to Linear TIA"},
+                        {"controlID": "note", "value": "Create TIA issue"},
+                    ],
+                    ensure_ascii=False,
+                )
+            ),
+        },
+        # Duplicate receipt in same batch should be ignored idempotently
+        {
+            "id": "evt-ack-2-dup",
+            "timestamp": "2026-11-11T09:02:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:proposal-improve-m1-review-pingpong|"
+                + json.dumps(
+                    [
+                        {"controlID": "decision", "value": "Promote to Linear TIA"},
+                        {"controlID": "note", "value": "Create TIA issue"},
+                    ],
+                    ensure_ascii=False,
+                )
+            ),
+        },
+    ]
+
+    summary = event_bridge.process_user_events(
+        events,
+        proposals_path=proposals,
+        linear_runner=lambda title, detail: promoted_calls.append((title, detail)) or (0, "TIA-341"),
+        linear_status_runner=lambda ident, state: status_calls.append((ident, state)) or 0,
+        linear_comment_runner=lambda ident, body: comment_calls.append((ident, body)) or 0,
+    )
+    assert summary["resolved"] == 1
+    assert summary["promoted"] == 1
+    assert summary["ignored"] == 1
+    assert summary["errors"] == 0
+    assert status_calls == [("TIA-340", "Done")]
+    assert comment_calls == [("TIA-340", "[AIDash Action Items · Done] Verified on Mac mini")]
+    assert promoted_calls == [("缩减审核返工拉锯", "H1-H5 root cause details")]
+
+    cursor_file = tmp_path / "cursor.json"
+    rc = event_bridge.main(
+        [
+            "--proposals-path",
+            str(proposals),
+            "--events-json",
+            json.dumps(events[0]),
+            "--cursor-path",
+            str(cursor_file),
+        ]
+    )
+    assert rc == 0
+    assert cursor_file.is_file()

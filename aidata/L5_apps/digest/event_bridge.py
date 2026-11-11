@@ -197,6 +197,62 @@ def _default_linear_status_runner(issue_id: str, state: str) -> int:
     return result.returncode
 
 
+def _default_linear_comment_runner(issue_id: str, body: str) -> int:
+    script = Path(LINEAR_SYNC_SCRIPT)
+    result = subprocess.run(
+        [str(script), "comment", "--id", issue_id, "--body", body, "--mode", "auto"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result.returncode
+
+
+_JOB_ACTION_TIA_RE = re.compile(r"^(?:linear-)?(TIA-\d+)$", re.IGNORECASE)
+_JOB_ACTION_LOCAL_RE = re.compile(r"^(?:local-)?(LOCAL-\d+)$", re.IGNORECASE)
+
+
+def _parse_job_action_receipt(event: dict) -> tuple[str, str, dict[str, str]] | None:
+    """Parse an acknowledgeJobAction event into (job_id, action_id, responses_map)."""
+    action = str(event.get("action") or "").strip()
+    if action.casefold() != "acknowledgejobaction":
+        return None
+    raw_ref = str(
+        event.get("item_ref") or event.get("itemRef") or event.get("detail") or ""
+    ).strip()
+    if "|" not in raw_ref:
+        return None
+    head, payload_str = raw_ref.split("|", 1)
+    card_id = str(event.get("card_id") or event.get("cardId") or "").strip()
+    fallback_job = (
+        card_id.removeprefix("scheduled-pulse/")
+        if card_id.startswith("scheduled-pulse/")
+        else "aidata-digest"
+    )
+    if ":" in head:
+        job_id, action_id = head.split(":", 1)
+    else:
+        job_id, action_id = fallback_job, head
+    if not action_id:
+        return None
+    try:
+        parsed_responses = json.loads(payload_str)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed_responses, list):
+        return None
+    responses_map: dict[str, str] = {}
+    for item in parsed_responses:
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("controlID") or item.get("id") or "").strip()
+        val = str(item.get("value") or "").strip()
+        if cid:
+            responses_map[cid] = val
+    return job_id.strip(), action_id.strip(), responses_map
+
+
 def _default_blog_publish_runner(
     slug: str,
     blog_repo: Path | None = None,
@@ -360,6 +416,7 @@ def process_user_events(
     provider: TodoSyncProvider | str | None = None,
     linear_runner: Callable[[str, str], Any] | None = None,
     linear_status_runner: Callable[[str, str], int] | None = None,
+    linear_comment_runner: Callable[[str, str], int] | None = None,
     blog_publish_runner: Callable[..., int] | None = None,
     mode: str = "observe",
     auto_dispatch: bool = False,
@@ -578,6 +635,139 @@ def process_user_events(
         else:
             result["ignored"] += 1
 
+    comment_runner = linear_comment_runner or _default_linear_comment_runner
+    processed_job_actions: set[str] = set()
+    for event in events:
+        parsed_ack = _parse_job_action_receipt(event)
+        if parsed_ack is None:
+            continue
+        job_id, action_id, responses = parsed_ack
+        dedup_key = f"{job_id}:{action_id}"
+        if dedup_key in processed_job_actions:
+            result["ignored"] += 1
+            continue
+        processed_job_actions.add(dedup_key)
+
+        decision_raw = (
+            responses.get("decision")
+            or responses.get("choice")
+            or responses.get("action")
+            or responses.get("confirm")
+            or ""
+        ).strip()
+        decision_lower = decision_raw.casefold()
+        note = (responses.get("note") or responses.get("comment") or "").strip()
+
+        tia_match = _JOB_ACTION_TIA_RE.fullmatch(action_id)
+        local_match = _JOB_ACTION_LOCAL_RE.fullmatch(action_id)
+
+        if decision_lower in {"hold", "稍后处理", "later", "skip"}:
+            result["ignored"] += 1
+            continue
+
+        if tia_match or local_match:
+            if tia_match:
+                issue_id = tia_match.group(1).upper()
+                target_prov: TodoSyncProvider = active_provider
+            else:
+                issue_id = local_match.group(1).upper() if local_match else action_id
+                target_prov = local_provider
+
+            if decision_lower in {"done", "确认", "confirm", "resolve"} or "done" in decision_lower:
+                sync_action = "done"
+            elif "unblock" in decision_lower or decision_lower in {"todo", "reopen", "undone"}:
+                sync_action = "undone"
+            else:
+                result["ignored"] += 1
+                continue
+
+            try:
+                rc = target_prov.sync_status(issue_id, sync_action)
+                if rc == 0 and note and tia_match and target_prov.name == "linear":
+                    comment_runner(issue_id, f"[AIDash Action Items · {decision_raw}] {note}")
+            except (OSError, subprocess.SubprocessError):
+                rc = 1
+
+            if rc == 0:
+                if sync_action == "done":
+                    result["resolved"] += 1
+                else:
+                    result["undone"] += 1
+            else:
+                result["errors"] += 1
+            continue
+
+        if action_id.startswith("proposal-"):
+            prop_id = action_id.removeprefix("proposal-")
+            proposal = pending.get(prop_id)
+            if proposal is None:
+                result["ignored"] += 1
+                continue
+            if "promote" in decision_lower or decision_lower in {"star", "approve", "确认"}:
+                should_dispatch = bool(
+                    auto_dispatch
+                    or event.get("auto_dispatch")
+                    or event.get("dispatch")
+                )
+                _promote_one(proposal, trigger_dispatch=should_dispatch)
+            elif decision_lower in {"done", "dismiss", "resolve"} or "done" in decision_lower:
+                dismissed_rec = {
+                    "id": proposal.id, "ts": proposal.ts,
+                    "agent": proposal.agent, "title": proposal.title,
+                    "detail": proposal.detail, "priority": proposal.priority,
+                    "status": "dismissed",
+                }
+                if getattr(proposal, "ref", ""):
+                    dismissed_rec["ref"] = proposal.ref
+                _append_jsonl(proposal_path, dismissed_rec)
+                result["resolved"] += 1
+            else:
+                result["ignored"] += 1
+            continue
+
+        if action_id.startswith("knowledge-"):
+            slug = action_id.removeprefix("knowledge-").strip("/")
+            matched_prop = _lookup_knowledge_proposal(pending, slug)
+            if "promote" in decision_lower or decision_lower in {"publish", "star", "确认"}:
+                _publish_knowledge_blog_and_approve(
+                    slug,
+                    matched_prop=matched_prop,
+                    proposal_path=proposal_path,
+                    blog_repo=blog_repo_path or DEFAULT_BLOG_REPO,
+                    blog_mode=blog_mode,
+                    pub_runner=blog_publish_runner or _default_blog_publish_runner,
+                    result=result,
+                )
+            elif decision_lower in {"done", "dismiss"} and matched_prop is not None:
+                _append_jsonl(proposal_path, {
+                    "id": matched_prop.id, "ref": f"knowledge://{slug}", "ts": matched_prop.ts,
+                    "agent": matched_prop.agent, "title": matched_prop.title,
+                    "detail": matched_prop.detail, "priority": matched_prop.priority,
+                    "status": "dismissed",
+                })
+                result["resolved"] += 1
+            else:
+                result["ignored"] += 1
+            continue
+
+        if "promote" in decision_lower:
+            title = str(event.get("title") or f"[Action Item] {action_id}")
+            detail = f"Promoted from AIDash job action `{job_id}:{action_id}`"
+            if note:
+                detail += f"\n\nNote: {note}"
+            try:
+                rc, _ = _coerce_idea_result(active_provider.promote_proposal(title, detail))
+            except (OSError, subprocess.SubprocessError):
+                rc = 1
+            if rc == 0:
+                result["promoted"] += 1
+            else:
+                result["errors"] += 1
+        elif decision_lower in {"done", "确认", "confirm"} or "done" in decision_lower:
+            result["resolved"] += 1
+        else:
+            result["ignored"] += 1
+
     if str(mode or "").strip().lower() == "auto":
         for proposal in pending.values():
             if proposal.id in promoted_ids:
@@ -588,18 +778,95 @@ def process_user_events(
     return result
 
 
+JOB_ACTION_CURSOR_PATH = (
+    HOME / ".aidash-state" / "event_bridge_job_actions_cursor.json"
+)
+
+
+def _read_consumed_receipt_keys(path: Path) -> set[str]:
+    if not path.is_file():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict) and isinstance(payload.get("consumed"), list):
+            return {str(k) for k in payload["consumed"] if k}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return set()
+
+
+def _write_consumed_receipt_keys(path: Path, keys: set[str]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"consumed": sorted(keys)}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--proposals-path", type=Path, default=PROPOSALS_PATH)
+    parser.add_argument("--events-json", type=str, default="")
+    parser.add_argument("--events-stdin", action="store_true")
+    parser.add_argument("--export-job-actions", action="store_true")
+    parser.add_argument("--cursor-path", type=Path, default=None)
     parser.add_argument("--mode", choices=("observe", "auto"), default="observe")
     parser.add_argument("--auto-dispatch", action="store_true")
     args = parser.parse_args(argv)
+
+    events: list[dict] = []
+    raw_input = args.events_json.strip()
+    if not raw_input and args.events_stdin:
+        import sys
+
+        raw_input = sys.stdin.read().strip()
+    if raw_input:
+        try:
+            loaded = json.loads(raw_input)
+            if isinstance(loaded, dict):
+                events = [loaded]
+            elif isinstance(loaded, list):
+                events = [item for item in loaded if isinstance(item, dict)]
+        except json.JSONDecodeError:
+            events = []
+
+    cursor_file = args.cursor_path or (
+        JOB_ACTION_CURSOR_PATH if (args.events_json or args.events_stdin) else None
+    )
+    consumed_keys = _read_consumed_receipt_keys(cursor_file) if cursor_file else set()
+    if consumed_keys and events:
+        filtered: list[dict] = []
+        for evt in events:
+            parsed_ack = _parse_job_action_receipt(evt)
+            if parsed_ack is not None:
+                dedup_key = f"{parsed_ack[0]}:{parsed_ack[1]}"
+                if dedup_key in consumed_keys:
+                    continue
+            filtered.append(evt)
+        events = filtered
+
     summary = process_user_events(
-        [],
+        events,
         proposals_path=args.proposals_path,
         mode=args.mode,
         auto_dispatch=args.auto_dispatch,
     )
+
+    if cursor_file and events and summary.get("errors", 0) == 0:
+        for evt in events:
+            parsed_ack = _parse_job_action_receipt(evt)
+            if parsed_ack is not None:
+                consumed_keys.add(f"{parsed_ack[0]}:{parsed_ack[1]}")
+        _write_consumed_receipt_keys(cursor_file, consumed_keys)
+
+    if args.export_job_actions:
+        from L5_apps.digest.inbox import export_job_actions
+
+        export_job_actions(proposals_path=args.proposals_path)
+
     print(json.dumps(summary, ensure_ascii=False))
     return 0
 
