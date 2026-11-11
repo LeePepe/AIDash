@@ -240,17 +240,28 @@ def test_collect_degrades_on_nonzero_exit(monkeypatch):
 @pytest.mark.unit
 def test_normalize_preserves_undone_action(monkeypatch):
     captured = {}
-    monkeypatch.setattr(ae, "read_raw", lambda _source: [{
-        "id": "evt-undone", "timestamp": "2026-07-21T11:00:00Z",
-        "device": "Mac", "cardId": "todo-list", "action": "undone",
-        "itemRef": "gtt://goal/task",
-    }])
+    monkeypatch.setattr(ae, "read_raw", lambda _source: [
+        {
+            "id": "evt-undone", "timestamp": "2026-07-21T11:00:00Z",
+            "device": "Mac", "cardId": "todo-list", "action": "undone",
+            "itemRef": "gtt://goal/task",
+        },
+        {
+            "id": "evt-ack", "timestamp": "2026-07-21T11:05:00Z",
+            "device": "Mac", "cardId": "scheduled-pulse/aidata-digest",
+            "action": "acknowledgeJobAction",
+            "itemRef": 'aidata-digest:linear-TIA-340|[{"controlID":"decision","value":"Done"}]',
+            "cardType": "scheduledPulse",
+        },
+    ])
     monkeypatch.setattr(
         ae, "write_clean",
-        lambda _source, _table, _ddl, rows, _cols: captured.setdefault("rows", rows) or 1,
+        lambda _source, _table, _ddl, rows, _cols: captured.setdefault("rows", rows) or len(rows),
     )
     ae.normalize()
     assert captured["rows"][0]["action"] == "undone"
+    assert captured["rows"][1]["action"] == "acknowledgeJobAction"
+    assert captured["rows"][1]["card_type"] == "scheduledPulse"
 
 
 # ---- normalize -------------------------------------------------------------
