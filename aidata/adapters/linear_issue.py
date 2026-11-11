@@ -201,7 +201,9 @@ def _normalize_status(rec: dict[str, Any]) -> str:
         return "in_progress"
     if state_name == "todo" or state_type == "unstarted":
         return "todo"
-    if state_name in {"triage", "backlog"} or state_type in {"triage", "backlog"}:
+    if state_name == "triage" or state_type == "triage":
+        return "triage"
+    if state_name == "backlog" or state_type == "backlog":
         return "backlog"
     return "todo"
 
