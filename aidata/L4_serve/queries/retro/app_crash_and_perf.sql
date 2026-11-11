@@ -1,5 +1,4 @@
 -- 7-day crash signature novelty, crash-free rate, and P95 latency regression (>20%) across personal apps.
--- aidata-tier: explore
 WITH anchor AS (
     SELECT COALESCE(
         (SELECT MAX(cst_day) FROM fact_product_telemetry),

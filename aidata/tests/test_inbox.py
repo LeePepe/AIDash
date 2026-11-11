@@ -247,3 +247,34 @@ def test_pending_issues_emits_canonical_linear_ref_for_tia_items(monkeypatch):
     assert len(items) == 2
     assert items[0].ref == "linear://TIA-90"
     assert items[1].ref == "MY-12"
+
+
+@pytest.mark.unit
+def test_inbox_surfaces_skill_roi_proposals_and_retro_signals(monkeypatch):
+    def run_query(name, params=None):
+        if name == "retro/skill_roi_diagnostics":
+            return (
+                [("my-designer", 0.32, 0.75, 0.50)],
+                ["skill", "roi_score", "unpracticed_rate", "r1_pass_rate"],
+            )
+        return ([], [])
+
+    monkeypatch.setattr(inbox_mod.serve, "run_query", run_query)
+    signals = inbox_mod._retro_signals()
+    assert any(it.ref == "skill-roi://my-designer" and "ROI 偏低" in it.title for it in signals)
+
+    props = inbox_mod._proposals(
+        lambda: [
+            Proposal(
+                "skill-roi-my-designer",
+                "2026-11-11T00:00:00Z",
+                "retro-loop",
+                "[Skill ROI] 优化 my-designer",
+                "detail",
+                "high",
+                "pending",
+                ref="skill-roi://my-designer",
+            )
+        ]
+    )
+    assert props[0].ref == "skill-roi://my-designer"

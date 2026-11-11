@@ -214,7 +214,7 @@ def _proposals(read: Callable[[], list[Proposal]] | None = None) -> list[InboxIt
         explicit_ref = getattr(p, "ref", "") or ""
         if explicit_ref:
             ref = explicit_ref
-        elif str(p.id).startswith(("proposal://", "knowledge://")):
+        elif str(p.id).startswith(("proposal://", "knowledge://", "skill-roi://")):
             ref = str(p.id)
         else:
             ref = f"proposal://{p.id}"
@@ -273,6 +273,45 @@ def _retro_signals() -> list[InboxItem]:
             out.append(InboxItem(
                 f"发现：{total_reclaimable} 个已合并洁净 Worktree 可安全回收",
                 "medium", "发现", "workspace_hygiene", "stale", "Owner"))
+    except Exception:  # noqa: BLE001, S110 - one retro source must not block others
+        pass
+
+    try:
+        rows, cols = serve.run_query("retro/skill_roi_diagnostics")
+        if rows and cols:
+            sk_i = cols.index("skill")
+            roi_i = cols.index("roi_score")
+            unp_i = cols.index("unpracticed_rate")
+            r1_i = cols.index("r1_pass_rate")
+            top_row = rows[0]
+            roi_val = float(top_row[roi_i] or 1.0)
+            unp_val = float(top_row[unp_i] or 0.0)
+            r1_val = float(top_row[r1_i] or 1.0)
+            if roi_val < 0.8 or unp_val >= 0.5:
+                sk_name = str(top_row[sk_i])
+                out.append(InboxItem(
+                    f"发现：Skill {sk_name} ROI 偏低（{roi_val:.2f}，R1 {r1_val*100:.0f}%，光读不练 {unp_val*100:.0f}%）",
+                    "medium", "发现", f"skill-roi://{sk_name}", "discovery", "Owner"))
+    except Exception:  # noqa: BLE001, S110 - one retro source must not block others
+        pass
+
+    try:
+        rows, cols = serve.run_query("retro/tool_context_burn")
+        if rows and cols:
+            t_i = cols.index("tool_name")
+            b_i = cols.index("bloated_call_count")
+            p_i = cols.index("p95_tokens")
+            sk_i = cols.index("dominant_skill")
+            for row in rows:
+                bloated = int(row[b_i] or 0)
+                if bloated > 0:
+                    t_name = str(row[t_i])
+                    p95_k = float(row[p_i] or 0) / 1000.0
+                    d_skill = str(row[sk_i] or "team-lead")
+                    out.append(InboxItem(
+                        f"发现：{t_name} ({d_skill}) 产出 {bloated} 次 >10k tok 膨胀输出（P95 {p95_k:.1f}k）",
+                        "medium", "发现", f"skill-roi://{d_skill}", "discovery", "Owner"))
+                    break
     except Exception:  # noqa: BLE001, S110 - one retro source must not block others
         pass
 

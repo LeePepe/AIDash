@@ -239,6 +239,21 @@ def _lookup_knowledge_proposal(
     return None
 
 
+def _lookup_skill_roi_proposal(
+    pending: dict[str, Proposal],
+    skill_name: str,
+) -> Proposal | None:
+    target_ref = f"skill-roi://{skill_name}"
+    for prop in pending.values():
+        if getattr(prop, "ref", "") == target_ref or prop.id in {
+            skill_name,
+            f"skill-roi-{skill_name}",
+            target_ref,
+        }:
+            return prop
+    return None
+
+
 def _publish_knowledge_blog_and_approve(
     slug: str,
     *,
@@ -514,6 +529,20 @@ def process_user_events(
             else:
                 result["ignored"] += 1
             continue
+        if ref.startswith("skill-roi://") and action == "done":
+            skill_name = ref.removeprefix("skill-roi://").strip("/")
+            proposal = _lookup_skill_roi_proposal(pending, skill_name)
+            if proposal is not None:
+                _append_jsonl(proposal_path, {
+                    "id": proposal.id, "ref": ref, "ts": proposal.ts,
+                    "agent": proposal.agent, "title": proposal.title,
+                    "detail": proposal.detail, "priority": proposal.priority,
+                    "status": "dismissed",
+                })
+                result["resolved"] += 1
+            else:
+                result["ignored"] += 1
+            continue
         if (
             ref.startswith("gtt://")
             and action == "done"
@@ -569,6 +598,29 @@ def process_user_events(
                 pub_runner=blog_publish_runner or _default_blog_publish_runner,
                 result=result,
             )
+        elif ref.startswith("skill-roi://"):
+            skill_name = ref.removeprefix("skill-roi://").strip("/")
+            if not skill_name:
+                result["ignored"] += 1
+                continue
+            matched = _lookup_skill_roi_proposal(pending, skill_name)
+            if matched is None:
+                matched = Proposal(
+                    id=f"skill-roi-{skill_name}",
+                    ts=_now(),
+                    agent="retro-loop",
+                    title=f"[Skill ROI] 优化 {skill_name} 效果与效率（补充脚本门禁与 Eval 抽屉）",
+                    detail=f"skill={skill_name} | ref=skill-roi://{skill_name}",
+                    priority="high",
+                    status="pending",
+                    ref=f"skill-roi://{skill_name}",
+                )
+            should_dispatch = bool(
+                auto_dispatch
+                or event.get("auto_dispatch")
+                or event.get("dispatch")
+            )
+            _promote_one(matched, trigger_dispatch=should_dispatch)
         elif ref.startswith("falcon://request/"):
             request_id = ref.removeprefix("falcon://request/")
             if _star_falcon(falcon_db_path, request_id, _now()) if falcon_db_path else False:

@@ -49,12 +49,14 @@ from L5_apps.digest.sources import (  # noqa: F401 — fetch_ado_pr_trends re-ex
     fetch_model_tier,
     fetch_multica_completed,
     fetch_news_radar,
+    fetch_product_growth_trends,
     fetch_raven_trends,
     fetch_repo_radar,
     fetch_retro_ops_trends,
     fetch_rework_by_workspace,
     # 交叉信号 (§design 4.2): the workspace × root-cause rework matrix.
     fetch_rework_relationship,
+    fetch_skill_roi_trends,
     fetch_tool_cross,
     fetch_value_efficiency,
     fetch_work_by_project,
@@ -135,6 +137,8 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         # happened to run long.
         tool_cross=fetch_tool_cross(None),
         retro_ops=fetch_retro_ops_trends(),
+        product_growth=fetch_product_growth_trends(),
+        skill_roi=fetch_skill_roi_trends(),
     )
 
 

@@ -13,6 +13,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 
 import serve
 from config import MULTICA_WORKSPACES, WAREHOUSE_DB, clean_path
@@ -593,6 +594,12 @@ class DigestSources:
         default_factory=lambda: ReworkRelationship.empty()
     )
     retro_ops: RetroOpsTrends | None = None
+    product_growth: "ProductGrowthTrends" = field(
+        default_factory=lambda: ProductGrowthTrends.empty()
+    )
+    skill_roi: "SkillRoiTrends" = field(
+        default_factory=lambda: SkillRoiTrends.empty()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1647,3 +1654,508 @@ def fetch_card_interest(since: str | None) -> "CardInterest":
         return CardInterest(types, SourceHealth("aidash_events", "ok"))
     except Exception as exc:
         return CardInterest([], SourceHealth("aidash_events", "error", str(exc)[:200]))
+
+
+# ---- 🏥 产品健康与个人成长 (#5 Crash-Free, #6 P95 PLT, #7 Unshipped, #10 Knowledge→Blog) ----
+@dataclass(frozen=True)
+class AppTelemetrySummary:
+    app_name: str
+    crash_free_rate_7d: float
+    new_crash_count: int
+    top_signature: str
+    p95_ms_7d: float | None
+    p95_prev_ms_7d: float | None
+    p95_regression_pct: float
+    is_perf_regressed: bool
+
+
+@dataclass(frozen=True)
+class ProductGrowthTrends:
+    apps: tuple[AppTelemetrySummary, ...]
+    unshipped_commits: tuple[tuple[str, int], ...]
+    vault_total_cards: int
+    vault_weekly_new_cards: int
+    blog_published_posts: int
+    featured_card_slug: str
+    featured_card_title: str
+    featured_card_summary: str
+    health: SourceHealth
+
+    @staticmethod
+    def empty(state: str = "skipped:未取") -> "ProductGrowthTrends":
+        return ProductGrowthTrends(
+            apps=(),
+            unshipped_commits=(),
+            vault_total_cards=0,
+            vault_weekly_new_cards=0,
+            blog_published_posts=0,
+            featured_card_slug="",
+            featured_card_title="",
+            featured_card_summary="",
+            health=SourceHealth("product_growth", state),
+        )
+
+
+@dataclass(frozen=True)
+class SkillRoiRow:
+    skill: str
+    loads_7d: int
+    loads_30d: int
+    r1_pass_rate: float
+    script_exec_count: int
+    script_touch_rate: float
+    unpracticed_rate: float
+    l0_only_sessions: int
+    l1_selective_sessions: int
+    l1_greedy_sessions: int
+    avg_context_tokens: int
+    rework_rounds: int
+    impl_bug_count: int
+    spec_gap_count: int
+    roi_score: float
+
+
+@dataclass(frozen=True)
+class ContextSliceRow:
+    slice_key: str
+    tokens: int
+    share_pct: float
+
+
+@dataclass(frozen=True)
+class ToolBurnRow:
+    tool_name: str
+    call_count: int
+    total_tokens: int
+    p95_tokens: int
+    bloated_call_count: int
+    share_pct: float
+    dominant_skill: str
+
+
+@dataclass(frozen=True)
+class SkillRoiTrends:
+    skills: tuple[SkillRoiRow, ...]
+    pin_drift_bars: tuple[tuple[str, int, int], ...]  # (repo_dep, commits_behind, days_behind)
+    gate_true_catches_7d: int
+    gate_noise_7d: int
+    gate_catch_ratio: float | None
+    skill_audit_pass_ratio: float | None
+    top_l0_watermarks: tuple[tuple[str, int, int], ...]
+    eval_case_total: int
+    eval_case_weekly_delta: int
+    idle_skills_30d: tuple[str, ...]
+    low_roi_summary: str
+    health: SourceHealth
+    context_slices: tuple[ContextSliceRow, ...] = ()
+    kv_cache_hit_pct: float | None = None
+    compressed_saved_tokens: int = 0
+    tool_burns: tuple[ToolBurnRow, ...] = ()
+
+    @staticmethod
+    def empty(state: str = "skipped:未取") -> "SkillRoiTrends":
+        return SkillRoiTrends(
+            skills=(),
+            pin_drift_bars=(),
+            gate_true_catches_7d=0,
+            gate_noise_7d=0,
+            gate_catch_ratio=None,
+            skill_audit_pass_ratio=None,
+            top_l0_watermarks=(),
+            eval_case_total=0,
+            eval_case_weekly_delta=0,
+            idle_skills_30d=(),
+            low_roi_summary="",
+            health=SourceHealth("skill_roi", state),
+            context_slices=(),
+            kv_cache_hit_pct=None,
+            compressed_saved_tokens=0,
+            tool_burns=(),
+        )
+
+
+def _scan_unshipped_commits(dev_root: Path | None = None) -> tuple[tuple[str, int], ...]:
+    """#7: Count commits between testflight/last-released (or macos-last-released) and HEAD."""
+    import subprocess
+    from config import HOME
+
+    root = dev_root or (HOME / "Development")
+    results: list[tuple[str, int]] = []
+    for app_name in ("VitalStride", "VoxPocket", "AIDash"):
+        repo_path = root / app_name
+        if not (repo_path / ".git").exists():
+            continue
+        for tag in ("testflight/last-released", "testflight/macos-last-released"):
+            try:
+                proc = subprocess.run(
+                    ["git", "--no-optional-locks", "rev-list", "--count", f"refs/tags/{tag}..HEAD"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if proc.returncode == 0 and proc.stdout.strip().isdigit():
+                results.append((app_name, int(proc.stdout.strip())))
+                break
+    return tuple(results)
+
+
+def _scan_knowledge_blog_funnel(dev_root: Path | None = None) -> tuple[int, int, int, str, str, str]:
+    """#10: Read knowledge-vault/index.md and leepepe.github.io for Digest -> Blog funnel."""
+    import re
+    from datetime import date, timedelta
+    from config import HOME
+
+    root = dev_root or (HOME / "Development")
+    vault_index = root / "Personal" / "knowledge-vault" / "index.md"
+    blog_root = root / "leepepe.github.io"
+    total_cards = 0
+    weekly_new = 0
+    featured_slug = ""
+    featured_title = ""
+    featured_summary = ""
+    cutoff = (date.today() - timedelta(days=7)).isoformat()
+
+    if vault_index.is_file():
+        try:
+            for line in vault_index.read_text(encoding="utf-8", errors="ignore").splitlines():
+                s = line.strip()
+                if not s.startswith("|") or s.startswith("|---") or "标题" in s:
+                    continue
+                cells = [c.strip() for c in s.strip("|").split("|")]
+                if len(cells) < 5:
+                    continue
+                title, summary, path_cell, updated = cells[1], cells[2], cells[3], cells[4]
+                if "raw/" in path_cell:
+                    continue
+                total_cards += 1
+                if updated >= cutoff:
+                    weekly_new += 1
+                m = re.search(r"\((?:concepts|craft|thoughts)/([A-Za-z0-9_-]+)\.md\)", path_cell)
+                slug = m.group(1) if m else ""
+                if slug and not featured_slug:
+                    featured_slug = slug
+                    featured_title = title
+                    featured_summary = summary
+        except OSError:
+            pass
+
+    blog_posts = 0
+    for section in ("learn", "thoughts"):
+        sec_dir = blog_root / section
+        if not sec_dir.is_dir():
+            continue
+        try:
+            blog_posts += sum(
+                1 for sub in sec_dir.iterdir() if sub.is_dir() and (sub / "index.html").is_file()
+            )
+        except OSError:
+            pass
+    return total_cards, weekly_new, blog_posts, featured_slug, featured_title, featured_summary
+
+
+def fetch_product_growth_trends(dev_root: Path | None = None) -> ProductGrowthTrends:
+    """Fetch #5 Crash-Free, #6 P95 latency, #7 Unshipped TF commits, and #10 Digest->Blog funnel."""
+    apps: list[AppTelemetrySummary] = []
+    try:
+        rows, idx = _rows("retro/app_crash_and_perf")
+        for r in rows:
+            apps.append(
+                AppTelemetrySummary(
+                    app_name=str(r[idx["app_name"]] or ""),
+                    crash_free_rate_7d=float(r[idx["crash_free_rate_7d"]] or 1.0),
+                    new_crash_count=int(r[idx["new_crash_signature_count"]] or 0),
+                    top_signature=str(r[idx["signature"]] or ""),
+                    p95_ms_7d=(
+                        float(r[idx["p95_metric_ms_7d"]])
+                        if r[idx["p95_metric_ms_7d"]] is not None else None
+                    ),
+                    p95_prev_ms_7d=(
+                        float(r[idx["p95_metric_ms_prev_7d"]])
+                        if r[idx["p95_metric_ms_prev_7d"]] is not None else None
+                    ),
+                    p95_regression_pct=float(r[idx["p95_regression_pct"]] or 0.0),
+                    is_perf_regressed=bool(int(r[idx["is_perf_regressed"]] or 0)),
+                )
+            )
+    except Exception:  # noqa: BLE001
+        apps = []
+
+    unshipped = _scan_unshipped_commits(dev_root)
+    total_cards, weekly_new, blog_posts, f_slug, f_title, f_sum = _scan_knowledge_blog_funnel(dev_root)
+    if not (apps or unshipped or total_cards or blog_posts):
+        return ProductGrowthTrends.empty("skipped:未采集")
+    return ProductGrowthTrends(
+        apps=tuple(apps),
+        unshipped_commits=unshipped,
+        vault_total_cards=total_cards,
+        vault_weekly_new_cards=weekly_new,
+        blog_published_posts=blog_posts,
+        featured_card_slug=f_slug,
+        featured_card_title=f_title,
+        featured_card_summary=f_sum,
+        health=SourceHealth("product_growth", "ok"),
+    )
+
+
+def _scan_skill_health_and_pins(dev_root: Path | None = None) -> tuple[
+    tuple[tuple[str, int, int], ...],
+    float | None,
+    tuple[tuple[str, int, int], ...],
+    int,
+    int,
+    set[str],
+]:
+    """Scan local skill packages (S3) and shared-* pin drift (S1) without network."""
+    import re
+    import subprocess
+    from datetime import date, timedelta
+    from config import HOME
+
+    root = dev_root or (HOME / "Development")
+    skills_dirs = [root / "user-skills" / "skills"]
+    for app_name in ("AIDash", "VitalStride", "VoxPocket"):
+        cand = root / app_name / ".agents" / "skills"
+        if cand.is_dir():
+            skills_dirs.append(cand)
+
+    total_skills = 0
+    budget_ok_count = 0
+    l0_rows: list[tuple[str, int, int]] = []
+    eval_total = 0
+    eval_weekly = 0
+    discovered_names: set[str] = set()
+    cutoff = (date.today() - timedelta(days=7)).isoformat()
+
+    for sdir in skills_dirs:
+        if not sdir.is_dir():
+            continue
+        try:
+            children = sorted(sdir.iterdir())
+        except OSError:
+            continue
+        for pkg in children:
+            md = pkg / "SKILL.md"
+            if not pkg.is_dir() or not md.is_file() or pkg.name in discovered_names:
+                continue
+            discovered_names.add(pkg.name)
+            total_skills += 1
+            try:
+                l0_lines = len(md.read_text(encoding="utf-8", errors="ignore").splitlines())
+            except OSError:
+                l0_lines = 0
+            cap = 80 if pkg.name in {"my-designer", "design-studio"} else 180
+            l0_rows.append((pkg.name, l0_lines, cap))
+            refs = pkg / "references"
+            max_l1 = 0
+            if refs.is_dir():
+                for rp in refs.rglob("*"):
+                    if not rp.is_file():
+                        continue
+                    if rp.suffix == ".md":
+                        try:
+                            max_l1 = max(max_l1, len(rp.read_text(encoding="utf-8", errors="ignore").splitlines()))
+                        except OSError:
+                            pass
+                    elif rp.suffix == ".json" and (
+                        rp.name == "eval-cases.json" or rp.as_posix().endswith("defect-cases/index.json")
+                    ):
+                        try:
+                            doc = json.loads(rp.read_text(encoding="utf-8"))
+                            for c in doc.get("active_cases", []):
+                                if isinstance(c, dict):
+                                    eval_total += 1
+                                    if str(c.get("registered_at") or doc.get("updated") or "") >= cutoff:
+                                        eval_weekly += 1
+                        except (OSError, json.JSONDecodeError):
+                            pass
+            if l0_lines <= cap and max_l1 <= 160:
+                budget_ok_count += 1
+
+    l0_rows.sort(key=lambda item: (-item[1], item[0]))
+    audit_ratio = (budget_ok_count / total_skills) if total_skills > 0 else None
+
+    # S1: check shared-ci and shared-telemetry pins
+    pin_drift: list[tuple[str, int, int]] = []
+    upstreams: dict[str, Path] = {}
+    for up in ("shared-ci", "shared-design-system", "shared-telemetry"):
+        up_p = root / up
+        if (up_p / ".git").exists():
+            upstreams[up] = up_p
+
+    for repo_name in ("AIDash", "VitalStride", "VoxPocket"):
+        rpath = root / repo_name
+        if not rpath.is_dir():
+            continue
+        pinned_ci = ""
+        sci = rpath / ".shared-ci"
+        if sci.is_file():
+            try:
+                m = re.search(r"\b([0-9a-f]{7,40})\b", sci.read_text(encoding="utf-8", errors="ignore"))
+                if m:
+                    pinned_ci = m.group(1)
+            except OSError:
+                pass
+        if not pinned_ci and (rpath / ".github" / "workflows").is_dir():
+            for wf in sorted((rpath / ".github" / "workflows").glob("*.yml")):
+                try:
+                    m = re.search(
+                        r"LeePepe/shared-ci/[^@\s]+@([0-9a-f]{7,40})",
+                        wf.read_text(encoding="utf-8", errors="ignore"),
+                    )
+                    if m:
+                        pinned_ci = m.group(1)
+                        break
+                except OSError:
+                    continue
+        if pinned_ci and "shared-ci" in upstreams:
+            up_p = upstreams["shared-ci"]
+            try:
+                cnt_p = subprocess.run(
+                    ["git", "--no-optional-locks", "rev-list", "--count", f"{pinned_ci}..HEAD"],
+                    cwd=up_p,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                behind = int(cnt_p.stdout.strip()) if cnt_p.returncode == 0 and cnt_p.stdout.strip().isdigit() else 0
+                pin_drift.append((f"{repo_name} · shared-ci", behind, 0))
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+    return (
+        tuple(pin_drift),
+        audit_ratio,
+        tuple(l0_rows[:3]),
+        eval_total,
+        eval_weekly,
+        discovered_names,
+    )
+
+
+def fetch_skill_roi_trends(dev_root: Path | None = None) -> SkillRoiTrends:
+    """Fetch S1–S4 and S6–S10 Skill ROI diagnostics."""
+    skill_rows: list[SkillRoiRow] = []
+    try:
+        rows, idx = _rows("retro/skill_roi_diagnostics")
+        for r in rows:
+            skill_rows.append(
+                SkillRoiRow(
+                    skill=str(r[idx["skill"]] or ""),
+                    loads_7d=int(r[idx["loads_7d"]] or 0),
+                    loads_30d=int(r[idx["loads_30d"]] or 0),
+                    r1_pass_rate=float(r[idx["r1_pass_rate"]] or 1.0),
+                    script_exec_count=int(r[idx["script_exec_count"]] or 0),
+                    script_touch_rate=float(r[idx["script_touch_rate"]] or 1.0),
+                    unpracticed_rate=float(r[idx["unpracticed_rate"]] or 0.0),
+                    l0_only_sessions=int(r[idx["l0_only_sessions"]] or 0),
+                    l1_selective_sessions=int(r[idx["l1_selective_sessions"]] or 0),
+                    l1_greedy_sessions=int(r[idx["l1_greedy_sessions"]] or 0),
+                    avg_context_tokens=int(r[idx["avg_context_tokens"]] or 1200),
+                    rework_rounds=int(r[idx["rework_rounds"]] or 0),
+                    impl_bug_count=int(r[idx["impl_bug_count"]] or 0),
+                    spec_gap_count=int(r[idx["spec_gap_count"]] or 0),
+                    roi_score=float(r[idx["roi_score"]] or 1.0),
+                )
+            )
+    except Exception:  # noqa: BLE001
+        skill_rows = []
+
+    gate_catches = 0
+    gate_noise = 0
+    gate_ratio: float | None = None
+    try:
+        ci_rows, ci_idx = _rows("retro/ci_health_and_noise")
+        failures = sum(int(r[ci_idx["failure_count"]] or 0) for r in ci_rows)
+        noise = sum(int(r[ci_idx["config_noise_job_count"]] or 0) for r in ci_rows)
+        gate_catches = max(0, failures - noise)
+        gate_noise = noise
+        if gate_catches + gate_noise > 0:
+            gate_ratio = gate_catches / (gate_catches + gate_noise)
+    except Exception:  # noqa: BLE001
+        pass
+
+    pin_drift, audit_ratio, top_l0, eval_tot, eval_wk, all_names = _scan_skill_health_and_pins(dev_root)
+    active_names = {s.skill for s in skill_rows if s.loads_30d > 0}
+    idle = tuple(sorted(all_names - active_names))
+
+    low_roi_summary = ""
+    if skill_rows:
+        worst = min(skill_rows, key=lambda s: (s.roi_score, -s.impl_bug_count, -s.unpracticed_rate))
+        low_roi_summary = (
+            f"低 ROI 关注：{worst.skill}（ROI {worst.roi_score:.2f} · "
+            f"R1 一次通过 {worst.r1_pass_rate * 100:.0f}% · "
+            f"光读不练 {worst.unpracticed_rate * 100:.0f}% · "
+            f"IMPL_BUG {worst.impl_bug_count} / SPEC_GAP {worst.spec_gap_count}）"
+        )
+
+    ctx_slices: list[ContextSliceRow] = []
+    kv_hit_pct: float | None = None
+    saved_toks = 0
+    try:
+        c_rows, c_idx = _rows("retro/context_composition")
+        for r in c_rows:
+            ctx_slices.append(
+                ContextSliceRow(
+                    slice_key=str(r[c_idx["slice_key"]] or ""),
+                    tokens=int(r[c_idx["tokens"]] or 0),
+                    share_pct=float(r[c_idx["share_pct"]] or 0.0),
+                )
+            )
+            if kv_hit_pct is None and r[c_idx["kv_cache_hit_pct"]] is not None:
+                kv_hit_pct = float(r[c_idx["kv_cache_hit_pct"]])
+            if not saved_toks and r[c_idx["compressed_saved_tokens"]] is not None:
+                saved_toks = int(r[c_idx["compressed_saved_tokens"]])
+    except Exception:  # noqa: BLE001
+        ctx_slices = []
+
+    t_burns: list[ToolBurnRow] = []
+    try:
+        tb_rows, tb_idx = _rows("retro/tool_context_burn")
+        for r in tb_rows:
+            t_burns.append(
+                ToolBurnRow(
+                    tool_name=str(r[tb_idx["tool_name"]] or ""),
+                    call_count=int(r[tb_idx["call_count"]] or 0),
+                    total_tokens=int(r[tb_idx["total_tokens"]] or 0),
+                    p95_tokens=int(r[tb_idx["p95_tokens"]] or 0),
+                    bloated_call_count=int(r[tb_idx["bloated_call_count"]] or 0),
+                    share_pct=float(r[tb_idx["share_pct"]] or 0.0),
+                    dominant_skill=str(r[tb_idx["dominant_skill"]] or "team-lead"),
+                )
+            )
+    except Exception:  # noqa: BLE001
+        t_burns = []
+
+    if not (
+        skill_rows
+        or pin_drift
+        or audit_ratio is not None
+        or gate_ratio is not None
+        or ctx_slices
+        or t_burns
+    ):
+        return SkillRoiTrends.empty("skipped:未采集")
+
+    return SkillRoiTrends(
+        skills=tuple(skill_rows),
+        pin_drift_bars=pin_drift,
+        gate_true_catches_7d=gate_catches,
+        gate_noise_7d=gate_noise,
+        gate_catch_ratio=gate_ratio,
+        skill_audit_pass_ratio=audit_ratio,
+        top_l0_watermarks=top_l0,
+        eval_case_total=eval_tot,
+        eval_case_weekly_delta=eval_wk,
+        idle_skills_30d=idle,
+        low_roi_summary=low_roi_summary,
+        health=SourceHealth("skill_roi", "ok"),
+        context_slices=tuple(ctx_slices),
+        kv_cache_hit_pct=kv_hit_pct,
+        compressed_saved_tokens=saved_toks,
+        tool_burns=tuple(t_burns),
+    )

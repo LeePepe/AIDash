@@ -1,4 +1,3 @@
--- aidata-tier: explore
 SELECT
     repo_key,
     target_platform,
