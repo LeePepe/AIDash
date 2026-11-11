@@ -125,6 +125,36 @@ enum JobActionsReceiptStore {
 }
 
 @MainActor
+enum JobActionsEventBridgeDispatcher {
+    static func triggerAsync(event: UserEvent) {
+        guard JobActionsSources.isProductionEnvironment else { return }
+        let home = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let aidataDir = home.appendingPathComponent("Development/AIDash/aidata", isDirectory: true)
+        let bridgeScript = aidataDir.appendingPathComponent("L5_apps/digest/event_bridge.py")
+        guard FileManager.default.fileExists(atPath: bridgeScript.path) else { return }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let payloadData = try? encoder.encode([event]),
+              let payloadString = String(data: payloadData, encoding: .utf8) else { return }
+        let aidataPath = aidataDir.path
+        DispatchQueue.global(qos: .utility).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            process.currentDirectoryURL = URL(fileURLWithPath: aidataPath, isDirectory: true)
+            process.arguments = [
+                "-m", "L5_apps.digest.event_bridge",
+                "--events-json", payloadString,
+                "--export-job-actions",
+                "--mode", "observe"
+            ]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+        }
+    }
+}
+
+@MainActor
 extension JobActionsBridge {
     static func production(container: @escaping () -> ModelContainer?) -> JobActionsBridge {
         let jobs = Set(ScheduledPulseRegistry.jobs.map { $0.id.rawValue })
@@ -141,7 +171,11 @@ extension JobActionsBridge {
                 guard JobActionsSources.isProductionEnvironment, let store = container() else {
                     throw JobActionsBridgeError.make("persistence-failed")
                 }
-                return try UserEventWriter(container: store).recordReviewedJobAction(action: action, responses: responses)
+                let saved = try UserEventWriter(container: store).recordReviewedJobAction(
+                    action: action, responses: responses
+                )
+                JobActionsEventBridgeDispatcher.triggerAsync(event: saved)
+                return saved
             },
             nativeAvailable: { JobActionsSources.isProductionEnvironment && NSApp != nil },
             presenter: JobActionsNativePresenter()

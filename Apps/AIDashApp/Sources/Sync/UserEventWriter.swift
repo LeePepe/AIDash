@@ -216,6 +216,11 @@ final class UserEventWriter {
         context.insert(event)
         do {
             try context.save()
+            JobActionsEventBridgeDispatcher.triggerAsync(event: UserEvent(
+                id: event.id, timestamp: event.timestamp, device: event.device,
+                cardId: event.cardId, action: .acknowledgeJobAction,
+                itemRef: event.itemRef, cardType: event.cardType
+            ))
             return true
         } catch {
             return false
