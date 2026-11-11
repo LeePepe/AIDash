@@ -770,4 +770,49 @@ def test_cross_device_actionable_item_schema_and_approve_done_dismiss_flows(
     assert len(retry_ideas) == 1
     assert retry_statuses == [("TIA-360", "Todo"), ("TIA-360", "Todo")]
 
+    # 6) sync_triage=True promotes unpromoted items to Linear Triage, rewrites action["id"]
+    #    to linear-TIA-xx, and subsequent Done/Approve/Dismiss routes to that Linear issue.
+    triage_proposals = tmp_path / "triage_proposals.jsonl"
+    triage_proposals.write_text(
+        json.dumps(
+            {
+                "id": "triage-prop-1",
+                "ts": "2026-11-11T00:00:00Z",
+                "agent": "retro-loop",
+                "title": "Sync to Linear Triage",
+                "detail": "Triage detail",
+                "priority": "high",
+                "status": "pending",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    triage_provider = LinearTodoSyncProvider(
+        team_key="TIA",
+        script_path=tmp_path / "linear-sync.py",
+        idea_runner=lambda title, detail: (0, "TIA-370"),
+        status_runner=lambda ident, state: 0,
+    )
+    synced_actions = inbox.build_job_actions(
+        [
+            inbox.InboxItem(
+                title="待决策（retro-loop）：Sync to Linear Triage",
+                priority="high",
+                bucket="待决策",
+                ref="proposal://triage-prop-1",
+                category="decision",
+            )
+        ],
+        proposals_path=triage_proposals,
+        provider=triage_provider,
+        sync_triage=True,
+    )
+    assert len(synced_actions) == 1
+    assert synced_actions[0]["id"] == "linear-TIA-370"
+    assert synced_actions[0]["ref"] == "linear://TIA-370"
+    assert synced_actions[0]["url"] == "https://linear.app/tianpeili/issue/TIA-370"
+    assert synced_actions[0]["status"] == "triage"
+
+
 

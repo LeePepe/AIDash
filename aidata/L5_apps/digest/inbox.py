@@ -724,6 +724,34 @@ def build_job_actions(
             if rc == 0 and ext_id:
                 parsed_ident = active_provider.parse_ref(ext_id) or str(ext_id).strip().upper()
                 ref = f"linear://{parsed_ident}"
+                candidate_linear_id = _safe_action_id(f"linear-{parsed_ident}", index)
+                if candidate_linear_id in seen_ids and candidate_linear_id != action_id:
+                    seen_ids.discard(action_id)
+                    continue
+                seen_ids.discard(action_id)
+                action_id = candidate_linear_id
+                seen_ids.add(action_id)
+                status = "triage"
+                if matched_prop is not None and proposals_path is not None:
+                    try:
+                        approved_rec: dict[str, object] = {
+                            "id": matched_prop.id,
+                            "ts": stamp,
+                            "agent": matched_prop.agent,
+                            "title": matched_prop.title,
+                            "detail": matched_prop.detail,
+                            "priority": matched_prop.priority,
+                            "status": "approved",
+                            "source": "aidata",
+                            "external_id": parsed_ident,
+                            "ref": ref,
+                        }
+                        with proposals_path.open("a", encoding="utf-8") as handle:
+                            import json
+
+                            handle.write(json.dumps(approved_rec, ensure_ascii=False) + "\n")
+                    except OSError:
+                        pass
 
         url = _infer_action_url(item, ref)
         effective_ref = ref or f"signal://{action_id}"
