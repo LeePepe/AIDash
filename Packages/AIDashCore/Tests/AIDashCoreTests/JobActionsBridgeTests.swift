@@ -4,6 +4,7 @@ import Testing
 
 @Suite("Job actions wire validation")
 struct JobActionsBridgeTests {
+    private let jobs: Set<String> = ["my-pr-supervisor", "pr-auto-review", "aidata-digest"]
     private func action(createdAt: Date? = Date(timeIntervalSince1970: 123.25)) -> JobActionsAction {
         JobActionsAction(id: "sample", jobID: "my-pr-supervisor", createdAt: createdAt, title: "Synthetic",
                          descriptionMd: "Safe text", controls: [
@@ -29,6 +30,11 @@ struct JobActionsBridgeTests {
         #expect(revision.count == 64)
         #expect(try JobActionsValidation.revision(for: action(createdAt: Date(timeIntervalSince1970: 123.5))) != revision)
         try JobActionsValidation.validateResponses(responses, for: value)
+        let producerControl = Data(#"{"id":"note","kind":"textInput","title":"Note","maxLength":120}"#.utf8)
+        let control = try JSONDecoder().decode(JobActionsAction.Control.self, from: producerControl)
+        #expect(control.options == [])
+        #expect(control.maxLength == 120)
+        #expect(control.effectiveMaxLength == 80)
     }
 
     @Test("Exact fields, Unicode bounds, duplicates, unknown controls, options and noncanonical selections reject")
@@ -69,11 +75,23 @@ struct JobActionsBridgeTests {
                               cardId: "scheduled-pulse/my-pr-supervisor", action: .acknowledgeJobAction,
                               itemRef: "sample|[{\"controlID\":\"confirm\",\"value\":\"确认\"}]", cardType: "scheduledPulse")
         let decoded = try JSONDecoder().decode(UserEvent.self, from: JSONEncoder().encode(event))
-        #expect(JobActionsValidation.acknowledgement(in: [decoded], for: action())?.id == event.id)
+        #expect(JobActionsValidation.acknowledgement(in: [decoded], for: action(), registeredJobIDs: jobs)?.id == event.id)
         let otherJob = JobActionsAction(id: "sample", jobID: "pr-auto-review", title: "Other", descriptionMd: "", controls: [])
-        #expect(JobActionsValidation.acknowledgement(in: [decoded], for: otherJob) == nil)
+        #expect(JobActionsValidation.acknowledgement(in: [decoded], for: otherJob, registeredJobIDs: jobs) == nil)
         let malformed = UserEvent(id: "bad", timestamp: Date(), device: "synthetic",
                                   cardId: event.cardId, action: event.action, itemRef: "sample|not-json", cardType: event.cardType)
-        #expect(JobActionsValidation.acknowledgement(in: [malformed], for: action()) == nil)
+        #expect(JobActionsValidation.acknowledgement(in: [malformed], for: action(), registeredJobIDs: jobs) == nil)
+        let scoped = UserEvent(id: "scoped", timestamp: event.timestamp, device: event.device,
+                               cardId: event.cardId, action: event.action,
+                               itemRef: "my-pr-supervisor:\(event.itemRef ?? "")", cardType: event.cardType)
+        #expect(JobActionsValidation.acknowledgement(in: [scoped], for: action(), registeredJobIDs: jobs)?.id == "scoped")
+        let ambiguous = JobActionsAction(id: "my-pr-supervisor:sample", jobID: "my-pr-supervisor",
+                                         title: "Not the same action", descriptionMd: "", controls: [])
+        #expect(JobActionsValidation.acknowledgement(in: [scoped], for: ambiguous, registeredJobIDs: jobs) == nil)
+        let forged = UserEvent(id: "forged", timestamp: event.timestamp, device: event.device,
+                               cardId: event.cardId, action: event.action,
+                               itemRef: "pr-auto-review:sample|[{\"controlID\":\"confirm\",\"value\":\"确认\"}]",
+                               cardType: event.cardType)
+        #expect(JobActionsValidation.acknowledgement(in: [forged], for: action(), registeredJobIDs: jobs) == nil)
     }
 }

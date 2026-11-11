@@ -22,6 +22,15 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         }
 
         public var effectiveMaxLength: Int { min(max(maxLength ?? 80, 0), 80) }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            kind = try container.decode(Kind.self, forKey: .kind)
+            title = try container.decode(String.self, forKey: .title)
+            options = try container.decodeIfPresent([String].self, forKey: .options) ?? []
+            maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
+        }
     }
 
     public let id: String

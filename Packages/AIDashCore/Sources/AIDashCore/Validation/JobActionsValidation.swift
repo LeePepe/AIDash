@@ -100,13 +100,15 @@ public enum JobActionsValidation {
     }
 
     /// Only exact job/action receipts with decodable response JSON can acknowledge an entry.
-    public static func acknowledgement(in events: [UserEvent], for action: JobActionsAction) -> UserEvent? {
+    public static func acknowledgement(
+        in events: [UserEvent], for action: JobActionsAction, registeredJobIDs: Set<String>
+    ) -> UserEvent? {
         events.filter { event in
             guard event.action == .acknowledgeJobAction,
                   event.cardId == "scheduled-pulse/\(action.jobID)",
                   event.cardType == "scheduledPulse",
                   let ref = event.itemRef, let separator = ref.firstIndex(of: "|"),
-                  String(ref[..<separator]) == action.id,
+                  matchesReceiptHead(String(ref[..<separator]), action: action, registeredJobIDs: registeredJobIDs),
                   let responses = try? JSONDecoder().decode(
                     [JobActionsResponse].self, from: Data(ref[ref.index(after: separator)...].utf8)
                   ) else { return false }
@@ -117,6 +119,15 @@ public enum JobActionsValidation {
             if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
             return $0.id < $1.id
         }.first
+    }
+
+    private static func matchesReceiptHead(
+        _ head: String, action: JobActionsAction, registeredJobIDs: Set<String>
+    ) -> Bool {
+        if let colon = head.firstIndex(of: ":"), registeredJobIDs.contains(String(head[..<colon])) {
+            return head == "\(action.jobID):\(action.id)"
+        }
+        return head == action.id
     }
 
     public static func validID(_ value: String) -> Bool {
