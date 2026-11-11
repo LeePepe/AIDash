@@ -10,8 +10,10 @@ SELECT
 FROM fact_issue
 WHERE status IN ('blocked', 'in_review', 'todo', 'in_progress')
 ORDER BY
+    CASE WHEN workspace_id LIKE 'linear:%' THEN 0 ELSE 1 END,
     CASE status WHEN 'blocked' THEN 0 WHEN 'in_progress' THEN 1
                 WHEN 'in_review' THEN 2 ELSE 3 END,
     CASE COALESCE(NULLIF(priority,'none'),'medium')
          WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+    COALESCE(updated_at, '') DESC,
     identifier;

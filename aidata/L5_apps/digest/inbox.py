@@ -408,3 +408,211 @@ def build_inbox(
     kept.sort(key=lambda it: (_PRIO_RANK.get(it.priority, 1),
                               bucket_order.get(it.bucket, 9)))
     return kept[:_MAX_ITEMS]
+
+
+_ACTION_ID_INVALID_RE = re.compile(r"[\x00-\x1f\x7f|]+")
+_JOBS_SUBPATH = Path("Library") / "Application Support" / "AIDash" / "jobs"
+_DEFAULT_REGISTERED_JOB_IDS = ("my-pr-supervisor", "pr-auto-review", "aidata-digest")
+
+
+def _safe_action_id(raw: str, index: int) -> str:
+    cleaned = _ACTION_ID_INVALID_RE.sub("-", str(raw or "").strip())
+    cleaned = re.sub(r"\s+", "-", cleaned)[:120]
+    return cleaned or f"inbox-item-{index}"
+
+
+def _controls_for_inbox_item(item: InboxItem) -> list[dict[str, object]]:
+    ref = (item.ref or "").strip()
+    if ref.lower().startswith(("linear://", "local://")) or _TIA_ISSUE_REF.fullmatch(ref):
+        return [
+            {
+                "id": "decision",
+                "kind": "singleSelect",
+                "title": "状态操作",
+                "options": ["Done", "Unblock & Comment"],
+            },
+            {
+                "id": "note",
+                "kind": "textInput",
+                "title": "备注说明",
+                "options": [],
+                "maxLength": 80,
+            },
+        ]
+    if ref.startswith("knowledge://"):
+        return [
+            {
+                "id": "decision",
+                "kind": "singleSelect",
+                "title": "决策操作",
+                "options": ["Publish Knowledge Blog", "Promote to Linear TIA", "Done"],
+            },
+            {
+                "id": "note",
+                "kind": "textInput",
+                "title": "备注说明",
+                "options": [],
+                "maxLength": 80,
+            },
+        ]
+    if ref.startswith("proposal://") or item.category in {"decision", "work_watch"}:
+        return [
+            {
+                "id": "decision",
+                "kind": "singleSelect",
+                "title": "决策操作",
+                "options": ["Promote to Linear TIA", "Done"],
+            },
+            {
+                "id": "note",
+                "kind": "textInput",
+                "title": "备注说明",
+                "options": [],
+                "maxLength": 80,
+            },
+        ]
+    return [
+        {
+            "id": "decision",
+            "kind": "singleSelect",
+            "title": "处理操作",
+            "options": ["Done", "Promote to Linear TIA"],
+        },
+        {
+            "id": "note",
+            "kind": "textInput",
+            "title": "备注说明",
+            "options": [],
+            "maxLength": 80,
+        },
+    ]
+
+
+def build_job_actions(
+    items: list[InboxItem] | None = None,
+    *,
+    job_id: str = "aidata-digest",
+    created_at: str | None = None,
+    proposals_path: Path | None = None,
+) -> list[dict[str, object]]:
+    """Map unified InboxItems (Linear TIA + proposals + mail/teams + stalls) to JobActionsAction v1."""
+    source_items = items if items is not None else build_inbox()
+    stamp = created_at or (
+        datetime.now(timezone.utc)  # noqa: UP017
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+    pending_by_id: dict[str, Proposal] = {}
+    try:
+        for prop in read_pending(proposals_path):
+            pending_by_id[prop.id] = prop
+            if prop.ref:
+                pending_by_id[prop.ref] = prop
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+    actions: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(source_items, start=1):
+        ref = (item.ref or "").strip()
+        if ref.lower().startswith("linear://"):
+            issue_ident = ref.split("://", 1)[1].upper()
+            raw_id = f"linear-{issue_ident}"
+        elif _TIA_ISSUE_REF.fullmatch(ref):
+            issue_ident = ref.upper()
+            raw_id = f"linear-{issue_ident}"
+            ref = f"linear://{issue_ident}"
+        elif ref.lower().startswith("local://"):
+            local_ident = ref.split("://", 1)[1].upper()
+            raw_id = f"local-{local_ident}"
+        elif ref.startswith("proposal://"):
+            prop_id = ref.removeprefix("proposal://")
+            raw_id = f"proposal-{prop_id}"
+        elif ref.startswith("knowledge://"):
+            slug = ref.removeprefix("knowledge://").strip("/")
+            raw_id = f"knowledge-{slug}"
+        elif item.category == "work_watch" and ref:
+            raw_id = f"work-watch-{ref}"
+        elif ref:
+            raw_id = f"item-{ref}"
+        else:
+            raw_id = f"signal-{index}"
+
+        action_id = _safe_action_id(raw_id, index)
+        if action_id in seen_ids:
+            action_id = _safe_action_id(f"{action_id}-{index}", index)
+        seen_ids.add(action_id)
+
+        title = str(item.title or action_id).strip()[:512] or action_id
+        desc_lines = [
+            f"- **来源分类**: `{item.bucket}` (`{item.category or 'inbox'}`)",
+            f"- **优先级**: `{item.priority}`",
+        ]
+        if ref:
+            desc_lines.append(f"- **关联引用 (ref)**: `{ref}`")
+        if item.waiting_on:
+            desc_lines.append(f"- **等待方**: {item.waiting_on}")
+        if item.age_text:
+            desc_lines.append(f"- **持续时长**: {item.age_text}")
+
+        prop_key = ref.removeprefix("proposal://") if ref.startswith("proposal://") else ref
+        matched_prop = pending_by_id.get(prop_key)
+        if matched_prop and matched_prop.detail:
+            desc_lines.append(f"\n{matched_prop.detail.strip()}")
+
+        description_md = "\n".join(desc_lines)[:16384]
+        actions.append(
+            {
+                "id": action_id,
+                "jobID": job_id,
+                "createdAt": stamp,
+                "title": title,
+                "descriptionMd": description_md,
+                "controls": _controls_for_inbox_item(item),
+            }
+        )
+        if len(actions) >= 64:
+            break
+    return actions
+
+
+def export_job_actions(
+    items: list[InboxItem] | None = None,
+    *,
+    jobs_root: Path | None = None,
+    job_id: str = "aidata-digest",
+    created_at: str | None = None,
+    proposals_path: Path | None = None,
+) -> Path | None:
+    """Atomically write unified actions.jsonl for AIDash job-actions snapshot."""
+    import json
+
+    root = jobs_root or (Path.home() / _JOBS_SUBPATH)
+    try:
+        for registered in _DEFAULT_REGISTERED_JOB_IDS:
+            job_dir = root / registered
+            job_dir.mkdir(parents=True, exist_ok=True)
+            actions_file = job_dir / "actions.jsonl"
+            if registered != job_id and not actions_file.exists():
+                actions_file.write_text("", encoding="utf-8")
+
+        actions = build_job_actions(
+            items,
+            job_id=job_id,
+            created_at=created_at,
+            proposals_path=proposals_path,
+        )
+        target_dir = root / job_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / "actions.jsonl"
+        payload = "".join(
+            json.dumps(action, ensure_ascii=False, separators=(",", ":")) + "\n"
+            for action in actions
+        )
+        tmp_path = target_dir / ".actions.jsonl.tmp"
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.replace(target_path)
+        return target_path
+    except OSError:
+        return None
+

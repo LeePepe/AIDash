@@ -144,7 +144,7 @@ def _build_action_inbox(cost_improvement) -> list:
         from L5_apps.digest.inbox import build_inbox
         waste = getattr(cost_improvement, "downgrade_usd", None)
         return build_inbox(downgrade_usd=waste)
-    except Exception:  # degrade: an inbox failure must not break the digest
+    except Exception:  # noqa: BLE001 - degrade: an inbox failure must not break the digest
         return []
 
 
@@ -219,12 +219,15 @@ def _push_to_aidash(md: str, report_date: str,
         resolve_aidash_bin,
         save_delivery_state,
     )
+    from L5_apps.digest.inbox import export_job_actions
+
     delivery = load_delivery_state()
     briefing = build_briefing(report_date, sources, md, must_see_layer(md),
                               delivery=delivery)
     result = push_briefing(briefing, bin_path=resolve_aidash_bin(),
                            failure_sink=failure_sink)
     export_widget_briefing_snapshot(briefing, sources)
+    export_job_actions(getattr(sources, "action_inbox", None))
     try:
         save_delivery_state(result)
     except Exception:  # noqa: BLE001 - state persistence is non-fatal

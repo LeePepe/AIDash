@@ -1,6 +1,139 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "job_actions.review.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Review action item" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "确认待处理事项" } }
+      }
+    },
+    "job_actions.review.source": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "From DeepSeek Harness" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "来自 DeepSeek Harness" } }
+      }
+    },
+    "job_actions.review.empty_value": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No value selected or entered" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "未选择或填写内容" } }
+      }
+    },
+    "job_actions.review.notice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Only your response is recorded. This does not execute, merge or start any task." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "只记录你的回复，不会直接执行、合并或启动任务。" } }
+      }
+    },
+    "job_actions.review.pending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Awaiting your confirmation. No receipt has been written." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "等待你的确认；尚未写入回执。" } }
+      }
+    },
+    "job_actions.review.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Cancel" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "取消" } }
+      }
+    },
+    "job_actions.review.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Close" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "关闭" } }
+      }
+    },
+    "job_actions.review.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Confirm and record receipt" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "确认并记录回执" } }
+      }
+    },
+    "job_actions.review.recording": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Recording receipt…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在记录回执…" } }
+      }
+    },
+    "job_actions.review.recorded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Receipt recorded. This does not mean the original task has run." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "回执已记录；不代表原任务已执行完成。" } }
+      }
+    },
+    "job_actions.review.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Cancelled. No receipt was written." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已取消；未写入回执。" } }
+      }
+    },
+    "job_actions.error.unknown-action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This action is no longer available. Refresh Action Items." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此事项已不可用，请刷新待处理事项。" } }
+      }
+    },
+    "job_actions.error.stale-action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This action changed or the review expired. Refresh and review it again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "事项已更新或确认窗口已过期，请刷新后重新确认。" } }
+      }
+    },
+    "job_actions.error.invalid-response": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The proposed responses do not match this action." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "所提议的回复与此事项的控件不匹配。" } }
+      }
+    },
+    "job_actions.error.invalid-request": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The action request is invalid. Refresh and try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "事项请求无效，请刷新后重试。" } }
+      }
+    },
+    "job_actions.error.request-conflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This request ID belongs to a different proposal." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此请求标识已用于另一份回复提议。" } }
+      }
+    },
+    "job_actions.error.native-ui-unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "AIDash cannot open native review right now." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AIDash 暂时无法打开原生确认窗口。" } }
+      }
+    },
+    "job_actions.error.persistence-failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The receipt could not be saved. Your proposed responses are retained. Try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "回执保存失败。回复已保留，请重试。" } }
+      }
+    },
+    "job_actions.error.bridge-unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "AIDash cannot verify the current action or receipts. Refresh and try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "AIDash 无法核实当前事项或回执，请刷新后重试。" } }
+      }
+    },
     "briefing.scene.error.status": {
       "comment": "Status shown when the BriefingWindowScene cannot initialize its CloudKit store.",
       "extractionState": "manual",
