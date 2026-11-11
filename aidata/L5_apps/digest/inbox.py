@@ -286,9 +286,9 @@ def _retro_signals() -> list[InboxItem]:
             unp_i = cols.index("unpracticed_rate")
             r1_i = cols.index("r1_pass_rate")
             top_row = rows[0]
-            roi_val = float(top_row[roi_i] or 1.0)
-            unp_val = float(top_row[unp_i] or 0.0)
-            r1_val = float(top_row[r1_i] or 1.0)
+            roi_val = float(top_row[roi_i]) if top_row[roi_i] is not None else 1.0
+            unp_val = float(top_row[unp_i]) if top_row[unp_i] is not None else 0.0
+            r1_val = float(top_row[r1_i]) if top_row[r1_i] is not None else 1.0
             if roi_val < 0.8 or unp_val >= 0.5:
                 sk_name = str(top_row[sk_i])
                 out.append(InboxItem(
@@ -308,10 +308,10 @@ def _retro_signals() -> list[InboxItem]:
                 bloated = int(row[b_i] or 0)
                 if bloated > 0:
                     t_name = str(row[t_i])
-                    p95_k = float(row[p_i] or 0) / 1000.0
+                    p95_k = float(row[p_i] if row[p_i] is not None else 0.0) / 1000.0
                     d_skill = str(row[sk_i] or "team-lead")
                     out.append(InboxItem(
-                        f"发现：{t_name} ({d_skill}) 产出 {bloated} 次 >10k tok 膨胀输出（P95 {p95_k:.1f}k）",
+                        f"发现：{t_name} ({d_skill}) 估算 {bloated} 次 >10k tok 膨胀上下文（P95 估算 {p95_k:.1f}k）",
                         "medium", "发现", f"skill-roi://{d_skill}", "discovery", "Owner"))
                     break
     except Exception:  # noqa: BLE001, S110 - one retro source must not block others

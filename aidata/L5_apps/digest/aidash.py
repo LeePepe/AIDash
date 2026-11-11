@@ -1580,10 +1580,10 @@ def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
             {
                 "label": (
                     f"{tb.tool_name} ({tb.dominant_skill}) · "
-                    f"P95 {tb.p95_tokens / 1000.0:.1f}k · >10k {tb.bloated_call_count}次"
+                    f"P95 估算 {tb.p95_tokens / 1000.0:.1f}k · >10k {tb.bloated_call_count}次"
                 ),
                 "value": float(tb.total_tokens),
-                "valueText": f"{tb.share_pct:.1f}% ({tb.total_tokens // 1000}k tok)",
+                "valueText": f"{tb.share_pct:.1f}% ({tb.total_tokens // 1000}k tok 估算)",
                 **({"semantic": "warning"} if tb.bloated_call_count > 0 else {}),
             }
             for tb in tool_burns[:6]
@@ -1596,7 +1596,7 @@ def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
                     "barList",
                     "wide",
                     {
-                        "title": "最烧上下文的 Tool 排行与 >10k 膨胀告警 (S12)",
+                        "title": "最烧上下文的 Tool 排行与 >10k 膨胀估算告警 (S12)",
                         "items": s12_items,
                     },
                 )

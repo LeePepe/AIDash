@@ -549,3 +549,40 @@ def test_event_bridge_skill_roi_star_and_done_and_sql_query(tmp_path):
     assert rows12
     assert rows12[0]["tool_name"] == "read/view"
     assert rows12[0]["bloated_call_count"] >= 1
+
+    # Verify fetch_skill_roi_trends and fetch_product_growth_trends preserve exact 0.0 rates
+    def fake_rows(name, params=None):
+        cols = [
+            "skill", "loads_7d", "loads_30d", "session_count", "script_exec_count",
+            "script_touch_rate", "unpracticed_rate", "l0_only_sessions", "l1_selective_sessions",
+            "l1_greedy_sessions", "avg_context_tokens", "r1_total", "r1_pass", "r1_pass_rate",
+            "rework_rounds", "impl_bug_count", "spec_gap_count", "roi_score",
+        ]
+        if name == "retro/skill_roi_diagnostics":
+            return (
+                [("my-designer", 1, 2, 1, 0, 0.0, 1.0, 0, 0, 1, 9000, 1, 0, 0.0, 1, 1, 0, 0.0)],
+                {c: i for i, c in enumerate(cols)},
+            )
+        if name == "retro/app_crash_and_perf":
+            app_cols = [
+                "app_name", "crash_free_rate_7d", "new_crash_signature_count", "signature",
+                "p95_metric_ms_7d", "p95_metric_ms_prev_7d", "p95_regression_pct", "is_perf_regressed",
+            ]
+            return (
+                [("VitalStride", 0.0, 2, "SIGABRT", 120.0, 100.0, 20.0, 0)],
+                {c: i for i, c in enumerate(app_cols)},
+            )
+        return ([], {})
+
+    orig_rows = sources._rows
+    sources._rows = fake_rows
+    try:
+        sr_zero = sources.fetch_skill_roi_trends(dev_root=tmp_path)
+        assert sr_zero.skills[0].r1_pass_rate == 0.0
+        assert sr_zero.skills[0].script_touch_rate == 0.0
+        assert sr_zero.skills[0].roi_score == 0.0
+
+        pg_zero = sources.fetch_product_growth_trends(dev_root=tmp_path)
+        assert pg_zero.apps[0].crash_free_rate_7d == 0.0
+    finally:
+        sources._rows = orig_rows

@@ -6,8 +6,9 @@ WITH anchor AS (
         date('now', '+8 hours')
     ) AS max_day
 ),
-turn_skills AS (
+turn_skills_raw AS (
     SELECT
+        turn_uuid,
         session_id,
         cst_day,
         CASE
@@ -28,8 +29,9 @@ turn_skills AS (
         ) / 6 AS read_calls
     FROM fact_turn
     WHERE attribution_skill IS NOT NULL AND attribution_skill != ''
-    UNION ALL
+    UNION
     SELECT
+        t.turn_uuid,
         t.session_id,
         t.cst_day,
         CASE
@@ -55,21 +57,20 @@ session_skill_rollup AS (
     SELECT
         ts.skill,
         ts.session_id,
-        MAX(CASE WHEN ts.cst_day > date(anchor.max_day, '-7 days') THEN 1 ELSE 0 END) AS in_7d,
-        MAX(CASE WHEN ts.cst_day > date(anchor.max_day, '-30 days') THEN 1 ELSE 0 END) AS in_30d,
-        COUNT(*) AS turn_loads,
+        SUM(CASE WHEN ts.cst_day > date(anchor.max_day, '-7 days') THEN 1 ELSE 0 END) AS turn_loads_7d,
+        SUM(CASE WHEN ts.cst_day > date(anchor.max_day, '-30 days') THEN 1 ELSE 0 END) AS turn_loads_30d,
         SUM(ts.tokens) AS session_tokens,
         MAX(ts.has_script_exec) AS session_script_exec,
         SUM(ts.read_calls) AS session_read_calls
-    FROM turn_skills AS ts, anchor
+    FROM turn_skills_raw AS ts, anchor
     WHERE ts.skill IS NOT NULL AND ts.skill != ''
     GROUP BY ts.skill, ts.session_id
 ),
 usage_agg AS (
     SELECT
         skill,
-        SUM(CASE WHEN in_7d = 1 THEN turn_loads ELSE 0 END) AS loads_7d,
-        SUM(CASE WHEN in_30d = 1 THEN turn_loads ELSE 0 END) AS loads_30d,
+        SUM(turn_loads_7d) AS loads_7d,
+        SUM(turn_loads_30d) AS loads_30d,
         COUNT(DISTINCT session_id) AS session_count,
         SUM(session_script_exec) AS script_exec_sessions,
         SUM(CASE WHEN session_read_calls <= 1 THEN 1 ELSE 0 END) AS l0_only_sessions,

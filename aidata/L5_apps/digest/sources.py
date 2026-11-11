@@ -1863,10 +1863,11 @@ def fetch_product_growth_trends(dev_root: Path | None = None) -> ProductGrowthTr
     try:
         rows, idx = _rows("retro/app_crash_and_perf")
         for r in rows:
+            raw_cf = r[idx["crash_free_rate_7d"]]
             apps.append(
                 AppTelemetrySummary(
                     app_name=str(r[idx["app_name"]] or ""),
-                    crash_free_rate_7d=float(r[idx["crash_free_rate_7d"]] or 1.0),
+                    crash_free_rate_7d=float(raw_cf) if raw_cf is not None else 1.0,
                     new_crash_count=int(r[idx["new_crash_signature_count"]] or 0),
                     top_signature=str(r[idx["signature"]] or ""),
                     p95_ms_7d=(
@@ -1877,7 +1878,10 @@ def fetch_product_growth_trends(dev_root: Path | None = None) -> ProductGrowthTr
                         float(r[idx["p95_metric_ms_prev_7d"]])
                         if r[idx["p95_metric_ms_prev_7d"]] is not None else None
                     ),
-                    p95_regression_pct=float(r[idx["p95_regression_pct"]] or 0.0),
+                    p95_regression_pct=(
+                        float(r[idx["p95_regression_pct"]])
+                        if r[idx["p95_regression_pct"]] is not None else 0.0
+                    ),
                     is_perf_regressed=bool(int(r[idx["is_perf_regressed"]] or 0)),
                 )
             )
@@ -2043,23 +2047,28 @@ def fetch_skill_roi_trends(dev_root: Path | None = None) -> SkillRoiTrends:
     try:
         rows, idx = _rows("retro/skill_roi_diagnostics")
         for r in rows:
+            raw_r1 = r[idx["r1_pass_rate"]]
+            raw_touch = r[idx["script_touch_rate"]]
+            raw_unp = r[idx["unpracticed_rate"]]
+            raw_tok = r[idx["avg_context_tokens"]]
+            raw_roi = r[idx["roi_score"]]
             skill_rows.append(
                 SkillRoiRow(
                     skill=str(r[idx["skill"]] or ""),
                     loads_7d=int(r[idx["loads_7d"]] or 0),
                     loads_30d=int(r[idx["loads_30d"]] or 0),
-                    r1_pass_rate=float(r[idx["r1_pass_rate"]] or 1.0),
+                    r1_pass_rate=float(raw_r1) if raw_r1 is not None else 1.0,
                     script_exec_count=int(r[idx["script_exec_count"]] or 0),
-                    script_touch_rate=float(r[idx["script_touch_rate"]] or 1.0),
-                    unpracticed_rate=float(r[idx["unpracticed_rate"]] or 0.0),
+                    script_touch_rate=float(raw_touch) if raw_touch is not None else 1.0,
+                    unpracticed_rate=float(raw_unp) if raw_unp is not None else 0.0,
                     l0_only_sessions=int(r[idx["l0_only_sessions"]] or 0),
                     l1_selective_sessions=int(r[idx["l1_selective_sessions"]] or 0),
                     l1_greedy_sessions=int(r[idx["l1_greedy_sessions"]] or 0),
-                    avg_context_tokens=int(r[idx["avg_context_tokens"]] or 1200),
+                    avg_context_tokens=int(raw_tok) if raw_tok is not None else 1200,
                     rework_rounds=int(r[idx["rework_rounds"]] or 0),
                     impl_bug_count=int(r[idx["impl_bug_count"]] or 0),
                     spec_gap_count=int(r[idx["spec_gap_count"]] or 0),
-                    roi_score=float(r[idx["roi_score"]] or 1.0),
+                    roi_score=float(raw_roi) if raw_roi is not None else 1.0,
                 )
             )
     except Exception:  # noqa: BLE001
