@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import os
 import re
-import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ from pathlib import Path
 
 import serve
 from config import clean_path
+from sqlite_ro import query_ro
 
 from L5_apps.digest.proposals import Proposal, read_pending
 from L5_apps.digest.todo_sync_provider import (
@@ -293,15 +293,22 @@ def _mail_and_work_watch_signals(
     teams_db = teams_db_path or clean_path("work_teams_bridge")
     if teams_db.exists():
         try:
-            with sqlite3.connect(teams_db) as conn:
-                rows = conn.execute(
-                    "SELECT dedup_key, channel_kind, sender_alias, title_preview, summary_preview, "
-                    "has_mention, priority FROM work_teams_item "
-                    "WHERE COALESCE(replied, 0) = 0 AND (COALESCE(has_mention, 0) = 1 OR COALESCE(needs_reply, 0) = 1) "
-                    "ORDER BY cursor DESC LIMIT ?",
-                    (cap,),
-                ).fetchall()
-            for dedup_key, channel_kind, sender_alias, title_prev, summary_prev, has_mention, prio in rows:
+            rows = query_ro(
+                teams_db,
+                "SELECT dedup_key, channel_kind, sender_alias, title_preview, summary_preview, "
+                "has_mention, priority FROM work_teams_item "
+                "WHERE COALESCE(replied, 0) = 0 AND (COALESCE(has_mention, 0) = 1 OR COALESCE(needs_reply, 0) = 1) "
+                "ORDER BY cursor DESC LIMIT ?",
+                (cap,),
+            )
+            for row in rows:
+                dedup_key = row.get("dedup_key")
+                channel_kind = row.get("channel_kind")
+                sender_alias = row.get("sender_alias")
+                title_prev = row.get("title_preview")
+                summary_prev = row.get("summary_preview")
+                has_mention = row.get("has_mention")
+                prio = row.get("priority")
                 headline = str(title_prev or summary_prev or "Teams 待处理消息").strip()[:48]
                 sender_label = str(sender_alias or "colleague").strip()[:24]
                 tag = "ADO 提醒" if str(channel_kind) == "ado_reminder" else ("Teams @我" if has_mention else "Teams 待回")
@@ -323,15 +330,21 @@ def _mail_and_work_watch_signals(
     if mail_db.exists() and len(out) < cap:
         try:
             rem = max(1, cap - len(out))
-            with sqlite3.connect(mail_db) as conn:
-                rows = conn.execute(
-                    "SELECT dedup_key, sender_domain, subject_preview, snippet_preview, "
-                    "has_mention, priority FROM mail_inbox_item "
-                    "WHERE COALESCE(replied, 0) = 0 AND (COALESCE(is_todo, 0) = 1 OR COALESCE(has_mention, 0) = 1) "
-                    "ORDER BY cursor DESC LIMIT ?",
-                    (rem,),
-                ).fetchall()
-            for dedup_key, sender_dom, subject_prev, snippet_prev, has_mention, prio in rows:
+            rows = query_ro(
+                mail_db,
+                "SELECT dedup_key, sender_domain, subject_preview, snippet_preview, "
+                "has_mention, priority FROM mail_inbox_item "
+                "WHERE COALESCE(replied, 0) = 0 AND (COALESCE(is_todo, 0) = 1 OR COALESCE(has_mention, 0) = 1) "
+                "ORDER BY cursor DESC LIMIT ?",
+                (rem,),
+            )
+            for row in rows:
+                dedup_key = row.get("dedup_key")
+                sender_dom = row.get("sender_domain")
+                subject_prev = row.get("subject_preview")
+                snippet_prev = row.get("snippet_preview")
+                has_mention = row.get("has_mention")
+                prio = row.get("priority")
                 headline = str(subject_prev or snippet_prev or "邮件待办").strip()[:48]
                 dom = str(sender_dom or "mail").strip()[:24]
                 tag = "邮件 @我" if has_mention else "邮件待办"

@@ -48,7 +48,7 @@ def test_export_work_teams_digest_script_redacts_and_writes_jsonl(tmp_path: Path
                     "channel_kind": "teams_mention",
                     "sender": "lead.user@corp.example.com",
                     "title": "@tianpei Check deployment",
-                    "summary": "token=abcdefghijkl1234567890",
+                    "summary": "Use sk-1234567890abcdefghijklmnop and ghp_1234567890abcdefghijkl and token=abcdefghijkl1234567890",
                 }
             ]
         ),
@@ -77,5 +77,7 @@ def test_export_work_teams_digest_script_redacts_and_writes_jsonl(tmp_path: Path
     assert record["item_id"] == "msg-501"
     assert record["dedup_key"] == "teams:msg-501"
     assert "<REDACTED>@corp.example.com" in record["sender_alias"]
+    assert "sk-1234567890" not in record["summary"]
+    assert "ghp_1234567890" not in record["summary"]
     assert "abcdefghijkl1234567890" not in record["summary"]
 

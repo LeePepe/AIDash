@@ -106,6 +106,26 @@ def test_mail_inbox_pull_cursor_redaction_and_reply_idempotency(
     assert rows_by_id["msg-001"]["replied"] == 1
     assert rows_by_id["msg-002"]["replied"] == 0
 
+    # Out-of-order / late-arriving older shard record (timestamp < current cursor) is still ingested once
+    late_shard = drop_dir / "2026-11-10-late.jsonl"
+    late_shard.write_text(
+        json.dumps(
+            {
+                "id": "m0",
+                "message_id": "msg-000",
+                "received_at": "2026-11-11T00:30:00Z",
+                "sender": "late@corp.example.com",
+                "subject": "Urgent: delayed sync message @tianpei",
+                "snippet": "Needs review",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert mail_inbox.collect() == 1
+    assert any(r["item_id"] == "msg-000" for r in raw_store)
+    assert mail_inbox.collect() == 0
+
 
 @pytest.mark.unit
 def test_work_teams_bridge_cursor_and_reply_idempotency(
@@ -189,3 +209,27 @@ def test_work_teams_bridge_cursor_and_reply_idempotency(
     rows_by_id = {row["item_id"]: row for row in captured_clean["work_teams_item"]}
     assert rows_by_id["wt-101"]["replied"] == 1
     assert rows_by_id["wt-102"]["replied"] == 0
+
+    # Late-arriving older shard record (created_at < current cursor) is still ingested once
+    late_shard = drop_dir / "work-teams-2026-11-10-late.jsonl"
+    late_shard.write_text(
+        json.dumps(
+            {
+                "item_id": "wt-100",
+                "created_at": "2026-11-11T01:00:00Z",
+                "channel_kind": "teams_reply",
+                "thread_ref": "teams://thread/100",
+                "sender_alias": "late_colleague",
+                "title": "Delayed sync thread",
+                "summary": "Waiting on reply",
+                "has_mention": False,
+                "needs_reply": True,
+                "priority": "high",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert work_teams_bridge.collect() == 1
+    assert any(r["item_id"] == "wt-100" for r in raw_store)
+    assert work_teams_bridge.collect() == 0

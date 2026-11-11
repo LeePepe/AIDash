@@ -19,6 +19,13 @@ from pathlib import Path
 from typing import Any
 
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\brvn_[A-Za-z0-9]{8,}"),
+    re.compile(r"\bmul_[A-Za-z0-9]{8,}"),
+    re.compile(r"\bsk-[A-Za-z0-9\-_]{16,}"),
+    re.compile(r"\bghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"x-access-token:[^@\s/]+@"),
+    re.compile(r"https://[^:@\s/]+:[^@\s/]+@github\.com"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{16,}=*"),
     re.compile(
         r'(?i)\b(token|password|passwd|secret|api[_-]?key|access[_-]?token)'

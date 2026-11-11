@@ -107,17 +107,28 @@ def _load_source_state() -> dict[str, Any]:
     if isinstance(raw, dict):
         cursor = str(raw.get("cursor") or "")
         keys = [str(k) for k in (raw.get("replied_keys") or []) if str(k).strip()]
-        return {"cursor": cursor, "replied_keys": keys[-_REPLIED_LIMIT:]}
+        seen = [str(k) for k in (raw.get("ingested_keys") or []) if str(k).strip()]
+        return {
+            "cursor": cursor,
+            "replied_keys": keys[-_REPLIED_LIMIT:],
+            "ingested_keys": seen[-_REPLIED_LIMIT:],
+        }
     if isinstance(raw, str) and raw.strip():
-        return {"cursor": raw.strip(), "replied_keys": []}
-    return {"cursor": "", "replied_keys": []}
+        return {"cursor": raw.strip(), "replied_keys": [], "ingested_keys": []}
+    return {"cursor": "", "replied_keys": [], "ingested_keys": []}
 
 
-def _save_source_state(cursor: str, replied_keys: Sequence[str]) -> dict[str, Any]:
-    deduped = list(dict.fromkeys(str(k) for k in replied_keys if str(k).strip()))
+def _save_source_state(
+    cursor: str,
+    replied_keys: Sequence[str],
+    ingested_keys: Sequence[str] = (),
+) -> dict[str, Any]:
+    deduped_replied = list(dict.fromkeys(str(k) for k in replied_keys if str(k).strip()))
+    deduped_ingested = list(dict.fromkeys(str(k) for k in ingested_keys if str(k).strip()))
     state_obj = {
         "cursor": str(cursor or ""),
-        "replied_keys": deduped[-_REPLIED_LIMIT:],
+        "replied_keys": deduped_replied[-_REPLIED_LIMIT:],
+        "ingested_keys": deduped_ingested[-_REPLIED_LIMIT:],
     }
     set_watermark(SOURCE, state_obj)
     return state_obj
@@ -251,8 +262,11 @@ def pull(
 ) -> dict[str, Any]:
     """Pull mail summary items strictly after `after` cursor (or persisted cursor)."""
     state = _load_source_state()
-    effective_after = state["cursor"] if after is None else str(after)
+    explicit_after = after is not None
+    effective_after = str(after) if explicit_after else state["cursor"]
     replied_set = set(state["replied_keys"])
+    ingested_list = list(state["ingested_keys"])
+    ingested_set = set(ingested_list)
 
     target_dir = drop_dir if drop_dir is not None else MAIL_INBOX_DROP_DIR
     candidates = _read_drop_records(target_dir) + _read_jxa_records(jxa_runner)
@@ -291,9 +305,16 @@ def pull(
     selected: list[dict[str, Any]] = []
     next_cursor = effective_after
     for cur, item in enriched:
-        if effective_after and cur <= effective_after:
-            continue
         key = str(item["dedup_key"])
+        if explicit_after:
+            if effective_after and cur <= effective_after:
+                continue
+        elif key in ingested_set:
+            next_cursor = max(next_cursor, cur)
+            continue
+        elif effective_after and cur <= effective_after and not ingested_set:
+            # Legacy string-cursor state without ingested_keys: honor watermark cutoff
+            continue
         if key in seen_keys or key in replied_set:
             next_cursor = max(next_cursor, cur)
             continue
@@ -301,8 +322,12 @@ def pull(
         selected.append(item)
         next_cursor = max(next_cursor, cur)
 
-    if commit_cursor and next_cursor != state["cursor"]:
-        _save_source_state(next_cursor, state["replied_keys"])
+    if commit_cursor and (next_cursor != state["cursor"] or selected):
+        _save_source_state(
+            next_cursor,
+            state["replied_keys"],
+            [*ingested_list, *(str(it["dedup_key"]) for it in selected)],
+        )
 
     return {
         "ok": True,
@@ -323,7 +348,7 @@ def reply(*, key: str, note: str = "") -> dict[str, Any]:
     already_replied = cleaned_key in replied_keys
     if not already_replied:
         replied_keys.append(cleaned_key)
-        _save_source_state(state["cursor"], replied_keys)
+        _save_source_state(state["cursor"], replied_keys, state["ingested_keys"])
     return {
         "ok": True,
         "source": SOURCE,
@@ -348,10 +373,14 @@ def collect(
     next_cursor = str(batch.get("next_cursor") or state["cursor"])
     if not items:
         if next_cursor != state["cursor"]:
-            _save_source_state(next_cursor, state["replied_keys"])
+            _save_source_state(next_cursor, state["replied_keys"], state["ingested_keys"])
         return 0
     written = write_raw(SOURCE, items)
-    _save_source_state(next_cursor, state["replied_keys"])
+    _save_source_state(
+        next_cursor,
+        state["replied_keys"],
+        [*state["ingested_keys"], *(str(it["dedup_key"]) for it in items)],
+    )
     return written
 
 
