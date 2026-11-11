@@ -211,9 +211,16 @@ struct JobActionsAppBridgeTests {
 
     @Test("Registered source parsing preserves fractional createdAt and limits, rejects partial controls and duplicate IDs")
     func sourceValidation() throws {
-        let source = Data(#"{"id":"sample","jobID":"my-pr-supervisor","createdAt":"2026-11-11T08:00:00.123Z","title":"Synthetic","descriptionMd":"Text","controls":[{"id":"note","kind":"textInput","title":"Note","maxLength":120}]}"#.utf8)
+        let source = Data(#"{"id":"sample","jobID":"my-pr-supervisor","createdAt":"2026-11-11T08:00:00.123Z","title":"Synthetic","description":"Text","status":"triage","source":"Linear","priority":"P0","ref":"linear://TIA-76","url":"https://linear.app/tianpeili/issue/TIA-76","controls":[{"id":"note","kind":"textInput","title":"Note","maxLength":120}]}"#.utf8)
         let parsed = try #require(JobActionsSources.decode(source, jobID: "my-pr-supervisor").first)
         #expect(parsed.createdAt != nil)
+        #expect(parsed.description == "Text")
+        #expect(parsed.descriptionMd == "Text")
+        #expect(parsed.status == "triage")
+        #expect(parsed.source == "Linear")
+        #expect(parsed.priority == "P0")
+        #expect(parsed.ref == "linear://TIA-76")
+        #expect(parsed.url == "https://linear.app/tianpeili/issue/TIA-76")
         #expect(parsed.controls[0].maxLength == 120)
         #expect(parsed.controls[0].effectiveMaxLength == 80)
         #expect(throws: (any Error).self) { try JobActionsSources.decode(source, jobID: "pr-auto-review") }
