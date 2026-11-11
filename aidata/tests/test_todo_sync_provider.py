@@ -703,3 +703,71 @@ def test_cross_device_actionable_item_schema_and_approve_done_dismiss_flows(
         ("TIA-350", "[AIDash Action Items · Approve] Promote to TIA Todo"),
     ]
 
+    # 5) If Approve creates issue but sync_status(Todo) fails, do not consume event;
+    #    retry reuses the created issue ID without creating a duplicate and completes Todo sync.
+    retry_proposals = tmp_path / "retry_proposals.jsonl"
+    retry_proposals.write_text(
+        json.dumps(
+            {
+                "id": "retry-prop-1",
+                "ts": "2026-11-11T00:00:00Z",
+                "agent": "retro-loop",
+                "title": "Retryable proposal",
+                "detail": "Details",
+                "priority": "high",
+                "status": "pending",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    retry_cursor = tmp_path / "retry_cursor.json"
+    retry_ideas: list[tuple[str, str]] = []
+    retry_statuses: list[tuple[str, str]] = []
+    fail_todo = {"should_fail": True}
+
+    def flaky_status(ident: str, state: str) -> int:
+        retry_statuses.append((ident, state))
+        if fail_todo["should_fail"]:
+            return 1
+        return 0
+
+    retry_event = [
+        {
+            "id": "ack-retry-prop",
+            "timestamp": "2026-11-11T16:10:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:proposal-retry-prop-1|"
+                + json.dumps([{"controlID": "decision", "value": "Approve"}])
+            ),
+        }
+    ]
+    res_fail = event_bridge.process_user_events(
+        retry_event,
+        proposals_path=retry_proposals,
+        cursor_path=retry_cursor,
+        linear_runner=lambda title, detail: retry_ideas.append((title, detail)) or (0, "TIA-360"),
+        linear_status_runner=flaky_status,
+    )
+    assert res_fail["promoted"] == 0
+    assert res_fail["errors"] == 1
+    assert len(retry_ideas) == 1
+    assert retry_statuses == [("TIA-360", "Todo")]
+
+    fail_todo["should_fail"] = False
+    res_recover = event_bridge.process_user_events(
+        retry_event,
+        proposals_path=retry_proposals,
+        cursor_path=retry_cursor,
+        linear_runner=lambda title, detail: retry_ideas.append((title, detail)) or (0, "TIA-361"),
+        linear_status_runner=flaky_status,
+    )
+    assert res_recover["promoted"] == 1
+    assert res_recover["errors"] == 0
+    assert len(retry_ideas) == 1
+    assert retry_statuses == [("TIA-360", "Todo"), ("TIA-360", "Todo")]
+
+
