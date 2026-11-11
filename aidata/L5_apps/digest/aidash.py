@@ -1282,6 +1282,362 @@ def _retro_ops_container(mmdd: str, retro_ops, multica=None,
                      layout="auto", style="neutral")
 
 
+def _product_growth_container(mmdd: str, product_growth) -> "Container | None":
+    """产品健康与个人成长 (#5 Crash-Free, #6 P95 PLT, #7 Unshipped, #10 Digest->Blog)."""
+    if (
+        product_growth is None
+        or getattr(product_growth, "health", None) is None
+        or product_growth.health.state != "ok"
+    ):
+        return None
+    cards: list[Card] = []
+    metric_items: list[dict] = []
+    new_crash_lines: list[str] = []
+
+    for app in getattr(product_growth, "apps", ()):
+        ratio = max(0.0, min(1.0, float(app.crash_free_rate_7d)))
+        metric_items.append({
+            "label": f"{app.app_name} Crash-Free",
+            "value": round(ratio * 100.0, 2),
+            "unit": "%",
+            "ratio": ratio,
+            "trend": "down" if app.new_crash_count > 0 else "flat",
+            "higherIsBetter": True,
+            "context": f"新增签名 {app.new_crash_count} 项",
+        })
+        if app.new_crash_count > 0 and app.top_signature:
+            new_crash_lines.append(
+                f"{app.app_name} 新增闪退（{app.new_crash_count}）：{app.top_signature}"
+            )
+        if app.p95_ms_7d is not None:
+            series = (
+                [float(app.p95_prev_ms_7d), float(app.p95_ms_7d)]
+                if app.p95_prev_ms_7d is not None
+                else [float(app.p95_ms_7d)]
+            )
+            metric_items.append({
+                "label": f"{app.app_name} P95 响应",
+                "value": round(float(app.p95_ms_7d), 1),
+                "unit": "ms",
+                "trend": "up" if app.is_perf_regressed else "flat",
+                "series": series,
+                "higherIsBetter": False,
+                "context": f"退化 {app.p95_regression_pct:+.1f}%",
+            })
+
+    if getattr(product_growth, "vault_total_cards", 0) > 0 or getattr(product_growth, "blog_published_posts", 0) > 0:
+        metric_items.append({
+            "label": "知识卡 → 博客产出",
+            "value": float(product_growth.blog_published_posts),
+            "unit": "篇",
+            "trend": "up" if product_growth.vault_weekly_new_cards > 0 else "flat",
+            "higherIsBetter": True,
+            "context": (
+                f"知识库 {product_growth.vault_total_cards} 卡"
+                f"（本周 +{product_growth.vault_weekly_new_cards}）"
+            ),
+        })
+
+    if metric_items:
+        cards.append(
+            Card(_kuid(mmdd, 71), "metric", "wide", {"items": metric_items}, style="accent")
+        )
+
+    unshipped = getattr(product_growth, "unshipped_commits", ())
+    if unshipped:
+        bars = [
+            {
+                "label": f"{app_name} 未发版积压",
+                "value": float(cnt),
+                "valueText": f"{cnt} commits",
+                **({"semantic": "warning"} if cnt >= 10 else {}),
+            }
+            for app_name, cnt in unshipped
+        ]
+        cards.append(
+            Card(
+                _kuid(mmdd, 72),
+                "barList",
+                "wide",
+                {"title": "TestFlight 待发版 Commit 积压 (#7)", "items": bars},
+            )
+        )
+
+    if new_crash_lines:
+        cards.append(
+            Card(
+                _kuid(mmdd, 73),
+                "insight",
+                "wide",
+                {"title": "新增 Crash 签名告警 (#5)", "body": "\n".join(new_crash_lines)},
+                style="warning",
+            )
+        )
+
+    featured_title = getattr(product_growth, "featured_card_title", "")
+    featured_summary = getattr(product_growth, "featured_card_summary", "")
+    featured_slug = getattr(product_growth, "featured_card_slug", "")
+    if featured_title and featured_summary:
+        cards.append(
+            Card(
+                _kuid(mmdd, 74),
+                "insight",
+                "wide",
+                {
+                    "title": f"今日精选知识卡：{featured_title}",
+                    "subtitle": f"knowledge://{featured_slug} · 点 Star 自动转博客发布",
+                    "body": _strip_md(featured_summary),
+                },
+                style="accent",
+            )
+        )
+
+    if not cards:
+        return None
+    return Container(
+        _cuid(mmdd, 18),
+        "产品健康与个人成长",
+        58,
+        tuple(cards),
+        layout="auto",
+        style="accent",
+        subtitle="Crash-Free · P95 退化 · 待发版积压 · 知识内化漏斗",
+    )
+
+
+def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
+    """Skills 与 ROI 诊断 (S1–S4 + S6–S10)."""
+    if (
+        skill_roi is None
+        or getattr(skill_roi, "health", None) is None
+        or skill_roi.health.state != "ok"
+    ):
+        return None
+    cards: list[Card] = []
+
+    # S2 & S3: Gate catch rate + Skill audit pass rate + Eval cases
+    metric_items: list[dict] = []
+    if getattr(skill_roi, "gate_catch_ratio", None) is not None:
+        ratio = max(0.0, min(1.0, float(skill_roi.gate_catch_ratio)))
+        metric_items.append({
+            "label": "Shared-CI 真实拦截率 (S2)",
+            "value": round(ratio * 100.0, 1),
+            "unit": "%",
+            "ratio": ratio,
+            "trend": "flat",
+            "higherIsBetter": True,
+            "context": f"拦截 {skill_roi.gate_true_catches_7d} · 噪音 {skill_roi.gate_noise_7d}",
+        })
+    if getattr(skill_roi, "skill_audit_pass_ratio", None) is not None:
+        ratio = max(0.0, min(1.0, float(skill_roi.skill_audit_pass_ratio)))
+        metric_items.append({
+            "label": "Skill 防爆审计通过率 (S3)",
+            "value": round(ratio * 100.0, 1),
+            "unit": "%",
+            "ratio": ratio,
+            "trend": "flat",
+            "higherIsBetter": True,
+            "context": f"Eval {skill_roi.eval_case_total} (+{skill_roi.eval_case_weekly_delta}/周)",
+        })
+    if getattr(skill_roi, "kv_cache_hit_pct", None) is not None:
+        kv_pct = max(0.0, min(100.0, float(skill_roi.kv_cache_hit_pct)))
+        saved_k = int(getattr(skill_roi, "compressed_saved_tokens", 0) or 0) // 1000
+        metric_items.append({
+            "label": "KV Cache 命中率 (S11)",
+            "value": round(kv_pct, 1),
+            "unit": "%",
+            "ratio": round(kv_pct / 100.0, 4),
+            "trend": "flat",
+            "higherIsBetter": True,
+            "context": f"缓存/裁剪省 {saved_k}k tok",
+        })
+    if metric_items:
+        cards.append(
+            Card(_kuid(mmdd, 81), "metric", "wide", {"items": metric_items}, style="accent")
+        )
+
+    # S1: Downstream pin drift
+    pin_bars = getattr(skill_roi, "pin_drift_bars", ())
+    if pin_bars:
+        cards.append(
+            Card(
+                _kuid(mmdd, 82),
+                "barList",
+                "wide",
+                {
+                    "title": "Shared-Repos 下游版本同步度 (S1)",
+                    "items": [
+                        {
+                            "label": label,
+                            "value": float(commits),
+                            "valueText": f"落后 {commits} commits" if commits > 0 else "已同步",
+                            **({"semantic": "warning"} if commits > 0 else {}),
+                        }
+                        for label, commits, _days in pin_bars
+                    ],
+                },
+            )
+        )
+
+    skills = getattr(skill_roi, "skills", ())
+    if skills:
+        # S4 + S6 + S10: Skill ROI & R1 Pass & Unpracticed script touch
+        roi_items = [
+            {
+                "label": f"{s.skill} · R1 {s.r1_pass_rate * 100:.0f}% · 触达 {s.script_touch_rate * 100:.0f}%",
+                "value": float(s.roi_score),
+                "valueText": f"ROI {s.roi_score:.2f} ({s.loads_30d}次)",
+                **({"semantic": "warning"} if s.roi_score < 0.75 or s.unpracticed_rate >= 0.5 else {}),
+            }
+            for s in skills[:6]
+        ]
+        cards.append(
+            Card(
+                _kuid(mmdd, 83),
+                "barList",
+                "wide",
+                {"title": "Skills 综合 ROI 与脚本触达 (S4/S6/S10)", "items": roi_items},
+            )
+        )
+
+        # S7: Progressive Disclosure Funnel
+        l0_sum = sum(s.l0_only_sessions for s in skills)
+        l1_sel_sum = sum(s.l1_selective_sessions for s in skills)
+        l1_grd_sum = sum(s.l1_greedy_sessions for s in skills)
+        funnel_segs = [
+            {"label": label, "value": float(val), **({"semantic": sem} if sem else {})}
+            for label, val, sem in (
+                ("仅读 L0 解决", l0_sum, "good"),
+                ("按需读 1-2 L1", l1_sel_sum, None),
+                ("全量暴读违规", l1_grd_sum, "warning"),
+            )
+            if val > 0
+        ]
+        if funnel_segs:
+            cards.append(
+                Card(
+                    _kuid(mmdd, 84),
+                    "stackedBar",
+                    "wide",
+                    {"title": "L0→L1→L2 渐进披露漏斗 (S7)", "segments": funnel_segs},
+                )
+            )
+
+        # S8 + S9: Escape attribution ([IMPL_BUG] vs [SPEC_GAP]) & Rework/Churn
+        escape_items = [
+            {
+                "label": f"{s.skill} · IMPL_BUG {s.impl_bug_count} / SPEC_GAP {s.spec_gap_count}",
+                "value": float(s.impl_bug_count + s.spec_gap_count + s.rework_rounds),
+                "valueText": f"返工 {s.rework_rounds} 轮",
+                **({"semantic": "warning"} if (s.impl_bug_count + s.spec_gap_count) > 0 else {}),
+            }
+            for s in skills
+            if (s.impl_bug_count + s.spec_gap_count + s.rework_rounds) > 0
+        ]
+        if escape_items:
+            cards.append(
+                Card(
+                    _kuid(mmdd, 85),
+                    "barList",
+                    "wide",
+                    {"title": "Skill 漏网归因与返工擦写 (S8/S9)", "items": escape_items[:6]},
+                )
+            )
+
+    # S11: Context Composition 5-slice & KV Cache Breakdown
+    ctx_slices = getattr(skill_roi, "context_slices", ())
+    if ctx_slices:
+        s11_segs = [
+            {
+                "label": cs.slice_key,
+                "value": float(cs.share_pct if cs.share_pct > 0 else cs.tokens),
+                **(
+                    {"semantic": "warning"}
+                    if "Tool Results" in cs.slice_key and cs.share_pct >= 35.0
+                    else {}
+                ),
+            }
+            for cs in ctx_slices
+            if (cs.share_pct > 0 or cs.tokens > 0)
+        ]
+        if s11_segs:
+            cards.append(
+                Card(
+                    _kuid(mmdd, 87),
+                    "stackedBar",
+                    "wide",
+                    {
+                        "title": "上下文构成五维切片与缓存演进 (S11)",
+                        "segments": s11_segs,
+                    },
+                )
+            )
+
+    # S12: Top Context-Burning Tools & >10k Bloated Output Alert
+    tool_burns = getattr(skill_roi, "tool_burns", ())
+    if tool_burns:
+        s12_items = [
+            {
+                "label": (
+                    f"{tb.tool_name} ({tb.dominant_skill}) · "
+                    f"P95 估算 {tb.p95_tokens / 1000.0:.1f}k · >10k {tb.bloated_call_count}次"
+                ),
+                "value": float(tb.total_tokens),
+                "valueText": f"{tb.share_pct:.1f}% ({tb.total_tokens // 1000}k tok 估算)",
+                **({"semantic": "warning"} if tb.bloated_call_count > 0 else {}),
+            }
+            for tb in tool_burns[:6]
+            if tb.total_tokens > 0
+        ]
+        if s12_items:
+            cards.append(
+                Card(
+                    _kuid(mmdd, 88),
+                    "barList",
+                    "wide",
+                    {
+                        "title": "最烧上下文的 Tool 排行与 >10k 膨胀估算告警 (S12)",
+                        "items": s12_items,
+                    },
+                )
+            )
+
+    summary_lines: list[str] = []
+    if getattr(skill_roi, "low_roi_summary", ""):
+        summary_lines.append(skill_roi.low_roi_summary)
+    if getattr(skill_roi, "top_l0_watermarks", ()):
+        w_str = "，".join(
+            f"{name} ({lines}/{cap})"
+            for name, lines, cap in skill_roi.top_l0_watermarks[:3]
+        )
+        summary_lines.append(f"L0 行数水位 Top-3：{w_str}")
+    if getattr(skill_roi, "idle_skills_30d", ()):
+        idle_str = "、".join(skill_roi.idle_skills_30d[:5])
+        summary_lines.append(f"30d 零触发闲置提醒：{idle_str}")
+    if summary_lines:
+        cards.append(
+            Card(
+                _kuid(mmdd, 86),
+                "insight",
+                "wide",
+                {"title": "Skill ROI 自动诊断建议 (S10)", "body": "\n".join(summary_lines)},
+                style="warning",
+            )
+        )
+
+    if not cards:
+        return None
+    return Container(
+        _cuid(mmdd, 19),
+        "Skills 与 ROI 诊断",
+        62,
+        tuple(cards),
+        layout="auto",
+        style="neutral",
+        subtitle="光读不练率 · 渐进披露漏斗 · 擦写率 · 漏网归因 · 综合 ROI",
+    )
+
+
 # Friendly topic → display label + chart-pill hint for the news radar.
 _NEWS_TOPIC_LABEL = {
     "ai-tech": "AI · 科技",
@@ -1528,6 +1884,8 @@ _BUDGET_META: dict[str, dict] = {
     "新闻雷达": {"is_detail": True, "reading_cost": 3},
     "工程与编排图表": {"cross_signal": 3, "reading_cost": 2},
     "24h 证据时间线": {"cross_signal": 2, "reading_cost": 2},
+    "产品健康与个人成长": {"cross_signal": 2, "reading_cost": 2},
+    "Skills 与 ROI 诊断": {"cross_signal": 3, "reading_cost": 2},
 }
 
 _READING_FLOW_ORDER = {
@@ -1537,7 +1895,9 @@ _READING_FLOW_ORDER = {
     "昨日汇总": 40,
     "24h 证据时间线": 50,
     "交叉信号": 55,
+    "产品健康与个人成长": 58,
     "工程与编排图表": 60,
+    "Skills 与 ROI 诊断": 62,
     "时间与产出": 65,
     "AI 效能": 70,
     "成本归因": 80,

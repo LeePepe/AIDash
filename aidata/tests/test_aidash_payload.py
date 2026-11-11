@@ -448,3 +448,109 @@ def test_retro_ops_stats_without_completed_work_omit_agent_summary(signal):
     container = _retro_ops_container("0709", replace(retro, **{signal: 0}))
     assert container is not None
     assert all(card.type != "agentSummary" for card in container.cards)
+
+
+@pytest.mark.unit
+def test_product_growth_and_skills_roi_containers_map_13_indicators():
+    from L5_apps.digest.aidash import _product_growth_container, _skills_roi_container
+    from L5_apps.digest.sources import (
+        AppTelemetrySummary,
+        ContextSliceRow,
+        ProductGrowthTrends,
+        SkillRoiRow,
+        SkillRoiTrends,
+        ToolBurnRow,
+    )
+
+    pg = ProductGrowthTrends(
+        apps=(
+            AppTelemetrySummary(
+                app_name="VitalStride",
+                crash_free_rate_7d=0.998,
+                new_crash_count=1,
+                top_signature="EXC_BAD_ACCESS:HealthSync",
+                p95_ms_7d=140.0,
+                p95_prev_ms_7d=100.0,
+                p95_regression_pct=40.0,
+                is_perf_regressed=True,
+            ),
+        ),
+        unshipped_commits=(("VitalStride", 12), ("VoxPocket", 3)),
+        vault_total_cards=10,
+        vault_weekly_new_cards=2,
+        blog_published_posts=8,
+        featured_card_slug="wifi-invisible-light",
+        featured_card_title="如果能看见 WiFi",
+        featured_card_summary="WiFi 就是看不见的光。",
+        health=SourceHealth("product_growth", "ok"),
+    )
+    pg_container = _product_growth_container("1110", pg)
+    assert pg_container is not None
+    assert pg_container.title == "产品健康与个人成长"
+    assert [c.type for c in pg_container.cards] == ["metric", "barList", "insight", "insight"]
+    pg_metrics = pg_container.cards[0].payload["items"]
+    assert any(it["label"] == "VitalStride Crash-Free" and it["ratio"] == pytest.approx(0.998) for it in pg_metrics)
+    assert any(it["label"] == "VitalStride P95 响应" and it["higherIsBetter"] is False for it in pg_metrics)
+    assert any(it["label"] == "知识卡 → 博客产出" and it["value"] == 8.0 for it in pg_metrics)
+    assert pg_container.cards[1].payload["items"][0]["semantic"] == "warning"
+    assert "knowledge://wifi-invisible-light" in pg_container.cards[3].payload["subtitle"]
+
+    sr = SkillRoiTrends(
+        skills=(
+            SkillRoiRow(
+                skill="my-designer",
+                loads_7d=4,
+                loads_30d=9,
+                r1_pass_rate=0.5,
+                script_exec_count=1,
+                script_touch_rate=0.2,
+                unpracticed_rate=0.8,
+                l0_only_sessions=2,
+                l1_selective_sessions=1,
+                l1_greedy_sessions=2,
+                avg_context_tokens=8500,
+                rework_rounds=2,
+                impl_bug_count=2,
+                spec_gap_count=1,
+                roi_score=0.28,
+            ),
+        ),
+        pin_drift_bars=(("VoxPocket · shared-ci", 3, 2), ("AIDash · shared-ci", 0, 0)),
+        gate_true_catches_7d=5,
+        gate_noise_7d=1,
+        gate_catch_ratio=5 / 6,
+        skill_audit_pass_ratio=1.0,
+        top_l0_watermarks=(("team-lead", 120, 180), ("my-designer", 72, 80)),
+        eval_case_total=22,
+        eval_case_weekly_delta=4,
+        idle_skills_30d=("save-tool",),
+        low_roi_summary="低 ROI 关注：my-designer（ROI 0.28）",
+        health=SourceHealth("skill_roi", "ok"),
+        context_slices=(
+            ContextSliceRow("System & AGENTS.md 指令链", 18000, 18.0),
+            ContextSliceRow("Skills 目录与 SKILL.md", 14000, 14.0),
+            ContextSliceRow("Tools Schema 定义", 12000, 12.0),
+            ContextSliceRow("Tool Results 工具返回", 40000, 40.0),
+            ContextSliceRow("User/Assistant 对话与思考链", 16000, 16.0),
+        ),
+        kv_cache_hit_pct=82.5,
+        compressed_saved_tokens=74000,
+        tool_burns=(
+            ToolBurnRow("read/view", 15, 45000, 14200, 3, 62.5, "my-designer"),
+            ToolBurnRow("bash", 10, 27000, 6800, 0, 37.5, "team-lead"),
+        ),
+    )
+    sr_container = _skills_roi_container("1110", sr)
+    assert sr_container is not None
+    assert sr_container.title == "Skills 与 ROI 诊断"
+    assert [c.type for c in sr_container.cards] == [
+        "metric", "barList", "barList", "stackedBar", "barList", "stackedBar", "barList", "insight",
+    ]
+    s11_card = next(c for c in sr_container.cards if "五维切片" in c.payload.get("title", ""))
+    assert s11_card.payload["segments"]
+    s12_card = next(c for c in sr_container.cards if "Tool 排行" in c.payload.get("title", ""))
+    assert s12_card.payload["items"][0]["semantic"] == "warning"
+    assert "my-designer" in sr_container.cards[-1].payload["body"]
+    assert "save-tool" in sr_container.cards[-1].payload["body"]
+    assert _product_growth_container("1110", ProductGrowthTrends.empty()) is None
+    assert _skills_roi_container("1110", SkillRoiTrends.empty()) is None

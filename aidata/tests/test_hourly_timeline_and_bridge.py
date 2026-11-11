@@ -417,3 +417,172 @@ def test_default_blog_publish_runner_invokes_digest_vault(monkeypatch, tmp_path)
     assert "--slug" in captured_cmd
     assert "wifi-invisible-light" in captured_cmd
     assert str(blog_repo) in captured_cmd
+
+
+@pytest.mark.unit
+def test_event_bridge_skill_roi_star_and_done_and_sql_query(tmp_path):
+    proposals = tmp_path / "proposals.jsonl"
+    proposals.write_text(
+        json.dumps(
+            {
+                "id": "skill-roi-my-designer",
+                "ref": "skill-roi://my-designer",
+                "ts": "2026-11-11T00:00:00Z",
+                "agent": "retro-loop",
+                "title": "[Skill ROI] 优化 my-designer（ROI=0.28, R1通过=50%）",
+                "detail": "skill=my-designer | roi_score=0.28 | unpracticed_rate=80.0%",
+                "priority": "high",
+                "status": "pending",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    linear_calls: list[tuple[str, str]] = []
+
+    res = event_bridge.process_user_events(
+        [{"action": "star", "itemRef": "skill-roi://my-designer"}],
+        proposals_path=proposals,
+        linear_runner=lambda title, detail: linear_calls.append((title, detail)) or (0, "TIA-310"),
+    )
+    assert res["promoted"] == 1
+    assert res["errors"] == 0
+    assert len(linear_calls) == 1
+    assert "my-designer" in linear_calls[0][0]
+    records = [
+        json.loads(line)
+        for line in proposals.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records[-1]["status"] == "approved"
+    assert records[-1]["ref"] == "skill-roi://my-designer"
+    assert records[-1]["external_id"] == "TIA-310"
+
+    # Also test Done action on skill-roi://<skill>
+    proposals.write_text(
+        json.dumps(
+            {
+                "id": "skill-roi-team-lead",
+                "ref": "skill-roi://team-lead",
+                "ts": "2026-11-11T00:00:00Z",
+                "agent": "retro-loop",
+                "title": "[Skill ROI] 优化 team-lead",
+                "detail": "skill=team-lead",
+                "priority": "medium",
+                "status": "pending",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    res_done = event_bridge.process_user_events(
+        [{"action": "done", "itemRef": "skill-roi://team-lead", "timestamp": "2026-11-11T01:00:00Z"}],
+        proposals_path=proposals,
+    )
+    assert res_done["resolved"] == 1
+    done_records = [
+        json.loads(line)
+        for line in proposals.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert done_records[-1]["status"] == "dismissed"
+
+    # Test L4 retro/skill_roi_diagnostics.sql against an in-memory warehouse schema
+    sql_path = Path(__file__).resolve().parent.parent / "L4_serve" / "queries" / "retro" / "skill_roi_diagnostics.sql"
+    sql_text = sql_path.read_text(encoding="utf-8")
+    wh = tmp_path / "wh.db"
+    with sqlite3.connect(wh) as conn:
+        conn.execute(
+            "CREATE TABLE fact_turn (turn_uuid TEXT, session_id TEXT, cst_day TEXT, attribution_skill TEXT, "
+            "skill_names TEXT, tool_calls TEXT, input_tokens INTEGER, output_tokens INTEGER, cache_read INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE fact_gtt_task_run (goal_id TEXT, task_id TEXT, role_name TEXT, "
+            "round_no INTEGER, v5_verdict TEXT, status TEXT, cst_day TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE fact_gtt_event (goal_id TEXT, evt_type TEXT, note_preview TEXT, cst_day TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO fact_turn VALUES ('u1', 's1', '2026-11-10', 'my-designer', '[\"my-designer\"]', '[\"Read\",\"Read\",\"Read\",\"Read\"]', 8000, 1000, 1000)"
+        )
+        conn.execute(
+            "INSERT INTO fact_gtt_task_run VALUES ('ui-feel-design', 'T1', 'code_reviewer', 1, 'FAIL', 'failed', '2026-11-10')"
+        )
+        conn.execute(
+            "INSERT INTO fact_gtt_event VALUES ('ui-feel-design', 'REVIEW_FAIL', '[IMPL_BUG] clip', '2026-11-10')"
+        )
+        cur = conn.execute(sql_text)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    assert rows
+    designer_row = next(r for r in rows if r["skill"] == "my-designer")
+    assert designer_row["r1_pass_rate"] == 0.0
+    assert designer_row["unpracticed_rate"] == 1.0
+    assert designer_row["impl_bug_count"] >= 1
+    assert designer_row["roi_score"] == 0.0
+
+    # Test S11 context_composition.sql and S12 tool_context_burn.sql
+    s11_sql = (Path(__file__).resolve().parent.parent / "L4_serve" / "queries" / "retro" / "context_composition.sql").read_text(encoding="utf-8")
+    s12_sql = (Path(__file__).resolve().parent.parent / "L4_serve" / "queries" / "retro" / "tool_context_burn.sql").read_text(encoding="utf-8")
+    with sqlite3.connect(wh) as conn:
+        conn.execute("ALTER TABLE fact_turn ADD COLUMN cache_creation INTEGER DEFAULT 0")
+        conn.execute(
+            "CREATE TABLE fact_request (input_tokens INTEGER, output_tokens INTEGER, cache_read INTEGER, cst_day TEXT)"
+        )
+        conn.execute("INSERT INTO fact_request VALUES (10000, 2000, 30000, '2026-11-10')")
+        conn.execute(
+            "INSERT INTO fact_turn VALUES ('u2', 's2', '2026-11-10', 'my-designer', '[\"my-designer\"]', '[\"Read\"]', 30000, 2000, 10000, 0)"
+        )
+        cur11 = conn.execute(s11_sql)
+        cols11 = [d[0] for d in cur11.description]
+        rows11 = [dict(zip(cols11, r)) for r in cur11.fetchall()]
+
+        cur12 = conn.execute(s12_sql)
+        cols12 = [d[0] for d in cur12.description]
+        rows12 = [dict(zip(cols12, r)) for r in cur12.fetchall()]
+
+    assert len(rows11) == 5
+    assert rows11[0]["kv_cache_hit_pct"] > 0
+    assert rows12
+    assert rows12[0]["tool_name"] == "read/view"
+    assert rows12[0]["bloated_call_count"] >= 1
+
+    # Verify fetch_skill_roi_trends and fetch_product_growth_trends preserve exact 0.0 rates
+    def fake_rows(name, params=None):
+        cols = [
+            "skill", "loads_7d", "loads_30d", "session_count", "script_exec_count",
+            "script_touch_rate", "unpracticed_rate", "l0_only_sessions", "l1_selective_sessions",
+            "l1_greedy_sessions", "avg_context_tokens", "r1_total", "r1_pass", "r1_pass_rate",
+            "rework_rounds", "impl_bug_count", "spec_gap_count", "roi_score",
+        ]
+        if name == "retro/skill_roi_diagnostics":
+            return (
+                [("my-designer", 1, 2, 1, 0, 0.0, 1.0, 0, 0, 1, 9000, 1, 0, 0.0, 1, 1, 0, 0.0)],
+                {c: i for i, c in enumerate(cols)},
+            )
+        if name == "retro/app_crash_and_perf":
+            app_cols = [
+                "app_name", "crash_free_rate_7d", "new_crash_signature_count", "signature",
+                "p95_metric_ms_7d", "p95_metric_ms_prev_7d", "p95_regression_pct", "is_perf_regressed",
+            ]
+            return (
+                [("VitalStride", 0.0, 2, "SIGABRT", 120.0, 100.0, 20.0, 0)],
+                {c: i for i, c in enumerate(app_cols)},
+            )
+        return ([], {})
+
+    orig_rows = sources._rows
+    sources._rows = fake_rows
+    try:
+        sr_zero = sources.fetch_skill_roi_trends(dev_root=tmp_path)
+        assert sr_zero.skills[0].r1_pass_rate == 0.0
+        assert sr_zero.skills[0].script_touch_rate == 0.0
+        assert sr_zero.skills[0].roi_score == 0.0
+
+        pg_zero = sources.fetch_product_growth_trends(dev_root=tmp_path)
+        assert pg_zero.apps[0].crash_free_rate_7d == 0.0
+    finally:
+        sources._rows = orig_rows

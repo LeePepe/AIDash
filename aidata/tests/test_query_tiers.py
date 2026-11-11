@@ -50,7 +50,7 @@ def _query_ref_pattern() -> re.Pattern[str]:
     prefixes = sorted({p.name for p in QUERIES.iterdir() if p.is_dir()})
     assert prefixes, "no query directories found — is QUERIES_DIR wired?"
     return re.compile(r'"((?:' + "|".join(map(re.escape, prefixes))
-                      + r')/[a-z0-9-]+)"')
+                      + r')/[a-z0-9_-]+)"')
 
 
 QUERY_REF = _query_ref_pattern()
