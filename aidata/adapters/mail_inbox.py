@@ -108,20 +108,28 @@ def _load_source_state() -> dict[str, Any]:
         cursor = str(raw.get("cursor") or "")
         keys = [str(k) for k in (raw.get("replied_keys") or []) if str(k).strip()]
         seen = [str(k) for k in (raw.get("ingested_keys") or []) if str(k).strip()]
+        raw_sc = raw.get("shard_cursors")
+        shard_cursors = (
+            {str(k): str(v) for k, v in raw_sc.items() if str(k).strip() and str(v).strip()}
+            if isinstance(raw_sc, dict)
+            else {}
+        )
         return {
             "cursor": cursor,
             "replied_keys": keys[-_REPLIED_LIMIT:],
             "ingested_keys": seen[-_REPLIED_LIMIT:],
+            "shard_cursors": shard_cursors,
         }
     if isinstance(raw, str) and raw.strip():
-        return {"cursor": raw.strip(), "replied_keys": [], "ingested_keys": []}
-    return {"cursor": "", "replied_keys": [], "ingested_keys": []}
+        return {"cursor": raw.strip(), "replied_keys": [], "ingested_keys": [], "shard_cursors": {}}
+    return {"cursor": "", "replied_keys": [], "ingested_keys": [], "shard_cursors": {}}
 
 
 def _save_source_state(
     cursor: str,
     replied_keys: Sequence[str],
     ingested_keys: Sequence[str] = (),
+    shard_cursors: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     deduped_replied = list(dict.fromkeys(str(k) for k in replied_keys if str(k).strip()))
     deduped_ingested = list(dict.fromkeys(str(k) for k in ingested_keys if str(k).strip()))
@@ -129,6 +137,7 @@ def _save_source_state(
         "cursor": str(cursor or ""),
         "replied_keys": deduped_replied[-_REPLIED_LIMIT:],
         "ingested_keys": deduped_ingested[-_REPLIED_LIMIT:],
+        "shard_cursors": dict(shard_cursors or {}),
     }
     set_watermark(SOURCE, state_obj)
     return state_obj
@@ -210,6 +219,7 @@ def _read_drop_records(drop_dir: Path) -> list[dict[str, Any]]:
         return []
     records: list[dict[str, Any]] = []
     for path in sorted(drop_dir.glob("*.jsonl")):
+        shard_id = path.name
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -223,7 +233,7 @@ def _read_drop_records(drop_dir: Path) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 continue
             if isinstance(obj, dict):
-                records.append(obj)
+                records.append({**obj, "_shard": shard_id})
     return records
 
 
@@ -232,7 +242,7 @@ def _read_jxa_records(
 ) -> list[dict[str, Any]]:
     if jxa_runner is not None:
         try:
-            return [dict(item) for item in jxa_runner() if isinstance(item, dict)]
+            return [{**dict(item), "_shard": "_jxa"} for item in jxa_runner() if isinstance(item, dict)]
         except Exception:  # noqa: BLE001
             return []
     if not MAIL_INBOX_ENABLE_JXA:
@@ -248,9 +258,21 @@ def _read_jxa_records(
         if proc.returncode != 0 or not proc.stdout.strip():
             return []
         parsed = json.loads(proc.stdout.strip())
-        return [item for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else []
+        return (
+            [{**item, "_shard": "_jxa"} for item in parsed if isinstance(item, dict)]
+            if isinstance(parsed, list)
+            else []
+        )
     except Exception:  # noqa: BLE001
         return []
+
+
+def _persisted_raw_keys() -> set[str]:
+    keys: set[str] = set()
+    for rec in read_raw(SOURCE):
+        if isinstance(rec, dict):
+            keys.add(_dedup_key_for_record(rec))
+    return keys
 
 
 def pull(
@@ -266,13 +288,15 @@ def pull(
     effective_after = str(after) if explicit_after else state["cursor"]
     replied_set = set(state["replied_keys"])
     ingested_list = list(state["ingested_keys"])
-    ingested_set = set(ingested_list)
+    ingested_set = set(ingested_list) | (_persisted_raw_keys() if not explicit_after else set())
+    shard_cursors: dict[str, str] = dict(state["shard_cursors"])
 
     target_dir = drop_dir if drop_dir is not None else MAIL_INBOX_DROP_DIR
     candidates = _read_drop_records(target_dir) + _read_jxa_records(jxa_runner)
 
-    enriched: list[tuple[str, dict[str, Any]]] = []
+    enriched: list[tuple[str, str, dict[str, Any]]] = []
     for idx, rec in enumerate(candidates):
+        shard_id = str(rec.get("_shard") or "_default")
         cur = _cursor_for_record(rec, idx)
         dedup_key = _dedup_key_for_record(rec)
         item_id = str(rec.get("item_id") or rec.get("message_id") or rec.get("id") or dedup_key)
@@ -298,35 +322,46 @@ def pull(
                 "replied": int(dedup_key in replied_set or bool(rec.get("replied"))),
             }
         )
-        enriched.append((cur, normalized_rec))
+        enriched.append((cur, shard_id, normalized_rec))
 
-    enriched.sort(key=lambda pair: pair[0])
+    enriched.sort(key=lambda triple: triple[0])
     seen_keys: set[str] = set()
     selected: list[dict[str, Any]] = []
     next_cursor = effective_after
-    for cur, item in enriched:
+    next_shard_cursors = dict(shard_cursors)
+    for cur, shard_id, item in enriched:
         key = str(item["dedup_key"])
+        shard_after = next_shard_cursors.get(shard_id, "")
         if explicit_after:
             if effective_after and cur <= effective_after:
                 continue
-        elif key in ingested_set:
-            next_cursor = max(next_cursor, cur)
-            continue
-        elif effective_after and cur <= effective_after and not ingested_set:
-            # Legacy string-cursor state without ingested_keys: honor watermark cutoff
-            continue
+        else:
+            if key in ingested_set:
+                next_cursor = max(next_cursor, cur)
+                if cur > shard_after:
+                    next_shard_cursors[shard_id] = cur
+                continue
+            if shard_after and cur <= shard_after:
+                continue
+            if not shard_cursors and not ingested_set and effective_after and cur <= effective_after:
+                continue
         if key in seen_keys or key in replied_set:
             next_cursor = max(next_cursor, cur)
+            if cur > shard_after:
+                next_shard_cursors[shard_id] = cur
             continue
         seen_keys.add(key)
         selected.append(item)
         next_cursor = max(next_cursor, cur)
+        if cur > shard_after:
+            next_shard_cursors[shard_id] = cur
 
-    if commit_cursor and (next_cursor != state["cursor"] or selected):
+    if commit_cursor and (next_cursor != state["cursor"] or next_shard_cursors != shard_cursors or selected):
         _save_source_state(
             next_cursor,
             state["replied_keys"],
             [*ingested_list, *(str(it["dedup_key"]) for it in selected)],
+            next_shard_cursors,
         )
 
     return {
@@ -334,6 +369,7 @@ def pull(
         "source": SOURCE,
         "after": effective_after,
         "next_cursor": next_cursor,
+        "shard_cursors": next_shard_cursors,
         "items": selected,
     }
 
@@ -348,7 +384,12 @@ def reply(*, key: str, note: str = "") -> dict[str, Any]:
     already_replied = cleaned_key in replied_keys
     if not already_replied:
         replied_keys.append(cleaned_key)
-        _save_source_state(state["cursor"], replied_keys, state["ingested_keys"])
+        _save_source_state(
+            state["cursor"],
+            replied_keys,
+            state["ingested_keys"],
+            state["shard_cursors"],
+        )
     return {
         "ok": True,
         "source": SOURCE,
@@ -371,15 +412,22 @@ def collect(
     items = batch.get("items") or []
     state = _load_source_state()
     next_cursor = str(batch.get("next_cursor") or state["cursor"])
+    next_shard_cursors = dict(batch.get("shard_cursors") or state["shard_cursors"])
     if not items:
-        if next_cursor != state["cursor"]:
-            _save_source_state(next_cursor, state["replied_keys"], state["ingested_keys"])
+        if next_cursor != state["cursor"] or next_shard_cursors != state["shard_cursors"]:
+            _save_source_state(
+                next_cursor,
+                state["replied_keys"],
+                state["ingested_keys"],
+                next_shard_cursors,
+            )
         return 0
     written = write_raw(SOURCE, items)
     _save_source_state(
         next_cursor,
         state["replied_keys"],
         [*state["ingested_keys"], *(str(it["dedup_key"]) for it in items)],
+        next_shard_cursors,
     )
     return written
 

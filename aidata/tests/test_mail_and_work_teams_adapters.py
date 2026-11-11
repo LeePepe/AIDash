@@ -126,6 +126,10 @@ def test_mail_inbox_pull_cursor_redaction_and_reply_idempotency(
     assert any(r["item_id"] == "msg-000" for r in raw_store)
     assert mail_inbox.collect() == 0
 
+    # Verify per-shard cursors + raw-key persistence prevent replay even if ingested_keys cache is evicted
+    isolated_watermarks["mail_inbox"]["ingested_keys"] = []
+    assert mail_inbox.collect() == 0
+
 
 @pytest.mark.unit
 def test_work_teams_bridge_cursor_and_reply_idempotency(
@@ -232,4 +236,8 @@ def test_work_teams_bridge_cursor_and_reply_idempotency(
     )
     assert work_teams_bridge.collect() == 1
     assert any(r["item_id"] == "wt-100" for r in raw_store)
+    assert work_teams_bridge.collect() == 0
+
+    # Verify per-shard cursors + raw-key persistence prevent replay even if ingested_keys cache is evicted
+    isolated_watermarks["work_teams_bridge"]["ingested_keys"] = []
     assert work_teams_bridge.collect() == 0
