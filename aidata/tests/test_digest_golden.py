@@ -9,7 +9,7 @@ from L5_apps.digest.sources import (
     RepoRadar, CostImprovement, ValueEfficiency, WorkByProject, AiEfficiency,
     RankBundle, SegmentBundle, NewsRadar, ModelTier, CardInterest, Leverage,
     ReworkRelationship,
-    RetroOpsTrends,
+    RetroOpsTrends, ProductGrowthTrends, SkillRoiTrends,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -139,6 +139,10 @@ def frozen_trends(monkeypatch):
                         lambda: RetroOpsTrends(
                             (), (), (), (), None, None, None, None,
                             _skipped("retro_ops")))
+    monkeypatch.setattr(app, "fetch_product_growth_trends",
+                        lambda *a, **k: ProductGrowthTrends.empty("skipped:未取"))
+    monkeypatch.setattr(app, "fetch_skill_roi_trends",
+                        lambda *a, **k: SkillRoiTrends.empty("skipped:未取"))
 
 
 @pytest.mark.unit

@@ -1,5 +1,4 @@
 -- Bot/TL supervision counts with the latest PR monitor heartbeat summary.
--- aidata-tier: explore
 WITH latest_heartbeat AS MATERIALIZED (
     SELECT ts, checked_pr_count, stuck_pr_count, repair_queued_count, status
     FROM fact_prmon_heartbeat
