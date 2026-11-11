@@ -335,16 +335,13 @@ def pull(
         if explicit_after:
             if effective_after and cur <= effective_after:
                 continue
-        else:
-            if key in ingested_set:
-                next_cursor = max(next_cursor, cur)
-                if cur > shard_after:
-                    next_shard_cursors[shard_id] = cur
-                continue
-            if shard_after and cur <= shard_after:
-                continue
-            if not shard_cursors and not ingested_set and effective_after and cur <= effective_after:
-                continue
+        elif key in ingested_set:
+            next_cursor = max(next_cursor, cur)
+            if cur > shard_after:
+                next_shard_cursors[shard_id] = cur
+            continue
+        elif not shard_cursors and not ingested_set and effective_after and cur <= effective_after:
+            continue
         if key in seen_keys or key in replied_set:
             next_cursor = max(next_cursor, cur)
             if cur > shard_after:

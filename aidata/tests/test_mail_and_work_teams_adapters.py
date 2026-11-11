@@ -130,6 +130,25 @@ def test_mail_inbox_pull_cursor_redaction_and_reply_idempotency(
     isolated_watermarks["mail_inbox"]["ingested_keys"] = []
     assert mail_inbox.collect() == 0
 
+    # Late-arriving older message appended to the SAME existing shard is still ingested once
+    with shard.open("a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "id": "m-same-shard-late",
+                    "message_id": "msg-000-same-shard",
+                    "received_at": "2026-11-11T00:15:00Z",
+                    "sender": "same-shard@corp.example.com",
+                    "subject": "Urgent: appended late to same shard @tianpei",
+                    "snippet": "Action required",
+                }
+            )
+            + "\n"
+        )
+    assert mail_inbox.collect() == 1
+    assert any(r["item_id"] == "msg-000-same-shard" for r in raw_store)
+    assert mail_inbox.collect() == 0
+
 
 @pytest.mark.unit
 def test_work_teams_bridge_cursor_and_reply_idempotency(
@@ -240,4 +259,27 @@ def test_work_teams_bridge_cursor_and_reply_idempotency(
 
     # Verify per-shard cursors + raw-key persistence prevent replay even if ingested_keys cache is evicted
     isolated_watermarks["work_teams_bridge"]["ingested_keys"] = []
+    assert work_teams_bridge.collect() == 0
+
+    # Late-arriving older message appended to the SAME existing shard is still ingested once
+    with shard.open("a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "item_id": "wt-099-same-shard",
+                    "created_at": "2026-11-11T00:45:00Z",
+                    "channel_kind": "teams_mention",
+                    "thread_ref": "teams://thread/099",
+                    "sender_alias": "same_shard_colleague",
+                    "title": "@tianpei Late append in same shard",
+                    "summary": "Needs reply",
+                    "has_mention": True,
+                    "needs_reply": True,
+                    "priority": "high",
+                }
+            )
+            + "\n"
+        )
+    assert work_teams_bridge.collect() == 1
+    assert any(r["item_id"] == "wt-099-same-shard" for r in raw_store)
     assert work_teams_bridge.collect() == 0
