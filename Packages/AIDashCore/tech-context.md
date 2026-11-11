@@ -44,6 +44,13 @@ App 和 CLI 都依赖 Core。如果 schema 在两处各写一份,agent 改了一
 - **XPC/**:`XPCProtocol` `XPCRequest` `XPCResponse` `XPCError`
   `XPCPendingRequests` —— CLI 作为瘦 XPC 客户端与 App 通信的契约。
 - **Validation/**:`SchemaValidator`(schema 锁定校验)、`URLPolicy`(链接策略)。
+- **Job Actions bridge v1**: `XPC/Commands/JobActionsCommands.swift` projects the
+  existing `ScheduledJobAction` fields without UI dependencies. `job-actions.snapshot`
+  returns current actions plus exact job/action `UserEvent` receipts;
+  `job-actions.present` only stages native review. `JobActionsValidation` rejects
+  incomplete responses, ambiguous multi-select values and values over 80 graphemes,
+  and derives opaque SHA256 revisions from canonical action bytes. These DTOs grant
+  neither CLI event-write authority nor task-execution authority.
 - **Storage/**:SwiftData 相关。**DeviceID/**:`DeviceIdentifier`。
 
 ## 数据流(关键约束)
