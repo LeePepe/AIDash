@@ -7,13 +7,13 @@ import AIDashCore
 /// Dispatches commands to typed handlers, validates inputs, and performs SwiftData mutations.
 @MainActor
 final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
-
     /// Persistent store container. Nil during bootstrap; store-independent
     /// commands respond immediately, store-dependent ones return typed error
     /// (retryable while loading, non-retryable after terminal failure).
     internal(set) var container: ModelContainer?
     /// Non-nil after terminal loader failure → `internal.store_failed`.
     internal(set) var storeFailureReason: String?
+    var jobActionsBridge: JobActionsBridge?
 
     init(container: ModelContainer?, storeFailureReason: String? = nil) {
         self.container = container
@@ -63,7 +63,7 @@ final class XPCHandlers: NSObject, AIDashXPCServiceProtocol {
         do {
             let request = try makeXPCDecoder().decode(XPCRequest.self, from: data)
             requestId = request.requestId
-
+            if let response = try handleJobActions(request) { return response }
             // Gate: store-dependent commands require a ready container.
             guard let container else {
                 let (code, message, cause): (String, String, String)

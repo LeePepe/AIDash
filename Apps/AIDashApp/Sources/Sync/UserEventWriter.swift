@@ -157,6 +157,45 @@ final class UserEventWriter {
     }
 
 #if os(macOS)
+    /// Native review's throwing save path. Rechecks exact job/action receipts in the same context
+    /// and returns the actual persisted event. Throws on fetch/encoding/save failure.
+    func recordReviewedJobAction(
+        action: JobActionsAction,
+        responses: [JobActionsResponse],
+        device: String? = nil
+    ) throws -> UserEvent {
+        try JobActionsValidation.validateResponses(responses, for: action)
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let jobs = Set(ScheduledPulseRegistry.jobs.map { $0.id.rawValue })
+        let existing = try JobActionsReceiptStore.read(context: context, jobID: action.jobID)
+        if let receipt = JobActionsValidation.acknowledgement(
+            in: existing, for: action, registeredJobIDs: jobs
+        ) {
+            return receipt
+        }
+        let responseData = try JSONEncoder().encode(responses)
+        guard let responseText = String(data: responseData, encoding: .utf8) else {
+            throw JobActionsBridgeError.make("persistence-failed")
+        }
+        let event = UserEvent(
+            id: UUID().uuidString, timestamp: Date(), device: device ?? DeviceIdentifier.current(),
+            cardId: "scheduled-pulse/\(action.jobID)", action: .acknowledgeJobAction,
+            itemRef: "\(action.jobID):\(action.id)|\(responseText)", cardType: "scheduledPulse"
+        )
+        context.insert(UserEventModel(
+            id: event.id, timestamp: event.timestamp, device: event.device, cardId: event.cardId,
+            action: event.action, itemRef: event.itemRef, cardType: event.cardType
+        ))
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        return event
+    }
+
     @discardableResult
     func acknowledgeScheduledJobAction(
         action: ScheduledJobAction,
