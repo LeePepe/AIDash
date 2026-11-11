@@ -434,6 +434,15 @@ def _star_falcon(path: Path, request_id: str, timestamp: str) -> bool:
         return False
 
 
+def _format_action_comment(action_label: str, *, note: str = "", targets: str = "") -> str:
+    parts: list[str] = []
+    if targets:
+        parts.append(f"targets={targets}")
+    if note:
+        parts.append(note)
+    return f"[AIDash Action Items · {action_label}] {' | '.join(parts)}"
+
+
 def process_user_events(
     events: list[dict],
     *,
@@ -479,10 +488,29 @@ def process_user_events(
     }
     pending = {proposal.id: proposal for proposal in read_pending(proposal_path)}
     promoted_ids: set[str] = set()
+    pending_issue_statuses: dict[str, str] = {}
+    try:
+        import serve
 
-    def _promote_one(proposal: Proposal, *, trigger_dispatch: bool) -> None:
+        rows, cols = serve.run_query("inbox/pending-issues")
+        if rows and cols and "identifier" in cols and "status" in cols:
+            ii = cols.index("identifier")
+            si = cols.index("status")
+            for row in rows:
+                ident_key = str(row[ii] or "").strip().upper()
+                if ident_key:
+                    pending_issue_statuses[ident_key] = str(row[si] or "").strip().lower()
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+    def _promote_one(
+        proposal: Proposal,
+        *,
+        trigger_dispatch: bool,
+        dedup_key: str | None = None,
+    ) -> str | None:
         if proposal.id in promoted_ids:
-            return
+            return None
         try:
             if _is_crash_or_perf_proposal(proposal) and linear_runner is not None:
                 rc, external_id = _coerce_idea_result(
@@ -497,13 +525,15 @@ def process_user_events(
                 rc, external_id = _default_linear_runner(proposal.title, proposal.detail)
             else:
                 rc, external_id = _coerce_idea_result(
-                    active_provider.promote_proposal(proposal.title, proposal.detail)
+                    active_provider.promote_proposal(
+                        proposal.title, proposal.detail, dedup_key=dedup_key
+                    )
                 )
         except (OSError, subprocess.SubprocessError):
             rc, external_id = 1, None
         if rc != 0:
             result["errors"] += 1
-            return
+            return None
 
         promoted_ids.add(proposal.id)
         approved_record: dict[str, Any] = {
@@ -543,6 +573,7 @@ def process_user_events(
 
         _append_jsonl(proposal_path, approved_record)
         result["promoted"] += 1
+        return external_id
 
     for ref, event in _latest_events(events, active_provider, local_provider).items():
         action = str(event.get("action") or "").lower()
@@ -740,6 +771,7 @@ def process_user_events(
         ).strip()
         decision_lower = decision_raw.casefold()
         note = (responses.get("note") or responses.get("comment") or "").strip()
+        targets = (responses.get("targets") or "").strip()
 
         tia_match = _JOB_ACTION_TIA_RE.fullmatch(action_id)
         local_match = _JOB_ACTION_LOCAL_RE.fullmatch(action_id)
@@ -752,25 +784,48 @@ def process_user_events(
                 issue_id = local_match.group(1).upper() if local_match else action_id
                 target_prov = local_provider
 
-            if "unblock" in decision_lower or decision_lower in {"todo", "reopen", "undone"}:
+            known_status = (
+                str(event.get("status") or responses.get("status") or "").strip().lower()
+                or pending_issue_statuses.get(issue_id, "")
+            )
+            if decision_lower in {"approve", "approve to todo"}:
+                sync_action = (
+                    "in_progress"
+                    if known_status in {"blocked", "in_progress"}
+                    else "todo"
+                )
+            elif "unblock" in decision_lower:
+                sync_action = (
+                    "in_progress"
+                    if known_status in {"blocked", "in_progress"}
+                    else "undone"
+                )
+            elif decision_lower in {"todo", "reopen", "undone"}:
                 sync_action = "undone"
+            elif decision_lower in {"in_progress", "in progress"}:
+                sync_action = "in_progress"
             elif decision_lower in {"done", "确认", "confirm", "resolve", "mark done"}:
                 sync_action = "done"
+            elif decision_lower in {"dismiss", "cancel", "canceled", "cancelled"}:
+                sync_action = "cancelled"
             else:
                 result["ignored"] += 1
                 continue
 
             try:
                 rc = target_prov.sync_status(issue_id, sync_action)
-                if rc == 0 and note and tia_match and target_prov.name == "linear":
-                    comment_runner(issue_id, f"[AIDash Action Items · {decision_raw}] {note}")
+                if rc == 0 and (note or targets) and tia_match and target_prov.name == "linear":
+                    comment_runner(
+                        issue_id,
+                        _format_action_comment(decision_raw, note=note, targets=targets),
+                    )
             except (OSError, subprocess.SubprocessError):
                 rc = 1
 
             if rc == 0:
                 processed_job_actions.add(dedup_key)
                 _record_consumed(dedup_key)
-                if sync_action == "done":
+                if sync_action in {"done", "cancelled"}:
                     result["resolved"] += 1
                 else:
                     result["undone"] += 1
@@ -784,18 +839,36 @@ def process_user_events(
             if proposal is None:
                 result["ignored"] += 1
                 continue
-            if "promote" in decision_lower or decision_lower in {"star", "approve", "确认"}:
+            if "promote" in decision_lower or decision_lower in {"star", "approve", "approve to todo", "确认"}:
                 should_dispatch = bool(
                     auto_dispatch
                     or event.get("auto_dispatch")
                     or event.get("dispatch")
                 )
                 prev_promoted = result["promoted"]
-                _promote_one(proposal, trigger_dispatch=should_dispatch)
+                ext_id = _promote_one(
+                    proposal, trigger_dispatch=should_dispatch, dedup_key=dedup_key
+                )
                 if result["promoted"] > prev_promoted:
+                    if (
+                        decision_lower in {"approve", "approve to todo"}
+                        and ext_id
+                        and active_provider.name == "linear"
+                    ):
+                        try:
+                            active_provider.sync_status(ext_id, "todo")
+                            if note or targets:
+                                comment_runner(
+                                    ext_id,
+                                    _format_action_comment(
+                                        decision_raw, note=note, targets=targets
+                                    ),
+                                )
+                        except (OSError, subprocess.SubprocessError):
+                            pass
                     processed_job_actions.add(dedup_key)
                     _record_consumed(dedup_key)
-            elif decision_lower in {"done", "dismiss", "resolve", "mark done"}:
+            elif decision_lower in {"done", "dismiss", "cancel", "canceled", "cancelled", "resolve", "mark done"}:
                 dismissed_rec = {
                     "id": proposal.id, "ts": proposal.ts,
                     "agent": proposal.agent, "title": proposal.title,
@@ -829,24 +902,58 @@ def process_user_events(
                 if result["blog_published"] > prev_pub:
                     processed_job_actions.add(dedup_key)
                     _record_consumed(dedup_key)
-            elif "promote" in decision_lower:
+            elif "promote" in decision_lower or decision_lower in {"approve", "approve to todo"}:
                 if matched_prop is not None:
                     prev_promoted = result["promoted"]
-                    _promote_one(matched_prop, trigger_dispatch=False)
+                    ext_id = _promote_one(
+                        matched_prop, trigger_dispatch=False, dedup_key=dedup_key
+                    )
                     if result["promoted"] > prev_promoted:
+                        if (
+                            decision_lower in {"approve", "approve to todo"}
+                            and ext_id
+                            and active_provider.name == "linear"
+                        ):
+                            try:
+                                active_provider.sync_status(ext_id, "todo")
+                                if note or targets:
+                                    comment_runner(
+                                        ext_id,
+                                        _format_action_comment(
+                                            decision_raw, note=note, targets=targets
+                                        ),
+                                    )
+                            except (OSError, subprocess.SubprocessError):
+                                pass
                         processed_job_actions.add(dedup_key)
                         _record_consumed(dedup_key)
                 else:
                     title = str(event.get("title") or f"[Knowledge] {slug}")
                     detail = f"Promoted knowledge item `knowledge://{slug}` from AIDash"
+                    if targets:
+                        detail += f"\n\nTargets: {targets}"
                     if note:
                         detail += f"\n\nNote: {note}"
                     try:
-                        rc, _ = _coerce_idea_result(
+                        rc, ext_id = _coerce_idea_result(
                             active_provider.promote_proposal(
                                 title, detail, dedup_key=dedup_key
                             )
                         )
+                        if (
+                            rc == 0
+                            and decision_lower in {"approve", "approve to todo"}
+                            and ext_id
+                            and active_provider.name == "linear"
+                        ):
+                            active_provider.sync_status(ext_id, "todo")
+                            if note or targets:
+                                comment_runner(
+                                    ext_id,
+                                    _format_action_comment(
+                                        decision_raw, note=note, targets=targets
+                                    ),
+                                )
                     except (OSError, subprocess.SubprocessError):
                         rc = 1
                     if rc == 0:
@@ -855,7 +962,7 @@ def process_user_events(
                         result["promoted"] += 1
                     else:
                         result["errors"] += 1
-            elif decision_lower in {"done", "dismiss"} and matched_prop is not None:
+            elif decision_lower in {"done", "dismiss", "cancel", "canceled", "cancelled"} and matched_prop is not None:
                 _append_jsonl(proposal_path, {
                     "id": matched_prop.id, "ref": f"knowledge://{slug}", "ts": matched_prop.ts,
                     "agent": matched_prop.agent, "title": matched_prop.title,
@@ -869,15 +976,31 @@ def process_user_events(
                 result["ignored"] += 1
             continue
 
-        if "promote" in decision_lower:
+        if "promote" in decision_lower or decision_lower in {"approve", "approve to todo"}:
             title = str(event.get("title") or f"[Action Item] {action_id}")
             detail = f"Promoted from AIDash job action `{job_id}:{action_id}`"
+            if targets:
+                detail += f"\n\nTargets: {targets}"
             if note:
                 detail += f"\n\nNote: {note}"
             try:
-                rc, _ = _coerce_idea_result(
+                rc, ext_id = _coerce_idea_result(
                     active_provider.promote_proposal(title, detail, dedup_key=dedup_key)
                 )
+                if (
+                    rc == 0
+                    and decision_lower in {"approve", "approve to todo"}
+                    and ext_id
+                    and active_provider.name == "linear"
+                ):
+                    active_provider.sync_status(ext_id, "todo")
+                    if note or targets:
+                        comment_runner(
+                            ext_id,
+                            _format_action_comment(
+                                decision_raw, note=note, targets=targets
+                            ),
+                        )
             except (OSError, subprocess.SubprocessError):
                 rc = 1
             if rc == 0:
@@ -886,7 +1009,7 @@ def process_user_events(
                 result["promoted"] += 1
             else:
                 result["errors"] += 1
-        elif decision_lower in {"done", "确认", "confirm", "resolve", "mark done"}:
+        elif decision_lower in {"done", "dismiss", "cancel", "canceled", "cancelled", "确认", "confirm", "resolve", "mark done"}:
             processed_job_actions.add(dedup_key)
             _record_consumed(dedup_key)
             result["resolved"] += 1

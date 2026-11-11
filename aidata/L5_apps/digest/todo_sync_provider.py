@@ -202,19 +202,25 @@ class LocalTodoSyncProvider:
         return None
 
     def promote_proposal(
-        self, title: str, detail: str, dedup_key: str | None = None
+        self,
+        title: str,
+        detail: str,
+        dedup_key: str | None = None,
+        *,
+        state: str | None = None,
     ) -> tuple[int, str | None]:
         if dedup_key:
             existing = self._find_by_dedup_key(dedup_key)
             if existing:
                 return 0, existing
+        target_status = "triage" if str(state or "").strip().casefold() == "triage" else "todo"
         try:
             local_id = self._next_local_id()
             record: dict[str, Any] = {
                 "id": local_id,
                 "title": title,
                 "detail": detail,
-                "status": "todo",
+                "status": target_status,
                 "priority": "medium",
                 "ts": _now(),
             }
@@ -229,7 +235,17 @@ class LocalTodoSyncProvider:
         parsed = self.parse_ref(external_id) or external_id.strip().upper()
         if not parsed:
             return 1
-        target_status = "done" if action.lower() == "done" else "todo"
+        norm = action.strip().casefold()
+        if norm == "done":
+            target_status = "done"
+        elif norm in {"cancelled", "canceled", "dismiss", "dismissed"}:
+            target_status = "cancelled"
+        elif norm in {"in_progress", "in progress"}:
+            target_status = "in_progress"
+        elif norm == "triage":
+            target_status = "triage"
+        else:
+            target_status = "todo"
         try:
             _append_jsonl(
                 self.local_todos_path,
@@ -286,7 +302,12 @@ class LinearTodoSyncProvider:
         return match.group(1).upper() if match else None
 
     def _default_idea_runner(
-        self, title: str, description: str, dedup_key: str | None = None
+        self,
+        title: str,
+        description: str,
+        dedup_key: str | None = None,
+        *,
+        state: str | None = None,
     ) -> tuple[int, str | None]:
         cmd = [
             sys.executable,
@@ -299,6 +320,8 @@ class LinearTodoSyncProvider:
             "--mode",
             "auto",
         ]
+        if state:
+            cmd.extend(["--state", state])
         if dedup_key:
             cmd.extend(["--dedup-key", dedup_key])
         result = subprocess.run(
@@ -346,17 +369,34 @@ class LinearTodoSyncProvider:
         return result.returncode
 
     def promote_proposal(
-        self, title: str, detail: str, dedup_key: str | None = None
+        self,
+        title: str,
+        detail: str,
+        dedup_key: str | None = None,
+        *,
+        state: str | None = None,
     ) -> tuple[int, str | None]:
         if self._idea_runner is not None:
             return _coerce_idea_result(self._idea_runner(title, detail))
         return _coerce_idea_result(
-            self._default_idea_runner(title, detail, dedup_key=dedup_key)
+            self._default_idea_runner(
+                title, detail, dedup_key=dedup_key, state=state
+            )
         )
 
     def sync_status(self, external_id: str, action: str) -> int:
         issue_id = self.parse_ref(external_id) or external_id.strip().upper()
-        target_state = "Done" if action.lower() == "done" else "Todo"
+        norm = action.strip().casefold()
+        if norm == "done":
+            target_state = "Done"
+        elif norm in {"cancelled", "canceled", "dismiss", "dismissed"}:
+            target_state = "Canceled"
+        elif norm in {"in_progress", "in progress"}:
+            target_state = "In Progress"
+        elif norm == "triage":
+            target_state = "Triage"
+        else:
+            target_state = "Todo"
         runner = self._status_runner or self._default_status_runner
         return int(runner(issue_id, target_state))
 

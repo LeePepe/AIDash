@@ -67,6 +67,11 @@ class InboxItem:
     age_text: str = ""
     command_hint: str = ""
     fresh: bool = True
+    status: str = ""
+    source: str = ""
+    description: str = ""
+    url: str = ""
+    sub_items: tuple[str, ...] = ()
 
 
 def _stalled_prs() -> list[InboxItem]:
@@ -85,7 +90,8 @@ def _stalled_prs() -> list[InboxItem]:
         title = str(r[ti])[:60]
         out.append(InboxItem(
             f"PR 卡 {days} 天：{title}", "high", "卡顿", str(r[pi]),
-            "stale", "PR owner", f"{days}d"))
+            "stale", "PR owner", f"{days}d",
+            status="blocked", source="PR & CI"))
     return out
 
 
@@ -113,17 +119,29 @@ def _pending_issues(
             ident = str(r[ii])
             status = str(r[si])
             blocked = status == "blocked"
+            is_triage = status == "triage"
             ref = active_provider.format_ref(ident)
             tia_match = _TIA_ISSUE_REF.fullmatch(ident.strip())
+            url = ""
             if tia_match:
-                ref = f"linear://{tia_match.group(1).upper()}"
+                ident_upper = tia_match.group(1).upper()
+                ref = f"linear://{ident_upper}"
+                url = f"https://linear.app/tianpeili/issue/{ident_upper}"
+            mapped_status = (
+                "blocked"
+                if blocked
+                else ("triage" if is_triage else ("done" if status == "done" else "in_progress"))
+            )
             out.append(InboxItem(
                 f"[{status}] {ident} {str(r[ti])[:44]}",
-                "high" if blocked else "medium",
-                "卡顿" if blocked else "计划",
+                "high" if (blocked or is_triage) else "medium",
+                "卡顿" if blocked else ("待决策" if is_triage else "计划"),
                 ref,
-                "blocked" if blocked else "planned",
-                "Owner" if blocked else "",
+                "blocked" if blocked else ("decision" if is_triage else "planned"),
+                "Owner" if (blocked or is_triage) else "",
+                status=mapped_status,
+                source="Linear",
+                url=url,
             ))
 
     if active_provider.name == "local" or local_todos_path is not None:
@@ -132,16 +150,25 @@ def _pending_issues(
             if len(out) >= cap:
                 break
             blocked = item.status == "blocked"
+            is_triage = item.status == "triage"
             ref = active_provider.format_ref(item.id)
             if not ref.startswith("local://"):
                 ref = f"local://{item.id}"
+            mapped_status = (
+                "blocked"
+                if blocked
+                else ("triage" if is_triage else "in_progress")
+            )
             out.append(InboxItem(
                 f"[{item.status}] {item.id} {item.title[:44]}",
-                "high" if blocked else "medium",
-                "卡顿" if blocked else "计划",
+                "high" if (blocked or is_triage) else "medium",
+                "卡顿" if blocked else ("待决策" if is_triage else "计划"),
                 ref,
-                "blocked" if blocked else "planned",
-                "Owner" if blocked else "",
+                "blocked" if blocked else ("decision" if is_triage else "planned"),
+                "Owner" if (blocked or is_triage) else "",
+                status=mapped_status,
+                source="Linear",
+                description=item.detail,
             ))
 
     return out[:cap]
@@ -450,8 +477,22 @@ def build_inbox(
 
 
 _ACTION_ID_INVALID_RE = re.compile(r"[\x00-\x1f\x7f|]+")
+_ISSUE_TITLE_PREFIX_RE = re.compile(
+    r"^\[(?P<raw_status>[a-z_]+)\]\s+(?P<ident>[A-Za-z0-9_-]+)\s+(?P<rest>.+)$",
+    re.IGNORECASE,
+)
+_PROPOSAL_TITLE_PREFIX_RE = re.compile(r"^待决策（[^）]+）：\s*(.+)$")
 _JOBS_SUBPATH = Path("Library") / "Application Support" / "AIDash" / "jobs"
 _DEFAULT_REGISTERED_JOB_IDS = ("my-pr-supervisor", "pr-auto-review", "aidata-digest")
+_PRIORITY_TO_P = {
+    "high": "P0",
+    "p0": "P0",
+    "urgent": "P0",
+    "medium": "P1",
+    "p1": "P1",
+    "low": "P2",
+    "p2": "P2",
+}
 
 
 def _safe_action_id(raw: str, index: int) -> str:
@@ -460,71 +501,114 @@ def _safe_action_id(raw: str, index: int) -> str:
     return cleaned or f"inbox-item-{index}"
 
 
-def _controls_for_inbox_item(item: InboxItem) -> list[dict[str, object]]:
-    ref = (item.ref or "").strip()
+def _clean_action_title(raw_title: str, fallback: str) -> str:
+    text = str(raw_title or "").strip()
+    issue_match = _ISSUE_TITLE_PREFIX_RE.match(text)
+    if issue_match:
+        text = issue_match.group("rest").strip()
+    else:
+        prop_match = _PROPOSAL_TITLE_PREFIX_RE.match(text)
+        if prop_match:
+            text = prop_match.group(1).strip()
+    return (text or fallback)[:512]
+
+
+def _infer_action_status(item: InboxItem, ref: str) -> str:
+    explicit = (item.status or "").strip().lower()
+    if explicit in {"triage", "blocked", "in_progress", "done"}:
+        return explicit
+    m = _ISSUE_TITLE_PREFIX_RE.match((item.title or "").strip())
+    if m:
+        raw_st = m.group("raw_status").lower()
+        if raw_st == "triage":
+            return "triage"
+        if raw_st == "blocked":
+            return "blocked"
+        if raw_st == "done":
+            return "done"
+        if raw_st in {"todo", "in_progress", "in_review"}:
+            return "in_progress"
+    if ref.startswith(("proposal://", "knowledge://")) or item.bucket in {"待决策", "发现"} or item.category in {"decision", "discovery", "work_watch", "drift"}:
+        return "triage"
+    if item.category == "blocked" or item.bucket == "卡顿":
+        return "blocked"
+    return "in_progress"
+
+
+def _infer_action_source(item: InboxItem, ref: str) -> str:
+    explicit = (item.source or "").strip()
+    if explicit in {"Linear", "GTT Blocker", "Retro", "PR & CI", "Mail & Teams"}:
+        return explicit
+    title = item.title or ""
     if ref.lower().startswith(("linear://", "local://")) or _TIA_ISSUE_REF.fullmatch(ref):
-        return [
-            {
-                "id": "decision",
-                "kind": "singleSelect",
-                "title": "状态操作",
-                "options": ["Done", "Unblock & Comment"],
-            },
-            {
-                "id": "note",
-                "kind": "textInput",
-                "title": "备注说明",
-                "options": [],
-                "maxLength": 80,
-            },
-        ]
-    if ref.startswith("knowledge://"):
-        return [
-            {
-                "id": "decision",
-                "kind": "singleSelect",
-                "title": "决策操作",
-                "options": ["Publish Knowledge Blog", "Promote to Linear TIA", "Done"],
-            },
-            {
-                "id": "note",
-                "kind": "textInput",
-                "title": "备注说明",
-                "options": [],
-                "maxLength": 80,
-            },
-        ]
-    if ref.startswith("proposal://") or item.category in {"decision", "work_watch"}:
-        return [
-            {
-                "id": "decision",
-                "kind": "singleSelect",
-                "title": "决策操作",
-                "options": ["Promote to Linear TIA", "Done"],
-            },
-            {
-                "id": "note",
-                "kind": "textInput",
-                "title": "备注说明",
-                "options": [],
-                "maxLength": 80,
-            },
-        ]
-    return [
+        return "Linear"
+    if item.category == "work_watch" or ref.startswith(("teams:", "mail:")):
+        return "Mail & Teams"
+    if title.startswith("GTT 阻塞") or ref.startswith("gtt://") or (item.category == "blocked" and item.waiting_on == "Writer / Reviewer"):
+        return "GTT Blocker"
+    if title.startswith("PR 卡") or "CI 配置噪音" in title or "报错：" in title:
+        return "PR & CI"
+    if ref.startswith(("proposal://", "knowledge://")) or item.category in {"decision", "discovery", "drift", "stale"} or item.bucket in {"待决策", "发现"}:
+        return "Retro"
+    return "Linear"
+
+
+def _infer_action_priority(raw_priority: str) -> str:
+    return _PRIORITY_TO_P.get(str(raw_priority or "medium").strip().lower(), "P1")
+
+
+def _infer_action_url(item: InboxItem, ref: str) -> str:
+    if item.url and item.url.strip():
+        return item.url.strip()
+    if ref.lower().startswith("linear://"):
+        ident = ref.split("://", 1)[1].strip().upper()
+        if _TIA_ISSUE_REF.fullmatch(ident):
+            return f"https://linear.app/tianpeili/issue/{ident}"
+    elif _TIA_ISSUE_REF.fullmatch(ref):
+        return f"https://linear.app/tianpeili/issue/{ref.upper()}"
+    return ""
+
+
+def _controls_for_inbox_item(
+    item: InboxItem,
+    sub_items: list[str] | tuple[str, ...] = (),
+) -> list[dict[str, object]]:
+    controls: list[dict[str, object]] = [
         {
             "id": "decision",
             "kind": "singleSelect",
-            "title": "处理操作",
-            "options": ["Done", "Promote to Linear TIA"],
-        },
+            "title": "Action",
+            "options": ["Approve", "Done", "Dismiss"],
+        }
+    ]
+    cleaned_targets: list[str] = []
+    seen_targets: set[str] = set()
+    for target in sub_items or item.sub_items:
+        opt = str(target or "").replace(",", " ").strip()[:80]
+        if opt and opt not in seen_targets:
+            seen_targets.add(opt)
+            cleaned_targets.append(opt)
+        if len(cleaned_targets) >= 64:
+            break
+    if cleaned_targets:
+        controls.append(
+            {
+                "id": "targets",
+                "kind": "multiSelect",
+                "title": "选择子项",
+                "options": cleaned_targets,
+            }
+        )
+    controls.append(
         {
             "id": "note",
             "kind": "textInput",
-            "title": "备注说明",
+            "title": "补充指令 / 备注（可选）",
             "options": [],
             "maxLength": 80,
-        },
-    ]
+        }
+    )
+    return controls
 
 
 def build_job_actions(
@@ -533,8 +617,10 @@ def build_job_actions(
     job_id: str = "aidata-digest",
     created_at: str | None = None,
     proposals_path: Path | None = None,
+    provider: TodoSyncProvider | None = None,
+    sync_triage: bool = False,
 ) -> list[dict[str, object]]:
-    """Map unified InboxItems (Linear TIA + proposals + mail/teams + stalls) to JobActionsAction v1."""
+    """Map unified InboxItems (Linear TIA + proposals + mail/teams + stalls) to ActionableItem Schema v1."""
     source_items = items if items is not None else build_inbox()
     stamp = created_at or (
         datetime.now(timezone.utc)  # noqa: UP017
@@ -550,6 +636,13 @@ def build_job_actions(
     except Exception:  # noqa: BLE001, S110
         pass
 
+    active_provider = provider
+    if sync_triage and active_provider is None:
+        try:
+            active_provider = resolve_todo_sync_provider()
+        except Exception:  # noqa: BLE001
+            active_provider = None
+
     actions: list[dict[str, object]] = []
     seen_ids: set[str] = set()
     for index, item in enumerate(source_items, start=1):
@@ -557,6 +650,7 @@ def build_job_actions(
         if ref.lower().startswith("linear://"):
             issue_ident = ref.split("://", 1)[1].upper()
             raw_id = f"linear-{issue_ident}"
+            ref = f"linear://{issue_ident}"
         elif _TIA_ISSUE_REF.fullmatch(ref):
             issue_ident = ref.upper()
             raw_id = f"linear-{issue_ident}"
@@ -582,31 +676,71 @@ def build_job_actions(
             action_id = _safe_action_id(f"{action_id}-{index}", index)
         seen_ids.add(action_id)
 
-        title = str(item.title or action_id).strip()[:512] or action_id
-        desc_lines = [
-            f"- **来源分类**: `{item.bucket}` (`{item.category or 'inbox'}`)",
-            f"- **优先级**: `{item.priority}`",
-        ]
-        if ref:
-            desc_lines.append(f"- **关联引用 (ref)**: `{ref}`")
-        if item.waiting_on:
-            desc_lines.append(f"- **等待方**: {item.waiting_on}")
-        if item.age_text:
-            desc_lines.append(f"- **持续时长**: {item.age_text}")
+        title = _clean_action_title(item.title, action_id)
+        status = _infer_action_status(item, ref)
+        source = _infer_action_source(item, ref)
+        priority = _infer_action_priority(item.priority)
 
         prop_key = ref.removeprefix("proposal://") if ref.startswith("proposal://") else ref
         matched_prop = pending_by_id.get(prop_key)
-        if matched_prop and matched_prop.detail:
-            desc_lines.append(f"\n{matched_prop.detail.strip()}")
+        clean_desc_parts: list[str] = []
+        if item.description and item.description.strip():
+            clean_desc_parts.append(item.description.strip())
+        elif matched_prop and matched_prop.detail and matched_prop.detail.strip():
+            clean_desc_parts.append(matched_prop.detail.strip())
 
-        description_md = "\n".join(desc_lines)[:16384]
+        context_bits: list[str] = []
+        if item.waiting_on:
+            context_bits.append(f"等待方: {item.waiting_on}")
+        if item.age_text:
+            context_bits.append(f"持续时长: {item.age_text}")
+        if item.command_hint:
+            context_bits.append(f"建议操作: {item.command_hint}")
+        if context_bits and not clean_desc_parts:
+            clean_desc_parts.append(" · ".join(context_bits))
+        elif context_bits:
+            clean_desc_parts.append("（" + " · ".join(context_bits) + "）")
+
+        if not clean_desc_parts:
+            clean_desc_parts.append(str(item.title or title).strip())
+
+        description = "\n\n".join(clean_desc_parts)[:16384]
+
+        if (
+            sync_triage
+            and active_provider is not None
+            and active_provider.name == "linear"
+            and active_provider.is_enabled()
+            and not ref.lower().startswith(("linear://", "local://"))
+            and priority in {"P0", "P1"}
+        ):
+            dedup_key = f"{job_id}:{action_id}"
+            try:
+                rc, ext_id = active_provider.promote_proposal(
+                    title, description, dedup_key=dedup_key, state="Triage"
+                )
+            except Exception:  # noqa: BLE001
+                rc, ext_id = 1, None
+            if rc == 0 and ext_id:
+                parsed_ident = active_provider.parse_ref(ext_id) or str(ext_id).strip().upper()
+                ref = f"linear://{parsed_ident}"
+
+        url = _infer_action_url(item, ref)
+        effective_ref = ref or f"signal://{action_id}"
+
         actions.append(
             {
                 "id": action_id,
                 "jobID": job_id,
                 "createdAt": stamp,
                 "title": title,
-                "descriptionMd": description_md,
+                "description": description,
+                "descriptionMd": description,
+                "status": status,
+                "source": source,
+                "priority": priority,
+                "ref": effective_ref,
+                "url": url,
                 "controls": _controls_for_inbox_item(item),
             }
         )
@@ -622,6 +756,8 @@ def export_job_actions(
     job_id: str = "aidata-digest",
     created_at: str | None = None,
     proposals_path: Path | None = None,
+    provider: TodoSyncProvider | None = None,
+    sync_triage: bool = False,
 ) -> Path | None:
     """Atomically write unified actions.jsonl for AIDash job-actions snapshot."""
     import json
@@ -640,6 +776,8 @@ def export_job_actions(
             job_id=job_id,
             created_at=created_at,
             proposals_path=proposals_path,
+            provider=provider,
+            sync_triage=sync_triage,
         )
         target_dir = root / job_id
         target_dir.mkdir(parents=True, exist_ok=True)

@@ -489,3 +489,217 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
     )
     assert res_retry["promoted"] == 0
     assert len(read_open_local_todos(local_todos)) == 1
+
+
+@pytest.mark.unit
+def test_cross_device_actionable_item_schema_and_approve_done_dismiss_flows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    proposals = tmp_path / "proposals.jsonl"
+    proposals.write_text(
+        json.dumps(
+            {
+                "id": "retro-lock-1",
+                "ts": "2026-11-11T00:00:00Z",
+                "agent": "retro-loop",
+                "title": "锁定跨设备待办契约",
+                "detail": "H1 root cause: unify DSH and AIDash via Linear TIA.",
+                "priority": "high",
+                "status": "pending",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    items = [
+        inbox.InboxItem(
+            title="[triage] TIA-76 [Bing] iOS Smart Banner / SERP",
+            priority="high",
+            bucket="待决策",
+            ref="linear://TIA-76",
+            category="decision",
+            waiting_on="Owner",
+            status="triage",
+            source="Linear",
+            url="https://linear.app/tianpeili/issue/TIA-76",
+            sub_items=("item-a", "item-b"),
+        ),
+        inbox.InboxItem(
+            title="[blocked] TIA-77 GTT blocked on owner decision",
+            priority="high",
+            bucket="卡顿",
+            ref="linear://TIA-77",
+            category="blocked",
+            waiting_on="Owner",
+        ),
+        inbox.InboxItem(
+            title="待决策（retro-loop）：锁定跨设备待办契约",
+            priority="high",
+            bucket="待决策",
+            ref="proposal://retro-lock-1",
+            category="decision",
+            waiting_on="Owner GO",
+        ),
+    ]
+    actions = inbox.build_job_actions(
+        items,
+        job_id="aidata-digest",
+        created_at="2026-11-11T16:00:00Z",
+        proposals_path=proposals,
+    )
+    assert len(actions) == 3
+
+    a0 = actions[0]
+    assert a0["id"] == "linear-TIA-76"
+    assert a0["title"] == "[Bing] iOS Smart Banner / SERP"
+    assert a0["status"] == "triage"
+    assert a0["source"] == "Linear"
+    assert a0["priority"] == "P0"
+    assert a0["ref"] == "linear://TIA-76"
+    assert a0["url"] == "https://linear.app/tianpeili/issue/TIA-76"
+    assert a0["description"] == a0["descriptionMd"]
+    assert "来源分类" not in str(a0["description"])
+    controls0 = a0["controls"]
+    assert [c["id"] for c in controls0] == ["decision", "targets", "note"]
+    assert controls0[0]["options"] == ["Approve", "Done", "Dismiss"]
+    assert controls0[1]["kind"] == "multiSelect"
+    assert controls0[1]["options"] == ["item-a", "item-b"]
+    assert controls0[2]["kind"] == "textInput"
+    assert controls0[2]["maxLength"] == 80
+
+    a1 = actions[1]
+    assert a1["id"] == "linear-TIA-77"
+    assert a1["status"] == "blocked"
+    assert a1["source"] == "Linear"
+    assert [c["id"] for c in a1["controls"]] == ["decision", "note"]
+
+    a2 = actions[2]
+    assert a2["id"] == "proposal-retro-lock-1"
+    assert a2["title"] == "锁定跨设备待办契约"
+    assert a2["status"] == "triage"
+    assert a2["source"] == "Retro"
+    assert a2["priority"] == "P0"
+    assert "H1 root cause: unify DSH and AIDash via Linear TIA." in str(a2["description"])
+
+    monkeypatch.setattr(
+        inbox.serve,
+        "run_query",
+        lambda name, params=None: (
+            (
+                [
+                    ("TIA-76", "[Bing] iOS Smart Banner / SERP", "triage", "high"),
+                    ("TIA-77", "GTT blocked on owner decision", "blocked", "high"),
+                    ("TIA-78", "Obsolete triage item", "triage", "low"),
+                ],
+                ["identifier", "title", "status", "priority"],
+            )
+            if name == "inbox/pending-issues"
+            else ([], [])
+        ),
+    )
+
+    promoted_calls: list[tuple[str, str]] = []
+    status_calls: list[tuple[str, str]] = []
+    comment_calls: list[tuple[str, str]] = []
+
+    ack_events = [
+        # 1) Approve on triage Linear issue -> Todo + comment with targets & note
+        {
+            "id": "ack-triage-approve",
+            "timestamp": "2026-11-11T16:01:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:linear-TIA-76|"
+                + json.dumps(
+                    [
+                        {"controlID": "decision", "value": "Approve"},
+                        {"controlID": "targets", "value": "item-a,item-b"},
+                        {"controlID": "note", "value": "Ship in wave 1"},
+                    ],
+                    ensure_ascii=False,
+                )
+            ),
+        },
+        # 2) Approve on blocked Linear issue -> In Progress + comment
+        {
+            "id": "ack-blocked-approve",
+            "timestamp": "2026-11-11T16:02:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:linear-TIA-77|"
+                + json.dumps(
+                    [
+                        {"controlID": "decision", "value": "Approve"},
+                        {"controlID": "note", "value": "GO approved"},
+                    ],
+                    ensure_ascii=False,
+                )
+            ),
+        },
+        # 3) Dismiss on Linear issue -> Canceled
+        {
+            "id": "ack-linear-dismiss",
+            "timestamp": "2026-11-11T16:03:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:linear-TIA-78|"
+                + json.dumps(
+                    [
+                        {"controlID": "decision", "value": "Dismiss"},
+                        {"controlID": "note", "value": "Not needed"},
+                    ],
+                    ensure_ascii=False,
+                )
+            ),
+        },
+        # 4) Approve on unpromoted proposal -> promote_proposal + Todo + comment
+        {
+            "id": "ack-prop-approve",
+            "timestamp": "2026-11-11T16:04:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:proposal-retro-lock-1|"
+                + json.dumps(
+                    [
+                        {"controlID": "decision", "value": "Approve"},
+                        {"controlID": "note", "value": "Promote to TIA Todo"},
+                    ],
+                    ensure_ascii=False,
+                )
+            ),
+        },
+    ]
+
+    summary = event_bridge.process_user_events(
+        ack_events,
+        proposals_path=proposals,
+        linear_runner=lambda title, detail: promoted_calls.append((title, detail)) or (0, "TIA-350"),
+        linear_status_runner=lambda ident, state: status_calls.append((ident, state)) or 0,
+        linear_comment_runner=lambda ident, body: comment_calls.append((ident, body)) or 0,
+    )
+    assert summary["promoted"] == 1
+    assert summary["undone"] == 2
+    assert summary["resolved"] == 1
+    assert summary["errors"] == 0
+    assert status_calls == [
+        ("TIA-76", "Todo"),
+        ("TIA-77", "In Progress"),
+        ("TIA-78", "Canceled"),
+        ("TIA-350", "Todo"),
+    ]
+    assert comment_calls == [
+        ("TIA-76", "[AIDash Action Items · Approve] targets=item-a,item-b | Ship in wave 1"),
+        ("TIA-77", "[AIDash Action Items · Approve] GO approved"),
+        ("TIA-78", "[AIDash Action Items · Dismiss] Not needed"),
+        ("TIA-350", "[AIDash Action Items · Approve] Promote to TIA Todo"),
+    ]
+
