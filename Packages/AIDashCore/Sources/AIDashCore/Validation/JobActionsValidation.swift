@@ -67,6 +67,11 @@ public enum JobActionsValidation {
         guard validID(action.id), validID(action.jobID),
               !action.title.isEmpty, action.title.count <= 512,
               action.descriptionMd.utf8.count <= 32 * 1024,
+              (action.status?.count ?? 0) <= 64,
+              (action.source?.count ?? 0) <= 128,
+              (action.priority?.count ?? 0) <= 32,
+              (action.ref?.utf8.count ?? 0) <= 512,
+              (action.url?.utf8.count ?? 0) <= 2048,
               !action.controls.isEmpty, action.controls.count <= 32,
               Set(action.controls.map(\.id)).count == action.controls.count else {
             throw failure("invalid-response")

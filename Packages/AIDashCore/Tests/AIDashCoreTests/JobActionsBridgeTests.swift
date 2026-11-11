@@ -35,6 +35,44 @@ struct JobActionsBridgeTests {
         #expect(control.options == [])
         #expect(control.maxLength == 120)
         #expect(control.effectiveMaxLength == 80)
+
+        let crossDeviceJSON = Data("""
+        {
+          "id": "linear-TIA-76",
+          "jobID": "aidata-digest",
+          "title": "[Bing] iOS Smart Banner / SERP",
+          "description": "Clean description text",
+          "status": "triage",
+          "source": "Linear",
+          "priority": "P0",
+          "ref": "linear://TIA-76",
+          "url": "https://linear.app/tianpeili/issue/TIA-76",
+          "controls": [
+            {"id": "decision", "kind": "singleSelect", "title": "Action", "options": ["Approve", "Done", "Dismiss"]},
+            {"id": "targets", "kind": "multiSelect", "title": "选择子项", "options": ["item-a", "item-b"]},
+            {"id": "note", "kind": "textInput", "title": "补充指令 / 备注（可选）", "maxLength": 80}
+          ]
+        }
+        """.utf8)
+        let crossDevice = try JSONDecoder().decode(JobActionsAction.self, from: crossDeviceJSON)
+        try JobActionsValidation.validateAction(crossDevice)
+        #expect(crossDevice.description == "Clean description text")
+        #expect(crossDevice.descriptionMd == "Clean description text")
+        #expect(crossDevice.status == "triage")
+        #expect(crossDevice.source == "Linear")
+        #expect(crossDevice.priority == "P0")
+        #expect(crossDevice.ref == "linear://TIA-76")
+        #expect(crossDevice.url == "https://linear.app/tianpeili/issue/TIA-76")
+        let encodedCrossDevice = try JSONSerialization.jsonObject(
+            with: encoder.encode(crossDevice)
+        ) as? [String: Any]
+        #expect(encodedCrossDevice?["description"] as? String == "Clean description text")
+        #expect(encodedCrossDevice?["descriptionMd"] as? String == "Clean description text")
+        #expect(encodedCrossDevice?["status"] as? String == "triage")
+        #expect(encodedCrossDevice?["source"] as? String == "Linear")
+        #expect(encodedCrossDevice?["priority"] as? String == "P0")
+        #expect(encodedCrossDevice?["ref"] as? String == "linear://TIA-76")
+        #expect(encodedCrossDevice?["url"] as? String == "https://linear.app/tianpeili/issue/TIA-76")
     }
 
     @Test("Exact fields, Unicode bounds, duplicates, unknown controls, options and noncanonical selections reject")

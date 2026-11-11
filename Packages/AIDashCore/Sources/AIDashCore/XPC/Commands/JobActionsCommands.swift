@@ -38,18 +38,80 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public let createdAt: Date?
     public let title: String
     public let descriptionMd: String
+    public var description: String { descriptionMd }
+    public let status: String?
+    public let source: String?
+    public let priority: String?
+    public let ref: String?
+    public let url: String?
     public let controls: [Control]
+
+    private enum CodingKeys: String, CodingKey {
+        case id, jobID, createdAt, title, description, descriptionMd
+        case status, source, priority, ref, url, controls
+    }
 
     public init(
         id: String, jobID: String, createdAt: Date? = nil,
-        title: String, descriptionMd: String, controls: [Control]
+        title: String, descriptionMd: String,
+        status: String? = nil, source: String? = nil, priority: String? = nil,
+        ref: String? = nil, url: String? = nil,
+        controls: [Control]
     ) {
         self.id = id
         self.jobID = jobID
         self.createdAt = createdAt
         self.title = title
         self.descriptionMd = descriptionMd
+        self.status = status
+        self.source = source
+        self.priority = priority
+        self.ref = ref
+        self.url = url
         self.controls = controls
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        jobID = try container.decode(String.self, forKey: .jobID)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        title = try container.decode(String.self, forKey: .title)
+        if let md = try container.decodeIfPresent(String.self, forKey: .descriptionMd) {
+            descriptionMd = md
+        } else if let desc = try container.decodeIfPresent(String.self, forKey: .description) {
+            descriptionMd = desc
+        } else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.descriptionMd,
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "Expected descriptionMd or description string."
+                )
+            )
+        }
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        priority = try container.decodeIfPresent(String.self, forKey: .priority)
+        ref = try container.decodeIfPresent(String.self, forKey: .ref)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        controls = try container.decode([Control].self, forKey: .controls)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(jobID, forKey: .jobID)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
+        try container.encode(title, forKey: .title)
+        try container.encode(descriptionMd, forKey: .description)
+        try container.encode(descriptionMd, forKey: .descriptionMd)
+        try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeIfPresent(source, forKey: .source)
+        try container.encodeIfPresent(priority, forKey: .priority)
+        try container.encodeIfPresent(ref, forKey: .ref)
+        try container.encodeIfPresent(url, forKey: .url)
+        try container.encode(controls, forKey: .controls)
     }
 }
 
