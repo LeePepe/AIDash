@@ -433,6 +433,7 @@ def process_user_events(
     linear_status_runner: Callable[[str, str], int] | None = None,
     linear_comment_runner: Callable[[str, str], int] | None = None,
     blog_publish_runner: Callable[..., int] | None = None,
+    cursor_path: Path | None = None,
     mode: str = "observe",
     auto_dispatch: bool = False,
     dispatch_runner: Callable[[Proposal, str | None], int] | None = None,
@@ -651,7 +652,16 @@ def process_user_events(
             result["ignored"] += 1
 
     comment_runner = linear_comment_runner or _default_linear_comment_runner
-    processed_job_actions: set[str] = set()
+    persisted_consumed = (
+        _read_consumed_receipt_keys(cursor_path) if cursor_path else set()
+    )
+    processed_job_actions: set[str] = set(persisted_consumed)
+
+    def _record_consumed(key: str) -> None:
+        if cursor_path is not None:
+            persisted_consumed.add(key)
+            _write_consumed_receipt_keys(cursor_path, persisted_consumed)
+
     for event in events:
         if str(event.get("action") or "").casefold() == "acknowledgejobaction":
             parsed_ack = _parse_job_action_receipt(event)
@@ -668,7 +678,6 @@ def process_user_events(
         if dedup_key in processed_job_actions:
             result["ignored"] += 1
             continue
-        processed_job_actions.add(dedup_key)
 
         decision_raw = (
             responses.get("decision")
@@ -682,10 +691,6 @@ def process_user_events(
 
         tia_match = _JOB_ACTION_TIA_RE.fullmatch(action_id)
         local_match = _JOB_ACTION_LOCAL_RE.fullmatch(action_id)
-
-        if decision_lower in {"hold", "稍后处理", "later", "skip"}:
-            result["ignored"] += 1
-            continue
 
         if tia_match or local_match:
             if tia_match:
@@ -711,6 +716,8 @@ def process_user_events(
                 rc = 1
 
             if rc == 0:
+                processed_job_actions.add(dedup_key)
+                _record_consumed(dedup_key)
                 if sync_action == "done":
                     result["resolved"] += 1
                 else:
@@ -731,7 +738,11 @@ def process_user_events(
                     or event.get("auto_dispatch")
                     or event.get("dispatch")
                 )
+                prev_promoted = result["promoted"]
                 _promote_one(proposal, trigger_dispatch=should_dispatch)
+                if result["promoted"] > prev_promoted:
+                    processed_job_actions.add(dedup_key)
+                    _record_consumed(dedup_key)
             elif decision_lower in {"done", "dismiss", "resolve", "mark done"}:
                 dismissed_rec = {
                     "id": proposal.id, "ts": proposal.ts,
@@ -742,6 +753,8 @@ def process_user_events(
                 if getattr(proposal, "ref", ""):
                     dismissed_rec["ref"] = proposal.ref
                 _append_jsonl(proposal_path, dismissed_rec)
+                processed_job_actions.add(dedup_key)
+                _record_consumed(dedup_key)
                 result["resolved"] += 1
             else:
                 result["ignored"] += 1
@@ -751,6 +764,7 @@ def process_user_events(
             slug = action_id.removeprefix("knowledge-").strip("/")
             matched_prop = _lookup_knowledge_proposal(pending, slug)
             if decision_lower in {"publish knowledge blog", "publish", "star"}:
+                prev_pub = result["blog_published"]
                 _publish_knowledge_blog_and_approve(
                     slug,
                     matched_prop=matched_prop,
@@ -760,9 +774,16 @@ def process_user_events(
                     pub_runner=blog_publish_runner or _default_blog_publish_runner,
                     result=result,
                 )
+                if result["blog_published"] > prev_pub:
+                    processed_job_actions.add(dedup_key)
+                    _record_consumed(dedup_key)
             elif "promote" in decision_lower:
                 if matched_prop is not None:
+                    prev_promoted = result["promoted"]
                     _promote_one(matched_prop, trigger_dispatch=False)
+                    if result["promoted"] > prev_promoted:
+                        processed_job_actions.add(dedup_key)
+                        _record_consumed(dedup_key)
                 else:
                     title = str(event.get("title") or f"[Knowledge] {slug}")
                     detail = f"Promoted knowledge item `knowledge://{slug}` from AIDash"
@@ -770,11 +791,15 @@ def process_user_events(
                         detail += f"\n\nNote: {note}"
                     try:
                         rc, _ = _coerce_idea_result(
-                            active_provider.promote_proposal(title, detail)
+                            active_provider.promote_proposal(
+                                title, detail, dedup_key=dedup_key
+                            )
                         )
                     except (OSError, subprocess.SubprocessError):
                         rc = 1
                     if rc == 0:
+                        processed_job_actions.add(dedup_key)
+                        _record_consumed(dedup_key)
                         result["promoted"] += 1
                     else:
                         result["errors"] += 1
@@ -785,6 +810,8 @@ def process_user_events(
                     "detail": matched_prop.detail, "priority": matched_prop.priority,
                     "status": "dismissed",
                 })
+                processed_job_actions.add(dedup_key)
+                _record_consumed(dedup_key)
                 result["resolved"] += 1
             else:
                 result["ignored"] += 1
@@ -796,14 +823,20 @@ def process_user_events(
             if note:
                 detail += f"\n\nNote: {note}"
             try:
-                rc, _ = _coerce_idea_result(active_provider.promote_proposal(title, detail))
+                rc, _ = _coerce_idea_result(
+                    active_provider.promote_proposal(title, detail, dedup_key=dedup_key)
+                )
             except (OSError, subprocess.SubprocessError):
                 rc = 1
             if rc == 0:
+                processed_job_actions.add(dedup_key)
+                _record_consumed(dedup_key)
                 result["promoted"] += 1
             else:
                 result["errors"] += 1
         elif decision_lower in {"done", "确认", "confirm", "resolve", "mark done"}:
+            processed_job_actions.add(dedup_key)
+            _record_consumed(dedup_key)
             result["resolved"] += 1
         else:
             result["ignored"] += 1
@@ -876,31 +909,14 @@ def main(argv: list[str] | None = None) -> int:
     cursor_file = args.cursor_path or (
         JOB_ACTION_CURSOR_PATH if (args.events_json or args.events_stdin) else None
     )
-    consumed_keys = _read_consumed_receipt_keys(cursor_file) if cursor_file else set()
-    if consumed_keys and events:
-        filtered: list[dict] = []
-        for evt in events:
-            parsed_ack = _parse_job_action_receipt(evt)
-            if parsed_ack is not None:
-                dedup_key = f"{parsed_ack[0]}:{parsed_ack[1]}"
-                if dedup_key in consumed_keys:
-                    continue
-            filtered.append(evt)
-        events = filtered
 
     summary = process_user_events(
         events,
         proposals_path=args.proposals_path,
+        cursor_path=cursor_file,
         mode=args.mode,
         auto_dispatch=args.auto_dispatch,
     )
-
-    if cursor_file and events and summary.get("errors", 0) == 0:
-        for evt in events:
-            parsed_ack = _parse_job_action_receipt(evt)
-            if parsed_ack is not None:
-                consumed_keys.add(f"{parsed_ack[0]}:{parsed_ack[1]}")
-        _write_consumed_receipt_keys(cursor_file, consumed_keys)
 
     if args.export_job_actions:
         from L5_apps.digest.inbox import export_job_actions

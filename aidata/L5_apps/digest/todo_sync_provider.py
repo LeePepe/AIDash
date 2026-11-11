@@ -76,7 +76,7 @@ class TodoSyncProvider(Protocol):
     def parse_ref(self, ref: str) -> str | None: ...
 
     def promote_proposal(
-        self, title: str, detail: str
+        self, title: str, detail: str, dedup_key: str | None = None
     ) -> tuple[int, str | None]: ...
 
     def sync_status(self, external_id: str, action: str) -> int: ...
@@ -182,22 +182,45 @@ class LocalTodoSyncProvider:
             pass
         return f"LOCAL-{max_num + 1}"
 
+    def _find_by_dedup_key(self, dedup_key: str) -> str | None:
+        if not dedup_key or not self.local_todos_path.exists():
+            return None
+        try:
+            for line in self.local_todos_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict) and rec.get("dedup_key") == dedup_key:
+                    raw_id = str(rec.get("id") or "").upper()
+                    if raw_id:
+                        return f"local://{raw_id}"
+        except OSError:
+            pass
+        return None
+
     def promote_proposal(
-        self, title: str, detail: str
+        self, title: str, detail: str, dedup_key: str | None = None
     ) -> tuple[int, str | None]:
+        if dedup_key:
+            existing = self._find_by_dedup_key(dedup_key)
+            if existing:
+                return 0, existing
         try:
             local_id = self._next_local_id()
-            _append_jsonl(
-                self.local_todos_path,
-                {
-                    "id": local_id,
-                    "title": title,
-                    "detail": detail,
-                    "status": "todo",
-                    "priority": "medium",
-                    "ts": _now(),
-                },
-            )
+            record: dict[str, Any] = {
+                "id": local_id,
+                "title": title,
+                "detail": detail,
+                "status": "todo",
+                "priority": "medium",
+                "ts": _now(),
+            }
+            if dedup_key:
+                record["dedup_key"] = dedup_key
+            _append_jsonl(self.local_todos_path, record)
             return 0, f"local://{local_id}"
         except OSError:
             return 1, None
@@ -263,20 +286,23 @@ class LinearTodoSyncProvider:
         return match.group(1).upper() if match else None
 
     def _default_idea_runner(
-        self, title: str, description: str
+        self, title: str, description: str, dedup_key: str | None = None
     ) -> tuple[int, str | None]:
+        cmd = [
+            sys.executable,
+            str(self.script_path),
+            "idea",
+            "--title",
+            title,
+            "--description",
+            description,
+            "--mode",
+            "auto",
+        ]
+        if dedup_key:
+            cmd.extend(["--dedup-key", dedup_key])
         result = subprocess.run(
-            [
-                sys.executable,
-                str(self.script_path),
-                "idea",
-                "--title",
-                title,
-                "--description",
-                description,
-                "--mode",
-                "auto",
-            ],
+            cmd,
             check=False,
             capture_output=True,
             text=True,
@@ -320,10 +346,13 @@ class LinearTodoSyncProvider:
         return result.returncode
 
     def promote_proposal(
-        self, title: str, detail: str
+        self, title: str, detail: str, dedup_key: str | None = None
     ) -> tuple[int, str | None]:
-        runner = self._idea_runner or self._default_idea_runner
-        return _coerce_idea_result(runner(title, detail))
+        if self._idea_runner is not None:
+            return _coerce_idea_result(self._idea_runner(title, detail))
+        return _coerce_idea_result(
+            self._default_idea_runner(title, detail, dedup_key=dedup_key)
+        )
 
     def sync_status(self, external_id: str, action: str) -> int:
         issue_id = self.parse_ref(external_id) or external_id.strip().upper()

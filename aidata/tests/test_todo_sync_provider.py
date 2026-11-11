@@ -443,3 +443,49 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
     assert forged_summary["resolved"] == 0
     assert forged_summary["ignored"] == 3
     assert forged_calls == []
+
+    # Partial-failure batch persists consumed cursor per item so retry does not duplicate
+    partial_cursor = tmp_path / "partial_cursor.json"
+    local_todos = tmp_path / "partial_local.jsonl"
+    local_prov = LocalTodoSyncProvider(local_todos_path=local_todos)
+    batch_events = [
+        {
+            "id": "batch-ok-1",
+            "timestamp": "2026-11-11T09:20:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:work-watch-msg-1|"
+                + json.dumps([{"controlID": "decision", "value": "Promote to Linear TIA"}])
+            ),
+        },
+        {
+            "id": "batch-fail-2",
+            "timestamp": "2026-11-11T09:21:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:proposal-missing-id|"
+                + json.dumps([{"controlID": "decision", "value": "Promote to Linear TIA"}])
+            ),
+        },
+    ]
+    res_first = event_bridge.process_user_events(
+        batch_events,
+        proposals_path=proposals,
+        provider=local_prov,
+        cursor_path=partial_cursor,
+    )
+    assert res_first["promoted"] == 1
+    assert len(read_open_local_todos(local_todos)) == 1
+    # Replay same batch -> already-promoted item is skipped via per-item cursor and dedup_key
+    res_retry = event_bridge.process_user_events(
+        batch_events,
+        proposals_path=proposals,
+        provider=local_prov,
+        cursor_path=partial_cursor,
+    )
+    assert res_retry["promoted"] == 0
+    assert len(read_open_local_todos(local_todos)) == 1

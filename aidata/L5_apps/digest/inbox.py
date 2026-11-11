@@ -429,7 +429,7 @@ def _controls_for_inbox_item(item: InboxItem) -> list[dict[str, object]]:
                 "id": "decision",
                 "kind": "singleSelect",
                 "title": "状态操作",
-                "options": ["Done", "Unblock & Comment", "Hold"],
+                "options": ["Done", "Unblock & Comment"],
             },
             {
                 "id": "note",
@@ -445,7 +445,7 @@ def _controls_for_inbox_item(item: InboxItem) -> list[dict[str, object]]:
                 "id": "decision",
                 "kind": "singleSelect",
                 "title": "决策操作",
-                "options": ["Publish Knowledge Blog", "Promote to Linear TIA", "Done", "Hold"],
+                "options": ["Publish Knowledge Blog", "Promote to Linear TIA", "Done"],
             },
             {
                 "id": "note",
@@ -461,7 +461,7 @@ def _controls_for_inbox_item(item: InboxItem) -> list[dict[str, object]]:
                 "id": "decision",
                 "kind": "singleSelect",
                 "title": "决策操作",
-                "options": ["Promote to Linear TIA", "Done", "Hold"],
+                "options": ["Promote to Linear TIA", "Done"],
             },
             {
                 "id": "note",
@@ -476,7 +476,7 @@ def _controls_for_inbox_item(item: InboxItem) -> list[dict[str, object]]:
             "id": "decision",
             "kind": "singleSelect",
             "title": "处理操作",
-            "options": ["Done", "Promote to Linear TIA", "Hold"],
+            "options": ["Done", "Promote to Linear TIA"],
         },
         {
             "id": "note",
