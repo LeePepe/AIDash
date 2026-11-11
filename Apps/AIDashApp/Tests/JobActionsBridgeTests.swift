@@ -242,7 +242,6 @@ struct JobActionsAppBridgeTests {
         let action = ActionBridgeFixture.action()
         let responses = [JobActionsResponse(controlID: "confirm", value: "确认")]
         let event = try writer.recordReviewedJobAction(action: action, responses: responses, device: "synthetic")
-        JobActionsEventBridgeDispatcher.triggerAsync(event: event)
         let duplicate = try writer.recordReviewedJobAction(action: action, responses: responses, device: "synthetic")
         #expect(duplicate.id == event.id)
         let rows = try ModelContext(container).fetch(FetchDescriptor<UserEventModel>())
