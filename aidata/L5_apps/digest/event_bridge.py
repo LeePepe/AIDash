@@ -211,6 +211,8 @@ def _default_linear_comment_runner(issue_id: str, body: str) -> int:
 
 _JOB_ACTION_TIA_RE = re.compile(r"^(?:linear-)?(TIA-\d+)$", re.IGNORECASE)
 _JOB_ACTION_LOCAL_RE = re.compile(r"^(?:local-)?(LOCAL-\d+)$", re.IGNORECASE)
+_REGISTERED_PULSE_JOBS = frozenset({"my-pr-supervisor", "pr-auto-review", "aidata-digest"})
+_AIDATA_ACTION_OWNING_JOB = "aidata-digest"
 
 
 def _parse_job_action_receipt(event: dict) -> tuple[str, str, dict[str, str]] | None:
@@ -218,39 +220,52 @@ def _parse_job_action_receipt(event: dict) -> tuple[str, str, dict[str, str]] | 
     action = str(event.get("action") or "").strip()
     if action.casefold() != "acknowledgejobaction":
         return None
+    card_type = str(event.get("card_type") or event.get("cardType") or "").strip()
+    if card_type != "scheduledPulse":
+        return None
+    card_id = str(event.get("card_id") or event.get("cardId") or "").strip()
+    if not card_id.startswith("scheduled-pulse/"):
+        return None
+    card_job_id = card_id.removeprefix("scheduled-pulse/").strip()
+    if card_job_id not in _REGISTERED_PULSE_JOBS:
+        return None
     raw_ref = str(
-        event.get("item_ref") or event.get("itemRef") or event.get("detail") or ""
+        event.get("item_ref") or event.get("itemRef") or ""
     ).strip()
     if "|" not in raw_ref:
         return None
     head, payload_str = raw_ref.split("|", 1)
-    card_id = str(event.get("card_id") or event.get("cardId") or "").strip()
-    fallback_job = (
-        card_id.removeprefix("scheduled-pulse/")
-        if card_id.startswith("scheduled-pulse/")
-        else "aidata-digest"
-    )
     if ":" in head:
-        job_id, action_id = head.split(":", 1)
+        prefix_job, action_id = head.split(":", 1)
+        if prefix_job in _REGISTERED_PULSE_JOBS:
+            if prefix_job != card_job_id or not action_id or ":" in action_id:
+                return None
+            job_id = prefix_job
+        else:
+            return None
     else:
-        job_id, action_id = fallback_job, head
+        job_id, action_id = card_job_id, head
     if not action_id:
         return None
     try:
         parsed_responses = json.loads(payload_str)
     except json.JSONDecodeError:
         return None
-    if not isinstance(parsed_responses, list):
+    if not isinstance(parsed_responses, list) or not (1 <= len(parsed_responses) <= 32):
         return None
     responses_map: dict[str, str] = {}
     for item in parsed_responses:
-        if not isinstance(item, dict):
-            continue
-        cid = str(item.get("controlID") or item.get("id") or "").strip()
-        val = str(item.get("value") or "").strip()
-        if cid:
-            responses_map[cid] = val
-    return job_id.strip(), action_id.strip(), responses_map
+        if not isinstance(item, dict) or set(item.keys()) != {"controlID", "value"}:
+            return None
+        cid = item.get("controlID")
+        val = item.get("value")
+        if not isinstance(cid, str) or not isinstance(val, str):
+            return None
+        cid_clean = cid.strip()
+        if not cid_clean or cid_clean in responses_map:
+            return None
+        responses_map[cid_clean] = val.strip()
+    return job_id, action_id.strip(), responses_map
 
 
 def _default_blog_publish_runner(
@@ -638,10 +653,17 @@ def process_user_events(
     comment_runner = linear_comment_runner or _default_linear_comment_runner
     processed_job_actions: set[str] = set()
     for event in events:
-        parsed_ack = _parse_job_action_receipt(event)
-        if parsed_ack is None:
+        if str(event.get("action") or "").casefold() == "acknowledgejobaction":
+            parsed_ack = _parse_job_action_receipt(event)
+            if parsed_ack is None:
+                result["ignored"] += 1
+                continue
+        else:
             continue
         job_id, action_id, responses = parsed_ack
+        if job_id != _AIDATA_ACTION_OWNING_JOB:
+            result["ignored"] += 1
+            continue
         dedup_key = f"{job_id}:{action_id}"
         if dedup_key in processed_job_actions:
             result["ignored"] += 1

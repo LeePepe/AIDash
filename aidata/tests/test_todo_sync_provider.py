@@ -397,3 +397,49 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
     assert know_summary["blog_published"] == 0
     assert blog_calls == []
     assert know_promote_calls == [("学习卡片：Spec 1", "Details")]
+
+    # Forged / cross-job receipts must be ignored without mutating Linear or proposals
+    forged_events = [
+        {
+            "id": "forged-1",
+            "timestamp": "2026-11-11T09:10:00Z",
+            "cardId": "scheduled-pulse/my-pr-supervisor",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "my-pr-supervisor:linear-TIA-340|"
+                + json.dumps([{"controlID": "decision", "value": "Done"}])
+            ),
+        },
+        {
+            "id": "forged-2",
+            "timestamp": "2026-11-11T09:11:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "scheduledPulse",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "pr-auto-review:linear-TIA-340|"
+                + json.dumps([{"controlID": "decision", "value": "Done"}])
+            ),
+        },
+        {
+            "id": "forged-3",
+            "timestamp": "2026-11-11T09:12:00Z",
+            "cardId": "scheduled-pulse/aidata-digest",
+            "cardType": "otherCard",
+            "action": "acknowledgeJobAction",
+            "itemRef": (
+                "aidata-digest:linear-TIA-340|"
+                + json.dumps([{"controlID": "decision", "value": "Done"}])
+            ),
+        },
+    ]
+    forged_calls: list[tuple[str, str]] = []
+    forged_summary = event_bridge.process_user_events(
+        forged_events,
+        proposals_path=proposals,
+        linear_status_runner=lambda ident, state: forged_calls.append((ident, state)) or 0,
+    )
+    assert forged_summary["resolved"] == 0
+    assert forged_summary["ignored"] == 3
+    assert forged_calls == []
