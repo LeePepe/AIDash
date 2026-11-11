@@ -439,7 +439,23 @@ def _controls_for_inbox_item(item: InboxItem) -> list[dict[str, object]]:
                 "maxLength": 80,
             },
         ]
-    if ref.startswith(("proposal://", "knowledge://")) or item.category in {"decision", "work_watch"}:
+    if ref.startswith("knowledge://"):
+        return [
+            {
+                "id": "decision",
+                "kind": "singleSelect",
+                "title": "决策操作",
+                "options": ["Publish Knowledge Blog", "Promote to Linear TIA", "Done", "Hold"],
+            },
+            {
+                "id": "note",
+                "kind": "textInput",
+                "title": "备注说明",
+                "options": [],
+                "maxLength": 80,
+            },
+        ]
+    if ref.startswith("proposal://") or item.category in {"decision", "work_watch"}:
         return [
             {
                 "id": "decision",

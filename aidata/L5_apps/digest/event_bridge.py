@@ -728,7 +728,7 @@ def process_user_events(
         if action_id.startswith("knowledge-"):
             slug = action_id.removeprefix("knowledge-").strip("/")
             matched_prop = _lookup_knowledge_proposal(pending, slug)
-            if "promote" in decision_lower or decision_lower in {"publish", "star", "确认"}:
+            if decision_lower in {"publish knowledge blog", "publish", "star"}:
                 _publish_knowledge_blog_and_approve(
                     slug,
                     matched_prop=matched_prop,
@@ -738,6 +738,24 @@ def process_user_events(
                     pub_runner=blog_publish_runner or _default_blog_publish_runner,
                     result=result,
                 )
+            elif "promote" in decision_lower:
+                if matched_prop is not None:
+                    _promote_one(matched_prop, trigger_dispatch=False)
+                else:
+                    title = str(event.get("title") or f"[Knowledge] {slug}")
+                    detail = f"Promoted knowledge item `knowledge://{slug}` from AIDash"
+                    if note:
+                        detail += f"\n\nNote: {note}"
+                    try:
+                        rc, _ = _coerce_idea_result(
+                            active_provider.promote_proposal(title, detail)
+                        )
+                    except (OSError, subprocess.SubprocessError):
+                        rc = 1
+                    if rc == 0:
+                        result["promoted"] += 1
+                    else:
+                        result["errors"] += 1
             elif decision_lower in {"done", "dismiss"} and matched_prop is not None:
                 _append_jsonl(proposal_path, {
                     "id": matched_prop.id, "ref": f"knowledge://{slug}", "ts": matched_prop.ts,

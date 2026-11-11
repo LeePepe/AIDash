@@ -333,3 +333,46 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
     )
     assert rc == 0
     assert cursor_file.is_file()
+
+    # Verify knowledge:// Promote to Linear TIA creates a Linear issue without publishing blog
+    proposals.write_text(
+        json.dumps(
+            {
+                "id": "learn-spec-1",
+                "ref": "knowledge://spec-1",
+                "ts": "2026-11-11T00:00:00Z",
+                "agent": "knowledge-digest",
+                "title": "学习卡片：Spec 1",
+                "detail": "Details",
+                "priority": "medium",
+                "status": "pending",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    blog_calls: list[str] = []
+    know_promote_calls: list[tuple[str, str]] = []
+    know_summary = event_bridge.process_user_events(
+        [
+            {
+                "id": "evt-know-promote",
+                "timestamp": "2026-11-11T09:05:00Z",
+                "cardId": "scheduled-pulse/aidata-digest",
+                "cardType": "scheduledPulse",
+                "action": "acknowledgeJobAction",
+                "itemRef": (
+                    "aidata-digest:knowledge-spec-1|"
+                    + json.dumps([{"controlID": "decision", "value": "Promote to Linear TIA"}])
+                ),
+            }
+        ],
+        proposals_path=proposals,
+        linear_runner=lambda title, detail: know_promote_calls.append((title, detail)) or (0, "TIA-342"),
+        blog_publish_runner=lambda slug, *a: blog_calls.append(slug) or 0,
+    )
+    assert know_summary["promoted"] == 1
+    assert know_summary["blog_published"] == 0
+    assert blog_calls == []
+    assert know_promote_calls == [("学习卡片：Spec 1", "Details")]
