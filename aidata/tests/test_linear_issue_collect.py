@@ -175,6 +175,15 @@ def test_normalize_maps_states_priorities_and_labels(monkeypatch):
             "updatedAt": "2026-11-09T12:00:00Z",
             "labels": ["NEED_GO"],
         },
+        {
+            "identifier": "TIA-96",
+            "title": "Backlog item",
+            "state": "Backlog",
+            "stateType": "backlog",
+            "priority": 4,
+            "updatedAt": "2026-11-09T12:00:00Z",
+            "labels": [],
+        },
     ]
     monkeypatch.setattr(li, "read_raw", lambda src: raw_records)
     captured: dict = {}
@@ -185,7 +194,7 @@ def test_normalize_maps_states_priorities_and_labels(monkeypatch):
         return len(rows)
 
     monkeypatch.setattr(li, "write_clean", fake_write_clean)
-    assert li.normalize() == 6
+    assert li.normalize() == 7
     by_ident = captured["rows"]
 
     assert by_ident["TIA-90"]["issue_id"] == "lin-uuid-90"
@@ -203,8 +212,8 @@ def test_normalize_maps_states_priorities_and_labels(monkeypatch):
     assert by_ident["TIA-92"]["status"] == "done"
     assert by_ident["TIA-92"]["priority"] == "low"
 
-    # Triage maps to backlog (excluded from active inbox until promoted to Todo)
-    assert by_ident["TIA-93"]["status"] == "backlog"
+    # Triage maps to triage (surfaced in cross-device inbox for Approve/Done/Dismiss)
+    assert by_ident["TIA-93"]["status"] == "triage"
     assert by_ident["TIA-93"]["priority"] == "medium"
 
     # Fallback id when UUID is absent + In Review + Priority 2 -> high
@@ -214,3 +223,6 @@ def test_normalize_maps_states_priorities_and_labels(monkeypatch):
 
     # Canceled state wins over NEED_GO label
     assert by_ident["TIA-95"]["status"] == "cancelled"
+
+    # Backlog remains backlog
+    assert by_ident["TIA-96"]["status"] == "backlog"

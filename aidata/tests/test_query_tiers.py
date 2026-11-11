@@ -377,3 +377,32 @@ def test_app_crash_and_perf_aggregates_7d_crash_and_p95_regression(tmp_path):
     assert ad["p95_regression_pct"] == 50.0
     assert ad["is_perf_regressed"] == 1
 
+
+def test_pending_issues_includes_triage_and_excludes_backlog(tmp_path):
+    db = tmp_path / "warehouse.db"
+    sql_path = QUERIES / "inbox" / "pending-issues.sql"
+    con = sqlite3.connect(db)
+    try:
+        con.execute(
+            "CREATE TABLE fact_issue ("
+            "identifier TEXT, title TEXT, status TEXT, priority TEXT, "
+            "workspace_id TEXT, updated_at TEXT)"
+        )
+        con.executemany(
+            "INSERT INTO fact_issue VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("TIA-76", "Triage proposal", "triage", "high", "linear:TIA", "2026-11-11T10:00:00Z"),
+                ("TIA-77", "Blocked task", "blocked", "high", "linear:TIA", "2026-11-11T09:00:00Z"),
+                ("TIA-78", "In progress task", "in_progress", "medium", "linear:TIA", "2026-11-11T08:00:00Z"),
+                ("TIA-79", "Backlog item", "backlog", "low", "linear:TIA", "2026-11-11T07:00:00Z"),
+                ("TIA-80", "Completed item", "done", "high", "linear:TIA", "2026-11-11T06:00:00Z"),
+            ],
+        )
+        rows = con.execute(sql_path.read_text(encoding="utf-8")).fetchall()
+    finally:
+        con.close()
+
+    assert [r[0] for r in rows] == ["TIA-77", "TIA-76", "TIA-78"]
+    assert [r[2] for r in rows] == ["blocked", "triage", "in_progress"]
+
+
