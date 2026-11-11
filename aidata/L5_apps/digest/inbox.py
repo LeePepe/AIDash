@@ -27,6 +27,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import serve
+from config import clean_path
+from sqlite_ro import query_ro
 
 from L5_apps.digest.proposals import Proposal, read_pending
 from L5_apps.digest.todo_sync_provider import (
@@ -279,11 +281,97 @@ def _retro_signals() -> list[InboxItem]:
     return out
 
 
+def _mail_and_work_watch_signals(
+    *,
+    mail_db_path: Path | None = None,
+    teams_db_path: Path | None = None,
+    cap: int = 3,
+) -> list[InboxItem]:
+    """Work Watch / 待我处理: actionable unread/unreplied mail todos and Work-PC Teams @mentions."""
+    out: list[InboxItem] = []
+
+    teams_db = teams_db_path or clean_path("work_teams_bridge")
+    if teams_db.exists():
+        try:
+            rows = query_ro(
+                teams_db,
+                "SELECT dedup_key, channel_kind, sender_alias, title_preview, summary_preview, "
+                "has_mention, priority FROM work_teams_item "
+                "WHERE COALESCE(replied, 0) = 0 AND (COALESCE(has_mention, 0) = 1 OR COALESCE(needs_reply, 0) = 1) "
+                "ORDER BY cursor DESC LIMIT ?",
+                (cap,),
+            )
+            for row in rows:
+                dedup_key = row.get("dedup_key")
+                channel_kind = row.get("channel_kind")
+                sender_alias = row.get("sender_alias")
+                title_prev = row.get("title_preview")
+                summary_prev = row.get("summary_preview")
+                has_mention = row.get("has_mention")
+                prio = row.get("priority")
+                headline = str(title_prev or summary_prev or "Teams 待处理消息").strip()[:48]
+                sender_label = str(sender_alias or "colleague").strip()[:24]
+                tag = "ADO 提醒" if str(channel_kind) == "ado_reminder" else ("Teams @我" if has_mention else "Teams 待回")
+                eff_prio = str(prio) if str(prio) in _PRIO_RANK else ("high" if has_mention else "medium")
+                out.append(
+                    InboxItem(
+                        f"[{tag}] {sender_label}: {headline}",
+                        eff_prio,
+                        "待决策" if has_mention else "计划",
+                        str(dedup_key or ""),
+                        "work_watch",
+                        "Owner",
+                    )
+                )
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    mail_db = mail_db_path or clean_path("mail_inbox")
+    if mail_db.exists() and len(out) < cap:
+        try:
+            rem = max(1, cap - len(out))
+            rows = query_ro(
+                mail_db,
+                "SELECT dedup_key, sender_domain, subject_preview, snippet_preview, "
+                "has_mention, priority FROM mail_inbox_item "
+                "WHERE COALESCE(replied, 0) = 0 AND (COALESCE(is_todo, 0) = 1 OR COALESCE(has_mention, 0) = 1) "
+                "ORDER BY cursor DESC LIMIT ?",
+                (rem,),
+            )
+            for row in rows:
+                dedup_key = row.get("dedup_key")
+                sender_dom = row.get("sender_domain")
+                subject_prev = row.get("subject_preview")
+                snippet_prev = row.get("snippet_preview")
+                has_mention = row.get("has_mention")
+                prio = row.get("priority")
+                headline = str(subject_prev or snippet_prev or "邮件待办").strip()[:48]
+                dom = str(sender_dom or "mail").strip()[:24]
+                tag = "邮件 @我" if has_mention else "邮件待办"
+                eff_prio = str(prio) if str(prio) in _PRIO_RANK else ("high" if has_mention else "medium")
+                out.append(
+                    InboxItem(
+                        f"[{tag}] {dom}: {headline}",
+                        eff_prio,
+                        "待决策" if has_mention else "计划",
+                        str(dedup_key or ""),
+                        "work_watch",
+                        "Owner",
+                    )
+                )
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    return out[:cap]
+
+
 def build_inbox(
     downgrade_usd: float | None = None,
     *,
     proposals_reader: Callable[[], list[Proposal]] | None = None,
     log_reader: Callable[[Path], str] | None = None,
+    mail_db_path: Path | None = None,
+    teams_db_path: Path | None = None,
 ) -> list[InboxItem]:
     """Aggregate all buckets → one prioritized, BALANCED inbox list.
 
@@ -301,6 +389,7 @@ def build_inbox(
     raw += _error_log_signals(log_reader)
     raw += _stalled_prs()
     raw += _proposals(proposals_reader)
+    raw += _mail_and_work_watch_signals(mail_db_path=mail_db_path, teams_db_path=teams_db_path)
     raw += _pending_issues()
     raw += _downgrade_finding(downgrade_usd if downgrade_usd is not None else 0.0)
     raw += _retro_signals()

@@ -90,3 +90,8 @@ LOCAL_GIT_SCAN_ROOTS = (
 #
 # # multica CLI binary (falls back to a PATH lookup if this exact path is absent).
 # MULTICA_BIN = "/opt/homebrew/bin/multica"
+#
+# # Bookmark-cursor mail & Work-PC Teams dropbox directories (DSH Mechanism 4).
+# MAIL_INBOX_DROP_DIR = HOME / ".aidash-state" / "mail-inbox-drop"
+# MAIL_INBOX_ENABLE_JXA = False
+# WORK_TEAMS_DROP_DIR = HOME / ".aidash-state" / "work-teams-drop"

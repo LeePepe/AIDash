@@ -147,6 +147,14 @@ TODO_SYNC_CONFIG_PATH = HOME / ".config" / "aidash" / "todo-sync.json"
 TODO_SYNC_PROVIDER = "auto"
 LOCAL_TODOS_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "local_todos.jsonl"
 
+# DSH Mechanism 4 bookmark-cursor dropbox & Mail.app ingestion (mail_inbox + work_teams_bridge).
+# Both default to ~/.aidash-state/* drop directories and degrade to 0 when empty/absent (ADR-23).
+# MAIL_INBOX_ENABLE_JXA stays False by default so scheduled runs never trigger macOS Mail.app
+# Automation TCC prompts unless opted in via config_local.py.
+MAIL_INBOX_DROP_DIR = HOME / ".aidash-state" / "mail-inbox-drop"
+MAIL_INBOX_ENABLE_JXA = False
+WORK_TEAMS_DROP_DIR = HOME / ".aidash-state" / "work-teams-drop"
+
 # Models that have NO published price, and so are deliberately measured in
 # TOKENS ONLY — `cost_usd` stays NULL for their rows, on purpose.
 #
@@ -323,6 +331,8 @@ SOURCES = (
     "github_ci",
     "github_ruleset",
     "release_tf",
+    "mail_inbox",
+    "work_teams_bridge",
 )
 
 # Current effective 04:00 runner order. The runner will consume this canonical
@@ -360,6 +370,8 @@ SCHEDULED_SOURCES = (
     "github_ci",
     "github_ruleset",
     "release_tf",
+    "mail_inbox",
+    "work_teams_bridge",
 )
 
 MERGE_SOURCES = (
