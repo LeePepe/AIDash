@@ -103,6 +103,33 @@ struct JobActionsBridgeTests {
         #expect(decoded.coverageRefs.isEmpty)
     }
 
+    @Test("Producer numeric and opaque revisions decode, round-trip and scope receipts to a fresh revision")
+    func producerRevisionCompatibility() throws {
+        let base = #"{"id":"topic","jobID":"aidata-digest","title":"Learn","description":"Gap","scope":"personal","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]}]"#
+        let decoder = JSONDecoder()
+        for (wire, expected) in [("7", "7"), (#""r:007-opaque""#, "r:007-opaque"), ("null", nil)] {
+            let action = try decoder.decode(JobActionsAction.self, from: Data((base + ",\"revision\":" + wire + "}").utf8))
+            #expect(action.revision == expected)
+            #expect(action.scope == "personal")
+            #expect(try decoder.decode(JobActionsAction.self, from: JSONEncoder().encode(action)) == action)
+        }
+        let legacy = try decoder.decode(JobActionsAction.self, from: Data((base + "}").utf8))
+        #expect(legacy.revision == nil)
+        let current = try decoder.decode(JobActionsAction.self, from: Data((base + ",\"revision\":8}").utf8))
+        let approve = [JobActionsResponse(controlID: "decision", value: "Approve")]
+        func receipt(revision: String?) throws -> UserEvent {
+            let data = try JSONEncoder().encode(JobActionsValidation.receiptResponses(approve, revision: revision))
+            let text = try #require(String(data: data, encoding: .utf8))
+            return UserEvent(id: UUID().uuidString, timestamp: Date(), device: "fixture",
+                             cardId: "scheduled-pulse/aidata-digest", action: .acknowledgeJobAction,
+                             itemRef: "aidata-digest:topic|\(text)", cardType: "scheduledPulse")
+        }
+        let prior = try receipt(revision: "7")
+        #expect(JobActionsValidation.acknowledgement(in: [prior], for: current, registeredJobIDs: jobs) == nil)
+        #expect(JobActionsValidation.acknowledgement(in: [try receipt(revision: nil)], for: legacy, registeredJobIDs: jobs) != nil)
+        #expect(JobActionsValidation.acknowledgement(in: [try receipt(revision: "8")], for: current, registeredJobIDs: jobs) != nil)
+    }
+
     @Test("Linear-native attributes round-trip while legacy payloads still decode")
     func linearNativeAttributesRoundTrip() throws {
         let parent = JobActionsAction.ParentIssue(

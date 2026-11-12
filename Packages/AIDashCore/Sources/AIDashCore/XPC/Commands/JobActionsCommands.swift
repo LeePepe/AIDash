@@ -85,6 +85,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public let topicKey: String?
     public let originRef: String?
     public let revision: String?
+    public let scope: String?
     public let whyNow: String?
     public let sourceURI: String?
     public let coverageRefs: [String]
@@ -110,7 +111,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         case id, jobID, jobId, createdAt, title, description, descriptionMd
         case status, source, priority, ref, url, subCategory, worthExtracting
         case labels, project, parentIssue, topicID, topicId, topic_id
-        case domain, topicKey = "topic_key", originRef = "origin_ref", revision
+        case domain, topicKey = "topic_key", originRef = "origin_ref", revision, scope
         case whyNow = "why_now", sourceURI = "source_uri", coverageRefs = "coverage_refs", evidence, freshness, controls
     }
 
@@ -121,7 +122,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         ref: String? = nil, url: String? = nil,
         subCategory: String? = nil, worthExtracting: Bool? = nil, labels: [String] = [],
         project: String? = nil, parentIssue: ParentIssue? = nil, topicID: String? = nil,
-        domain: String? = nil, topicKey: String? = nil, originRef: String? = nil, revision: String? = nil,
+        domain: String? = nil, topicKey: String? = nil, originRef: String? = nil, revision: String? = nil, scope: String? = nil,
         whyNow: String? = nil, sourceURI: String? = nil, coverageRefs: [String] = [], evidence: String? = nil, freshness: String? = nil,
         controls: [Control]
 
@@ -146,6 +147,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         self.topicKey = topicKey
         self.originRef = originRef
         self.revision = revision
+        self.scope = scope
         self.whyNow = whyNow
         self.sourceURI = sourceURI
         self.coverageRefs = coverageRefs
@@ -201,7 +203,12 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         domain = try container.decodeIfPresent(String.self, forKey: .domain)
         topicKey = try container.decodeIfPresent(String.self, forKey: .topicKey)
         originRef = try container.decodeIfPresent(String.self, forKey: .originRef)
-        revision = try container.decodeIfPresent(String.self, forKey: .revision)
+        if let token = try? container.decode(String.self, forKey: .revision) {
+            revision = token
+        } else {
+            revision = try container.decodeIfPresent(Int64.self, forKey: .revision).map(String.init)
+        }
+        scope = try container.decodeIfPresent(String.self, forKey: .scope)
         whyNow = try container.decodeIfPresent(String.self, forKey: .whyNow)
         sourceURI = try container.decodeIfPresent(String.self, forKey: .sourceURI)
         coverageRefs = try container.decodeIfPresent([String].self, forKey: .coverageRefs) ?? []
@@ -233,6 +240,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         try container.encodeIfPresent(topicKey, forKey: .topicKey)
         try container.encodeIfPresent(originRef, forKey: .originRef)
         try container.encodeIfPresent(revision, forKey: .revision)
+        try container.encodeIfPresent(scope, forKey: .scope)
         try container.encodeIfPresent(whyNow, forKey: .whyNow)
         try container.encodeIfPresent(sourceURI, forKey: .sourceURI)
         if !coverageRefs.isEmpty { try container.encode(coverageRefs, forKey: .coverageRefs) }

@@ -50,7 +50,12 @@ App 和 CLI 都依赖 Core。如果 schema 在两处各写一份,agent 改了一
   `job-actions.present` only stages native review. `JobActionsValidation` rejects
   incomplete responses, ambiguous multi-select values and values over 80 graphemes,
   and derives opaque SHA256 revisions from canonical action bytes. These DTOs grant
-  neither CLI event-write authority nor task-execution authority.
+  neither CLI event-write authority nor task-execution authority. Producer `revision`
+  accepts integer or opaque string tokens (missing remains legacy); encoding uses a
+  canonical string. Append-only receipt responses carry that producer token under
+  `revision`, distinct from the native-review SHA256. A prior producer revision's
+  receipt cannot acknowledge a refreshed action, so Approve does not prevent later
+  Done/Dismiss. `scope` preserves the producer's personal/work exclusion signal.
 - **Storage/**:SwiftData 相关。**DeviceID/**:`DeviceIdentifier`。
 
 ## 数据流(关键约束)

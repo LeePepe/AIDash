@@ -75,7 +75,9 @@ public enum JobActionsValidation {
               (action.ref?.utf8.count ?? 0) <= 512,
               (action.url?.utf8.count ?? 0) <= 2048,
               (action.subCategory?.count ?? 0) <= 128,
-              action.controls.count <= 32,
+              action.revision.map({ !$0.isEmpty && $0.count <= 80 }) ?? true,
+              action.controls.count <= (action.revision == nil ? 32 : 31),
+              !action.controls.contains(where: { $0.id == "revision" }),
               !action.controls.isEmpty || action.url != nil,
               Set(action.controls.map(\.id)).count == action.controls.count else {
             throw failure("invalid-response")
@@ -109,7 +111,14 @@ public enum JobActionsValidation {
         return try SHA256.hash(data: encoder.encode(action)).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Only exact job/action receipts with decodable response JSON can acknowledge an entry.
+    /// Producer revisions travel inside the existing append-only response envelope, independently
+    /// of the SHA256 native-review revision (which covers the complete action bytes).
+    public static func receiptResponses(_ responses: [JobActionsResponse], revision: String?) -> [JobActionsResponse] {
+        guard let revision else { return responses }
+        return responses.filter { $0.controlID != "revision" } + [.init(controlID: "revision", value: revision)]
+    }
+
+    /// Only exact job/action/revision receipts with decodable response JSON acknowledge an entry.
     public static func acknowledgement(
         in events: [UserEvent], for action: JobActionsAction, registeredJobIDs: Set<String>
     ) -> UserEvent? {
@@ -122,6 +131,8 @@ public enum JobActionsValidation {
                   let responses = try? JSONDecoder().decode(
                     [JobActionsResponse].self, from: Data(ref[ref.index(after: separator)...].utf8)
                   ) else { return false }
+            if let revision = action.revision,
+               responses.first(where: { $0.controlID == "revision" })?.value != revision { return false }
             return !responses.isEmpty && responses.count <= 32
                 && Set(responses.map(\.controlID)).count == responses.count
                 && responses.allSatisfy { validID($0.controlID) && $0.value.count <= 80 }
