@@ -7,7 +7,8 @@ import AIDashCore
 /// Reads only registered actions.jsonl files. No telemetry, launchctl, precheck or source mutations.
 @MainActor
 enum JobActionsSources {
-    static let maximumFileBytes = 256 * 1024
+    static let maximumFileBytes = 8 * 1024 * 1024
+    static let maximumRetainedActions = 512
     typealias ReadFile = (URL, Int) throws -> Data
 
     static func load(home: URL, jobs: [ScheduledJobDefinition], read: ReadFile) -> JobActionsSourceSnapshot {
@@ -17,11 +18,7 @@ enum JobActionsSources {
         for job in jobs {
             do {
                 let url = root.appendingPathComponent(job.id.rawValue).appendingPathComponent("actions.jsonl")
-                let data = try read(url, maximumFileBytes + 1)
-                guard data.count <= maximumFileBytes else {
-                    diagnostics.append(.init(code: "source-oversized", jobID: job.id.rawValue))
-                    continue
-                }
+                let data = try read(url, maximumFileBytes)
                 actions += try decode(data, jobID: job.id.rawValue)
             } catch {
                 let code: String
@@ -40,11 +37,9 @@ enum JobActionsSources {
         return JobActionsSourceSnapshot(actions: actions, diagnostics: diagnostics)
     }
 
-    /// Throws a safe validation error for invalid UTF-8, duplicate IDs, wrong jobs or invalid declarations.
+    /// Decodes valid lines independently and retains protected high-priority actions when bounded.
     static func decode(_ data: Data, jobID: String) throws -> [JobActionsAction] {
         guard let text = String(data: data, encoding: .utf8) else { throw invalidSource() }
-        let lines = text.split(whereSeparator: \.isNewline)
-        guard lines.count <= 128 else { throw invalidSource() }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
@@ -56,14 +51,34 @@ enum JobActionsSources {
             }
             return date
         }
-        let actions = try lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.map { line in
-            let action = try decoder.decode(JobActionsAction.self, from: Data(line.utf8))
-            guard action.jobID == jobID else { throw invalidSource() }
-            try JobActionsValidation.validateAction(action)
-            return action
+        var actions: [JobActionsAction] = []
+        var seenIDs = Set<String>()
+        for line in text.split(whereSeparator: \.isNewline) where !line.trimmingCharacters(in: .whitespaces).isEmpty {
+            guard let action = try? decoder.decode(JobActionsAction.self, from: Data(line.utf8)),
+                  action.jobID == jobID,
+                  (try? JobActionsValidation.validateAction(action)) != nil,
+                  seenIDs.insert(action.id).inserted else { continue }
+            actions.append(action)
         }
-        guard Set(actions.map(\.id)).count == actions.count else { throw invalidSource() }
-        return actions
+        return retain(actions)
+    }
+
+    private static func retain(_ actions: [JobActionsAction]) -> [JobActionsAction] {
+        guard actions.count > maximumRetainedActions else { return actions }
+        let protected = actions.filter(isProtected)
+        let protectedIDs = Set(protected.map(\.id))
+        let ordinary = actions.filter { !protectedIDs.contains($0.id) }
+        let ordinaryLimit = max(0, maximumRetainedActions - protected.count)
+        let ordinaryIDs = Set(ordinary.prefix(ordinaryLimit).map(\.id))
+        return actions.filter { protectedIDs.contains($0.id) || ordinaryIDs.contains($0.id) }
+    }
+
+    private static func isProtected(_ action: JobActionsAction) -> Bool {
+        let haystack = [action.id, action.title, action.ref ?? "", action.subCategory ?? ""]
+            .joined(separator: " ")
+            .uppercased()
+        return action.priority?.uppercased() == "P0"
+            || ["PR_POP_GATE", "PR_DECISION", "EVAL_WORTHY", "BUG_BLOCKER"].contains(where: haystack.contains)
     }
 
     static func production() -> JobActionsSourceSnapshot {

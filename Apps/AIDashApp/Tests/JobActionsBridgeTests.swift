@@ -238,7 +238,52 @@ struct JobActionsAppBridgeTests {
             return Data(repeating: 32, count: limit)
         }
         #expect(snapshot.actions.count == 1)
-        #expect(snapshot.diagnostics.map(\.code) == ["source-missing", "source-oversized"])
+        #expect(snapshot.diagnostics.map(\.code) == ["source-missing"])
+    }
+
+    @Test("Large JSONL retains protected v2 actions beyond the legacy line and byte limits")
+    func largeJSONLRetention() throws {
+        let ordinary = (0..<700).map { index in
+            JobActionsAction(
+                id: "ordinary-\(index)", jobID: "my-pr-supervisor", title: "Routine \(index)",
+                descriptionMd: "Routine", priority: "P2",
+                controls: [.init(id: "confirm", kind: .confirm, title: "Confirm")]
+            )
+        }
+        let protected = JobActionsAction(
+            id: "D617", jobID: "my-pr-supervisor", title: "PR decision", descriptionMd: "Important",
+            priority: "P1", subCategory: "PR_DECISION",
+            controls: [.init(id: "decision", kind: .singleSelect, title: "Choose", options: ["Approve", "Dismiss"])]
+        )
+        let text = (ordinary + [protected]).compactMap { try? String(decoding: JSONEncoder().encode($0), as: UTF8.self) }.joined(separator: "\n")
+        let decoded = try JobActionsSources.decode(Data(text.utf8), jobID: "my-pr-supervisor")
+        #expect(decoded.contains { $0.id == "D617" })
+        #expect(decoded.count <= JobActionsSources.maximumRetainedActions)
+    }
+
+    @Test("Live improvement loader aggregates all scheduled jobs and hides non-worthy previews")
+    func aggregateActionSources() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-actions-\(UUID().uuidString)")
+        let root = home.appendingPathComponent("Library/Application Support/AIDash/jobs", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let actions: [(String, JobActionsAction)] = [
+            ("aidata-digest", .init(id: "linear-1", jobID: "aidata-digest", title: "Linear", descriptionMd: "Linear", source: "Linear", controls: [.init(id: "confirm", kind: .confirm, title: "Confirm")])),
+            ("my-pr-supervisor", .init(
+                id: "pr-1", jobID: "my-pr-supervisor", title: "PR", descriptionMd: "PR", source: "PR & CI",
+                subCategory: "PR_DECISION",
+                controls: [.init(id: "decision", kind: .singleSelect, title: "Choose", options: ["Approve", "Dismiss"])]
+            )),
+            ("pr-auto-review", .init(id: "noise", jobID: "pr-auto-review", title: "Calibration", descriptionMd: "Noise", subCategory: "EVAL_NOT_WORTHY_PREVIEW", worthExtracting: false, controls: [.init(id: "confirm", kind: .confirm, title: "Confirm")])),
+        ]
+        for (job, action) in actions {
+            let directory = root.appendingPathComponent(job, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(action).write(to: directory.appendingPathComponent("actions.jsonl"))
+        }
+        let items = LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: home)
+        #expect(items.map(\.id).contains("linear-1"))
+        #expect(items.map(\.id).contains("pr-1"))
+        #expect(!items.map(\.id).contains("noise"))
     }
 
     @Test("Actual existing UserEvent save and encoding are exercised only in memory")

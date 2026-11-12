@@ -158,63 +158,41 @@ public struct ActionItemsCardView: View {
     }
 
     private func statusTintColor(for status: DashboardActionStatus) -> Color {
-        switch status {
-        case .triage: return .purple
-        case .blocked: return .red
-        case .inProgress: return .blue
-        case .done: return .green
-        }
+        DashboardSemanticColorPalette.color(for: status.health)
     }
 
     private func actionItemRow(_ item: DashboardActionItem) -> some View {
         let priorityColor = DashboardSemanticColorPalette.color(for: item.priority.health)
         let statusColor = statusTintColor(for: item.status)
-        let effectiveExpandedID = expandedActionID ?? store.filteredActionItems.first(where: { !$0.isCompleted })?.id
-        let isExpanded = effectiveExpandedID == item.id
+        let isExpanded = expandedActionID == item.id
+        let requiresChoice = !item.targetOptions.isEmpty || item.decisionOptions.count > 1
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
-                Toggle(
-                    isOn: Binding(
-                        get: { item.isCompleted },
-                        set: { _ in store.toggleActionItem(id: item.id, onToggleDone: onToggleDone) }
-                    )
-                ) {
-                    EmptyView()
+            HStack(alignment: .top, spacing: 8) {
+                Button {
+                    store.toggleActionItem(id: item.id, onToggleDone: onToggleDone)
+                } label: {
+                    Image(systemName: item.status.symbolName)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                        .frame(width: 24, height: 24)
                 }
-                .toggleStyle(.checkbox)
-                .frame(minWidth: 28, minHeight: 28)
+                .buttonStyle(.plain)
                 .accessibilityLabel(DashboardL10n.format("dashboard.actions.mark_completed_format", "Mark %@ as completed", item.title))
 
-                Button {
-                    let toggleBlock = { expandedActionID = isExpanded ? "__none__" : item.id }
-                    if reduceMotion { toggleBlock() } else {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { toggleBlock() }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(item.priority.label)
-                            .font(.caption2.weight(.bold)).monospacedDigit().padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(priorityColor.opacity(0.16), in: Capsule()).foregroundStyle(priorityColor)
-                        Label(item.status.displayTitle, systemImage: item.status.symbolName)
-                            .font(.caption2.weight(.semibold))
+                            .font(.caption2.weight(.bold))
+                            .monospacedDigit()
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(statusColor.opacity(0.14), in: Capsule())
-                            .foregroundStyle(statusColor)
-                        Label(item.sourceTag, systemImage: item.sourceSymbolName)
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.12), in: Capsule())
-                            .foregroundStyle(.secondary)
-                        Label(item.projectFolderName, systemImage: "folder")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.12), in: Capsule())
-                            .foregroundStyle(Color.accentColor)
-                        Text(item.title).font(.body.weight(.medium)).strikethrough(item.isCompleted)
-                            .foregroundStyle(item.isCompleted ? .secondary : .primary).lineLimit(1)
+                            .background(priorityColor.opacity(0.16), in: Capsule())
+                            .foregroundStyle(priorityColor)
+                        Text(item.title)
+                            .font(.body.weight(.semibold))
+                            .strikethrough(item.isCompleted)
+                            .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                            .lineLimit(1)
                         if let refLabel = item.displayRefLabel, !item.title.contains(refLabel) {
                             Text(refLabel)
                                 .font(.caption2.monospaced())
@@ -222,19 +200,26 @@ public struct ActionItemsCardView: View {
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 6)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        actionQuickButtons(item, requiresChoice: requiresChoice)
                     }
-                    .contentShape(Rectangle())
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(item.summary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 6)
+                        Text("\(item.sourceTag) · \(item.projectFolderName)")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
-                .buttonStyle(.plain)
-
-                actionRowAccessoryButtons(item)
             }
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(item.summary)
-                        .font(.callout)
+                        .font(.body)
                         .lineSpacing(2)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
@@ -249,12 +234,63 @@ public struct ActionItemsCardView: View {
                     if !item.isCompleted {
                         actionInlineDecisionBar(item)
                     }
+                    actionRowAccessoryButtons(item)
                 }
-                .padding(.leading, 38)
+                .padding(.leading, 32)
             }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    @ViewBuilder
+    private func actionQuickButtons(_ item: DashboardActionItem, requiresChoice: Bool) -> some View {
+        if requiresChoice {
+            Button {
+                toggleExpanded(item.id)
+            } label: {
+                Label(
+                    DashboardL10n.format("dashboard.actions.choose_handling_format", "选择处理 (%lld)", item.decisionOptions.count),
+                    systemImage: expandedActionID == item.id ? "chevron.up" : "chevron.down"
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(minHeight: 28)
+        } else {
+            Button {
+                let decision = item.status == .inProgress ? "Done" : "Approve"
+                store.submitActionItemDecision(item, decision: decision, onToggleDone: onToggleDone)
+            } label: {
+                Label(
+                    item.status == .inProgress
+                        ? DashboardL10n.tr("dashboard.actions.done", "Done")
+                        : DashboardL10n.tr("dashboard.actions.approve", "Approve"),
+                    systemImage: "checkmark"
+                )
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .frame(minHeight: 28)
+            Button {
+                toggleExpanded(item.id)
+            } label: {
+                Label(
+                    DashboardL10n.tr("dashboard.actions.add_note", "+ 备注"),
+                    systemImage: expandedActionID == item.id ? "chevron.up" : "chevron.down"
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(minHeight: 28)
+        }
+    }
+
+    private func toggleExpanded(_ id: String) {
+        let update = { expandedActionID = expandedActionID == id ? nil : id }
+        if reduceMotion { update() } else {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { update() }
+        }
     }
 
     @ViewBuilder

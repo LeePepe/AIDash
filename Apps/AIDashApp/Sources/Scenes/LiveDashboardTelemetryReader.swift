@@ -3,6 +3,7 @@
 import Darwin
 import Foundation
 import SQLite3
+import AIDashCore
 
 public struct RealQuotaSnapshot: Sendable, Equatable {
     public let claudeSevenDayUsedFraction: Double?
@@ -1702,11 +1703,19 @@ extension LiveDashboardTelemetryReader {
     ) -> [DashboardActionItem] {
         guard isLiveEnvironment || homeURL != nil else { return [] }
         let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
-        let actionsURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/actions.jsonl")
-        let canonicalItems = parseUnifiedActionItems(
-            fromURL: actionsURL,
-            acknowledgedActionIDs: acknowledgedActionIDs
-        )
+        let sources = JobActionsSources.load(
+            home: home,
+            jobs: ScheduledPulseRegistry.liveJobs
+        ) { url, limit in
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular else {
+                throw CocoaError(.fileReadUnsupportedScheme)
+            }
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            return try handle.read(upToCount: limit) ?? Data()
+        }
+        let canonicalItems = mapJobActions(sources.actions, acknowledgedActionIDs: acknowledgedActionIDs)
         if !canonicalItems.isEmpty {
             return canonicalItems
         }
@@ -1723,7 +1732,17 @@ extension LiveDashboardTelemetryReader {
               let decoded = try? JobActionsSources.decode(data, jobID: "aidata-digest") else {
             return []
         }
-        return decoded.map { action in
+        return mapJobActions(decoded, acknowledgedActionIDs: acknowledgedActionIDs)
+    }
+
+    private static func mapJobActions(
+        _ actions: [JobActionsAction],
+        acknowledgedActionIDs: Set<String>
+    ) -> [DashboardActionItem] {
+        actions.compactMap { action in
+            let isPreviewNoise = action.subCategory?.uppercased() == "EVAL_NOT_WORTHY_PREVIEW"
+                && action.worthExtracting == false
+            guard !isPreviewNoise else { return nil }
             let ackKey = "\(action.jobID):\(action.id)"
             let isAck = acknowledgedActionIDs.contains(ackKey)
             let status = DashboardActionStatus.from(rawStatus: action.status, isCompleted: isAck)

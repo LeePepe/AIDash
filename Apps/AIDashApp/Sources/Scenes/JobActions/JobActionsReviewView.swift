@@ -27,19 +27,23 @@ struct JobActionsReviewView: View {
                         HStack(spacing: 6) {
                             Text(verbatim: jobLabel).font(.caption).foregroundStyle(.secondary)
                             if let priority = review.action.priority, !priority.isEmpty {
+                                let priorityHealth = DashboardActionPriority.from(rawPriority: priority).health
                                 Text(verbatim: priority)
                                     .font(.caption2.weight(.bold))
                                     .monospacedDigit()
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(theme.neutrals.card, in: Capsule())
+                                    .background(DashboardSemanticColorPalette.color(for: priorityHealth).opacity(0.16), in: Capsule())
+                                    .foregroundStyle(DashboardSemanticColorPalette.color(for: priorityHealth))
                             }
                             if let status = review.action.status, !status.isEmpty {
+                                let statusHealth = DashboardActionStatus.from(rawStatus: status).health
                                 Text(verbatim: status)
                                     .font(.caption2.weight(.semibold))
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(theme.neutrals.card, in: Capsule())
+                                    .background(DashboardSemanticColorPalette.color(for: statusHealth).opacity(0.14), in: Capsule())
+                                    .foregroundStyle(DashboardSemanticColorPalette.color(for: statusHealth))
                             }
                             if let source = review.action.source, !source.isEmpty {
                                 Text(verbatim: source)
@@ -57,6 +61,19 @@ struct JobActionsReviewView: View {
                             .font(.body)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
+                        if let url = URLPolicy.validate(review.action.url) {
+                            Button {
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                Label(
+                                    DashboardL10n.tr("dashboard.actions.open_link", "Open Link"),
+                                    systemImage: "arrow.up.right.square"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .frame(minHeight: 28)
+                        }
                     }
                     ForEach(review.action.controls) { control in
                         VStack(alignment: .leading, spacing: Space.gap) {
