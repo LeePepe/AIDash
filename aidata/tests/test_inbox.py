@@ -222,8 +222,11 @@ def test_old_cron_log_line_is_not_actionable(tmp_path):
 
 @pytest.mark.unit
 def test_recent_embedded_cron_timestamp_is_actionable(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     log = tmp_path / "cron-errors.log"
-    log.write_text("2026-11-05T04:00:00Z — recent failure\n", encoding="utf-8")
+    log.write_text(f"{recent_iso} — recent failure\n", encoding="utf-8")
     old = time.time() - 8 * 24 * 60 * 60
     os.utime(log, (old, old))
     assert "recent failure" in inbox_mod._default_log_reader(log)
@@ -290,6 +293,7 @@ def test_mail_and_work_watch_signals_surface_in_build_inbox(tmp_path, monkeypatc
         log_reader=_no_logs,
         mail_db_path=mail_db,
         teams_db_path=teams_db,
+        personal_only=False,
     )
     refs = [it.ref for it in items]
     titles = " | ".join(it.title for it in items)
@@ -329,3 +333,50 @@ def test_inbox_surfaces_skill_roi_proposals_and_retro_signals(monkeypatch):
         ]
     )
     assert props[0].ref == "skill-roi://my-designer"
+
+
+@pytest.mark.unit
+def test_personal_only_filter_strips_bing_flightbook_and_maps_learning_four_domains(monkeypatch):
+    monkeypatch.setattr(
+        inbox_mod.serve,
+        "run_query",
+        lambda name, params=None: (
+            [
+                ("TIA-10", "[Bing] Work search pipeline", "todo", "high"),
+                ("TIA-11", "[FlightBook] Work travel bot", "blocked", "high"),
+                ("TIA-12", "Personal AIDash 4-domain UI", "in_progress", "medium"),
+            ],
+            ["identifier", "title", "status", "priority"],
+        )
+        if name == "inbox/pending-issues"
+        else ([], []),
+    )
+    learning_prop = Proposal(
+        "learning-jp-mixed-script-line-breaking",
+        "2026-11-12T00:00:00Z",
+        "knowledge-digest",
+        "日文/CJK 与拉丁文混排中，字体回退与行首行末禁则如何共同避免断行错误？",
+        "为什么现在学：repos/awesome-cjk-design-md · 来源依据：https://github.com/kzhrknt/awesome-design-md-jp",
+        "medium",
+        "pending",
+        ref="learning-topic://jp-mixed-script-line-breaking",
+        source="Learning",
+        scope="personal",
+        topic_key="jp-mixed-script-line-breaking",
+    )
+    items = build_inbox(0.0, proposals_reader=lambda: [learning_prop], log_reader=_no_logs)
+    titles = " | ".join(it.title for it in items)
+    assert "[Bing]" not in titles
+    assert "[FlightBook]" not in titles
+    assert "Personal AIDash 4-domain UI" in titles
+    assert any(it.source == "Learning" and it.bucket == "待决策" for it in items)
+
+    actions = inbox_mod.build_job_actions(items, proposals_path=None)
+    by_id = {a["id"]: a for a in actions}
+    assert "learning-jp-mixed-script-line-breaking" in by_id
+    l_act = by_id["learning-jp-mixed-script-line-breaking"]
+    assert l_act["source"] == "Learning"
+    assert l_act["domain"] == "decisions"
+    assert l_act["status"] == "triage"
+    assert l_act["controls"][0]["options"] == ["Approve", "Snooze 7d", "Done", "Dismiss"]
+    assert by_id["linear-TIA-12"]["domain"] == "planned"

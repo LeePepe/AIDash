@@ -217,6 +217,8 @@ GITHUB_PR_REPOS: tuple[str, ...] = ()
 # Repositories sampled for Actions runs, governance, and release delivery.
 # Keep the tracked default public and identity-free; a local override may
 # replace this tuple with the operator's current monitoring set.
+# Tracked defaults stay identity-free. Deployment operators may set the
+# personal allowlist in ignored config_local.py.
 GITHUB_CI_REPOS: tuple[str, ...] = ()
 
 # ---------------------------------------------------------------------------
@@ -412,6 +414,7 @@ def clean_path(source: str) -> Path:
 # is human-facing state, not telemetry. One JSON object per line; see
 # L5_apps/digest/proposals.py for the schema.
 PROPOSALS_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "proposals.jsonl"
+LEARNING_QUEUE_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "learning_queue.jsonl"
 
 
 # ---------------------------------------------------------------------------

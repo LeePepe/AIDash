@@ -47,10 +47,11 @@ def _skill_calls(tool_calls: Any, timestamp: Any) -> list[dict[str, Any]]:
     for call in calls:
         if not isinstance(call, dict):
             continue
-        function = call.get("function")
-        if not isinstance(function, dict) or function.get("name") != "skill_view":
+        function = call.get("function") if isinstance(call.get("function"), dict) else call
+        fn_name = str(function.get("name") or "").strip()
+        if fn_name not in {"skill_view", "skill", "Skill"}:
             continue
-        arguments = function.get("arguments")
+        arguments = function.get("arguments") or function.get("input")
         if isinstance(arguments, str):
             try:
                 arguments = json.loads(arguments)
@@ -58,7 +59,7 @@ def _skill_calls(tool_calls: Any, timestamp: Any) -> list[dict[str, Any]]:
                 continue
         if not isinstance(arguments, dict):
             continue
-        skill = arguments.get("name")
+        skill = arguments.get("name") or arguments.get("skill")
         if not isinstance(skill, str) or not skill:
             continue
         call_id = call.get("call_id") or call.get("id")
@@ -74,7 +75,10 @@ def collect() -> int:
         return 0
 
     tool_watermark = float(get_watermark(SOURCE) or 0)
-    tool_rows = query_ro(HERMES_STATE_DB, _TOOL_SELECT, (tool_watermark,))
+    try:
+        tool_rows = query_ro(HERMES_STATE_DB, _TOOL_SELECT, (tool_watermark,))
+    except Exception:  # noqa: BLE001
+        tool_rows = []
     if tool_rows:
         tool_written = write_raw(SOURCE, tool_rows)
         set_watermark(SOURCE, max(float(row["timestamp"]) for row in tool_rows))
@@ -82,7 +86,10 @@ def collect() -> int:
         tool_written = 0
 
     skill_watermark = float(get_watermark(SKILL_SOURCE) or 0)
-    skill_rows = query_ro(HERMES_STATE_DB, _SKILL_SELECT, (skill_watermark,))
+    try:
+        skill_rows = query_ro(HERMES_STATE_DB, _SKILL_SELECT, (skill_watermark,))
+    except Exception:  # noqa: BLE001
+        skill_rows = []
     records: list[dict[str, Any]] = []
     for row in skill_rows:
         records.extend(_skill_calls(row.get("tool_calls"), row.get("timestamp")))

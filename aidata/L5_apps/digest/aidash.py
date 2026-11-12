@@ -2057,6 +2057,24 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
                                       report_date=report_date)]
     containers.append(_default_plan_container(
         mmdd, sections, getattr(sources, "action_inbox", None)))
+    skills_container = _skills_roi_container(
+        mmdd, getattr(sources, "skill_roi", None)
+    )
+    if skills_container is not None:
+        containers.append(skills_container)
+    retro_container = _retro_ops_container(
+        mmdd,
+        getattr(sources, "retro_ops", None),
+        getattr(sources, "multica", None),
+        getattr(sources, "ai_efficiency", None),
+    )
+    if retro_container is not None:
+        containers.append(retro_container)
+    pg_container = _product_growth_container(
+        mmdd, getattr(sources, "product_growth", None)
+    )
+    if pg_container is not None:
+        containers.append(pg_container)
     return Briefing(reported_day, GENERATED_BY, tuple(containers))
 
 

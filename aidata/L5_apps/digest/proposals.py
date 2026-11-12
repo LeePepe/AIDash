@@ -50,6 +50,17 @@ class Proposal:
     stack_top_symbol: str = ""
     recommended_layer: str = ""
     verify_cmd: str = ""
+    source: str = ""
+    scope: str = "personal"
+    topic_key: str = ""
+    source_uri: str = ""
+    why_now: str = ""
+    coverage_refs: tuple[str, ...] = ()
+    learning_state: str = ""
+    revision: int = 1
+    next_eligible_at: str = ""
+    origin_ref: str = ""
+    external_id: str = ""
 
 
 def _coerce(obj: dict) -> Proposal | None:
@@ -79,6 +90,25 @@ def _coerce(obj: dict) -> Proposal | None:
     stack_top_symbol = str(obj.get("stack_top_symbol", "") or "").strip()
     recommended_layer = str(obj.get("recommended_layer", "") or "").strip()
     verify_cmd = str(obj.get("verify_cmd", "") or "").strip()
+    source = str(obj.get("source", "") or "").strip()
+    scope = str(obj.get("scope", "personal") or "personal").strip()
+    topic_key = str(obj.get("topic_key", "") or "").strip()
+    source_uri = str(obj.get("source_uri", "") or "").strip()
+    why_now = str(obj.get("why_now", "") or "").strip()
+    raw_cov = obj.get("coverage_refs")
+    coverage_refs = (
+        tuple(str(x).strip() for x in raw_cov if str(x).strip())
+        if isinstance(raw_cov, (list, tuple))
+        else ()
+    )
+    learning_state = str(obj.get("learning_state", "") or "").strip().lower()
+    try:
+        revision = int(obj.get("revision") or 1)
+    except (TypeError, ValueError):
+        revision = 1
+    next_eligible_at = str(obj.get("next_eligible_at", "") or "").strip()
+    origin_ref = str(obj.get("origin_ref", "") or "").strip()
+    external_id = str(obj.get("external_id", "") or "").strip()
     return Proposal(
         id=pid,
         ts=ts,
@@ -94,24 +124,30 @@ def _coerce(obj: dict) -> Proposal | None:
         stack_top_symbol=stack_top_symbol,
         recommended_layer=recommended_layer,
         verify_cmd=verify_cmd,
+        source=source,
+        scope=scope,
+        topic_key=topic_key,
+        source_uri=source_uri,
+        why_now=why_now,
+        coverage_refs=coverage_refs,
+        learning_state=learning_state,
+        revision=revision,
+        next_eligible_at=next_eligible_at,
+        origin_ref=origin_ref,
+        external_id=external_id,
     )
 
 
-def read_pending(path: Path | None = None) -> list[Proposal]:
-    """Return pending proposals (append-only JSONL), newest last.
-
-    Missing file → []. Malformed lines are skipped. De-dupes by id keeping the
-    LAST occurrence, so an agent re-appending the same id with an updated status
-    (e.g. pending → approved) correctly drops it from the pending set.
-    """
+def read_all_latest(path: Path | None = None) -> dict[str, Proposal]:
+    """Return latest valid Proposal per id across all statuses."""
     p = path or PROPOSALS_PATH
     if not p.exists():
-        return []
+        return {}
     by_id: dict[str, Proposal] = {}
     try:
         text = p.read_text(encoding="utf-8")
     except OSError:
-        return []
+        return {}
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -124,5 +160,21 @@ def read_pending(path: Path | None = None) -> list[Proposal]:
             continue
         prop = _coerce(obj)
         if prop is not None:
-            by_id[prop.id] = prop   # last occurrence wins
-    return [p for p in by_id.values() if p.status == "pending"]
+            by_id[prop.id] = prop
+    return by_id
+
+
+def read_pending(path: Path | None = None) -> list[Proposal]:
+    """Return pending proposals (append-only JSONL), newest last.
+
+    Missing file → []. Malformed lines are skipped. De-dupes by id keeping the
+    LAST occurrence, so an agent re-appending the same id with an updated status
+    (e.g. pending → approved) correctly drops it from the pending set.
+    """
+    by_id = read_all_latest(path)
+    return [
+        p
+        for p in by_id.values()
+        if p.status == "pending"
+        and p.learning_state not in {"snoozed", "dismissed", "learned", "approved", "exploring"}
+    ]

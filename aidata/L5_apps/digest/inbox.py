@@ -54,6 +54,22 @@ _ISO_TIMESTAMP = re.compile(
     r"\b20\d{2}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?\b"
 )
 _TIA_ISSUE_REF = re.compile(r"^(?:linear://)?(TIA-\d+)$", re.IGNORECASE)
+_WORK_ITEM_PATTERNS = re.compile(
+    r"(?:\[bing\]|\[flightbook\]|\bmsft\.ghe\.com\b|\bado\s*提醒\b|\bwork_teams_bridge\b|\bteams\s*@我\b|\bteams\s*待回\b)",
+    re.IGNORECASE,
+)
+
+
+def _is_personal_inbox_item(item: "InboxItem") -> bool:
+    if item.category == "work_watch":
+        return False
+    ref_lower = (item.ref or "").strip().lower()
+    if ref_lower.startswith(("teams:", "mail:", "ado://")):
+        return False
+    text = f"{item.title or ''} {item.description or ''} {item.ref or ''}"
+    if _WORK_ITEM_PATTERNS.search(text):
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -239,17 +255,30 @@ def _proposals(read: Callable[[], list[Proposal]] | None = None) -> list[InboxIt
         return []
     out = []
     for p in pending:
+        if getattr(p, "scope", "personal") not in {"", "personal"}:
+            continue
         prio = p.priority if p.priority in _PRIO_RANK else "high"
         explicit_ref = getattr(p, "ref", "") or ""
         if explicit_ref:
             ref = explicit_ref
-        elif str(p.id).startswith(("proposal://", "knowledge://", "skill-roi://")):
+        elif str(p.id).startswith(("proposal://", "knowledge://", "learning-topic://", "skill-roi://")):
             ref = str(p.id)
+        elif str(p.id).startswith("learning-"):
+            ref = f"learning-topic://{str(p.id).removeprefix('learning-')}"
         else:
             ref = f"proposal://{p.id}"
+        is_learning = (
+            getattr(p, "source", "") == "Learning"
+            or ref.startswith("learning-topic://")
+            or p.agent == "knowledge-digest"
+        )
+        prefix = f"待决策（{p.agent}）：" if not is_learning else ""
         out.append(InboxItem(
-            f"待决策（{p.agent}）：{p.title[:56]}", prio, "待决策",
-            ref, "decision", "Owner GO"))
+            f"{prefix}{p.title[:80]}", prio, "待决策",
+            ref, "decision", "Owner GO",
+            status="triage",
+            source="Learning" if is_learning else "Retro",
+            description=p.detail))
     return out
 
 
@@ -438,6 +467,7 @@ def build_inbox(
     log_reader: Callable[[Path], str] | None = None,
     mail_db_path: Path | None = None,
     teams_db_path: Path | None = None,
+    personal_only: bool = True,
 ) -> list[InboxItem]:
     """Aggregate all buckets → one prioritized, BALANCED inbox list.
 
@@ -461,6 +491,8 @@ def build_inbox(
     raw += _retro_signals()
 
     raw = [item for item in raw if item.fresh]
+    if personal_only:
+        raw = [item for item in raw if _is_personal_inbox_item(item)]
 
     # Apply per-bucket quota, preserving each bucket's internal (urgency) order.
     kept: list[InboxItem] = []
@@ -528,7 +560,7 @@ def _infer_action_status(item: InboxItem, ref: str) -> str:
             return "done"
         if raw_st in {"todo", "in_progress", "in_review"}:
             return "in_progress"
-    if ref.startswith(("proposal://", "knowledge://")) or item.bucket in {"待决策", "发现"} or item.category in {"decision", "discovery", "work_watch", "drift"}:
+    if ref.startswith(("proposal://", "knowledge://", "learning-topic://", "skill-roi://")) or item.bucket in {"待决策", "发现"} or item.category in {"decision", "discovery", "work_watch", "drift"}:
         return "triage"
     if item.category == "blocked" or item.bucket == "卡顿":
         return "blocked"
@@ -537,9 +569,11 @@ def _infer_action_status(item: InboxItem, ref: str) -> str:
 
 def _infer_action_source(item: InboxItem, ref: str) -> str:
     explicit = (item.source or "").strip()
-    if explicit in {"Linear", "GTT Blocker", "Retro", "PR & CI", "Mail & Teams"}:
+    if explicit in {"Linear", "GTT Blocker", "Retro", "PR & CI", "Mail & Teams", "Learning"}:
         return explicit
     title = item.title or ""
+    if ref.startswith("learning-topic://") or (ref.startswith("knowledge://") and "学习" in title):
+        return "Learning"
     if ref.lower().startswith(("linear://", "local://")) or _TIA_ISSUE_REF.fullmatch(ref):
         return "Linear"
     if item.category == "work_watch" or ref.startswith(("teams:", "mail:")):
@@ -548,9 +582,23 @@ def _infer_action_source(item: InboxItem, ref: str) -> str:
         return "GTT Blocker"
     if title.startswith("PR 卡") or "CI 配置噪音" in title or "报错：" in title:
         return "PR & CI"
-    if ref.startswith(("proposal://", "knowledge://")) or item.category in {"decision", "discovery", "drift", "stale"} or item.bucket in {"待决策", "发现"}:
+    if ref.startswith(("proposal://", "knowledge://", "skill-roi://")) or item.category in {"decision", "discovery", "drift", "stale"} or item.bucket in {"待决策", "发现"}:
         return "Retro"
     return "Linear"
+
+
+def _infer_action_domain(item: InboxItem, ref: str, status: str, source: str) -> str:
+    if item.bucket == "待决策" or source == "Learning" or ref.startswith(("learning-topic://", "knowledge://", "proposal://", "skill-roi://")):
+        return "decisions"
+    if item.bucket == "卡顿" or status == "blocked" or source == "GTT Blocker":
+        return "blockers"
+    if item.bucket == "发现" or item.category in {"discovery", "drift", "stale"} or ref == "workspace_hygiene":
+        return "findings"
+    if item.bucket == "计划" or status == "in_progress":
+        return "planned"
+    if status == "triage":
+        return "decisions"
+    return "planned"
 
 
 def _infer_action_priority(raw_priority: str) -> str:
@@ -573,12 +621,19 @@ def _controls_for_inbox_item(
     item: InboxItem,
     sub_items: list[str] | tuple[str, ...] = (),
 ) -> list[dict[str, object]]:
+    ref = (item.ref or "").strip()
+    is_learning = item.source == "Learning" or ref.startswith("learning-topic://")
+    decision_options = (
+        ["Approve", "Snooze 7d", "Done", "Dismiss"]
+        if is_learning
+        else ["Approve", "Done", "Dismiss"]
+    )
     controls: list[dict[str, object]] = [
         {
             "id": "decision",
             "kind": "singleSelect",
             "title": "Action",
-            "options": ["Approve", "Done", "Dismiss"],
+            "options": decision_options,
         }
     ]
     cleaned_targets: list[str] = []
@@ -619,9 +674,16 @@ def build_job_actions(
     proposals_path: Path | None = None,
     provider: TodoSyncProvider | None = None,
     sync_triage: bool = False,
+    personal_only: bool = True,
 ) -> list[dict[str, object]]:
-    """Map unified InboxItems (Linear TIA + proposals + mail/teams + stalls) to ActionableItem Schema v1."""
-    source_items = items if items is not None else build_inbox()
+    """Map unified InboxItems to ActionableItem Schema v1.
+
+    The boundary is repeated here because callers may pass fixture or cached
+    items directly, bypassing ``build_inbox``.
+    """
+    source_items = items if items is not None else build_inbox(personal_only=personal_only)
+    if personal_only:
+        source_items = [item for item in source_items if _is_personal_inbox_item(item)]
     stamp = created_at or (
         datetime.now(timezone.utc)  # noqa: UP017
         .isoformat(timespec="seconds")
@@ -661,6 +723,9 @@ def build_job_actions(
         elif ref.startswith("proposal://"):
             prop_id = ref.removeprefix("proposal://")
             raw_id = f"proposal-{prop_id}"
+        elif ref.startswith("learning-topic://"):
+            topic_key = ref.removeprefix("learning-topic://").strip("/")
+            raw_id = f"learning-{topic_key}"
         elif ref.startswith("knowledge://"):
             slug = ref.removeprefix("knowledge://").strip("/")
             raw_id = f"knowledge-{slug}"
@@ -679,10 +744,11 @@ def build_job_actions(
         title = _clean_action_title(item.title, action_id)
         status = _infer_action_status(item, ref)
         source = _infer_action_source(item, ref)
+        domain = _infer_action_domain(item, ref, status, source)
         priority = _infer_action_priority(item.priority)
 
         prop_key = ref.removeprefix("proposal://") if ref.startswith("proposal://") else ref
-        matched_prop = pending_by_id.get(prop_key)
+        matched_prop = pending_by_id.get(prop_key) or pending_by_id.get(f"learning-{ref.removeprefix('learning-topic://')}")
         clean_desc_parts: list[str] = []
         if item.description and item.description.strip():
             clean_desc_parts.append(item.description.strip())
@@ -723,6 +789,7 @@ def build_job_actions(
                 rc, ext_id = 1, None
             if rc == 0 and ext_id:
                 parsed_ident = active_provider.parse_ref(ext_id) or str(ext_id).strip().upper()
+                orig_ref = ref
                 ref = f"linear://{parsed_ident}"
                 candidate_linear_id = _safe_action_id(f"linear-{parsed_ident}", index)
                 if candidate_linear_id in seen_ids and candidate_linear_id != action_id:
@@ -742,6 +809,9 @@ def build_job_actions(
                             "detail": matched_prop.detail,
                             "priority": matched_prop.priority,
                             "status": "approved",
+                            "learning_state": "transferred" if orig_ref.startswith("learning-topic://") else "",
+                            "origin_ref": orig_ref,
+                            "topic_key": getattr(matched_prop, "topic_key", ""),
                             "source": "aidata",
                             "external_id": parsed_ident,
                             "ref": ref,
@@ -766,6 +836,8 @@ def build_job_actions(
                 "descriptionMd": description,
                 "status": status,
                 "source": source,
+                "domain": domain,
+                "bucket": item.bucket or "待决策",
                 "priority": priority,
                 "ref": effective_ref,
                 "url": url,
@@ -786,6 +858,7 @@ def export_job_actions(
     proposals_path: Path | None = None,
     provider: TodoSyncProvider | None = None,
     sync_triage: bool = False,
+    personal_only: bool = True,
 ) -> Path | None:
     """Atomically write unified actions.jsonl for AIDash job-actions snapshot."""
     import json
@@ -806,6 +879,7 @@ def export_job_actions(
             proposals_path=proposals_path,
             provider=provider,
             sync_triage=sync_triage,
+            personal_only=personal_only,
         )
         target_dir = root / job_id
         target_dir.mkdir(parents=True, exist_ok=True)

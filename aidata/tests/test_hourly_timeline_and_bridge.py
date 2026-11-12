@@ -586,3 +586,108 @@ def test_event_bridge_skill_roi_star_and_done_and_sql_query(tmp_path):
         assert pg_zero.apps[0].crash_free_rate_7d == 0.0
     finally:
         sources._rows = orig_rows
+
+
+@pytest.mark.unit
+def test_event_bridge_learning_topic_star_snooze_approve_done_and_full_writeback(tmp_path):
+    from L5_apps.digest.proposals import read_pending
+
+    proposals = tmp_path / "proposals.jsonl"
+    proposals.write_text(
+        json.dumps(
+            {
+                "id": "learning-jp-mixed-script-line-breaking",
+                "ref": "learning-topic://jp-mixed-script-line-breaking",
+                "origin_ref": "learning-topic://jp-mixed-script-line-breaking",
+                "topic_key": "jp-mixed-script-line-breaking",
+                "source": "Learning",
+                "scope": "personal",
+                "learning_state": "proposed",
+                "revision": 1,
+                "ts": "2026-11-12T00:00:00Z",
+                "agent": "knowledge-digest",
+                "title": "日文/CJK 与拉丁文混排中，字体回退与行首行末禁则如何共同避免断行错误？",
+                "detail": "为什么现在学：repos/awesome-cjk-design-md",
+                "priority": "medium",
+                "status": "pending",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    blog_calls: list[str] = []
+    linear_calls: list[tuple[str, str]] = []
+    status_calls: list[tuple[str, str]] = []
+
+    # 1. Star on learning-topic:// only bookmarks; never triggers blog publish
+    res_star = event_bridge.process_user_events(
+        [{"action": "star", "itemRef": "learning-topic://jp-mixed-script-line-breaking"}],
+        proposals_path=proposals,
+        blog_publish_runner=lambda slug, *_a: blog_calls.append(slug) or 0,
+    )
+    assert res_star["bookmarked"] == 1
+    assert res_star["blog_published"] == 0
+    assert blog_calls == []
+    assert len(read_pending(proposals)) == 1
+
+    # 2. Snooze 7d via acknowledgeJobAction removes from pending and sets next_eligible_at
+    cursor = tmp_path / "cursor.json"
+    res_snooze = event_bridge.process_user_events(
+        [
+            {
+                "id": "evt-snooze-1",
+                "action": "acknowledgeJobAction",
+                "cardType": "scheduledPulse",
+                "cardId": "scheduled-pulse/aidata-digest",
+                "itemRef": 'aidata-digest:learning-jp-mixed-script-line-breaking|[{"controlID":"decision","value":"Snooze 7d"},{"controlID":"note","value":"下周再看"}]',
+            }
+        ],
+        proposals_path=proposals,
+        cursor_path=cursor,
+    )
+    assert res_snooze["snoozed"] == 1
+    assert read_pending(proposals) == []
+    lines = [json.loads(ln) for ln in proposals.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines[-1]["learning_state"] == "snoozed"
+    assert lines[-1]["next_eligible_at"]
+    assert lines[-1]["agent"] == "knowledge-digest"
+    assert lines[-1]["title"]
+
+    # 3. Approve followed by Done on the same topic (different UserEvent id) is not swallowed
+    res_approve = event_bridge.process_user_events(
+        [
+            {
+                "id": "evt-approve-2",
+                "action": "acknowledgeJobAction",
+                "cardType": "scheduledPulse",
+                "cardId": "scheduled-pulse/aidata-digest",
+                "itemRef": 'aidata-digest:learning-jp-mixed-script-line-breaking|[{"controlID":"decision","value":"Approve"}]',
+            }
+        ],
+        proposals_path=proposals,
+        cursor_path=cursor,
+        linear_runner=lambda t, d: linear_calls.append((t, d)) or (0, "TIA-360"),
+        linear_status_runner=lambda i, s: status_calls.append((i, s)) or 0,
+    )
+    assert res_approve["promoted"] == 1
+    assert ("TIA-360", "Todo") in status_calls
+
+    res_done = event_bridge.process_user_events(
+        [
+            {
+                "id": "evt-done-3",
+                "action": "acknowledgeJobAction",
+                "cardType": "scheduledPulse",
+                "cardId": "scheduled-pulse/aidata-digest",
+                "itemRef": 'aidata-digest:learning-jp-mixed-script-line-breaking|[{"controlID":"decision","value":"Done"}]',
+            }
+        ],
+        proposals_path=proposals,
+        cursor_path=cursor,
+    )
+    assert res_done["resolved"] == 1
+    final_lines = [json.loads(ln) for ln in proposals.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert final_lines[-1]["learning_state"] == "learned"
+    assert final_lines[-1]["outcome"] == "owner_reported"

@@ -229,6 +229,7 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
         job_id="aidata-digest",
         created_at="2026-11-11T08:00:00Z",
         proposals_path=proposals,
+        personal_only=False,
     )
     assert exported is not None and exported.is_file()
     assert (jobs_root / "my-pr-supervisor" / "actions.jsonl").is_file()
@@ -547,6 +548,7 @@ def test_cross_device_actionable_item_schema_and_approve_done_dismiss_flows(
         job_id="aidata-digest",
         created_at="2026-11-11T16:00:00Z",
         proposals_path=proposals,
+        personal_only=False,
     )
     assert len(actions) == 3
 

@@ -54,17 +54,17 @@ def collect() -> int:
         batch: list[dict[str, Any]] = []
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             fh.seek(start)
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                # Only keep assistant lines (the ones carrying usage) — keeps raw lean.
-                if obj.get("type") == "assistant":
-                    batch.append(_slim(obj))
+        for idx, line in enumerate(fh, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            # Only keep assistant lines (the ones carrying usage) — keeps raw lean.
+            if obj.get("type") == "assistant":
+                batch.append(_slim(obj, fallback_uuid=f"{path.stem}:{start}:{idx}"))
             new_offsets[key] = fh.tell()
         if batch:
             total += write_raw(SOURCE, batch)
@@ -74,7 +74,7 @@ def collect() -> int:
     return total
 
 
-def _slim(obj: dict[str, Any]) -> dict[str, Any]:
+def _slim(obj: dict[str, Any], fallback_uuid: str | None = None) -> dict[str, Any]:
     """Keep only fields we need — drop bulky message content bodies."""
     msg = obj.get("message") or {}
     usage = msg.get("usage") or {}
@@ -86,12 +86,12 @@ def _slim(obj: dict[str, Any]) -> dict[str, Any]:
     for block in msg.get("content") or []:
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
-        if block.get("name") != "Skill":
+        if block.get("name") not in {"Skill", "skill"}:
             continue
         tool_input = block.get("input")
         if not isinstance(tool_input, dict):
             continue
-        skill = tool_input.get("skill")
+        skill = tool_input.get("skill") or tool_input.get("name")
         if not isinstance(skill, str):
             continue
         # Keep the named skill only; discard all other tool-input fields and
@@ -103,8 +103,9 @@ def _slim(obj: dict[str, Any]) -> dict[str, Any]:
     # message; it is rare in practice. Capture wherever present, but never
     # confuse it with camelCase sessionId (the current session / join key).
     lineage = obj.get("session_id") or msg.get("session_id")
+    attr_skill = obj.get("attributionSkill") or (skill_names[0] if skill_names else None)
     return {
-        "uuid": obj.get("uuid"),
+        "uuid": obj.get("uuid") or msg.get("id") or fallback_uuid,
         "sessionId": obj.get("sessionId"),          # current session (join key)
         "session_id_lineage": lineage,               # parent (do NOT join on this)
         "timestamp": obj.get("timestamp"),
@@ -113,7 +114,7 @@ def _slim(obj: dict[str, Any]) -> dict[str, Any]:
         "role": msg.get("role"),
         "model": msg.get("model"),
         "stop_reason": msg.get("stop_reason"),       # finish_reason: end_turn/tool_use/max_tokens
-        "attributionSkill": obj.get("attributionSkill"),
+        "attributionSkill": attr_skill,
         "usage": {
             "input_tokens": usage.get("input_tokens"),
             "output_tokens": usage.get("output_tokens"),
@@ -155,15 +156,14 @@ def normalize() -> int:
     # with fields the old parser dropped (e.g. stop_reason) — the newer, richer
     # record must win, not the first (older, sparser) one seen.
     rows: dict[str, dict[str, Any]] = {}
-    for rec in read_raw(SOURCE):
-        uuid = rec.get("uuid")
-        if not uuid:
-            continue
+    for idx, rec in enumerate(read_raw(SOURCE), start=1):
+        uuid = rec.get("uuid") or f"{rec.get('sessionId') or 'turn'}:{rec.get('timestamp') or idx}:{idx}"
         u = rec.get("usage") or {}
         tc = rec.get("tool_calls") or []
         skills = rec.get("skill_names") or []
-        rows[uuid] = {
-            "turn_uuid": uuid,
+        attr_skill = rec.get("attributionSkill") or (skills[0] if skills else None)
+        rows[str(uuid)] = {
+            "turn_uuid": str(uuid),
             "session_id": rec.get("sessionId"),
             "parent_session_id": rec.get("session_id_lineage"),
             "ts": rec.get("timestamp"),
@@ -171,7 +171,7 @@ def normalize() -> int:
             "git_branch": rec.get("gitBranch"),
             "role": rec.get("role"),
             "model": rec.get("model"),
-            "attribution_skill": rec.get("attributionSkill"),
+            "attribution_skill": attr_skill,
             "input_tokens": u.get("input_tokens"),
             "output_tokens": u.get("output_tokens"),
             "cache_read": u.get("cache_read_input_tokens"),

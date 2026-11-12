@@ -8,13 +8,13 @@ import re
 import sqlite3
 import subprocess
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from config import HOME, LINEAR_SYNC_SCRIPT, LOCAL_TODOS_PATH, PROPOSALS_PATH
+from config import HOME, LEARNING_QUEUE_PATH, LINEAR_SYNC_SCRIPT, LOCAL_TODOS_PATH, PROPOSALS_PATH
 
-from L5_apps.digest.proposals import Proposal, read_pending
+from L5_apps.digest.proposals import Proposal, read_all_latest, read_pending
 from L5_apps.digest.todo_sync_provider import (
     LinearTodoSyncProvider,
     LocalTodoSyncProvider,
@@ -147,6 +147,21 @@ def _append_jsonl(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _enqueue_learning_task(proposal: Proposal, *, task_key: str, external_id: str = "") -> None:
+    """Persist one authorized, metadata-only exploration job for the runner."""
+    _append_jsonl(
+        LEARNING_QUEUE_PATH,
+        {
+            "task_key": task_key,
+            "topic_key": proposal.topic_key or proposal.id.removeprefix("learning-"),
+            "origin_ref": proposal.origin_ref or proposal.ref,
+            "external_id": external_id,
+            "status": "queued",
+            "created_at": _now(),
+        },
+    )
 
 
 def _now() -> str:
@@ -325,6 +340,82 @@ def _lookup_skill_roi_proposal(
     return None
 
 
+def _lookup_learning_proposal(
+    proposals_by_id: dict[str, Proposal],
+    topic_key: str,
+    external_id: str | None = None,
+) -> Proposal | None:
+    target_ref = f"learning-topic://{topic_key}"
+    legacy_ref = f"knowledge://{topic_key}"
+    for prop in proposals_by_id.values():
+        if external_id and getattr(prop, "external_id", "").upper() == external_id.upper():
+            return prop
+        if topic_key and (
+            getattr(prop, "topic_key", "") == topic_key
+            or getattr(prop, "ref", "") in {target_ref, legacy_ref}
+            or getattr(prop, "origin_ref", "") in {target_ref, legacy_ref}
+            or prop.id in {topic_key, f"learning-{topic_key}", f"learn-{topic_key}", target_ref}
+        ):
+            return prop
+    return None
+
+
+def _build_full_proposal_record(
+    proposal: Proposal,
+    *,
+    status: str,
+    learning_state: str = "",
+    ref_override: str = "",
+    external_id: str = "",
+    next_eligible_at: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    now_ts = _now()
+    rec: dict[str, Any] = {
+        "id": proposal.id,
+        "ts": now_ts,
+        "agent": proposal.agent or "knowledge-digest",
+        "title": proposal.title or proposal.id,
+        "detail": proposal.detail or "",
+        "priority": proposal.priority or "medium",
+        "status": status,
+        "ref": ref_override or proposal.ref or f"proposal://{proposal.id}",
+        "source": proposal.source or "aidash",
+        "scope": getattr(proposal, "scope", "personal") or "personal",
+    }
+    for attr in (
+        "app_name",
+        "event_kind",
+        "signature",
+        "stack_top_symbol",
+        "recommended_layer",
+        "verify_cmd",
+        "topic_key",
+        "source_uri",
+        "why_now",
+        "origin_ref",
+    ):
+        val = getattr(proposal, attr, "")
+        if val:
+            rec[attr] = val
+    cov = getattr(proposal, "coverage_refs", ())
+    if cov:
+        rec["coverage_refs"] = list(cov)
+    eff_l_state = learning_state or getattr(proposal, "learning_state", "")
+    if eff_l_state:
+        rec["learning_state"] = eff_l_state
+    rec["revision"] = int(getattr(proposal, "revision", 1) or 1) + 1
+    eff_ext = external_id or getattr(proposal, "external_id", "")
+    if eff_ext:
+        rec["external_id"] = eff_ext
+    eff_next = next_eligible_at or getattr(proposal, "next_eligible_at", "")
+    if eff_next:
+        rec["next_eligible_at"] = eff_next
+    if extra:
+        rec.update(extra)
+    return rec
+
+
 def _publish_knowledge_blog_and_approve(
     slug: str,
     *,
@@ -341,13 +432,15 @@ def _publish_knowledge_blog_and_approve(
         rc = 1
     if rc == 0:
         if matched_prop is not None:
-            _append_jsonl(proposal_path, {
-                "id": matched_prop.id,
-                "ref": f"knowledge://{slug}",
-                "status": "approved",
-                "ts": _now(),
-                "source": "aidash",
-            })
+            _append_jsonl(
+                proposal_path,
+                _build_full_proposal_record(
+                    matched_prop,
+                    status="approved",
+                    learning_state="learned",
+                    ref_override=f"knowledge://{slug}",
+                ),
+            )
             result["promoted"] += 1
         result["blog_published"] += 1
     else:
@@ -485,7 +578,9 @@ def process_user_events(
     result = {
         "resolved": 0, "undone": 0, "promoted": 0, "dispatched": 0,
         "falcon_starred": 0, "blog_published": 0, "ignored": 0, "errors": 0,
+        "snoozed": 0, "bookmarked": 0,
     }
+    all_proposals = read_all_latest(proposal_path)
     pending = {proposal.id: proposal for proposal in read_pending(proposal_path)}
     promoted_ids: set[str] = set()
     comment_runner = linear_comment_runner or _default_linear_comment_runner
@@ -641,45 +736,60 @@ def process_user_events(
             result["undone"] += 1
             continue
         if ref.startswith("proposal://") and action == "done":
-            proposal = pending.get(ref.removeprefix("proposal://"))
+            proposal = pending.get(ref.removeprefix("proposal://")) or all_proposals.get(ref.removeprefix("proposal://"))
             if proposal is not None:
-                dismissed_rec = {
-                    "id": proposal.id, "ts": proposal.ts,
-                    "agent": proposal.agent, "title": proposal.title,
-                    "detail": proposal.detail, "priority": proposal.priority,
-                    "status": "dismissed",
-                }
-                if getattr(proposal, "ref", ""):
-                    dismissed_rec["ref"] = proposal.ref
-                _append_jsonl(proposal_path, dismissed_rec)
+                _append_jsonl(
+                    proposal_path,
+                    _build_full_proposal_record(proposal, status="dismissed"),
+                )
+                result["resolved"] += 1
+            else:
+                result["ignored"] += 1
+            continue
+        if ref.startswith("learning-topic://") and action == "done":
+            topic_key = ref.removeprefix("learning-topic://").strip("/")
+            proposal = _lookup_learning_proposal(all_proposals, topic_key)
+            if proposal is not None:
+                _append_jsonl(
+                    proposal_path,
+                    _build_full_proposal_record(
+                        proposal,
+                        status="learned",
+                        learning_state="learned",
+                        ref_override=ref,
+                        extra={"outcome": "owner_reported"},
+                    ),
+                )
                 result["resolved"] += 1
             else:
                 result["ignored"] += 1
             continue
         if ref.startswith("knowledge://") and action == "done":
             slug = ref.removeprefix("knowledge://").strip("/")
-            proposal = _lookup_knowledge_proposal(pending, slug)
+            proposal = _lookup_knowledge_proposal(pending, slug) or _lookup_learning_proposal(all_proposals, slug)
             if proposal is not None:
-                _append_jsonl(proposal_path, {
-                    "id": proposal.id, "ref": ref, "ts": proposal.ts,
-                    "agent": proposal.agent, "title": proposal.title,
-                    "detail": proposal.detail, "priority": proposal.priority,
-                    "status": "dismissed",
-                })
+                _append_jsonl(
+                    proposal_path,
+                    _build_full_proposal_record(
+                        proposal,
+                        status="dismissed",
+                        learning_state="learned",
+                        ref_override=ref,
+                        extra={"outcome": "owner_reported"},
+                    ),
+                )
                 result["resolved"] += 1
             else:
                 result["ignored"] += 1
             continue
         if ref.startswith("skill-roi://") and action == "done":
             skill_name = ref.removeprefix("skill-roi://").strip("/")
-            proposal = _lookup_skill_roi_proposal(pending, skill_name)
+            proposal = _lookup_skill_roi_proposal(pending, skill_name) or _lookup_skill_roi_proposal(all_proposals, skill_name)
             if proposal is not None:
-                _append_jsonl(proposal_path, {
-                    "id": proposal.id, "ref": ref, "ts": proposal.ts,
-                    "agent": proposal.agent, "title": proposal.title,
-                    "detail": proposal.detail, "priority": proposal.priority,
-                    "status": "dismissed",
-                })
+                _append_jsonl(
+                    proposal_path,
+                    _build_full_proposal_record(proposal, status="dismissed", ref_override=ref),
+                )
                 result["resolved"] += 1
             else:
                 result["ignored"] += 1
@@ -698,12 +808,40 @@ def process_user_events(
         ref = str(event.get("item_ref") or event.get("itemRef") or "").strip()
         if not ref:
             result["ignored"] += 1
+        elif ref.startswith("learning-topic://"):
+            # Per spec §6: Star on learning-topic:// only bookmarks; NEVER triggers publish-blog or design-studio sync!
+            topic_key = ref.removeprefix("learning-topic://").strip("/")
+            proposal = _lookup_learning_proposal(all_proposals, topic_key)
+            if proposal is not None:
+                _append_jsonl(
+                    proposal_path,
+                    _build_full_proposal_record(
+                        proposal,
+                        status=proposal.status,
+                        learning_state=proposal.learning_state or "proposed",
+                        ref_override=ref,
+                        extra={"bookmarked": True},
+                    ),
+                )
+            result["bookmarked"] += 1
         elif ref.startswith("proposal://"):
             proposal = pending.get(ref.removeprefix("proposal://"))
             if proposal is None:
                 result["ignored"] += 1
                 continue
             prop_ref = getattr(proposal, "ref", "") or ""
+            if prop_ref.startswith("learning-topic://") or getattr(proposal, "source", "") == "Learning":
+                _append_jsonl(
+                    proposal_path,
+                    _build_full_proposal_record(
+                        proposal,
+                        status=proposal.status,
+                        learning_state=proposal.learning_state or "proposed",
+                        extra={"bookmarked": True},
+                    ),
+                )
+                result["bookmarked"] += 1
+                continue
             if prop_ref.startswith("knowledge://"):
                 slug = prop_ref.removeprefix("knowledge://").strip("/")
                 if not slug:
@@ -783,11 +921,6 @@ def process_user_events(
         if job_id != _AIDATA_ACTION_OWNING_JOB:
             result["ignored"] += 1
             continue
-        dedup_key = f"{job_id}:{action_id}"
-        if dedup_key in processed_job_actions:
-            result["ignored"] += 1
-            continue
-
         decision_raw = (
             responses.get("decision")
             or responses.get("choice")
@@ -798,6 +931,29 @@ def process_user_events(
         decision_lower = decision_raw.casefold()
         note = (responses.get("note") or responses.get("comment") or "").strip()
         targets = (responses.get("targets") or "").strip()
+
+        event_uid = str(event.get("id") or event.get("event_id") or event.get("eventId") or "").strip()
+        rev_token = str(event.get("revision") or responses.get("revision") or "").strip()
+        base_dedup_key = f"{job_id}:{action_id}"
+        decision_dedup_key = f"{base_dedup_key}:{decision_lower}" if decision_lower else base_dedup_key
+        if event_uid:
+            dedup_key = f"{base_dedup_key}:evt:{event_uid}"
+        elif rev_token:
+            dedup_key = f"{base_dedup_key}:rev:{rev_token}:{decision_lower}"
+        else:
+            dedup_key = decision_dedup_key
+        if (
+            dedup_key in processed_job_actions
+            or decision_dedup_key in processed_job_actions
+            or (
+                not event_uid
+                and not rev_token
+                and base_dedup_key in processed_job_actions
+                and decision_lower in {"approve", "approve to todo"}
+            )
+        ):
+            result["ignored"] += 1
+            continue
 
         tia_match = _JOB_ACTION_TIA_RE.fullmatch(action_id)
         local_match = _JOB_ACTION_LOCAL_RE.fullmatch(action_id)
@@ -810,11 +966,14 @@ def process_user_events(
                 issue_id = local_match.group(1).upper() if local_match else action_id
                 target_prov = local_provider
 
+            linked_learning = _lookup_learning_proposal(all_proposals, "", external_id=issue_id)
             known_status = (
                 str(event.get("status") or responses.get("status") or "").strip().lower()
                 or pending_issue_statuses.get(issue_id, "")
             )
-            if decision_lower in {"approve", "approve to todo"}:
+            if "snooze" in decision_lower or "延后" in decision_lower:
+                sync_action = "undone"
+            elif decision_lower in {"approve", "approve to todo"}:
                 sync_action = (
                     "in_progress"
                     if known_status in {"blocked", "in_progress"}
@@ -849,7 +1008,52 @@ def process_user_events(
                 rc = 1
 
             if rc == 0:
+                if linked_learning is not None:
+                    now_dt = datetime.now(timezone.utc)
+                    if "snooze" in decision_lower or "延后" in decision_lower:
+                        next_el = (now_dt + timedelta(days=7)).isoformat(timespec="seconds").replace("+00:00", "Z")
+                        updated_prop = _build_full_proposal_record(
+                            linked_learning,
+                            status="snoozed",
+                            learning_state="snoozed",
+                            external_id=issue_id,
+                            next_eligible_at=next_el,
+                        )
+                        _append_jsonl(proposal_path, updated_prop)
+                        all_proposals[linked_learning.id] = Proposal(**{k: v for k, v in updated_prop.items() if k in Proposal.__dataclass_fields__})
+                        result["snoozed"] += 1
+                    elif sync_action == "done":
+                        updated_prop = _build_full_proposal_record(
+                            linked_learning,
+                            status="learned",
+                            learning_state="learned",
+                            external_id=issue_id,
+                            extra={"outcome": "owner_reported"},
+                        )
+                        _append_jsonl(proposal_path, updated_prop)
+                        all_proposals[linked_learning.id] = Proposal(**{k: v for k, v in updated_prop.items() if k in Proposal.__dataclass_fields__})
+                    elif sync_action == "cancelled":
+                        next_el = (now_dt + timedelta(days=30)).isoformat(timespec="seconds").replace("+00:00", "Z")
+                        updated_prop = _build_full_proposal_record(
+                            linked_learning,
+                            status="dismissed",
+                            learning_state="dismissed",
+                            external_id=issue_id,
+                            next_eligible_at=next_el,
+                        )
+                        _append_jsonl(proposal_path, updated_prop)
+                        all_proposals[linked_learning.id] = Proposal(**{k: v for k, v in updated_prop.items() if k in Proposal.__dataclass_fields__})
+                    elif decision_lower in {"approve", "approve to todo"}:
+                        updated_prop = _build_full_proposal_record(
+                            linked_learning,
+                            status="approved",
+                            learning_state="approved",
+                            external_id=issue_id,
+                        )
+                        _append_jsonl(proposal_path, updated_prop)
+                        all_proposals[linked_learning.id] = Proposal(**{k: v for k, v in updated_prop.items() if k in Proposal.__dataclass_fields__})
                 processed_job_actions.add(dedup_key)
+                processed_job_actions.add(base_dedup_key)
                 _record_consumed(dedup_key)
                 if sync_action in {"done", "cancelled"}:
                     result["resolved"] += 1
@@ -857,6 +1061,174 @@ def process_user_events(
                     result["undone"] += 1
             else:
                 result["errors"] += 1
+            continue
+
+        if action_id.startswith("learning-"):
+            topic_key = action_id.removeprefix("learning-").strip("/")
+            matched_prop = _lookup_learning_proposal(all_proposals, topic_key)
+            now_dt = datetime.now(timezone.utc)
+            if "snooze" in decision_lower or "延后" in decision_lower:
+                next_el = (now_dt + timedelta(days=7)).isoformat(timespec="seconds").replace("+00:00", "Z")
+                base_prop = matched_prop or Proposal(
+                    id=f"learning-{topic_key}",
+                    ts=_now(),
+                    agent="knowledge-digest",
+                    title=str(event.get("title") or topic_key),
+                    detail=note or f"Learning topic {topic_key}",
+                    priority="medium",
+                    status="pending",
+                    ref=f"learning-topic://{topic_key}",
+                    source="Learning",
+                    topic_key=topic_key,
+                    origin_ref=f"learning-topic://{topic_key}",
+                )
+                snoozed_rec = _build_full_proposal_record(
+                    base_prop,
+                    status="snoozed",
+                    learning_state="snoozed",
+                    ref_override=f"learning-topic://{topic_key}",
+                    next_eligible_at=next_el,
+                    extra={"note": note} if note else None,
+                )
+                _append_jsonl(proposal_path, snoozed_rec)
+                all_proposals[base_prop.id] = Proposal(**{k: v for k, v in snoozed_rec.items() if k in Proposal.__dataclass_fields__})
+                pending.pop(base_prop.id, None)
+                processed_job_actions.add(dedup_key)
+                _record_consumed(dedup_key)
+                result["snoozed"] += 1
+                result["resolved"] += 1
+                continue
+            if decision_lower in {"done", "确认", "confirm", "resolve", "mark done"}:
+                base_prop = matched_prop or Proposal(
+                    id=f"learning-{topic_key}",
+                    ts=_now(),
+                    agent="knowledge-digest",
+                    title=str(event.get("title") or topic_key),
+                    detail=note or f"Learning topic {topic_key}",
+                    priority="medium",
+                    status="pending",
+                    ref=f"learning-topic://{topic_key}",
+                    source="Learning",
+                    topic_key=topic_key,
+                    origin_ref=f"learning-topic://{topic_key}",
+                )
+                learned_rec = _build_full_proposal_record(
+                    base_prop,
+                    status="learned",
+                    learning_state="learned",
+                    ref_override=f"learning-topic://{topic_key}",
+                    extra={"outcome": "owner_reported", **({"note": note} if note else {})},
+                )
+                _append_jsonl(proposal_path, learned_rec)
+                all_proposals[base_prop.id] = Proposal(**{k: v for k, v in learned_rec.items() if k in Proposal.__dataclass_fields__})
+                pending.pop(base_prop.id, None)
+                processed_job_actions.add(dedup_key)
+                _record_consumed(dedup_key)
+                result["resolved"] += 1
+                continue
+            if decision_lower in {"dismiss", "cancel", "canceled", "cancelled"}:
+                next_el = (now_dt + timedelta(days=30)).isoformat(timespec="seconds").replace("+00:00", "Z")
+                base_prop = matched_prop or Proposal(
+                    id=f"learning-{topic_key}",
+                    ts=_now(),
+                    agent="knowledge-digest",
+                    title=str(event.get("title") or topic_key),
+                    detail=note or f"Learning topic {topic_key}",
+                    priority="medium",
+                    status="pending",
+                    ref=f"learning-topic://{topic_key}",
+                    source="Learning",
+                    topic_key=topic_key,
+                    origin_ref=f"learning-topic://{topic_key}",
+                )
+                dismissed_rec = _build_full_proposal_record(
+                    base_prop,
+                    status="dismissed",
+                    learning_state="dismissed",
+                    ref_override=f"learning-topic://{topic_key}",
+                    next_eligible_at=next_el,
+                    extra={"note": note} if note else None,
+                )
+                _append_jsonl(proposal_path, dismissed_rec)
+                all_proposals[base_prop.id] = Proposal(**{k: v for k, v in dismissed_rec.items() if k in Proposal.__dataclass_fields__})
+                pending.pop(base_prop.id, None)
+                processed_job_actions.add(dedup_key)
+                _record_consumed(dedup_key)
+                result["resolved"] += 1
+                continue
+            if "promote" in decision_lower or decision_lower in {"approve", "approve to todo"}:
+                base_prop = matched_prop or Proposal(
+                    id=f"learning-{topic_key}",
+                    ts=_now(),
+                    agent="knowledge-digest",
+                    title=str(event.get("title") or f"[Learning] {topic_key}"),
+                    detail=note or f"Explore learning-topic://{topic_key}",
+                    priority="medium",
+                    status="pending",
+                    ref=f"learning-topic://{topic_key}",
+                    source="Learning",
+                    topic_key=topic_key,
+                    origin_ref=f"learning-topic://{topic_key}",
+                )
+                # Guard terminal state: do not reopen if already learned/dismissed
+                if base_prop.learning_state in {"learned", "dismissed"}:
+                    result["ignored"] += 1
+                    continue
+                comment_body = (
+                    _format_action_comment(decision_raw, note=note, targets=targets)
+                    if (note or targets)
+                    else ""
+                )
+                ext_id = pending_external_ids.get(base_dedup_key) or base_prop.external_id
+                try:
+                    if ext_id:
+                        rc = 0
+                    else:
+                        rc, ext_id = _coerce_idea_result(
+                            active_provider.promote_proposal(
+                                base_prop.title, base_prop.detail, dedup_key=base_dedup_key
+                            )
+                        )
+                    if rc == 0 and ext_id and active_provider.name == "linear":
+                        sync_rc = active_provider.sync_status(ext_id, "todo")
+                        if sync_rc != 0:
+                            _record_pending_external_id(base_dedup_key, ext_id)
+                            rc = 1
+                        elif comment_body:
+                            comment_runner(ext_id, comment_body)
+                except (OSError, subprocess.SubprocessError):
+                    if ext_id:
+                        _record_pending_external_id(base_dedup_key, ext_id)
+                    rc = 1
+                if rc == 0:
+                    approved_rec = _build_full_proposal_record(
+                        base_prop,
+                        status="approved",
+                        learning_state="approved",
+                        ref_override=f"learning-topic://{topic_key}",
+                        external_id=ext_id or "",
+                        extra={
+                            "origin_ref": f"learning-topic://{topic_key}",
+                            "task_key": f"explore-{topic_key}-r{int(getattr(base_prop, 'revision', 1) or 1)}",
+                            **({"note": note} if note else {}),
+                        },
+                    )
+                    _append_jsonl(proposal_path, approved_rec)
+                    _enqueue_learning_task(
+                        base_prop,
+                        task_key=str(approved_rec["task_key"]),
+                        external_id=ext_id or "",
+                    )
+                    all_proposals[base_prop.id] = Proposal(**{k: v for k, v in approved_rec.items() if k in Proposal.__dataclass_fields__})
+                    pending.pop(base_prop.id, None)
+                    processed_job_actions.add(dedup_key)
+                    processed_job_actions.add(base_dedup_key)
+                    _record_consumed(dedup_key)
+                    result["promoted"] += 1
+                else:
+                    result["errors"] += 1
+                continue
+            result["ignored"] += 1
             continue
 
         if action_id.startswith("proposal-"):
@@ -881,25 +1253,23 @@ def process_user_events(
                 _promote_one(
                     proposal,
                     trigger_dispatch=should_dispatch,
-                    dedup_key=dedup_key,
+                    dedup_key=base_dedup_key,
                     require_todo_state=require_todo,
                     comment_body=comment_body,
-                    existing_external_id=pending_external_ids.get(dedup_key),
+                    existing_external_id=pending_external_ids.get(base_dedup_key) or pending_external_ids.get(dedup_key),
                 )
                 if result["promoted"] > prev_promoted:
                     processed_job_actions.add(dedup_key)
+                    processed_job_actions.add(decision_dedup_key)
+                    processed_job_actions.add(base_dedup_key)
                     _record_consumed(dedup_key)
             elif decision_lower in {"done", "dismiss", "cancel", "canceled", "cancelled", "resolve", "mark done"}:
-                dismissed_rec = {
-                    "id": proposal.id, "ts": proposal.ts,
-                    "agent": proposal.agent, "title": proposal.title,
-                    "detail": proposal.detail, "priority": proposal.priority,
-                    "status": "dismissed",
-                }
-                if getattr(proposal, "ref", ""):
-                    dismissed_rec["ref"] = proposal.ref
-                _append_jsonl(proposal_path, dismissed_rec)
+                _append_jsonl(
+                    proposal_path,
+                    _build_full_proposal_record(proposal, status="dismissed"),
+                )
                 processed_job_actions.add(dedup_key)
+                processed_job_actions.add(decision_dedup_key)
                 _record_consumed(dedup_key)
                 result["resolved"] += 1
             else:
@@ -908,7 +1278,7 @@ def process_user_events(
 
         if action_id.startswith("knowledge-"):
             slug = action_id.removeprefix("knowledge-").strip("/")
-            matched_prop = _lookup_knowledge_proposal(pending, slug)
+            matched_prop = _lookup_knowledge_proposal(pending, slug) or _lookup_learning_proposal(all_proposals, slug)
             if decision_lower in {"publish knowledge blog", "publish", "star"}:
                 prev_pub = result["blog_published"]
                 _publish_knowledge_blog_and_approve(
@@ -935,13 +1305,14 @@ def process_user_events(
                     _promote_one(
                         matched_prop,
                         trigger_dispatch=False,
-                        dedup_key=dedup_key,
+                        dedup_key=base_dedup_key,
                         require_todo_state=require_todo,
                         comment_body=comment_body,
-                        existing_external_id=pending_external_ids.get(dedup_key),
+                        existing_external_id=pending_external_ids.get(base_dedup_key),
                     )
                     if result["promoted"] > prev_promoted:
                         processed_job_actions.add(dedup_key)
+                        processed_job_actions.add(base_dedup_key)
                         _record_consumed(dedup_key)
                 else:
                     title = str(event.get("title") or f"[Knowledge] {slug}")
@@ -950,14 +1321,14 @@ def process_user_events(
                         detail += f"\n\nTargets: {targets}"
                     if note:
                         detail += f"\n\nNote: {note}"
-                    ext_id = pending_external_ids.get(dedup_key)
+                    ext_id = pending_external_ids.get(base_dedup_key)
                     try:
                         if ext_id:
                             rc = 0
                         else:
                             rc, ext_id = _coerce_idea_result(
                                 active_provider.promote_proposal(
-                                    title, detail, dedup_key=dedup_key
+                                    title, detail, dedup_key=base_dedup_key
                                 )
                             )
                         if (
@@ -968,27 +1339,33 @@ def process_user_events(
                         ):
                             sync_rc = active_provider.sync_status(ext_id, "todo")
                             if sync_rc != 0:
-                                _record_pending_external_id(dedup_key, ext_id)
+                                _record_pending_external_id(base_dedup_key, ext_id)
                                 rc = 1
                             elif comment_body:
                                 comment_runner(ext_id, comment_body)
                     except (OSError, subprocess.SubprocessError):
                         if ext_id:
-                            _record_pending_external_id(dedup_key, ext_id)
+                            _record_pending_external_id(base_dedup_key, ext_id)
                         rc = 1
                     if rc == 0:
                         processed_job_actions.add(dedup_key)
+                        processed_job_actions.add(base_dedup_key)
                         _record_consumed(dedup_key)
                         result["promoted"] += 1
                     else:
                         result["errors"] += 1
             elif decision_lower in {"done", "dismiss", "cancel", "canceled", "cancelled"} and matched_prop is not None:
-                _append_jsonl(proposal_path, {
-                    "id": matched_prop.id, "ref": f"knowledge://{slug}", "ts": matched_prop.ts,
-                    "agent": matched_prop.agent, "title": matched_prop.title,
-                    "detail": matched_prop.detail, "priority": matched_prop.priority,
-                    "status": "dismissed",
-                })
+                is_done = decision_lower == "done"
+                _append_jsonl(
+                    proposal_path,
+                    _build_full_proposal_record(
+                        matched_prop,
+                        status="dismissed",
+                        learning_state="learned" if is_done else "dismissed",
+                        ref_override=f"knowledge://{slug}",
+                        extra={"outcome": "owner_reported"} if is_done else None,
+                    ),
+                )
                 processed_job_actions.add(dedup_key)
                 _record_consumed(dedup_key)
                 result["resolved"] += 1

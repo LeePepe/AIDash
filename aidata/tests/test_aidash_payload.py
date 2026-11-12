@@ -548,6 +548,21 @@ def test_product_growth_and_skills_roi_containers_map_13_indicators():
     ]
     s11_card = next(c for c in sr_container.cards if "五维切片" in c.payload.get("title", ""))
     assert s11_card.payload["segments"]
+
+    # Verify build_briefing mounts Skills 与 ROI 诊断 and 产品健康与个人成长 when populated
+    full_sources = DigestSources(
+        raven=_FROZEN_TRENDS,
+        multica=_FROZEN_MULTICA,
+        ado=_FROZEN_ADO,
+        automation=_FROZEN_AUTOMATION,
+        skill_roi=sr,
+        product_growth=pg,
+    )
+    b_mounted = build_briefing(REPORT_DATE, full_sources, FULL_MD, MUST_SEE)
+    titles = [c.title for c in b_mounted.containers]
+    assert "Skills 与 ROI 诊断" in titles
+    assert "产品健康与个人成长" in titles
+
     s12_card = next(c for c in sr_container.cards if "Tool 排行" in c.payload.get("title", ""))
     assert s12_card.payload["items"][0]["semantic"] == "warning"
     assert "my-designer" in sr_container.cards[-1].payload["body"]
