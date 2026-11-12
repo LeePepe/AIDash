@@ -383,19 +383,39 @@ public final class DashboardWorkspaceStore {
         do {
             let directory = decisionsURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            var data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
-            data.append(0x0A)
-            if FileManager.default.fileExists(atPath: decisionsURL.path) {
-                let handle = try FileHandle(forWritingTo: decisionsURL)
-                defer { try? handle.close() }
-                try handle.seekToEnd()
-                try handle.write(contentsOf: data)
-            } else {
-                try data.write(to: decisionsURL, options: [.atomic])
-            }
+            let replacementData = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+            let existing = FileManager.default.fileExists(atPath: decisionsURL.path)
+                ? (try String(contentsOf: decisionsURL, encoding: .utf8))
+                : ""
+            let merged = Self.replacingEvalDecisionLines(
+                existing: existing,
+                replacement: replacementData,
+                itemID: itemID
+            )
+            try Data(merged.utf8).write(to: decisionsURL, options: [.atomic])
         } catch {
             return
         }
+    }
+
+    static func replacingEvalDecisionLines(existing: String, replacement: Data, itemID: String) -> String {
+        let replacementLine = String(data: replacement, encoding: .utf8) ?? "{}"
+        var output: [String] = []
+        var replaced = false
+        for line in existing.split(whereSeparator: \.isNewline).map(String.init) {
+            if let data = line.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               object["id"] as? String == itemID {
+                if !replaced {
+                    output.append(replacementLine)
+                    replaced = true
+                }
+            } else {
+                output.append(line)
+            }
+        }
+        if !replaced { output.append(replacementLine) }
+        return output.joined(separator: "\n") + "\n"
     }
 
     private func persistMyPRSupervisorDecision(itemID: String, decision: String, note: String) {
@@ -676,7 +696,7 @@ public final class DashboardWorkspaceStore {
     }
 
     public var availableLinearActionFilters: [DashboardLinearActionFilterChip] {
-        let activeLinearItems = actionItems.filter { !$0.isCompleted && $0.isLinearNative }
+        let activeLinearItems = actionItems.filter { $0.isLinearNative }
         let orderedLabels: [(String, String)] = [
             ("needs-decision", "🔴 needs-decision · 需单独拍板"),
             ("pop", "🔐 label:pop · 待合入"),
@@ -712,6 +732,47 @@ public final class DashboardWorkspaceStore {
         return item.hasLinearLabel(selectedLinearActionFilter)
     }
 
+    private func matchesSelectedFrameworkJob(_ item: DashboardActionItem) -> Bool {
+        guard let selectedFrameworkJobID else { return true }
+        return item.jobID == selectedFrameworkJobID
+    }
+
+    private func sortActionItems(_ items: [DashboardActionItem]) -> [DashboardActionItem] {
+        items.sorted { lhs, rhs in
+            switch actionSort {
+            case .priority:
+                if lhs.isCompleted != rhs.isCompleted { return !lhs.isCompleted }
+                if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
+                return lhs.title < rhs.title
+            case .source:
+                if lhs.sourceTag != rhs.sourceTag { return lhs.sourceTag < rhs.sourceTag }
+                return lhs.priority < rhs.priority
+            case .title:
+                return lhs.title < rhs.title
+            }
+        }
+    }
+
+    public var kanbanActionItems: [DashboardActionItem] {
+        let filtered = actionItems.filter { item in
+            guard matchesActiveCLIFilter(item.cliFilter),
+                  matchesChartCategory(item.cliFilter, categoryName: item.sourceTag),
+                  matchesLinearActionFilter(item),
+                  matchesSelectedFrameworkJob(item) else {
+                return false
+            }
+            switch actionFilter {
+            case .all, .pending:
+                return true
+            case .completed:
+                return item.isCompleted || item.status == .done
+            case .highPriorityOnly:
+                return item.priority == .p0 || item.priority == .p1
+            }
+        }
+        return sortActionItems(filtered)
+    }
+
     public var filteredCLIEntries: [CLICostQuotaEntry] {
         cliEntries.filter { entry in
             matchesActiveCLIFilter(entry.cliFilter)
@@ -727,7 +788,8 @@ public final class DashboardWorkspaceStore {
         let filtered = actionItems.filter { item in
             guard matchesActiveCLIFilter(item.cliFilter),
                   matchesChartCategory(item.cliFilter, categoryName: item.sourceTag),
-                  matchesLinearActionFilter(item) else {
+                  matchesLinearActionFilter(item),
+                  matchesSelectedFrameworkJob(item) else {
                 return false
             }
             switch actionFilter {
@@ -737,19 +799,7 @@ public final class DashboardWorkspaceStore {
             case .highPriorityOnly: return item.priority == .p0 || item.priority == .p1
             }
         }
-        return filtered.sorted { lhs, rhs in
-            switch actionSort {
-            case .priority:
-                if lhs.isCompleted != rhs.isCompleted { return !lhs.isCompleted }
-                if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
-                return lhs.title < rhs.title
-            case .source:
-                if lhs.sourceTag != rhs.sourceTag { return lhs.sourceTag < rhs.sourceTag }
-                return lhs.priority < rhs.priority
-            case .title:
-                return lhs.title < rhs.title
-            }
-        }
+        return sortActionItems(filtered)
     }
 
     public var filteredRankingRows: [AgentRankingRow] {

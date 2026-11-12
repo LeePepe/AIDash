@@ -234,6 +234,67 @@ struct DashboardWorkspaceTests {
         #expect(event.2 == true)
     }
 
+    @Test("Kanban source keeps completed cards visible under pending filter and honors job filters")
+    func kanbanActionItemsIncludeDoneAndFilterByJob() {
+        let actions = [
+            DashboardActionItem(
+                id: "eval-done",
+                title: "Done eval rule",
+                summary: "Already recorded",
+                sourceTag: "Linear",
+                priority: .p1,
+                status: .done,
+                isCompleted: true,
+                jobID: .myPRSupervisor,
+                labels: ["eval"]
+            ),
+            DashboardActionItem(
+                id: "eval-triage",
+                title: "Pending eval rule",
+                summary: "Needs review",
+                sourceTag: "Linear",
+                priority: .p1,
+                status: .triage,
+                jobID: .myPRSupervisor,
+                labels: ["eval"]
+            ),
+            DashboardActionItem(
+                id: "other-job",
+                title: "Other job item",
+                summary: "Should be scoped out",
+                sourceTag: "Linear",
+                priority: .p1,
+                status: .blocked,
+                jobID: .aidataDigest,
+                labels: ["bug-blocker"]
+            )
+        ]
+        let store = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: actions)
+        store.actionFilter = .pending
+        store.selectedLinearActionFilter = "eval"
+        #expect(store.kanbanActionItems.map(\.id) == ["eval-triage", "eval-done"])
+        store.selectedFrameworkJobID = .aidataDigest
+        #expect(store.kanbanActionItems.map(\.id) == [])
+    }
+
+    @Test("eval decision line merge replaces every duplicate id with one latest record")
+    func evalDecisionLinesAreIdempotentByID() throws {
+        let replacement = try JSONSerialization.data(withJSONObject: [
+            "id": "EVAL-1", "decision": "忽略", "note": "latest"
+        ], options: [.sortedKeys])
+        let existing = "{\"id\":\"EVAL-1\",\"decision\":\"旧\"}\n{\"id\":\"other\",\"decision\":\"保留\"}\n{\"id\":\"EVAL-1\",\"decision\":\"重复\"}\n"
+        let merged = DashboardWorkspaceStore.replacingEvalDecisionLines(
+            existing: existing,
+            replacement: replacement,
+            itemID: "EVAL-1"
+        )
+        let lines = merged.split(whereSeparator: \.isNewline)
+        #expect(lines.count == 2)
+        #expect(lines.filter { $0.contains("EVAL-1") }.count == 1)
+        #expect(merged.contains("latest"))
+        #expect(merged.contains("other"))
+    }
+
     @Test("modular card views and workspace view construct bodies across all sections")
     func modularViewsRenderSmokeTest() {
         let snapshot = sampleSnapshot()

@@ -60,30 +60,33 @@ public struct ActionItemsCardView: View {
             symbolName: "checklist"
         ) {
             VStack(alignment: .leading, spacing: 8) {
+                if let parent = parentIssueForBoard {
+                    parentIssueBanner(parent)
+                }
                 HStack(spacing: 12) {
                     Picker(DashboardL10n.tr("dashboard.actions.filter_label", "Filter"), selection: $store.actionFilter) {
-                    ForEach(DashboardActionFilter.allCases) { filter in
-                        Text(filter.displayTitle).tag(filter)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .fixedSize(horizontal: true, vertical: false)
-
-                Menu {
-                    Picker(DashboardL10n.tr("dashboard.actions.sort_by", "Sort By"), selection: $store.actionSort) {
-                        ForEach(DashboardActionSort.allCases) { sort in
-                            Text(sort.displayTitle).tag(sort)
+                        ForEach(DashboardActionFilter.allCases) { filter in
+                            Text(filter.displayTitle).tag(filter)
                         }
                     }
-                } label: {
-                    Label(
-                        DashboardL10n.format("dashboard.actions.sort_button_format", "Sort: %@", store.actionSort.displayTitle),
-                        systemImage: "arrow.up.arrow.down"
-                    )
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
+
+                    Menu {
+                        Picker(DashboardL10n.tr("dashboard.actions.sort_by", "Sort By"), selection: $store.actionSort) {
+                            ForEach(DashboardActionSort.allCases) { sort in
+                                Text(sort.displayTitle).tag(sort)
+                            }
+                        }
+                    } label: {
+                        Label(
+                            DashboardL10n.format("dashboard.actions.sort_button_format", "Sort: %@", store.actionSort.displayTitle),
+                            systemImage: "arrow.up.arrow.down"
+                        )
                         .font(.caption)
-                }
+                    }
                     .controlSize(.small)
                     .fixedSize(horizontal: true, vertical: false)
                     .frame(minHeight: 28)
@@ -95,7 +98,7 @@ public struct ActionItemsCardView: View {
                                 Button {
                                     store.selectedLinearActionFilter = filter.id
                                 } label: {
-                                    Text(filter.displayTitle)
+                                    Text(linearFilterTitle(filter))
                                         .font(.caption)
                                         .lineLimit(1)
                                 }
@@ -109,13 +112,347 @@ public struct ActionItemsCardView: View {
                 }
             }
         } content: {
-            if store.filteredActionItems.isEmpty {
+            if kanbanBoardItems.isEmpty {
                 actionEmptyStateContent
                     .frame(minHeight: 150)
             } else {
-                actionItemsContent(store.filteredActionItems)
+                kanbanBoardContent
             }
         }
+    }
+
+    private struct KanbanColumn {
+        let title: String
+        let status: DashboardActionStatus
+        let tint: Color
+    }
+
+    private struct KanbanButtonStyleModifier: ViewModifier {
+        let prominent: Bool
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if prominent {
+                content.buttonStyle(.borderedProminent)
+            } else {
+                content.buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private var parentIssueForBoard: DashboardActionItem? {
+        store.actionItems.first { $0.parentIssueKey == "TIA-83" }
+    }
+
+    private func linearFilterTitle(_ filter: DashboardLinearActionFilterChip) -> String {
+        if filter.id == "all" { return "全部" }
+        let label = filter.id == "needs-decision" ? "needs-decision" : filter.id
+        let count = filter.count.map { " (\($0))" } ?? ""
+        return "🏷️ \(label)\(count)"
+    }
+
+    private func parentIssueBanner(_ item: DashboardActionItem) -> some View {
+        let parentKey = item.parentIssueKey ?? "TIA-83"
+        let parentTitle = item.parentIssueTitle ?? "[Bing] PR 审查意见修复与 CI 门禁值守队列"
+        return HStack(spacing: 8) {
+            Text("🔗 \(parentKey) · \(parentTitle)")
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if let project = item.project, !project.isEmpty {
+                Text(project)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.secondary.opacity(0.14), in: Capsule())
+            }
+            Spacer(minLength: 4)
+            if let url = URLPolicy.validate(item.parentIssueURL) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label("打开 Linear TIA-83 ↗", systemImage: "arrow.up.right.square")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minHeight: 28)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: Capsule())
+    }
+
+    private var kanbanBoardItems: [DashboardActionItem] {
+        store.kanbanActionItems
+    }
+
+    private var kanbanColumns: [KanbanColumn] {
+        [
+            KanbanColumn(title: "🔴 Blocked 卡点", status: .blocked, tint: DashboardSemanticColorPalette.color(for: .critical)),
+            KanbanColumn(title: "🔵 Todo 待操作", status: .inProgress, tint: DashboardSemanticColorPalette.color(for: .neutral)),
+            KanbanColumn(title: "🟠 Triage 待审阅", status: .triage, tint: DashboardSemanticColorPalette.color(for: .warning)),
+            KanbanColumn(title: "🟢 Done 已完成", status: .done, tint: DashboardSemanticColorPalette.color(for: .healthy))
+        ]
+    }
+
+    private var kanbanBoardContent: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(kanbanColumns, id: \.title) { column in
+                    kanbanColumn(column)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func kanbanColumn(_ column: KanbanColumn) -> some View {
+        let items = kanbanBoardItems.filter { item in
+            if column.status == .done {
+                return item.isCompleted || item.status == .done
+            }
+            return !item.isCompleted && item.status == column.status
+        }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: column.status.symbolName)
+                    .foregroundStyle(column.tint)
+                    .accessibilityHidden(true)
+                Text(column.title)
+                    .font(.subheadline.weight(.bold))
+                Spacer(minLength: 4)
+                Text("\(items.count)")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.secondary.opacity(0.12), in: Capsule())
+            }
+            if items.isEmpty {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .foregroundStyle(.secondary.opacity(0.35))
+                    .frame(minHeight: 80)
+                    .overlay {
+                        Text("无事项")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(items) { item in
+                        kanbanCard(item)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(minWidth: 260, idealWidth: 290, maxWidth: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // swiftlint:disable:next function_body_length
+    private func kanbanCard(_ item: DashboardActionItem) -> some View {
+        let isDone = item.isCompleted || item.status == .done
+        let isExpanded = expandedActionID == item.id
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
+                Text(item.priority.label)
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(DashboardSemanticColorPalette.color(for: item.priority.health).opacity(0.16), in: Capsule())
+                    .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
+                if let parent = item.parentIssueKey, !parent.isEmpty {
+                    Text(parent)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.secondary.opacity(0.12), in: Capsule())
+                }
+                ForEach(item.labels, id: \.self) { label in
+                    Button {
+                        store.selectedLinearActionFilter = label
+                    } label: {
+                        Text("🏷️ \(label)")
+                            .font(.caption2)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .tint(store.selectedLinearActionFilter == label ? .accentColor : nil)
+                }
+                Spacer(minLength: 4)
+                if let url = URLPolicy.validate(item.externalURLString) {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.borderless)
+                    .frame(minWidth: 28, minHeight: 28)
+                    .accessibilityLabel("打开链接")
+                }
+            }
+
+            Button {
+                toggleExpanded(item.id)
+            } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isDone ? .secondary : .primary)
+                        .strikethrough(isDone)
+                        .lineLimit(isExpanded ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(item.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(isExpanded ? nil : 3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "收起 \(item.title)" : "展开 \(item.title)")
+
+            if isExpanded {
+                Divider()
+                Text(item.summary)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !isDone {
+                    TextField(
+                        "补充说明 / 指令（可选）",
+                        text: Binding(
+                            get: { noteInputs[item.id] ?? "" },
+                            set: { noteInputs[item.id] = String($0.prefix(item.noteMaxLength)) }
+                        )
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                }
+                if !isDone {
+                    actionRowAccessoryButtons(item)
+                    if URLPolicy.validate(item.externalURLString) != nil {
+                        openExternalActionButton(item, title: "打开 PR ↗", prominent: false)
+                    }
+                }
+            }
+
+            kanbanActionFooter(item, isDone: isDone)
+        }
+        .padding(10)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func kanbanActionFooter(_ item: DashboardActionItem, isDone: Bool) -> some View {
+        if isDone {
+            Label("已处理", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(DashboardSemanticColorPalette.color(for: .healthy))
+        } else {
+            switch actionItemKind(item) {
+            case .popGate:
+                HStack(spacing: 6) {
+                    openExternalActionButton(item, title: "打开 PR 合并 ↗", prominent: true)
+                    markDoneButton(item)
+                }
+            case .decision:
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(item.decisionOptions.prefix(2).enumerated()), id: \.offset) { index, option in
+                        Button {
+                            store.submitActionItemDecision(item, decision: option, note: noteInputs[item.id] ?? "", onToggleDone: onToggleDone)
+                        } label: {
+                            Text(option)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .modifier(KanbanButtonStyleModifier(prominent: index == 0))
+                        .controlSize(.small)
+                        .frame(minHeight: 28)
+                    }
+                }
+            case .evalRule:
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 6) {
+                    evalFooterButton(item, title: "两个都加", decision: "两个都加", prominent: true)
+                    evalFooterButton(item, title: "记规范", decision: "记入编码规范 (防再犯)", prominent: false)
+                    evalFooterButton(item, title: "入题库", decision: "加入审查题库 (防漏审)", prominent: false)
+                    evalFooterButton(item, title: "忽略", decision: "忽略", prominent: false)
+                }
+            case .general:
+                HStack(spacing: 6) {
+                    approveButton(item)
+                    ignoreButton(item)
+                }
+            }
+        }
+    }
+
+    private func openExternalActionButton(_ item: DashboardActionItem, title: String, prominent: Bool) -> some View {
+        Button {
+            if let url = URLPolicy.validate(item.externalURLString) { NSWorkspace.shared.open(url) }
+        } label: {
+            Text(title)
+        }
+        .modifier(KanbanButtonStyleModifier(prominent: prominent))
+        .controlSize(.small)
+        .frame(minHeight: 28)
+        .disabled(URLPolicy.validate(item.externalURLString) == nil)
+    }
+
+    private func markDoneButton(_ item: DashboardActionItem) -> some View {
+        Button {
+            store.submitActionItemDecision(item, decision: "Done", onToggleDone: onToggleDone)
+        } label: {
+            Label("✓ 已完成", systemImage: "checkmark")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(minHeight: 28)
+    }
+
+    private func evalFooterButton(_ item: DashboardActionItem, title: String, decision: String, prominent: Bool) -> some View {
+        Button {
+            store.submitActionItemDecision(item, decision: decision, note: noteInputs[item.id] ?? "", onToggleDone: onToggleDone)
+        } label: {
+            Text(title)
+                .frame(maxWidth: .infinity)
+        }
+        .modifier(KanbanButtonStyleModifier(prominent: prominent))
+        .controlSize(.small)
+        .frame(minHeight: 28)
+    }
+
+    private func approveButton(_ item: DashboardActionItem) -> some View {
+        Button {
+            store.submitActionItemDecision(item, decision: "Approve", onToggleDone: onToggleDone)
+        } label: {
+            Label("✓ 批准处理", systemImage: "checkmark")
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .frame(minHeight: 28)
+    }
+
+    private func ignoreButton(_ item: DashboardActionItem) -> some View {
+        Button {
+            store.submitActionItemDecision(item, decision: "忽略", onToggleDone: onToggleDone)
+        } label: {
+            Text("忽略")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(minHeight: 28)
     }
 
     private static let linearClusterLabels = ["pop", "eval", "bug-blocker"]
@@ -362,6 +699,9 @@ public struct ActionItemsCardView: View {
     private func actionItemKind(_ item: DashboardActionItem) -> ActionItemKind {
         if item.hasLinearLabel("eval") || item.id.hasPrefix("EVAL-") {
             return .evalRule
+        }
+        if item.hasLinearLabel("needs-decision") {
+            return .decision
         }
         let haystack = [item.id, item.title, item.summary, item.sourceTag, item.backingItemRef ?? ""]
             .joined(separator: " ")
