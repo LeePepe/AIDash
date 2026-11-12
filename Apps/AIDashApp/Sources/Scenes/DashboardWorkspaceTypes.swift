@@ -958,6 +958,59 @@ public enum DashboardActionPriority: Int, CaseIterable, Codable, Sendable, Equat
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
     public var label: String { self == .p0 ? "P0" : (self == .p1 ? "P1" : "P2") }
     public var health: DashboardSemanticHealth { self == .p0 ? .critical : (self == .p1 ? .warning : .neutral) }
+
+    public static func from(rawPriority: String?) -> Self {
+        switch rawPriority?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "P0", "HIGH", "URGENT": return .p0
+        case "P2", "LOW": return .p2
+        default: return .p1
+        }
+    }
+}
+
+public enum DashboardActionStatus: String, CaseIterable, Codable, Sendable, Equatable {
+    case triage
+    case blocked
+    case inProgress = "in_progress"
+    case done
+
+    public static func from(rawStatus: String?, isCompleted: Bool = false) -> Self {
+        if isCompleted { return .done }
+        switch rawStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "triage", "pending": return .triage
+        case "blocked", "need_go": return .blocked
+        case "done", "completed", "canceled", "cancelled", "dismissed": return .done
+        case "in_progress", "todo", "started": return .inProgress
+        default: return .triage
+        }
+    }
+
+    public var displayTitle: String {
+        switch self {
+        case .triage: return DashboardL10n.tr("dashboard.action_status.triage", "Triage")
+        case .blocked: return DashboardL10n.tr("dashboard.action_status.blocked", "Blocked")
+        case .inProgress: return DashboardL10n.tr("dashboard.action_status.in_progress", "In Progress")
+        case .done: return DashboardL10n.tr("dashboard.action_status.done", "Done")
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .triage: return "tray.full.fill"
+        case .blocked: return "exclamationmark.octagon.fill"
+        case .inProgress: return "bolt.horizontal.circle.fill"
+        case .done: return "checkmark.circle.fill"
+        }
+    }
+
+    public var health: DashboardSemanticHealth {
+        switch self {
+        case .blocked: return .critical
+        case .triage: return .warning
+        case .inProgress: return .neutral
+        case .done: return .healthy
+        }
+    }
 }
 
 public enum DashboardActionFilter: String, CaseIterable, Sendable, Equatable, Identifiable {
@@ -992,29 +1045,87 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public let sourceTag: String
     public let cliFilter: DashboardCLIFilter
     public let priority: DashboardActionPriority
+    public var status: DashboardActionStatus
     public var isCompleted: Bool
     public let command: String?
     public let externalURLString: String?
     public let backingCardId: String?
     public let backingItemRef: String?
+    public let jobID: ScheduledPulseJobID?
+    public let controls: [ScheduledJobActionControl]
     public let projectFolderName: String
 
     public init(
         id: String, title: String, summary: String, sourceTag: String,
         cliFilter: DashboardCLIFilter = .all, priority: DashboardActionPriority = .p1,
+        status: DashboardActionStatus? = nil,
         isCompleted: Bool = false, command: String? = nil, externalURLString: String? = nil,
         backingCardId: String? = nil, backingItemRef: String? = nil,
+        jobID: ScheduledPulseJobID? = nil,
+        controls: [ScheduledJobActionControl] = [],
         projectFolderName: String? = nil
     ) {
+        let resolvedStatus = status ?? (isCompleted ? .done : .triage)
         self.id = id; self.title = title; self.summary = summary; self.sourceTag = sourceTag
-        self.cliFilter = cliFilter; self.priority = priority; self.isCompleted = isCompleted
+        self.cliFilter = cliFilter; self.priority = priority
+        self.status = isCompleted ? .done : resolvedStatus
+        self.isCompleted = isCompleted || resolvedStatus == .done
         self.command = command; self.externalURLString = externalURLString
         self.backingCardId = backingCardId; self.backingItemRef = backingItemRef
+        self.jobID = jobID
+        self.controls = controls
         self.projectFolderName = projectFolderName ?? HerdrSocketClient.inferProjectFolderName(
             title: title,
             summary: summary,
-            command: command
+            command: command ?? backingItemRef
         )
+    }
+
+    public var acknowledgementKey: String? {
+        guard let jobID else { return nil }
+        return "\(jobID.rawValue):\(id)"
+    }
+
+    public var decisionOptions: [String] {
+        if let decisionControl = controls.first(where: { $0.id == "decision" && !$0.options.isEmpty }) {
+            return decisionControl.options
+        }
+        return ["Approve", "Done", "Dismiss"]
+    }
+
+    public var targetOptions: [String] {
+        controls.first(where: { $0.id == "targets" && $0.kind == .multiSelect })?.options ?? []
+    }
+
+    public var noteMaxLength: Int {
+        controls.first(where: { $0.id == "note" && $0.kind == .textInput })?.effectiveMaxLength ?? 80
+    }
+
+    public var sourceSymbolName: String {
+        switch sourceTag {
+        case "Linear": return "link.circle.fill"
+        case "GTT Blocker": return "exclamationmark.octagon.fill"
+        case "Retro", "retro-loop": return "arrow.triangle.2.circlepath.circle.fill"
+        case "PR & CI", "CI Improve": return "hammer.circle.fill"
+        case "Mail & Teams": return "envelope.circle.fill"
+        default: return "tag.circle.fill"
+        }
+    }
+
+    public var displayRefLabel: String? {
+        guard let rawRef = backingItemRef?.trimmingCharacters(in: .whitespacesAndNewlines), !rawRef.isEmpty else {
+            return nil
+        }
+        if rawRef.hasPrefix("linear://") {
+            return String(rawRef.dropFirst("linear://".count))
+        }
+        if rawRef.hasPrefix("proposal://") {
+            return String(rawRef.dropFirst("proposal://".count))
+        }
+        if rawRef.hasPrefix("signal://") {
+            return String(rawRef.dropFirst("signal://".count))
+        }
+        return rawRef
     }
 }
 

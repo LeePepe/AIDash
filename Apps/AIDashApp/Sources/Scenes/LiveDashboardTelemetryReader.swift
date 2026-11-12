@@ -1666,12 +1666,84 @@ extension LiveDashboardTelemetryReader {
         if totalAll > 0 { summary.steeringTokenShare = Double(steeringAll) / Double(totalAll) }
     }
 
-    public static func loadLiveImprovementActionItems(homeURL: URL? = nil) -> [DashboardActionItem] {
-        guard isLiveEnvironment else { return [] }
+    public static func loadLiveImprovementActionItems(
+        homeURL: URL? = nil,
+        acknowledgedActionIDs: Set<String> = []
+    ) -> [DashboardActionItem] {
+        guard isLiveEnvironment || homeURL != nil else { return [] }
         let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let actionsURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/actions.jsonl")
+        let canonicalItems = parseUnifiedActionItems(
+            fromURL: actionsURL,
+            acknowledgedActionIDs: acknowledgedActionIDs
+        )
+        if !canonicalItems.isEmpty {
+            return canonicalItems
+        }
         let proposalsURL = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
         let whURL = home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
         return parsePendingProposals(fromURL: proposalsURL) + querySlowCIActionItems(whURL: whURL)
+    }
+
+    public static func parseUnifiedActionItems(
+        fromURL actionsURL: URL,
+        acknowledgedActionIDs: Set<String> = []
+    ) -> [DashboardActionItem] {
+        guard let data = try? Data(contentsOf: actionsURL),
+              let decoded = try? JobActionsSources.decode(data, jobID: "aidata-digest") else {
+            return []
+        }
+        return decoded.map { action in
+            let ackKey = "\(action.jobID):\(action.id)"
+            let isAck = acknowledgedActionIDs.contains(ackKey)
+            let status = DashboardActionStatus.from(rawStatus: action.status, isCompleted: isAck)
+            let priority = DashboardActionPriority.from(rawPriority: action.priority)
+            let sourceTag = (action.source?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "Linear"
+            let rawDesc = action.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanSummary = cleanActionDescription(rawDesc, title: action.title, ref: action.ref)
+            let urlStr = (action.url?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            let mappedControls = action.controls.compactMap { ctrl -> ScheduledJobActionControl? in
+                guard let kind = ScheduledJobActionControlKind(rawValue: ctrl.kind.rawValue) else { return nil }
+                return ScheduledJobActionControl(
+                    id: ctrl.id,
+                    kind: kind,
+                    title: ctrl.title,
+                    options: ctrl.options,
+                    maxLength: ctrl.maxLength
+                )
+            }
+            return DashboardActionItem(
+                id: action.id,
+                title: action.title,
+                summary: cleanSummary.isEmpty ? action.title : cleanSummary,
+                sourceTag: sourceTag,
+                cliFilter: .all,
+                priority: priority,
+                status: status,
+                isCompleted: status == .done,
+                command: nil,
+                externalURLString: urlStr,
+                backingCardId: "scheduled-pulse/\(action.jobID)",
+                backingItemRef: action.ref ?? "\(action.jobID):\(action.id)",
+                jobID: ScheduledPulseJobID(rawValue: action.jobID) ?? .aidataDigest,
+                controls: mappedControls
+            )
+        }
+    }
+
+    private static func cleanActionDescription(_ raw: String, title: String, ref: String?) -> String {
+        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["[triage] ", "[blocked] ", "[in_progress] ", "[done] ", "[todo] "]
+            where cleaned.lowercased().hasPrefix(prefix) {
+            cleaned = String(cleaned.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let ref, ref.hasPrefix("linear://") {
+            let issueKey = String(ref.dropFirst("linear://".count))
+            if cleaned.hasPrefix("\(issueKey) ") {
+                cleaned = String(cleaned.dropFirst(issueKey.count + 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return cleaned
     }
 
     public static func parsePendingProposals(fromURL proposalsURL: URL) -> [DashboardActionItem] {

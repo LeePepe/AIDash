@@ -864,5 +864,78 @@ struct DashboardWorkspaceTests {
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
         _ = DashboardSettingsPageView(store: store, prefs: prefs).body
     }
+
+    @Test("loadLiveImprovementActionItems consumes unified ActionableItem Schema v1 from actions.jsonl and supports native Approve / Done / Dismiss decisions")
+    func unifiedActionableItemsSchemaV1AndDecisionSubmission() throws {
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-unified-actions-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+        let digestDir = tempHome.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: digestDir, withIntermediateDirectories: true)
+
+        let actionsURL = digestDir.appendingPathComponent("actions.jsonl")
+        let sampleLines = [
+            #"{"id":"linear-TIA-76","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[Bing] iOS Smart Banner / SERP","description":"[in_progress] TIA-76 [Bing] iOS Smart Banner / SERP","status":"in_progress","source":"Linear","priority":"P1","ref":"linear://TIA-76","url":"https://linear.app/tianpeili/issue/TIA-76","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
+            #"{"id":"proposal-review-pingpong","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"Shrink Review Ping-Pong","description":"R1 fail rate 55.7%","status":"triage","source":"Retro","priority":"P0","ref":"proposal://review-pingpong","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"targets","kind":"multiSelect","title":"Targets","options":["item-a","item-b"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
+            #"{"id":"gtt-blocker-1","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"GTT Blocker: aidash-ops","description":"Waiting on Owner GO","status":"blocked","source":"GTT Blocker","priority":"P0","ref":"aidash-ops","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#
+        ]
+        try (sampleLines.joined(separator: "\n") + "\n").write(to: actionsURL, atomically: true, encoding: .utf8)
+
+        let loaded = LiveDashboardTelemetryReader.loadLiveImprovementActionItems(
+            homeURL: tempHome,
+            acknowledgedActionIDs: ["aidata-digest:gtt-blocker-1"]
+        )
+        #expect(loaded.count == 3)
+
+        let linearItem = try #require(loaded.first(where: { $0.id == "linear-TIA-76" }))
+        #expect(linearItem.status == .inProgress)
+        #expect(!linearItem.isCompleted)
+        #expect(linearItem.sourceTag == "Linear")
+        #expect(linearItem.priority == .p1)
+        #expect(linearItem.displayRefLabel == "TIA-76")
+        #expect(linearItem.externalURLString == "https://linear.app/tianpeili/issue/TIA-76")
+        #expect(linearItem.summary == "[Bing] iOS Smart Banner / SERP")
+        #expect(linearItem.decisionOptions == ["Approve", "Done", "Dismiss"])
+
+        let retroItem = try #require(loaded.first(where: { $0.id == "proposal-review-pingpong" }))
+        #expect(retroItem.status == .triage)
+        #expect(retroItem.sourceTag == "Retro")
+        #expect(retroItem.priority == .p0)
+        #expect(retroItem.targetOptions == ["item-a", "item-b"])
+
+        let ackedItem = try #require(loaded.first(where: { $0.id == "gtt-blocker-1" }))
+        #expect(ackedItem.status == .done)
+        #expect(ackedItem.isCompleted)
+
+        let store = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: loaded)
+        var capturedAction: ScheduledJobAction?
+        var capturedResponses: [ScheduledJobActionResponse] = []
+        var toggledEvent: (String, String, Bool)?
+        store.scheduledActionWriter = { action, responses in
+            capturedAction = action
+            capturedResponses = responses
+            return true
+        }
+        store.submitActionItemDecision(
+            retroItem,
+            decision: "Approve",
+            targets: ["item-b", "item-a"],
+            note: "Ship in wave 1",
+            onToggleDone: { cardId, itemRef, isDone in
+                toggledEvent = (cardId, itemRef, isDone)
+            }
+        )
+        #expect(capturedAction?.id == "proposal-review-pingpong")
+        #expect(capturedResponses.contains(ScheduledJobActionResponse(controlID: "decision", value: "Approve")))
+        #expect(capturedResponses.contains(ScheduledJobActionResponse(controlID: "targets", value: "item-a,item-b")))
+        #expect(capturedResponses.contains(ScheduledJobActionResponse(controlID: "note", value: "Ship in wave 1")))
+        #expect(store.acknowledgedScheduledActionIDs.contains("aidata-digest:proposal-review-pingpong"))
+        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.isCompleted == true)
+        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.status == .done)
+        #expect(toggledEvent?.0 == "scheduled-pulse/aidata-digest")
+        #expect(toggledEvent?.1 == "proposal://review-pingpong")
+        #expect(toggledEvent?.2 == true)
+        _ = ActionItemsCardView(store: store).body
+    }
 }
 #endif

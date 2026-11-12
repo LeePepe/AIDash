@@ -32,6 +32,9 @@ public struct ActionItemsCardView: View {
     @Bindable public var store: DashboardWorkspaceStore
     public var onToggleDone: ((String, String, Bool) -> Void)?
     @State private var expandedActionID: String?
+    @State private var selectedDecisions: [String: String] = [:]
+    @State private var selectedTargets: [String: Set<String>] = [:]
+    @State private var noteInputs: [String: String] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
@@ -154,11 +157,21 @@ public struct ActionItemsCardView: View {
         }
     }
 
+    private func statusTintColor(for status: DashboardActionStatus) -> Color {
+        switch status {
+        case .triage: return .purple
+        case .blocked: return .red
+        case .inProgress: return .blue
+        case .done: return .green
+        }
+    }
+
     private func actionItemRow(_ item: DashboardActionItem) -> some View {
         let priorityColor = DashboardSemanticColorPalette.color(for: item.priority.health)
+        let statusColor = statusTintColor(for: item.status)
         let effectiveExpandedID = expandedActionID ?? store.filteredActionItems.first(where: { !$0.isCompleted })?.id
         let isExpanded = effectiveExpandedID == item.id
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
                 Toggle(
                     isOn: Binding(
@@ -182,15 +195,32 @@ public struct ActionItemsCardView: View {
                         Text(item.priority.label)
                             .font(.caption2.weight(.bold)).monospacedDigit().padding(.horizontal, 6).padding(.vertical, 2)
                             .background(priorityColor.opacity(0.16), in: Capsule()).foregroundStyle(priorityColor)
+                        Label(item.status.displayTitle, systemImage: item.status.symbolName)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(statusColor.opacity(0.14), in: Capsule())
+                            .foregroundStyle(statusColor)
+                        Label(item.sourceTag, systemImage: item.sourceSymbolName)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                            .foregroundStyle(.secondary)
                         Label(item.projectFolderName, systemImage: "folder")
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.accentColor.opacity(0.12), in: Capsule())
                             .foregroundStyle(Color.accentColor)
-                        Text(item.sourceTag).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         Text(item.title).font(.body.weight(.medium)).strikethrough(item.isCompleted)
                             .foregroundStyle(item.isCompleted ? .secondary : .primary).lineLimit(1)
+                        if let refLabel = item.displayRefLabel, !item.title.contains(refLabel) {
+                            Text(refLabel)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                         Spacer(minLength: 6)
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                             .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
@@ -202,10 +232,22 @@ public struct ActionItemsCardView: View {
                 actionRowAccessoryButtons(item)
             }
             if isExpanded {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.summary).font(.subheadline).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(item.summary)
+                        .font(.callout)
+                        .lineSpacing(2)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let command = item.command {
-                        Text("$ \(command)").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Text("$ \(command)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    if !item.isCompleted {
+                        actionInlineDecisionBar(item)
                     }
                 }
                 .padding(.leading, 38)
@@ -213,6 +255,88 @@ public struct ActionItemsCardView: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    @ViewBuilder
+    private func actionInlineDecisionBar(_ item: DashboardActionItem) -> some View {
+        let options = item.decisionOptions
+        let defaultDecision = item.status == .inProgress && options.contains("Done") ? "Done" : (options.first ?? "Approve")
+        let decisionBinding = Binding<String>(
+            get: { selectedDecisions[item.id] ?? defaultDecision },
+            set: { selectedDecisions[item.id] = $0 }
+        )
+        let noteBinding = Binding<String>(
+            get: { noteInputs[item.id] ?? "" },
+            set: { noteInputs[item.id] = String($0.prefix(item.noteMaxLength)) }
+        )
+        VStack(alignment: .leading, spacing: 6) {
+            if !item.targetOptions.isEmpty {
+                HStack(spacing: 10) {
+                    Text(DashboardL10n.tr("dashboard.actions.targets_label", "Targets:"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(item.targetOptions, id: \.self) { target in
+                        Toggle(
+                            target,
+                            isOn: Binding(
+                                get: { selectedTargets[item.id, default: []].contains(target) },
+                                set: { isOn in
+                                    if isOn {
+                                        selectedTargets[item.id, default: []].insert(target)
+                                    } else {
+                                        selectedTargets[item.id, default: []].remove(target)
+                                    }
+                                }
+                            )
+                        )
+                        .toggleStyle(.checkbox)
+                        .controlSize(.small)
+                        .font(.caption)
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                Picker(DashboardL10n.tr("dashboard.actions.decision_label", "Decision"), selection: decisionBinding) {
+                    ForEach(options, id: \.self) { option in
+                        Text(option).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
+
+                TextField(
+                    DashboardL10n.tr("dashboard.actions.note_placeholder", "Note / instruction (optional, max 80 chars)"),
+                    text: noteBinding
+                )
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .frame(maxWidth: 320)
+
+                Button {
+                    let chosenDecision = selectedDecisions[item.id] ?? defaultDecision
+                    let chosenTargets = selectedTargets[item.id] ?? []
+                    let chosenNote = noteInputs[item.id] ?? ""
+                    store.submitActionItemDecision(
+                        item,
+                        decision: chosenDecision,
+                        targets: chosenTargets,
+                        note: chosenNote,
+                        onToggleDone: onToggleDone
+                    )
+                } label: {
+                    Label(
+                        DashboardL10n.tr("dashboard.actions.submit_decision", "Apply"),
+                        systemImage: "checkmark.circle.fill"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .frame(minHeight: 28)
+            }
+        }
+        .padding(.top, 2)
     }
 
     private func actionRowAccessoryButtons(_ item: DashboardActionItem) -> some View {
