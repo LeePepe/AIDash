@@ -43,12 +43,16 @@ struct TK3SnapshotRenderTests {
             }
         }
         try #require(!geometrySamples.isEmpty)
-        let geometryDocument: [String: Any] = [
-            "platform": "desktop",
-            "viewportWidth": 1040,
-            "children": geometrySamples.map { ["label": $0.id, "role": $0.role, "frame": ["x": $0.x, "y": $0.y, "width": $0.width, "height": $0.height]] }
-        ]
-        try JSONSerialization.data(withJSONObject: geometryDocument, options: [.prettyPrinted]).write(to: output.deletingLastPathComponent().appendingPathComponent("TK3-geometry.json"))
+        let rawNodes = geometrySamples.map { ["label": $0.id, "role": $0.role, "frame": ["x": $0.x, "y": $0.y, "width": $0.width, "height": $0.height]] }
+        let rawDocument: [String: Any] = ["platform": "desktop", "viewportWidth": 1040, "children": rawNodes]
+        let receipts = output.deletingLastPathComponent()
+        try JSONSerialization.data(withJSONObject: rawDocument, options: [.prettyPrinted]).write(to: receipts.appendingPathComponent("TK3-geometry-raw.json"))
+        let leafNodes = geometrySamples.filter { $0.role != "pulseStageGrid" && $0.role != "skillsHealthGrid" }
+        let groups = Dictionary(grouping: leafNodes, by: { $0.id.split(separator: "/", maxSplits: 1).first.map(String.init) ?? $0.id }).map { key, values in
+            ["label": key, "children": values.map { ["label": $0.id, "role": $0.role, "frame": ["x": $0.x, "y": $0.y, "width": $0.width, "height": $0.height]] }] as [String: Any]
+        }
+        let geometryDocument: [String: Any] = ["platform": "desktop", "viewportWidth": 1040, "children": groups]
+        try JSONSerialization.data(withJSONObject: geometryDocument, options: [.prettyPrinted]).write(to: receipts.appendingPathComponent("TK3-geometry.json"))
     }
 
     private func canonicalFixtureData() throws -> Data {
