@@ -236,12 +236,7 @@ public struct ActionItemsCardView: View {
     @ViewBuilder
     private func linearClusterRow(label: String, items: [DashboardActionItem]) -> some View {
         let isExpanded = expandedLinearClusterLabels.contains(label) || store.selectedLinearActionFilter == label
-        let labelText: String
-        switch label {
-        case "pop": labelText = "📦 🏷️ pop · 待 PoP / 手动合入"
-        case "eval": labelText = "📦 🏷️ eval · Triage 评论衍生改进建议"
-        default: labelText = "📦 🏷️ bug-blocker · Triage 未提 PR 的 Bug 阻塞"
-        }
+        let labelText = linearClusterTitle(for: label)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Button {
@@ -278,6 +273,14 @@ public struct ActionItemsCardView: View {
                 }
                 .padding(.leading, 14)
             }
+        }
+    }
+
+    private func linearClusterTitle(for label: String) -> String {
+        switch label {
+        case "pop": return "📦 🏷️ pop · 待 PoP / 手动合入"
+        case "eval": return "📦 🏷️ eval · Triage 评论衍生改进建议"
+        default: return "📦 🏷️ bug-blocker · Triage 未提 PR 的 Bug 阻塞"
         }
     }
 

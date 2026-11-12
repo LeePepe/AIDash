@@ -946,5 +946,23 @@ struct DashboardWorkspaceTests {
         #expect(toggledEvent?.2 == true)
         _ = ActionItemsCardView(store: store).body
     }
+
+    @Test("Linear parent rows are removed when they only serve as containers")
+    func linearParentContainerRowsAreDeduplicated() throws {
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-linear-parent-container-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+        let digestDir = tempHome.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: digestDir, withIntermediateDirectories: true)
+        let actionsURL = digestDir.appendingPathComponent("actions.jsonl")
+        let lines = [
+            #"{"id":"linear-TIA-83","jobID":"aidata-digest","title":"Parent","description":"Parent","status":"in_progress","source":"Linear","ref":"linear://TIA-83","controls":[{"id":"confirm","kind":"confirm","title":"Confirm"}],"parentIssue":{"identifier":"TIA-83","title":"Parent","url":"https://linear.app/example/issue/TIA-83"}}"#,
+            #"{"id":"child-1","jobID":"aidata-digest","title":"Child","description":"Child","status":"triage","source":"Linear","ref":"linear://CHILD-1","controls":[{"id":"confirm","kind":"confirm","title":"Confirm"}],"parentIssue":{"identifier":"TIA-83","title":"Parent","url":"https://linear.app/example/issue/TIA-83"}}"#
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: actionsURL, atomically: true, encoding: .utf8)
+
+        let loaded = LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: tempHome)
+        #expect(loaded.map(\.id) == ["child-1"])
+    }
 }
 #endif

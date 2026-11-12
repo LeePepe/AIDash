@@ -1809,7 +1809,7 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func deduplicatingLinearContainerRows(_ items: [DashboardActionItem]) -> [DashboardActionItem] {
-        let childParentKeys = Set(items.compactMap { item in
+        let childParentKeys: Set<String> = Set(items.compactMap { item in
             guard let parentKey = item.parentIssueKey?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
                   linearIssueKey(for: item) != parentKey else { return nil }
             return parentKey
