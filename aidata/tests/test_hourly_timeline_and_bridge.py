@@ -10,6 +10,24 @@ from L5_apps.digest import aidash, event_bridge, sources, verify
 from L5_apps.digest.card_policy import DataProfile, choose_card
 
 
+@pytest.fixture(autouse=True)
+def reject_uninjected_todo_effects(tmp_path, monkeypatch):
+    from L5_apps.digest import todo_sync_provider
+
+    direct_idea_adapter = event_bridge._default_linear_runner
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("live Todo provider is forbidden; inject a fixture runner")
+
+    monkeypatch.setattr(event_bridge, "LOCAL_TODOS_PATH", tmp_path / "local-todos.jsonl")
+    monkeypatch.setattr(todo_sync_provider, "TODO_SYNC_CONFIG_PATH", tmp_path / "todo-config.json")
+    for name in ("_default_linear_runner", "_default_linear_status_runner", "_default_linear_comment_runner"):
+        monkeypatch.setattr(event_bridge, name, forbidden)
+    for name in ("_default_idea_runner", "_default_status_runner"):
+        monkeypatch.setattr(todo_sync_provider.LinearTodoSyncProvider, name, forbidden)
+    return direct_idea_adapter
+
+
 def _payload():
     hours = []
     citations = []
@@ -639,7 +657,7 @@ def test_event_bridge_linear_done_undone_and_star_external_id(tmp_path):
 
 
 @pytest.mark.unit
-def test_default_linear_runner_parses_issue_identifier(monkeypatch, tmp_path):
+def test_default_linear_runner_parses_issue_identifier(monkeypatch, tmp_path, reject_uninjected_todo_effects):
     script = tmp_path / "linear-sync.py"
     script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     monkeypatch.setattr(event_bridge, "LINEAR_SYNC_SCRIPT", script)
@@ -653,7 +671,7 @@ def test_default_linear_runner_parses_issue_identifier(monkeypatch, tmp_path):
         })
 
     monkeypatch.setattr(event_bridge.subprocess, "run", lambda *a, **k: FakeProc())
-    rc, external_id = event_bridge._default_linear_runner("Title", "Desc")
+    rc, external_id = reject_uninjected_todo_effects("Title", "Desc")
     assert rc == 0
     assert external_id == "TIA-96"
 
