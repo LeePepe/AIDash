@@ -11,8 +11,7 @@
     {"patterns": [".claude/**", ".github/**", ".specify/**", "design/**", "docs/**", "scripts/**", "specs/**", ".gitignore", ".require-tests-ignore", ".swiftlint.yml", "AGENTS.md", "CLAUDE.md", "LICENSE", "README.md", "tech-context.md"], "context": "scripts/CONTEXT.md"}
   ],
   "exclusions": [
-    {"patterns": ["CONTEXT.md"], "reason": "Root routing metadata; it is audited as context structure rather than owned product code."},
-    {"patterns": ["receipts/**"], "reason": "Temporary handoff receipt deletion; receipts are session artifacts, not product code."}
+    {"patterns": ["CONTEXT.md"], "reason": "Root routing metadata; it is audited as context structure rather than owned product code."}
   ]
 }
 ---
