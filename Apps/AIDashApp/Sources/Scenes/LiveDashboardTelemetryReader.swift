@@ -1974,6 +1974,7 @@ extension LiveDashboardTelemetryReader {
             || normalizedRef.hasPrefix("knowledge://")
             || normalizedRef.hasPrefix("proposal://")
             || normalizedRef.hasPrefix("skill-roi://")
+            || normalizedRef.hasPrefix("retro://")
             || normalizedRef.hasPrefix("linear://")
     }
 

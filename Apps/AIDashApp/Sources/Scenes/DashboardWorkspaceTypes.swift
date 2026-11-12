@@ -1455,7 +1455,7 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         let ref = backingItemRef?.lowercased() ?? ""
         if status == .blocked || sourceTag == "GTT Blocker" { return .blockers }
         if status == .inProgress { return .planned }
-        if sourceTag == "Learning" || ref.hasPrefix("learning-topic://") || ref.hasPrefix("knowledge://") || ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://") { return .decisions }
+        if sourceTag == "Learning" || ref.hasPrefix("learning-topic://") || ref.hasPrefix("knowledge://") || ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://") || ref.hasPrefix("retro://") { return .decisions }
         if sourceTag == "Linear" { return .planned }
         return .findings
     }
@@ -1463,7 +1463,7 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public var isLearningTopic: Bool { sourceTag == "Learning" || backingItemRef?.hasPrefix("learning-topic://") == true }
     public var isProposal: Bool {
         let ref = backingItemRef ?? ""
-        return ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://")
+        return ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://") || ref.hasPrefix("retro://")
     }
 
     public var acknowledgementKey: String? {
