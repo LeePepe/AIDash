@@ -276,6 +276,20 @@ struct ScheduledPulseTests {
         #expect(empty.overviewEntries.allSatisfy { $0.semanticState == .noState })
     }
 
+    @Test("scheduled pulse need-actions loader accepts actionable v2 aliases")
+    func scheduledPulseV2Actions() throws {
+        let data = Data(#"{"id":"D617","jobId":"my-pr-supervisor","title":"Choose landing","description":"Pick a path","controls":[{"id":"decision","kind":"singleSelect","label":"Choose","options":["Approve","Dismiss"]}]}"#.utf8)
+        let snapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            fileReader: { url in
+                url.lastPathComponent == "actions.jsonl" && url.path.contains("my-pr-supervisor") ? data : nil
+            },
+            homeURL: URL(fileURLWithPath: "/Users/tester")
+        )
+        let entry = try #require(snapshot.entries.first(where: { $0.id == .myPRSupervisor }))
+        #expect(entry.actions.first?.id == "D617")
+        #expect(entry.actions.first?.controls.first?.title == "Choose")
+    }
+
     @Test("acknowledged actions disappear before the initial main-window render")
     func initialAcknowledgementFiltering() {
         let store = DashboardWorkspaceStore(snapshot: Self.menuSnapshot())
@@ -365,7 +379,6 @@ struct ScheduledPulseTests {
         let coalesced = Data("{\"id\":\"pr-auto-review\",\"lastResult\":\"coalesced\"}".utf8)
         let snapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
             now: now,
-            homeURL: home,
             fileReader: { url in
                 switch url.lastPathComponent {
                 case "state.json" where url.path.contains("my-pr-supervisor"): return succeeded
@@ -373,6 +386,7 @@ struct ScheduledPulseTests {
                 default: return nil
                 }
             },
+            homeURL: home,
             launchctl: { args in
                 let label = args.last ?? ""
                 let output = label.contains("my-pr-supervisor")

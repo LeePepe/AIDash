@@ -7,7 +7,7 @@ import AIDashCore
 /// Reads only registered actions.jsonl files. No telemetry, launchctl, precheck or source mutations.
 @MainActor
 enum JobActionsSources {
-    static let maximumFileBytes = 8 * 1024 * 1024
+    static let maximumFileBytes = 4 * 1024 * 1024
     static let maximumRetainedActions = 512
     typealias ReadFile = (URL, Int) throws -> Data
 
@@ -18,7 +18,11 @@ enum JobActionsSources {
         for job in jobs {
             do {
                 let url = root.appendingPathComponent(job.id.rawValue).appendingPathComponent("actions.jsonl")
-                let data = try read(url, maximumFileBytes)
+                let data = try read(url, maximumFileBytes + 1)
+                guard data.count <= maximumFileBytes else {
+                    diagnostics.append(.init(code: "source-oversized", jobID: job.id.rawValue))
+                    continue
+                }
                 actions += try decode(data, jobID: job.id.rawValue)
             } catch {
                 let code: String
@@ -53,13 +57,16 @@ enum JobActionsSources {
         }
         var actions: [JobActionsAction] = []
         var seenIDs = Set<String>()
+        var nonEmptyLineCount = 0
         for line in text.split(whereSeparator: \.isNewline) where !line.trimmingCharacters(in: .whitespaces).isEmpty {
+            nonEmptyLineCount += 1
             guard let action = try? decoder.decode(JobActionsAction.self, from: Data(line.utf8)),
                   action.jobID == jobID,
                   (try? JobActionsValidation.validateAction(action)) != nil,
                   seenIDs.insert(action.id).inserted else { continue }
             actions.append(action)
         }
+        guard nonEmptyLineCount == 0 || !actions.isEmpty else { throw invalidSource() }
         return retain(actions)
     }
 

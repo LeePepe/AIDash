@@ -327,7 +327,9 @@ public enum ScheduledJobFrameworkLogic {
             return .failed
         }
         if state?.lastResult == .succeeded {
-            return launchdStatus?.lastExitCode.map { $0 == 0 ? .healthy : .partial } ?? .healthy
+            guard let launchdStatus else { return .partial }
+            guard launchdStatus.isLoaded else { return .partial }
+            return launchdStatus.lastExitCode.map { $0 == 0 ? .healthy : .partial } ?? .healthy
         }
         if let launchdStatus, launchdStatus.health == .critical || (launchdStatus.lastExitCode ?? 0) != 0 {
             return .failed

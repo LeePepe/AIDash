@@ -27,23 +27,10 @@ struct JobActionsReviewView: View {
                         HStack(spacing: 6) {
                             Text(verbatim: jobLabel).font(.caption).foregroundStyle(.secondary)
                             if let priority = review.action.priority, !priority.isEmpty {
-                                let priorityHealth = DashboardActionPriority.from(rawPriority: priority).health
-                                Text(verbatim: priority)
-                                    .font(.caption2.weight(.bold))
-                                    .monospacedDigit()
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(DashboardSemanticColorPalette.color(for: priorityHealth).opacity(0.16), in: Capsule())
-                                    .foregroundStyle(DashboardSemanticColorPalette.color(for: priorityHealth))
+                                StatusPill(priority, tone: priorityTone(priority))
                             }
                             if let status = review.action.status, !status.isEmpty {
-                                let statusHealth = DashboardActionStatus.from(rawStatus: status).health
-                                Text(verbatim: status)
-                                    .font(.caption2.weight(.semibold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(DashboardSemanticColorPalette.color(for: statusHealth).opacity(0.14), in: Capsule())
-                                    .foregroundStyle(DashboardSemanticColorPalette.color(for: statusHealth))
+                                StatusPill(status, tone: statusTone(status))
                             }
                             if let source = review.action.source, !source.isEmpty {
                                 Text(verbatim: source)
@@ -151,6 +138,23 @@ struct JobActionsReviewView: View {
                 .font(.body).foregroundStyle(theme.dangerOnSubtle)
         case .cancelled:
             Text("job_actions.review.cancelled").font(.body).foregroundStyle(.secondary)
+        }
+    }
+
+    private func priorityTone(_ priority: String) -> PillTone {
+        switch DashboardActionPriority.from(rawPriority: priority) {
+        case .p0: return .danger
+        case .p1: return .warning
+        case .p2: return .neutral
+        }
+    }
+
+    private func statusTone(_ status: String) -> PillTone {
+        switch DashboardActionStatus.from(rawStatus: status) {
+        case .blocked: return .danger
+        case .triage: return .warning
+        case .inProgress: return .primary
+        case .done: return .success
         }
     }
 

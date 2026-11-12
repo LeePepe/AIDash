@@ -92,7 +92,7 @@ public struct ScheduledPulsePageView: View {
                         .font(.headline)
                     HStack(spacing: 6) {
                         Text(entry.definition.cadence.displayText)
-                        if let lastRun = ScheduledJobTimeFormatting.relativeText(from: entry.lastRunAt) {
+                        if let lastRun = ScheduledJobTimeFormatting.relativeText(from: entry.lastRunAt ?? entry.lastTick) {
                             Text(lastRun)
                         } else {
                             Text(DashboardL10n.tr("dashboard.scheduled_pulse.time.never", "尚未运行"))

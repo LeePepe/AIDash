@@ -224,9 +224,8 @@ struct JobActionsAppBridgeTests {
         #expect(parsed.controls[0].maxLength == 120)
         #expect(parsed.controls[0].effectiveMaxLength == 80)
         #expect(throws: (any Error).self) { try JobActionsSources.decode(source, jobID: "pr-auto-review") }
-        #expect(throws: (any Error).self) {
-            try JobActionsSources.decode(source + Data("\n".utf8) + source, jobID: "my-pr-supervisor")
-        }
+        let duplicate = try JobActionsSources.decode(source + Data("\n".utf8) + source, jobID: "my-pr-supervisor")
+        #expect(duplicate.count == 1)
         let malformed = Data(#"{"id":"bad","jobID":"my-pr-supervisor","title":"Synthetic","descriptionMd":"","controls":[{"id":"x","kind":"futureKind","title":"Unknown"}]}"#.utf8)
         #expect(throws: (any Error).self) { try JobActionsSources.decode(malformed, jobID: "my-pr-supervisor") }
         let snapshot = JobActionsSources.load(
@@ -238,7 +237,7 @@ struct JobActionsAppBridgeTests {
             return Data(repeating: 32, count: limit)
         }
         #expect(snapshot.actions.count == 1)
-        #expect(snapshot.diagnostics.map(\.code) == ["source-missing"])
+        #expect(snapshot.diagnostics.map(\.code) == ["source-missing", "source-oversized"])
     }
 
     @Test("Large JSONL retains protected v2 actions beyond the legacy line and byte limits")

@@ -245,6 +245,28 @@ public enum LiveDashboardTelemetryReader {
               let text = String(data: data, encoding: .utf8) else { return [] }
         return text.split(whereSeparator: \.isNewline).compactMap { line in
             let lineData = Data(line.utf8)
+            if let wireAction = try? decoder.decode(JobActionsAction.self, from: lineData),
+               wireAction.jobID == definition.id.rawValue {
+                let controls = wireAction.controls.compactMap { control -> ScheduledJobActionControl? in
+                    guard let kind = ScheduledJobActionControlKind(rawValue: control.kind.rawValue) else { return nil }
+                    return ScheduledJobActionControl(
+                        id: control.id,
+                        kind: kind,
+                        title: control.title,
+                        options: control.options,
+                        maxLength: control.maxLength
+                    )
+                }
+                guard !controls.isEmpty else { return nil }
+                return ScheduledJobAction(
+                    id: wireAction.id,
+                    jobID: definition.id,
+                    createdAt: wireAction.createdAt,
+                    title: wireAction.title,
+                    descriptionMd: wireAction.descriptionMd,
+                    controls: controls
+                )
+            }
             if let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let rawControls = object["controls"] as? [[String: Any]],
                   !rawControls.isEmpty,

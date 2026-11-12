@@ -595,7 +595,7 @@ private struct MenuBarScheduledJobsCard: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(DashboardSemanticColorPalette.color(for: entry.semanticState.semanticHealth))
                     .lineLimit(1)
-                if let relative = ScheduledJobTimeFormatting.relativeText(from: entry.lastRunAt) {
+                if let relative = ScheduledJobTimeFormatting.relativeText(from: entry.lastRunAt ?? entry.lastTick) {
                     Text(relative)
                         .font(.caption2)
                         .foregroundStyle(.secondary)

@@ -2,6 +2,7 @@
 // swiftlint:disable file_length
 import AppKit
 import SwiftUI
+import AIDashCore
 import AIDashUI
 
 public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Identifiable {
@@ -165,7 +166,8 @@ public struct ActionItemsCardView: View {
         let priorityColor = DashboardSemanticColorPalette.color(for: item.priority.health)
         let statusColor = statusTintColor(for: item.status)
         let isExpanded = expandedActionID == item.id
-        let requiresChoice = !item.targetOptions.isEmpty || item.decisionOptions.count > 1
+        let hasDecisionControl = item.controls.contains { $0.id == "decision" && !$0.options.isEmpty }
+        let requiresChoice = !item.targetOptions.isEmpty || (hasDecisionControl && item.decisionOptions.count > 1)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
                 Button {
@@ -409,7 +411,7 @@ public struct ActionItemsCardView: View {
                 }
                 .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
             }
-            if let urlString = item.externalURLString, let url = URL(string: urlString) {
+            if let url = URLPolicy.validate(item.externalURLString) {
                 Button { NSWorkspace.shared.open(url) } label: {
                     Label(DashboardL10n.tr("dashboard.actions.open_link", "Open"), systemImage: "arrow.up.right.square")
                 }
