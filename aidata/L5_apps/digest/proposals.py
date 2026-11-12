@@ -25,7 +25,11 @@ proposal must not break the digest.
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -138,12 +142,31 @@ def _coerce(obj: dict) -> Proposal | None:
     )
 
 
-def read_all_latest(path: Path | None = None) -> dict[str, Proposal]:
-    """Return latest valid Proposal per id across all statuses."""
+@contextmanager
+def jsonl_lock(path: Path) -> Iterator[None]:
+    """Shared sidecar protocol for proposal producers, decisions and leases."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix(path.suffix + ".lock").open("a", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def append_jsonl_locked(path: Path, record: dict) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def read_latest_records(path: Path | None = None) -> dict[str, dict]:
+    """Return full latest valid records, preserving producer metadata/extras."""
     p = path or PROPOSALS_PATH
     if not p.exists():
         return {}
-    by_id: dict[str, Proposal] = {}
+    by_id: dict[str, dict] = {}
     try:
         text = p.read_text(encoding="utf-8")
     except OSError:
@@ -160,8 +183,13 @@ def read_all_latest(path: Path | None = None) -> dict[str, Proposal]:
             continue
         prop = _coerce(obj)
         if prop is not None:
-            by_id[prop.id] = prop
+            by_id[prop.id] = obj
     return by_id
+
+
+def read_all_latest(path: Path | None = None) -> dict[str, Proposal]:
+    """Return latest valid Proposal per id across all statuses."""
+    return {key: prop for key, record in read_latest_records(path).items() if (prop := _coerce(record)) is not None}
 
 
 def read_pending(path: Path | None = None) -> list[Proposal]:

@@ -1483,23 +1483,27 @@ def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
     skills = getattr(skill_roi, "skills", ())
     if skills:
         # S4 + S6 + S10: Skill ROI & R1 Pass & Unpracticed script touch
+        def rate_text(value: float | None) -> str:
+            return f"{value * 100:.0f}%" if value is not None else "unknown"
+
         roi_items = [
             {
-                "label": f"{s.skill} · R1 {s.r1_pass_rate * 100:.0f}% · 触达 {s.script_touch_rate * 100:.0f}%",
+                "label": f"{s.skill} · R1 {rate_text(s.r1_pass_rate)} · 触达 {rate_text(s.script_touch_rate)}",
                 "value": float(s.roi_score),
                 "valueText": f"ROI {s.roi_score:.2f} ({s.loads_30d}次)",
-                **({"semantic": "warning"} if s.roi_score < 0.75 or s.unpracticed_rate >= 0.5 else {}),
+                **({"semantic": "warning"} if s.roi_score < 0.75 or (s.unpracticed_rate is not None and s.unpracticed_rate >= 0.5) else {}),
             }
-            for s in skills[:6]
+            for s in skills[:6] if s.roi_score is not None
         ]
-        cards.append(
-            Card(
-                _kuid(mmdd, 83),
-                "barList",
-                "wide",
-                {"title": "Skills 综合 ROI 与脚本触达 (S4/S6/S10)", "items": roi_items},
+        if roi_items:
+            cards.append(
+                Card(
+                    _kuid(mmdd, 83),
+                    "barList",
+                    "wide",
+                    {"title": "Skills 综合 ROI 与脚本触达 (S4/S6/S10)", "items": roi_items},
+                )
             )
-        )
 
         # S7: Progressive Disclosure Funnel
         l0_sum = sum(s.l0_only_sessions for s in skills)
@@ -1603,7 +1607,10 @@ def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
                 )
             )
 
-    summary_lines: list[str] = []
+    summary_lines: list[str] = [
+        f"{s.skill} · ROI unknown · R1 {rate_text(s.r1_pass_rate)} · 触达 {rate_text(s.script_touch_rate)} · {s.loads_30d}次 · {s.coverage_status}"
+        for s in skills[:6] if s.roi_score is None
+    ]
     if getattr(skill_roi, "low_roi_summary", ""):
         summary_lines.append(skill_roi.low_roi_summary)
     if getattr(skill_roi, "top_l0_watermarks", ()):
@@ -1631,7 +1638,7 @@ def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
     return Container(
         _cuid(mmdd, 19),
         "Skills 与 ROI 诊断",
-        62,
+        26,
         tuple(cards),
         layout="auto",
         style="neutral",
@@ -1897,8 +1904,8 @@ _READING_FLOW_ORDER = {
     "24h 证据时间线": 50,
     "交叉信号": 55,
     "产品健康与个人成长": 58,
-    "工程与编排图表": 60,
-    "Skills 与 ROI 诊断": 62,
+    "工程与编排图表": 28,
+    "Skills 与 ROI 诊断": 26,
     "时间与产出": 65,
     "AI 效能": 70,
     "成本归因": 80,

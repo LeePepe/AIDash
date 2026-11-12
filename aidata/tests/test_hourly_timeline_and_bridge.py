@@ -2,7 +2,6 @@ import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event
 
@@ -261,6 +260,114 @@ def test_learning_queue_does_not_reopen_terminal_proposal(tmp_path, monkeypatch)
     assert event_bridge.consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job) or 0) == {"consumed": 0, "blocked": 1}
     assert calls == []
     assert proposals.read_text(encoding="utf-8") == json.dumps(terminal) + "\n"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("ref", ["learning-topic://topic", "knowledge://topic", "linear://TIA-123"])
+def test_learning_receipts_guard_revisions_and_keep_later_done(tmp_path, ref):
+    proposals, todos = tmp_path / "proposals.jsonl", tmp_path / "todos.jsonl"
+    record = {**asdict(_learning_proposal()), "ref": ref, "revision": 4, "learning_state": "transferred", "source": "Learning"}
+    proposals.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    calls = []
+
+    def receipt(uid, decision, revision):
+        action_id = "linear-TIA-123" if ref.startswith("linear:") else "knowledge-topic" if ref.startswith("knowledge:") else "learning-topic"
+        return {"id": uid, "revision": revision, "action": "acknowledgeJobAction", "cardType": "scheduledPulse", "cardId": "scheduled-pulse/aidata-digest", "itemRef": f'aidata-digest:{action_id}|[{json.dumps({"controlID": "decision", "value": decision})}]'}
+
+    def run(event):
+        return event_bridge.process_user_events([event], proposals_path=proposals, local_todos_path=todos,
+            linear_runner=lambda *_: pytest.fail("must reuse stored external id"),
+            linear_status_runner=lambda ident, state: calls.append((ident, state)) or 0)
+
+    assert run(receipt("old", "Approve", 3))["conflicts"] == 1
+    assert calls == []
+    assert event_bridge.read_all_latest(proposals)[record["id"]].revision == 4
+    assert json.loads(proposals.read_text().splitlines()[-1])["conflict"]["reason"] == "stale event revision"
+    approved = receipt("approve", "Approve", 4)
+    assert run(approved)["promoted"] == 1
+    assert run(approved)["ignored"] == 1
+    latest = event_bridge.read_all_latest(proposals)[record["id"]]
+    assert latest.learning_state == "approved"
+    assert run(receipt("done", "Done", latest.revision))["resolved"] == 1
+    latest = event_bridge.read_all_latest(proposals)[record["id"]]
+    assert latest.learning_state == "learned"
+    assert run(receipt("late", "Approve", latest.revision))["conflicts"] == 1
+    assert calls == [("TIA-123", "Todo"), ("TIA-123", "Done")]
+    assert event_bridge.read_all_latest(proposals)[record["id"]].learning_state == "learned"
+
+
+@pytest.mark.unit
+def test_learning_approval_revision_check_and_append_share_lock(tmp_path, monkeypatch):
+    proposals, queue = tmp_path / "proposals.jsonl", tmp_path / "queue.jsonl"
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    proposal = _learning_proposal()
+    proposals.write_text(json.dumps({**asdict(proposal), "learning_state": "transferred"}) + "\n")
+    entered, finish = Event(), Event()
+    calls = []
+
+    def status(ident, state):
+        calls.append((ident, state))
+        entered.set()
+        assert finish.wait(5)
+        return 0
+
+    def approve(uid):
+        return event_bridge.process_user_events([{"id": uid, "revision": 2, "action": "approve", "itemRef": "learning-topic://topic"}],
+            proposals_path=proposals, local_todos_path=tmp_path / "todos.jsonl", linear_status_runner=status)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(approve, "first")
+        try:
+            assert entered.wait(5)
+            second = pool.submit(approve, "second")
+        finally:
+            finish.set()
+        assert first.result(timeout=5)["promoted"] == 1
+        assert second.result(timeout=5)["conflicts"] == 1
+    assert calls == [("TIA-123", "Todo")]
+    assert len(_queue_records(queue)) == 1
+
+
+@pytest.mark.unit
+def test_legacy_unlearned_knowledge_star_never_publishes(tmp_path):
+    proposals = tmp_path / "proposals.jsonl"
+    proposals.write_text(json.dumps({**asdict(_learning_proposal()), "topic_key": "", "learning_state": "", "source": "", "ref": "knowledge://topic", "origin_ref": ""}) + "\n", encoding="utf-8")
+    result = event_bridge.process_user_events([{"action": "star", "itemRef": "knowledge://topic"}], proposals_path=proposals,
+        blog_publish_runner=lambda *_: pytest.fail("unlearned Star cannot publish"))
+    assert result["bookmarked"] == 1
+    assert result["blog_published"] == 0
+
+
+@pytest.mark.unit
+def test_default_learning_dispatch_launches_bounded_authorized_channel_a_worker(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "Development/Personal/knowledge-vault").mkdir(parents=True)
+    script = tmp_path / "herdr-dispatch.sh"
+    script.write_text("# fixture only; never executed\n")
+    monkeypatch.setattr(event_bridge, "HOME", home)
+    monkeypatch.setenv("AIDASH_LEARNING_DISPATCH_SCRIPT", str(script))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(event_bridge.subprocess, "run", fake_run)
+    job = _learning_job(status="leased", scope="personal", proposal_id="learning-topic", approval_revision=2,
+        lease_token="token", dispatch_started_at="2026-11-12T00:00:00Z")
+    assert event_bridge._default_learning_dispatch(job) == 0
+    command, kwargs = calls[0]
+    assert command[:2] == ["bash", str(script)]
+    assert command[command.index("--role") + 1] == "writer"
+    prompt = command[command.index("--prompt") + 1]
+    assert "knowledge-digest" in prompt and "Channel A" in prompt
+    assert "artifact" in prompt and "citations" in prompt and "index" in prompt
+    assert "Dispatch acknowledgement alone is not learned" in prompt
+    assert kwargs["timeout"] == 60
+    assert "explore" not in command  # No nonexistent digest_vault subcommand.
+    assert event_bridge._default_learning_dispatch({**job, "scope": "work"}) == 1
+    assert event_bridge._default_learning_dispatch({**job, "status": "queued"}) == 1
+    assert len(calls) == 1
 
 
 def test_event_bridge_latest_wins_and_falcon_star(tmp_path):
@@ -575,6 +682,7 @@ def test_event_bridge_knowledge_star_publishes_blog_and_approves_proposal(tmp_pa
                 "detail": "R09 KEEP_PRIMARY",
                 "priority": "medium",
                 "status": "pending",
+                "learning_state": "learned",
             },
             ensure_ascii=False,
         )
@@ -906,6 +1014,7 @@ def test_event_bridge_learning_topic_star_snooze_approve_done_and_full_writeback
         ],
         proposals_path=proposals,
         cursor_path=cursor,
+        linear_status_runner=lambda i, s: status_calls.append((i, s)) or 0,
     )
     assert res_done["resolved"] == 1
     final_lines = [json.loads(ln) for ln in proposals.read_text(encoding="utf-8").splitlines() if ln.strip()]

@@ -27,10 +27,17 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import serve
-from config import clean_path
+from config import PROPOSALS_PATH, clean_path
 from sqlite_ro import query_ro
 
-from L5_apps.digest.proposals import Proposal, read_pending
+from L5_apps.digest.proposals import (
+    Proposal,
+    append_jsonl_locked,
+    jsonl_lock,
+    read_all_latest,
+    read_latest_records,
+    read_pending,
+)
 from L5_apps.digest.todo_sync_provider import (
     TodoSyncProvider,
     read_open_local_todos,
@@ -689,10 +696,11 @@ def build_job_actions(
     )
     pending_by_id: dict[str, Proposal] = {}
     try:
-        for prop in read_pending(proposals_path):
+        for prop in read_all_latest(proposals_path).values():
             pending_by_id[prop.id] = prop
-            if prop.ref:
-                pending_by_id[prop.ref] = prop
+            for prop_ref in (prop.ref, prop.origin_ref, f"linear://{prop.external_id}" if prop.external_id else ""):
+                if prop_ref:
+                    pending_by_id[prop_ref] = prop
     except Exception:  # noqa: BLE001, S110
         pass
 
@@ -747,6 +755,11 @@ def build_job_actions(
 
         prop_key = ref.removeprefix("proposal://") if ref.startswith("proposal://") else ref
         matched_prop = pending_by_id.get(prop_key) or pending_by_id.get(f"learning-{ref.removeprefix('learning-topic://')}")
+        matched_record = read_latest_records(proposals_path).get(matched_prop.id, {}) if matched_prop else {}
+        if matched_prop and (matched_prop.topic_key or matched_prop.source == "Learning"):
+            source = "Learning"
+            status = "blocked" if matched_prop.learning_state == "blocked" else "in_progress" if matched_prop.learning_state in {"approved", "exploring"} else status
+            domain = "blockers" if status == "blocked" else "planned" if status == "in_progress" else "decisions"
         clean_desc_parts: list[str] = []
         if item.description and item.description.strip():
             clean_desc_parts.append(item.description.strip())
@@ -797,35 +810,51 @@ def build_job_actions(
                 action_id = candidate_linear_id
                 seen_ids.add(action_id)
                 status = "triage"
-                if matched_prop is not None and proposals_path is not None:
-                    try:
-                        approved_rec: dict[str, object] = {
-                            "id": matched_prop.id,
-                            "ts": stamp,
-                            "agent": matched_prop.agent,
-                            "title": matched_prop.title,
-                            "detail": matched_prop.detail,
-                            "priority": matched_prop.priority,
-                            "status": "approved",
-                            "learning_state": "transferred" if orig_ref.startswith("learning-topic://") else "",
-                            "origin_ref": orig_ref,
-                            "topic_key": getattr(matched_prop, "topic_key", ""),
-                            "source": "aidata",
-                            "external_id": parsed_ident,
-                            "ref": ref,
-                        }
-                        with proposals_path.open("a", encoding="utf-8") as handle:
-                            import json
-
-                            handle.write(json.dumps(approved_rec, ensure_ascii=False) + "\n")
-                    except OSError:
-                        pass
+                if matched_prop is not None:
+                    proposal_file = proposals_path or PROPOSALS_PATH
+                    with jsonl_lock(proposal_file):
+                        latest = read_latest_records(proposal_file).get(matched_prop.id)
+                        # Transfer is not learning approval and cannot overwrite a
+                        # newer Owner decision observed during external sync.
+                        if latest is not None and int(latest.get("revision") or 1) == matched_prop.revision and latest.get("status", "pending") == "pending":
+                            matched_record = {
+                                **latest, "ts": stamp, "status": "approved",
+                                "learning_state": "transferred" if source == "Learning" else latest.get("learning_state", ""),
+                                "origin_ref": latest.get("origin_ref") or orig_ref,
+                                "scope": matched_prop.scope, "external_id": parsed_ident,
+                                "ref": ref, "revision": matched_prop.revision + 1,
+                            }
+                            append_jsonl_locked(proposal_file, matched_record)
 
         url = _infer_action_url(item, ref)
         effective_ref = ref or f"signal://{action_id}"
 
+        metadata: dict[str, object] = {"scope": "personal"}
+        if matched_prop:
+            metadata.update({
+                "topic_key": matched_prop.topic_key,
+                "origin_ref": matched_record.get("origin_ref") or matched_prop.origin_ref or matched_prop.ref,
+                "revision": int(matched_record.get("revision") or matched_prop.revision),
+                "why_now": matched_prop.why_now,
+                "source_uri": matched_prop.source_uri,
+                "coverage_refs": list(matched_prop.coverage_refs),
+                "scope": matched_prop.scope,
+                "external_id": matched_record.get("external_id") or matched_prop.external_id,
+                "evidence": matched_record.get("evidence") or matched_prop.detail,
+                "freshness": matched_record.get("freshness") or " · ".join(
+                    str(matched_record.get(key) if matched_record.get(key) is not None else "unknown")
+                    for key in ("window_cst", "source_as_of", "sample_size", "coverage_status")
+                ),
+            })
+            for key in ("window_cst", "source_as_of", "sample_size", "coverage_status", "estimated"):
+                if key in matched_record:
+                    metadata[key] = matched_record[key]
+        controls = _controls_for_inbox_item(item)
+        if source == "Learning":
+            controls[0]["options"] = ["Approve", "Snooze 7d", "Done", "Dismiss"]
         actions.append(
             {
+                **metadata,
                 "id": action_id,
                 "jobID": job_id,
                 "createdAt": stamp,
@@ -839,7 +868,7 @@ def build_job_actions(
                 "priority": priority,
                 "ref": effective_ref,
                 "url": url,
-                "controls": _controls_for_inbox_item(item),
+                "controls": controls,
             }
         )
         if len(actions) >= 64:
