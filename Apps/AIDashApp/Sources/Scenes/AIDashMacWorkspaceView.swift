@@ -158,6 +158,25 @@ public struct ActionItemsCardView: View {
         }
     }
 
+    private enum ActionItemKind: Equatable {
+        case popGate
+        case decision
+        case general
+    }
+
+    private func actionItemKind(_ item: DashboardActionItem) -> ActionItemKind {
+        let haystack = [item.id, item.title, item.summary, item.sourceTag, item.backingItemRef ?? ""]
+            .joined(separator: " ")
+            .uppercased()
+        if haystack.contains("PR_POP_GATE") || item.id.uppercased().hasPrefix("POP") {
+            return .popGate
+        }
+        if haystack.contains("PR_DECISION") || (item.jobID == .myPRSupervisor && item.id.uppercased().hasPrefix("D")) {
+            return .decision
+        }
+        return .general
+    }
+
     private func statusTintColor(for status: DashboardActionStatus) -> Color {
         DashboardSemanticColorPalette.color(for: status.health)
     }
@@ -208,7 +227,7 @@ public struct ActionItemsCardView: View {
                         Text(item.summary)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .lineLimit(actionItemKind(item) == .decision ? 2 : 1)
                             .truncationMode(.tail)
                         Spacer(minLength: 6)
                         Text("\(item.sourceTag) · \(item.projectFolderName)")
@@ -247,45 +266,113 @@ public struct ActionItemsCardView: View {
 
     @ViewBuilder
     private func actionQuickButtons(_ item: DashboardActionItem, requiresChoice: Bool) -> some View {
-        if requiresChoice {
-            Button {
-                toggleExpanded(item.id)
-            } label: {
-                Label(
-                    DashboardL10n.format("dashboard.actions.choose_handling_format", "选择处理 (%lld)", item.decisionOptions.count),
-                    systemImage: expandedActionID == item.id ? "chevron.up" : "chevron.down"
-                )
+        switch actionItemKind(item) {
+        case .popGate:
+            if let url = URLPolicy.validate(item.externalURLString) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label(
+                        DashboardL10n.tr("dashboard.actions.open_pr_merge", "打开 PR 合并 ↗"),
+                        systemImage: "arrow.up.right.square"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .frame(minHeight: 28)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(minHeight: 28)
-        } else {
             Button {
-                let decision = item.status == .inProgress ? "Done" : "Approve"
-                store.submitActionItemDecision(item, decision: decision, onToggleDone: onToggleDone)
+                store.submitActionItemDecision(item, decision: "Done", onToggleDone: onToggleDone)
             } label: {
                 Label(
-                    item.status == .inProgress
-                        ? DashboardL10n.tr("dashboard.actions.done", "Done")
-                        : DashboardL10n.tr("dashboard.actions.approve", "Approve"),
+                    DashboardL10n.tr("dashboard.actions.mark_done", "✓ 已完成"),
                     systemImage: "checkmark"
                 )
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .frame(minHeight: 28)
-            Button {
-                toggleExpanded(item.id)
-            } label: {
-                Label(
-                    DashboardL10n.tr("dashboard.actions.add_note", "+ 备注"),
-                    systemImage: expandedActionID == item.id ? "chevron.up" : "chevron.down"
-                )
-            }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .frame(minHeight: 28)
+        case .decision:
+            ForEach(Array(item.decisionOptions.prefix(2).enumerated()), id: \.offset) { index, option in
+                Button {
+                    store.submitActionItemDecision(
+                        item,
+                        decision: option,
+                        note: noteInputs[item.id] ?? "",
+                        onToggleDone: onToggleDone
+                    )
+                } label: {
+                    Text(decisionButtonTitle(index: index))
+                }
+                .help(option)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .frame(minHeight: 28)
+            }
+            detailsButton(for: item)
+        case .general:
+            if let url = URLPolicy.validate(item.externalURLString) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label(
+                        DashboardL10n.tr("dashboard.actions.open_link", "打开 Linear ↗"),
+                        systemImage: "arrow.up.right.square"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minHeight: 28)
+            }
+            if requiresChoice {
+                Button {
+                    toggleExpanded(item.id)
+                } label: {
+                    Label(
+                        DashboardL10n.format("dashboard.actions.choose_handling_format", "选择处理 (%lld)", item.decisionOptions.count),
+                        systemImage: expandedActionID == item.id ? "chevron.up" : "chevron.down"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minHeight: 28)
+            } else {
+                Button {
+                    let decision = item.status == .inProgress ? "Done" : "Approve"
+                    store.submitActionItemDecision(item, decision: decision, onToggleDone: onToggleDone)
+                } label: {
+                    Label(
+                        item.status == .inProgress
+                            ? DashboardL10n.tr("dashboard.actions.done", "Done")
+                            : DashboardL10n.tr("dashboard.actions.approve", "Approve"),
+                        systemImage: "checkmark"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .frame(minHeight: 28)
+            }
+            detailsButton(for: item)
         }
+    }
+
+    private func decisionButtonTitle(index: Int) -> String {
+        let suffix = index == 0 ? "A" : "B"
+        return DashboardL10n.format("dashboard.actions.decision_option_format", "方案 %@", suffix)
+    }
+
+    private func detailsButton(for item: DashboardActionItem) -> some View {
+        Button {
+            toggleExpanded(item.id)
+        } label: {
+            Label(
+                DashboardL10n.tr("dashboard.actions.details", "详情"),
+                systemImage: expandedActionID == item.id ? "chevron.up" : "chevron.down"
+            )
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(minHeight: 28)
     }
 
     private func toggleExpanded(_ id: String) {
@@ -408,12 +495,6 @@ public struct ActionItemsCardView: View {
                         systemImage: store.lastCopiedActionID == item.id ? "checkmark" : "doc.on.doc"
                     )
                     .contentTransition(.symbolEffect(.replace))
-                }
-                .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
-            }
-            if let url = URLPolicy.validate(item.externalURLString) {
-                Button { NSWorkspace.shared.open(url) } label: {
-                    Label(DashboardL10n.tr("dashboard.actions.open_link", "Open"), systemImage: "arrow.up.right.square")
                 }
                 .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
             }

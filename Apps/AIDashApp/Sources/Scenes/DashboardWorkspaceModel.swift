@@ -1,6 +1,7 @@
 #if os(macOS)
 // swiftlint:disable file_length
 import AppKit
+import Darwin
 import Foundation
 import Observation
 import SQLite3
@@ -323,6 +324,9 @@ public final class DashboardWorkspaceStore {
         onToggleDone: ((String, String, Bool) -> Void)? = nil
     ) {
         let trimmedNote = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(item.noteMaxLength))
+        if item.jobID == .myPRSupervisor, item.id.hasPrefix("D") {
+            persistMyPRSupervisorDecision(itemID: item.id, decision: decision, note: trimmedNote)
+        }
         if let jobID = item.jobID {
             let effectiveControls = item.controls.isEmpty
                 ? [
@@ -357,6 +361,60 @@ public final class DashboardWorkspaceStore {
             if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
                 LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
             }
+        }
+    }
+
+    private func persistMyPRSupervisorDecision(itemID: String, decision: String, note: String) {
+        guard LiveDashboardTelemetryReader.isLiveEnvironment else { return }
+        let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let configURL = homeURL.appendingPathComponent(
+            "Development/job skills/my-pr-supervisor/config/my-prs.json"
+        )
+        let lockURL = URL(fileURLWithPath: configURL.path + ".lock")
+        let fileManager = FileManager.default
+
+        do {
+            guard fileManager.fileExists(atPath: configURL.path) else { return }
+            if !fileManager.fileExists(atPath: lockURL.path) {
+                guard fileManager.createFile(atPath: lockURL.path, contents: nil) else { return }
+            }
+            let lockHandle = try FileHandle(forWritingTo: lockURL)
+            defer { try? lockHandle.close() }
+            guard flock(lockHandle.fileDescriptor, LOCK_EX) == 0 else { return }
+            defer { _ = flock(lockHandle.fileDescriptor, LOCK_UN) }
+
+            let data = try Data(contentsOf: configURL)
+            guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  var pendingDecisions = root["pending_decisions"] as? [String: Any] else {
+                return
+            }
+
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+            let matchingKeys: [String] = pendingDecisions.compactMap { key, value -> String? in
+                guard let entry = value as? [String: Any],
+                      (entry["decision_id"] as? String) == itemID else {
+                    return nil
+                }
+                return key
+            }
+            guard !matchingKeys.isEmpty else { return }
+            for key in matchingKeys {
+                guard var entry = pendingDecisions[key] as? [String: Any] else { continue }
+                entry["status"] = "owner_replied"
+                entry["owner_choice"] = decision
+                entry["owner_note"] = note
+                entry["replied_at"] = timestamp
+                pendingDecisions[key] = entry
+            }
+
+            root["pending_decisions"] = pendingDecisions
+            let updatedData = try JSONSerialization.data(
+                withJSONObject: root,
+                options: [.prettyPrinted, .sortedKeys]
+            )
+            try updatedData.write(to: configURL, options: .atomic)
+        } catch {
+            return
         }
     }
 
@@ -405,6 +463,13 @@ public final class DashboardWorkspaceStore {
         lastCopiedScheduledJobID = status.id
     }
 
+    private static func isArchivedActionItem(_ item: DashboardActionItem) -> Bool {
+        let haystack = [item.id, item.title, item.summary, item.sourceTag, item.backingItemRef ?? ""]
+            .joined(separator: " ")
+            .uppercased()
+        return haystack.contains("EVAL_CANDIDATE") || haystack.contains("BUG_BLOCKER")
+    }
+
     private func applySnapshot(
         _ snapshot: MenuBarSystemSnapshot,
         customTrends: [TrendDataPoint]? = nil,
@@ -432,7 +497,7 @@ public final class DashboardWorkspaceStore {
                 nextActions[index].status = .done
             }
         }
-        actionItems = nextActions
+        actionItems = nextActions.filter { !Self.isArchivedActionItem($0) }
         rankingRows = customRankings ?? liveDataset?.rankings ?? Self.deriveRankingRows(from: derivedCLIs)
         liveEfficiencySummary = (customCLIs == nil && customRankings == nil)
             ? LiveDashboardTelemetryReader.loadLiveEfficiencySummary()
