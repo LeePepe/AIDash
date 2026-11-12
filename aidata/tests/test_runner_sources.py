@@ -36,7 +36,7 @@ def test_runner_sources_match_config() -> None:
     assert _runner_sources() == set(config.SOURCES)
 
 
-def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None):
+def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None, producer_exit_code=0):
     home, root, bin_dir = tmp_path / "home", tmp_path / "aidata", tmp_path / "bin"
     home.mkdir()
     root.mkdir()
@@ -62,7 +62,7 @@ def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None):
     report_file.write_text(json.dumps(report) if report is not None else fixture.read_text())
     engine = root / "retro.py"
     if producer_present:
-        engine.write_text('import os, sys\nfrom pathlib import Path\nif sys.argv[1] == "skill-roi":\n    print(Path(os.environ["FIXTURE_REPORT"]).read_text())\n')
+        engine.write_text('import os, sys\nfrom pathlib import Path\nif sys.argv[1] == "skill-roi":\n    print(Path(os.environ["FIXTURE_REPORT"]).read_text())\n    raise SystemExit(int(os.environ["FIXTURE_PRODUCER_EXIT"]))\n')
     vault = root / "vault.py"
     vault.write_text("# Discovery fixture; no materialization or publication\n")
     state = root / "job" / "state.json"
@@ -72,7 +72,8 @@ def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None):
         **os.environ, "HOME": str(home), "AIDATA_HOME": str(root),
         "AIDASH_JOB_STATE_FILE": str(state), "AIDASH_JOB_OUTPUT_DIR": str(state.parent),
         "RETRO_ENGINE": str(engine), "DIGEST_VAULT_SCRIPT": str(vault),
-        "FIXTURE_REPORT": str(report_file), "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+        "FIXTURE_REPORT": str(report_file), "FIXTURE_PRODUCER_EXIT": str(producer_exit_code),
+        "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
         "PYTHONPATH": str(RUNNER.parent.parent),
     }
     proc = subprocess.run(["bash", str(RUNNER)], env=env, capture_output=True, text=True, timeout=30, check=False)
@@ -92,7 +93,17 @@ def test_digest_runner_exports_real_full_report_and_disjoint_daily_grains(tmp_pa
     assert {row["source"] for row in snapshot["skills_daily"]} == {"claude_attribution", "claude_skill_tool"}
     assert state["schedulerField"] == "preserve-me"
     assert state["stages"][2]["status"] == "ok"
+    assert state["stages"][2]["sourceAsOf"] == report["source_as_of"]
     assert not list(job_dir.glob(".skills-roi-report.*"))
+
+
+def test_digest_runner_failed_producer_preserves_report_but_never_claims_healthy(tmp_path):
+    proc, snapshot, state, _ = _run_isolated_digest_chain(tmp_path, producer_exit_code=1)
+    assert proc.returncode != 0
+    assert snapshot["coverage_status"] == "error"
+    assert snapshot["diagnostics"]["S2_gate_catch"]["sample_size"] == 4
+    assert "retro producer exited 1" in snapshot["errors"]
+    assert state["stages"][2]["status"] == "warning"
 
 
 def test_digest_runner_missing_or_partial_producer_is_not_healthy(tmp_path):

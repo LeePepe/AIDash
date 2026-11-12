@@ -80,19 +80,21 @@ STAGE3_RC=0
 RETRO_ENGINE="${RETRO_ENGINE:-$HOME/Development/user-skills/skills/retro-loop/scripts/retro_story_engine.py}"
 mkdir -p "$JOB_OUTPUT_DIR"
 ROI_REPORT="$(mktemp "$JOB_OUTPUT_DIR/.skills-roi-report.XXXXXX")" || exit 1
+ROI_RC=1
 trap 'rm -f "$ROI_REPORT"' EXIT
 if [ -f "$RETRO_ENGINE" ]; then
   python3 "$RETRO_ENGINE" agent-efficiency --auto-propose >/dev/null \
     || { echo "[aidata-digest]   ! agent-efficiency auto-propose warning"; STAGE3_RC=1; }
+  ROI_RC=0
   python3 "$RETRO_ENGINE" skill-roi --auto-propose >"$ROI_REPORT" \
-    || { echo "[aidata-digest]   ! skill-roi auto-propose warning"; STAGE3_RC=1; }
+    || { ROI_RC=$?; echo "[aidata-digest]   ! skill-roi auto-propose warning"; STAGE3_RC=1; }
   python3 "$RETRO_ENGINE" discover >/dev/null \
     || { echo "[aidata-digest]   ! retro discover warning"; STAGE3_RC=1; }
 else
   echo "[aidata-digest]   ! retro engine missing"
   STAGE3_RC=1
 fi
-if ! python3 -m L5_apps.digest.skills_roi_snapshot --report "$ROI_REPORT" --output "$SKILLS_ROI_FILE"; then
+if ! python3 -m L5_apps.digest.skills_roi_snapshot --report "$ROI_REPORT" --output "$SKILLS_ROI_FILE" --producer-exit-code "$ROI_RC"; then
   echo "[aidata-digest]   ! skills-roi snapshot failed"
   STAGE3_RC=1
 fi
@@ -134,7 +136,7 @@ python3 - "$JOB_STATE_FILE" "$TODAY" "$FINAL_RC" "$TOTAL_DUR" \
   "$STAGE2_STATUS" "$STAGE2_DUR" \
   "$STAGE3_STATUS" "$STAGE3_DUR" \
   "$STAGE4_STATUS" "$STAGE4_DUR" \
-  "$STAGE5_STATUS" "$STAGE5_DUR" <<'PYEOF' || true
+  "$STAGE5_STATUS" "$STAGE5_DUR" "$SKILLS_ROI_FILE" <<'PYEOF' || true
 import json
 import sys
 from datetime import datetime, timezone
@@ -157,7 +159,8 @@ from pathlib import Path
     s4_dur,
     s5_st,
     s5_dur,
-) = sys.argv[1:17]
+    skills_snapshot_path,
+) = sys.argv[1:18]
 
 state_path = Path(state_path_raw)
 state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,6 +173,10 @@ except (OSError, json.JSONDecodeError):
     existing = {}
 if not isinstance(existing, dict):
     existing = {}
+try:
+    roi_snapshot = json.loads(Path(skills_snapshot_path).read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    roi_snapshot = {}
 
 stages = [
     {
@@ -196,8 +203,8 @@ stages = [
         "status": s3_st,
         "exitCode": 0 if s3_st == "ok" else 1,
         "durationSec": int(s3_dur),
-        "sourceAsOf": report_date,
-        "detail": "M1-M5 & S1-S12",
+        "sourceAsOf": roi_snapshot.get("source_as_of") or "unknown",
+        "detail": "M1-M5 & S1-S12 · " + str(roi_snapshot.get("coverage_status", "unknown")),
     },
     {
         "id": "learning_topics",
