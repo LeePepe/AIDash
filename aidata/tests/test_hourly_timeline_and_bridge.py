@@ -402,6 +402,36 @@ def test_learning_receipts_guard_revisions_and_keep_later_done(tmp_path, ref):
 
 
 @pytest.mark.unit
+def test_learning_approval_replay_repairs_failed_enqueue_without_new_authorization(tmp_path, monkeypatch):
+    proposals, queue = tmp_path / "proposals.jsonl", tmp_path / "queue.jsonl"
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    proposal = _learning_proposal()
+    proposals.write_text(json.dumps({**asdict(proposal), "learning_state": "transferred"}) + "\n")
+    event = {"id": "approval", "revision": 2, "action": "approve", "itemRef": "learning-topic://topic"}
+    calls = []
+    enqueue = event_bridge._enqueue_learning_task
+
+    def no_space(*args, **kwargs):
+        raise OSError("queue disk failure after durable approval")
+
+    monkeypatch.setattr(event_bridge, "_enqueue_learning_task", no_space)
+    options = dict(proposals_path=proposals, local_todos_path=tmp_path / "todos.jsonl",
+        linear_status_runner=lambda ident, state: calls.append((ident, state)) or 0)
+    with pytest.raises(OSError, match="queue disk failure"):
+        event_bridge.process_user_events([event], **options)
+    approved = json.loads(proposals.read_text().splitlines()[-1])
+    assert approved["learning_state"] == "approved"
+    assert approved["external_id"] == "TIA-123"
+    key = approved["task_key"]
+    monkeypatch.setattr(event_bridge, "_enqueue_learning_task", enqueue)
+    assert event_bridge.process_user_events([event], **options)["ignored"] == 1
+    assert event_bridge.process_user_events([event], **options)["ignored"] == 1
+    assert calls == [("TIA-123", "Todo")]
+    assert [job["task_key"] for job in _queue_records(queue)] == [key]
+    assert event_bridge.read_all_latest(proposals)[proposal.id].revision == approved["revision"]
+
+
+@pytest.mark.unit
 def test_learning_approval_revision_check_and_append_share_lock(tmp_path, monkeypatch):
     proposals, queue = tmp_path / "proposals.jsonl", tmp_path / "queue.jsonl"
     monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
