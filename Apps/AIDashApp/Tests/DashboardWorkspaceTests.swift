@@ -876,6 +876,7 @@ struct DashboardWorkspaceTests {
         let actionsURL = digestDir.appendingPathComponent("actions.jsonl")
         let sampleLines = [
             #"{"id":"linear-TIA-76","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[Bing] iOS Smart Banner / SERP","description":"[in_progress] TIA-76 [Bing] iOS Smart Banner / SERP","status":"in_progress","source":"Linear","priority":"P1","ref":"linear://TIA-76","url":"https://linear.app/tianpeili/issue/TIA-76","labels":["pop"],"project":"Bing","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://linear.app/example/issue/TIA-83"},"controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
+            #"{"id":"EVAL-RULE-VIEW-SNAPSHOT-TEST","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[假测试防呆] UI 视觉改动未验证真实 View 渲染 (#545/#617)","description":"建议规则：修复 SwiftUI/UIKit 视觉 Bug 时，必须用 validateSnapshots 或 ImageRenderer 测真实 View。","status":"triage","source":"Linear","priority":"P1","ref":"eval://EVAL-RULE-VIEW-SNAPSHOT-TEST","url":"https://msft.ghe.com/san/bing-growth-sapphire-app/pull/617","labels":["eval"],"project":"Bing","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://linear.app/example/issue/TIA-83"},"controls":[]}"#,
             #"{"id":"proposal-review-pingpong","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"Shrink Review Ping-Pong","description":"R1 fail rate 55.7%","status":"triage","source":"Retro","priority":"P0","ref":"proposal://review-pingpong","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"targets","kind":"multiSelect","title":"Targets","options":["item-a","item-b"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
             #"{"id":"gtt-blocker-1","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"GTT Blocker: aidash-ops","description":"Waiting on Owner GO","status":"blocked","source":"GTT Blocker","priority":"P0","ref":"aidash-ops","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#
         ]
@@ -885,7 +886,13 @@ struct DashboardWorkspaceTests {
             homeURL: tempHome,
             acknowledgedActionIDs: ["aidata-digest:gtt-blocker-1"]
         )
-        #expect(loaded.count == 3)
+        #expect(loaded.count == 4)
+
+        let evalItem = try #require(loaded.first(where: { $0.id == "EVAL-RULE-VIEW-SNAPSHOT-TEST" }))
+        #expect(evalItem.labels == ["eval"])
+        #expect(evalItem.parentIssueKey == "TIA-83")
+        #expect(evalItem.summary.hasPrefix("建议规则："))
+        #expect(evalItem.decisionOptions == ["Approve", "Done", "Dismiss"])
 
         let linearItem = try #require(loaded.first(where: { $0.id == "linear-TIA-76" }))
         #expect(linearItem.status == .inProgress)
@@ -908,7 +915,7 @@ struct DashboardWorkspaceTests {
         #expect(retroItem.priority == .p0)
         #expect(retroItem.targetOptions == ["item-a", "item-b"])
         let filterStore = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: loaded)
-        #expect(filterStore.availableLinearActionFilters.map(\.id) == ["all", "pop"])
+        #expect(filterStore.availableLinearActionFilters.map(\.id) == ["all", "pop", "eval"])
         filterStore.selectedLinearActionFilter = "pop"
         #expect(filterStore.filteredActionItems.map(\.id) == ["linear-TIA-76"])
 

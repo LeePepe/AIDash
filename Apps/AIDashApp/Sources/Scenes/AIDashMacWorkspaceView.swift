@@ -29,6 +29,7 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
     }
 }
 
+// swiftlint:disable:next type_body_length
 public struct ActionItemsCardView: View {
     @Bindable public var store: DashboardWorkspaceStore
     public var onToggleDone: ((String, String, Bool) -> Void)?
@@ -352,12 +353,16 @@ public struct ActionItemsCardView: View {
     }
 
     private enum ActionItemKind: Equatable {
+        case evalRule
         case popGate
         case decision
         case general
     }
 
     private func actionItemKind(_ item: DashboardActionItem) -> ActionItemKind {
+        if item.hasLinearLabel("eval") || item.id.hasPrefix("EVAL-") {
+            return .evalRule
+        }
         let haystack = [item.id, item.title, item.summary, item.sourceTag, item.backingItemRef ?? ""]
             .joined(separator: " ")
             .uppercased()
@@ -368,6 +373,10 @@ public struct ActionItemsCardView: View {
             return .decision
         }
         return .general
+    }
+
+    private func evalRulePreview(_ summary: String) -> String {
+        summary.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? summary
     }
 
     private func statusTintColor(for status: DashboardActionStatus) -> Color {
@@ -406,7 +415,8 @@ public struct ActionItemsCardView: View {
                             .font(.body.weight(.semibold))
                             .strikethrough(item.isCompleted)
                             .foregroundStyle(item.isCompleted ? .secondary : .primary)
-                            .lineLimit(1)
+                            .lineLimit(actionItemKind(item) == .evalRule ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: actionItemKind(item) == .evalRule)
                         if let refLabel = item.displayRefLabel, !item.title.contains(refLabel) {
                             Text(refLabel)
                                 .font(.caption2.monospaced())
@@ -417,10 +427,10 @@ public struct ActionItemsCardView: View {
                         actionQuickButtons(item, requiresChoice: requiresChoice)
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(item.summary)
+                        Text(actionItemKind(item) == .evalRule ? evalRulePreview(item.summary) : item.summary)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(actionItemKind(item) == .decision ? 2 : 1)
+                            .lineLimit(actionItemKind(item) == .evalRule || actionItemKind(item) == .decision ? 2 : 1)
                             .truncationMode(.tail)
                         Spacer(minLength: 6)
                         Text("\(item.sourceTag) · \(item.projectFolderName)")
@@ -432,13 +442,17 @@ public struct ActionItemsCardView: View {
             }
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(item.summary)
-                        .font(.body)
-                        .lineSpacing(2)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let command = item.command {
+                    if actionItemKind(item) == .evalRule {
+                        evalRuleExpandedContent(item)
+                    } else {
+                        Text(item.summary)
+                            .font(.body)
+                            .lineSpacing(2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if actionItemKind(item) != .evalRule, let command = item.command {
                         Text("$ \(command)")
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
@@ -448,7 +462,9 @@ public struct ActionItemsCardView: View {
                     if !item.isCompleted {
                         actionInlineDecisionBar(item)
                     }
-                    actionRowAccessoryButtons(item)
+                    if actionItemKind(item) != .evalRule {
+                        actionRowAccessoryButtons(item)
+                    }
                 }
                 .padding(.leading, 32)
             }
@@ -458,8 +474,88 @@ public struct ActionItemsCardView: View {
     }
 
     @ViewBuilder
+    private func evalRuleExpandedContent(_ item: DashboardActionItem) -> some View {
+        Text(item.summary)
+            .font(.body)
+            .lineSpacing(2)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+        if let url = URLPolicy.validate(item.externalURLString) {
+            Button {
+                NSWorkspace.shared.open(url)
+            } label: {
+                Label(
+                    DashboardL10n.tr("dashboard.actions.eval.open_pr", "打开 PR ↗"),
+                    systemImage: "arrow.up.right.square"
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(minHeight: 28)
+        }
+    }
+
+    @ViewBuilder
+    private func evalRuleQuickButtons(_ item: DashboardActionItem) -> some View {
+        Button {
+            store.submitActionItemDecision(
+                item,
+                decision: "两个都加",
+                note: noteInputs[item.id] ?? "",
+                onToggleDone: onToggleDone
+            )
+        } label: {
+            Text(DashboardL10n.tr("dashboard.actions.eval.add_both", "两个都加"))
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .frame(minHeight: 28)
+        Button {
+            store.submitActionItemDecision(
+                item,
+                decision: "记入编码规范 (防再犯)",
+                note: noteInputs[item.id] ?? "",
+                onToggleDone: onToggleDone
+            )
+        } label: {
+            Text(DashboardL10n.tr("dashboard.actions.eval.add_rule", "记入编码规范"))
+        }
+        .help("写入仓内 .claude/skills/ios-best-practices，防 AI 写代码再犯")
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(minHeight: 28)
+        Button {
+            store.submitActionItemDecision(
+                item,
+                decision: "加入审查题库 (防漏审)",
+                note: noteInputs[item.id] ?? "",
+                onToggleDone: onToggleDone
+            )
+        } label: {
+            Text(DashboardL10n.tr("dashboard.actions.eval.add_eval", "加入审查题库"))
+        }
+        .help("写入 pr-auto-review 黄金评测集，防 AI 审 PR 漏抓")
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(minHeight: 28)
+        Button {
+            store.submitActionItemDecision(item, decision: "忽略", onToggleDone: onToggleDone)
+        } label: {
+            Text(DashboardL10n.tr("dashboard.actions.eval.ignore", "忽略"))
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(minHeight: 28)
+        evalDetailsButton(for: item)
+    }
+
+    @ViewBuilder
+    // swiftlint:disable:next function_body_length
     private func actionQuickButtons(_ item: DashboardActionItem, requiresChoice: Bool) -> some View {
         switch actionItemKind(item) {
+        case .evalRule:
+            evalRuleQuickButtons(item)
         case .popGate:
             if let url = URLPolicy.validate(item.externalURLString) {
                 Button {
@@ -486,7 +582,7 @@ public struct ActionItemsCardView: View {
             .controlSize(.small)
             .frame(minHeight: 28)
         case .decision:
-            ForEach(Array(item.decisionOptions.prefix(2).enumerated()), id: \.offset) { index, option in
+            ForEach(Array(item.decisionOptions.prefix(2).enumerated()), id: \.offset) { _, option in
                 Button {
                     store.submitActionItemDecision(
                         item,
@@ -548,6 +644,17 @@ public struct ActionItemsCardView: View {
             }
             detailsButton(for: item)
         }
+    }
+
+    private func evalDetailsButton(for item: DashboardActionItem) -> some View {
+        Button {
+            toggleExpanded(item.id)
+        } label: {
+            Text(expandedActionID == item.id ? "详情 ▴" : "详情 ▾")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(minHeight: 28)
     }
 
     private func detailsButton(for item: DashboardActionItem) -> some View {

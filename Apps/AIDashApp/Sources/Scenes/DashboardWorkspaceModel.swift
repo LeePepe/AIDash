@@ -325,6 +325,9 @@ public final class DashboardWorkspaceStore {
         onToggleDone: ((String, String, Bool) -> Void)? = nil
     ) {
         let trimmedNote = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(item.noteMaxLength))
+        if item.id.hasPrefix("EVAL-") {
+            persistEvalDecision(itemID: item.id, decision: decision, note: trimmedNote)
+        }
         if item.jobID == .myPRSupervisor, item.id.hasPrefix("D") {
             persistMyPRSupervisorDecision(itemID: item.id, decision: decision, note: trimmedNote)
         }
@@ -362,6 +365,36 @@ public final class DashboardWorkspaceStore {
             if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
                 LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
             }
+        }
+    }
+
+    private func persistEvalDecision(itemID: String, decision: String, note: String) {
+        guard LiveDashboardTelemetryReader.isLiveEnvironment else { return }
+        let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let decisionsURL = homeURL.appendingPathComponent(
+            "Development/job skills/my-pr-supervisor/config/eval-decisions.jsonl"
+        )
+        let record: [String: String] = [
+            "id": itemID,
+            "decision": decision,
+            "note": note,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+        ]
+        do {
+            let directory = decisionsURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            var data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+            data.append(0x0A)
+            if FileManager.default.fileExists(atPath: decisionsURL.path) {
+                let handle = try FileHandle(forWritingTo: decisionsURL)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+            } else {
+                try data.write(to: decisionsURL, options: [.atomic])
+            }
+        } catch {
+            return
         }
     }
 
