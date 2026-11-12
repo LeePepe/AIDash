@@ -266,7 +266,7 @@ def _proposals(read: Callable[[], list[Proposal]] | None = None) -> list[InboxIt
         explicit_ref = getattr(p, "ref", "") or ""
         if explicit_ref:
             ref = explicit_ref
-        elif str(p.id).startswith(("proposal://", "knowledge://", "learning-topic://", "skill-roi://")):
+        elif str(p.id).startswith(("proposal://", "knowledge://", "learning-topic://", "skill-roi://", "retro://")):
             ref = str(p.id)
         elif str(p.id).startswith("learning-"):
             ref = f"learning-topic://{str(p.id).removeprefix('learning-')}"
@@ -513,7 +513,7 @@ def build_inbox(
     return kept[:_MAX_ITEMS]
 
 
-_ACTION_ID_INVALID_RE = re.compile(r"[\x00-\x1f\x7f|]+")
+_ACTION_ID_INVALID_RE = re.compile(r"[\x00-\x1f\x7f|:/]+")
 _ISSUE_TITLE_PREFIX_RE = re.compile(
     r"^\[(?P<raw_status>[a-z_]+)\]\s+(?P<ident>[A-Za-z0-9_-]+)\s+(?P<rest>.+)$",
     re.IGNORECASE,
@@ -565,7 +565,7 @@ def _infer_action_status(item: InboxItem, ref: str) -> str:
             return "done"
         if raw_st in {"todo", "in_progress", "in_review"}:
             return "in_progress"
-    if ref.startswith(("proposal://", "knowledge://", "learning-topic://", "skill-roi://")) or item.bucket in {"待决策", "发现"} or item.category in {"decision", "discovery", "work_watch", "drift"}:
+    if ref.startswith(("proposal://", "knowledge://", "learning-topic://", "skill-roi://", "retro://")) or item.bucket in {"待决策", "发现"} or item.category in {"decision", "discovery", "work_watch", "drift"}:
         return "triage"
     if item.category == "blocked" or item.bucket == "卡顿":
         return "blocked"
@@ -587,13 +587,13 @@ def _infer_action_source(item: InboxItem, ref: str) -> str:
         return "GTT Blocker"
     if title.startswith("PR 卡") or "CI 配置噪音" in title or "报错：" in title:
         return "PR & CI"
-    if ref.startswith(("proposal://", "knowledge://", "skill-roi://")) or item.category in {"decision", "discovery", "drift", "stale"} or item.bucket in {"待决策", "发现"}:
+    if ref.startswith(("proposal://", "knowledge://", "skill-roi://", "retro://")) or item.category in {"decision", "discovery", "drift", "stale"} or item.bucket in {"待决策", "发现"}:
         return "Retro"
     return "Linear"
 
 
 def _infer_action_domain(item: InboxItem, ref: str, status: str, source: str) -> str:
-    if item.bucket == "待决策" or source == "Learning" or ref.startswith(("learning-topic://", "knowledge://", "proposal://", "skill-roi://")):
+    if item.bucket == "待决策" or source == "Learning" or ref.startswith(("learning-topic://", "knowledge://", "proposal://", "skill-roi://", "retro://")):
         return "decisions"
     if item.bucket == "卡顿" or status == "blocked" or source == "GTT Blocker":
         return "blockers"
@@ -695,12 +695,28 @@ def build_job_actions(
         .replace("+00:00", "Z")
     )
     pending_by_id: dict[str, Proposal] = {}
+    latest_records_by_id: dict[str, dict] = {}
     try:
+        latest_records_by_id = read_latest_records(proposals_path)
         for prop in read_all_latest(proposals_path).values():
             pending_by_id[prop.id] = prop
-            for prop_ref in (prop.ref, prop.origin_ref, f"linear://{prop.external_id}" if prop.external_id else ""):
-                if prop_ref:
-                    pending_by_id[prop_ref] = prop
+            rec = latest_records_by_id.get(prop.id, {})
+            alias_keys = [
+                prop.ref,
+                prop.origin_ref,
+                f"linear://{prop.external_id}" if prop.external_id else "",
+                str(rec.get("legacy_ref") or ""),
+            ]
+            for list_key in ("legacy_ids", "legacy_refs"):
+                raw_list = rec.get(list_key)
+                if isinstance(raw_list, (list, tuple)):
+                    alias_keys.extend(str(x) for x in raw_list if x)
+            for prop_ref in alias_keys:
+                clean_alias = prop_ref.strip()
+                if clean_alias:
+                    pending_by_id[clean_alias] = prop
+                    if clean_alias.startswith("proposal://"):
+                        pending_by_id[clean_alias.removeprefix("proposal://")] = prop
     except Exception:  # noqa: BLE001, S110
         pass
 
@@ -729,6 +745,12 @@ def build_job_actions(
         elif ref.startswith("proposal://"):
             prop_id = ref.removeprefix("proposal://")
             raw_id = f"proposal-{prop_id}"
+        elif ref.startswith("retro://"):
+            slug = ref.removeprefix("retro://").strip("/")
+            raw_id = f"retro-{slug}"
+        elif ref.startswith("skill-roi://"):
+            slug = ref.removeprefix("skill-roi://").strip("/")
+            raw_id = f"skill-roi-{slug}"
         elif ref.startswith("learning-topic://"):
             topic_key = ref.removeprefix("learning-topic://").strip("/")
             raw_id = f"learning-{topic_key}"
@@ -754,8 +776,13 @@ def build_job_actions(
         priority = _infer_action_priority(item.priority)
 
         prop_key = ref.removeprefix("proposal://") if ref.startswith("proposal://") else ref
-        matched_prop = pending_by_id.get(prop_key) or pending_by_id.get(f"learning-{ref.removeprefix('learning-topic://')}")
-        matched_record = read_latest_records(proposals_path).get(matched_prop.id, {}) if matched_prop else {}
+        matched_prop = (
+            pending_by_id.get(prop_key)
+            or pending_by_id.get(ref)
+            or pending_by_id.get(f"learning-{ref.removeprefix('learning-topic://')}")
+            or pending_by_id.get(f"skill-roi-{ref.removeprefix('skill-roi://').strip('/')}")
+        )
+        matched_record = latest_records_by_id.get(matched_prop.id, {}) if matched_prop else {}
         if matched_prop and (matched_prop.topic_key or matched_prop.source == "Learning"):
             source = "Learning"
             status = "blocked" if matched_prop.learning_state == "blocked" else "in_progress" if matched_prop.learning_state in {"approved", "exploring"} else status

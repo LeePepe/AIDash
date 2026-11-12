@@ -357,14 +357,73 @@ def _lookup_knowledge_proposal(
 def _lookup_skill_roi_proposal(
     pending: dict[str, Proposal],
     skill_name: str,
+    raw_records: dict[str, dict] | None = None,
 ) -> Proposal | None:
-    target_ref = f"skill-roi://{skill_name}"
+    clean = skill_name.strip("/")
+    target_ref = f"skill-roi://{clean}"
+    legacy_retro_ref = f"retro://skill-roi/{clean}"
     for prop in pending.values():
-        if getattr(prop, "ref", "") == target_ref or prop.id in {
-            skill_name,
-            f"skill-roi-{skill_name}",
+        rec = (raw_records or {}).get(prop.id, {})
+        aliases = {
+            getattr(prop, "ref", ""),
+            getattr(prop, "origin_ref", ""),
+            str(rec.get("legacy_ref") or ""),
+            *(str(x) for x in (rec.get("legacy_refs") or []) if x),
+            *(str(x) for x in (rec.get("legacy_ids") or []) if x),
+        }
+        if aliases & {target_ref, legacy_retro_ref, clean, f"skill-roi-{clean}"} or prop.id in {
+            clean,
+            f"skill-roi-{clean}",
             target_ref,
         }:
+            return prop
+    return None
+
+
+def _lookup_retro_proposal(
+    proposals_by_id: dict[str, Proposal],
+    key: str,
+    raw_records: dict[str, dict] | None = None,
+) -> Proposal | None:
+    clean = key.strip()
+    if not clean:
+        return None
+    slug = (
+        clean.removeprefix("proposal://")
+        .removeprefix("retro://")
+        .removeprefix("skill-roi://")
+        .removeprefix("proposal-")
+        .removeprefix("retro-")
+        .strip("/")
+    )
+    candidates = {
+        clean,
+        slug,
+        f"proposal://{slug}",
+        f"retro://{slug}",
+        f"skill-roi://{slug}",
+        f"skill-roi-{slug}",
+        f"retro://skill-roi/{slug}",
+    }
+    if slug in proposals_by_id:
+        return proposals_by_id[slug]
+    if clean in proposals_by_id:
+        return proposals_by_id[clean]
+    for prop in proposals_by_id.values():
+        rec = (raw_records or {}).get(prop.id, {})
+        aliases = {
+            prop.id,
+            getattr(prop, "ref", ""),
+            getattr(prop, "origin_ref", ""),
+            str(rec.get("legacy_ref") or ""),
+            *(str(x) for x in (rec.get("legacy_refs") or []) if x),
+            *(str(x) for x in (rec.get("legacy_ids") or []) if x),
+        }
+        normalized_aliases = set(aliases)
+        for alias in list(aliases):
+            if alias:
+                normalized_aliases.add(alias.replace("://", "-").replace("/", "-"))
+        if normalized_aliases & (candidates | {c.replace("://", "-").replace("/", "-") for c in candidates}):
             return prop
     return None
 
@@ -767,6 +826,7 @@ def process_user_events(
         blog_repo=blog_repo_path or DEFAULT_BLOG_REPO, blog_mode=blog_mode,
     )]
     all_proposals = read_all_latest(proposal_path)
+    raw_records = read_latest_records(proposal_path)
     pending = {proposal.id: proposal for proposal in read_pending(proposal_path)}
     promoted_ids: set[str] = set()
     comment_runner = linear_comment_runner or _default_linear_comment_runner
@@ -854,26 +914,13 @@ def process_user_events(
                 return None
 
         promoted_ids.add(proposal.id)
-        approved_record: dict[str, Any] = {
-            "id": proposal.id, "ts": _now(), "agent": proposal.agent,
-            "title": proposal.title, "detail": proposal.detail,
-            "priority": proposal.priority, "status": "approved",
-            "source": "aidash",
-        }
-        for extra_attr in (
-            "ref",
-            "app_name",
-            "event_kind",
-            "signature",
-            "stack_top_symbol",
-            "recommended_layer",
-            "verify_cmd",
-        ):
-            val = getattr(proposal, extra_attr, "")
-            if val:
-                approved_record[extra_attr] = val
-        if external_id:
-            approved_record["external_id"] = external_id
+        raw_rec = raw_records.get(proposal.id, {})
+        approved_record = _build_full_proposal_record(
+            proposal,
+            status="approved",
+            external_id=external_id or "",
+            extra={k: v for k, v in raw_rec.items() if k not in {"id", "ts", "status", "revision", "external_id"}},
+        )
 
         if trigger_dispatch and _is_crash_or_perf_proposal(proposal):
             runner = dispatch_runner or _default_dispatch_runner
@@ -890,6 +937,8 @@ def process_user_events(
                 result["errors"] += 1
 
         _append_jsonl(proposal_path, approved_record)
+        all_proposals[proposal.id] = Proposal(**{k: v for k, v in approved_record.items() if k in Proposal.__dataclass_fields__})
+        raw_records[proposal.id] = approved_record
         result["promoted"] += 1
         return external_id
 
@@ -921,13 +970,18 @@ def process_user_events(
         if action == "undone":
             result["undone"] += 1
             continue
-        if ref.startswith("proposal://") and action == "done":
-            proposal = pending.get(ref.removeprefix("proposal://")) or all_proposals.get(ref.removeprefix("proposal://"))
+        if ref.startswith(("proposal://", "retro://")) and action == "done":
+            proposal = _lookup_retro_proposal(pending, ref, raw_records) or _lookup_retro_proposal(all_proposals, ref, raw_records)
             if proposal is not None:
-                _append_jsonl(
-                    proposal_path,
-                    _build_full_proposal_record(proposal, status="dismissed"),
+                raw_rec = raw_records.get(proposal.id, {})
+                dismissed_rec = _build_full_proposal_record(
+                    proposal,
+                    status="dismissed",
+                    extra={k: v for k, v in raw_rec.items() if k not in {"id", "ts", "status", "revision"}},
                 )
+                _append_jsonl(proposal_path, dismissed_rec)
+                raw_records[proposal.id] = dismissed_rec
+                pending.pop(proposal.id, None)
                 result["resolved"] += 1
             else:
                 result["ignored"] += 1
@@ -970,12 +1024,18 @@ def process_user_events(
             continue
         if ref.startswith("skill-roi://") and action == "done":
             skill_name = ref.removeprefix("skill-roi://").strip("/")
-            proposal = _lookup_skill_roi_proposal(pending, skill_name) or _lookup_skill_roi_proposal(all_proposals, skill_name)
+            proposal = _lookup_skill_roi_proposal(pending, skill_name, raw_records) or _lookup_skill_roi_proposal(all_proposals, skill_name, raw_records)
             if proposal is not None:
-                _append_jsonl(
-                    proposal_path,
-                    _build_full_proposal_record(proposal, status="dismissed", ref_override=ref),
+                raw_rec = raw_records.get(proposal.id, {})
+                dismissed_rec = _build_full_proposal_record(
+                    proposal,
+                    status="dismissed",
+                    ref_override=ref,
+                    extra={k: v for k, v in raw_rec.items() if k not in {"id", "ts", "status", "revision", "ref"}},
                 )
+                _append_jsonl(proposal_path, dismissed_rec)
+                raw_records[proposal.id] = dismissed_rec
+                pending.pop(proposal.id, None)
                 result["resolved"] += 1
             else:
                 result["ignored"] += 1
@@ -1010,8 +1070,8 @@ def process_user_events(
                     ),
                 )
             result["bookmarked"] += 1
-        elif ref.startswith("proposal://"):
-            proposal = pending.get(ref.removeprefix("proposal://"))
+        elif ref.startswith(("proposal://", "retro://")):
+            proposal = _lookup_retro_proposal(pending, ref, raw_records)
             if proposal is None:
                 result["ignored"] += 1
                 continue
@@ -1068,7 +1128,7 @@ def process_user_events(
             if not skill_name:
                 result["ignored"] += 1
                 continue
-            matched = _lookup_skill_roi_proposal(pending, skill_name)
+            matched = _lookup_skill_roi_proposal(pending, skill_name, raw_records)
             if matched is None:
                 matched = Proposal(
                     id=f"skill-roi-{skill_name}",
@@ -1424,9 +1484,21 @@ def process_user_events(
             result["ignored"] += 1
             continue
 
-        if action_id.startswith("proposal-"):
-            prop_id = action_id.removeprefix("proposal-")
-            proposal = pending.get(prop_id)
+        if action_id.startswith(("proposal-", "retro-", "skill-roi-", "item-retro-", "item-skill-roi-")):
+            proposal: Proposal | None = None
+            if action_id.startswith(("skill-roi-", "item-skill-roi-")):
+                skill_slug = action_id.removeprefix("item-").removeprefix("skill-roi-").strip("-")
+                proposal = (
+                    _lookup_skill_roi_proposal(pending, skill_slug, raw_records)
+                    or _lookup_retro_proposal(pending, skill_slug, raw_records)
+                    or _lookup_skill_roi_proposal(all_proposals, skill_slug, raw_records)
+                )
+            else:
+                prop_key = action_id.removeprefix("item-").removeprefix("proposal-").removeprefix("retro-").strip("-")
+                proposal = (
+                    _lookup_retro_proposal(pending, prop_key, raw_records)
+                    or _lookup_retro_proposal(all_proposals, prop_key, raw_records)
+                )
             if proposal is None:
                 result["ignored"] += 1
                 continue
@@ -1449,7 +1521,7 @@ def process_user_events(
                     dedup_key=base_dedup_key,
                     require_todo_state=require_todo,
                     comment_body=comment_body,
-                    existing_external_id=pending_external_ids.get(base_dedup_key) or pending_external_ids.get(dedup_key),
+                    existing_external_id=pending_external_ids.get(base_dedup_key) or pending_external_ids.get(dedup_key) or proposal.external_id,
                 )
                 if result["promoted"] > prev_promoted:
                     processed_job_actions.add(dedup_key)
@@ -1457,10 +1529,15 @@ def process_user_events(
                     processed_job_actions.add(base_dedup_key)
                     _record_consumed(dedup_key)
             elif decision_lower in {"done", "dismiss", "cancel", "canceled", "cancelled", "resolve", "mark done"}:
-                _append_jsonl(
-                    proposal_path,
-                    _build_full_proposal_record(proposal, status="dismissed"),
+                raw_rec = raw_records.get(proposal.id, {})
+                dismissed_rec = _build_full_proposal_record(
+                    proposal,
+                    status="dismissed",
+                    extra={k: v for k, v in raw_rec.items() if k not in {"id", "ts", "status", "revision"}},
                 )
+                _append_jsonl(proposal_path, dismissed_rec)
+                raw_records[proposal.id] = dismissed_rec
+                pending.pop(proposal.id, None)
                 processed_job_actions.add(dedup_key)
                 processed_job_actions.add(decision_dedup_key)
                 _record_consumed(dedup_key)

@@ -290,7 +290,11 @@ def test_learning_queue_expired_unstarted_lease_retries_once_but_uncertain_dispa
     old = "2026-01-01T00:00:00Z"
     queue.write_text(json.dumps(_learning_job(status="leased", lease_token="dead", leased_at=old, lease_expires_at=old, attempts=1)) + "\n", encoding="utf-8")
     calls = []
-    run = lambda job: calls.append(job["task_key"]) or 0
+
+    def run(job):
+        calls.append(job["task_key"])
+        return 0
+
     assert event_bridge.consume_learning_queue(queue, dispatch_runner=run) == {"consumed": 0, "blocked": 1}
     assert calls == []
     assert event_bridge.consume_learning_queue(queue, dispatch_runner=run, retry_blocked=True) == {"consumed": 1, "blocked": 0}
@@ -365,7 +369,11 @@ def test_learning_queue_unknown_outcome_and_failed_ack_never_redispatch(tmp_path
         original_write(path, jobs)
 
     monkeypatch.setattr(event_bridge, "_write_learning_queue", lose_ack)
-    run = lambda job: calls.append(job["task_key"]) or 0
+
+    def run(job):
+        calls.append(job["task_key"])
+        return 0
+
     assert event_bridge.consume_learning_queue(queue, dispatch_runner=run) == {"consumed": 0, "blocked": 1}
     monkeypatch.setattr(event_bridge, "_write_learning_queue", original_write)
     jobs = _queue_records(queue)
@@ -1201,3 +1209,114 @@ def test_event_bridge_learning_topic_star_snooze_approve_done_and_full_writeback
     final_lines = [json.loads(ln) for ln in proposals.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert final_lines[-1]["learning_state"] == "learned"
     assert final_lines[-1]["outcome"] == "owner_reported"
+
+
+@pytest.mark.unit
+def test_retro_and_skill_roi_job_actions_emit_colon_free_ids_and_close_writeback_loop(tmp_path):
+    from L5_apps.digest.inbox import _proposals, build_job_actions
+    from L5_apps.digest.proposals import read_all_latest, read_pending
+
+    proposals = tmp_path / "proposals.jsonl"
+    records = [
+        {
+            "id": "reduce-m1-ping-pong",
+            "ts": "2026-11-12T10:00:00Z",
+            "agent": "retro-loop",
+            "title": "[Agent Efficiency M1] 降低 Writer↔Reviewer Ping-Pong",
+            "detail": "ping-pong 偏高",
+            "priority": "high",
+            "status": "pending",
+            "ref": "retro://agent-efficiency-m1",
+            "legacy_ids": ["improve-m1-review-pingpong"],
+            "legacy_refs": ["proposal://improve-m1-review-pingpong"],
+            "scope": "personal",
+            "revision": 3,
+            "window_cst": "7d",
+            "source_as_of": "2026-11-12",
+            "sample_size": 8,
+            "coverage_status": "healthy",
+        },
+        {
+            "id": "skill-roi-my-designer",
+            "ts": "2026-11-12T10:01:00Z",
+            "agent": "retro-loop",
+            "title": "[Skill ROI] 优化 my-designer 效果与效率",
+            "detail": "unpracticed=0.5",
+            "priority": "high",
+            "status": "pending",
+            "ref": "skill-roi://my-designer",
+            "legacy_ref": "retro://skill-roi/my-designer",
+            "scope": "personal",
+            "revision": 2,
+            "window_cst": "7d",
+            "source_as_of": "2026-11-12",
+            "sample_size": 12,
+            "coverage_status": "healthy",
+        },
+    ]
+    proposals.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n",
+        encoding="utf-8",
+    )
+
+    items = _proposals(lambda: read_pending(proposals))
+    actions = build_job_actions(items, proposals_path=proposals, sync_triage=False)
+    by_ref = {str(a["ref"]): a for a in actions}
+    assert set(by_ref) == {"retro://agent-efficiency-m1", "skill-roi://my-designer"}
+    for act in actions:
+        aid = str(act["id"])
+        assert ":" not in aid
+        assert "/" not in aid
+        assert act["domain"] == "decisions"
+        assert act["source"] == "Retro"
+        assert act["evidence"]
+
+    retro_aid = str(by_ref["retro://agent-efficiency-m1"]["id"])
+    skill_aid = str(by_ref["skill-roi://my-designer"]["id"])
+    assert retro_aid == "retro-agent-efficiency-m1"
+    assert skill_aid == "skill-roi-my-designer"
+
+    promoted: list[tuple[str, str]] = []
+    statuses: list[tuple[str, str]] = []
+    cursor = tmp_path / "cursor.json"
+
+    def record_idea(title: str, detail: str) -> tuple[int, str]:
+        promoted.append((title, detail))
+        return 0, "TIA-358"
+
+    def record_status(ident: str, state: str) -> int:
+        statuses.append((ident, state))
+        return 0
+
+    res = event_bridge.process_user_events(
+        [
+            {
+                "id": "evt-retro-approve",
+                "action": "acknowledgeJobAction",
+                "cardType": "scheduledPulse",
+                "cardId": "scheduled-pulse/aidata-digest",
+                "itemRef": f'aidata-digest:{retro_aid}|[{{"controlID":"decision","value":"Approve"}}]',
+            },
+            {
+                "id": "evt-skill-dismiss",
+                "action": "acknowledgeJobAction",
+                "cardType": "scheduledPulse",
+                "cardId": "scheduled-pulse/aidata-digest",
+                "itemRef": f'aidata-digest:{skill_aid}|[{{"controlID":"decision","value":"Dismiss"}}]',
+            },
+        ],
+        proposals_path=proposals,
+        cursor_path=cursor,
+        linear_runner=record_idea,
+        linear_status_runner=record_status,
+    )
+    assert res["promoted"] == 1
+    assert res["resolved"] == 1
+    assert len(promoted) == 1
+    assert ("TIA-358", "Todo") in statuses
+    latest = read_all_latest(proposals)
+    assert latest["reduce-m1-ping-pong"].status == "approved"
+    assert latest["reduce-m1-ping-pong"].external_id == "TIA-358"
+    assert latest["skill-roi-my-designer"].status == "dismissed"
+    assert read_pending(proposals) == []
+
