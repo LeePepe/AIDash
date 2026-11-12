@@ -4,7 +4,7 @@ import Foundation
 public struct JobActionsAction: Codable, Sendable, Equatable {
     public struct Control: Codable, Sendable, Equatable, Identifiable {
         public enum Kind: String, Codable, Sendable {
-            case confirm, singleSelect, multiSelect, textInput
+            case confirm, singleSelect, multiSelect, textInput, openURL
         }
 
         public let id: String
@@ -12,24 +12,49 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         public let title: String
         public let options: [String]
         public let maxLength: Int?
+        public let url: String?
 
-        public init(id: String, kind: Kind, title: String, options: [String] = [], maxLength: Int? = nil) {
+        public init(
+            id: String,
+            kind: Kind,
+            title: String,
+            options: [String] = [],
+            maxLength: Int? = nil,
+            url: String? = nil
+        ) {
             self.id = id
             self.kind = kind
             self.title = title
             self.options = options
             self.maxLength = maxLength
+            self.url = url
         }
 
         public var effectiveMaxLength: Int { min(max(maxLength ?? 80, 0), 80) }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, kind, title, label, options, maxLength, url
+        }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(String.self, forKey: .id)
             kind = try container.decode(Kind.self, forKey: .kind)
-            title = try container.decode(String.self, forKey: .title)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+                ?? (try container.decode(String.self, forKey: .label))
             options = try container.decodeIfPresent([String].self, forKey: .options) ?? []
             maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
+            url = try container.decodeIfPresent(String.self, forKey: .url)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(kind, forKey: .kind)
+            try container.encode(title, forKey: .title)
+            try container.encode(options, forKey: .options)
+            try container.encodeIfPresent(maxLength, forKey: .maxLength)
+            try container.encodeIfPresent(url, forKey: .url)
         }
     }
 
@@ -44,11 +69,21 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public let priority: String?
     public let ref: String?
     public let url: String?
+    public let subCategory: String?
+    public let worthExtracting: Bool?
     public let controls: [Control]
 
+    private struct SourcePayload: Decodable {
+        let kind: String?
+        let label: String?
+        let url: String?
+        let entityId: String?
+        let headSha: String?
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case id, jobID, createdAt, title, description, descriptionMd
-        case status, source, priority, ref, url, controls
+        case id, jobID, jobId, createdAt, title, description, descriptionMd
+        case status, source, priority, ref, url, subCategory, worthExtracting, controls
     }
 
     public init(
@@ -56,6 +91,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         title: String, descriptionMd: String,
         status: String? = nil, source: String? = nil, priority: String? = nil,
         ref: String? = nil, url: String? = nil,
+        subCategory: String? = nil, worthExtracting: Bool? = nil,
         controls: [Control]
     ) {
         self.id = id
@@ -68,13 +104,16 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         self.priority = priority
         self.ref = ref
         self.url = url
+        self.subCategory = subCategory
+        self.worthExtracting = worthExtracting
         self.controls = controls
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        jobID = try container.decode(String.self, forKey: .jobID)
+        jobID = try container.decodeIfPresent(String.self, forKey: .jobID)
+            ?? (try container.decode(String.self, forKey: .jobId))
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         title = try container.decode(String.self, forKey: .title)
         if let md = try container.decodeIfPresent(String.self, forKey: .descriptionMd) {
@@ -91,11 +130,23 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
             )
         }
         status = try container.decodeIfPresent(String.self, forKey: .status)
-        source = try container.decodeIfPresent(String.self, forKey: .source)
+        let sourcePayload: SourcePayload?
+        if let sourceString = try? container.decode(String.self, forKey: .source) {
+            source = sourceString
+            sourcePayload = nil
+        } else {
+            sourcePayload = try container.decodeIfPresent(SourcePayload.self, forKey: .source)
+            source = sourcePayload?.label
+        }
         priority = try container.decodeIfPresent(String.self, forKey: .priority)
-        ref = try container.decodeIfPresent(String.self, forKey: .ref)
-        url = try container.decodeIfPresent(String.self, forKey: .url)
-        controls = try container.decode([Control].self, forKey: .controls)
+        ref = try container.decodeIfPresent(String.self, forKey: .ref) ?? sourcePayload?.entityId
+        let explicitURL = try container.decodeIfPresent(String.self, forKey: .url)
+        let decodedControls = try container.decode([Control].self, forKey: .controls)
+        let controlURL = decodedControls.first(where: { $0.kind == .openURL })?.url
+        url = explicitURL ?? sourcePayload?.url ?? controlURL
+        subCategory = try container.decodeIfPresent(String.self, forKey: .subCategory)
+        worthExtracting = try container.decodeIfPresent(Bool.self, forKey: .worthExtracting)
+        controls = decodedControls.filter { $0.kind != .openURL }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -111,6 +162,8 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         try container.encodeIfPresent(priority, forKey: .priority)
         try container.encodeIfPresent(ref, forKey: .ref)
         try container.encodeIfPresent(url, forKey: .url)
+        try container.encodeIfPresent(subCategory, forKey: .subCategory)
+        try container.encodeIfPresent(worthExtracting, forKey: .worthExtracting)
         try container.encode(controls, forKey: .controls)
     }
 }

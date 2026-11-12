@@ -75,6 +75,42 @@ struct JobActionsBridgeTests {
         #expect(encodedCrossDevice?["url"] as? String == "https://linear.app/tianpeili/issue/TIA-76")
     }
 
+    @Test("Actionable v2 aliases decode without exposing openURL as a response control")
+    func actionableV2Compatibility() throws {
+        let data = Data(#"""
+        {
+          "id":"D617",
+          "jobId":"my-pr-supervisor",
+          "title":"Preserve logo aspect ratio",
+          "description":"Choose the landing path",
+          "status":"awaiting_owner",
+          "priority":"P0",
+          "source":{"kind":"pr","label":"PR & CI","url":"https://github.com/acme/repo/pull/617","entityId":"PR#617","headSha":"abc123"},
+          "subCategory":"PR_DECISION",
+          "worthExtracting":true,
+          "controls":[
+            {"id":"link","kind":"openURL","label":"Open PR","url":"https://github.com/acme/repo/pull/617"},
+            {"id":"decision","kind":"singleSelect","label":"Choose","options":["Approve","Dismiss"]}
+          ]
+        }
+        """#.utf8)
+        let action = try JSONDecoder().decode(JobActionsAction.self, from: data)
+        #expect(action.jobID == "my-pr-supervisor")
+        #expect(action.source == "PR & CI")
+        #expect(action.ref == "PR#617")
+        #expect(action.url == "https://github.com/acme/repo/pull/617")
+        #expect(action.controls.map(\.id) == ["decision"])
+        #expect(action.controls[0].title == "Choose")
+        #expect(action.subCategory == "PR_DECISION")
+        try JobActionsValidation.validateAction(action)
+
+        let noResponseAction = JobActionsAction(
+            id: "link-only", jobID: "my-pr-supervisor", title: "Open", descriptionMd: "",
+            url: "https://github.com/acme/repo/pull/1", controls: []
+        )
+        try JobActionsValidation.validateAction(noResponseAction)
+    }
+
     @Test("Exact fields, Unicode bounds, duplicates, unknown controls, options and noncanonical selections reject")
     func invalidProposals() throws {
         let params = JobActionsPresentParams(requestID: UUID().uuidString, jobID: "my-pr-supervisor",
