@@ -255,15 +255,12 @@ def write_digest(report_date: str, use_llm: bool = False,
     # skipped collection, query error), append a loud line to cron-errors.log +
     # notify — so a silently-incomplete digest (0 issue / 0 PR / stale radar) is
     # noticed the same day. Never blocks generation (ADR-16 必成 sink).
-    # Skip writing to the global .aidash-state/cron-errors.log when DIGEST_DIR
-    # has been monkeypatched to a temp directory in unit tests.
-    if DIGEST_DIR == Path(__file__).resolve().parents[2] / "L5_apps" / "digest" / "archive":
-        try:
-            from L5_apps.digest.aidash import _default_notifier
-            from L5_apps.digest.freshness import alarm_if_degraded
-            alarm_if_degraded(sources, report_date, notifier=_default_notifier)
-        except Exception as exc:  # noqa: BLE001 - monitoring must never break digest
-            log.warning("freshness gate errored (non-fatal): %s", exc)
+    try:
+        from L5_apps.digest.aidash import _default_notifier
+        from L5_apps.digest.freshness import alarm_if_degraded
+        alarm_if_degraded(sources, report_date, notifier=_default_notifier)
+    except Exception as exc:  # noqa: BLE001 - monitoring must never break digest
+        log.warning("freshness gate errored (non-fatal): %s", exc)
 
     md = build_digest(report_date, use_llm=use_llm, sources=sources)
     out_dir = DIGEST_DIR / "daily"

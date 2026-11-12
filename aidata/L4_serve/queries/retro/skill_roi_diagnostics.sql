@@ -188,7 +188,7 @@ SELECT
         CASE
             WHEN COALESCE(u.session_count, 0) > 0
             THEN 1.0 * COALESCE(u.script_exec_sessions, 0) / u.session_count
-            ELSE 1.0
+            ELSE NULL
         END,
         4
     ) AS script_touch_rate,
@@ -196,21 +196,21 @@ SELECT
         CASE
             WHEN COALESCE(u.session_count, 0) > 0
             THEN 1.0 - (1.0 * COALESCE(u.script_exec_sessions, 0) / u.session_count)
-            ELSE 0.0
+            ELSE NULL
         END,
         4
     ) AS unpracticed_rate,
     COALESCE(u.l0_only_sessions, 0) AS l0_only_sessions,
     COALESCE(u.l1_selective_sessions, 0) AS l1_selective_sessions,
     COALESCE(u.l1_greedy_sessions, 0) AS l1_greedy_sessions,
-    COALESCE(u.avg_context_tokens, 1200) AS avg_context_tokens,
+    u.avg_context_tokens AS avg_context_tokens,
     COALESCE(r.r1_total, 0) AS r1_total,
     COALESCE(r.r1_pass, 0) AS r1_pass,
     ROUND(
         CASE
             WHEN COALESCE(r.r1_total, 0) > 0
             THEN 1.0 * COALESCE(r.r1_pass, 0) / r.r1_total
-            ELSE 1.0
+            ELSE NULL
         END,
         4
     ) AS r1_pass_rate,
@@ -218,29 +218,34 @@ SELECT
     COALESCE(e.impl_bug_count, COALESCE(r.r1_fail, 0)) AS impl_bug_count,
     COALESCE(e.spec_gap_count, 0) AS spec_gap_count,
     ROUND(
-        (
-            CASE
-                WHEN COALESCE(r.r1_total, 0) > 0
-                THEN 1.0 * COALESCE(r.r1_pass, 0) / r.r1_total
-                ELSE 1.0
-            END
-        ) / (
-            0.5
-            + MIN(2.0, MAX(0.2, COALESCE(u.avg_context_tokens, 1200) / 10000.0))
-            + (COALESCE(r.rework_rounds, 0) * 0.25)
-            + (
-                CASE
+        CASE
+            WHEN COALESCE(r.r1_total, 0) > 0
+             AND u.avg_context_tokens IS NOT NULL
+            THEN (
+                1.0 * COALESCE(r.r1_pass, 0) / r.r1_total
+            ) / (
+                0.5
+                + MIN(2.0, u.avg_context_tokens / 10000.0)
+                + (COALESCE(r.rework_rounds, 0) * 0.25)
+                + CASE
                     WHEN COALESCE(u.session_count, 0) > 0
                     THEN (1.0 - (1.0 * COALESCE(u.script_exec_sessions, 0) / u.session_count)) * 0.6
                     ELSE 0.0
-                END
+                  END
+                + (COALESCE(e.impl_bug_count, COALESCE(r.r1_fail, 0)) * 0.2)
+                + (COALESCE(e.spec_gap_count, 0) * 0.15)
             )
-            + (COALESCE(e.impl_bug_count, COALESCE(r.r1_fail, 0)) * 0.2)
-            + (COALESCE(e.spec_gap_count, 0) * 0.15)
-        ),
+            ELSE NULL
+        END,
         4
-    ) AS roi_score
+    ) AS roi_score,
+    anchor.max_day AS source_as_of,
+    date(anchor.max_day, '-6 days') || ' → ' || anchor.max_day AS time_window,
+    COALESCE(u.session_count, r.r1_total, 0) AS sample_size,
+    CASE WHEN COALESCE(u.session_count, r.r1_total, 0) > 0 THEN 'covered' ELSE 'unknown' END AS coverage_status,
+    0 AS estimated
 FROM all_skills AS s
+CROSS JOIN anchor
 LEFT JOIN usage_agg AS u ON u.skill = s.skill
 LEFT JOIN review_agg AS r ON r.skill = s.skill
 LEFT JOIN escape_agg AS e ON e.skill = s.skill

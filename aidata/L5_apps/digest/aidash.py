@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Callable, Sequence
 from config import AIDASH_BIN_FIXED, AIDASH_BIN_GLOB
 
 from L5_apps.digest.card_policy import (
+    DIAGNOSTICS_ALLOWANCE,
     FIRST_SCREEN_CARDS,
     MAX_ACTIONS,
     MAX_CARDS,
@@ -1973,15 +1974,23 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
         head_cards -= sum(card.type == "metric" for card in head.cards)
         head_cards += min(
             1, sum(card.type == "metric" for card in head.cards))
-    budget = max(0, MAX_CARDS - head_cards)
-    first_screen = max(0, FIRST_SCREEN_CARDS - head_cards)
-    kept = select_with_budget(_container_candidates(rest),
-                              max_cards=budget, first_screen=first_screen)
-    if not [c for c in kept.selected if c.card.cards]:
+    required_titles = {"Skills 与 ROI 诊断", "工程与编排图表", "产品健康与个人成长"}
+    required = [c for c in _container_candidates(rest)
+                if c.card.title in required_titles and c.card.cards]
+    optional = [c for c in _container_candidates(rest)
+                if c not in required]
+    discretionary_budget = max(0, MAX_CARDS - head_cards)
+    kept = select_with_budget(
+        optional,
+        max_cards=discretionary_budget,
+        first_screen=max(0, FIRST_SCREEN_CARDS - head_cards),
+    )
+    selected = required + [c for c in kept.selected if c.card.cards]
+    if not selected:
         return (head,)
 
     published = sorted(
-        (c.card for c in kept.selected if c.card.cards),
+        (c.card for c in selected if c.card.cards),
         key=lambda container: container.order,
     )
     published_card_cost = sum(
@@ -1992,12 +2001,14 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     if head.title == "总览":
         head_card_cost -= sum(card.type == "metric" for card in head.cards)
         head_card_cost += min(1, sum(card.type == "metric" for card in head.cards))
-    while published_card_cost + head_card_cost > MAX_CARDS:
-        if not published:
+    total_budget = MAX_CARDS + (DIAGNOSTICS_ALLOWANCE if required else 0)
+    while published_card_cost + head_card_cost > total_budget:
+        removable = [c for c in published if c.title not in required_titles]
+        if not removable:
             break
-        removed = published.pop()
-        published_card_cost -= sum(
-            card.type != "sectionHeader" for card in removed.cards)
+        removed = removable[-1]
+        published.remove(removed)
+        published_card_cost -= sum(card.type != "sectionHeader" for card in removed.cards)
     return tuple([head] + published)
 
 

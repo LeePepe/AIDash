@@ -95,9 +95,13 @@ def _connect(required_sources: list[str] | None = None) -> sqlite3.Connection:
                 )
             db = clean_path(src)
             if not db.exists():
-                # Degrade-safe (ADR-23): a missing clean DB is not fatal at
-                # connect time — the query itself surfaces "no such table" only
-                # if it genuinely needs the source.
+                # Degrade-safe: queries may declare optional sources. Provide
+                # empty known schemas so one missing DB cannot hide other rows.
+                if src in {"hermes_tools", "copilot_cli"}:
+                    conn.execute(f"ATTACH DATABASE ':memory:' AS {src}")
+                    conn.execute(f"CREATE TABLE {src}.skill_day (day TEXT, skill TEXT, n INTEGER, PRIMARY KEY (day, skill))")
+                    if src == "hermes_tools":
+                        conn.execute("CREATE TABLE hermes_tools.tool_day (day TEXT, tool_name TEXT, n INTEGER, PRIMARY KEY (day, tool_name))")
                 continue
             has_skill_day = True
             if src == "hermes_tools":

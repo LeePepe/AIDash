@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import re
 import sqlite3
@@ -145,8 +146,15 @@ def _default_dispatch_runner(proposal: Proposal, external_id: str | None) -> int
 
 def _append_jsonl(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            handle.flush()
+            import os
+            os.fsync(handle.fileno())
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def _enqueue_learning_task(proposal: Proposal, *, task_key: str, external_id: str = "") -> None:
@@ -475,9 +483,11 @@ def _latest_events(
         if raw_ref and action in {"done", "undone"}:
             ref = _canonicalize_event_ref(raw_ref, provider, local_prov)
             stamp = str(event.get("timestamp") or event.get("ts") or "")
+            revision = int(event.get("revision") or 1)
             current = latest.get(ref)
-            if current is None or stamp >= str(current.get("_stamp", "")):
-                latest[ref] = {**event, "_stamp": stamp}
+            current_key = (int(current.get("revision") or 1), str(current.get("_stamp", ""))) if current else (-1, "")
+            if current is None or (revision, stamp) >= current_key:
+                latest[ref] = {**event, "_stamp": stamp, "_revision": revision}
     return latest
 
 
@@ -937,14 +947,17 @@ def process_user_events(
         base_dedup_key = f"{job_id}:{action_id}"
         decision_dedup_key = f"{base_dedup_key}:{decision_lower}" if decision_lower else base_dedup_key
         if event_uid:
-            dedup_key = f"{base_dedup_key}:evt:{event_uid}"
+            dedup_key = f"{base_dedup_key}:evt:{event_uid}:rev:{rev_token or '1'}:{decision_lower}"
         elif rev_token:
             dedup_key = f"{base_dedup_key}:rev:{rev_token}:{decision_lower}"
         else:
             dedup_key = decision_dedup_key
         if (
             dedup_key in processed_job_actions
-            or decision_dedup_key in processed_job_actions
+            or (
+                decision_lower in {"approve", "approve to todo", "promote to linear tia"}
+                and decision_dedup_key in processed_job_actions
+            )
             or (
                 not event_uid
                 and not rev_token
@@ -1066,6 +1079,9 @@ def process_user_events(
         if action_id.startswith("learning-"):
             topic_key = action_id.removeprefix("learning-").strip("/")
             matched_prop = _lookup_learning_proposal(all_proposals, topic_key)
+            if matched_prop is None:
+                result["ignored"] += 1
+                continue
             now_dt = datetime.now(timezone.utc)
             if "snooze" in decision_lower or "延后" in decision_lower:
                 next_el = (now_dt + timedelta(days=7)).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -1497,6 +1513,69 @@ def _write_consumed_receipt_keys(path: Path, keys: set[str]) -> None:
     _write_cursor_state(path, keys, pending_ext)
 
 
+def consume_learning_queue(
+    queue_path: Path = LEARNING_QUEUE_PATH,
+    *,
+    dispatch_runner: Callable[[dict[str, Any]], int] | None = None,
+) -> dict[str, int]:
+    """Lease queued approvals once and expose blocked jobs for recovery."""
+    if not queue_path.exists():
+        return {"consumed": 0, "blocked": 0}
+    try:
+        lines = queue_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {"consumed": 0, "blocked": 1}
+    jobs = [json.loads(line) for line in lines if line.strip()]
+    result = {"consumed": 0, "blocked": 0}
+    updated: list[dict[str, Any]] = []
+    for job in jobs:
+        if job.get("status") != "queued":
+            updated.append(job)
+            continue
+        task_key = str(job.get("task_key") or "").strip()
+        if not task_key:
+            job.update({"status": "blocked", "error": "missing task_key"})
+            result["blocked"] += 1
+            updated.append(job)
+            continue
+        job["status"] = "leased"
+        job["leased_at"] = _now()
+        updated.append(job)
+        runner = dispatch_runner or _default_learning_dispatch
+        try:
+            rc = runner(job)
+        except (OSError, subprocess.SubprocessError):
+            rc = 1
+        job["status"] = "dispatched" if rc == 0 else "blocked"
+        job["completed_at"] = _now() if rc == 0 else ""
+        if rc != 0:
+            job["error"] = "knowledge-digest dispatch failed"
+            result["blocked"] += 1
+        else:
+            result["consumed"] += 1
+    tmp = queue_path.with_suffix(queue_path.suffix + ".tmp")
+    try:
+        with queue_path.with_suffix(queue_path.suffix + ".lock").open("a", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            tmp.write_text("".join(json.dumps(job, ensure_ascii=False) + "\n" for job in updated), encoding="utf-8")
+            tmp.replace(queue_path)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        return {"consumed": 0, "blocked": max(1, result["blocked"])}
+    return result
+
+
+def _default_learning_dispatch(job: dict[str, Any]) -> int:
+    topic_key = str(job.get("topic_key") or "").strip()
+    if not topic_key or not Path(DIGEST_VAULT_SCRIPT).exists():
+        return 1
+    result = subprocess.run(
+        ["python3", str(DIGEST_VAULT_SCRIPT), "explore", "--topic-key", topic_key, "--no-materialize"],
+        check=False, capture_output=True, text=True, timeout=60,
+    )
+    return result.returncode
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--proposals-path", type=Path, default=PROPOSALS_PATH)
@@ -1506,7 +1585,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cursor-path", type=Path, default=None)
     parser.add_argument("--mode", choices=("observe", "auto"), default="observe")
     parser.add_argument("--auto-dispatch", action="store_true")
+    parser.add_argument("--consume-learning", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.consume_learning:
+        print(json.dumps(consume_learning_queue(), ensure_ascii=False))
+        return 0
 
     events: list[dict] = []
     raw_input = args.events_json.strip()

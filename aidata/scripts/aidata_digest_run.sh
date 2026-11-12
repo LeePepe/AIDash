@@ -23,6 +23,8 @@ cd "$AIDATA_HOME" || { echo "aidata home not found: $AIDATA_HOME" >&2; exit 1; }
 # CST (Asia/Shanghai) "today" — digest reports on the CST day before this.
 TODAY="$(TZ=Asia/Shanghai date +%Y-%m-%d)"
 JOB_STATE_FILE="${AIDASH_JOB_STATE_FILE:-$HOME/Library/Application Support/AIDash/jobs/aidata-digest/state.json}"
+JOB_OUTPUT_DIR="${AIDASH_JOB_OUTPUT_DIR:-$(dirname "$JOB_STATE_FILE")}"
+SKILLS_ROI_FILE="$JOB_OUTPUT_DIR/skills-roi.json"
 CHAIN_START_TS="$(date +%s)"
 
 echo "[aidata-digest] $(date) — chain start (report_date=$TODAY)"
@@ -39,7 +41,7 @@ COLLECT_OK=0
 COLLECT_FAIL=0
 PER_SOURCE_TIMEOUT="${PER_SOURCE_TIMEOUT:-300}"
 _TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
-SOURCES="raven claude_jsonl claude_prompts codex_prompts kimi_prompts multica_issue linear_issue multica_run multica_comment claude_job github_repo github_pr pr_cache ado_pr state_db hermes_tools hermes_messages memory_claude memory_hermes_db memory_hermes_md news aidash_events local_git browser_history gecko gtt_ledger gtt_receipt bot_tl workspace_hygiene github_ci github_ruleset release_tf mail_inbox work_teams_bridge"
+SOURCES="raven claude_jsonl claude_prompts codex_prompts kimi_prompts multica_issue linear_issue multica_run multica_comment claude_job github_repo github_pr pr_cache ado_pr state_db hermes_tools copilot_cli hermes_messages memory_claude memory_hermes_db memory_hermes_md news aidash_events local_git browser_history gecko gtt_ledger gtt_receipt bot_tl workspace_hygiene github_ci github_ruleset release_tf mail_inbox work_teams_bridge"
 for src in $SOURCES; do
   echo "[aidata-digest]   collect $src (budget ${PER_SOURCE_TIMEOUT}s)"
   if [ -n "$_TIMEOUT_BIN" ]; then
@@ -87,6 +89,39 @@ else
   echo "[aidata-digest]   ! retro engine missing"
   STAGE3_RC=1
 fi
+mkdir -p "$JOB_OUTPUT_DIR"
+if ! python3 - "$SKILLS_ROI_FILE" <<'PYEOF'
+import json
+import sys
+from L5_apps.digest.sources import fetch_skill_roi_trends
+
+path = sys.argv[1]
+trends = fetch_skill_roi_trends()
+payload = {
+    "schema_version": 1,
+    "source_as_of": max((r.source_as_of for r in trends.skills), default=""),
+    "window": max((r.time_window for r in trends.skills), default="7d CST"),
+    "coverage_status": trends.health.state,
+    "skills_daily": [
+        {"skill": r.skill, "loads_7d": r.loads_7d, "loads_30d": r.loads_30d,
+         "sample_size": r.sample_size, "coverage_status": r.coverage_status,
+         "estimated": r.estimated, "r1_pass_rate": r.r1_pass_rate,
+         "script_touch_rate": r.script_touch_rate, "roi_score": r.roi_score,
+         "source_as_of": r.source_as_of, "window": r.time_window}
+        for r in trends.skills
+    ],
+    "diagnostics": {"gate_catch_ratio": trends.gate_catch_ratio,
+                    "skill_audit_pass_ratio": trends.skill_audit_pass_ratio,
+                    "kv_cache_hit_pct": trends.kv_cache_hit_pct},
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PYEOF
+then
+  echo "[aidata-digest]   ! skills-roi snapshot failed"
+  STAGE3_RC=1
+fi
 STAGE3_DUR=$(( $(date +%s) - STAGE3_START ))
 STAGE3_STATUS=$([ "$STAGE3_RC" -eq 0 ] && echo "ok" || echo "warning")
 
@@ -101,6 +136,8 @@ else
   echo "[aidata-digest]   ! digest vault missing"
   STAGE4_RC=1
 fi
+python3 -m L5_apps.digest.event_bridge --consume-learning >/dev/null \
+  || { echo "[aidata-digest]   ! approved learning queue consumer blocked"; STAGE4_RC=1; }
 STAGE4_DUR=$(( $(date +%s) - STAGE4_START ))
 STAGE4_STATUS=$([ "$STAGE4_RC" -eq 0 ] && echo "ok" || echo "warning")
 

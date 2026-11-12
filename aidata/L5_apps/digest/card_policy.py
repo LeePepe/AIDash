@@ -33,6 +33,10 @@ from typing import Any, Sequence
 # are ceilings, not targets — a thin day publishes fewer cards, never padding.
 FIRST_SCREEN_CARDS = 6
 MAX_CARDS = 10
+# Required diagnostics are a bounded second allowance, not free cards. The
+# legacy discretionary budget remains 10; each published diagnostic card is
+# charged against this explicit allowance.
+DIAGNOSTICS_ALLOWANCE = 24
 MAX_ACTIONS = 3
 OVERVIEW_KPI_LIMIT = 4
 KPI_CARD_SIZE = "medium"

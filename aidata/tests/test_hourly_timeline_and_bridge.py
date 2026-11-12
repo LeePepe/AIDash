@@ -43,6 +43,18 @@ def test_jev_offline_degrades_to_ok():
 
 
 @pytest.mark.unit
+def test_learning_queue_consumer_dispatches_once_and_marks_blocked(tmp_path):
+    from L5_apps.digest.event_bridge import consume_learning_queue
+
+    queue = tmp_path / "learning_queue.jsonl"
+    queue.write_text(json.dumps({"task_key": "explore-topic-r1", "topic_key": "topic", "status": "queued"}) + "\n", encoding="utf-8")
+    calls = []
+    assert consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job["task_key"]) or 0) == {"consumed": 1, "blocked": 0}
+    assert calls == ["explore-topic-r1"]
+    assert json.loads(queue.read_text(encoding="utf-8"))["status"] == "dispatched"
+    assert consume_learning_queue(queue, dispatch_runner=lambda _: 1) == {"consumed": 0, "blocked": 0}
+
+
 def test_event_bridge_latest_wins_and_falcon_star(tmp_path):
     proposals = tmp_path / "proposals.jsonl"
     proposals.write_text(json.dumps({

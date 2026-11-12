@@ -231,6 +231,8 @@ GITHUB_CI_REPOS: tuple[str, ...] = ()
 # adapter degrades to a no-op when neither resolves (ADR-23).
 # ---------------------------------------------------------------------------
 AIDASH_BIN_FIXED = str(HOME / ".local" / "bin" / "aidash")
+COPILOT_SESSION_DB = HOME / ".copilot" / "session-store.db"
+
 AIDASH_BIN_GLOB = (
     "Library/Developer/Xcode/DerivedData/"
     "AIDash-*/Build/Products/Debug/aidash"
@@ -312,6 +314,7 @@ SOURCES = (
     "ado_pr",
     "state_db",
     "hermes_tools",
+    "copilot_cli",
     "hermes_messages",
     "claude_prompts",
     "codex_prompts",
@@ -356,6 +359,7 @@ SCHEDULED_SOURCES = (
     "ado_pr",
     "state_db",
     "hermes_tools",
+    "copilot_cli",
     "hermes_messages",
     "memory_claude",
     "memory_hermes_db",

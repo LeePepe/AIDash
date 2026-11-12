@@ -4,6 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+import adapters.copilot_cli as copilot
 import adapters.hermes_tools as ht
 import pytest
 
@@ -123,3 +124,20 @@ def test_missing_db_degrades(monkeypatch, tmp_path):
     monkeypatch.setattr(ht, "HERMES_STATE_DB", tmp_path / "missing.db")
     monkeypatch.setattr(ht, "query_ro", lambda *args: pytest.fail("must not query"))
     assert ht.collect() == 0
+
+
+@pytest.mark.unit
+def test_copilot_collects_skill_metadata_without_prompt_bodies(monkeypatch, tmp_path):
+    db = tmp_path / "session-store.db"
+    with sqlite3.connect(db) as con:
+        con.execute("CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT, assistant_response TEXT)")
+        con.execute("INSERT INTO turns VALUES (1, 's1', '2026-11-12T01:00:00Z', '/skill team-lead SECRET_PROMPT')")
+        con.commit()
+    captured = []
+    monkeypatch.setattr(copilot, "COPILOT_SESSION_DB", db)
+    monkeypatch.setattr(copilot, "write_raw", lambda source, rows: captured.extend(rows) or len(rows))
+    monkeypatch.setattr(copilot, "get_watermark", lambda source: 0)
+    monkeypatch.setattr(copilot, "set_watermark", lambda source, value: None)
+    assert copilot.collect() == 1
+    assert captured == [{"turn_id": 1, "session_id": "s1", "timestamp": "2026-11-12T01:00:00Z", "skill": "team-lead"}]
+    assert "SECRET_PROMPT" not in repr(captured)
