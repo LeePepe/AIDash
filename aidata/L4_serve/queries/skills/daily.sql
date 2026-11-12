@@ -1,4 +1,4 @@
--- aidata-tier: explore
+-- Production contract consumed by the Skills ROI snapshot exporter.
 -- aidata-attach: claude_prompts, codex_prompts, hermes_tools, copilot_cli
 -- skills/daily — skill usage by CST day, source, and skill.
 -- Grain: one (day, source, skill) row.  Claude attribution and tool usage are
