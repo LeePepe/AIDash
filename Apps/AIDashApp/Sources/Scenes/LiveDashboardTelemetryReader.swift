@@ -215,15 +215,15 @@ public enum LiveDashboardTelemetryReader {
         return HerdrM2SessionSnapshot(workspaces: workspaceRows, agents: agentRows)
     }
 
-    private static func bind(topic: DashboardTopic, workspaces: [HerdrWorkspaceRecord], agents: [HerdrAgentRecord]) -> DashboardM2SessionBinding {
+    nonisolated private static func bind(topic: DashboardTopic, workspaces: [HerdrWorkspaceRecord], agents: [HerdrAgentRecord]) -> DashboardM2SessionBinding {
         let knownWorkspaceIDs: [String: [String]] = [
             "sapphire-china-bugs": ["w1"], "sapphire-smartbanner": ["w10"], "sapphire-notification": ["w25"],
             "flightbook-status": ["w27"], "aidash-aidata": ["w55"], "info-teams": ["w5N"], "info-email": ["w5M"],
             "skills-workflow": ["w5A", "w5K"]
         ]
         let knownIDs = knownWorkspaceIDs[topic.id] ?? []
+        let knownWorkspace = workspaces.first { knownIDs.contains($0.workspaceID) }
         let candidates = workspaces.filter { workspace in
-            if knownIDs.contains(workspace.workspaceID) { return true }
             let text = [workspace.label, workspace.workspaceID].joined(separator: " ").lowercased()
             let agentText = agents.filter { $0.workspaceID == workspace.workspaceID }
                 .flatMap { [$0.cwd ?? "", $0.foregroundCwd ?? "", $0.terminalTitle ?? "", $0.name ?? ""] }
@@ -231,9 +231,9 @@ public enum LiveDashboardTelemetryReader {
             return text.contains(topic.id.lowercased()) || agentText.contains(topic.id.lowercased())
                 || topic.keywords.contains { text.localizedCaseInsensitiveContains($0) || agentText.localizedCaseInsensitiveContains($0) }
                 || topic.aliases.contains { text.localizedCaseInsensitiveContains($0) || agentText.localizedCaseInsensitiveContains($0) }
-                || text.localizedCaseInsensitiveContains(topic.title) || agentText.localizedCaseInsensitiveContains(topic.targetRepo)
+                || text.localizedCaseInsensitiveContains(topic.title)
         }
-        guard let workspace = candidates.sorted(by: { $0.workspaceID < $1.workspaceID }).first else {
+        guard let workspace = knownWorkspace ?? candidates.sorted(by: { $0.workspaceID < $1.workspaceID }).first else {
             return DashboardM2SessionBinding(topicID: topic.id, targetRepo: topic.targetRepo)
         }
         let agent = agents.first { $0.workspaceID == workspace.workspaceID && $0.paneID.hasSuffix(":p1") }

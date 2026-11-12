@@ -563,13 +563,15 @@ public final class DashboardWorkspaceStore {
     ) -> DashboardM2DispatchResult {
         var selected = stagedItems(for: topicID)
         if selected.isEmpty {
-            selected = actionItems.filter { $0.topicID == topicID && !$0.isCompleted }
-                .sorted {
-                    if $0.priority != $1.priority { return $0.priority < $1.priority }
-                    return $0.id < $1.id
-                }
-                .prefix(3)
-                .map { ($0, $0.decisionOptions.first ?? "Approve", "") }
+            selected = actionItems.filter { item in
+                item.topicID == topicID && !item.isCompleted && !item.hasLinearLabel("bug-blocker")
+            }
+            .sorted {
+                if $0.priority != $1.priority { return $0.priority < $1.priority }
+                return $0.id < $1.id
+            }
+            .prefix(3)
+            .map { ($0, $0.decisionOptions.first ?? "Approve", "") }
         }
         guard !selected.isEmpty else {
             let result = DashboardM2DispatchResult(succeeded: false, error: "没有可派发事项")
@@ -588,7 +590,11 @@ public final class DashboardWorkspaceStore {
         guard let topic = topicCatalog.first(where: { $0.id == topicID }) ?? DashboardTopicCatalog.topic(withID: topicID) else {
             return DashboardM2DispatchResult(succeeded: false, error: "未知 topic")
         }
-        let pending = items.filter { !$0.0.isCompleted && $0.0.topicID == topicID }
+        let pending = items.compactMap { entry -> (DashboardActionItem, String, String)? in
+            guard let current = actionItems.first(where: { $0.id == entry.0.id }),
+                  !current.isCompleted, current.topicID == topicID else { return nil }
+            return (current, entry.1, entry.2)
+        }
         guard !pending.isEmpty else {
             return DashboardM2DispatchResult(succeeded: false, error: "事项已处理，禁止重复派发")
         }

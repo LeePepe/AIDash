@@ -1143,17 +1143,21 @@ public enum DashboardTopicCatalog {
         let haystack = [id, title, summary, source, backingRef ?? ""].joined(separator: " ")
         let upper = haystack.uppercased()
         let lower = haystack.lowercased()
-        if id == "POP580-0d776631" || id == "EVAL-RULE-WARM-LAUNCH-SOURCE" || id == "linear-TIA-76"
-            || ["SmartBanner", "Smart Banner", "Universal Link", "UniversalLink", "PR #476", "PR #501", "PR #557", "PR #580", "TIA-76"].contains(where: { haystack.localizedCaseInsensitiveContains($0) }) {
+        let smartBannerIDs = id == "POP580-0d776631" || id == "EVAL-RULE-WARM-LAUNCH-SOURCE" || id == "linear-TIA-76"
+        let smartBannerTerms = ["SmartBanner", "Smart Banner", "Universal Link", "UniversalLink", "PR #476", "PR #501", "PR #557", "PR #580", "TIA-76"]
+        if smartBannerIDs || smartBannerTerms.contains(where: { haystack.localizedCaseInsensitiveContains($0) }) {
             return topic(withID: "sapphire-smartbanner", in: topics) ?? builtInTopics[1]
         }
-        if ["EVAL-RULE-SNAPSHOT-REF-PNG", "EVAL-RULE-A11Y-TOGGLE-ROW", "EVAL-RULE-FLAG-LIFETIME-CACHE", "EVAL-RULE-L10N-BUNDLE-KEY"].contains(id)
-            || ["Notification", "Push", "气象单位", "PR #358", "PR #392", "PR #630"].contains(where: { haystack.localizedCaseInsensitiveContains($0) }) {
+        let notificationIDs = ["EVAL-RULE-SNAPSHOT-REF-PNG", "EVAL-RULE-A11Y-TOGGLE-ROW", "EVAL-RULE-FLAG-LIFETIME-CACHE", "EVAL-RULE-L10N-BUNDLE-KEY"]
+        let notificationTerms = ["Notification", "Push", "气象单位", "PR #358", "PR #392", "PR #630"]
+        if notificationIDs.contains(id) || notificationTerms.contains(where: { haystack.localizedCaseInsensitiveContains($0) }) {
             return topic(withID: "sapphire-notification", in: topics) ?? builtInTopics[2]
         }
-        if id.hasPrefix("BUG-AB") || ["D617-5221157", "D565-5187442", "D569-5185567", "EVAL-RULE-PBXPROJ-TESTS", "EVAL-RULE-VIEW-SNAPSHOT-TEST", "EVAL-RULE-SWIFTYJSON-DOC-PATH"].contains(id)
-            || jobID == "my-pr-supervisor" || ["China Bugs", "Bing CN", "devsync", "AB114"].contains(where: { haystack.localizedCaseInsensitiveContains($0) })
-            || (upper.contains("PR #") && (543...624).contains(Int(upper.split(separator: "#").last.map(String.init) ?? "0") ?? -1)) {
+        let chinaIDs = ["D617-5221157", "D565-5187442", "D569-5185567", "EVAL-RULE-PBXPROJ-TESTS", "EVAL-RULE-VIEW-SNAPSHOT-TEST", "EVAL-RULE-SWIFTYJSON-DOC-PATH"]
+        let chinaTerms = ["China Bugs", "Bing CN", "devsync", "AB114"]
+        let chinaPR = upper.contains("PR #") && (543...624).contains(Int(upper.split(separator: "#").last.map(String.init) ?? "0") ?? -1)
+        if id.hasPrefix("BUG-AB") || chinaIDs.contains(id) || jobID == "my-pr-supervisor"
+            || chinaTerms.contains(where: { haystack.localizedCaseInsensitiveContains($0) }) || chinaPR {
             return topic(withID: "sapphire-china-bugs", in: topics) ?? builtInTopics[0]
         }
         if (lower.contains("flightbook") || lower.contains("flight book")) && !lower.contains("smartbanner") && !lower.contains("tia-76") {
