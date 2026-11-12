@@ -24,9 +24,36 @@ struct JobActionsReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.cardPadding) {
                     VStack(alignment: .leading, spacing: Space.gap) {
-                        Text(verbatim: jobLabel).font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Text(verbatim: jobLabel).font(.caption).foregroundStyle(.secondary)
+                            if let priority = review.action.priority, !priority.isEmpty {
+                                Text(verbatim: priority)
+                                    .font(.caption2.weight(.bold))
+                                    .monospacedDigit()
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(theme.neutrals.card, in: Capsule())
+                            }
+                            if let status = review.action.status, !status.isEmpty {
+                                Text(verbatim: status)
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(theme.neutrals.card, in: Capsule())
+                            }
+                            if let source = review.action.source, !source.isEmpty {
+                                Text(verbatim: source)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let ref = review.action.ref, !ref.isEmpty {
+                                Text(verbatim: ref)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Text(verbatim: review.action.title).font(.headline)
-                        Text(verbatim: review.action.descriptionMd)
+                        Text(verbatim: review.action.description)
                             .font(.body)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)

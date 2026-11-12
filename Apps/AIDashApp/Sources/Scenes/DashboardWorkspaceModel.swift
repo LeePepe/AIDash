@@ -52,6 +52,13 @@ public final class DashboardWorkspaceStore {
                 capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
                 entries: entries
             )
+            for idx in actionItems.indices {
+                if let ackKey = actionItems[idx].acknowledgementKey,
+                   acknowledgedScheduledActionIDs.contains(ackKey) {
+                    actionItems[idx].isCompleted = true
+                    actionItems[idx].status = .done
+                }
+            }
         }
     }
     public var availableDates: [String] = DashboardWorkspaceStore.recentDateStrings()
@@ -302,6 +309,55 @@ public final class DashboardWorkspaceStore {
             capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
             entries: entries
         )
+        for idx in actionItems.indices where actionItems[idx].acknowledgementKey == action.acknowledgementKey {
+            actionItems[idx].isCompleted = true
+            actionItems[idx].status = .done
+        }
+    }
+
+    public func submitActionItemDecision(
+        _ item: DashboardActionItem,
+        decision: String,
+        targets: Set<String> = [],
+        note: String = "",
+        onToggleDone: ((String, String, Bool) -> Void)? = nil
+    ) {
+        let trimmedNote = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(item.noteMaxLength))
+        if let jobID = item.jobID {
+            let effectiveControls = item.controls.isEmpty
+                ? [
+                    ScheduledJobActionControl(id: "decision", kind: .singleSelect, title: "Action", options: ["Approve", "Done", "Dismiss"]),
+                    ScheduledJobActionControl(id: "note", kind: .textInput, title: "Note", maxLength: 80)
+                ]
+                : item.controls
+            let scheduledAction = ScheduledJobAction(
+                id: item.id,
+                jobID: jobID,
+                title: item.title,
+                descriptionMd: item.summary,
+                controls: effectiveControls
+            )
+            var values: [String: String] = ["decision": decision]
+            if !trimmedNote.isEmpty || effectiveControls.contains(where: { $0.id == "note" }) {
+                values["note"] = trimmedNote
+            }
+            let responses = scheduledAction.resolvedResponses(
+                values: values,
+                selectedValues: targets.isEmpty ? [:] : ["targets": targets]
+            )
+            acknowledgeScheduledAction(scheduledAction, responses: responses)
+        }
+        if let idx = actionItems.firstIndex(where: { $0.id == item.id }) {
+            actionItems[idx].isCompleted = true
+            actionItems[idx].status = .done
+            let updated = actionItems[idx]
+            if let cardId = updated.backingCardId, let itemRef = updated.backingItemRef {
+                onToggleDone?(cardId, itemRef, true)
+            }
+            if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
+                LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
+            }
+        }
     }
 
     public var scheduledPulseRows: [ScheduledJobStatus] {
@@ -364,9 +420,17 @@ public final class DashboardWorkspaceStore {
         cliEntries = derivedCLIs
         trendPoints = customTrends ?? liveDataset?.trends ?? Self.deriveTrendPoints(from: derivedCLIs)
         let preservedCompletedIDs = Set(actionItems.filter(\.isCompleted).map(\.id))
-        var nextActions = customActions ?? Self.deriveActionItems(from: snapshot, cliEntries: derivedCLIs)
-        for index in nextActions.indices where preservedCompletedIDs.contains(nextActions[index].id) {
-            nextActions[index].isCompleted = true
+        var nextActions = customActions ?? Self.deriveActionItems(
+            from: snapshot,
+            cliEntries: derivedCLIs,
+            acknowledgedActionIDs: acknowledgedScheduledActionIDs
+        )
+        for index in nextActions.indices {
+            if preservedCompletedIDs.contains(nextActions[index].id)
+                || (nextActions[index].acknowledgementKey.map { acknowledgedScheduledActionIDs.contains($0) } ?? false) {
+                nextActions[index].isCompleted = true
+                nextActions[index].status = .done
+            }
         }
         actionItems = nextActions
         rankingRows = customRankings ?? liveDataset?.rankings ?? Self.deriveRankingRows(from: derivedCLIs)
@@ -414,6 +478,7 @@ public final class DashboardWorkspaceStore {
     ) {
         guard let idx = actionItems.firstIndex(where: { $0.id == id }) else { return }
         actionItems[idx].isCompleted.toggle()
+        actionItems[idx].status = actionItems[idx].isCompleted ? .done : .triage
         let updated = actionItems[idx]
         if let cardId = updated.backingCardId, let itemRef = updated.backingItemRef {
             onToggleDone?(cardId, itemRef, updated.isCompleted)
@@ -755,7 +820,17 @@ extension DashboardWorkspaceStore {
         }
     }
 
-    static func deriveActionItems(from snapshot: MenuBarSystemSnapshot, cliEntries: [CLICostQuotaEntry]) -> [DashboardActionItem] {
+    static func deriveActionItems(
+        from snapshot: MenuBarSystemSnapshot,
+        cliEntries: [CLICostQuotaEntry],
+        acknowledgedActionIDs: Set<String> = []
+    ) -> [DashboardActionItem] {
+        let liveItems = LiveDashboardTelemetryReader.loadLiveImprovementActionItems(
+            acknowledgedActionIDs: acknowledgedActionIDs
+        )
+        if !liveItems.isEmpty && liveItems.contains(where: { $0.jobID == .aidataDigest }) {
+            return liveItems
+        }
         var result: [DashboardActionItem] = snapshot.attention.items.enumerated().map { index, att in
             DashboardActionItem(
                 id: "attention-\(att.id)", title: att.title,
@@ -763,11 +838,11 @@ extension DashboardWorkspaceStore {
                     DashboardL10n.format("dashboard.action.waiting_on_format", "Waiting on %@ · %@", $0, att.category ?? "Workflow")
                 } ?? DashboardL10n.tr("dashboard.action.requires_review", "Requires owner review to unblock downstream tasks."),
                 sourceTag: att.category ?? "Claude Code", cliFilter: .claude,
-                priority: index == 0 ? .p0 : .p1, isCompleted: false, command: "aidash events pull --since 24h"
+                priority: index == 0 ? .p0 : .p1, status: .blocked, isCompleted: false, command: "aidash events pull --since 24h"
             )
         }
         _ = cliEntries
-        result.append(contentsOf: LiveDashboardTelemetryReader.loadLiveImprovementActionItems())
+        result.append(contentsOf: liveItems)
         if result.isEmpty && !LiveDashboardTelemetryReader.isLiveEnvironment {
             result = [
                 DashboardActionItem(
