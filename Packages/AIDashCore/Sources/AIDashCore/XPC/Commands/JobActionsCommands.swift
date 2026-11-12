@@ -44,18 +44,38 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public let priority: String?
     public let ref: String?
     public let url: String?
+    public let domain: String?
+    public let topicKey: String?
+    public let originRef: String?
+    public let revision: String?
+    public let whyNow: String?
+    public let sourceURI: String?
+    public let coverageRefs: [String]
+    public let evidence: String?
+    public let freshness: String?
     public let controls: [Control]
 
     private enum CodingKeys: String, CodingKey {
         case id, jobID, createdAt, title, description, descriptionMd
-        case status, source, priority, ref, url, controls
+        case status, source, priority, ref, url
+        case domain
+        case topicKey = "topic_key"
+        case originRef = "origin_ref"
+        case revision
+        case whyNow = "why_now"
+        case sourceURI = "source_uri"
+        case coverageRefs = "coverage_refs"
+        case evidence, freshness, controls
     }
 
     public init(
         id: String, jobID: String, createdAt: Date? = nil,
         title: String, descriptionMd: String,
         status: String? = nil, source: String? = nil, priority: String? = nil,
-        ref: String? = nil, url: String? = nil,
+        ref: String? = nil, url: String? = nil, domain: String? = nil,
+        topicKey: String? = nil, originRef: String? = nil, revision: String? = nil,
+        whyNow: String? = nil, sourceURI: String? = nil, coverageRefs: [String] = [],
+        evidence: String? = nil, freshness: String? = nil,
         controls: [Control]
     ) {
         self.id = id
@@ -68,6 +88,15 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         self.priority = priority
         self.ref = ref
         self.url = url
+        self.domain = domain
+        self.topicKey = topicKey
+        self.originRef = originRef
+        self.revision = revision
+        self.whyNow = whyNow
+        self.sourceURI = sourceURI
+        self.coverageRefs = coverageRefs
+        self.evidence = evidence
+        self.freshness = freshness
         self.controls = controls
     }
 
@@ -95,6 +124,15 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         priority = try container.decodeIfPresent(String.self, forKey: .priority)
         ref = try container.decodeIfPresent(String.self, forKey: .ref)
         url = try container.decodeIfPresent(String.self, forKey: .url)
+        domain = try container.decodeIfPresent(String.self, forKey: .domain)
+        topicKey = try container.decodeIfPresent(String.self, forKey: .topicKey)
+        originRef = try container.decodeIfPresent(String.self, forKey: .originRef)
+        revision = try container.decodeIfPresent(String.self, forKey: .revision)
+        whyNow = try container.decodeIfPresent(String.self, forKey: .whyNow)
+        sourceURI = try container.decodeIfPresent(String.self, forKey: .sourceURI)
+        coverageRefs = try container.decodeIfPresent([String].self, forKey: .coverageRefs) ?? []
+        evidence = try container.decodeIfPresent(String.self, forKey: .evidence)
+        freshness = try container.decodeIfPresent(String.self, forKey: .freshness)
         controls = try container.decode([Control].self, forKey: .controls)
     }
 
@@ -111,6 +149,15 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         try container.encodeIfPresent(priority, forKey: .priority)
         try container.encodeIfPresent(ref, forKey: .ref)
         try container.encodeIfPresent(url, forKey: .url)
+        try container.encodeIfPresent(domain, forKey: .domain)
+        try container.encodeIfPresent(topicKey, forKey: .topicKey)
+        try container.encodeIfPresent(originRef, forKey: .originRef)
+        try container.encodeIfPresent(revision, forKey: .revision)
+        try container.encodeIfPresent(whyNow, forKey: .whyNow)
+        try container.encodeIfPresent(sourceURI, forKey: .sourceURI)
+        if !coverageRefs.isEmpty { try container.encode(coverageRefs, forKey: .coverageRefs) }
+        try container.encodeIfPresent(evidence, forKey: .evidence)
+        try container.encodeIfPresent(freshness, forKey: .freshness)
         try container.encode(controls, forKey: .controls)
     }
 }

@@ -75,6 +75,34 @@ struct JobActionsBridgeTests {
         #expect(encodedCrossDevice?["url"] as? String == "https://linear.app/tianpeili/issue/TIA-76")
     }
 
+    @Test("Metadata fields round-trip with snake-case wire keys and remain absent-safe")
+    func metadataRoundTripAndLegacyDecode() throws {
+        let value = JobActionsAction(
+            id: "learning-topic-1", jobID: "aidata-digest", title: "Learn", descriptionMd: "Why now",
+            source: "Learning", priority: "P1", ref: "learning-topic://topic-1",
+            domain: "decisions", topicKey: "topic-1", originRef: "learning-topic://topic-1",
+            revision: "3", whyNow: "New gap", sourceURI: "https://example.invalid/source",
+            coverageRefs: ["vault://existing"], evidence: "sample=4", freshness: "7d CST",
+            controls: []
+        )
+        let encoder = JSONEncoder()
+        let encoded = try JSONSerialization.jsonObject(with: encoder.encode(value)) as? [String: Any]
+        #expect(encoded?["topic_key"] as? String == "topic-1")
+        #expect(encoded?["origin_ref"] as? String == "learning-topic://topic-1")
+        #expect(encoded?["why_now"] as? String == "New gap")
+        #expect(encoded?["source_uri"] as? String == "https://example.invalid/source")
+        #expect(encoded?["coverage_refs"] as? [String] == ["vault://existing"])
+        #expect(try JSONDecoder().decode(JobActionsAction.self, from: encoder.encode(value)) == value)
+
+        let legacy = Data("""
+        {"id":"legacy","jobID":"aidata-digest","title":"Legacy","description":"Old","controls":[]}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(JobActionsAction.self, from: legacy)
+        #expect(decoded.domain == nil)
+        #expect(decoded.topicKey == nil)
+        #expect(decoded.coverageRefs.isEmpty)
+    }
+
     @Test("Exact fields, Unicode bounds, duplicates, unknown controls, options and noncanonical selections reject")
     func invalidProposals() throws {
         let params = JobActionsPresentParams(requestID: UUID().uuidString, jobID: "my-pr-supervisor",

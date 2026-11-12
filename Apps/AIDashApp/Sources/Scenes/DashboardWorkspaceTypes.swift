@@ -968,6 +968,51 @@ public enum DashboardActionPriority: Int, CaseIterable, Codable, Sendable, Equat
     }
 }
 
+public enum DashboardActionDomain: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
+    case decisions
+    case blockers
+    case findings
+    case planned
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .decisions: return DashboardL10n.tr("dashboard.action_domain.decisions", "待决策")
+        case .blockers: return DashboardL10n.tr("dashboard.action_domain.blockers", "卡顿")
+        case .findings: return DashboardL10n.tr("dashboard.action_domain.findings", "发现")
+        case .planned: return DashboardL10n.tr("dashboard.action_domain.planned", "计划")
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .decisions: return DashboardL10n.tr("dashboard.action_domain.decisions_subtitle", "学习选题 · Retro 提案")
+        case .blockers: return DashboardL10n.tr("dashboard.action_domain.blockers_subtitle", "GTT · 门禁阻断")
+        case .findings: return DashboardL10n.tr("dashboard.action_domain.findings_subtitle", "CI · Skill · Worktree")
+        case .planned: return DashboardL10n.tr("dashboard.action_domain.planned_subtitle", "Linear 个人在途")
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .decisions: return "sparkles.rectangle.stack.fill"
+        case .blockers: return "exclamationmark.octagon.fill"
+        case .findings: return "waveform.path.ecg.magnifyingglass"
+        case .planned: return "checklist.checked"
+        }
+    }
+
+    public var tint: DashboardSemanticHealth {
+        switch self {
+        case .decisions: return .warning
+        case .blockers: return .critical
+        case .findings: return .warning
+        case .planned: return .healthy
+        }
+    }
+}
+
 public enum DashboardActionStatus: String, CaseIterable, Codable, Sendable, Equatable {
     case triage
     case blocked
@@ -1054,6 +1099,15 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public let jobID: ScheduledPulseJobID?
     public let controls: [ScheduledJobActionControl]
     public let projectFolderName: String
+    public let domain: DashboardActionDomain?
+    public let topicKey: String?
+    public let originRef: String?
+    public let revision: String?
+    public let whyNow: String?
+    public let sourceURI: String?
+    public let coverageRefs: [String]
+    public let evidence: String?
+    public let freshness: String?
 
     public init(
         id: String, title: String, summary: String, sourceTag: String,
@@ -1063,7 +1117,16 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         backingCardId: String? = nil, backingItemRef: String? = nil,
         jobID: ScheduledPulseJobID? = nil,
         controls: [ScheduledJobActionControl] = [],
-        projectFolderName: String? = nil
+        projectFolderName: String? = nil,
+        domain: DashboardActionDomain? = nil,
+        topicKey: String? = nil,
+        originRef: String? = nil,
+        revision: String? = nil,
+        whyNow: String? = nil,
+        sourceURI: String? = nil,
+        coverageRefs: [String] = [],
+        evidence: String? = nil,
+        freshness: String? = nil
     ) {
         let resolvedStatus = status ?? (isCompleted ? .done : .triage)
         self.id = id; self.title = title; self.summary = summary; self.sourceTag = sourceTag
@@ -1079,6 +1142,35 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
             summary: summary,
             command: command ?? backingItemRef
         )
+        self.domain = domain
+        self.topicKey = topicKey
+        self.originRef = originRef
+        self.revision = revision
+        self.whyNow = whyNow
+        self.sourceURI = sourceURI
+        self.coverageRefs = coverageRefs
+        self.evidence = evidence
+        self.freshness = freshness
+    }
+
+    public var resolvedDomain: DashboardActionDomain {
+        if let domain { return domain }
+        let ref = backingItemRef?.lowercased() ?? ""
+        if sourceTag == "Learning" || ref.hasPrefix("learning-topic://") || ref.hasPrefix("knowledge://") || ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://") {
+            return .decisions
+        }
+        if status == .blocked || sourceTag == "GTT Blocker" { return .blockers }
+        if sourceTag == "Linear" || status == .inProgress { return .planned }
+        return .findings
+    }
+
+    public var isLearningTopic: Bool {
+        sourceTag == "Learning" || backingItemRef?.hasPrefix("learning-topic://") == true
+    }
+
+    public var isProposal: Bool {
+        let ref = backingItemRef ?? ""
+        return ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://")
     }
 
     public var acknowledgementKey: String? {
@@ -1105,6 +1197,7 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         switch sourceTag {
         case "Linear": return "link.circle.fill"
         case "GTT Blocker": return "exclamationmark.octagon.fill"
+        case "Learning": return "book.pages.fill"
         case "Retro", "retro-loop": return "arrow.triangle.2.circlepath.circle.fill"
         case "PR & CI", "CI Improve": return "hammer.circle.fill"
         case "Mail & Teams": return "envelope.circle.fill"

@@ -10,12 +10,11 @@ import Testing
 @MainActor
 @Suite("AIDash Job Framework")
 struct ScheduledPulseTests {
-    @Test("registry is exactly the three live framework jobs")
+    @Test("registry reserves unavailable external prechecks")
     func registryShape() {
         #expect(ScheduledPulseRegistry.jobs.map(\.id) == [.myPRSupervisor, .prAutoReview, .aidataDigest])
-        #expect(ScheduledPulseRegistry.liveJobs.count == 3)
-        #expect(ScheduledPulseRegistry.reservedJobs.isEmpty)
-        #expect(ScheduledPulseRegistry.jobs.allSatisfy { $0.isLive })
+        #expect(ScheduledPulseRegistry.jobs.contains { $0.id == .aidataDigest && $0.isLive })
+        #expect(ScheduledPulseRegistry.reservedJobs.map(\.id) == [.myPRSupervisor, .prAutoReview])
         #expect(ScheduledPulseRegistry.job(for: .myPRSupervisor)?.displayName == "我的 PR")
         #expect(ScheduledPulseRegistry.job(for: .prAutoReview)?.displayName == "特定人 PR")
         #expect(ScheduledPulseRegistry.job(for: .aidataDigest)?.displayName == "每日简报")
@@ -27,11 +26,12 @@ struct ScheduledPulseTests {
         let expected: [(ScheduledPulseJobID, String, String)] = [
             (.myPRSupervisor, "/usr/bin/python3", "/Users/tester/Development/handoff/my-pr-supervisor/precheck.py"),
             (.prAutoReview, "/usr/bin/python3", "/Users/tester/Development/handoff/pr-auto-review/precheck.py"),
-            (.aidataDigest, "/bin/zsh", "/Users/tester/Development/AIDash/aidata/scripts/aidata_digest_run.sh")
+            (.aidataDigest, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/aidata_digest_run.sh")
         ]
         let wrapper = "/Users/tester/Development/AIDash/scripts/scheduled-job-entrypoint.sh"
+        let definitions = ScheduledPulseRegistry.jobs(homeURL: home, fileExists: { _ in true })
         for (id, interpreter, program) in expected {
-            let definition = try #require(ScheduledPulseRegistry.job(for: id))
+            let definition = try #require(definitions.first(where: { $0.id == id }))
             let data = try #require(ScheduledPulseLaunchdInstaller.plistData(for: definition, homeURL: home))
             let plist = try #require(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
             #expect(plist["Label"] as? String == definition.launchAgentLabel)
@@ -201,7 +201,7 @@ struct ScheduledPulseTests {
 
     @Test("owned start and stop use exact labels and never remove the plist")
     func startStopLabels() throws {
-        let job = try #require(ScheduledPulseRegistry.job(for: .myPRSupervisor))
+        let job = try #require(ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/Users/tester"), fileExists: { _ in true }).first(where: { $0.id == .myPRSupervisor }))
         var calls: [[String]] = []
         var removed = false
         let installer = ScheduledPulseLaunchdInstaller(

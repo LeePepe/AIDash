@@ -21,6 +21,27 @@ public enum ScheduledJobLastResult: String, Codable, Sendable, Equatable {
     case coalesced
 }
 
+public struct ScheduledJobStageReceipt: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let title: String
+    public let status: String?
+    public let exitCode: Int?
+    public let durationSec: Double?
+    public let sourceAsOf: String?
+
+    public init(id: String, title: String, status: String? = nil, exitCode: Int? = nil, durationSec: Double? = nil, sourceAsOf: String? = nil) {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.exitCode = exitCode
+        self.durationSec = durationSec
+        self.sourceAsOf = sourceAsOf
+    }
+
+    public var isSuccess: Bool { status?.lowercased() == "succeeded" || status?.lowercased() == "success" || status?.lowercased() == "ok" || exitCode == 0 }
+    public var isKnown: Bool { status != nil || exitCode != nil || durationSec != nil || sourceAsOf != nil }
+}
+
 public struct ScheduledJobState: Codable, Sendable, Equatable {
     public let id: ScheduledPulseJobID
     public let updatedAt: Date?
@@ -28,6 +49,8 @@ public struct ScheduledJobState: Codable, Sendable, Equatable {
     public let lastRunAt: Date?
     public let summary: String?
     public let overviewMd: String?
+    public let stages: [ScheduledJobStageReceipt]
+    public let sourceAsOf: String?
 
     public init(
         id: ScheduledPulseJobID,
@@ -35,7 +58,9 @@ public struct ScheduledJobState: Codable, Sendable, Equatable {
         lastResult: ScheduledJobLastResult? = nil,
         lastRunAt: Date? = nil,
         summary: String? = nil,
-        overviewMd: String? = nil
+        overviewMd: String? = nil,
+        stages: [ScheduledJobStageReceipt] = [],
+        sourceAsOf: String? = nil
     ) {
         self.id = id
         self.updatedAt = updatedAt
@@ -43,6 +68,45 @@ public struct ScheduledJobState: Codable, Sendable, Equatable {
         self.lastRunAt = lastRunAt
         self.summary = summary
         self.overviewMd = overviewMd
+        self.stages = stages
+        self.sourceAsOf = sourceAsOf
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, jobID, updatedAt, lastResult, lastRunAt, summary, overviewMd, stages, sourceAsOf }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(ScheduledPulseJobID.self, forKey: .id)
+            ?? c.decode(ScheduledPulseJobID.self, forKey: .jobID)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
+        if let raw = try c.decodeIfPresent(String.self, forKey: .lastResult) {
+            switch raw.lowercased() {
+            case "succeeded", "success", "ok": lastResult = .succeeded
+            case "failed", "failure", "error": lastResult = .failed
+            case "skipped": lastResult = .skipped
+            case "coalesced": lastResult = .coalesced
+            default: lastResult = nil
+            }
+        } else {
+            lastResult = nil
+        }
+        lastRunAt = try c.decodeIfPresent(Date.self, forKey: .lastRunAt)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? c.decodeIfPresent(String.self, forKey: .overviewMd)
+        overviewMd = try c.decodeIfPresent(String.self, forKey: .overviewMd)
+        stages = try c.decodeIfPresent([ScheduledJobStageReceipt].self, forKey: .stages) ?? []
+        sourceAsOf = try c.decodeIfPresent(String.self, forKey: .sourceAsOf)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        try c.encodeIfPresent(lastResult, forKey: .lastResult)
+        try c.encodeIfPresent(lastRunAt, forKey: .lastRunAt)
+        try c.encodeIfPresent(summary, forKey: .summary)
+        try c.encodeIfPresent(overviewMd, forKey: .overviewMd)
+        try c.encode(stages, forKey: .stages)
+        try c.encodeIfPresent(sourceAsOf, forKey: .sourceAsOf)
     }
 
     public var isSuccess: Bool { lastResult == .succeeded }

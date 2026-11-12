@@ -7,6 +7,8 @@ import SQLite3
 import SwiftUI
 import AIDashCore
 
+public typealias ScheduledJobExecution = @Sendable (ScheduledPulseJobID) async -> Bool
+
 @MainActor
 @Observable
 // swiftlint:disable:next type_body_length
@@ -37,6 +39,9 @@ public final class DashboardWorkspaceStore {
     public var lastCopiedScheduledJobID: ScheduledPulseJobID?
     public var scheduledPulseTab: ScheduledPulsePageTab = .overview
     public var selectedFrameworkJobID: ScheduledPulseJobID?
+    public var selectedActionDomain: DashboardActionDomain?
+    public private(set) var runningJobIDs: Set<ScheduledPulseJobID> = []
+    public var scheduledJobExecution: ScheduledJobExecution
     public var scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Bool)?
     public var acknowledgedScheduledActionIDs: Set<String> = [] {
         didSet {
@@ -116,9 +121,11 @@ public final class DashboardWorkspaceStore {
 
     public init(
         statusProvider: (any MenuBarSystemStatusProviding)? = nil,
-        deferInitialRefresh: Bool = false
+        deferInitialRefresh: Bool = false,
+        scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution
     ) {
         self.statusProvider = statusProvider ?? LiveMenuBarSystemStatusProvider()
+        self.scheduledJobExecution = scheduledJobExecution
         if !deferInitialRefresh {
             refreshFromProvider()
         }
@@ -130,9 +137,11 @@ public final class DashboardWorkspaceStore {
         cliEntries: [CLICostQuotaEntry]? = nil,
         actionItems: [DashboardActionItem]? = nil,
         rankingRows: [AgentRankingRow]? = nil,
-        scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil
+        scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil,
+        scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution
     ) {
         self.statusProvider = LiveMenuBarSystemStatusProvider(tokenDatabasePaths: CLITokenDatabasePaths())
+        self.scheduledJobExecution = scheduledJobExecution
         if let scheduledPulseSnapshot {
             self.scheduledPulseSnapshot = scheduledPulseSnapshot
             self.scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
@@ -288,6 +297,40 @@ public final class DashboardWorkspaceStore {
             )
         }
         return outcome
+    }
+
+    public func runScheduledJobNow(_ id: ScheduledPulseJobID) {
+        guard !runningJobIDs.contains(id),
+              ScheduledPulseRegistry.job(for: id)?.isLive == true else { return }
+        runningJobIDs.insert(id)
+        let execution = scheduledJobExecution
+        Task { [weak self] in
+            _ = await execution(id)
+            guard let self else { return }
+            runningJobIDs.remove(id)
+            refreshFromProvider()
+        }
+    }
+
+    nonisolated public static func productionScheduledJobExecution(_ id: ScheduledPulseJobID) async -> Bool {
+        guard let definition = ScheduledPulseRegistry.job(for: id), definition.isLive,
+              let interpreter = definition.interpreterPath,
+              let program = definition.programPath(homeURL: HerdrSocketClient.currentUserHomeDirectoryURL()),
+              let entrypoint = definition.entrypointPath(homeURL: HerdrSocketClient.currentUserHomeDirectoryURL()) else {
+            return false
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: entrypoint)
+        process.arguments = [entrypoint, id.rawValue, interpreter, program]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
     public func acknowledgeScheduledAction(
@@ -582,7 +625,8 @@ public final class DashboardWorkspaceStore {
     public var filteredActionItems: [DashboardActionItem] {
         let filtered = actionItems.filter { item in
             guard matchesActiveCLIFilter(item.cliFilter),
-                  matchesChartCategory(item.cliFilter, categoryName: item.sourceTag) else {
+                  matchesChartCategory(item.cliFilter, categoryName: item.sourceTag),
+                  selectedActionDomain == nil || item.resolvedDomain == selectedActionDomain else {
                 return false
             }
             switch actionFilter {

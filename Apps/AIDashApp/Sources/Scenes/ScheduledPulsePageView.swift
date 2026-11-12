@@ -32,6 +32,7 @@ public struct ScheduledPulsePageView: View {
             }
         }
         .onAppear {
+            _ = ScheduledPulseLaunchdInstaller.shared.registerLiveJobs()
             if store.scheduledJobFrameworkSnapshot.entries.isEmpty {
                 store.refreshFromProvider()
             }
@@ -40,6 +41,7 @@ public struct ScheduledPulsePageView: View {
 
     private var overview: some View {
         VStack(alignment: .leading, spacing: 16) {
+            pulseHealthStrip
             SolidModularCardContainer(
                 title: DashboardL10n.tr("dashboard.scheduled_pulse.result.title", "定时任务结果"),
                 subtitle: DashboardL10n.tr("dashboard.scheduled_pulse.result.subtitle", "按登记表动态汇总 · 只读产出"),
@@ -86,6 +88,39 @@ public struct ScheduledPulsePageView: View {
         }
     }
 
+    private var pulseHealthStrip: some View {
+        HStack(spacing: 10) {
+            pulseMetric(title: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.online", "在线任务"), value: "\(store.scheduledPulseSnapshot.jobs.filter { $0.definition.isLive }.count)/\(store.scheduledPulseSnapshot.jobs.count)", detail: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.registration", "LaunchAgent 注册"))
+            pulseMetric(title: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.recent", "最近运行"), value: latestRunText, detail: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.success_priority", "成功回执优先"))
+            pulseMetric(title: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.health", "阶段健康"), value: stageHealthText, detail: DashboardL10n.format("dashboard.scheduled_pulse.kpi.actions_format", "待拍板 %lld 项", store.scheduledJobFrameworkSnapshot.unacknowledgedActions.count))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func pulseMetric(title: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text(value).font(.headline.monospacedDigit()).fixedSize(horizontal: true, vertical: false)
+            Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+    }
+
+    private var latestRunText: String {
+        let dates = store.scheduledJobFrameworkSnapshot.entries.compactMap(\.lastRunAt)
+        guard let date = dates.max() else { return DashboardL10n.tr("dashboard.scheduled_pulse.unknown", "未知") }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var stageHealthText: String {
+        let stages = store.scheduledJobFrameworkSnapshot.entries.flatMap { $0.state?.stages ?? [] }
+        guard !stages.isEmpty else { return DashboardL10n.tr("dashboard.scheduled_pulse.unknown", "未知") }
+        return "\(stages.filter(\.isSuccess).count)/\(stages.count)"
+    }
+
     private var frameworkControls: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(store.scheduledJobFrameworkSnapshot.entries) { entry in
@@ -124,15 +159,53 @@ public struct ScheduledPulsePageView: View {
                 Text(overviewMd).font(.body).fixedSize(horizontal: false, vertical: true)
             } else if let summary = entry.state?.summary, !summary.isEmpty {
                 Text(summary).font(.body).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(DashboardL10n.tr("dashboard.scheduled_pulse.no_success_receipt", "尚无成功执行回执；状态未知，不视为失败。"))
+                    .font(.body).foregroundStyle(.secondary)
             }
+            stageReceiptStrip(entry.state?.stages ?? [])
+            HStack(spacing: 8) {
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "立即运行")) { store.runScheduledJobNow(entry.id) }
+                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(store.runningJobIDs.contains(entry.id))
+                if store.runningJobIDs.contains(entry.id) { ProgressView().controlSize(.small) }
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "刷新状态")) { store.refreshFromProvider() }
+                    .buttonStyle(.bordered).controlSize(.small)
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.copy_command", "复制诊断命令")) { store.copyScheduledJobCommand(ScheduledJobStatus(definition: entry.definition, health: .healthy)) }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
+            .frame(minHeight: 28)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .leading) {
-            if isProblem { Rectangle().fill(Color.orange).frame(width: 3) }
-        }
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+    }
+
+    private func stageReceiptStrip(_ stages: [ScheduledJobStageReceipt]) -> some View {
+        let titles = [
+            DashboardL10n.tr("dashboard.scheduled_pulse.stage.collect", "① 个人源采集"),
+            DashboardL10n.tr("dashboard.scheduled_pulse.stage.warehouse", "② L2/L3 入仓"),
+            DashboardL10n.tr("dashboard.scheduled_pulse.stage.retro", "③ Retro/ROI 诊断"),
+            DashboardL10n.tr("dashboard.scheduled_pulse.stage.learning", "④ 学习寻题"),
+            DashboardL10n.tr("dashboard.scheduled_pulse.stage.brief", "⑤ Brief 投递")
+        ]
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5), spacing: 6) {
+            ForEach(Array(titles.enumerated()), id: \.offset) { index, title in
+                let stage = stages.indices.contains(index) ? stages[index] : nil
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.caption.weight(.semibold)).lineLimit(2)
+                    Text(stage?.isKnown == true ? (stage?.isSuccess == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stage.passed", "通过") : DashboardL10n.tr("dashboard.scheduled_pulse.stage.error", "异常")) : DashboardL10n.tr("dashboard.scheduled_pulse.stage.unknown", "未知"))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(stage?.isSuccess == true ? .green : (stage?.isKnown == true ? .orange : .secondary))
+                    if let exitCode = stage?.exitCode { Text("exit \(exitCode)").font(.caption2.monospacedDigit()) }
+                    if let duration = stage?.durationSec { Text("\(duration, specifier: "%.1f")s").font(.caption2.monospacedDigit()) }
+                    if let asOf = stage?.sourceAsOf { Text(asOf).font(.caption2).lineLimit(1) }
+                }
+                .padding(7)
+                .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+        }
     }
 
     private var needActions: some View {

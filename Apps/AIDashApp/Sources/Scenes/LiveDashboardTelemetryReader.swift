@@ -82,7 +82,10 @@ public enum LiveDashboardTelemetryReader {
         }
         let effect = launchctl ?? productionScheduledPulseLaunchctl
         let domain = "gui/\(getuid())"
-        let jobs = ScheduledPulseRegistry.liveJobs.map { definition in
+        let jobs = ScheduledPulseRegistry.jobs.map { definition in
+            guard definition.isLive else {
+                return ScheduledJobStatus(definition: definition, health: .reserved)
+            }
             let result = effect(["print", "\(domain)/\(definition.launchAgentLabel)"])
             return scheduledJobStatus(definition: definition, result: result)
         }
@@ -173,7 +176,7 @@ public enum LiveDashboardTelemetryReader {
             )
         }
         let root = resolvedHome.appendingPathComponent("Library/Application Support/AIDash/jobs", isDirectory: true)
-        let entries = ScheduledPulseRegistry.liveJobs.map { definition in
+        let entries = ScheduledPulseRegistry.jobs.map { definition in
             let directory = root.appendingPathComponent(definition.id.rawValue, isDirectory: true)
             let state = readState(
                 from: directory.appendingPathComponent("state.json"),
@@ -1597,6 +1600,22 @@ extension LiveDashboardTelemetryReader {
         }
     }
 
+    public struct SkillsRoiSnapshot: Sendable, Equatable {
+        public let window: String?
+        public let sourceAsOf: String?
+        public let sampleSize: Int?
+        public let coverageStatus: String
+        public let metrics: [String: String]
+
+        public init(window: String? = nil, sourceAsOf: String? = nil, sampleSize: Int? = nil, coverageStatus: String = "unknown", metrics: [String: String] = [:]) {
+            self.window = window
+            self.sourceAsOf = sourceAsOf
+            self.sampleSize = sampleSize
+            self.coverageStatus = coverageStatus
+            self.metrics = metrics
+        }
+    }
+
     public struct LiveEfficiencySummary: Sendable, Equatable {
         public var r1ReviewFailRate: Double = 0
         public var reviewedTasksCount: Int = 0
@@ -1604,6 +1623,7 @@ extension LiveDashboardTelemetryReader {
         public var p90TTFTSeconds: Double = 0
         public var cacheHitRate: Double = 0
         public var steeringTokenShare: Double = 0
+        public var skillsROI: SkillsRoiSnapshot?
     }
 
     public static func loadLiveEfficiencySummary(homeURL: URL? = nil) -> LiveEfficiencySummary? {
@@ -1618,9 +1638,27 @@ extension LiveDashboardTelemetryReader {
         var summary = LiveEfficiencySummary()
         populateWarehouseReviewSummary(&summary, whURL: whURL)
         populateMagpieEfficiencySummary(&summary, magpieURL: magpieURL)
+        summary.skillsROI = loadSkillsRoiSnapshot(homeURL: home)
         cachedLiveEfficiencyKey = cacheKey
         cachedLiveEfficiencySummary = summary
         return summary
+    }
+
+    private static func loadSkillsRoiSnapshot(homeURL: URL) -> SkillsRoiSnapshot? {
+        let url = homeURL.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var metrics: [String: String] = [:]
+        if let values = object["metrics"] as? [String: Any] {
+            for (key, value) in values { metrics[key] = String(describing: value) }
+        }
+        return SkillsRoiSnapshot(
+            window: object["window"] as? String,
+            sourceAsOf: object["source_as_of"] as? String,
+            sampleSize: (object["sample_size"] as? NSNumber)?.intValue,
+            coverageStatus: object["coverage_status"] as? String ?? "unknown",
+            metrics: metrics
+        )
     }
 
     private static func populateWarehouseReviewSummary(_ summary: inout LiveEfficiencySummary, whURL: URL) {
@@ -1726,7 +1764,16 @@ extension LiveDashboardTelemetryReader {
                 backingCardId: "scheduled-pulse/\(action.jobID)",
                 backingItemRef: action.ref ?? "\(action.jobID):\(action.id)",
                 jobID: ScheduledPulseJobID(rawValue: action.jobID) ?? .aidataDigest,
-                controls: mappedControls
+                controls: mappedControls,
+                domain: action.domain.flatMap(DashboardActionDomain.init(rawValue:)),
+                topicKey: action.topicKey,
+                originRef: action.originRef,
+                revision: action.revision,
+                whyNow: action.whyNow,
+                sourceURI: action.sourceURI,
+                coverageRefs: action.coverageRefs,
+                evidence: action.evidence,
+                freshness: action.freshness
             )
         }
     }

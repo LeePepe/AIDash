@@ -8,6 +8,7 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
     case trends
     case rankings
     case actionItems
+    case skills
 
     public var id: String { rawValue }
 
@@ -16,6 +17,7 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
         case .trends: return DashboardL10n.tr("dashboard.lens.trends", "Token Trends")
         case .rankings: return DashboardL10n.tr("dashboard.lens.rankings", "M2 / M1 Ranking")
         case .actionItems: return DashboardL10n.tr("dashboard.lens.actions", "Actionable Items")
+        case .skills: return "Skills ROI"
         }
     }
 
@@ -24,7 +26,59 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
         case .trends: return "chart.bar.xaxis"
         case .rankings: return "tablecells"
         case .actionItems: return "checklist"
+        case .skills: return "sparkles.square.filled.on.square"
         }
+    }
+}
+
+public struct SkillsRoiDiagnosticsCardView: View {
+    let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
+    @State private var lens = "Usage"
+
+    public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?) { self.summary = summary }
+
+    public var body: some View {
+        SolidModularCardContainer(title: DashboardL10n.tr("dashboard.skills_roi.title", "Skills 效能与上下文 ROI 诊断 (S1–S12)"), subtitle: freshnessText, symbolName: "sparkles.square.filled.on.square") {
+            Picker(DashboardL10n.tr("dashboard.skills_roi.lens", "分析视角"), selection: $lens) {
+                Text(DashboardL10n.tr("dashboard.skills_roi.usage", "Usage")).tag("Usage")
+                Text(DashboardL10n.tr("dashboard.skills_roi.disclosure", "Disclosure / Escapes")).tag("Disclosure / Escapes")
+                Text(DashboardL10n.tr("dashboard.skills_roi.context", "Context")).tag("Context")
+            }
+            .pickerStyle(.segmented).controlSize(.small).frame(maxWidth: 430)
+            if let roi = summary?.skillsROI {
+                let selected = roi.metrics.filter { key, _ in
+                    switch lens {
+                    case "Usage":
+                        return key.hasPrefix("S1") || key.hasPrefix("S2") || key.hasPrefix("S3") || key.hasPrefix("S4") || key.hasPrefix("S6") || key.hasPrefix("S10")
+                    case "Disclosure / Escapes":
+                        return key.hasPrefix("S7") || key.hasPrefix("S8") || key.hasPrefix("S9")
+                    default:
+                        return key.hasPrefix("S11") || key.hasPrefix("S12")
+                    }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(selected.keys.sorted(), id: \.self) { key in
+                        HStack {
+                            Text(key).font(.caption.weight(.semibold))
+                            Spacer()
+                            Text(selected[key] ?? DashboardL10n.tr("dashboard.skills_roi.metric_unknown", "unknown")).font(.caption.monospacedDigit()).fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            } else {
+                Text(DashboardL10n.tr("dashboard.skills_roi.missing", "unknown / missing · 等待 metadata-only skills-roi.json"))
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var freshnessText: String {
+        guard let roi = summary?.skillsROI else { return DashboardL10n.tr("dashboard.skills_roi.coverage_unknown", "Coverage: unknown") }
+        let window = roi.window ?? DashboardL10n.tr("dashboard.skills_roi.window_unknown", "unknown window")
+        let asOf = roi.sourceAsOf ?? DashboardL10n.tr("dashboard.skills_roi.as_of_unknown", "unknown as_of")
+        let sample = roi.sampleSize.map(String.init) ?? DashboardL10n.tr("dashboard.skills_roi.sample_unknown", "unknown sample")
+        return "Window: \(window) · as of \(asOf) · sample \(sample) · \(roi.coverageStatus)"
     }
 }
 
@@ -85,16 +139,63 @@ public struct ActionItemsCardView: View {
                 .frame(minHeight: 28)
             }
         } content: {
+            domainSummaryStrip
             if store.filteredActionItems.isEmpty {
                 actionEmptyStateContent
                     .frame(minHeight: 150)
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(store.filteredActionItems) { item in
-                        actionItemRow(item)
+            } else if store.selectedActionDomain == nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(DashboardActionDomain.allCases) { domain in
+                        let items = store.filteredActionItems.filter { $0.resolvedDomain == domain }
+                        if !items.isEmpty {
+                            domainSection(domain, items: items)
+                        }
                     }
                 }
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(store.filteredActionItems) { item in actionItemRow(item) }
+                }
             }
+        }
+    }
+
+    private var domainSummaryStrip: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+            ForEach(DashboardActionDomain.allCases) { domain in
+                let count = store.filteredActionItems.filter { !$0.isCompleted && $0.resolvedDomain == domain }.count
+                Button {
+                    store.selectedActionDomain = store.selectedActionDomain == domain ? nil : domain
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: domain.symbolName)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(domain.title).font(.caption.weight(.semibold))
+                            Text(domain.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 2)
+                        Text("\(count)").font(.caption.monospacedDigit().weight(.bold)).fixedSize(horizontal: true, vertical: false)
+                    }
+                    .padding(9)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .background(store.selectedActionDomain == domain ? Color.accentColor.opacity(0.14) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(store.selectedActionDomain == domain ? Color.accentColor : Color.primary)
+                .help(domain.subtitle)
+            }
+        }
+    }
+
+    private func domainSection(_ domain: DashboardActionDomain, items: [DashboardActionItem]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: domain.symbolName)
+                Text(domain.title).font(.caption.weight(.semibold))
+                Text("\(items.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+            }
+            ForEach(items) { item in actionItemRow(item) }
         }
     }
 
@@ -239,6 +340,9 @@ public struct ActionItemsCardView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                    if item.isLearningTopic || item.isProposal {
+                        specializedMetadata(for: item)
+                    }
                     if let command = item.command {
                         Text("$ \(command)")
                             .font(.system(.caption, design: .monospaced))
@@ -255,6 +359,25 @@ public struct ActionItemsCardView: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
+    private func specializedMetadata(for item: DashboardActionItem) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let whyNow = item.whyNow { Label(whyNow, systemImage: "questionmark.circle") }
+            if let sourceURI = item.sourceURI {
+                Label(DashboardL10n.format("dashboard.actions.source_format", "来源: %@", sourceURI), systemImage: "link")
+            }
+            if !item.coverageRefs.isEmpty {
+                Label(DashboardL10n.format("dashboard.actions.coverage_format", "覆盖: %@", item.coverageRefs.joined(separator: ", ")), systemImage: "checkmark.shield")
+            }
+            if let evidence = item.evidence { Label(evidence, systemImage: "chart.bar.doc.horizontal") }
+            if let freshness = item.freshness { Label(freshness, systemImage: "clock") }
+            Text(item.isLearningTopic ? DashboardL10n.tr("dashboard.learning.boundary", "批准后由后台启动 knowledge-digest；不自动发博客，不同步 design-studio。") : DashboardL10n.tr("dashboard.proposal.receipt_note", "审批记录 Owner 意图，不代表任务已完成；后续权威 Done/Dismiss 仍可生效。"))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .font(.caption)
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     @ViewBuilder
@@ -707,6 +830,7 @@ public struct AIDashMacWorkspaceView: View {
                 onClearSelection: { store.clearChartSelection() }
             )
             RankingTableCardView(store: store)
+            SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary)
         case .actionItems:
             KPISummaryCardView(metrics: store.effectiveKPIMetrics)
             ActionItemsCardView(store: store, onToggleDone: onToggleDone)
@@ -765,6 +889,8 @@ public struct AIDashMacWorkspaceView: View {
                 RankingTableCardView(store: store)
             case .actionItems:
                 ActionItemsCardView(store: store, onToggleDone: onToggleDone)
+            case .skills:
+                SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary)
             }
         }
     }

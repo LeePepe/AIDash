@@ -84,7 +84,7 @@ public struct ScheduledJobDefinition: Sendable, Equatable, Identifiable {
 
     public var interpreterPath: String? {
         guard isLive else { return nil }
-        return id == .aidataDigest ? "/bin/zsh" : "/usr/bin/python3"
+        return id == .aidataDigest ? "/bin/bash" : "/usr/bin/python3"
     }
 
     public func entrypointPath(homeURL: URL) -> String? {
@@ -99,41 +99,24 @@ public struct ScheduledJobDefinition: Sendable, Equatable, Identifiable {
 }
 
 public enum ScheduledPulseRegistry {
-    public static let jobs: [ScheduledJobDefinition] = [
-        ScheduledJobDefinition(
-            id: .myPRSupervisor,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "我的 PR"),
-            program: "~/Development/handoff/my-pr-supervisor/precheck.py",
-            cadence: .interval(seconds: 300),
-            isLive: true
-        ),
-        ScheduledJobDefinition(
-            id: .prAutoReview,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.pr_auto_review", "特定人 PR"),
-            program: "~/Development/handoff/pr-auto-review/precheck.py",
-            cadence: .interval(seconds: 300),
-            isLive: true
-        ),
-        ScheduledJobDefinition(
-            id: .aidataDigest,
-            displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.aidata_digest", "每日简报"),
-            program: "aidata/scripts/aidata_digest_run.sh",
-            cadence: .daily(hour: 4, minute: 0, timeZoneIdentifier: "Asia/Shanghai"),
-            isLive: true
-        )
-    ]
-
-    public static var liveJobs: [ScheduledJobDefinition] {
-        jobs.filter(\.isLive)
+    public static func jobs(
+        homeURL: URL = HerdrSocketClient.currentUserHomeDirectoryURL(),
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> [ScheduledJobDefinition] {
+        let myPR = homeURL.appendingPathComponent("Development/handoff/my-pr-supervisor/precheck.py").path
+        let autoReview = homeURL.appendingPathComponent("Development/handoff/pr-auto-review/precheck.py").path
+        let digest = homeURL.appendingPathComponent("Development/AIDash/aidata/scripts/aidata_digest_run.sh").path
+        return [
+            ScheduledJobDefinition(id: .myPRSupervisor, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "我的 PR"), program: "~/Development/handoff/my-pr-supervisor/precheck.py", cadence: .interval(seconds: 300), isLive: fileExists(myPR)),
+            ScheduledJobDefinition(id: .prAutoReview, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.pr_auto_review", "特定人 PR"), program: "~/Development/handoff/pr-auto-review/precheck.py", cadence: .interval(seconds: 300), isLive: fileExists(autoReview)),
+            ScheduledJobDefinition(id: .aidataDigest, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.aidata_digest", "每日简报"), program: "aidata/scripts/aidata_digest_run.sh", cadence: .daily(hour: 4, minute: 0, timeZoneIdentifier: "Asia/Shanghai"), isLive: fileExists(digest))
+        ]
     }
 
-    public static var reservedJobs: [ScheduledJobDefinition] {
-        jobs.filter { !$0.isLive }
-    }
-
-    public static func job(for id: ScheduledPulseJobID) -> ScheduledJobDefinition? {
-        jobs.first { $0.id == id }
-    }
+    public static var jobs: [ScheduledJobDefinition] { jobs() }
+    public static var liveJobs: [ScheduledJobDefinition] { jobs.filter(\.isLive) }
+    public static var reservedJobs: [ScheduledJobDefinition] { jobs.filter { !$0.isLive } }
+    public static func job(for id: ScheduledPulseJobID) -> ScheduledJobDefinition? { jobs.first { $0.id == id } }
 }
 
 public enum ScheduledPulseHealth: String, Sendable, Equatable, CaseIterable {
