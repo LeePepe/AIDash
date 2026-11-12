@@ -1,9 +1,10 @@
 """Hermetic unit tests for adapters/claude_jsonl — no real transcripts required.
 
-read_raw / write_clean are monkeypatched so the finish_reason extraction (from
-message.stop_reason through collect's _slim into the clean `turn` row) is proven
-deterministically, alongside the existing token/tool columns.
+Collect reads only temporary transcripts with injected raw and checkpoint sinks.
+Normalization uses injected read_raw / write_clean to exercise token/tool fields.
 """
+
+import json
 
 import adapters.claude_jsonl as cj
 import pytest
@@ -37,6 +38,78 @@ def _skill_line(uuid, blocks):
     line = _assistant_line(uuid, "end_turn")
     line["message"]["content"] = blocks
     return line
+
+
+@pytest.mark.unit
+def test_collect_reads_temp_log_and_resumes_after_malformed_records(tmp_path, monkeypatch):
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    log = projects / "session.jsonl"
+    first = _assistant_line("first", "end_turn")
+    first["message"]["content"].append({"type": "text", "text": "私密正文"})
+    original = (
+        json.dumps(first, ensure_ascii=False) + "\n"
+        + '{malformed record}\n\n'
+        + json.dumps({"type": "user", "message": {"content": "do not collect"}}) + "\n"
+        + 'null\n[]\n'
+    ).encode("utf-8")
+    log.write_bytes(original)
+    offsets = {}
+    raw = []
+    writes = []
+    monkeypatch.setattr(cj, "CLAUDE_PROJECTS_DIR", projects)
+    monkeypatch.setattr(cj, "get_watermark", lambda source: dict(offsets))
+
+    def checkpoint(source, value):
+        assert source == cj.SOURCE
+        offsets.update(value)
+        writes.append(dict(value))
+
+    def append_raw(source, records):
+        assert source == cj.SOURCE
+        raw.extend(records)
+        return len(records)
+
+    monkeypatch.setattr(cj, "set_watermark", checkpoint)
+    monkeypatch.setattr(cj, "write_raw", append_raw)
+
+    assert cj.collect() == 1
+    assert offsets == {str(log): len(original)}
+    assert [row["uuid"] for row in raw] == ["first"]
+    assert "私密正文" not in json.dumps(raw, ensure_ascii=False)
+    assert cj.collect() == 0
+    assert len(writes) == 1
+    assert log.read_bytes() == original
+
+    second = (json.dumps(_assistant_line("second", "tool_use")) + "\n").encode("utf-8")
+    with log.open("ab") as handle:
+        handle.write(second)
+    assert cj.collect() == 1
+    assert [row["uuid"] for row in raw] == ["first", "second"]
+    assert offsets[str(log)] == len(original + second)
+    assert log.read_bytes() == original + second
+    assert cj.collect() == 0
+
+
+@pytest.mark.unit
+def test_collect_retains_incomplete_line_until_appended_newline(tmp_path, monkeypatch):
+    log = tmp_path / "session.jsonl"
+    record = json.dumps(_assistant_line("partial", "end_turn")).encode("utf-8")
+    log.write_bytes(record[:40])
+    offsets = {}
+    raw = []
+    monkeypatch.setattr(cj, "CLAUDE_PROJECTS_DIR", tmp_path)
+    monkeypatch.setattr(cj, "get_watermark", lambda source: dict(offsets))
+    monkeypatch.setattr(cj, "set_watermark", lambda source, value: offsets.update(value))
+    monkeypatch.setattr(cj, "write_raw", lambda source, records: raw.extend(records) or len(records))
+
+    assert cj.collect() == 0
+    assert offsets == {}
+    with log.open("ab") as handle:
+        handle.write(record[40:] + b"\n")
+    assert cj.collect() == 1
+    assert offsets == {str(log): len(record) + 1}
+    assert [row["uuid"] for row in raw] == ["partial"]
 
 
 @pytest.mark.unit

@@ -1,10 +1,31 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from pathlib import Path
+from threading import Event
 
 import pytest
 from L5_apps.digest import aidash, event_bridge, sources, verify
 from L5_apps.digest.card_policy import DataProfile, choose_card
+
+
+@pytest.fixture(autouse=True)
+def reject_uninjected_todo_effects(tmp_path, monkeypatch):
+    from L5_apps.digest import todo_sync_provider
+
+    direct_idea_adapter = event_bridge._default_linear_runner
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("live Todo provider is forbidden; inject a fixture runner")
+
+    monkeypatch.setattr(event_bridge, "LOCAL_TODOS_PATH", tmp_path / "local-todos.jsonl")
+    monkeypatch.setattr(todo_sync_provider, "TODO_SYNC_CONFIG_PATH", tmp_path / "todo-config.json")
+    for name in ("_default_linear_runner", "_default_linear_status_runner", "_default_linear_comment_runner"):
+        monkeypatch.setattr(event_bridge, name, forbidden)
+    for name in ("_default_idea_runner", "_default_status_runner"):
+        monkeypatch.setattr(todo_sync_provider.LinearTodoSyncProvider, name, forbidden)
+    return direct_idea_adapter
 
 
 def _payload():
@@ -34,6 +55,91 @@ def test_verify_hourly_timeline_rejects_cross_hour_evidence():
 
 
 @pytest.mark.unit
+def test_canonical_skills_roi_snapshot_preserves_report_nulls_and_source_grain(tmp_path):
+    from L5_apps.digest.skills_roi_snapshot import write_snapshot
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    report = json.loads(fixture.read_text(encoding="utf-8"))
+    seen = []
+
+    def query(name, params):
+        seen.append((name, params))
+        return ([("2026-11-11", "claude_attribution", "team-lead", 2, 1),
+                 ("2026-11-11", "claude_skill_tool", "team-lead", 2, 1)],
+                ["day", "source", "skill", "n", "sessions"])
+
+    output = tmp_path / "skills-roi.json"
+    payload = write_snapshot(output, fixture, query_runner=query)
+    assert payload["diagnostics"] == report
+    assert payload["schema_version"] == 1
+    assert payload["source_as_of"] == report["source_as_of"]
+    assert payload["sample_size"] == 4
+    assert payload["coverage_status"] == "healthy"
+    assert "metrics" not in payload and "S5" not in payload["diagnostics"]
+    assert payload["diagnostics"]["S10_skill_roi_ranking"][0]["roi_score"] is None
+    assert payload["diagnostics"]["S11_context_composition"]["estimated"] is True
+    assert [row["n"] for row in payload["skills_daily"]] == [2, 2]
+    assert [row["source"] for row in payload["skills_daily"]] == ["claude_attribution", "claude_skill_tool"]
+    assert all(row["sample_size"] == 2 for row in payload["skills_daily"])
+    assert seen == [("skills/daily", {"day_from": "2026-11-05", "day_to": "2026-11-11"})]
+    assert json.loads(output.read_text()) == payload
+    failed_producer = write_snapshot(output, fixture, query_runner=query, producer_exit_code=1)
+    assert failed_producer["coverage_status"] == "error"
+    assert failed_producer["diagnostics"] == report
+    assert failed_producer["errors"][0] == "retro producer exited 1"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("exclusive_end", ["2026-11-12T00:00:00+08:00", "2026-11-11T16:00:00Z"])
+def test_snapshot_daily_population_respects_producer_exclusive_cst_midnight(tmp_path, exclusive_end):
+    from L5_apps.digest.skills_roi_snapshot import write_snapshot
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    report = json.loads(fixture.read_text())
+    # The canonical producer's seven-day interval ends at next-day midnight,
+    # exclusively. skills/daily has inclusive day filters, not timestamp filters.
+    report["window_end"] = exclusive_end
+    report_file = tmp_path / "report.json"
+    report_file.write_text(json.dumps(report))
+    rows = [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1),
+            ("2026-11-12", "copilot_cli_skill", "team-lead", 99, 1)]
+    seen = []
+
+    def query(name, params):
+        seen.append(params)
+        return ([row for row in rows if params["day_from"] <= row[0] <= params["day_to"]],
+                ["day", "source", "skill", "n", "sessions"])
+
+    snapshot = write_snapshot(tmp_path / "skills-roi.json", report_file, query_runner=query)
+    assert [row["day"] for row in snapshot["skills_daily"]] == ["2026-11-11"]
+    assert seen == [{"day_from": "2026-11-05", "day_to": "2026-11-11"}]
+    assert snapshot["window_end"] == report["window_end"]
+    assert snapshot["source_as_of"] == report["source_as_of"]
+
+
+@pytest.mark.unit
+def test_canonical_skills_roi_snapshot_reports_missing_and_query_failure(tmp_path):
+    from L5_apps.digest.skills_roi_snapshot import write_snapshot
+
+    output = tmp_path / "skills-roi.json"
+    missing = write_snapshot(output, tmp_path / "absent.json", query_runner=lambda *_: pytest.fail("must not query without an observed window"))
+    assert missing["coverage_status"] == "missing"
+    assert missing["source_as_of"] is None and missing["sample_size"] == 0
+    assert missing["skills_daily"] == []
+    assert missing["errors"]
+
+    def broken_query(*_):
+        raise sqlite3.OperationalError("missing source")
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    degraded = write_snapshot(output, fixture, query_runner=broken_query)
+    assert degraded["coverage_status"] == "error"
+    assert degraded["diagnostics"] == json.loads(fixture.read_text())
+    assert degraded["skills_daily"] == []
+    assert "skills/daily unavailable" in degraded["errors"][0]
+
+
+@pytest.mark.unit
 def test_jev_offline_degrades_to_ok():
     def offline(*_args, **_kwargs):
         raise OSError("offline")
@@ -53,6 +159,396 @@ def test_learning_queue_consumer_dispatches_once_and_marks_blocked(tmp_path):
     assert calls == ["explore-topic-r1"]
     assert json.loads(queue.read_text(encoding="utf-8"))["status"] == "dispatched"
     assert consume_learning_queue(queue, dispatch_runner=lambda _: 1) == {"consumed": 0, "blocked": 0}
+
+
+def _learning_job(task_key="explore-topic-r1", **overrides):
+    return {
+        "task_key": task_key, "topic_key": "topic",
+        "origin_ref": "learning-topic://topic", "external_id": "TIA-123",
+        "status": "queued", **overrides,
+    }
+
+
+def _queue_records(queue):
+    return [json.loads(line) for line in queue.read_text(encoding="utf-8").splitlines()]
+
+
+def _learning_proposal(topic="topic"):
+    return event_bridge.Proposal(
+        id=f"learning-{topic}", ts="2026-11-12T00:00:00Z", agent="knowledge-digest",
+        title=f"Explore {topic}", detail="Owner authorized exploration only",
+        priority="medium", status="approved", learning_state="approved",
+        topic_key=topic, ref=f"learning-topic://{topic}",
+        origin_ref=f"learning-topic://{topic}", external_id="TIA-123", revision=2,
+    )
+
+
+@pytest.mark.unit
+def test_learning_queue_preserves_append_during_dispatch(tmp_path, monkeypatch):
+    queue = tmp_path / "queue.jsonl"
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    queue.write_text(json.dumps(_learning_job()) + "\n", encoding="utf-8")
+    entered, finish = Event(), Event()
+
+    def dispatch(job):
+        entered.set()
+        assert finish.wait(5), "test did not release dispatch"
+        return 0
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        consumer = pool.submit(event_bridge.consume_learning_queue, queue, dispatch_runner=dispatch)
+        try:
+            assert entered.wait(5), "consumer did not enter dispatch"
+            event_bridge._enqueue_learning_task(
+                _learning_proposal("new-topic"), task_key="explore-new-topic-r1", external_id="TIA-124",
+            )
+        finally:
+            finish.set()
+        assert consumer.result(timeout=5) == {"consumed": 1, "blocked": 0}
+    jobs = {job["task_key"]: job for job in _queue_records(queue)}
+    assert jobs["explore-topic-r1"]["status"] == "dispatched"
+    assert jobs["explore-new-topic-r1"]["status"] == "queued"
+    assert jobs["explore-new-topic-r1"]["external_id"] == "TIA-124"
+
+
+@pytest.mark.unit
+def test_learning_queue_two_consumers_persist_lease_before_dispatch(tmp_path):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n", encoding="utf-8")
+    entered, finish = Event(), Event()
+    observed, calls = [], []
+
+    def dispatch(job):
+        calls.append(job["task_key"])
+        observed.extend(_queue_records(queue))
+        entered.set()
+        assert finish.wait(5), "test did not release dispatch"
+        return 0
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(event_bridge.consume_learning_queue, queue, dispatch_runner=dispatch)
+        try:
+            assert entered.wait(5), "consumer did not enter dispatch"
+            second = pool.submit(event_bridge.consume_learning_queue, queue, dispatch_runner=lambda job: calls.append(job["task_key"]) or 0)
+            assert second.result(timeout=5) == {"consumed": 0, "blocked": 0}
+        finally:
+            finish.set()
+        assert first.result(timeout=5) == {"consumed": 1, "blocked": 0}
+    assert calls == ["explore-topic-r1"]
+    assert observed[0]["status"] == "leased"
+    assert observed[0]["lease_token"]
+    assert observed[0]["dispatch_started_at"]
+    assert "completed_at" not in _queue_records(queue)[0]
+
+
+@pytest.mark.unit
+def test_learning_queue_failure_is_visible_retry_is_explicit_and_success_idempotent(tmp_path, monkeypatch):
+    queue, proposals = tmp_path / "queue.jsonl", tmp_path / "proposals.jsonl"
+    proposal = _learning_proposal()
+    task_key = "explore-topic-r1"
+    proposals.write_text(json.dumps({**asdict(proposal), "task_key": task_key}) + "\n", encoding="utf-8")
+    monkeypatch.setattr(event_bridge, "PROPOSALS_PATH", proposals)
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    event_bridge._enqueue_learning_task(proposal, task_key=task_key, external_id="TIA-123")
+    calls = []
+
+    def fail(job):
+        calls.append(job["task_key"])
+        assert _queue_records(queue)[0]["status"] == "leased"
+        assert event_bridge.read_all_latest(proposals)[proposal.id].learning_state == "exploring"
+        return 1
+
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=fail) == {"consumed": 0, "blocked": 1}
+    blocked = _queue_records(queue)[0]
+    assert blocked["status"] == "blocked"
+    assert blocked["error"]
+    assert blocked["external_id"] == "TIA-123"
+    latest = event_bridge.read_all_latest(proposals)[proposal.id]
+    assert latest.status == "approved"
+    assert latest.learning_state == "blocked"
+    assert latest.external_id == "TIA-123"
+    assert json.loads(proposals.read_text(encoding="utf-8").splitlines()[-1])["error"]
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=fail) == {"consumed": 0, "blocked": 0}
+
+    def succeed(job):
+        calls.append(job["task_key"])
+        return 0
+
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=succeed, retry_blocked=True) == {"consumed": 1, "blocked": 0}
+    assert _queue_records(queue)[0]["attempts"] == 2
+    assert "error" not in _queue_records(queue)[0]
+    assert event_bridge.read_all_latest(proposals)[proposal.id].learning_state == "exploring"
+    event_bridge._enqueue_learning_task(proposal, task_key=task_key, external_id="TIA-123")
+    assert len(_queue_records(queue)) == 1
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=fail, retry_blocked=True) == {"consumed": 0, "blocked": 0}
+    assert calls == [task_key, task_key]
+
+
+@pytest.mark.unit
+def test_learning_queue_expired_unstarted_lease_retries_once_but_uncertain_dispatch_does_not(tmp_path):
+    queue = tmp_path / "queue.jsonl"
+    old = "2026-01-01T00:00:00Z"
+    queue.write_text(json.dumps(_learning_job(status="leased", lease_token="dead", leased_at=old, lease_expires_at=old, attempts=1)) + "\n", encoding="utf-8")
+    calls = []
+    run = lambda job: calls.append(job["task_key"]) or 0
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run) == {"consumed": 0, "blocked": 1}
+    assert calls == []
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run, retry_blocked=True) == {"consumed": 1, "blocked": 0}
+    assert _queue_records(queue)[0]["attempts"] == 2
+
+    queue.write_text(json.dumps(_learning_job(status="leased", lease_token="ambiguous", leased_at=old, lease_expires_at=old, attempts=1, dispatch_started_at=old)) + "\n", encoding="utf-8")
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run, retry_blocked=True) == {"consumed": 0, "blocked": 1}
+    assert len(calls) == 1
+    assert _queue_records(queue)[0]["status"] == "blocked"
+    assert _queue_records(queue)[0]["retryable"] is False
+    assert "unknown" in _queue_records(queue)[0]["error"]
+
+
+@pytest.mark.unit
+def test_learning_queue_retry_attempts_are_bounded(tmp_path):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n", encoding="utf-8")
+    calls = []
+    for _ in range(5):
+        event_bridge.consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job["task_key"]) or 1, retry_blocked=True)
+    assert len(calls) == 3
+    assert _queue_records(queue)[0]["attempts"] == 3
+    assert _queue_records(queue)[0]["status"] == "blocked"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("outcome", [0, 1])
+def test_learning_queue_stale_completion_cannot_overwrite_newer_lease(tmp_path, outcome):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n", encoding="utf-8")
+    newer = {}
+
+    def dispatch(job):
+        newer.update(_queue_records(queue)[0])
+        newer.update(lease_token="newer-owner", attempts=2)
+        with event_bridge._jsonl_lock(queue):
+            event_bridge._write_learning_queue(queue, [newer])
+        return outcome
+
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=dispatch) == {"consumed": 0, "blocked": 0}
+    assert _queue_records(queue) == [newer]
+
+
+@pytest.mark.unit
+def test_learning_queue_does_not_dispatch_without_durable_lease(tmp_path, monkeypatch):
+    queue = tmp_path / "queue.jsonl"
+    original = json.dumps(_learning_job()) + "\n"
+    queue.write_text(original, encoding="utf-8")
+    calls = []
+
+    def disk_full(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(event_bridge, "_write_learning_queue", disk_full)
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job) or 0) == {"consumed": 0, "blocked": 1}
+    assert calls == []
+    assert queue.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.unit
+def test_learning_queue_unknown_outcome_and_failed_ack_never_redispatch(tmp_path, monkeypatch):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n")
+    calls = []
+    original_write = event_bridge._write_learning_queue
+    writes = []
+
+    def lose_ack(path, jobs):
+        writes.append(1)
+        if len(writes) == 3:
+            raise OSError("acknowledgement disk failure")
+        original_write(path, jobs)
+
+    monkeypatch.setattr(event_bridge, "_write_learning_queue", lose_ack)
+    run = lambda job: calls.append(job["task_key"]) or 0
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run) == {"consumed": 0, "blocked": 1}
+    monkeypatch.setattr(event_bridge, "_write_learning_queue", original_write)
+    jobs = _queue_records(queue)
+    assert jobs[0]["status"] == "leased"
+    jobs[0]["lease_expires_at"] = "2026-01-01T00:00:00Z"
+    with event_bridge._jsonl_lock(queue):
+        original_write(queue, jobs)
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run, retry_blocked=True) == {"consumed": 0, "blocked": 1}
+    assert len(calls) == 1
+    assert _queue_records(queue)[0]["retryable"] is False
+
+
+@pytest.mark.unit
+def test_learning_queue_timeout_and_cli_failure_are_observable(tmp_path, monkeypatch, capsys):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n")
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    calls = []
+
+    def timeout(job):
+        calls.append(job["task_key"])
+        raise event_bridge.subprocess.TimeoutExpired("fixture launcher", 60)
+
+    monkeypatch.setattr(event_bridge, "_default_learning_dispatch", timeout)
+    assert event_bridge.main(["--consume-learning"]) == 1
+    assert json.loads(capsys.readouterr().out)["blocked"] == 1
+    assert event_bridge.main(["--consume-learning", "--retry-learning-blocked"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"consumed": 0, "blocked": 0}
+    assert len(calls) == 1
+    assert _queue_records(queue)[0]["retryable"] is False
+
+
+@pytest.mark.unit
+def test_learning_queue_does_not_reopen_terminal_proposal(tmp_path, monkeypatch):
+    queue, proposals = tmp_path / "queue.jsonl", tmp_path / "proposals.jsonl"
+    proposal = _learning_proposal()
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    monkeypatch.setattr(event_bridge, "PROPOSALS_PATH", proposals)
+    event_bridge._enqueue_learning_task(proposal, task_key="explore-topic-r1")
+    terminal = {**asdict(proposal), "learning_state": "learned", "outcome": "owner_reported", "revision": 3}
+    proposals.write_text(json.dumps(terminal) + "\n", encoding="utf-8")
+    calls = []
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job) or 0) == {"consumed": 0, "blocked": 1}
+    assert calls == []
+    assert proposals.read_text(encoding="utf-8") == json.dumps(terminal) + "\n"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("ref", ["learning-topic://topic", "knowledge://topic", "linear://TIA-123"])
+def test_learning_receipts_guard_revisions_and_keep_later_done(tmp_path, ref):
+    proposals, todos = tmp_path / "proposals.jsonl", tmp_path / "todos.jsonl"
+    record = {**asdict(_learning_proposal()), "ref": ref, "revision": 4, "learning_state": "transferred", "source": "Learning"}
+    proposals.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    calls = []
+
+    def receipt(uid, decision, revision):
+        action_id = "linear-TIA-123" if ref.startswith("linear:") else "knowledge-topic" if ref.startswith("knowledge:") else "learning-topic"
+        return {"id": uid, "revision": revision, "action": "acknowledgeJobAction", "cardType": "scheduledPulse", "cardId": "scheduled-pulse/aidata-digest", "itemRef": f'aidata-digest:{action_id}|[{json.dumps({"controlID": "decision", "value": decision})}]'}
+
+    def run(event):
+        return event_bridge.process_user_events([event], proposals_path=proposals, local_todos_path=todos,
+            linear_runner=lambda *_: pytest.fail("must reuse stored external id"),
+            linear_status_runner=lambda ident, state: calls.append((ident, state)) or 0)
+
+    assert run(receipt("old", "Approve", 3))["conflicts"] == 1
+    assert calls == []
+    assert event_bridge.read_all_latest(proposals)[record["id"]].revision == 4
+    assert json.loads(proposals.read_text().splitlines()[-1])["conflict"]["reason"] == "stale event revision"
+    approved = receipt("approve", "Approve", 4)
+    assert run(approved)["promoted"] == 1
+    assert run(approved)["ignored"] == 1
+    latest = event_bridge.read_all_latest(proposals)[record["id"]]
+    assert latest.learning_state == "approved"
+    assert run(receipt("done", "Done", latest.revision))["resolved"] == 1
+    latest = event_bridge.read_all_latest(proposals)[record["id"]]
+    assert latest.learning_state == "learned"
+    assert run(receipt("late", "Approve", latest.revision))["conflicts"] == 1
+    assert calls == [("TIA-123", "Todo"), ("TIA-123", "Done")]
+    assert event_bridge.read_all_latest(proposals)[record["id"]].learning_state == "learned"
+
+
+@pytest.mark.unit
+def test_learning_approval_replay_repairs_failed_enqueue_without_new_authorization(tmp_path, monkeypatch):
+    proposals, queue = tmp_path / "proposals.jsonl", tmp_path / "queue.jsonl"
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    proposal = _learning_proposal()
+    proposals.write_text(json.dumps({**asdict(proposal), "learning_state": "transferred"}) + "\n")
+    event = {"id": "approval", "revision": 2, "action": "approve", "itemRef": "learning-topic://topic"}
+    calls = []
+    enqueue = event_bridge._enqueue_learning_task
+
+    def no_space(*args, **kwargs):
+        raise OSError("queue disk failure after durable approval")
+
+    monkeypatch.setattr(event_bridge, "_enqueue_learning_task", no_space)
+    options = {"proposals_path": proposals, "local_todos_path": tmp_path / "todos.jsonl",
+        "linear_status_runner": lambda ident, state: calls.append((ident, state)) or 0}
+    with pytest.raises(OSError, match="queue disk failure"):
+        event_bridge.process_user_events([event], **options)
+    approved = json.loads(proposals.read_text().splitlines()[-1])
+    assert approved["learning_state"] == "approved"
+    assert approved["external_id"] == "TIA-123"
+    key = approved["task_key"]
+    monkeypatch.setattr(event_bridge, "_enqueue_learning_task", enqueue)
+    assert event_bridge.process_user_events([event], **options)["ignored"] == 1
+    assert event_bridge.process_user_events([event], **options)["ignored"] == 1
+    assert calls == [("TIA-123", "Todo")]
+    assert [job["task_key"] for job in _queue_records(queue)] == [key]
+    assert event_bridge.read_all_latest(proposals)[proposal.id].revision == approved["revision"]
+
+
+@pytest.mark.unit
+def test_learning_approval_revision_check_and_append_share_lock(tmp_path, monkeypatch):
+    proposals, queue = tmp_path / "proposals.jsonl", tmp_path / "queue.jsonl"
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    proposal = _learning_proposal()
+    proposals.write_text(json.dumps({**asdict(proposal), "learning_state": "transferred"}) + "\n")
+    entered, finish = Event(), Event()
+    calls = []
+
+    def status(ident, state):
+        calls.append((ident, state))
+        entered.set()
+        assert finish.wait(5)
+        return 0
+
+    def approve(uid):
+        return event_bridge.process_user_events([{"id": uid, "revision": 2, "action": "approve", "itemRef": "learning-topic://topic"}],
+            proposals_path=proposals, local_todos_path=tmp_path / "todos.jsonl", linear_status_runner=status)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(approve, "first")
+        try:
+            assert entered.wait(5)
+            second = pool.submit(approve, "second")
+        finally:
+            finish.set()
+        assert first.result(timeout=5)["promoted"] == 1
+        assert second.result(timeout=5)["conflicts"] == 1
+    assert calls == [("TIA-123", "Todo")]
+    assert len(_queue_records(queue)) == 1
+
+
+@pytest.mark.unit
+def test_legacy_unlearned_knowledge_star_never_publishes(tmp_path):
+    proposals = tmp_path / "proposals.jsonl"
+    proposals.write_text(json.dumps({**asdict(_learning_proposal()), "topic_key": "", "learning_state": "", "source": "", "ref": "knowledge://topic", "origin_ref": ""}) + "\n", encoding="utf-8")
+    result = event_bridge.process_user_events([{"action": "star", "itemRef": "knowledge://topic"}], proposals_path=proposals,
+        blog_publish_runner=lambda *_: pytest.fail("unlearned Star cannot publish"))
+    assert result["bookmarked"] == 1
+    assert result["blog_published"] == 0
+
+
+@pytest.mark.unit
+def test_default_learning_dispatch_launches_bounded_authorized_channel_a_worker(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "Development/Personal/knowledge-vault").mkdir(parents=True)
+    script = tmp_path / "herdr-dispatch.sh"
+    script.write_text("# fixture only; never executed\n")
+    monkeypatch.setattr(event_bridge, "HOME", home)
+    monkeypatch.setenv("AIDASH_LEARNING_DISPATCH_SCRIPT", str(script))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(event_bridge.subprocess, "run", fake_run)
+    job = _learning_job(status="leased", scope="personal", proposal_id="learning-topic", approval_revision=2,
+        lease_token="token", dispatch_started_at="2026-11-12T00:00:00Z")
+    assert event_bridge._default_learning_dispatch(job) == 0
+    command, kwargs = calls[0]
+    assert command[:2] == ["bash", str(script)]
+    assert command[command.index("--role") + 1] == "writer"
+    prompt = command[command.index("--prompt") + 1]
+    assert "knowledge-digest" in prompt and "Channel A" in prompt
+    assert "artifact" in prompt and "citations" in prompt and "index" in prompt
+    assert "Dispatch acknowledgement alone is not learned" in prompt
+    assert kwargs["timeout"] == 60
+    assert "explore" not in command  # No nonexistent digest_vault subcommand.
+    assert event_bridge._default_learning_dispatch({**job, "scope": "work"}) == 1
+    assert event_bridge._default_learning_dispatch({**job, "status": "queued"}) == 1
+    assert len(calls) == 1
 
 
 def test_event_bridge_latest_wins_and_falcon_star(tmp_path):
@@ -189,7 +685,7 @@ def test_event_bridge_linear_done_undone_and_star_external_id(tmp_path):
 
 
 @pytest.mark.unit
-def test_default_linear_runner_parses_issue_identifier(monkeypatch, tmp_path):
+def test_default_linear_runner_parses_issue_identifier(monkeypatch, tmp_path, reject_uninjected_todo_effects):
     script = tmp_path / "linear-sync.py"
     script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     monkeypatch.setattr(event_bridge, "LINEAR_SYNC_SCRIPT", script)
@@ -203,7 +699,7 @@ def test_default_linear_runner_parses_issue_identifier(monkeypatch, tmp_path):
         })
 
     monkeypatch.setattr(event_bridge.subprocess, "run", lambda *a, **k: FakeProc())
-    rc, external_id = event_bridge._default_linear_runner("Title", "Desc")
+    rc, external_id = reject_uninjected_todo_effects("Title", "Desc")
     assert rc == 0
     assert external_id == "TIA-96"
 
@@ -367,6 +863,7 @@ def test_event_bridge_knowledge_star_publishes_blog_and_approves_proposal(tmp_pa
                 "detail": "R09 KEEP_PRIMARY",
                 "priority": "medium",
                 "status": "pending",
+                "learning_state": "learned",
             },
             ensure_ascii=False,
         )
@@ -698,6 +1195,7 @@ def test_event_bridge_learning_topic_star_snooze_approve_done_and_full_writeback
         ],
         proposals_path=proposals,
         cursor_path=cursor,
+        linear_status_runner=lambda i, s: status_calls.append((i, s)) or 0,
     )
     assert res_done["resolved"] == 1
     final_lines = [json.loads(ln) for ln in proposals.read_text(encoding="utf-8").splitlines() if ln.strip()]

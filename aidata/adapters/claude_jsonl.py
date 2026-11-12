@@ -52,20 +52,23 @@ def collect() -> int:
         if size <= start:
             continue  # unchanged
         batch: list[dict[str, Any]] = []
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
+        with path.open("rb") as fh:
             fh.seek(start)
-        for idx, line in enumerate(fh, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            # Only keep assistant lines (the ones carrying usage) — keeps raw lean.
-            if obj.get("type") == "assistant":
-                batch.append(_slim(obj, fallback_uuid=f"{path.stem}:{start}:{idx}"))
-            new_offsets[key] = fh.tell()
+            for idx, raw_line in enumerate(iter(fh.readline, b""), start=1):
+                # A writer may still be appending this record. Retry it next time.
+                if not raw_line.endswith(b"\n"):
+                    break
+                new_offsets[key] = fh.tell()
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                # Only keep assistant lines (the ones carrying usage) — keeps raw lean.
+                if isinstance(obj, dict) and obj.get("type") == "assistant":
+                    batch.append(_slim(obj, fallback_uuid=f"{path.stem}:{start}:{idx}"))
         if batch:
             total += write_raw(SOURCE, batch)
 

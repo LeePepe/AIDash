@@ -139,5 +139,56 @@ def test_copilot_collects_skill_metadata_without_prompt_bodies(monkeypatch, tmp_
     monkeypatch.setattr(copilot, "get_watermark", lambda source: 0)
     monkeypatch.setattr(copilot, "set_watermark", lambda source, value: None)
     assert copilot.collect() == 1
-    assert captured == [{"turn_id": 1, "session_id": "s1", "timestamp": "2026-11-12T01:00:00Z", "skill": "team-lead"}]
+    assert len(captured) == 1
+    assert {key: captured[0][key] for key in ("turn_id", "session_id", "timestamp", "skill")} == {"turn_id": 1, "session_id": "s1", "timestamp": "2026-11-12T01:00:00Z", "skill": "team-lead"}
     assert "SECRET_PROMPT" not in repr(captured)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("omit", [None, "turns", "session_files"])
+def test_copilot_real_skill_markers_are_bounded_metadata_and_deduped(tmp_path, monkeypatch, omit):
+    from datetime import datetime, timezone
+
+    db = tmp_path / "copilot.db"
+    with sqlite3.connect(db) as con:
+        if omit != "turns":
+            con.execute("CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, turn_index INTEGER, timestamp TEXT, user_message TEXT, assistant_response TEXT)")
+            con.executemany("INSERT INTO turns VALUES (?, ?, ?, ?, ?, ?)", [
+                (1, "s1", 0, "2026-11-12T01:00:00Z", '<skill-context name="team-lead">SECRET_BODY</skill-context>', '/Users/test/.copilot/skills/team-lead/SKILL.md SECRET_REPLY'),
+                (2, "s1", 1, "2026-11-12T02:00:00Z", "read /Users/test/.agents/skills/aidash-content/SKILL.md", '<skill-context name="aidash-content">'),
+                (3, "old", 0, "2025-01-01T00:00:00Z", '<skill-context name="old-skill">', ""),
+                (4, "ordinary", 0, "2026-11-12T01:00:00Z", "skillful prose /skills is not an invocation", ""),
+            ])
+        if omit != "session_files":
+            con.execute("CREATE TABLE session_files (session_id TEXT, file_path TEXT, tool_name TEXT, turn_index INTEGER, first_seen_at TEXT)")
+            con.executemany("INSERT INTO session_files VALUES (?, ?, ?, ?, ?)", [
+                ("s1", "/Users/test/.copilot/skills/team-lead/SKILL.md", "view", 0, "2026-11-12T01:00:01Z"),
+                ("s1", "/Users/test/.copilot/skills/team-lead/SKILL.md", "view", 0, "2026-11-12T01:00:02Z"),
+                ("s2", "/Users/test/.agents/skills/retro-loop/SKILL.md", "view", 2, "2026-11-12T03:00:00Z"),
+                ("old", "/Users/test/skills/old-skill/SKILL.md", "view", 0, "2025-01-01T00:00:00Z"),
+            ])
+    before = db.read_bytes()
+    raw, checkpoints = [], {}
+    monkeypatch.setattr(copilot, "COPILOT_SESSION_DB", db)
+    monkeypatch.setattr(copilot, "get_watermark", lambda _: dict(checkpoints))
+    monkeypatch.setattr(copilot, "set_watermark", lambda _, value: checkpoints.update(value))
+    monkeypatch.setattr(copilot, "write_raw", lambda _, rows: raw.extend(rows) or len(rows))
+    now = datetime(2026, 11, 12, 12, tzinfo=timezone.utc)  # noqa: UP017 - hook Python 3.9
+    expected = {"team-lead", "aidash-content", "retro-loop"}
+    if omit == "turns":
+        expected.remove("aidash-content")
+    if omit == "session_files":
+        expected.remove("retro-loop")
+    assert copilot.collect(now=now) == len(expected)
+    assert {row["skill"] for row in raw} == expected
+    assert len({row["event_id"] for row in raw}) == len(expected)
+    assert all(row["timestamp"].startswith("2026-11-12") for row in raw)
+    assert "SECRET" not in repr(raw)
+    assert "/Users/test" not in repr(raw)
+    assert copilot.collect(now=now) == 0
+    assert db.read_bytes() == before
+    monkeypatch.setattr(copilot, "read_raw", lambda _: raw + raw)
+    clean = []
+    monkeypatch.setattr(copilot, "write_clean", lambda source, table, ddl, rows, cols: clean.extend(rows) or len(rows))
+    assert copilot.normalize() == len(expected)
+    assert all(row["n"] == 1 for row in clean)

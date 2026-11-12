@@ -38,6 +38,79 @@ def _no_proposals():
 
 
 @pytest.mark.unit
+def test_learning_export_preserves_producer_metadata_after_linear_transfer(tmp_path):
+    import json
+
+    from L5_apps.digest import event_bridge
+    from L5_apps.digest.todo_sync_provider import LinearTodoSyncProvider
+
+    proposals = tmp_path / "proposals.jsonl"
+    record = {
+        "id": "learning-topic", "ts": "2026-11-12T00:00:00Z", "agent": "knowledge-digest",
+        "title": "What is the uncovered mechanism?", "detail": "Concrete cited evidence", "priority": "high",
+        "status": "pending", "source": "Learning", "scope": "personal", "learning_state": "proposed",
+        "ref": "learning-topic://topic", "origin_ref": "learning-topic://topic", "topic_key": "topic",
+        "revision": 3, "why_now": "A real coverage gap", "source_uri": "https://example.test/article",
+        "coverage_refs": ["concepts/prior.md"], "evidence": "commit abc123", "freshness": "7d CST · observed 2026-11-11",
+        "window_cst": "7d", "source_as_of": "2026-11-11", "sample_size": 2, "coverage_status": "partial",
+    }
+    proposals.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    script = tmp_path / "linear.py"
+    script.write_text("# fixture only")
+    statuses = []
+    provider = LinearTodoSyncProvider(script_path=script,
+        idea_runner=lambda *_: (0, "TIA-123"), status_runner=lambda ident, state: statuses.append((ident, state)) or 0)
+    item = inbox_mod.InboxItem(record["title"], "high", "待决策", ref=record["ref"], category="decision", source="Learning")
+    actions = inbox_mod.build_job_actions([item], proposals_path=proposals, provider=provider, sync_triage=True)
+    action = actions[0]
+    assert action["ref"] == "linear://TIA-123"
+    assert action["revision"] == 4
+    for key in ("topic_key", "origin_ref", "why_now", "source_uri", "coverage_refs", "evidence", "freshness", "scope", "source_as_of", "sample_size"):
+        assert action[key] == record[key]
+    transferred = json.loads(proposals.read_text().splitlines()[-1])
+    assert transferred["learning_state"] == "transferred"
+    assert transferred["source"] == "Learning"
+    assert transferred["why_now"] == record["why_now"]
+    cached = inbox_mod.build_job_actions([inbox_mod.InboxItem(record["title"], "high", "计划", ref="linear://TIA-123", source="Linear")], proposals_path=proposals)[0]
+    assert cached["topic_key"] == "topic" and cached["source"] == "Learning"
+    result = event_bridge.process_user_events([{
+        "id": "decision-after-transfer", "revision": action["revision"], "action": "acknowledgeJobAction",
+        "cardType": "scheduledPulse", "cardId": "scheduled-pulse/aidata-digest",
+        "itemRef": 'aidata-digest:linear-TIA-123|[{"controlID":"decision","value":"Approve"}]',
+    }], proposals_path=proposals, provider=provider, local_todos_path=tmp_path / "todos.jsonl")
+    assert result["promoted"] == 1
+    assert statuses == [("TIA-123", "Todo")]
+    assert event_bridge.read_all_latest(proposals)[record["id"]].learning_state == "approved"
+
+
+@pytest.mark.unit
+def test_transfer_does_not_overwrite_newer_owner_decision(tmp_path):
+    import json
+
+    from L5_apps.digest.proposals import append_jsonl_locked, jsonl_lock
+    from L5_apps.digest.todo_sync_provider import LinearTodoSyncProvider
+
+    proposals = tmp_path / "proposals.jsonl"
+    record = {"id": "learning-topic", "ts": "2026-11-12T00:00:00Z", "agent": "knowledge-digest",
+        "title": "Explore one question", "detail": "Concrete evidence", "priority": "high", "status": "pending",
+        "ref": "learning-topic://topic", "topic_key": "topic", "source": "Learning", "scope": "personal", "revision": 1}
+    proposals.write_text(json.dumps(record) + "\n")
+    newer = {**record, "revision": 2, "status": "learned", "learning_state": "learned", "outcome": "owner_reported"}
+    script = tmp_path / "linear.py"
+    script.write_text("# fixture only")
+
+    def promoted(*_):
+        with jsonl_lock(proposals):
+            append_jsonl_locked(proposals, newer)
+        return 0, "TIA-123"
+
+    provider = LinearTodoSyncProvider(script_path=script, idea_runner=promoted)
+    item = inbox_mod.InboxItem(record["title"], "high", "待决策", ref=record["ref"], source="Learning")
+    assert inbox_mod.build_job_actions([item], proposals_path=proposals, provider=provider, sync_triage=True) == []
+    assert json.loads(proposals.read_text().splitlines()[-1]) == newer
+
+
+@pytest.mark.unit
 def test_aggregates_stalls_and_issues(fake_queries):
     items = build_inbox(0.0, proposals_reader=_no_proposals, log_reader=_no_logs)
     buckets = {it.bucket for it in items}

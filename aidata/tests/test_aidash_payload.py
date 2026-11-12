@@ -451,6 +451,39 @@ def test_retro_ops_stats_without_completed_work_omit_agent_summary(signal):
 
 
 @pytest.mark.unit
+def test_skills_roi_null_rates_are_unknown_without_fabricated_zero_bars():
+    from dataclasses import replace
+
+    from L5_apps.digest.aidash import _apply_reading_flow_order, _skills_roi_container
+    from L5_apps.digest.sources import SkillRoiRow, SkillRoiTrends
+
+    unknown = SkillRoiRow(
+        skill="unmeasured", loads_7d=2, loads_30d=3, r1_pass_rate=None,
+        script_exec_count=0, script_touch_rate=None, unpracticed_rate=None,
+        l0_only_sessions=0, l1_selective_sessions=0, l1_greedy_sessions=0,
+        avg_context_tokens=None, rework_rounds=0, impl_bug_count=0,
+        spec_gap_count=0, roi_score=None, coverage_status="unknown",
+    )
+    measured = replace(unknown, skill="measured", r1_pass_rate=0.0, roi_score=0.0)
+    trends = replace(SkillRoiTrends.empty(), skills=(unknown, measured), health=SourceHealth("skill_roi", "ok"))
+    container = _skills_roi_container("1112", trends)
+    assert container is not None
+    bars = [card.payload["items"] for card in container.cards if card.type == "barList"]
+    assert len(bars) == 1
+    assert len(bars[0]) == 1
+    assert bars[0][0]["value"] == 0.0  # A measured zero is not missing.
+    assert "R1 0%" in bars[0][0]["label"]
+    assert "触达 unknown" in bars[0][0]["label"]
+    unknown_card = next(card for card in container.cards if card.type == "insight")
+    assert "unmeasured" in unknown_card.payload["body"]
+    assert "ROI unknown" in unknown_card.payload["body"]
+    assert "R1 unknown" in unknown_card.payload["body"]
+    assert "100%" not in unknown_card.payload["body"]
+    assert _apply_reading_flow_order([container])[0].order == 26
+    assert _skills_roi_container("1112", replace(trends, health=SourceHealth("skill_roi", "skipped:missing"))) is None
+
+
+@pytest.mark.unit
 def test_product_growth_and_skills_roi_containers_map_13_indicators():
     from L5_apps.digest.aidash import _product_growth_container, _skills_roi_container
     from L5_apps.digest.sources import (
