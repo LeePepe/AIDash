@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import AIDashCore
 
 public enum ScheduledPulsePageTab: String, CaseIterable, Sendable, Equatable, Identifiable {
     case overview
@@ -19,10 +20,12 @@ public enum ScheduledJobLastResult: String, Codable, Sendable, Equatable {
     case failed
     case skipped
     case coalesced
+    case running
 }
 
 public enum ScheduledJobSemanticState: String, Sendable, Equatable, CaseIterable {
     case healthy
+    case running
     case partial
     case coalesced
     case failed
@@ -31,7 +34,7 @@ public enum ScheduledJobSemanticState: String, Sendable, Equatable, CaseIterable
     public var isProblem: Bool {
         switch self {
         case .partial, .failed: return true
-        case .healthy, .coalesced, .noState: return false
+        case .healthy, .running, .coalesced, .noState: return false
         }
     }
 
@@ -40,13 +43,14 @@ public enum ScheduledJobSemanticState: String, Sendable, Equatable, CaseIterable
         case .healthy: return .healthy
         case .partial: return .warning
         case .failed: return .critical
-        case .coalesced, .noState: return .neutral
+        case .running, .coalesced, .noState: return .neutral
         }
     }
 
     public var symbolName: String {
         switch self {
         case .healthy: return "checkmark.circle.fill"
+        case .running: return "arrow.trianglehead.2.clockwise.rotate.90"
         case .partial: return "exclamationmark.triangle.fill"
         case .coalesced: return "minus.circle.fill"
         case .failed: return "xmark.octagon.fill"
@@ -56,19 +60,59 @@ public enum ScheduledJobSemanticState: String, Sendable, Equatable, CaseIterable
 
     public func displayText(exitCode: Int32? = nil) -> String {
         switch self {
-        case .healthy:
-            return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.healthy", "正常")
+        case .healthy: return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.healthy", "正常")
+        case .running: return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.running", "运行中")
         case .partial:
-            if let exitCode {
-                return DashboardL10n.format("dashboard.scheduled_pulse.semantic.partial", "已产出 · exit %lld", exitCode)
-            }
-            return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.partial_unknown", "已产出 · exit warning")
-        case .coalesced:
-            return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.coalesced", "已合并跳过")
-        case .failed:
-            return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.failed", "失败")
-        case .noState:
-            return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.no_state", "尚无状态产出")
+            return exitCode.map { DashboardL10n.format("dashboard.scheduled_pulse.semantic.partial", "已产出 · exit %lld", $0) } ?? DashboardL10n.tr("dashboard.scheduled_pulse.semantic.partial_unknown", "已产出 · exit warning")
+        case .coalesced: return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.coalesced", "已合并跳过")
+        case .failed: return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.failed", "失败")
+        case .noState: return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.no_state", "尚无状态产出")
+        }
+    }
+}
+
+public struct ScheduledJobStageReceipt: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let title: String
+    public let status: String?
+    public let exitCode: Int?
+    public let durationSec: Double?
+    public let sourceAsOf: String?
+
+    public init(id: String, title: String, status: String? = nil, exitCode: Int? = nil, durationSec: Double? = nil, sourceAsOf: String? = nil) {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.exitCode = exitCode
+        self.durationSec = durationSec
+        self.sourceAsOf = sourceAsOf
+    }
+
+    public var semanticState: ScheduledStageState {
+        switch status?.lowercased() {
+        case "running", "in_progress": return .running
+        case "warning", "partial", "degraded": return .warning
+        case "failed", "failure", "error": return .failed
+        case "passed", "succeeded", "success", "ok": return .passed
+        case nil:
+            guard let exitCode else { return .unknown }
+            return exitCode == 0 ? .passed : .failed
+        default: return .unknown
+        }
+    }
+    public var isSuccess: Bool { semanticState == .passed }
+    public var isKnown: Bool { semanticState != .unknown }
+}
+
+public enum ScheduledStageState: String, Sendable, Equatable {
+    case running, warning, failed, passed, unknown
+    public var title: String {
+        switch self {
+        case .running: return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.running", "运行中")
+        case .warning: return DashboardL10n.tr("dashboard.scheduled_pulse.stage.warning", "警告")
+        case .failed: return DashboardL10n.tr("dashboard.scheduled_pulse.semantic.failed", "失败")
+        case .passed: return DashboardL10n.tr("dashboard.scheduled_pulse.stage.passed", "通过")
+        case .unknown: return DashboardL10n.tr("dashboard.scheduled_pulse.stage.unknown", "未知")
         }
     }
 }
@@ -80,6 +124,8 @@ public struct ScheduledJobState: Codable, Sendable, Equatable {
     public let lastRunAt: Date?
     public let summary: String?
     public let overviewMd: String?
+    public let stages: [ScheduledJobStageReceipt]
+    public let sourceAsOf: String?
 
     public init(
         id: ScheduledPulseJobID,
@@ -87,7 +133,9 @@ public struct ScheduledJobState: Codable, Sendable, Equatable {
         lastResult: ScheduledJobLastResult? = nil,
         lastRunAt: Date? = nil,
         summary: String? = nil,
-        overviewMd: String? = nil
+        overviewMd: String? = nil,
+        stages: [ScheduledJobStageReceipt] = [],
+        sourceAsOf: String? = nil
     ) {
         self.id = id
         self.updatedAt = updatedAt
@@ -95,6 +143,46 @@ public struct ScheduledJobState: Codable, Sendable, Equatable {
         self.lastRunAt = lastRunAt
         self.summary = summary
         self.overviewMd = overviewMd
+        self.stages = stages
+        self.sourceAsOf = sourceAsOf
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, jobID, updatedAt, lastResult, lastRunAt, summary, overviewMd, stages, sourceAsOf }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(ScheduledPulseJobID.self, forKey: .id)
+            ?? c.decode(ScheduledPulseJobID.self, forKey: .jobID)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
+        if let raw = try c.decodeIfPresent(String.self, forKey: .lastResult) {
+            switch raw.lowercased() {
+            case "succeeded", "success", "ok": lastResult = .succeeded
+            case "failed", "failure", "error": lastResult = .failed
+            case "skipped": lastResult = .skipped
+            case "coalesced": lastResult = .coalesced
+            case "running", "in_progress": lastResult = .running
+            default: lastResult = nil
+            }
+        } else {
+            lastResult = nil
+        }
+        lastRunAt = try c.decodeIfPresent(Date.self, forKey: .lastRunAt)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? c.decodeIfPresent(String.self, forKey: .overviewMd)
+        overviewMd = try c.decodeIfPresent(String.self, forKey: .overviewMd)
+        stages = try c.decodeIfPresent([ScheduledJobStageReceipt].self, forKey: .stages) ?? []
+        sourceAsOf = try c.decodeIfPresent(String.self, forKey: .sourceAsOf)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        try c.encodeIfPresent(lastResult, forKey: .lastResult)
+        try c.encodeIfPresent(lastRunAt, forKey: .lastRunAt)
+        try c.encodeIfPresent(summary, forKey: .summary)
+        try c.encodeIfPresent(overviewMd, forKey: .overviewMd)
+        try c.encode(stages, forKey: .stages)
+        try c.encodeIfPresent(sourceAsOf, forKey: .sourceAsOf)
     }
 
     public var isSuccess: Bool { lastResult == .succeeded }
@@ -143,6 +231,7 @@ public struct ScheduledJobAction: Codable, Sendable, Equatable, Identifiable {
     public let title: String
     public let descriptionMd: String
     public let controls: [ScheduledJobActionControl]
+    public let revision: String?
 
     public init(
         id: String,
@@ -150,7 +239,8 @@ public struct ScheduledJobAction: Codable, Sendable, Equatable, Identifiable {
         createdAt: Date? = nil,
         title: String,
         descriptionMd: String,
-        controls: [ScheduledJobActionControl]
+        controls: [ScheduledJobActionControl],
+        revision: String? = nil
     ) {
         self.id = id
         self.jobID = jobID
@@ -158,13 +248,29 @@ public struct ScheduledJobAction: Codable, Sendable, Equatable, Identifiable {
         self.title = title
         self.descriptionMd = descriptionMd
         self.controls = controls
+        self.revision = revision
     }
 
     public var acknowledgementKey: String {
-        "\(jobID.rawValue):\(id)"
+        Self.receiptKey(jobID: jobID.rawValue, actionID: id, revision: revision)
     }
 
-    /// Returns whether this action has been acknowledged by its `(jobID, action.id)` key.
+    public static func receiptKey(jobID: String, actionID: String, revision: String?) -> String {
+        let base = "\(jobID):\(actionID)"
+        return revision.map { "\(base)|revision=\($0)" } ?? base
+    }
+
+    public static func receiptKey(itemRef: String?, cardID: String) -> String? {
+        guard let itemRef, let separator = itemRef.firstIndex(of: "|") else { return nil }
+        let head = String(itemRef[..<separator])
+        let responses = try? JSONDecoder().decode([JobActionsResponse].self, from: Data(itemRef[itemRef.index(after: separator)...].utf8))
+        let revision = responses?.first { $0.controlID == "revision" }?.value
+        let jobID = String(cardID.dropFirst("scheduled-pulse/".count))
+        let base = head.contains(":") ? head : "\(jobID):\(head)"
+        return revision.map { "\(base)|revision=\($0)" } ?? base
+    }
+
+    /// Returns whether this action has a receipt for its current producer revision.
     public func isAcknowledged(in acknowledgedIDs: Set<String>) -> Bool {
         acknowledgedIDs.contains(acknowledgementKey)
     }
@@ -320,16 +426,17 @@ public enum ScheduledJobFrameworkLogic {
         state: ScheduledJobState?,
         launchdStatus: ScheduledJobStatus?
     ) -> ScheduledJobSemanticState {
+        let stages = state?.stages ?? []
+        if state?.lastResult == .running || stages.contains(where: { $0.semanticState == .running }) { return .running }
+        if state?.lastResult == .failed || stages.contains(where: { $0.semanticState == .failed }) { return .failed }
+        if stages.contains(where: { $0.semanticState == .warning }) { return .partial }
         if state?.lastResult == .coalesced || state?.lastResult == .skipped {
             return .coalesced
         }
-        if state?.lastResult == .failed {
-            return .failed
-        }
         if state?.lastResult == .succeeded {
-            guard let launchdStatus else { return .partial }
-            guard launchdStatus.isLoaded else { return .partial }
-            return launchdStatus.lastExitCode.map { $0 == 0 ? .healthy : .partial } ?? .healthy
+            if let launchdStatus, let code = launchdStatus.lastExitCode, code != 0 { return .partial }
+            guard stages.count == 5, stages.allSatisfy(\.isSuccess) else { return .noState }
+            return .healthy
         }
         if let launchdStatus, launchdStatus.health == .critical || (launchdStatus.lastExitCode ?? 0) != 0 {
             return .failed

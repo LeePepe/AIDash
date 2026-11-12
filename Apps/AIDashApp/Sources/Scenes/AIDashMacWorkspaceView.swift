@@ -4,11 +4,74 @@ import AppKit
 import SwiftUI
 import AIDashCore
 import AIDashUI
+import DesignKit
+
+public struct DashboardGeometrySample: Codable, Sendable, Equatable {
+    public let id: String
+    public let role: String
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(id: String, role: String, frame: CGRect) {
+        self.id = id
+        self.role = role
+        self.x = frame.minX
+        self.y = frame.minY
+        self.width = frame.width
+        self.height = frame.height
+    }
+}
+
+@MainActor
+public final class DashboardGeometryRecorder {
+    public private(set) var samples: [DashboardGeometrySample] = []
+    public init() {}
+    public func record(_ sample: DashboardGeometrySample) {
+        samples.removeAll { $0.id == sample.id && $0.role == sample.role }
+        samples.append(sample)
+    }
+}
+
+struct DashboardGeometryRecorderKey: EnvironmentKey {
+    static let defaultValue: DashboardGeometryRecorder? = nil
+}
+
+extension EnvironmentValues {
+    var dashboardGeometryRecorder: DashboardGeometryRecorder? {
+        get { self[DashboardGeometryRecorderKey.self] }
+        set { self[DashboardGeometryRecorderKey.self] = newValue }
+    }
+}
+
+struct DashboardGeometryCapture: ViewModifier {
+    @Environment(\.dashboardGeometryRecorder) private var recorder
+    let id: String
+    let role: String
+
+    func body(content: Content) -> some View {
+        content.background {
+            GeometryReader { proxy in
+                Color.clear.onAppear {
+                    recorder?.record(DashboardGeometrySample(id: id, role: role, frame: proxy.frame(in: .named("tk3-geometry"))))
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    func captureDashboardGeometry(id: String, role: String) -> some View {
+        modifier(DashboardGeometryCapture(id: id, role: role))
+    }
+}
 
 public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Identifiable {
     case trends
     case rankings
     case actionItems
+    case skills
 
     public var id: String { rawValue }
 
@@ -17,6 +80,7 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
         case .trends: return DashboardL10n.tr("dashboard.lens.trends", "Token Trends")
         case .rankings: return DashboardL10n.tr("dashboard.lens.rankings", "M2 / M1 Ranking")
         case .actionItems: return DashboardL10n.tr("dashboard.lens.actions", "Actionable Items")
+        case .skills: return DashboardL10n.tr("dashboard.lens.skills_roi", "Skills ROI")
         }
     }
 
@@ -25,6 +89,7 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
         case .trends: return "chart.bar.xaxis"
         case .rankings: return "tablecells"
         case .actionItems: return "checklist"
+        case .skills: return "sparkles.square.filled.on.square"
         }
     }
 }
@@ -39,7 +104,9 @@ public struct ActionItemsCardView: View {
     @State private var noteInputs: [String: String] = [:]
     @State private var expandedLinearClusterLabels: Set<String> = []
     @State private var expandedBugBlockers = false
+    @State private var collapsedDomains: Set<DashboardActionDomain> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.theme) private var theme
 
     public init(
         store: DashboardWorkspaceStore,
@@ -133,9 +200,17 @@ public struct ActionItemsCardView: View {
                 }
             }
         } content: {
+            domainSummaryStrip
             if kanbanBoardItems.isEmpty {
                 actionEmptyStateContent
                     .frame(minHeight: 150)
+            } else if store.selectedActionDomain == nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(DashboardActionDomain.allCases) { domain in
+                        let items = store.filteredActionItems.filter { $0.resolvedDomain == domain }
+                        if !items.isEmpty { domainSection(domain, items: items) }
+                    }
+                }
             } else {
                 kanbanBoardContent
             }
@@ -577,8 +652,75 @@ public struct ActionItemsCardView: View {
                         .font(.headline)
                     ForEach(standaloneItems) { item in
                         actionItemRow(item)
+
                     }
                 }
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(store.filteredActionItems) { item in actionItemRow(item) }
+                }
+            }
+        }
+    }
+
+    private var domainSummaryStrip: some View {
+        ViewThatFits(in: .horizontal) {
+            DashboardResponsiveGrid { domainTiles }.frame(minWidth: 640)
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(spacing: Space.gap) { domainTiles.frame(width: 240) }
+            }
+            .frame(height: 76)
+        }
+    }
+
+    @ViewBuilder
+    private var domainTiles: some View {
+        ForEach(DashboardActionDomain.allCases) { domain in
+            let count = store.actionItems.filter { !$0.isCompleted && $0.resolvedDomain == domain }.count
+            Button {
+                    store.selectedActionDomain = store.selectedActionDomain == domain ? nil : domain
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: domain.symbolName)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(domain.title).font(.caption.weight(.semibold))
+                            Text(domain.subtitle).font(.subheadline).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .captureDashboardGeometry(id: "domain-subtitle-\(domain.id)", role: "domainSubtitle")
+                        }
+                        Spacer(minLength: 2)
+                        Text("\(count)").font(.caption.monospacedDigit().weight(.bold)).fixedSize(horizontal: true, vertical: false)
+                    }
+                    .padding(Space.gap)
+                    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                    .background(store.selectedActionDomain == domain ? theme.primary.primary.opacity(0.14) : theme.neutrals.inner, in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(store.selectedActionDomain == domain ? Color.accentColor : Color.primary)
+                .help(domain.subtitle)
+                .captureDashboardGeometry(id: "domain-\(domain.id)", role: "domainTile")
+            }
+        }
+
+    private func domainSection(_ domain: DashboardActionDomain, items: [DashboardActionItem]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                if collapsedDomains.contains(domain) { collapsedDomains.remove(domain) } else { collapsedDomains.insert(domain) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: domain.symbolName)
+                    Text(domain.title).font(.caption.weight(.semibold))
+                    Text("\(items.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+                    Image(systemName: collapsedDomains.contains(domain) ? "chevron.down" : "chevron.up").font(.caption2)
+                }
+                .frame(minHeight: 28)
+            }
+            .buttonStyle(.plain)
+            .captureDashboardGeometry(id: "domain-section-\(domain.id)", role: "button")
+            if !collapsedDomains.contains(domain) {
+                ForEach(items) { item in actionItemRow(item) }
             }
         }
     }
@@ -822,7 +964,6 @@ public struct ActionItemsCardView: View {
     }
 
     private func actionItemRow(_ item: DashboardActionItem) -> some View {
-        let priorityColor = DashboardSemanticColorPalette.color(for: item.priority.health)
         let statusColor = statusTintColor(for: item.status)
         let isExpanded = expandedActionID == item.id
         let hasDecisionControl = item.controls.contains { $0.id == "decision" && !$0.options.isEmpty }
@@ -835,51 +976,35 @@ public struct ActionItemsCardView: View {
                     Image(systemName: item.status.symbolName)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(statusColor)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .captureDashboardGeometry(id: "status-\(item.id)", role: "button")
                 .accessibilityLabel(DashboardL10n.format("dashboard.actions.mark_completed_format", "Mark %@ as completed", item.title))
 
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(item.priority.label)
-                            .font(.caption2.weight(.bold))
-                            .monospacedDigit()
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(priorityColor.opacity(0.16), in: Capsule())
-                            .foregroundStyle(priorityColor)
-                        Text(item.title)
-                            .font(.body.weight(.semibold))
-                            .strikethrough(item.isCompleted)
-                            .foregroundStyle(item.isCompleted ? .secondary : .primary)
-                            .lineLimit(actionItemKind(item) == .evalRule ? nil : 1)
-                            .fixedSize(horizontal: false, vertical: actionItemKind(item) == .evalRule)
-                        if let refLabel = item.displayRefLabel, !item.title.contains(refLabel) {
-                            Text(refLabel)
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: Space.gap) {
+                            actionRowTitle(item)
+                            Spacer(minLength: Space.gap)
+                            actionQuickButtons(item, requiresChoice: requiresChoice)
+                        }.frame(minWidth: 900)
+                        HStack(alignment: .top, spacing: Space.gap) {
+                            actionRowTitle(item)
+                            Spacer(minLength: 0)
+                            compactDecisionButtons(item)
                         }
-                        Spacer(minLength: 6)
-                        actionQuickButtons(item, requiresChoice: requiresChoice)
                     }
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(actionItemKind(item) == .evalRule ? evalRulePreview(item.summary) : item.summary)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(actionItemKind(item) == .evalRule || actionItemKind(item) == .decision ? 2 : 1)
-                            .truncationMode(.tail)
-                        Spacer(minLength: 6)
-                        Text("\(item.sourceTag) · \(item.projectFolderName)")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
+                    Text(actionItemKind(item) == .evalRule ? evalRulePreview(item.summary) : item.summary)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
             }
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
+                    Text("\(item.sourceTag) · \(item.projectFolderName) · \(item.displayRefLabel ?? "")")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if actionItemKind(item) == .evalRule {
                         evalRuleExpandedContent(item)
                     } else {
@@ -890,7 +1015,11 @@ public struct ActionItemsCardView: View {
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if item.isLearningTopic || item.isProposal {
+                        specializedMetadata(for: item)
+                    }
                     if actionItemKind(item) != .evalRule, let command = item.command {
+
                         Text("$ \(command)")
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
@@ -909,6 +1038,54 @@ public struct ActionItemsCardView: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .captureDashboardGeometry(id: "action-\(item.id)", role: "actionRow")
+    }
+
+    private func actionRowTitle(_ item: DashboardActionItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.gap / 2) {
+            Text(item.priority.label).font(.caption2.weight(.bold)).fixedSize()
+                .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
+            Text(item.title).font(.body.weight(.semibold)).strikethrough(item.isCompleted)
+                .fixedSize(horizontal: false, vertical: true)
+                .captureDashboardGeometry(id: "title-\(item.id)", role: "actionTitle")
+        }
+    }
+
+    private func compactDecisionButtons(_ item: DashboardActionItem) -> some View {
+        HStack(spacing: Space.gap / 2) {
+            if !item.isCompleted && (item.isLearningTopic || item.isProposal) {
+                Button(decisionLabel(item.status == .inProgress ? "Done" : "Approve")) {
+                    store.submitActionItemDecision(item, decision: item.status == .inProgress ? "Done" : "Approve", onToggleDone: onToggleDone)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.small).frame(minHeight: 28)
+                .captureDashboardGeometry(id: "primary-\(item.id)", role: "button")
+            }
+            Button { expandedActionID = expandedActionID == item.id ? nil : item.id } label: {
+                Image(systemName: expandedActionID == item.id ? "chevron.up" : "chevron.down")
+                    .frame(minWidth: 28, minHeight: 28)
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+            .captureDashboardGeometry(id: "drawer-\(item.id)", role: "button")
+        }.fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func specializedMetadata(for item: DashboardActionItem) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let whyNow = item.whyNow { Label(whyNow, systemImage: "questionmark.circle") }
+            if let sourceURI = item.sourceURI {
+                Label(DashboardL10n.format("dashboard.actions.source_format", "来源: %@", sourceURI), systemImage: "link")
+            }
+            if !item.coverageRefs.isEmpty {
+                Label(DashboardL10n.format("dashboard.actions.coverage_format", "覆盖: %@", item.coverageRefs.joined(separator: ", ")), systemImage: "checkmark.shield")
+            }
+            if let evidence = item.evidence { Label(evidence, systemImage: "chart.bar.doc.horizontal") }
+            if let freshness = item.freshness { Label(freshness, systemImage: "clock") }
+            Text(item.isLearningTopic ? DashboardL10n.tr("dashboard.learning.boundary", "批准后由后台启动 knowledge-digest；不自动发博客，不同步 design-studio。") : DashboardL10n.tr("dashboard.proposal.receipt_note", "审批记录 Owner 意图，不代表任务已完成；后续权威 Done/Dismiss 仍可生效。"))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .font(.caption)
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     @ViewBuilder
@@ -1029,10 +1206,10 @@ public struct ActionItemsCardView: View {
                         onToggleDone: onToggleDone
                     )
                 } label: {
-                    Text(option)
+                    Text(decisionLabel(option))
                         .lineLimit(1)
                 }
-                .help(option)
+                .help(decisionLabel(option))
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .frame(minHeight: 28)
@@ -1116,6 +1293,16 @@ public struct ActionItemsCardView: View {
         }
     }
 
+    private func decisionLabel(_ option: String) -> String {
+        switch option {
+        case "Approve": return DashboardL10n.tr("dashboard.decision.approve", "Approve")
+        case "Snooze 7d": return DashboardL10n.tr("dashboard.decision.snooze_7d", "Snooze 7d")
+        case "Done": return DashboardL10n.tr("dashboard.decision.done", "Done")
+        case "Dismiss": return DashboardL10n.tr("dashboard.decision.dismiss", "Dismiss")
+        default: return option
+        }
+    }
+
     @ViewBuilder
     private func actionInlineDecisionBar(_ item: DashboardActionItem) -> some View {
         let options = item.decisionOptions
@@ -1157,7 +1344,7 @@ public struct ActionItemsCardView: View {
             HStack(spacing: 8) {
                 Picker(DashboardL10n.tr("dashboard.actions.decision_label", "Decision"), selection: decisionBinding) {
                     ForEach(options, id: \.self) { option in
-                        Text(option).tag(option)
+                        Text(decisionLabel(option)).tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -1234,6 +1421,7 @@ public struct ActionItemsCardView: View {
             }
         }
     }
+
 }
 
 public struct RankingTableCardView: View {
@@ -1560,6 +1748,7 @@ public struct AIDashMacWorkspaceView: View {
                 onClearSelection: { store.clearChartSelection() }
             )
             RankingTableCardView(store: store)
+            SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary)
         case .actionItems:
             KPISummaryCardView(metrics: store.effectiveKPIMetrics)
             ActionItemsCardView(store: store, onToggleDone: onToggleDone)
@@ -1618,6 +1807,8 @@ public struct AIDashMacWorkspaceView: View {
                 RankingTableCardView(store: store)
             case .actionItems:
                 ActionItemsCardView(store: store, onToggleDone: onToggleDone)
+            case .skills:
+                SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary)
             }
         }
     }

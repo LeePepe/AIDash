@@ -75,6 +75,61 @@ struct JobActionsBridgeTests {
         #expect(encodedCrossDevice?["url"] as? String == "https://linear.app/tianpeili/issue/TIA-76")
     }
 
+    @Test("Metadata fields round-trip with snake-case wire keys and remain absent-safe")
+    func metadataRoundTripAndLegacyDecode() throws {
+        let value = JobActionsAction(
+            id: "learning-topic-1", jobID: "aidata-digest", title: "Learn", descriptionMd: "Why now",
+            source: "Learning", priority: "P1", ref: "learning-topic://topic-1",
+            domain: "decisions", topicKey: "topic-1", originRef: "learning-topic://topic-1",
+            revision: "3", whyNow: "New gap", sourceURI: "https://example.invalid/source",
+            coverageRefs: ["vault://existing"], evidence: "sample=4", freshness: "7d CST",
+            controls: []
+        )
+        let encoder = JSONEncoder()
+        let encoded = try JSONSerialization.jsonObject(with: encoder.encode(value)) as? [String: Any]
+        #expect(encoded?["topic_key"] as? String == "topic-1")
+        #expect(encoded?["origin_ref"] as? String == "learning-topic://topic-1")
+        #expect(encoded?["why_now"] as? String == "New gap")
+        #expect(encoded?["source_uri"] as? String == "https://example.invalid/source")
+        #expect(encoded?["coverage_refs"] as? [String] == ["vault://existing"])
+        #expect(try JSONDecoder().decode(JobActionsAction.self, from: encoder.encode(value)) == value)
+
+        let legacy = Data("""
+        {"id":"legacy","jobID":"aidata-digest","title":"Legacy","description":"Old","controls":[]}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(JobActionsAction.self, from: legacy)
+        #expect(decoded.domain == nil)
+        #expect(decoded.topicKey == nil)
+        #expect(decoded.coverageRefs.isEmpty)
+    }
+
+    @Test("Producer numeric and opaque revisions decode, round-trip and scope receipts to a fresh revision")
+    func producerRevisionCompatibility() throws {
+        let base = #"{"id":"topic","jobID":"aidata-digest","title":"Learn","description":"Gap","scope":"personal","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]}]"#
+        let decoder = JSONDecoder()
+        for (wire, expected) in [("7", "7"), (#""r:007-opaque""#, "r:007-opaque"), ("null", nil)] {
+            let action = try decoder.decode(JobActionsAction.self, from: Data((base + ",\"revision\":" + wire + "}").utf8))
+            #expect(action.revision == expected)
+            #expect(action.scope == "personal")
+            #expect(try decoder.decode(JobActionsAction.self, from: JSONEncoder().encode(action)) == action)
+        }
+        let legacy = try decoder.decode(JobActionsAction.self, from: Data((base + "}").utf8))
+        #expect(legacy.revision == nil)
+        let current = try decoder.decode(JobActionsAction.self, from: Data((base + ",\"revision\":8}").utf8))
+        let approve = [JobActionsResponse(controlID: "decision", value: "Approve")]
+        func receipt(revision: String?) throws -> UserEvent {
+            let data = try JSONEncoder().encode(JobActionsValidation.receiptResponses(approve, revision: revision))
+            let text = try #require(String(data: data, encoding: .utf8))
+            return UserEvent(id: UUID().uuidString, timestamp: Date(), device: "fixture",
+                             cardId: "scheduled-pulse/aidata-digest", action: .acknowledgeJobAction,
+                             itemRef: "aidata-digest:topic|\(text)", cardType: "scheduledPulse")
+        }
+        let prior = try receipt(revision: "7")
+        #expect(JobActionsValidation.acknowledgement(in: [prior], for: current, registeredJobIDs: jobs) == nil)
+        #expect(JobActionsValidation.acknowledgement(in: [try receipt(revision: nil)], for: legacy, registeredJobIDs: jobs) != nil)
+        #expect(JobActionsValidation.acknowledgement(in: [try receipt(revision: "8")], for: current, registeredJobIDs: jobs) != nil)
+    }
+
     @Test("Linear-native attributes round-trip while legacy payloads still decode")
     func linearNativeAttributesRoundTrip() throws {
         let parent = JobActionsAction.ParentIssue(
@@ -136,6 +191,7 @@ struct JobActionsBridgeTests {
             url: "https://github.com/acme/repo/pull/1", controls: []
         )
         try JobActionsValidation.validateAction(noResponseAction)
+
     }
 
     @Test("Exact fields, Unicode bounds, duplicates, unknown controls, options and noncanonical selections reject")

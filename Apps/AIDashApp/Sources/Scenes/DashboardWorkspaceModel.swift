@@ -8,6 +8,8 @@ import SQLite3
 import SwiftUI
 import AIDashCore
 
+public typealias ScheduledJobExecution = @Sendable (ScheduledPulseJobID) async -> Bool
+
 @MainActor
 @Observable
 // swiftlint:disable:next type_body_length
@@ -39,6 +41,9 @@ public final class DashboardWorkspaceStore {
     public var lastCopiedScheduledJobID: ScheduledPulseJobID?
     public var scheduledPulseTab: ScheduledPulsePageTab = .overview
     public var selectedFrameworkJobID: ScheduledPulseJobID?
+    public var selectedActionDomain: DashboardActionDomain?
+    public private(set) var runningJobIDs: Set<ScheduledPulseJobID> = []
+    public var scheduledJobExecution: ScheduledJobExecution
     public var scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Bool)?
     public var acknowledgedScheduledActionIDs: Set<String> = [] {
         didSet {
@@ -47,20 +52,16 @@ public final class DashboardWorkspaceStore {
                 ScheduledJobFrameworkEntry(
                     definition: entry.definition,
                     state: entry.state,
-                    actions: entry.actions.filter { !$0.isAcknowledged(in: acknowledgedScheduledActionIDs) }
+                    actions: entry.actions.filter { !$0.isAcknowledged(in: acknowledgedScheduledActionIDs) },
+                    launchdStatus: entry.launchdStatus
                 )
             }
             scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(
                 capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
                 entries: entries
             )
-            for idx in actionItems.indices {
-                if let ackKey = actionItems[idx].acknowledgementKey,
-                   acknowledgedScheduledActionIDs.contains(ackKey) {
-                    actionItems[idx].isCompleted = true
-                    actionItems[idx].status = .done
-                }
-            }
+            // A recorded acknowledgement is a receipt, not authoritative task completion.
+            // The producer's later revision is the source of truth for Done/Dismiss.
         }
     }
     public var availableDates: [String] = DashboardWorkspaceStore.recentDateStrings()
@@ -126,11 +127,13 @@ public final class DashboardWorkspaceStore {
     public init(
         statusProvider: (any MenuBarSystemStatusProviding)? = nil,
         deferInitialRefresh: Bool = false,
+        scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution,
         topicCatalog: [DashboardTopic]? = nil,
         sessionBindings: [String: DashboardM2SessionBinding]? = nil,
         m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil
     ) {
         self.statusProvider = statusProvider ?? LiveMenuBarSystemStatusProvider()
+        self.scheduledJobExecution = scheduledJobExecution
         self.topicCatalog = topicCatalog ?? (LiveDashboardTelemetryReader.isLiveEnvironment ? LiveDashboardTelemetryReader.loadTopicCatalog() : DashboardTopicCatalog.builtInTopics)
         self.topicSessionBindings = sessionBindings ?? Self.defaultTopicBindings(for: self.topicCatalog)
         self.m2DispatchExecutor = m2DispatchExecutor
@@ -146,11 +149,14 @@ public final class DashboardWorkspaceStore {
         actionItems: [DashboardActionItem]? = nil,
         rankingRows: [AgentRankingRow]? = nil,
         scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil,
+        liveEfficiencySummary: LiveDashboardTelemetryReader.LiveEfficiencySummary? = nil,
+        scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution,
         topicCatalog: [DashboardTopic]? = nil,
         sessionBindings: [String: DashboardM2SessionBinding]? = nil,
         m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil
     ) {
         self.statusProvider = LiveMenuBarSystemStatusProvider(tokenDatabasePaths: CLITokenDatabasePaths())
+        self.scheduledJobExecution = scheduledJobExecution
         self.topicCatalog = topicCatalog ?? DashboardTopicCatalog.builtInTopics
         self.topicSessionBindings = sessionBindings ?? Self.defaultTopicBindings(for: self.topicCatalog)
         self.m2DispatchExecutor = m2DispatchExecutor
@@ -165,6 +171,7 @@ public final class DashboardWorkspaceStore {
             customActions: actionItems,
             customRankings: rankingRows
         )
+        if let liveEfficiencySummary { self.liveEfficiencySummary = liveEfficiencySummary }
     }
 
     private static func defaultTopicBindings(for topics: [DashboardTopic]) -> [String: DashboardM2SessionBinding] {
@@ -320,29 +327,63 @@ public final class DashboardWorkspaceStore {
         return outcome
     }
 
+    public func runScheduledJobNow(_ id: ScheduledPulseJobID) {
+        guard !runningJobIDs.contains(id),
+              ScheduledPulseRegistry.job(for: id)?.isLive == true else { return }
+        runningJobIDs.insert(id)
+        let execution = scheduledJobExecution
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) { await execution(id) }.value
+            _ = result
+            guard let self else { return }
+            runningJobIDs.remove(id)
+            refreshFromProvider()
+        }
+    }
+
+    nonisolated public static func productionScheduledJobExecution(_ id: ScheduledPulseJobID) async -> Bool {
+        guard let definition = ScheduledPulseRegistry.job(for: id), definition.isLive,
+              let interpreter = definition.interpreterPath,
+              let program = definition.programPath(homeURL: HerdrSocketClient.currentUserHomeDirectoryURL()),
+              let entrypoint = definition.entrypointPath(homeURL: HerdrSocketClient.currentUserHomeDirectoryURL()) else {
+            return false
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: entrypoint)
+        process.arguments = [id.rawValue, interpreter, program]
+        process.standardOutput = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
+        process.standardError = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
     public func acknowledgeScheduledAction(
         _ action: ScheduledJobAction,
         responses: [ScheduledJobActionResponse]
-    ) {
+    ) -> Bool {
         if let scheduledActionWriter {
-            guard scheduledActionWriter(action, responses) else { return }
+            guard scheduledActionWriter(action, responses) else { return false }
         }
         acknowledgedScheduledActionIDs.insert(action.acknowledgementKey)
         let entries = scheduledJobFrameworkSnapshot.entries.map { entry in
             ScheduledJobFrameworkEntry(
                 definition: entry.definition,
                 state: entry.state,
-                actions: entry.actions.filter { $0.acknowledgementKey != action.acknowledgementKey }
+                actions: entry.actions.filter { $0.acknowledgementKey != action.acknowledgementKey },
+                launchdStatus: entry.launchdStatus
             )
         }
         scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(
             capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
             entries: entries
         )
-        for idx in actionItems.indices where actionItems[idx].acknowledgementKey == action.acknowledgementKey {
-            actionItems[idx].isCompleted = true
-            actionItems[idx].status = .done
-        }
+        return true
     }
 
     public func submitActionItemDecision(
@@ -371,7 +412,8 @@ public final class DashboardWorkspaceStore {
                 jobID: jobID,
                 title: item.title,
                 descriptionMd: item.summary,
-                controls: effectiveControls
+                controls: effectiveControls,
+                revision: item.revision
             )
             var values: [String: String] = ["decision": decision]
             if !trimmedNote.isEmpty || effectiveControls.contains(where: { $0.id == "note" }) {
@@ -381,17 +423,15 @@ public final class DashboardWorkspaceStore {
                 values: values,
                 selectedValues: targets.isEmpty ? [:] : ["targets": targets]
             )
-            acknowledgeScheduledAction(scheduledAction, responses: responses)
+            guard acknowledgeScheduledAction(scheduledAction, responses: responses) else { return }
         }
         if let idx = actionItems.firstIndex(where: { $0.id == item.id }) {
-            actionItems[idx].isCompleted = true
-            actionItems[idx].status = .done
+            let terminalDecision = ["Done", "Dismiss", "done", "dismissed", "dismiss"].contains(decision)
+            actionItems[idx].isCompleted = terminalDecision
+            actionItems[idx].status = terminalDecision ? .done : .inProgress
             let updated = actionItems[idx]
             if let cardId = updated.backingCardId, let itemRef = updated.backingItemRef {
-                onToggleDone?(cardId, itemRef, true)
-            }
-            if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
-                LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
+                onToggleDone?(cardId, itemRef, terminalDecision)
             }
         }
     }
@@ -616,6 +656,11 @@ public final class DashboardWorkspaceStore {
             if item.id.hasPrefix("EVAL-") { persistEvalDecision(itemID: item.id, decision: decision, note: note) }
             if item.jobID == .myPRSupervisor, item.id.hasPrefix("D") { persistMyPRSupervisorDecision(itemID: item.id, decision: decision, note: note) }
             submitActionItemDecision(item, decision: decision, note: note, onToggleDone: onToggleDone)
+            if let index = actionItems.firstIndex(where: { $0.id == item.id }) {
+                actionItems[index].isCompleted = true
+                actionItems[index].status = .done
+                onToggleDone?(actionItems[index].backingCardId ?? "", actionItems[index].backingItemRef ?? "", true)
+            }
             stagedTopicDecisions.removeValue(forKey: item.id)
         }
         let pane = topicSessionBindings[topicID]?.paneID ?? "NEW_M2"
@@ -755,12 +800,9 @@ public final class DashboardWorkspaceStore {
             cliEntries: derivedCLIs,
             acknowledgedActionIDs: acknowledgedScheduledActionIDs
         )
-        for index in nextActions.indices {
-            if preservedCompletedIDs.contains(nextActions[index].id)
-                || (nextActions[index].acknowledgementKey.map { acknowledgedScheduledActionIDs.contains($0) } ?? false) {
-                nextActions[index].isCompleted = true
-                nextActions[index].status = .done
-            }
+        for index in nextActions.indices where preservedCompletedIDs.contains(nextActions[index].id) {
+            nextActions[index].isCompleted = true
+            nextActions[index].status = .done
         }
         actionItems = nextActions.filter { !Self.isArchivedActionItem($0) }
         if !availableLinearActionFilters.contains(where: { $0.id == selectedLinearActionFilter }) {
@@ -817,9 +859,6 @@ public final class DashboardWorkspaceStore {
         let updated = actionItems[idx]
         if let cardId = updated.backingCardId, let itemRef = updated.backingItemRef {
             onToggleDone?(cardId, itemRef, updated.isCompleted)
-        }
-        if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
-            LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
         }
     }
 
@@ -996,6 +1035,7 @@ public final class DashboardWorkspaceStore {
         let filtered = actionItems.filter { item in
             guard matchesActiveCLIFilter(item.cliFilter),
                   matchesChartCategory(item.cliFilter, categoryName: item.sourceTag),
+                  selectedActionDomain == nil || item.resolvedDomain == selectedActionDomain,
                   matchesLinearActionFilter(item),
                   matchesSelectedFrameworkJob(item) else {
                 return false

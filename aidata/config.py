@@ -217,6 +217,8 @@ GITHUB_PR_REPOS: tuple[str, ...] = ()
 # Repositories sampled for Actions runs, governance, and release delivery.
 # Keep the tracked default public and identity-free; a local override may
 # replace this tuple with the operator's current monitoring set.
+# Tracked defaults stay identity-free. Deployment operators may set the
+# personal allowlist in ignored config_local.py.
 GITHUB_CI_REPOS: tuple[str, ...] = ()
 
 # ---------------------------------------------------------------------------
@@ -229,6 +231,8 @@ GITHUB_CI_REPOS: tuple[str, ...] = ()
 # adapter degrades to a no-op when neither resolves (ADR-23).
 # ---------------------------------------------------------------------------
 AIDASH_BIN_FIXED = str(HOME / ".local" / "bin" / "aidash")
+COPILOT_SESSION_DB = HOME / ".copilot" / "session-store.db"
+
 AIDASH_BIN_GLOB = (
     "Library/Developer/Xcode/DerivedData/"
     "AIDash-*/Build/Products/Debug/aidash"
@@ -310,6 +314,7 @@ SOURCES = (
     "ado_pr",
     "state_db",
     "hermes_tools",
+    "copilot_cli",
     "hermes_messages",
     "claude_prompts",
     "codex_prompts",
@@ -354,6 +359,7 @@ SCHEDULED_SOURCES = (
     "ado_pr",
     "state_db",
     "hermes_tools",
+    "copilot_cli",
     "hermes_messages",
     "memory_claude",
     "memory_hermes_db",
@@ -412,6 +418,7 @@ def clean_path(source: str) -> Path:
 # is human-facing state, not telemetry. One JSON object per line; see
 # L5_apps/digest/proposals.py for the schema.
 PROPOSALS_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "proposals.jsonl"
+LEARNING_QUEUE_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "learning_queue.jsonl"
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,79 @@ def _no_proposals():
 
 
 @pytest.mark.unit
+def test_learning_export_preserves_producer_metadata_after_linear_transfer(tmp_path):
+    import json
+
+    from L5_apps.digest import event_bridge
+    from L5_apps.digest.todo_sync_provider import LinearTodoSyncProvider
+
+    proposals = tmp_path / "proposals.jsonl"
+    record = {
+        "id": "learning-topic", "ts": "2026-11-12T00:00:00Z", "agent": "knowledge-digest",
+        "title": "What is the uncovered mechanism?", "detail": "Concrete cited evidence", "priority": "high",
+        "status": "pending", "source": "Learning", "scope": "personal", "learning_state": "proposed",
+        "ref": "learning-topic://topic", "origin_ref": "learning-topic://topic", "topic_key": "topic",
+        "revision": 3, "why_now": "A real coverage gap", "source_uri": "https://example.test/article",
+        "coverage_refs": ["concepts/prior.md"], "evidence": "commit abc123", "freshness": "7d CST · observed 2026-11-11",
+        "window_cst": "7d", "source_as_of": "2026-11-11", "sample_size": 2, "coverage_status": "partial",
+    }
+    proposals.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    script = tmp_path / "linear.py"
+    script.write_text("# fixture only")
+    statuses = []
+    provider = LinearTodoSyncProvider(script_path=script,
+        idea_runner=lambda *_: (0, "TIA-123"), status_runner=lambda ident, state: statuses.append((ident, state)) or 0)
+    item = inbox_mod.InboxItem(record["title"], "high", "待决策", ref=record["ref"], category="decision", source="Learning")
+    actions = inbox_mod.build_job_actions([item], proposals_path=proposals, provider=provider, sync_triage=True)
+    action = actions[0]
+    assert action["ref"] == "linear://TIA-123"
+    assert action["revision"] == 4
+    for key in ("topic_key", "origin_ref", "why_now", "source_uri", "coverage_refs", "evidence", "freshness", "scope", "source_as_of", "sample_size"):
+        assert action[key] == record[key]
+    transferred = json.loads(proposals.read_text().splitlines()[-1])
+    assert transferred["learning_state"] == "transferred"
+    assert transferred["source"] == "Learning"
+    assert transferred["why_now"] == record["why_now"]
+    cached = inbox_mod.build_job_actions([inbox_mod.InboxItem(record["title"], "high", "计划", ref="linear://TIA-123", source="Linear")], proposals_path=proposals)[0]
+    assert cached["topic_key"] == "topic" and cached["source"] == "Learning"
+    result = event_bridge.process_user_events([{
+        "id": "decision-after-transfer", "revision": action["revision"], "action": "acknowledgeJobAction",
+        "cardType": "scheduledPulse", "cardId": "scheduled-pulse/aidata-digest",
+        "itemRef": 'aidata-digest:linear-TIA-123|[{"controlID":"decision","value":"Approve"}]',
+    }], proposals_path=proposals, provider=provider, local_todos_path=tmp_path / "todos.jsonl")
+    assert result["promoted"] == 1
+    assert statuses == [("TIA-123", "Todo")]
+    assert event_bridge.read_all_latest(proposals)[record["id"]].learning_state == "approved"
+
+
+@pytest.mark.unit
+def test_transfer_does_not_overwrite_newer_owner_decision(tmp_path):
+    import json
+
+    from L5_apps.digest.proposals import append_jsonl_locked, jsonl_lock
+    from L5_apps.digest.todo_sync_provider import LinearTodoSyncProvider
+
+    proposals = tmp_path / "proposals.jsonl"
+    record = {"id": "learning-topic", "ts": "2026-11-12T00:00:00Z", "agent": "knowledge-digest",
+        "title": "Explore one question", "detail": "Concrete evidence", "priority": "high", "status": "pending",
+        "ref": "learning-topic://topic", "topic_key": "topic", "source": "Learning", "scope": "personal", "revision": 1}
+    proposals.write_text(json.dumps(record) + "\n")
+    newer = {**record, "revision": 2, "status": "learned", "learning_state": "learned", "outcome": "owner_reported"}
+    script = tmp_path / "linear.py"
+    script.write_text("# fixture only")
+
+    def promoted(*_):
+        with jsonl_lock(proposals):
+            append_jsonl_locked(proposals, newer)
+        return 0, "TIA-123"
+
+    provider = LinearTodoSyncProvider(script_path=script, idea_runner=promoted)
+    item = inbox_mod.InboxItem(record["title"], "high", "待决策", ref=record["ref"], source="Learning")
+    assert inbox_mod.build_job_actions([item], proposals_path=proposals, provider=provider, sync_triage=True) == []
+    assert json.loads(proposals.read_text().splitlines()[-1]) == newer
+
+
+@pytest.mark.unit
 def test_aggregates_stalls_and_issues(fake_queries):
     items = build_inbox(0.0, proposals_reader=_no_proposals, log_reader=_no_logs)
     buckets = {it.bucket for it in items}
@@ -222,8 +295,11 @@ def test_old_cron_log_line_is_not_actionable(tmp_path):
 
 @pytest.mark.unit
 def test_recent_embedded_cron_timestamp_is_actionable(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: UP017 - Python 3.9 compatibility
     log = tmp_path / "cron-errors.log"
-    log.write_text("2026-11-05T04:00:00Z — recent failure\n", encoding="utf-8")
+    log.write_text(f"{recent_iso} — recent failure\n", encoding="utf-8")
     old = time.time() - 8 * 24 * 60 * 60
     os.utime(log, (old, old))
     assert "recent failure" in inbox_mod._default_log_reader(log)
@@ -290,6 +366,7 @@ def test_mail_and_work_watch_signals_surface_in_build_inbox(tmp_path, monkeypatc
         log_reader=_no_logs,
         mail_db_path=mail_db,
         teams_db_path=teams_db,
+        personal_only=False,
     )
     refs = [it.ref for it in items]
     titles = " | ".join(it.title for it in items)
@@ -329,3 +406,50 @@ def test_inbox_surfaces_skill_roi_proposals_and_retro_signals(monkeypatch):
         ]
     )
     assert props[0].ref == "skill-roi://my-designer"
+
+
+@pytest.mark.unit
+def test_personal_only_filter_strips_bing_flightbook_and_maps_learning_four_domains(monkeypatch):
+    monkeypatch.setattr(
+        inbox_mod.serve,
+        "run_query",
+        lambda name, params=None: (
+            [
+                ("TIA-10", "[Bing] Work search pipeline", "todo", "high"),
+                ("TIA-11", "[FlightBook] Work travel bot", "blocked", "high"),
+                ("TIA-12", "Personal AIDash 4-domain UI", "in_progress", "medium"),
+            ],
+            ["identifier", "title", "status", "priority"],
+        )
+        if name == "inbox/pending-issues"
+        else ([], []),
+    )
+    learning_prop = Proposal(
+        "learning-jp-mixed-script-line-breaking",
+        "2026-11-12T00:00:00Z",
+        "knowledge-digest",
+        "日文/CJK 与拉丁文混排中，字体回退与行首行末禁则如何共同避免断行错误？",
+        "为什么现在学：repos/awesome-cjk-design-md · 来源依据：https://github.com/kzhrknt/awesome-design-md-jp",
+        "medium",
+        "pending",
+        ref="learning-topic://jp-mixed-script-line-breaking",
+        source="Learning",
+        scope="personal",
+        topic_key="jp-mixed-script-line-breaking",
+    )
+    items = build_inbox(0.0, proposals_reader=lambda: [learning_prop], log_reader=_no_logs)
+    titles = " | ".join(it.title for it in items)
+    assert "[Bing]" not in titles
+    assert "[FlightBook]" not in titles
+    assert "Personal AIDash 4-domain UI" in titles
+    assert any(it.source == "Learning" and it.bucket == "待决策" for it in items)
+
+    actions = inbox_mod.build_job_actions(items, proposals_path=None)
+    by_id = {a["id"]: a for a in actions}
+    assert "learning-jp-mixed-script-line-breaking" in by_id
+    l_act = by_id["learning-jp-mixed-script-line-breaking"]
+    assert l_act["source"] == "Learning"
+    assert l_act["domain"] == "decisions"
+    assert l_act["status"] == "triage"
+    assert l_act["controls"][0]["options"] == ["Approve", "Snooze 7d", "Done", "Dismiss"]
+    assert by_id["linear-TIA-12"]["domain"] == "planned"

@@ -222,20 +222,7 @@ private struct StarFeedbackScope: View {
                     writer.acknowledgeScheduledJobAction(action: action, responses: responses)
                 },
                 acknowledgedScheduledActionIDs: Set(scheduledActionEvents.compactMap { event in
-                    guard let head = event.itemRef?.split(separator: "|", maxSplits: 1).first.map(String.init) else {
-                        return nil
-                    }
-                    if head.contains(":") {
-                        return head
-                    }
-                    let prefix = "scheduled-pulse/"
-                    if event.cardId.hasPrefix(prefix) {
-                        let jobRaw = String(event.cardId.dropFirst(prefix.count))
-                        if !jobRaw.isEmpty {
-                            return "\(jobRaw):\(head)"
-                        }
-                    }
-                    return head
+                    ScheduledJobAction.receiptKey(itemRef: event.itemRef, cardID: event.cardId)
                 })
             )
             #else

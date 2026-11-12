@@ -10,15 +10,20 @@ import Testing
 @MainActor
 @Suite("AIDash Job Framework")
 struct ScheduledPulseTests {
-    @Test("registry is exactly the three live framework jobs")
+    private var fixtureJobs: [ScheduledJobDefinition] {
+        ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-scheduled-pulse"), fileExists: { path in
+            path.hasSuffix("aidata_digest_run.sh")
+        })
+    }
+
+    @Test("registry reserves unavailable external prechecks")
     func registryShape() {
-        #expect(ScheduledPulseRegistry.jobs.map(\.id) == [.myPRSupervisor, .prAutoReview, .aidataDigest])
-        #expect(ScheduledPulseRegistry.liveJobs.count == 3)
-        #expect(ScheduledPulseRegistry.reservedJobs.isEmpty)
-        #expect(ScheduledPulseRegistry.jobs.allSatisfy { $0.isLive })
-        #expect(ScheduledPulseRegistry.job(for: .myPRSupervisor)?.displayName == "我的 PR")
-        #expect(ScheduledPulseRegistry.job(for: .prAutoReview)?.displayName == "特定人 PR")
-        #expect(ScheduledPulseRegistry.job(for: .aidataDigest)?.displayName == "每日简报")
+        #expect(fixtureJobs.map(\.id) == [.myPRSupervisor, .prAutoReview, .aidataDigest])
+        #expect(fixtureJobs.contains { $0.id == .aidataDigest && $0.isLive })
+        #expect(fixtureJobs.filter { !$0.isLive }.map(\.id) == [.myPRSupervisor, .prAutoReview])
+        #expect(fixtureJobs.first { $0.id == .myPRSupervisor }?.displayName == "我的 PR")
+        #expect(fixtureJobs.first { $0.id == .prAutoReview }?.displayName == "特定人 PR")
+        #expect(fixtureJobs.first { $0.id == .aidataDigest }?.displayName == "每日简报")
     }
 
     @Test("live plists use absolute programs and interpreter ProgramArguments")
@@ -27,11 +32,12 @@ struct ScheduledPulseTests {
         let expected: [(ScheduledPulseJobID, String, String)] = [
             (.myPRSupervisor, "/usr/bin/python3", "/Users/tester/Development/handoff/my-pr-supervisor/precheck.py"),
             (.prAutoReview, "/usr/bin/python3", "/Users/tester/Development/handoff/pr-auto-review/precheck.py"),
-            (.aidataDigest, "/bin/zsh", "/Users/tester/Development/AIDash/aidata/scripts/aidata_digest_run.sh")
+            (.aidataDigest, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/aidata_digest_run.sh")
         ]
         let wrapper = "/Users/tester/Development/AIDash/scripts/scheduled-job-entrypoint.sh"
+        let definitions = ScheduledPulseRegistry.jobs(homeURL: home, fileExists: { _ in true })
         for (id, interpreter, program) in expected {
-            let definition = try #require(ScheduledPulseRegistry.job(for: id))
+            let definition = try #require(definitions.first(where: { $0.id == id }))
             let data = try #require(ScheduledPulseLaunchdInstaller.plistData(for: definition, homeURL: home))
             let plist = try #require(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
             #expect(plist["Label"] as? String == definition.launchAgentLabel)
@@ -159,8 +165,8 @@ struct ScheduledPulseTests {
             ScheduledJobFrameworkSnapshot(
                 capturedAt: .now,
                 entries: [
-                    ScheduledJobFrameworkEntry(definition: ScheduledPulseRegistry.jobs[0], state: nil, actions: [action1]),
-                    ScheduledJobFrameworkEntry(definition: ScheduledPulseRegistry.jobs[1], state: nil, actions: [action2])
+                    ScheduledJobFrameworkEntry(definition: fixtureJobs[0], state: nil, actions: [action1]),
+                    ScheduledJobFrameworkEntry(definition: fixtureJobs[1], state: nil, actions: [action2])
                 ]
             )
         )
@@ -201,7 +207,7 @@ struct ScheduledPulseTests {
 
     @Test("owned start and stop use exact labels and never remove the plist")
     func startStopLabels() throws {
-        let job = try #require(ScheduledPulseRegistry.job(for: .myPRSupervisor))
+        let job = try #require(ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/Users/tester"), fileExists: { _ in true }).first(where: { $0.id == .myPRSupervisor }))
         var calls: [[String]] = []
         var removed = false
         let installer = ScheduledPulseLaunchdInstaller(
@@ -300,7 +306,7 @@ struct ScheduledPulseTests {
             descriptionMd: "确认",
             controls: []
         )
-        let definition = ScheduledPulseRegistry.jobs[0]
+        let definition = fixtureJobs[0]
         store.updateScheduledJobFrameworkSnapshot(
             ScheduledJobFrameworkSnapshot(
                 capturedAt: .now,
@@ -309,6 +315,49 @@ struct ScheduledPulseTests {
         )
         store.acknowledgedScheduledActionIDs = ["my-pr-supervisor:initial-action"]
         #expect(store.scheduledJobFrameworkSnapshot.unacknowledgedActions.isEmpty)
+    }
+
+    @Test("Run Now uses fixed argv, drains large output, and refreshes after completion")
+    func runNowUsesFixedArgvAndCompletes() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-run-now-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let script = home.appendingPathComponent("fake-entrypoint.sh")
+        let argvFile = home.appendingPathComponent("argv.txt")
+        try """
+        printf '%s\\n' "$@" > "$HOME/argv.txt"
+        yes O | head -c 200000 >/dev/stdout
+        yes E | head -c 200000 >/dev/stderr
+        """.write(to: script, atomically: true, encoding: .utf8)
+        let completed = AsyncGate()
+        let store = DashboardWorkspaceStore(
+            snapshot: Self.menuSnapshot(),
+            cliEntries: [],
+            rankingRows: [],
+            scheduledJobExecution: { id in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/bash")
+                process.arguments = [script.path, id.rawValue, "/bin/bash", "/tmp/fixed-program.sh"]
+                process.environment = ["HOME": home.path]
+                process.standardOutput = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
+                process.standardError = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    await completed.open()
+                    return process.terminationStatus == 0
+                } catch {
+                    await completed.open()
+                    return false
+                }
+            }
+        )
+        store.runScheduledJobNow(.aidataDigest)
+        await completed.wait()
+        for _ in 0..<20 where store.runningJobIDs.contains(.aidataDigest) { await Task.yield() }
+        let argv = try String(contentsOf: argvFile, encoding: .utf8).split(separator: "\n").map(String.init)
+        #expect(argv == ["aidata-digest", "/bin/bash", "/tmp/fixed-program.sh"])
+        #expect(!store.runningJobIDs.contains(.aidataDigest))
     }
 
     @Test("same-id fires coalesce without queueing")
@@ -329,7 +378,7 @@ struct ScheduledPulseTests {
         var opens = 0
         let snapshot = ScheduledJobFrameworkSnapshot(
             capturedAt: .now,
-            entries: ScheduledPulseRegistry.jobs.map {
+            entries: fixtureJobs.map {
                 ScheduledJobFrameworkEntry(
                     definition: $0,
                     state: ScheduledJobState(id: $0.id, lastResult: $0.id == .prAutoReview ? .failed : .succeeded)
@@ -361,7 +410,8 @@ struct ScheduledPulseTests {
             now: Date(timeIntervalSince1970: 1_000),
             launchctl: { args in
                 .init(arguments: args, terminationStatus: 0, stdout: output, stderr: "", launchError: nil)
-            }
+            },
+            registry: ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-launchd"), fileExists: { _ in true })
         )
         let status = try #require(snapshot.jobs.first)
         #expect(status.isLoaded)
@@ -393,7 +443,8 @@ struct ScheduledPulseTests {
                     ? "state = running\npid = 12\nlast exit code = 7\nlast exit time = 1970-01-01T00:15:00Z"
                     : "state = running\nlast exit code = 0"
                 return .init(arguments: args, terminationStatus: 0, stdout: output, stderr: "", launchError: nil)
-            }
+            },
+            registry: ScheduledPulseRegistry.jobs(homeURL: home, fileExists: { _ in true })
         )
         let partial = try #require(snapshot.entries.first(where: { $0.id == .myPRSupervisor }))
         let skipped = try #require(snapshot.entries.first(where: { $0.id == .prAutoReview }))

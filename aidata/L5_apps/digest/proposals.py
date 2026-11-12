@@ -25,7 +25,11 @@ proposal must not break the digest.
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +54,17 @@ class Proposal:
     stack_top_symbol: str = ""
     recommended_layer: str = ""
     verify_cmd: str = ""
+    source: str = ""
+    scope: str = "personal"
+    topic_key: str = ""
+    source_uri: str = ""
+    why_now: str = ""
+    coverage_refs: tuple[str, ...] = ()
+    learning_state: str = ""
+    revision: int = 1
+    next_eligible_at: str = ""
+    origin_ref: str = ""
+    external_id: str = ""
 
 
 def _coerce(obj: dict) -> Proposal | None:
@@ -79,6 +94,25 @@ def _coerce(obj: dict) -> Proposal | None:
     stack_top_symbol = str(obj.get("stack_top_symbol", "") or "").strip()
     recommended_layer = str(obj.get("recommended_layer", "") or "").strip()
     verify_cmd = str(obj.get("verify_cmd", "") or "").strip()
+    source = str(obj.get("source", "") or "").strip()
+    scope = str(obj.get("scope", "personal") or "personal").strip()
+    topic_key = str(obj.get("topic_key", "") or "").strip()
+    source_uri = str(obj.get("source_uri", "") or "").strip()
+    why_now = str(obj.get("why_now", "") or "").strip()
+    raw_cov = obj.get("coverage_refs")
+    coverage_refs = (
+        tuple(str(x).strip() for x in raw_cov if str(x).strip())
+        if isinstance(raw_cov, (list, tuple))
+        else ()
+    )
+    learning_state = str(obj.get("learning_state", "") or "").strip().lower()
+    try:
+        revision = int(obj.get("revision") or 1)
+    except (TypeError, ValueError):
+        revision = 1
+    next_eligible_at = str(obj.get("next_eligible_at", "") or "").strip()
+    origin_ref = str(obj.get("origin_ref", "") or "").strip()
+    external_id = str(obj.get("external_id", "") or "").strip()
     return Proposal(
         id=pid,
         ts=ts,
@@ -94,24 +128,49 @@ def _coerce(obj: dict) -> Proposal | None:
         stack_top_symbol=stack_top_symbol,
         recommended_layer=recommended_layer,
         verify_cmd=verify_cmd,
+        source=source,
+        scope=scope,
+        topic_key=topic_key,
+        source_uri=source_uri,
+        why_now=why_now,
+        coverage_refs=coverage_refs,
+        learning_state=learning_state,
+        revision=revision,
+        next_eligible_at=next_eligible_at,
+        origin_ref=origin_ref,
+        external_id=external_id,
     )
 
 
-def read_pending(path: Path | None = None) -> list[Proposal]:
-    """Return pending proposals (append-only JSONL), newest last.
+@contextmanager
+def jsonl_lock(path: Path) -> Iterator[None]:
+    """Shared sidecar protocol for proposal producers, decisions and leases."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix(path.suffix + ".lock").open("a", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
-    Missing file → []. Malformed lines are skipped. De-dupes by id keeping the
-    LAST occurrence, so an agent re-appending the same id with an updated status
-    (e.g. pending → approved) correctly drops it from the pending set.
-    """
+
+def append_jsonl_locked(path: Path, record: dict) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def read_latest_records(path: Path | None = None) -> dict[str, dict]:
+    """Return full latest valid records, preserving producer metadata/extras."""
     p = path or PROPOSALS_PATH
     if not p.exists():
-        return []
-    by_id: dict[str, Proposal] = {}
+        return {}
+    by_id: dict[str, dict] = {}
     try:
         text = p.read_text(encoding="utf-8")
     except OSError:
-        return []
+        return {}
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -124,5 +183,26 @@ def read_pending(path: Path | None = None) -> list[Proposal]:
             continue
         prop = _coerce(obj)
         if prop is not None:
-            by_id[prop.id] = prop   # last occurrence wins
-    return [p for p in by_id.values() if p.status == "pending"]
+            by_id[prop.id] = obj
+    return by_id
+
+
+def read_all_latest(path: Path | None = None) -> dict[str, Proposal]:
+    """Return latest valid Proposal per id across all statuses."""
+    return {key: prop for key, record in read_latest_records(path).items() if (prop := _coerce(record)) is not None}
+
+
+def read_pending(path: Path | None = None) -> list[Proposal]:
+    """Return pending proposals (append-only JSONL), newest last.
+
+    Missing file → []. Malformed lines are skipped. De-dupes by id keeping the
+    LAST occurrence, so an agent re-appending the same id with an updated status
+    (e.g. pending → approved) correctly drops it from the pending set.
+    """
+    by_id = read_all_latest(path)
+    return [
+        p
+        for p in by_id.values()
+        if p.status == "pending"
+        and p.learning_state not in {"snoozed", "dismissed", "learned", "approved", "exploring"}
+    ]

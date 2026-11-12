@@ -37,3 +37,16 @@ Host-home telemetry reads must use `getpwuid(getuid())` guarded by
 `XCTestConfigurationFilePath == nil`; read-only path exceptions must be
 declared in both macOS entitlement files, and WAL SQLite databases must
 include a `mode=ro&immutable=1` URI fallback.
+
+Skills ROI is an App-owned read-only typed projection (`SkillsRoiReport`) of the
+canonical 11 diagnostic populations. Scalar and `.value` observations retain
+metric/population freshness, nulls and estimates; daily source populations are
+not summed. `SkillsRoiDiagnosticsCardView` renders one Usage, Disclosure/Escapes
+or Context lens and exposes observation evidence on cue. Responsive domain
+geometry is proposal-driven (`DashboardResponsiveGrid`), not state updated on
+appearance. Missing Pulse stages remain unknown; stage status outranks stale
+exit codes. Producer action revisions travel in append-only UserEvent response
+metadata, distinct from native-review SHA256 revisions; fresh producer revisions
+allow later Done/Dismiss. Snapshot fixtures inject isolated sources, execution
+and registration callbacks; default output is temporary and cleaned, with an
+explicit `AIDASH_TK3_SCREENSHOT_DIR` override for handoff evidence.

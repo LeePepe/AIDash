@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Callable, Sequence
 from config import AIDASH_BIN_FIXED, AIDASH_BIN_GLOB
 
 from L5_apps.digest.card_policy import (
+    DIAGNOSTICS_ALLOWANCE,
     FIRST_SCREEN_CARDS,
     MAX_ACTIONS,
     MAX_CARDS,
@@ -1482,23 +1483,27 @@ def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
     skills = getattr(skill_roi, "skills", ())
     if skills:
         # S4 + S6 + S10: Skill ROI & R1 Pass & Unpracticed script touch
+        def rate_text(value: float | None) -> str:
+            return f"{value * 100:.0f}%" if value is not None else "unknown"
+
         roi_items = [
             {
-                "label": f"{s.skill} · R1 {s.r1_pass_rate * 100:.0f}% · 触达 {s.script_touch_rate * 100:.0f}%",
+                "label": f"{s.skill} · R1 {rate_text(s.r1_pass_rate)} · 触达 {rate_text(s.script_touch_rate)}",
                 "value": float(s.roi_score),
                 "valueText": f"ROI {s.roi_score:.2f} ({s.loads_30d}次)",
-                **({"semantic": "warning"} if s.roi_score < 0.75 or s.unpracticed_rate >= 0.5 else {}),
+                **({"semantic": "warning"} if s.roi_score < 0.75 or (s.unpracticed_rate is not None and s.unpracticed_rate >= 0.5) else {}),
             }
-            for s in skills[:6]
+            for s in skills[:6] if s.roi_score is not None
         ]
-        cards.append(
-            Card(
-                _kuid(mmdd, 83),
-                "barList",
-                "wide",
-                {"title": "Skills 综合 ROI 与脚本触达 (S4/S6/S10)", "items": roi_items},
+        if roi_items:
+            cards.append(
+                Card(
+                    _kuid(mmdd, 83),
+                    "barList",
+                    "wide",
+                    {"title": "Skills 综合 ROI 与脚本触达 (S4/S6/S10)", "items": roi_items},
+                )
             )
-        )
 
         # S7: Progressive Disclosure Funnel
         l0_sum = sum(s.l0_only_sessions for s in skills)
@@ -1602,7 +1607,10 @@ def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
                 )
             )
 
-    summary_lines: list[str] = []
+    summary_lines: list[str] = [
+        f"{s.skill} · ROI unknown · R1 {rate_text(s.r1_pass_rate)} · 触达 {rate_text(s.script_touch_rate)} · {s.loads_30d}次 · {s.coverage_status}"
+        for s in skills[:6] if s.roi_score is None
+    ]
     if getattr(skill_roi, "low_roi_summary", ""):
         summary_lines.append(skill_roi.low_roi_summary)
     if getattr(skill_roi, "top_l0_watermarks", ()):
@@ -1630,7 +1638,7 @@ def _skills_roi_container(mmdd: str, skill_roi) -> "Container | None":
     return Container(
         _cuid(mmdd, 19),
         "Skills 与 ROI 诊断",
-        62,
+        26,
         tuple(cards),
         layout="auto",
         style="neutral",
@@ -1896,8 +1904,8 @@ _READING_FLOW_ORDER = {
     "24h 证据时间线": 50,
     "交叉信号": 55,
     "产品健康与个人成长": 58,
-    "工程与编排图表": 60,
-    "Skills 与 ROI 诊断": 62,
+    "工程与编排图表": 28,
+    "Skills 与 ROI 诊断": 26,
     "时间与产出": 65,
     "AI 效能": 70,
     "成本归因": 80,
@@ -1973,15 +1981,23 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
         head_cards -= sum(card.type == "metric" for card in head.cards)
         head_cards += min(
             1, sum(card.type == "metric" for card in head.cards))
-    budget = max(0, MAX_CARDS - head_cards)
-    first_screen = max(0, FIRST_SCREEN_CARDS - head_cards)
-    kept = select_with_budget(_container_candidates(rest),
-                              max_cards=budget, first_screen=first_screen)
-    if not [c for c in kept.selected if c.card.cards]:
+    required_titles = {"Skills 与 ROI 诊断", "工程与编排图表", "产品健康与个人成长"}
+    required = [c for c in _container_candidates(rest)
+                if c.card.title in required_titles and c.card.cards]
+    optional = [c for c in _container_candidates(rest)
+                if c not in required]
+    discretionary_budget = max(0, MAX_CARDS - head_cards)
+    kept = select_with_budget(
+        optional,
+        max_cards=discretionary_budget,
+        first_screen=max(0, FIRST_SCREEN_CARDS - head_cards),
+    )
+    selected = required + [c for c in kept.selected if c.card.cards]
+    if not selected:
         return (head,)
 
     published = sorted(
-        (c.card for c in kept.selected if c.card.cards),
+        (c.card for c in selected if c.card.cards),
         key=lambda container: container.order,
     )
     published_card_cost = sum(
@@ -1992,12 +2008,14 @@ def _apply_budget(containers: list[Container]) -> tuple[Container, ...]:
     if head.title == "总览":
         head_card_cost -= sum(card.type == "metric" for card in head.cards)
         head_card_cost += min(1, sum(card.type == "metric" for card in head.cards))
-    while published_card_cost + head_card_cost > MAX_CARDS:
-        if not published:
+    total_budget = MAX_CARDS + (DIAGNOSTICS_ALLOWANCE if required else 0)
+    while published_card_cost + head_card_cost > total_budget:
+        removable = [c for c in published if c.title not in required_titles]
+        if not removable:
             break
-        removed = published.pop()
-        published_card_cost -= sum(
-            card.type != "sectionHeader" for card in removed.cards)
+        removed = removable[-1]
+        published.remove(removed)
+        published_card_cost -= sum(card.type != "sectionHeader" for card in removed.cards)
     return tuple([head] + published)
 
 
@@ -2057,6 +2075,24 @@ def build_briefing(report_date: str, sources: "DigestSources", full_md: str,
                                       report_date=report_date)]
     containers.append(_default_plan_container(
         mmdd, sections, getattr(sources, "action_inbox", None)))
+    skills_container = _skills_roi_container(
+        mmdd, getattr(sources, "skill_roi", None)
+    )
+    if skills_container is not None:
+        containers.append(skills_container)
+    retro_container = _retro_ops_container(
+        mmdd,
+        getattr(sources, "retro_ops", None),
+        getattr(sources, "multica", None),
+        getattr(sources, "ai_efficiency", None),
+    )
+    if retro_container is not None:
+        containers.append(retro_container)
+    pg_container = _product_growth_container(
+        mmdd, getattr(sources, "product_growth", None)
+    )
+    if pg_container is not None:
+        containers.append(pg_container)
     return Briefing(reported_day, GENERATED_BY, tuple(containers))
 
 

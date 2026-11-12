@@ -1701,18 +1701,23 @@ class SkillRoiRow:
     skill: str
     loads_7d: int
     loads_30d: int
-    r1_pass_rate: float
+    r1_pass_rate: float | None
     script_exec_count: int
-    script_touch_rate: float
-    unpracticed_rate: float
+    script_touch_rate: float | None
+    unpracticed_rate: float | None
     l0_only_sessions: int
     l1_selective_sessions: int
     l1_greedy_sessions: int
-    avg_context_tokens: int
+    avg_context_tokens: int | None
     rework_rounds: int
     impl_bug_count: int
     spec_gap_count: int
-    roi_score: float
+    roi_score: float | None
+    source_as_of: str = ""
+    time_window: str = ""
+    sample_size: int = 0
+    coverage_status: str = "unknown"
+    estimated: bool = False
 
 
 @dataclass(frozen=True)
@@ -2046,29 +2051,38 @@ def fetch_skill_roi_trends(dev_root: Path | None = None) -> SkillRoiTrends:
     skill_rows: list[SkillRoiRow] = []
     try:
         rows, idx = _rows("retro/skill_roi_diagnostics")
+        def value(row, name, default=None):
+            position = idx.get(name)
+            return row[position] if position is not None else default
+
         for r in rows:
-            raw_r1 = r[idx["r1_pass_rate"]]
-            raw_touch = r[idx["script_touch_rate"]]
-            raw_unp = r[idx["unpracticed_rate"]]
-            raw_tok = r[idx["avg_context_tokens"]]
-            raw_roi = r[idx["roi_score"]]
+            raw_r1 = value(r, "r1_pass_rate")
+            raw_touch = value(r, "script_touch_rate")
+            raw_unp = value(r, "unpracticed_rate")
+            raw_tok = value(r, "avg_context_tokens")
+            raw_roi = value(r, "roi_score")
             skill_rows.append(
                 SkillRoiRow(
                     skill=str(r[idx["skill"]] or ""),
                     loads_7d=int(r[idx["loads_7d"]] or 0),
                     loads_30d=int(r[idx["loads_30d"]] or 0),
-                    r1_pass_rate=float(raw_r1) if raw_r1 is not None else 1.0,
+                    r1_pass_rate=float(raw_r1) if raw_r1 is not None else None,
                     script_exec_count=int(r[idx["script_exec_count"]] or 0),
-                    script_touch_rate=float(raw_touch) if raw_touch is not None else 1.0,
-                    unpracticed_rate=float(raw_unp) if raw_unp is not None else 0.0,
+                    script_touch_rate=float(raw_touch) if raw_touch is not None else None,
+                    unpracticed_rate=float(raw_unp) if raw_unp is not None else None,
                     l0_only_sessions=int(r[idx["l0_only_sessions"]] or 0),
                     l1_selective_sessions=int(r[idx["l1_selective_sessions"]] or 0),
                     l1_greedy_sessions=int(r[idx["l1_greedy_sessions"]] or 0),
-                    avg_context_tokens=int(raw_tok) if raw_tok is not None else 1200,
+                    avg_context_tokens=int(raw_tok) if raw_tok is not None else None,
                     rework_rounds=int(r[idx["rework_rounds"]] or 0),
                     impl_bug_count=int(r[idx["impl_bug_count"]] or 0),
                     spec_gap_count=int(r[idx["spec_gap_count"]] or 0),
-                    roi_score=float(raw_roi) if raw_roi is not None else 1.0,
+                    roi_score=float(raw_roi) if raw_roi is not None else None,
+                    source_as_of=str(value(r, "source_as_of", "") or ""),
+                    time_window=str(value(r, "time_window", "") or ""),
+                    sample_size=int(value(r, "sample_size", 0) or 0),
+                    coverage_status=str(value(r, "coverage_status", "unknown") or "unknown"),
+                    estimated=bool(value(r, "estimated", 0)),
                 )
             )
     except Exception:  # noqa: BLE001
@@ -2093,12 +2107,13 @@ def fetch_skill_roi_trends(dev_root: Path | None = None) -> SkillRoiTrends:
     idle = tuple(sorted(all_names - active_names))
 
     low_roi_summary = ""
-    if skill_rows:
-        worst = min(skill_rows, key=lambda s: (s.roi_score, -s.impl_bug_count, -s.unpracticed_rate))
+    scored_rows = [s for s in skill_rows if s.roi_score is not None]
+    if scored_rows:
+        worst = min(scored_rows, key=lambda s: (s.roi_score, -s.impl_bug_count, -(s.unpracticed_rate or 0.0)))
         low_roi_summary = (
             f"低 ROI 关注：{worst.skill}（ROI {worst.roi_score:.2f} · "
-            f"R1 一次通过 {worst.r1_pass_rate * 100:.0f}% · "
-            f"光读不练 {worst.unpracticed_rate * 100:.0f}% · "
+            f"R1 一次通过 {(worst.r1_pass_rate or 0.0) * 100:.0f}% · "
+            f"光读不练 {(worst.unpracticed_rate or 0.0) * 100:.0f}% · "
             f"IMPL_BUG {worst.impl_bug_count} / SPEC_GAP {worst.spec_gap_count}）"
         )
 

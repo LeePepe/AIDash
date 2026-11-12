@@ -133,6 +133,7 @@ public enum LiveDashboardTelemetryReader {
 
     public static var isLiveEnvironment: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
+            && ProcessInfo.processInfo.environment["XCTestBundlePath"] == nil
     }
 
     public static func loadTopicCatalog(
@@ -262,7 +263,8 @@ public enum LiveDashboardTelemetryReader {
     public static func loadScheduledPulseSnapshot(
         now: Date = Date(),
         statuses: [ScheduledJobStatus]? = nil,
-        launchctl: ScheduledPulseLaunchctl? = nil
+        launchctl: ScheduledPulseLaunchctl? = nil,
+        registry: [ScheduledJobDefinition]? = nil
     ) -> ScheduledPulseSnapshot {
         if let statuses {
             return ScheduledPulseSnapshot(capturedAt: now, jobs: statuses)
@@ -272,7 +274,10 @@ public enum LiveDashboardTelemetryReader {
         }
         let effect = launchctl ?? productionScheduledPulseLaunchctl
         let domain = "gui/\(getuid())"
-        let jobs = ScheduledPulseRegistry.liveJobs.map { definition in
+        let jobs = (registry ?? ScheduledPulseRegistry.jobs).map { definition in
+            guard definition.isLive else {
+                return ScheduledJobStatus(definition: definition, health: .reserved)
+            }
             let result = effect(["print", "\(domain)/\(definition.launchAgentLabel)"])
             return scheduledJobStatus(definition: definition, result: result)
         }
@@ -354,7 +359,8 @@ public enum LiveDashboardTelemetryReader {
         fileReader: ScheduledJobFileReader? = nil,
         homeURL: URL? = nil,
         acknowledgedActionIDs: Set<String> = [],
-        launchctl: ScheduledPulseLaunchctl? = nil
+        launchctl: ScheduledPulseLaunchctl? = nil,
+        registry: [ScheduledJobDefinition]? = nil
     ) -> ScheduledJobFrameworkSnapshot {
         guard isLiveEnvironment || fileReader != nil || homeURL != nil || launchctl != nil else {
             return ScheduledJobFrameworkSnapshot(capturedAt: now, entries: [])
@@ -363,7 +369,7 @@ public enum LiveDashboardTelemetryReader {
         let read = fileReader ?? productionScheduledJobFileReader
         let launchdStatuses: [ScheduledPulseJobID: ScheduledJobStatus]
         if isLiveEnvironment || launchctl != nil {
-            let pulseSnapshot = loadScheduledPulseSnapshot(now: now, launchctl: launchctl)
+            let pulseSnapshot = loadScheduledPulseSnapshot(now: now, launchctl: launchctl, registry: registry)
             launchdStatuses = Dictionary(uniqueKeysWithValues: pulseSnapshot.jobs.map { ($0.id, $0) })
         } else {
             launchdStatuses = [:]
@@ -388,7 +394,7 @@ public enum LiveDashboardTelemetryReader {
             )
         }
         let root = resolvedHome.appendingPathComponent("Library/Application Support/AIDash/jobs", isDirectory: true)
-        let entries = ScheduledPulseRegistry.liveJobs.map { definition in
+        let entries = (registry ?? ScheduledPulseRegistry.jobs).map { definition in
             let directory = root.appendingPathComponent(definition.id.rawValue, isDirectory: true)
             let state = readState(
                 from: directory.appendingPathComponent("state.json"),
@@ -436,6 +442,7 @@ public enum LiveDashboardTelemetryReader {
             let lineData = Data(line.utf8)
             if let wireAction = try? decoder.decode(JobActionsAction.self, from: lineData),
                wireAction.jobID == definition.id.rawValue {
+                if definition.id == .aidataDigest, !isPersonalJobAction(wireAction) { return nil }
                 let controls = wireAction.controls.compactMap { control -> ScheduledJobActionControl? in
                     guard let kind = ScheduledJobActionControlKind(rawValue: control.kind.rawValue) else { return nil }
                     return ScheduledJobActionControl(
@@ -453,9 +460,13 @@ public enum LiveDashboardTelemetryReader {
                     createdAt: wireAction.createdAt,
                     title: wireAction.title,
                     descriptionMd: wireAction.descriptionMd,
-                    controls: controls
+                    controls: controls,
+                    revision: wireAction.revision
                 )
             }
+            // Digest actions must pass the typed personal contract. Its legacy parser
+            // must not reopen an excluded/malformed work record after decoding fails.
+            if definition.id == .aidataDigest { return nil }
             if let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let rawControls = object["controls"] as? [[String: Any]],
                   !rawControls.isEmpty,
@@ -1839,6 +1850,8 @@ extension LiveDashboardTelemetryReader {
         }
     }
 
+    public typealias SkillsRoiSnapshot = SkillsRoiReport
+
     public struct LiveEfficiencySummary: Sendable, Equatable {
         public var r1ReviewFailRate: Double = 0
         public var reviewedTasksCount: Int = 0
@@ -1846,6 +1859,7 @@ extension LiveDashboardTelemetryReader {
         public var p90TTFTSeconds: Double = 0
         public var cacheHitRate: Double = 0
         public var steeringTokenShare: Double = 0
+        public var skillsROI: SkillsRoiSnapshot?
     }
 
     public static func loadLiveEfficiencySummary(homeURL: URL? = nil) -> LiveEfficiencySummary? {
@@ -1853,16 +1867,24 @@ extension LiveDashboardTelemetryReader {
         let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
         let whURL = home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
         let magpieURL = home.appendingPathComponent(".config/magpie/usage.jsonl")
-        let cacheKey = "\(fileCacheSignature(for: whURL))|\(fileCacheSignature(for: magpieURL))"
+        let skillsURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
+        let cacheKey = "\(fileCacheSignature(for: whURL))|\(fileCacheSignature(for: magpieURL))|\(fileCacheSignature(for: skillsURL))"
         if cachedLiveEfficiencyKey == cacheKey, let cached = cachedLiveEfficiencySummary {
             return cached
         }
         var summary = LiveEfficiencySummary()
         populateWarehouseReviewSummary(&summary, whURL: whURL)
         populateMagpieEfficiencySummary(&summary, magpieURL: magpieURL)
+        summary.skillsROI = loadSkillsRoiSnapshot(homeURL: home)
         cachedLiveEfficiencyKey = cacheKey
         cachedLiveEfficiencySummary = summary
         return summary
+    }
+
+    private static func loadSkillsRoiSnapshot(homeURL: URL) -> SkillsRoiSnapshot? {
+        let url = homeURL.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(SkillsRoiReport.self, from: data)
     }
 
     private static func populateWarehouseReviewSummary(_ summary: inout LiveEfficiencySummary, whURL: URL) {
@@ -1916,7 +1938,8 @@ extension LiveDashboardTelemetryReader {
         let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
         let sources = JobActionsSources.load(
             home: home,
-            jobs: ScheduledPulseRegistry.liveJobs
+            jobs: ScheduledPulseRegistry.jobs,
+            include: isPersonalJobAction
         ) { url, limit in
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             guard attributes[.type] as? FileAttributeType == .typeRegular else {
@@ -1926,13 +1949,33 @@ extension LiveDashboardTelemetryReader {
             defer { try? handle.close() }
             return try handle.read(upToCount: limit) ?? Data()
         }
-        let canonicalItems = mapJobActions(sources.actions, acknowledgedActionIDs: acknowledgedActionIDs)
-        if !canonicalItems.isEmpty {
-            return canonicalItems
-        }
-        let proposalsURL = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
-        let whURL = home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
-        return parsePendingProposals(fromURL: proposalsURL) + querySlowCIActionItems(whURL: whURL)
+        // Registered producer output is authoritative. Missing/filtered sources do not
+        // reopen local proposals or warehouse work data as a second action writer.
+        return mapJobActions(sources.actions, acknowledgedActionIDs: acknowledgedActionIDs)
+    }
+
+    private static let personalActionSources: Set<String> = ["Learning", "Linear", "Retro", "retro-loop", "CI Improve", "GTT Blocker", "PR & CI"]
+    static func isPersonalJobAction(_ action: JobActionsAction) -> Bool {
+        guard !["work", "work-business", "work_only"].contains(action.scope?.lowercased() ?? ""),
+              !action.labels.contains(where: { ["work", "work-business", "work_only"].contains($0.lowercased()) }) else { return false }
+        return isPersonalAction(source: action.source, title: action.title + " " + action.descriptionMd,
+                         ref: [action.ref, action.url].compactMap { $0 }.joined(separator: " "),
+                         project: ([action.project, action.scope].compactMap { $0 } + action.labels).joined(separator: " "))
+    }
+
+    private static func isPersonalAction(source: String?, title: String, ref: String?, project: String? = nil) -> Bool {
+        let haystack = [source, title, ref, project].compactMap { $0?.lowercased() }.joined(separator: " ")
+        let workTokens = #"(?<![\p{L}\p{N}])(?:bing|flightbook|ado|teams|mail_inbox|work_teams_bridge)(?![\p{L}\p{N}])"#
+        guard !haystack.contains("msft.ghe.com"), haystack.range(of: workTokens, options: .regularExpression) == nil else { return false }
+        let normalizedSource = source?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalizedRef = ref?.lowercased() ?? ""
+        return personalActionSources.contains(normalizedSource)
+            || normalizedRef.hasPrefix("learning-topic://")
+            || normalizedRef.hasPrefix("knowledge://")
+            || normalizedRef.hasPrefix("proposal://")
+            || normalizedRef.hasPrefix("skill-roi://")
+            || normalizedRef.hasPrefix("retro://")
+            || normalizedRef.hasPrefix("linear://")
     }
 
     public static func parseUnifiedActionItems(
@@ -1940,7 +1983,7 @@ extension LiveDashboardTelemetryReader {
         acknowledgedActionIDs: Set<String> = []
     ) -> [DashboardActionItem] {
         guard let data = try? Data(contentsOf: actionsURL),
-              let decoded = try? JobActionsSources.decode(data, jobID: "aidata-digest") else {
+              let decoded = try? JobActionsSources.decode(data, jobID: "aidata-digest", include: isPersonalJobAction) else {
             return []
         }
         return mapJobActions(decoded, acknowledgedActionIDs: acknowledgedActionIDs)
@@ -1954,11 +1997,10 @@ extension LiveDashboardTelemetryReader {
             let isPreviewNoise = action.subCategory?.uppercased() == "EVAL_NOT_WORTHY_PREVIEW"
                 && action.worthExtracting == false
             guard !isPreviewNoise else { return nil }
-            let ackKey = "\(action.jobID):\(action.id)"
-            let isAck = acknowledgedActionIDs.contains(ackKey)
-            let status = DashboardActionStatus.from(rawStatus: action.status, isCompleted: isAck)
+            let status = DashboardActionStatus.from(rawStatus: action.status, isCompleted: false)
             let priority = DashboardActionPriority.from(rawPriority: action.priority)
-            let sourceTag = (action.source?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "Linear"
+            let sourceTag = (action.source?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? ""
+            guard isPersonalJobAction(action) else { return nil }
             let rawDesc = action.description.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanSummary = cleanActionDescription(rawDesc, title: action.title, ref: action.ref)
             let urlStr = (action.url?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
@@ -1993,7 +2035,16 @@ extension LiveDashboardTelemetryReader {
                 parentIssueTitle: action.parentIssue?.title,
                 parentIssueURL: action.parentIssue?.url,
                 topicID: action.topicID,
-                topicCatalog: loadTopicCatalog()
+                topicCatalog: loadTopicCatalog(),
+                domain: action.domain.flatMap { DashboardActionDomain(rawValue: $0) },
+                topicKey: action.topicKey,
+                originRef: action.originRef,
+                revision: action.revision,
+                whyNow: action.whyNow,
+                sourceURI: action.sourceURI,
+                coverageRefs: action.coverageRefs,
+                evidence: action.evidence,
+                freshness: action.freshness
             )
         }
         return deduplicatingLinearContainerRows(mappedItems)
@@ -2057,6 +2108,8 @@ extension LiveDashboardTelemetryReader {
                   let title = obj["title"] as? String, !title.isEmpty else { continue }
             let detail = (obj["detail"] as? String) ?? ""
             let agent = (obj["agent"] as? String) ?? "retro-loop"
+            let ref = obj["ref"] as? String
+            guard isPersonalAction(source: agent, title: title, ref: ref) else { continue }
             let rawPrio = ((obj["priority"] as? String) ?? "high").lowercased()
             let prio: DashboardActionPriority = rawPrio == "high" ? .p0 : (rawPrio == "medium" ? .p1 : .p2)
             let escaped = title.replacingOccurrences(of: "\"", with: "\\\"")
@@ -2085,6 +2138,7 @@ extension LiveDashboardTelemetryReader {
         while sqlite3_step(stmt) == SQLITE_ROW {
             let repo = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
             let job = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            guard isPersonalAction(source: "CI Improve", title: "\(repo) \(job)", ref: "repo://\(repo)", project: repo) else { continue }
             let runs = Int(sqlite3_column_int64(stmt, 2)), avgExec = Int(sqlite3_column_int64(stmt, 3)), avgWait = Int(sqlite3_column_int64(stmt, 4))
             let execMin = String(format: "%.1fm", Double(avgExec) / 60.0), waitMin = String(format: "%.1fm", Double(avgWait) / 60.0)
             let slug = "\(repo)-\(job)".replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: " ", with: "-")
@@ -2099,24 +2153,5 @@ extension LiveDashboardTelemetryReader {
         return items
     }
 
-    public static func persistProposalStatus(item: DashboardActionItem, homeURL: URL? = nil) {
-        let pid = String(item.id.dropFirst("proposal-".count))
-        let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
-        let proposalsURL = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
-        let record: [String: String] = [
-            "id": pid,
-            "ts": ISO8601DateFormatter().string(from: Date()),
-            "agent": item.sourceTag,
-            "title": item.title,
-            "detail": item.summary,
-            "status": item.isCompleted ? "dismissed" : "pending"
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: record),
-              let line = String(data: data, encoding: .utf8),
-              let handle = try? FileHandle(forWritingTo: proposalsURL) else { return }
-        defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: Data((line + "\n").utf8))
-    }
 }
 #endif

@@ -514,7 +514,7 @@ struct DashboardWorkspaceTests {
         LiveDashboardTelemetryReader.appendCindyRankingRows(&cindyRows, cindyDirURL: tempDir, safeDate: todayStr)
         #expect(cindyRows.contains(where: { $0.agentName == "M2 · Cindy Desktop" && $0.modelName == "gemini-4-argon" }))
         #expect(cindyRows.contains(where: { $0.agentName == "M2 · Cindy Bot (mimo)" && $0.modelName == "gpt-6.1-sol" }))
-        #expect(OverviewWorkbenchLens.allCases.count == 3)
+        #expect(OverviewWorkbenchLens.allCases.count == 4)
         #expect(!OverviewWorkbenchLens.trends.title.isEmpty)
         #expect(OverviewWorkbenchLens.rankings.symbolName == "tablecells")
         _ = DashboardSettingsPageView(store: store, prefs: prefs).body
@@ -936,8 +936,8 @@ struct DashboardWorkspaceTests {
 
         let actionsURL = digestDir.appendingPathComponent("actions.jsonl")
         let sampleLines = [
-            #"{"id":"linear-TIA-76","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[Bing] iOS Smart Banner / SERP","description":"[in_progress] TIA-76 [Bing] iOS Smart Banner / SERP","status":"in_progress","source":"Linear","priority":"P1","ref":"linear://TIA-76","url":"https://linear.app/tianpeili/issue/TIA-76","labels":["pop"],"project":"Bing","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://linear.app/example/issue/TIA-83"},"controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
-            #"{"id":"EVAL-RULE-VIEW-SNAPSHOT-TEST","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[假测试防呆] UI 视觉改动未验证真实 View 渲染 (#545/#617)","description":"建议规则：修复 SwiftUI/UIKit 视觉 Bug 时，必须用 validateSnapshots 或 ImageRenderer 测真实 View。","status":"triage","source":"Linear","priority":"P1","ref":"eval://EVAL-RULE-VIEW-SNAPSHOT-TEST","url":"https://msft.ghe.com/san/bing-growth-sapphire-app/pull/617","labels":["eval"],"project":"Bing","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://linear.app/example/issue/TIA-83"},"controls":[]}"#,
+            #"{"id":"linear-TIA-76","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"Personal AIDash rollout","description":"[in_progress] TIA-76 Personal AIDash rollout","status":"in_progress","source":"Linear","priority":"P1","ref":"linear://TIA-76","url":"https://github.com/LeePepe/AIDash/issues/76","labels":["pop"],"project":"LeePepe/AIDash","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://github.com/LeePepe/AIDash/issues/83"},"controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
+            #"{"id":"EVAL-RULE-VIEW-SNAPSHOT-TEST","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[Bing] external work noise","description":"external work","status":"triage","source":"Linear","priority":"P1","ref":"eval://EVAL-RULE-VIEW-SNAPSHOT-TEST","url":"https://msft.ghe.com/san/bing-growth-sapphire-app/pull/617","labels":["eval"],"project":"Bing","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://github.com/LeePepe/AIDash/issues/83"},"controls":[]}"#,
             #"{"id":"proposal-review-pingpong","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"Shrink Review Ping-Pong","description":"R1 fail rate 55.7%","status":"triage","source":"Retro","priority":"P0","ref":"proposal://review-pingpong","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"targets","kind":"multiSelect","title":"Targets","options":["item-a","item-b"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
             #"{"id":"gtt-blocker-1","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"GTT Blocker: aidash-ops","description":"Waiting on Owner GO","status":"blocked","source":"GTT Blocker","priority":"P0","ref":"aidash-ops","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#
         ]
@@ -947,13 +947,9 @@ struct DashboardWorkspaceTests {
             homeURL: tempHome,
             acknowledgedActionIDs: ["aidata-digest:gtt-blocker-1"]
         )
-        #expect(loaded.count == 4)
+        #expect(loaded.count == 3)
 
-        let evalItem = try #require(loaded.first(where: { $0.id == "EVAL-RULE-VIEW-SNAPSHOT-TEST" }))
-        #expect(evalItem.labels == ["eval"])
-        #expect(evalItem.parentIssueKey == "TIA-83")
-        #expect(evalItem.summary.hasPrefix("建议规则："))
-        #expect(evalItem.decisionOptions == ["Approve", "Done", "Dismiss"])
+        #expect(loaded.first(where: { $0.id == "EVAL-RULE-VIEW-SNAPSHOT-TEST" }) == nil)
 
         let linearItem = try #require(loaded.first(where: { $0.id == "linear-TIA-76" }))
         #expect(linearItem.status == .inProgress)
@@ -961,13 +957,13 @@ struct DashboardWorkspaceTests {
         #expect(linearItem.sourceTag == "Linear")
         #expect(linearItem.priority == .p1)
         #expect(linearItem.displayRefLabel == "TIA-76")
-        #expect(linearItem.externalURLString == "https://linear.app/tianpeili/issue/TIA-76")
+        #expect(linearItem.externalURLString == "https://github.com/LeePepe/AIDash/issues/76")
         #expect(linearItem.labels == ["pop"])
-        #expect(linearItem.project == "Bing")
+        #expect(linearItem.project == "LeePepe/AIDash")
         #expect(linearItem.parentIssueKey == "TIA-83")
         #expect(linearItem.parentIssueTitle == "Parent queue")
-        #expect(linearItem.parentIssueURL == "https://linear.app/example/issue/TIA-83")
-        #expect(linearItem.summary == "[Bing] iOS Smart Banner / SERP")
+        #expect(linearItem.parentIssueURL == "https://github.com/LeePepe/AIDash/issues/83")
+        #expect(linearItem.summary == "Personal AIDash rollout")
         #expect(linearItem.decisionOptions == ["Approve", "Done", "Dismiss"])
 
         let retroItem = try #require(loaded.first(where: { $0.id == "proposal-review-pingpong" }))
@@ -976,13 +972,13 @@ struct DashboardWorkspaceTests {
         #expect(retroItem.priority == .p0)
         #expect(retroItem.targetOptions == ["item-a", "item-b"])
         let filterStore = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: loaded)
-        #expect(filterStore.availableLinearActionFilters.map(\.id) == ["all", "pop", "eval"])
+        #expect(filterStore.availableLinearActionFilters.map(\.id) == ["all", "pop"])
         filterStore.selectedLinearActionFilter = "pop"
         #expect(filterStore.filteredActionItems.map(\.id) == ["linear-TIA-76"])
 
         let ackedItem = try #require(loaded.first(where: { $0.id == "gtt-blocker-1" }))
-        #expect(ackedItem.status == .done)
-        #expect(ackedItem.isCompleted)
+        #expect(ackedItem.status == .blocked)
+        #expect(!ackedItem.isCompleted)
 
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: loaded)
         var capturedAction: ScheduledJobAction?
@@ -1007,11 +1003,11 @@ struct DashboardWorkspaceTests {
         #expect(capturedResponses.contains(ScheduledJobActionResponse(controlID: "targets", value: "item-a,item-b")))
         #expect(capturedResponses.contains(ScheduledJobActionResponse(controlID: "note", value: "Ship in wave 1")))
         #expect(store.acknowledgedScheduledActionIDs.contains("aidata-digest:proposal-review-pingpong"))
-        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.isCompleted == true)
-        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.status == .done)
+        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.isCompleted == false)
+        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.status == .inProgress)
         #expect(toggledEvent?.0 == "scheduled-pulse/aidata-digest")
         #expect(toggledEvent?.1 == "proposal://review-pingpong")
-        #expect(toggledEvent?.2 == true)
+        #expect(toggledEvent?.2 == false)
         _ = ActionItemsCardView(store: store).body
     }
 

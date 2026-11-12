@@ -1,5 +1,5 @@
--- aidata-tier: explore
--- aidata-attach: claude_prompts, codex_prompts, hermes_tools
+-- Production contract consumed by the Skills ROI snapshot exporter.
+-- aidata-attach: claude_prompts, codex_prompts, hermes_tools, copilot_cli
 -- skills/daily — skill usage by CST day, source, and skill.
 -- Grain: one (day, source, skill) row.  Claude attribution and tool usage are
 -- separate populations; Codex call rows are not unioned with slash commands;
@@ -71,6 +71,13 @@ hermes AS (
     FROM hermes_tools.skill_day
     WHERE day BETWEEN COALESCE(:day_from, '0000-01-01')
                   AND COALESCE(:day_to, '9999-12-31')
+),
+copilot AS (
+    SELECT day, 'copilot_cli_skill' AS source, skill, n,
+           NULL AS sessions
+    FROM copilot_cli.skill_day
+    WHERE day BETWEEN COALESCE(:day_from, '0000-01-01')
+                  AND COALESCE(:day_to, '9999-12-31')
 )
 SELECT day, source, skill, n, sessions FROM claude_attribution
 UNION ALL SELECT day, source, skill, n, sessions FROM claude_skill_tool
@@ -78,4 +85,5 @@ UNION ALL SELECT day, source, skill, n, sessions FROM codex_skill_read
 UNION ALL SELECT day, source, skill, n, sessions FROM claude_slash
 UNION ALL SELECT day, source, skill, n, sessions FROM codex_slash
 UNION ALL SELECT day, source, skill, n, sessions FROM hermes
+UNION ALL SELECT day, source, skill, n, sessions FROM copilot
 ORDER BY day, source, skill;

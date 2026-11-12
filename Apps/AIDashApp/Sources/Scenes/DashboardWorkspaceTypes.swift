@@ -968,6 +968,51 @@ public enum DashboardActionPriority: Int, CaseIterable, Codable, Sendable, Equat
     }
 }
 
+public enum DashboardActionDomain: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
+    case decisions
+    case blockers
+    case findings
+    case planned
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .decisions: return DashboardL10n.tr("dashboard.action_domain.decisions", "待决策")
+        case .blockers: return DashboardL10n.tr("dashboard.action_domain.blockers", "卡顿")
+        case .findings: return DashboardL10n.tr("dashboard.action_domain.findings", "发现")
+        case .planned: return DashboardL10n.tr("dashboard.action_domain.planned", "计划")
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .decisions: return DashboardL10n.tr("dashboard.action_domain.decisions_subtitle", "学习选题 · Retro 提案")
+        case .blockers: return DashboardL10n.tr("dashboard.action_domain.blockers_subtitle", "GTT · 门禁阻断")
+        case .findings: return DashboardL10n.tr("dashboard.action_domain.findings_subtitle", "CI · Skill · Worktree")
+        case .planned: return DashboardL10n.tr("dashboard.action_domain.planned_subtitle", "Linear 个人在途")
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .decisions: return "sparkles.rectangle.stack.fill"
+        case .blockers: return "exclamationmark.octagon.fill"
+        case .findings: return "waveform.path.ecg.magnifyingglass"
+        case .planned: return "checklist.checked"
+        }
+    }
+
+    public var tint: DashboardSemanticHealth {
+        switch self {
+        case .decisions: return .warning
+        case .blockers: return .critical
+        case .findings: return .warning
+        case .planned: return .healthy
+        }
+    }
+}
+
 public enum DashboardActionStatus: String, CaseIterable, Codable, Sendable, Equatable {
     case triage
     case blocked
@@ -1233,6 +1278,15 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public let parentIssueTitle: String?
     public let parentIssueURL: String?
     public let projectFolderName: String
+    public let domain: DashboardActionDomain?
+    public let topicKey: String?
+    public let originRef: String?
+    public let revision: String?
+    public let whyNow: String?
+    public let sourceURI: String?
+    public let coverageRefs: [String]
+    public let evidence: String?
+    public let freshness: String?
     public let topicID: String
     public let topicTitle: String
     public let topicGroup: String
@@ -1250,7 +1304,9 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         labels: [String] = [], project: String? = nil,
         parentIssueKey: String? = nil, parentIssueTitle: String? = nil, parentIssueURL: String? = nil,
         projectFolderName: String? = nil, topicID: String? = nil,
-        topicCatalog: [DashboardTopic] = DashboardTopicCatalog.builtInTopics
+        topicCatalog: [DashboardTopic] = DashboardTopicCatalog.builtInTopics,
+        domain: DashboardActionDomain? = nil, topicKey: String? = nil, originRef: String? = nil, revision: String? = nil,
+        whyNow: String? = nil, sourceURI: String? = nil, coverageRefs: [String] = [], evidence: String? = nil, freshness: String? = nil
     ) {
         let resolvedStatus = status ?? (isCompleted ? .done : .triage)
         let topic = DashboardTopicCatalog.resolve(
@@ -1280,6 +1336,15 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         self.topicGroup = topic.topicGroup
         self.targetRepo = topic.targetRepo
         self.topicCwd = topic.topicCwd
+        self.domain = domain
+        self.topicKey = topicKey
+        self.originRef = originRef
+        self.revision = revision
+        self.whyNow = whyNow
+        self.sourceURI = sourceURI
+        self.coverageRefs = coverageRefs
+        self.evidence = evidence
+        self.freshness = freshness
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1287,6 +1352,7 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         case command, externalURLString, backingCardId, backingItemRef, jobID, controls
         case labels, project, parentIssueKey, parentIssueTitle, parentIssueURL, projectFolderName
         case topicID, topicId, topic_id, topicTitle, topicGroup, targetRepo, topicCwd
+        case domain, topicKey, originRef, revision, whyNow, sourceURI, coverageRefs, evidence, freshness
     }
 
     public init(from decoder: Decoder) throws {
@@ -1335,6 +1401,15 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         topicGroup = topic.topicGroup
         targetRepo = topic.targetRepo
         topicCwd = topic.topicCwd
+        domain = try container.decodeIfPresent(DashboardActionDomain.self, forKey: .domain)
+        topicKey = try container.decodeIfPresent(String.self, forKey: .topicKey)
+        originRef = try container.decodeIfPresent(String.self, forKey: .originRef)
+        revision = try container.decodeIfPresent(String.self, forKey: .revision)
+        whyNow = try container.decodeIfPresent(String.self, forKey: .whyNow)
+        sourceURI = try container.decodeIfPresent(String.self, forKey: .sourceURI)
+        coverageRefs = try container.decodeIfPresent([String].self, forKey: .coverageRefs) ?? []
+        evidence = try container.decodeIfPresent(String.self, forKey: .evidence)
+        freshness = try container.decodeIfPresent(String.self, forKey: .freshness)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1364,6 +1439,31 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         try container.encode(topicGroup, forKey: .topicGroup)
         try container.encode(targetRepo, forKey: .targetRepo)
         try container.encode(topicCwd, forKey: .topicCwd)
+        try container.encodeIfPresent(domain, forKey: .domain)
+        try container.encodeIfPresent(topicKey, forKey: .topicKey)
+        try container.encodeIfPresent(originRef, forKey: .originRef)
+        try container.encodeIfPresent(revision, forKey: .revision)
+        try container.encodeIfPresent(whyNow, forKey: .whyNow)
+        try container.encodeIfPresent(sourceURI, forKey: .sourceURI)
+        if !coverageRefs.isEmpty { try container.encode(coverageRefs, forKey: .coverageRefs) }
+        try container.encodeIfPresent(evidence, forKey: .evidence)
+        try container.encodeIfPresent(freshness, forKey: .freshness)
+    }
+
+    public var resolvedDomain: DashboardActionDomain {
+        if let domain { return domain }
+        let ref = backingItemRef?.lowercased() ?? ""
+        if status == .blocked || sourceTag == "GTT Blocker" { return .blockers }
+        if status == .inProgress { return .planned }
+        if sourceTag == "Learning" || ref.hasPrefix("learning-topic://") || ref.hasPrefix("knowledge://") || ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://") || ref.hasPrefix("retro://") { return .decisions }
+        if sourceTag == "Linear" { return .planned }
+        return .findings
+    }
+
+    public var isLearningTopic: Bool { sourceTag == "Learning" || backingItemRef?.hasPrefix("learning-topic://") == true }
+    public var isProposal: Bool {
+        let ref = backingItemRef ?? ""
+        return ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://") || ref.hasPrefix("retro://")
     }
 
     public var acknowledgementKey: String? {
@@ -1402,6 +1502,7 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         switch sourceTag {
         case "Linear": return "link.circle.fill"
         case "GTT Blocker": return "exclamationmark.octagon.fill"
+        case "Learning": return "book.pages.fill"
         case "Retro", "retro-loop": return "arrow.triangle.2.circlepath.circle.fill"
         case "PR & CI", "CI Improve": return "hammer.circle.fill"
         case "Mail & Teams": return "envelope.circle.fill"

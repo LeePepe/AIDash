@@ -81,12 +81,21 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public let priority: String?
     public let ref: String?
     public let url: String?
+    public let domain: String?
+    public let topicKey: String?
+    public let originRef: String?
+    public let revision: String?
+    public let scope: String?
+    public let whyNow: String?
+    public let sourceURI: String?
+    public let coverageRefs: [String]
+    public let evidence: String?
+    public let freshness: String?
     public let subCategory: String?
     public let worthExtracting: Bool?
     public let labels: [String]
     public let project: String?
     public let parentIssue: ParentIssue?
-    /// Optional canonical M2 topic supplied by the producer. Older producers omit it.
     public let topicID: String?
     public let controls: [Control]
 
@@ -101,7 +110,9 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case id, jobID, jobId, createdAt, title, description, descriptionMd
         case status, source, priority, ref, url, subCategory, worthExtracting
-        case labels, project, parentIssue, topicID, topicId, topic_id, controls
+        case labels, project, parentIssue, topicID, topicId, topic_id
+        case domain, topicKey = "topic_key", originRef = "origin_ref", revision, scope
+        case whyNow = "why_now", sourceURI = "source_uri", coverageRefs = "coverage_refs", evidence, freshness, controls
     }
 
     public init(
@@ -109,9 +120,12 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         title: String, descriptionMd: String,
         status: String? = nil, source: String? = nil, priority: String? = nil,
         ref: String? = nil, url: String? = nil,
-        subCategory: String? = nil, worthExtracting: Bool? = nil,
-        labels: [String] = [], project: String? = nil, parentIssue: ParentIssue? = nil,
-        topicID: String? = nil, controls: [Control]
+        subCategory: String? = nil, worthExtracting: Bool? = nil, labels: [String] = [],
+        project: String? = nil, parentIssue: ParentIssue? = nil, topicID: String? = nil,
+        domain: String? = nil, topicKey: String? = nil, originRef: String? = nil, revision: String? = nil, scope: String? = nil,
+        whyNow: String? = nil, sourceURI: String? = nil, coverageRefs: [String] = [], evidence: String? = nil, freshness: String? = nil,
+        controls: [Control]
+
     ) {
         self.id = id
         self.jobID = jobID
@@ -129,6 +143,16 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         self.project = project
         self.parentIssue = parentIssue
         self.topicID = topicID
+        self.domain = domain
+        self.topicKey = topicKey
+        self.originRef = originRef
+        self.revision = revision
+        self.scope = scope
+        self.whyNow = whyNow
+        self.sourceURI = sourceURI
+        self.coverageRefs = coverageRefs
+        self.evidence = evidence
+        self.freshness = freshness
         self.controls = controls
     }
 
@@ -176,6 +200,21 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
             ?? (try container.decodeIfPresent(String.self, forKey: .topicId))
             ?? (try container.decodeIfPresent(String.self, forKey: .topic_id))
         controls = decodedControls.filter { $0.kind != .openURL }
+        domain = try container.decodeIfPresent(String.self, forKey: .domain)
+        topicKey = try container.decodeIfPresent(String.self, forKey: .topicKey)
+        originRef = try container.decodeIfPresent(String.self, forKey: .originRef)
+        if let token = try? container.decode(String.self, forKey: .revision) {
+            revision = token
+        } else {
+            revision = try container.decodeIfPresent(Int64.self, forKey: .revision).map(String.init)
+        }
+        scope = try container.decodeIfPresent(String.self, forKey: .scope)
+        whyNow = try container.decodeIfPresent(String.self, forKey: .whyNow)
+        sourceURI = try container.decodeIfPresent(String.self, forKey: .sourceURI)
+        coverageRefs = try container.decodeIfPresent([String].self, forKey: .coverageRefs) ?? []
+        evidence = try container.decodeIfPresent(String.self, forKey: .evidence)
+        freshness = try container.decodeIfPresent(String.self, forKey: .freshness)
+
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -196,7 +235,17 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         if !labels.isEmpty { try container.encode(labels, forKey: .labels) }
         try container.encodeIfPresent(project, forKey: .project)
         try container.encodeIfPresent(parentIssue, forKey: .parentIssue)
-        try container.encodeIfPresent(topicID, forKey: .topicId)
+        try container.encodeIfPresent(topicID, forKey: .topicID)
+        try container.encodeIfPresent(domain, forKey: .domain)
+        try container.encodeIfPresent(topicKey, forKey: .topicKey)
+        try container.encodeIfPresent(originRef, forKey: .originRef)
+        try container.encodeIfPresent(revision, forKey: .revision)
+        try container.encodeIfPresent(scope, forKey: .scope)
+        try container.encodeIfPresent(whyNow, forKey: .whyNow)
+        try container.encodeIfPresent(sourceURI, forKey: .sourceURI)
+        if !coverageRefs.isEmpty { try container.encode(coverageRefs, forKey: .coverageRefs) }
+        try container.encodeIfPresent(evidence, forKey: .evidence)
+        try container.encodeIfPresent(freshness, forKey: .freshness)
         try container.encode(controls, forKey: .controls)
     }
 }
