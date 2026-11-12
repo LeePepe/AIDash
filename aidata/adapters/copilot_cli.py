@@ -39,9 +39,9 @@ def _skill_event(session_id: str, turn_id: int, timestamp: str, skill: str) -> d
 
 def _cst_day(timestamp: Any) -> str | None:
     try:
-        stamp = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+        stamp = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))  # noqa: FURB162 - Python 3.9 cannot parse Z
         if stamp.tzinfo is None:
-            stamp = stamp.replace(tzinfo=timezone.utc)
+            stamp = stamp.replace(tzinfo=timezone.utc)  # noqa: UP017 - hook Python 3.9
         return stamp.astimezone(timezone(timedelta(hours=8))).date().isoformat()
     except ValueError:
         return epoch_s_to_cst_day(timestamp)
@@ -56,7 +56,7 @@ def collect(*, now: datetime | None = None) -> int:
     """
     if not COPILOT_SESSION_DB.exists():
         return 0
-    today = (now or datetime.now(timezone.utc)).date()
+    today = (now or datetime.now(timezone.utc)).date()  # noqa: UP017 - hook Python 3.9
     cutoff = (today - timedelta(days=30)).isoformat()
     watermark = get_watermark(SOURCE)
     previous = watermark.get("seen", {}) if isinstance(watermark, dict) else {}

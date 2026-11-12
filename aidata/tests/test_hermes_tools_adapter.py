@@ -173,7 +173,7 @@ def test_copilot_real_skill_markers_are_bounded_metadata_and_deduped(tmp_path, m
     monkeypatch.setattr(copilot, "get_watermark", lambda _: dict(checkpoints))
     monkeypatch.setattr(copilot, "set_watermark", lambda _, value: checkpoints.update(value))
     monkeypatch.setattr(copilot, "write_raw", lambda _, rows: raw.extend(rows) or len(rows))
-    now = datetime(2026, 11, 12, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 12, 12, tzinfo=timezone.utc)  # noqa: UP017 - hook Python 3.9
     expected = {"team-lead", "aidash-content", "retro-loop"}
     if omit == "turns":
         expected.remove("aidash-content")
