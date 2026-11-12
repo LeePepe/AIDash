@@ -247,7 +247,8 @@ struct ScheduledPulseTests {
         )
         #expect(reader.entries.count == 3)
         #expect(reader.overviewEntries.first?.id == ScheduledPulseJobID.prAutoReview)
-        #expect(reader.overviewEntries.count == 1)
+        #expect(reader.overviewEntries.count == 3)
+        #expect(reader.entries.first(where: { $0.id == .prAutoReview })?.semanticState == .failed)
         #expect(reader.unacknowledgedActions.count == 1)
         let control = try #require(reader.unacknowledgedActions.first?.controls.last)
         #expect(control.effectiveMaxLength == 80)
@@ -271,7 +272,8 @@ struct ScheduledPulseTests {
             homeURL: home
         )
         #expect(empty.allHaveNoState)
-        #expect(empty.overviewEntries.isEmpty)
+        #expect(empty.overviewEntries.count == ScheduledPulseRegistry.jobs.count)
+        #expect(empty.overviewEntries.allSatisfy { $0.semanticState == .noState })
     }
 
     @Test("acknowledged actions disappear before the initial main-window render")
@@ -326,10 +328,102 @@ struct ScheduledPulseTests {
             scheduledJobFrameworkSnapshot: snapshot
         )
         _ = view.body
-        #expect(ScheduledJobFrameworkLogic.successStripText(for: snapshot).contains("特定人 PR ✗"))
+        #expect(ScheduledJobFrameworkLogic.successStripText(for: snapshot).contains("特定人 PR 失败"))
         #expect(snapshot.entries.count == 3)
         view.onOpenScheduledPulse()
         #expect(opens == 1)
+    }
+
+    @Test("launchd print parsing keeps loaded, PID, exit, run, and tick telemetry")
+    func launchdTelemetryParsing() throws {
+        let output = """
+        state = running
+        pid = 4321
+        last exit code = 0
+        last exit time = 2026-11-12T05:30:00Z
+        last tick = 2026-11-12T05:31:00Z
+        """
+        let snapshot = LiveDashboardTelemetryReader.loadScheduledPulseSnapshot(
+            now: Date(timeIntervalSince1970: 1_000),
+            launchctl: { args in
+                .init(arguments: args, terminationStatus: 0, stdout: output, stderr: "", launchError: nil)
+            }
+        )
+        let status = try #require(snapshot.jobs.first)
+        #expect(status.isLoaded)
+        #expect(status.runningPID == 4321)
+        #expect(status.lastExitCode == 0)
+        #expect(status.lastRun != nil)
+        #expect(status.lastTick != nil)
+    }
+
+    @Test("framework loader fuses state result with launchd exit semantics")
+    func frameworkStateFusion() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let home = URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        let succeeded = Data("{\"id\":\"my-pr-supervisor\",\"lastResult\":\"succeeded\",\"lastRunAt\":\"1970-01-01T00:16:00Z\"}".utf8)
+        let coalesced = Data("{\"id\":\"pr-auto-review\",\"lastResult\":\"coalesced\"}".utf8)
+        let snapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            now: now,
+            homeURL: home,
+            fileReader: { url in
+                switch url.lastPathComponent {
+                case "state.json" where url.path.contains("my-pr-supervisor"): return succeeded
+                case "state.json" where url.path.contains("pr-auto-review"): return coalesced
+                default: return nil
+                }
+            },
+            launchctl: { args in
+                let label = args.last ?? ""
+                let output = label.contains("my-pr-supervisor")
+                    ? "state = running\npid = 12\nlast exit code = 7\nlast exit time = 1970-01-01T00:15:00Z"
+                    : "state = running\nlast exit code = 0"
+                return .init(arguments: args, terminationStatus: 0, stdout: output, stderr: "", launchError: nil)
+            }
+        )
+        let partial = try #require(snapshot.entries.first(where: { $0.id == .myPRSupervisor }))
+        let skipped = try #require(snapshot.entries.first(where: { $0.id == .prAutoReview }))
+        let noState = try #require(snapshot.entries.first(where: { $0.id == .aidataDigest }))
+        #expect(partial.semanticState == .partial)
+        #expect(partial.statusText.contains("exit 7"))
+        #expect(skipped.semanticState == .coalesced)
+        #expect(!skipped.isProblem)
+        #expect(noState.semanticState == .noState)
+        #expect(!noState.isProblem)
+        let failedLaunchd = ScheduledJobStatus(
+            definition: noState.definition,
+            health: .critical,
+            lastExitCode: nil
+        )
+        let failedWithoutState = ScheduledJobFrameworkEntry(
+            definition: noState.definition,
+            state: nil,
+            launchdStatus: failedLaunchd
+        )
+        #expect(failedWithoutState.semanticState == .failed)
+        #expect(failedWithoutState.isProblem)
+    }
+
+    @Test("overview parser prioritizes failures and keeps relative time compact")
+    func overviewParsingAndRelativeTime() throws {
+        let markdown = """
+        ## Watched PRs
+        - SUCCESS · one
+        - FAILURE · two
+        - PENDING · three
+        - SUCCESS · four
+        - SUCCESS · five
+        - SUCCESS · six
+        - SUCCESS · seven
+        - SUCCESS · eight
+        - SUCCESS · nine
+        """
+        let section = try #require(ScheduledJobFrameworkLogic.parseOverview(markdown).first)
+        let split = ScheduledJobFrameworkLogic.prioritizedBullets(for: section)
+        #expect(Array(split.visible.prefix(2)) == ["FAILURE · two", "PENDING · three"])
+        #expect(split.collapsed.count == 7)
+        let now = Date(timeIntervalSince1970: 1_000)
+        #expect(ScheduledJobTimeFormatting.relativeText(from: now.addingTimeInterval(-120), now: now)?.hasPrefix("2m ago") == true)
     }
 
     private static func menuSnapshot() -> MenuBarSystemSnapshot {

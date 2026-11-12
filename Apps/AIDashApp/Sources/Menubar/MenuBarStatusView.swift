@@ -562,7 +562,7 @@ private struct MenuBarScheduledJobsCard: View {
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(snapshot.entries) { entry in
-                    if entry.isProblem {
+                    if entry.isProblem || !entry.actions.isEmpty {
                         Button { onOpenProblem(entry) } label: {
                             row(entry)
                         }
@@ -581,14 +581,27 @@ private struct MenuBarScheduledJobsCard: View {
 
     private func row(_ entry: ScheduledJobFrameworkEntry) -> some View {
         HStack(spacing: 8) {
+            Image(systemName: entry.semanticState.symbolName)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(DashboardSemanticColorPalette.color(for: entry.semanticState.semanticHealth))
+                .accessibilityHidden(true)
             Text(entry.definition.displayName)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            Text(entry.isSuccess ? "✓" : "✗")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(entry.isSuccess ? .green : .orange)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(entry.statusText)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(DashboardSemanticColorPalette.color(for: entry.semanticState.semanticHealth))
+                    .lineLimit(1)
+                if let relative = ScheduledJobTimeFormatting.relativeText(from: entry.lastRunAt) {
+                    Text(relative)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
         }
         .frame(minHeight: 28)
         .contentShape(Rectangle())

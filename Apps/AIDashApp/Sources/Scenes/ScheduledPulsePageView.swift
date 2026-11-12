@@ -1,10 +1,14 @@
 #if os(macOS)
+import Darwin
 import SwiftUI
 
 @MainActor
 public struct ScheduledPulsePageView: View {
     @Bindable public var store: DashboardWorkspaceStore
     @State private var installerError: String?
+    @State private var expandedOverviewSections: Set<String> = []
+    @State private var collapsedOverviewSections: Set<String> = []
+    @State private var expandedOverflowSections: Set<String> = []
 
     public init(store: DashboardWorkspaceStore) {
         self.store = store
@@ -17,7 +21,7 @@ public struct ScheduledPulsePageView: View {
                 selection: $store.scheduledPulseTab
             ) {
                 ForEach(ScheduledPulsePageTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
+                    Text(tabTitle(tab)).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
@@ -47,92 +51,198 @@ public struct ScheduledPulsePageView: View {
             ) {
                 HStack(spacing: 8) {
                     ForEach(store.scheduledJobFrameworkSnapshot.entries) { entry in
-                        Button {
-                            select(entry)
-                        } label: {
-                            Text("\(entry.definition.displayName) \(entry.isSuccess ? "✓" : "✗")")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(entry.isSuccess ? .green : .orange)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 6)
-                                .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
+                        Button { select(entry) } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: entry.semanticState.symbolName)
+                                    .accessibilityHidden(true)
+                                Text(entry.statusText)
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(DashboardSemanticColorPalette.color(for: entry.semanticState.semanticHealth))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(entry.definition.displayName)
+                        .accessibilityLabel("\(entry.definition.displayName), \(entry.statusText)")
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
 
-            if store.scheduledJobFrameworkSnapshot.allHaveNoState {
-                Text(DashboardL10n.tr("dashboard.scheduled_pulse.no_summary", "还没有汇总。"))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(store.scheduledJobFrameworkSnapshot.overviewEntries) { entry in
-                        overviewBlock(entry)
-                    }
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(store.scheduledJobFrameworkSnapshot.overviewEntries) { entry in
+                    scheduledJobCard(entry)
                 }
             }
-
-            frameworkControls
 
             if let installerError {
                 Text(installerError)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DashboardSemanticColorPalette.color(for: .critical))
             }
         }
     }
 
-    private var frameworkControls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(store.scheduledJobFrameworkSnapshot.entries) { entry in
-                HStack(spacing: 8) {
+    private func scheduledJobCard(_ entry: ScheduledJobFrameworkEntry) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(entry.definition.displayName)
-                        .font(.caption.weight(.medium))
-                    Spacer(minLength: 4)
-                    Button(DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) {
-                        handle(store.startScheduledJob(entry.id))
+                        .font(.headline)
+                    HStack(spacing: 6) {
+                        Text(entry.definition.cadence.displayText)
+                        if let lastRun = ScheduledJobTimeFormatting.relativeText(from: entry.lastRunAt) {
+                            Text(lastRun)
+                        } else {
+                            Text(DashboardL10n.tr("dashboard.scheduled_pulse.time.never", "尚未运行"))
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    Button(DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止")) {
-                        handle(store.stopScheduledJob(entry.id))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 8)
+                statusPill(entry)
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "立即运行")) {
+                    runNow(entry.id)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) {
+                    handle(store.startScheduledJob(entry.id))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止")) {
+                    handle(store.stopScheduledJob(entry.id))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-        }
-    }
+            .frame(minHeight: 44)
 
-    private func overviewBlock(_ entry: ScheduledJobFrameworkEntry) -> some View {
-        let isProblem = entry.isProblem
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(entry.definition.displayName).font(.headline)
-                Spacer(minLength: 4)
-                Text(entry.isSuccess
-                    ? DashboardL10n.tr("dashboard.scheduled_pulse.success", "成功")
-                    : DashboardL10n.tr("dashboard.scheduled_pulse.needs_attention", "需要处理"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isProblem ? .orange : .green)
+            if let summary = entry.state?.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(summary.split(separator: "·").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }, id: \.self) { part in
+                        Text(part)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+                    }
+                    if !entry.actions.isEmpty {
+                        Button(DashboardL10n.format("dashboard.scheduled_pulse.pending_actions_format", "%lld 个待处理", entry.actions.count)) {
+                            store.selectedFrameworkJobID = entry.id
+                            store.scheduledPulseTab = .needActions
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            } else if !entry.actions.isEmpty {
+                Button(DashboardL10n.format("dashboard.scheduled_pulse.pending_actions_format", "%lld 个待处理", entry.actions.count)) {
+                    store.selectedFrameworkJobID = entry.id
+                    store.scheduledPulseTab = .needActions
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            if let overviewMd = entry.state?.overviewMd, !overviewMd.isEmpty {
-                Text(overviewMd).font(.body).fixedSize(horizontal: false, vertical: true)
-            } else if let summary = entry.state?.summary, !summary.isEmpty {
-                Text(summary).font(.body).fixedSize(horizontal: false, vertical: true)
+
+            let sections = ScheduledJobFrameworkLogic.parseOverview(entry.state?.overviewMd)
+            if sections.isEmpty {
+                if entry.state?.summary?.isEmpty != false && entry.lastTick == nil {
+                    Text(DashboardL10n.tr("dashboard.scheduled_pulse.no_summary", "尚无汇总；等待 launchd 首次运行。"))
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
+                        overviewSection(section, id: "\(entry.id.rawValue):\(index)")
+                    }
+                }
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .leading) {
-            if isProblem { Rectangle().fill(Color.orange).frame(width: 3) }
+            Rectangle()
+                .fill(DashboardSemanticColorPalette.color(for: entry.semanticState.semanticHealth))
+                .frame(width: 3)
         }
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+    }
+
+    private func statusPill(_ entry: ScheduledJobFrameworkEntry) -> some View {
+        Label(entry.statusText, systemImage: entry.semanticState.symbolName)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(DashboardSemanticColorPalette.color(for: entry.semanticState.semanticHealth))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+            .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func overviewSection(_ section: ScheduledJobOverviewSection, id: String) -> some View {
+        let bullets = ScheduledJobFrameworkLogic.prioritizedBullets(for: section)
+        DisclosureGroup(isExpanded: sectionBinding(for: section, id: id)) {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(bullets.visible, id: \.self) { bullet in
+                    Text("• \(bullet)")
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !bullets.collapsed.isEmpty {
+                    DisclosureGroup(
+                        DashboardL10n.format("dashboard.scheduled_pulse.expand_prs_format", "展开全部 %lld 个 PR", bullets.collapsed.count),
+                        isExpanded: overflowBinding(for: id)
+                    ) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(bullets.collapsed, id: \.self) { bullet in
+                                Text("• \(bullet)")
+                                    .font(.body)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+            }
+            .padding(.top, 5)
+        } label: {
+            Text(section.heading)
+                .font(.subheadline.weight(.semibold))
+        }
+    }
+
+    private func sectionBinding(for section: ScheduledJobOverviewSection, id: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                if section.isPriority { return !collapsedOverviewSections.contains(id) }
+                return expandedOverviewSections.contains(id)
+            },
+            set: { expanded in
+                if section.isPriority {
+                    if expanded { collapsedOverviewSections.remove(id) } else { collapsedOverviewSections.insert(id) }
+                } else if expanded {
+                    expandedOverviewSections.insert(id)
+                } else {
+                    expandedOverviewSections.remove(id)
+                }
+            }
+        )
+    }
+
+    private func overflowBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedOverflowSections.contains(id) },
+            set: { expanded in
+                if expanded { expandedOverflowSections.insert(id) } else { expandedOverflowSections.remove(id) }
+            }
+        )
     }
 
     private var needActions: some View {
@@ -160,13 +270,33 @@ public struct ScheduledPulsePageView: View {
         }
     }
 
+    private func tabTitle(_ tab: ScheduledPulsePageTab) -> String {
+        guard tab == .needActions else { return tab.title }
+        let count = store.scheduledJobFrameworkSnapshot.unacknowledgedActions.count
+        return count == 0 ? tab.title : DashboardL10n.format("dashboard.scheduled_pulse.tab.need_actions_count", "需要处理 (%lld)", count)
+    }
+
     private func select(_ entry: ScheduledJobFrameworkEntry) {
         store.selectedFrameworkJobID = entry.id
         store.scheduledPulseTab = entry.actions.isEmpty ? .overview : .needActions
     }
 
+    private func runNow(_ id: ScheduledPulseJobID) {
+        guard let definition = ScheduledPulseRegistry.job(for: id) else { return }
+        let result = ScheduledPulseLaunchdInstaller.productionLaunchctl([
+            "kickstart", "-k", "gui/\(getuid())/\(definition.launchAgentLabel)"
+        ])
+        if result.succeeded {
+            installerError = nil
+            store.refreshFromProvider()
+        } else {
+            installerError = result.diagnosticSummary
+        }
+    }
+
     private func handle(_ outcome: ScheduledPulseLaunchdInstaller.RegistrationOutcome) {
         installerError = outcome.failureDescription
+        if outcome.isHealthy { store.refreshFromProvider() }
     }
 }
 

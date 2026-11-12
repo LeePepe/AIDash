@@ -93,43 +93,60 @@ public enum LiveDashboardTelemetryReader {
         definition: ScheduledJobDefinition,
         result: LaunchdAgentInstaller.LaunchctlResult
     ) -> ScheduledJobStatus {
-        let parsedLastTick = parseLaunchdDate(from: result.stdout)
+        let lastRun = parseLaunchdDate(from: result.stdout, keys: ["last run", "last exit time"])
+        let lastTick = parseLaunchdDate(from: result.stdout, keys: ["last tick"]) ?? lastRun
+        let exitCode = parseLaunchdExitCode(from: result.stdout)
+        let runningPID = parseLaunchdInteger(from: result.stdout, key: "pid")
         guard result.succeeded else {
             let isAbsent = result.launchError == nil && (result.terminationStatus == 3 || result.terminationStatus == 113)
             return ScheduledJobStatus(
                 definition: definition,
                 health: isAbsent ? .expectedOnButIdle : .critical,
-                lastRun: parseLaunchdDate(from: result.stdout),
-                lastTick: nil,
+                isLoaded: false,
+                runningPID: runningPID,
+                lastExitCode: exitCode,
+                lastRun: lastRun,
+                lastTick: lastTick,
                 lastError: isAbsent ? nil : result.diagnosticSummary
             )
         }
-        let exitCode = parseLaunchdExitCode(from: result.stdout)
         let health: ScheduledPulseHealth = exitCode.map { $0 == 0 ? .healthy : .critical } ?? .healthy
         return ScheduledJobStatus(
             definition: definition,
             health: health,
-            lastRun: parseLaunchdDate(from: result.stdout),
-            lastTick: parseLaunchdDate(from: result.stdout),
+            isLoaded: true,
+            runningPID: runningPID,
+            lastExitCode: exitCode,
+            lastRun: lastRun,
+            lastTick: lastTick,
             lastError: health == .healthy ? nil : "last exit code \(exitCode ?? -1)"
         )
     }
 
     private static func parseLaunchdExitCode(from output: String) -> Int32? {
+        parseLaunchdInteger(from: output, key: "last exit code")
+    }
+
+    private static func parseLaunchdInteger(from output: String, key: String) -> Int32? {
         for line in output.split(separator: "\n") {
-            let lower = line.lowercased()
-            guard lower.contains("last exit code") else { continue }
+            guard line.lowercased().contains(key) else { continue }
             let number = line.split(whereSeparator: { !$0.isNumber && $0 != "-" }).last
             if let number, let value = Int32(String(number)) { return value }
         }
         return nil
     }
 
-    private static func parseLaunchdDate(from output: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        for line in output.split(separator: "\n") where line.lowercased().contains("last exit time") {
-            guard let value = line.split(separator: "=", maxSplits: 1).last else { continue }
-            if let date = formatter.date(from: value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+    private static func parseLaunchdDate(from output: String, keys: [String]) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        for line in output.split(separator: "\n") {
+            let lower = line.lowercased()
+            guard keys.contains(where: { lower.contains($0) }),
+                  let value = line.split(separator: "=", maxSplits: 1).last else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let date = fractional.date(from: trimmed) ?? standard.date(from: trimmed) {
                 return date
             }
         }
@@ -146,13 +163,21 @@ public enum LiveDashboardTelemetryReader {
         now: Date = Date(),
         fileReader: ScheduledJobFileReader? = nil,
         homeURL: URL? = nil,
-        acknowledgedActionIDs: Set<String> = []
+        acknowledgedActionIDs: Set<String> = [],
+        launchctl: ScheduledPulseLaunchctl? = nil
     ) -> ScheduledJobFrameworkSnapshot {
-        guard isLiveEnvironment || fileReader != nil || homeURL != nil else {
+        guard isLiveEnvironment || fileReader != nil || homeURL != nil || launchctl != nil else {
             return ScheduledJobFrameworkSnapshot(capturedAt: now, entries: [])
         }
         let resolvedHome = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
         let read = fileReader ?? productionScheduledJobFileReader
+        let launchdStatuses: [ScheduledPulseJobID: ScheduledJobStatus]
+        if isLiveEnvironment || launchctl != nil {
+            let pulseSnapshot = loadScheduledPulseSnapshot(now: now, launchctl: launchctl)
+            launchdStatuses = Dictionary(uniqueKeysWithValues: pulseSnapshot.jobs.map { ($0.id, $0) })
+        } else {
+            launchdStatuses = [:]
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
@@ -187,7 +212,12 @@ public enum LiveDashboardTelemetryReader {
                 decoder: decoder,
                 read: read
             ).filter { !$0.isAcknowledged(in: acknowledgedActionIDs) }
-            return ScheduledJobFrameworkEntry(definition: definition, state: state, actions: actions)
+            return ScheduledJobFrameworkEntry(
+                definition: definition,
+                state: state,
+                actions: actions,
+                launchdStatus: launchdStatuses[definition.id]
+            )
         }
         return ScheduledJobFrameworkSnapshot(capturedAt: now, entries: entries)
     }
