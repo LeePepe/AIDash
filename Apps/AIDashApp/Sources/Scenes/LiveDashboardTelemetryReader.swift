@@ -464,6 +464,9 @@ public enum LiveDashboardTelemetryReader {
                     revision: wireAction.revision
                 )
             }
+            // Digest actions must pass the typed personal contract. Its legacy parser
+            // must not reopen an excluded/malformed work record after decoding fails.
+            if definition.id == .aidataDigest { return nil }
             if let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let rawControls = object["controls"] as? [[String: Any]],
                   !rawControls.isEmpty,
@@ -1952,7 +1955,7 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static let personalActionSources: Set<String> = ["Learning", "Linear", "Retro", "retro-loop", "CI Improve", "GTT Blocker", "PR & CI"]
-    private static func isPersonalJobAction(_ action: JobActionsAction) -> Bool {
+    static func isPersonalJobAction(_ action: JobActionsAction) -> Bool {
         guard !["work", "work-business", "work_only"].contains(action.scope?.lowercased() ?? ""),
               !action.labels.contains(where: { ["work", "work-business", "work_only"].contains($0.lowercased()) }) else { return false }
         return isPersonalAction(source: action.source, title: action.title + " " + action.descriptionMd,

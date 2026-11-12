@@ -159,6 +159,14 @@ struct TK3SemanticTests {
         try Data(#"{"id":"legacy-work","status":"pending","title":"Local work proposal","agent":"retro-loop","scope":"work"}"#.utf8).write(to: legacy)
         try FileManager.default.removeItem(at: url)
         #expect(LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: home).isEmpty)
+        var malformedWork = base
+        malformedWork["scope"] = "work"
+        malformedWork["revision"] = true
+        let malformed = try JSONSerialization.data(withJSONObject: malformedWork)
+        let registry = ScheduledPulseRegistry.jobs(homeURL: home, fileExists: { _ in true }).filter { $0.id == .aidataDigest }
+        let framework = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            fileReader: { $0.lastPathComponent == "actions.jsonl" ? malformed : nil }, homeURL: home, registry: registry)
+        #expect(framework.entries.flatMap(\.actions).isEmpty)
     }
 }
 #endif

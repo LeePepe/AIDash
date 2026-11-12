@@ -96,16 +96,18 @@ enum JobActionsSources {
         }
         return load(
             home: LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL(),
-            jobs: ScheduledPulseRegistry.jobs
-        ) { url, limit in
-            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-            guard attributes[.type] as? FileAttributeType == .typeRegular else {
-                throw CocoaError(.fileReadUnsupportedScheme)
+            jobs: ScheduledPulseRegistry.jobs,
+            include: { $0.jobID != ScheduledPulseJobID.aidataDigest.rawValue || LiveDashboardTelemetryReader.isPersonalJobAction($0) },
+            read: { url, limit in
+                let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                guard attributes[.type] as? FileAttributeType == .typeRegular else {
+                    throw CocoaError(.fileReadUnsupportedScheme)
+                }
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                return try handle.read(upToCount: limit) ?? Data()
             }
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            return try handle.read(upToCount: limit) ?? Data()
-        }
+        )
     }
 
     static var isProductionEnvironment: Bool {
