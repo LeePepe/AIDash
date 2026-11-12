@@ -30,14 +30,14 @@ struct TK3SnapshotRenderTests {
         let output = URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-four-domains-pulse-roi/receipts/TK3-screenshots", isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let states = ["populated", "loading", "empty", "error"]
-        let populatedSummary = try makeCanonicalSummary()
         for state in states {
-            let store = makeStore(state: state, skillsSummary: state == "populated" ? populatedSummary : nil)
+            let skillsSummary = try makeSkillsSummary(state: state)
+            let store = makeStore(state: state, skillsSummary: skillsSummary)
             for width in [1000.0, 700.0] {
                 for (appearance, scheme) in [("light", ColorScheme.light), ("dark", ColorScheme.dark)] {
                     try render(ActionItemsCardView(store: store), name: "actionable-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output)
                     try render(ScheduledPulsePageView(store: store), name: "pulse-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output)
-                    try render(SkillsRoiDiagnosticsCardView(summary: state == "populated" ? store.liveEfficiencySummary : nil), name: "skills-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output)
+                    try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary), name: "skills-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output)
                 }
             }
         }
@@ -45,6 +45,21 @@ struct TK3SnapshotRenderTests {
 
     private func canonicalFixtureData() throws -> Data {
         try Data(contentsOf: URL(fileURLWithPath: "/Users/lee/Development/worktrees/aidash-4dom-data-review-fix/aidata/tests/fixtures/skills_roi_report.json"))
+    }
+
+    private func makeSkillsSummary(state: String) throws -> LiveDashboardTelemetryReader.LiveEfficiencySummary {
+        let base = try makeCanonicalSummary()
+        guard let roi = base.skillsROI else { return base }
+        switch state {
+        case "empty":
+            return LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: .init(window: roi.window, windowStart: roi.windowStart, windowEnd: roi.windowEnd, sourceAsOf: roi.sourceAsOf, sampleSize: 0, coverageStatus: "missing"))
+        case "loading":
+            return LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: .init(window: roi.window, windowStart: roi.windowStart, windowEnd: nil, sourceAsOf: nil, sampleSize: nil, coverageStatus: "partial", diagnostics: roi.diagnostics, skillsDaily: roi.skillsDaily))
+        case "error":
+            return LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: .init(window: roi.window, windowStart: roi.windowStart, windowEnd: roi.windowEnd, sourceAsOf: roi.sourceAsOf, sampleSize: roi.sampleSize, coverageStatus: "error", diagnostics: roi.diagnostics, skillsDaily: roi.skillsDaily))
+        default:
+            return base
+        }
     }
 
     private func makeCanonicalSummary() throws -> LiveDashboardTelemetryReader.LiveEfficiencySummary {
