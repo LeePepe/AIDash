@@ -1,6 +1,10 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 
 import pytest
 from L5_apps.digest import aidash, event_bridge, sources, verify
@@ -53,6 +57,210 @@ def test_learning_queue_consumer_dispatches_once_and_marks_blocked(tmp_path):
     assert calls == ["explore-topic-r1"]
     assert json.loads(queue.read_text(encoding="utf-8"))["status"] == "dispatched"
     assert consume_learning_queue(queue, dispatch_runner=lambda _: 1) == {"consumed": 0, "blocked": 0}
+
+
+def _learning_job(task_key="explore-topic-r1", **overrides):
+    return {
+        "task_key": task_key, "topic_key": "topic",
+        "origin_ref": "learning-topic://topic", "external_id": "TIA-123",
+        "status": "queued", **overrides,
+    }
+
+
+def _queue_records(queue):
+    return [json.loads(line) for line in queue.read_text(encoding="utf-8").splitlines()]
+
+
+def _learning_proposal(topic="topic"):
+    return event_bridge.Proposal(
+        id=f"learning-{topic}", ts="2026-11-12T00:00:00Z", agent="knowledge-digest",
+        title=f"Explore {topic}", detail="Owner authorized exploration only",
+        priority="medium", status="approved", learning_state="approved",
+        topic_key=topic, ref=f"learning-topic://{topic}",
+        origin_ref=f"learning-topic://{topic}", external_id="TIA-123", revision=2,
+    )
+
+
+@pytest.mark.unit
+def test_learning_queue_preserves_append_during_dispatch(tmp_path, monkeypatch):
+    queue = tmp_path / "queue.jsonl"
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    queue.write_text(json.dumps(_learning_job()) + "\n", encoding="utf-8")
+    entered, finish = Event(), Event()
+
+    def dispatch(job):
+        entered.set()
+        assert finish.wait(5), "test did not release dispatch"
+        return 0
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        consumer = pool.submit(event_bridge.consume_learning_queue, queue, dispatch_runner=dispatch)
+        try:
+            assert entered.wait(5), "consumer did not enter dispatch"
+            event_bridge._enqueue_learning_task(
+                _learning_proposal("new-topic"), task_key="explore-new-topic-r1", external_id="TIA-124",
+            )
+        finally:
+            finish.set()
+        assert consumer.result(timeout=5) == {"consumed": 1, "blocked": 0}
+    jobs = {job["task_key"]: job for job in _queue_records(queue)}
+    assert jobs["explore-topic-r1"]["status"] == "dispatched"
+    assert jobs["explore-new-topic-r1"]["status"] == "queued"
+    assert jobs["explore-new-topic-r1"]["external_id"] == "TIA-124"
+
+
+@pytest.mark.unit
+def test_learning_queue_two_consumers_persist_lease_before_dispatch(tmp_path):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n", encoding="utf-8")
+    entered, finish = Event(), Event()
+    observed, calls = [], []
+
+    def dispatch(job):
+        calls.append(job["task_key"])
+        observed.extend(_queue_records(queue))
+        entered.set()
+        assert finish.wait(5), "test did not release dispatch"
+        return 0
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(event_bridge.consume_learning_queue, queue, dispatch_runner=dispatch)
+        try:
+            assert entered.wait(5), "consumer did not enter dispatch"
+            second = pool.submit(event_bridge.consume_learning_queue, queue, dispatch_runner=lambda job: calls.append(job["task_key"]) or 0)
+            assert second.result(timeout=5) == {"consumed": 0, "blocked": 0}
+        finally:
+            finish.set()
+        assert first.result(timeout=5) == {"consumed": 1, "blocked": 0}
+    assert calls == ["explore-topic-r1"]
+    assert observed[0]["status"] == "leased"
+    assert observed[0]["lease_token"]
+    assert observed[0]["dispatch_started_at"]
+    assert "completed_at" not in _queue_records(queue)[0]
+
+
+@pytest.mark.unit
+def test_learning_queue_failure_is_visible_retry_is_explicit_and_success_idempotent(tmp_path, monkeypatch):
+    queue, proposals = tmp_path / "queue.jsonl", tmp_path / "proposals.jsonl"
+    proposal = _learning_proposal()
+    task_key = "explore-topic-r1"
+    proposals.write_text(json.dumps({**asdict(proposal), "task_key": task_key}) + "\n", encoding="utf-8")
+    monkeypatch.setattr(event_bridge, "PROPOSALS_PATH", proposals)
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    event_bridge._enqueue_learning_task(proposal, task_key=task_key, external_id="TIA-123")
+    calls = []
+
+    def fail(job):
+        calls.append(job["task_key"])
+        assert _queue_records(queue)[0]["status"] == "leased"
+        assert event_bridge.read_all_latest(proposals)[proposal.id].learning_state == "exploring"
+        return 1
+
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=fail) == {"consumed": 0, "blocked": 1}
+    blocked = _queue_records(queue)[0]
+    assert blocked["status"] == "blocked"
+    assert blocked["error"]
+    assert blocked["external_id"] == "TIA-123"
+    latest = event_bridge.read_all_latest(proposals)[proposal.id]
+    assert latest.status == "approved"
+    assert latest.learning_state == "blocked"
+    assert latest.external_id == "TIA-123"
+    assert json.loads(proposals.read_text(encoding="utf-8").splitlines()[-1])["error"]
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=fail) == {"consumed": 0, "blocked": 0}
+
+    def succeed(job):
+        calls.append(job["task_key"])
+        return 0
+
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=succeed, retry_blocked=True) == {"consumed": 1, "blocked": 0}
+    assert _queue_records(queue)[0]["attempts"] == 2
+    assert "error" not in _queue_records(queue)[0]
+    assert event_bridge.read_all_latest(proposals)[proposal.id].learning_state == "exploring"
+    event_bridge._enqueue_learning_task(proposal, task_key=task_key, external_id="TIA-123")
+    assert len(_queue_records(queue)) == 1
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=fail, retry_blocked=True) == {"consumed": 0, "blocked": 0}
+    assert calls == [task_key, task_key]
+
+
+@pytest.mark.unit
+def test_learning_queue_expired_unstarted_lease_retries_once_but_uncertain_dispatch_does_not(tmp_path):
+    queue = tmp_path / "queue.jsonl"
+    old = "2026-01-01T00:00:00Z"
+    queue.write_text(json.dumps(_learning_job(status="leased", lease_token="dead", leased_at=old, lease_expires_at=old, attempts=1)) + "\n", encoding="utf-8")
+    calls = []
+    run = lambda job: calls.append(job["task_key"]) or 0
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run) == {"consumed": 0, "blocked": 1}
+    assert calls == []
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run, retry_blocked=True) == {"consumed": 1, "blocked": 0}
+    assert _queue_records(queue)[0]["attempts"] == 2
+
+    queue.write_text(json.dumps(_learning_job(status="leased", lease_token="ambiguous", leased_at=old, lease_expires_at=old, attempts=1, dispatch_started_at=old)) + "\n", encoding="utf-8")
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run, retry_blocked=True) == {"consumed": 0, "blocked": 1}
+    assert len(calls) == 1
+    assert _queue_records(queue)[0]["status"] == "blocked"
+    assert _queue_records(queue)[0]["retryable"] is False
+    assert "unknown" in _queue_records(queue)[0]["error"]
+
+
+@pytest.mark.unit
+def test_learning_queue_retry_attempts_are_bounded(tmp_path):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n", encoding="utf-8")
+    calls = []
+    for _ in range(5):
+        event_bridge.consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job["task_key"]) or 1, retry_blocked=True)
+    assert len(calls) == 3
+    assert _queue_records(queue)[0]["attempts"] == 3
+    assert _queue_records(queue)[0]["status"] == "blocked"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("outcome", [0, 1])
+def test_learning_queue_stale_completion_cannot_overwrite_newer_lease(tmp_path, outcome):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n", encoding="utf-8")
+    newer = {}
+
+    def dispatch(job):
+        newer.update(_queue_records(queue)[0])
+        newer.update(lease_token="newer-owner", attempts=2)
+        with event_bridge._jsonl_lock(queue):
+            event_bridge._write_learning_queue(queue, [newer])
+        return outcome
+
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=dispatch) == {"consumed": 0, "blocked": 0}
+    assert _queue_records(queue) == [newer]
+
+
+@pytest.mark.unit
+def test_learning_queue_does_not_dispatch_without_durable_lease(tmp_path, monkeypatch):
+    queue = tmp_path / "queue.jsonl"
+    original = json.dumps(_learning_job()) + "\n"
+    queue.write_text(original, encoding="utf-8")
+    calls = []
+
+    def disk_full(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(event_bridge, "_write_learning_queue", disk_full)
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job) or 0) == {"consumed": 0, "blocked": 1}
+    assert calls == []
+    assert queue.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.unit
+def test_learning_queue_does_not_reopen_terminal_proposal(tmp_path, monkeypatch):
+    queue, proposals = tmp_path / "queue.jsonl", tmp_path / "proposals.jsonl"
+    proposal = _learning_proposal()
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    monkeypatch.setattr(event_bridge, "PROPOSALS_PATH", proposals)
+    event_bridge._enqueue_learning_task(proposal, task_key="explore-topic-r1")
+    terminal = {**asdict(proposal), "learning_state": "learned", "outcome": "owner_reported", "revision": 3}
+    proposals.write_text(json.dumps(terminal) + "\n", encoding="utf-8")
+    calls = []
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job) or 0) == {"consumed": 0, "blocked": 1}
+    assert calls == []
+    assert proposals.read_text(encoding="utf-8") == json.dumps(terminal) + "\n"
 
 
 def test_event_bridge_latest_wins_and_falcon_star(tmp_path):

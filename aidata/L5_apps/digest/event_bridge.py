@@ -5,13 +5,17 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import os
 import re
 import sqlite3
 import subprocess
-from collections.abc import Callable
+import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from config import (
     HOME,
@@ -150,32 +154,47 @@ def _default_dispatch_runner(proposal: Proposal, external_id: str | None) -> int
     return result.returncode
 
 
-def _append_jsonl(path: Path, record: dict) -> None:
+@contextmanager
+def _jsonl_lock(path: Path) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    with lock_path.open("a", encoding="utf-8") as lock:
+    with path.with_suffix(path.suffix + ".lock").open("a", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-            handle.flush()
-            import os
-            os.fsync(handle.fileno())
-        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _append_jsonl_locked(path: Path, record: dict) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _append_jsonl(path: Path, record: dict) -> None:
+    with _jsonl_lock(path):
+        _append_jsonl_locked(path, record)
 
 
 def _enqueue_learning_task(proposal: Proposal, *, task_key: str, external_id: str = "") -> None:
-    """Persist one authorized, metadata-only exploration job for the runner."""
-    _append_jsonl(
-        LEARNING_QUEUE_PATH,
-        {
-            "task_key": task_key,
-            "topic_key": proposal.topic_key or proposal.id.removeprefix("learning-"),
-            "origin_ref": proposal.origin_ref or proposal.ref,
-            "external_id": external_id,
-            "status": "queued",
-            "created_at": _now(),
-        },
-    )
+    """Persist one authorized job per stable approval key, even after dispatch."""
+    with _jsonl_lock(LEARNING_QUEUE_PATH):
+        if any(job.get("task_key") == task_key for job in _read_learning_queue(LEARNING_QUEUE_PATH)):
+            return
+        _append_jsonl_locked(
+            LEARNING_QUEUE_PATH,
+            {
+                "task_key": task_key,
+                "proposal_id": proposal.id,
+                "approval_revision": proposal.revision,
+                "topic_key": proposal.topic_key or proposal.id.removeprefix("learning-"),
+                "origin_ref": proposal.origin_ref or proposal.ref,
+                "external_id": external_id or proposal.external_id,
+                "status": "queued",
+                "created_at": _now(),
+            },
+        )
 
 
 def _now() -> str:
@@ -1236,12 +1255,13 @@ def process_user_events(
                         },
                     )
                     _append_jsonl(proposal_path, approved_rec)
+                    approved_prop = Proposal(**{k: v for k, v in approved_rec.items() if k in Proposal.__dataclass_fields__})
                     _enqueue_learning_task(
-                        base_prop,
+                        approved_prop,
                         task_key=str(approved_rec["task_key"]),
                         external_id=ext_id or "",
                     )
-                    all_proposals[base_prop.id] = Proposal(**{k: v for k, v in approved_rec.items() if k in Proposal.__dataclass_fields__})
+                    all_proposals[base_prop.id] = approved_prop
                     pending.pop(base_prop.id, None)
                     processed_job_actions.add(dedup_key)
                     processed_job_actions.add(base_dedup_key)
@@ -1519,55 +1539,195 @@ def _write_consumed_receipt_keys(path: Path, keys: set[str]) -> None:
     _write_cursor_state(path, keys, pending_ext)
 
 
+_LEARNING_MAX_ATTEMPTS = 3
+_LEARNING_LEASE_SECONDS = 300  # Longer than the fixed dispatch subprocess timeout.
+
+
+def _read_learning_queue(path: Path) -> list[dict[str, Any]]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    jobs = [json.loads(line) for line in lines if line.strip()]
+    if not all(isinstance(job, dict) for job in jobs):
+        raise ValueError("learning queue contains a non-object record")
+    return jobs
+
+
+def _write_learning_queue(path: Path, jobs: list[dict[str, Any]]) -> None:
+    """Replace a fresh locked snapshot durably before any external dispatch."""
+    tmp: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+            tmp = Path(handle.name)
+            for job in jobs:
+                handle.write(json.dumps(job, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp.replace(path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
+def _sync_learning_proposal(path: Path, job: dict[str, Any], state: str, error: str = "") -> bool:
+    """Under the queue lock, validate/append only the still-authorized topic."""
+    proposal_id = job.get("proposal_id")
+    if not proposal_id:
+        # Legacy queued approvals lack a proposal id; their durable queue entry
+        # remains the authorization. New entries always carry the exact id.
+        return True
+    with _jsonl_lock(path):
+        latest = None
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            return False
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and record.get("id") == proposal_id:
+                latest = record
+        if (
+            latest is None
+            or latest.get("learning_state") not in {"approved", "exploring", "blocked"}
+            or latest.get("status") != "approved"
+            or latest.get("task_key", job["task_key"]) != job["task_key"]
+            or int(latest.get("revision") or 1) < int(job.get("approval_revision") or 1)
+        ):
+            return False
+        updated = {
+            **latest, "ts": _now(), "revision": int(latest.get("revision") or 1) + 1,
+            "learning_state": state, "task_key": job["task_key"],
+            "lease_token": job["lease_token"],
+        }
+        if error:
+            updated["error"] = error
+        else:
+            updated.pop("error", None)
+        _append_jsonl_locked(path, updated)
+        return True
+
+
+def _claim_learning_job(
+    queue_path: Path, task_key: str, proposal_path: Path, *, retry_blocked: bool,
+) -> tuple[dict[str, Any] | None, int]:
+    with _jsonl_lock(queue_path):
+        jobs = _read_learning_queue(queue_path)
+        matches = [job for job in jobs if str(job.get("task_key") or "").strip() == task_key]
+        if not matches or any(job.get("status") == "dispatched" for job in matches):
+            return None, 0
+        # A legacy duplicate queued row must never bypass an existing lease.
+        job = next((job for job in matches if job.get("status") == "leased"), matches[-1])
+        now = datetime.fromisoformat(_now().replace("Z", "+00:00"))
+        if job.get("status") == "leased":
+            try:
+                expires = datetime.fromisoformat(str(job["lease_expires_at"]).replace("Z", "+00:00"))
+                if expires > now:
+                    return None, 0
+            except (KeyError, ValueError, TypeError):
+                expires = None
+            # Retrying an expired *started* dispatch could duplicate a success
+            # whose acknowledgement was lost. Fail closed pending reconciliation.
+            safe_retry = expires is not None and not job.get("dispatch_started_at")
+            job.update(status="blocked", retryable=safe_retry, error=(
+                "lease expired before dispatch" if safe_retry
+                else "dispatch outcome unknown after expired lease; reconciliation required"
+            ))
+            _write_learning_queue(queue_path, jobs)
+            if not (retry_blocked and safe_retry):
+                _sync_learning_proposal(proposal_path, job, "blocked", job["error"])
+                return None, 1
+        if job.get("status") == "blocked" and not (retry_blocked and job.get("retryable") is True):
+            return None, 0
+        if job.get("status") not in {"queued", "blocked"}:
+            return None, 0
+        # Collapse legacy duplicate approvals for this identity only.
+        jobs = [item for item in jobs if item not in matches or item is job]
+        attempts = int(job.get("attempts") or 0)
+        if not task_key or attempts >= _LEARNING_MAX_ATTEMPTS:
+            job.update(status="blocked", retryable=False, error="missing task_key" if not task_key else "dispatch attempt limit reached")
+            _write_learning_queue(queue_path, jobs)
+            return None, 1
+        job.update(
+            status="leased", attempts=attempts + 1, lease_token=uuid4().hex,
+            leased_at=_now(), lease_expires_at=(now + timedelta(seconds=_LEARNING_LEASE_SECONDS)).isoformat(),
+        )
+        for field in ("error", "completed_at", "dispatched_at", "dispatch_started_at", "retryable"):
+            job.pop(field, None)
+        _write_learning_queue(queue_path, jobs)
+        try:
+            authorized = _sync_learning_proposal(proposal_path, job, "exploring")
+        except OSError:
+            job.update(status="blocked", retryable=True, error="proposal update failed before dispatch")
+        else:
+            if not authorized:
+                job.update(status="blocked", retryable=False, error="approval is no longer active")
+        if job["status"] == "blocked":
+            _write_learning_queue(queue_path, jobs)
+            return None, 1
+        job["dispatch_started_at"] = _now()
+        _write_learning_queue(queue_path, jobs)
+        return dict(job), 0
+
+
 def consume_learning_queue(
-    queue_path: Path = LEARNING_QUEUE_PATH,
+    queue_path: Path | None = None,
     *,
     dispatch_runner: Callable[[dict[str, Any]], int] | None = None,
+    proposals_path: Path | None = None,
+    retry_blocked: bool = False,
 ) -> dict[str, int]:
-    """Lease queued approvals once and expose blocked jobs for recovery."""
-    if not queue_path.exists():
-        return {"consumed": 0, "blocked": 0}
-    try:
-        lines = queue_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return {"consumed": 0, "blocked": 1}
-    jobs = [json.loads(line) for line in lines if line.strip()]
+    """Durably claim approvals, dispatch unlocked, then merge by owned token.
+
+    Confirmed failures and expired *unstarted* leases require explicit retry,
+    with at most three attempts. Expired started dispatches/timeouts have an
+    unknown outcome and cannot be retried automatically, even with retry enabled.
+    A successful dispatch remains exploring, not learned or task-complete.
+    """
+    queue_path = queue_path or LEARNING_QUEUE_PATH
+    proposal_path = proposals_path or PROPOSALS_PATH
     result = {"consumed": 0, "blocked": 0}
-    updated: list[dict[str, Any]] = []
-    for job in jobs:
-        if job.get("status") != "queued":
-            updated.append(job)
-            continue
-        task_key = str(job.get("task_key") or "").strip()
-        if not task_key:
-            job.update({"status": "blocked", "error": "missing task_key"})
-            result["blocked"] += 1
-            updated.append(job)
-            continue
-        job["status"] = "leased"
-        job["leased_at"] = _now()
-        updated.append(job)
-        runner = dispatch_runner or _default_learning_dispatch
-        try:
-            rc = runner(job)
-        except (OSError, subprocess.SubprocessError):
-            rc = 1
-        job["status"] = "dispatched" if rc == 0 else "blocked"
-        job["completed_at"] = _now() if rc == 0 else ""
-        if rc != 0:
-            job["error"] = "knowledge-digest dispatch failed"
-            result["blocked"] += 1
-        else:
-            result["consumed"] += 1
-    tmp = queue_path.with_suffix(queue_path.suffix + ".tmp")
+    if not queue_path.exists():
+        return result
     try:
-        with queue_path.with_suffix(queue_path.suffix + ".lock").open("a", encoding="utf-8") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            tmp.write_text("".join(json.dumps(job, ensure_ascii=False) + "\n" for job in updated), encoding="utf-8")
-            tmp.replace(queue_path)
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        return {"consumed": 0, "blocked": max(1, result["blocked"])}
+        with _jsonl_lock(queue_path):
+            task_keys = list(dict.fromkeys(str(job.get("task_key") or "").strip() for job in _read_learning_queue(queue_path)))
+        for task_key in task_keys:
+            job, blocked = _claim_learning_job(queue_path, task_key, proposal_path, retry_blocked=retry_blocked)
+            result["blocked"] += blocked
+            if job is None:
+                continue
+            runner = dispatch_runner or _default_learning_dispatch
+            error = ""
+            retryable = True
+            try:
+                rc = runner(dict(job))
+            except (OSError, subprocess.SubprocessError) as exc:
+                rc = 1
+                retryable = isinstance(exc, FileNotFoundError)
+                error = "dispatch failed before launch" if retryable else "dispatch outcome unknown; reconciliation required"
+            with _jsonl_lock(queue_path):
+                jobs = _read_learning_queue(queue_path)
+                current = next((item for item in reversed(jobs) if str(item.get("task_key") or "").strip() == task_key), None)
+                if current is None or current.get("status") != "leased" or current.get("lease_token") != job["lease_token"]:
+                    continue
+                if rc == 0:
+                    current.update(status="dispatched", dispatched_at=_now())
+                else:
+                    current.update(status="blocked", retryable=retryable, error=error or "knowledge-digest dispatch failed")
+                _write_learning_queue(queue_path, jobs)
+                result["consumed" if rc == 0 else "blocked"] += 1
+                _sync_learning_proposal(proposal_path, current, "exploring" if rc == 0 else "blocked", current.get("error", ""))
+    except (OSError, ValueError):
+        result["blocked"] = max(1, result["blocked"])
     return result
 
 
@@ -1592,10 +1752,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("observe", "auto"), default="observe")
     parser.add_argument("--auto-dispatch", action="store_true")
     parser.add_argument("--consume-learning", action="store_true")
+    parser.add_argument("--retry-learning-blocked", action="store_true", help="Retry confirmed failures/unstarted expired leases, up to three attempts; never retry an unknown dispatch outcome.")
     args = parser.parse_args(argv)
 
     if args.consume_learning:
-        print(json.dumps(consume_learning_queue(), ensure_ascii=False))
+        print(json.dumps(consume_learning_queue(proposals_path=args.proposals_path, retry_blocked=args.retry_learning_blocked), ensure_ascii=False))
         return 0
 
     events: list[dict] = []
