@@ -332,7 +332,8 @@ public final class DashboardWorkspaceStore {
         runningJobIDs.insert(id)
         let execution = scheduledJobExecution
         Task { [weak self] in
-            _ = await execution(id)
+            let result = await Task.detached(priority: .userInitiated) { await execution(id) }.value
+            _ = result
             guard let self else { return }
             runningJobIDs.remove(id)
             refreshFromProvider()
@@ -348,9 +349,9 @@ public final class DashboardWorkspaceStore {
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: entrypoint)
-        process.arguments = [entrypoint, id.rawValue, interpreter, program]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        process.arguments = [id.rawValue, interpreter, program]
+        process.standardOutput = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
+        process.standardError = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
         do {
             try process.run()
             process.waitUntilExit()

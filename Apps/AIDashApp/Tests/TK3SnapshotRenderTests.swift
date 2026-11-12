@@ -27,7 +27,12 @@ struct TK3SnapshotRenderTests {
 
     @Test("renders Actionable, Pulse, and Skills production views across states and appearances")
     func rendersProductionViews() throws {
-        let output = URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-four-domains-pulse-roi/receipts/TK3-screenshots", isDirectory: true)
+        let output: URL
+        if let configured = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"], !configured.isEmpty {
+            output = URL(fileURLWithPath: configured, isDirectory: true)
+        } else {
+            output = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-tk3-screenshots-\(UUID().uuidString)", isDirectory: true)
+        }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let states = ["populated", "loading", "empty", "error"]
         var geometrySamples: [DashboardGeometrySample] = []
@@ -56,7 +61,12 @@ struct TK3SnapshotRenderTests {
     }
 
     private func canonicalFixtureData() throws -> Data {
-        try Data(contentsOf: URL(fileURLWithPath: "/Users/lee/Development/worktrees/aidash-4dom-data-review-fix/aidata/tests/fixtures/skills_roi_report.json"))
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // AIDashApp
+            .deletingLastPathComponent() // Apps
+            .deletingLastPathComponent()
+        return try Data(contentsOf: repoRoot.appendingPathComponent("aidata/tests/fixtures/skills_roi_report.json"))
     }
 
     private func makeSkillsSummary(state: String) throws -> LiveDashboardTelemetryReader.LiveEfficiencySummary {

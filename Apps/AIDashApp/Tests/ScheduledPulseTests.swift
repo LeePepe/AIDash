@@ -317,6 +317,49 @@ struct ScheduledPulseTests {
         #expect(store.scheduledJobFrameworkSnapshot.unacknowledgedActions.isEmpty)
     }
 
+    @Test("Run Now uses fixed argv, drains large output, and refreshes after completion")
+    func runNowUsesFixedArgvAndCompletes() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-run-now-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let script = home.appendingPathComponent("fake-entrypoint.sh")
+        let argvFile = home.appendingPathComponent("argv.txt")
+        try """
+        printf '%s\\n' "$@" > "$HOME/argv.txt"
+        yes O | head -c 200000 >/dev/stdout
+        yes E | head -c 200000 >/dev/stderr
+        """.write(to: script, atomically: true, encoding: .utf8)
+        let completed = AsyncGate()
+        let store = DashboardWorkspaceStore(
+            snapshot: Self.menuSnapshot(),
+            cliEntries: [],
+            rankingRows: [],
+            scheduledJobExecution: { id in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/bash")
+                process.arguments = [script.path, id.rawValue, "/bin/bash", "/tmp/fixed-program.sh"]
+                process.environment = ["HOME": home.path]
+                process.standardOutput = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
+                process.standardError = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    await completed.open()
+                    return process.terminationStatus == 0
+                } catch {
+                    await completed.open()
+                    return false
+                }
+            }
+        )
+        store.runScheduledJobNow(.aidataDigest)
+        await completed.wait()
+        for _ in 0..<20 where store.runningJobIDs.contains(.aidataDigest) { await Task.yield() }
+        let argv = try String(contentsOf: argvFile, encoding: .utf8).split(separator: "\n").map(String.init)
+        #expect(argv == ["aidata-digest", "/bin/bash", "/tmp/fixed-program.sh"])
+        #expect(!store.runningJobIDs.contains(.aidataDigest))
+    }
+
     @Test("same-id fires coalesce without queueing")
     func coalescesSameID() async {
         let coordinator = ScheduledJobRunCoordinator()
