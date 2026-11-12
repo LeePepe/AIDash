@@ -90,6 +90,34 @@ def test_canonical_skills_roi_snapshot_preserves_report_nulls_and_source_grain(t
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("exclusive_end", ["2026-11-12T00:00:00+08:00", "2026-11-11T16:00:00Z"])
+def test_snapshot_daily_population_respects_producer_exclusive_cst_midnight(tmp_path, exclusive_end):
+    from L5_apps.digest.skills_roi_snapshot import write_snapshot
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    report = json.loads(fixture.read_text())
+    # The canonical producer's seven-day interval ends at next-day midnight,
+    # exclusively. skills/daily has inclusive day filters, not timestamp filters.
+    report["window_end"] = exclusive_end
+    report_file = tmp_path / "report.json"
+    report_file.write_text(json.dumps(report))
+    rows = [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1),
+            ("2026-11-12", "copilot_cli_skill", "team-lead", 99, 1)]
+    seen = []
+
+    def query(name, params):
+        seen.append(params)
+        return ([row for row in rows if params["day_from"] <= row[0] <= params["day_to"]],
+                ["day", "source", "skill", "n", "sessions"])
+
+    snapshot = write_snapshot(tmp_path / "skills-roi.json", report_file, query_runner=query)
+    assert [row["day"] for row in snapshot["skills_daily"]] == ["2026-11-11"]
+    assert seen == [{"day_from": "2026-11-05", "day_to": "2026-11-11"}]
+    assert snapshot["window_end"] == report["window_end"]
+    assert snapshot["source_as_of"] == report["source_as_of"]
+
+
+@pytest.mark.unit
 def test_canonical_skills_roi_snapshot_reports_missing_and_query_failure(tmp_path):
     from L5_apps.digest.skills_roi_snapshot import write_snapshot
 
@@ -433,8 +461,8 @@ def test_learning_approval_replay_repairs_failed_enqueue_without_new_authorizati
         raise OSError("queue disk failure after durable approval")
 
     monkeypatch.setattr(event_bridge, "_enqueue_learning_task", no_space)
-    options = dict(proposals_path=proposals, local_todos_path=tmp_path / "todos.jsonl",
-        linear_status_runner=lambda ident, state: calls.append((ident, state)) or 0)
+    options = {"proposals_path": proposals, "local_todos_path": tmp_path / "todos.jsonl",
+        "linear_status_runner": lambda ident, state: calls.append((ident, state)) or 0}
     with pytest.raises(OSError, match="queue disk failure"):
         event_bridge.process_user_events([event], **options)
     approved = json.loads(proposals.read_text().splitlines()[-1])

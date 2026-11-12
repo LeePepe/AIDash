@@ -13,10 +13,12 @@ import json
 import os
 import tempfile
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import serve
+from timeutil import CST
 
 _SECTION_TYPES = {
     "S1_pin_drift": dict, "S2_gate_catch": dict, "S3_skill_health": dict,
@@ -68,6 +70,23 @@ def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, error
     return payload
 
 
+def _daily_window(start: str, end: str) -> dict[str, str]:
+    def cst_timestamp(value: str) -> datetime:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))  # noqa: FURB162 - hook Python 3.9
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=CST)
+        return stamp.astimezone(CST)
+
+    lower, upper = cst_timestamp(start), cst_timestamp(end)
+    # The canonical producer's timestamp interval is upper-exclusive. The L4
+    # query is day-grained and inclusive; do not admit next-day midnight's day.
+    if ("T" in end or " " in end) and (upper.hour, upper.minute, upper.second, upper.microsecond) == (0, 0, 0, 0):
+        upper -= timedelta(days=1)
+    if lower.date() > upper.date():
+        raise ValueError("producer window has no complete CST day")
+    return {"day_from": lower.date().isoformat(), "day_to": upper.date().isoformat()}
+
+
 def write_snapshot(
     output: Path, report_path: Path, *,
     query_runner: Callable[..., tuple[list, list[str]]] | None = None,
@@ -88,7 +107,7 @@ def write_snapshot(
     start, end = report.get("window_start"), report.get("window_end")
     if isinstance(start, str) and isinstance(end, str):
         try:
-            rows, columns = (query_runner or serve.run_query)("skills/daily", {"day_from": start[:10], "day_to": end[:10]})
+            rows, columns = (query_runner or serve.run_query)("skills/daily", _daily_window(start, end))
             if not {"day", "source", "skill", "n", "sessions"}.issubset(columns):
                 raise ValueError("skills/daily grain is missing")
             for values in rows:
