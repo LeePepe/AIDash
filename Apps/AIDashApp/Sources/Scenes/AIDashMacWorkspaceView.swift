@@ -5,6 +5,67 @@ import SwiftUI
 import AIDashCore
 import AIDashUI
 
+public struct DashboardGeometrySample: Codable, Sendable, Equatable {
+    public let id: String
+    public let role: String
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(id: String, role: String, frame: CGRect) {
+        self.id = id
+        self.role = role
+        self.x = frame.minX
+        self.y = frame.minY
+        self.width = frame.width
+        self.height = frame.height
+    }
+}
+
+@MainActor
+public final class DashboardGeometryRecorder {
+    public private(set) var samples: [DashboardGeometrySample] = []
+    public init() {}
+    public func record(_ sample: DashboardGeometrySample) {
+        samples.removeAll { $0.id == sample.id && $0.role == sample.role }
+        samples.append(sample)
+    }
+}
+
+struct DashboardGeometryRecorderKey: EnvironmentKey {
+    static let defaultValue: DashboardGeometryRecorder? = nil
+}
+
+extension EnvironmentValues {
+    var dashboardGeometryRecorder: DashboardGeometryRecorder? {
+        get { self[DashboardGeometryRecorderKey.self] }
+        set { self[DashboardGeometryRecorderKey.self] = newValue }
+    }
+}
+
+struct DashboardGeometryCapture: ViewModifier {
+    @Environment(\.dashboardGeometryRecorder) private var recorder
+    let id: String
+    let role: String
+
+    func body(content: Content) -> some View {
+        content.background {
+            GeometryReader { proxy in
+                Color.clear.onAppear {
+                    recorder?.record(DashboardGeometrySample(id: id, role: role, frame: proxy.frame(in: .named("tk3-geometry"))))
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    func captureDashboardGeometry(id: String, role: String) -> some View {
+        modifier(DashboardGeometryCapture(id: id, role: role))
+    }
+}
+
 public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Identifiable {
     case trends
     case rankings
@@ -56,6 +117,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
                             Spacer()
                             Text(entry.value).font(.caption.monospacedDigit()).fixedSize(horizontal: true, vertical: false).lineLimit(2)
                         }
+                        .captureDashboardGeometry(id: "skills-row-\(entry.key)", role: "skillsDiagnosticRow")
                     }
                     if lens == "Usage" && !roi.skillsDaily.isEmpty {
                         Text("skills_daily · \(roi.skillsDaily.count) day/source/skill rows").font(.caption2).foregroundStyle(.secondary)
@@ -81,8 +143,10 @@ public struct SkillsRoiDiagnosticsCardView: View {
                 .padding(8)
                 .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .captureDashboardGeometry(id: "skills-\(id)", role: "skillsHealthPill")
             }
         }
+        .captureDashboardGeometry(id: "skills-health", role: "skillsHealthGrid")
     }
 
     private func diagnosticValue(_ roi: LiveDashboardTelemetryReader.SkillsRoiSnapshot, section: String) -> String {
@@ -721,6 +785,7 @@ public struct ActionItemsCardView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(store.selectedActionDomain == domain ? Color.accentColor : Color.primary)
                 .help(domain.subtitle)
+                .captureDashboardGeometry(id: "domain-\(domain.id)", role: "domainTile")
             }
         }
 
@@ -1074,6 +1139,7 @@ public struct ActionItemsCardView: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .captureDashboardGeometry(id: "action-\(item.id)", role: "actionRow")
     }
 
     private func specializedMetadata(for item: DashboardActionItem) -> some View {

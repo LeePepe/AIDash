@@ -30,17 +30,25 @@ struct TK3SnapshotRenderTests {
         let output = URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-four-domains-pulse-roi/receipts/TK3-screenshots", isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let states = ["populated", "loading", "empty", "error"]
+        var geometrySamples: [DashboardGeometrySample] = []
         for state in states {
             let skillsSummary = try makeSkillsSummary(state: state)
             let store = makeStore(state: state, skillsSummary: skillsSummary)
             for width in [1000.0, 700.0] {
                 for (appearance, scheme) in [("light", ColorScheme.light), ("dark", ColorScheme.dark)] {
-                    try render(ActionItemsCardView(store: store), name: "actionable-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output)
-                    try render(ScheduledPulsePageView(store: store), name: "pulse-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output)
-                    try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary), name: "skills-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output)
+                    try render(ActionItemsCardView(store: store), name: "actionable-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                    try render(ScheduledPulsePageView(store: store), name: "pulse-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                    try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary), name: "skills-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                 }
             }
         }
+        try #require(!geometrySamples.isEmpty)
+        let geometryDocument: [String: Any] = [
+            "platform": "desktop",
+            "viewportWidth": 1040,
+            "children": geometrySamples.map { ["label": $0.id, "role": $0.role, "frame": ["x": $0.x, "y": $0.y, "width": $0.width, "height": $0.height]] }
+        ]
+        try JSONSerialization.data(withJSONObject: geometryDocument, options: [.prettyPrinted]).write(to: output.deletingLastPathComponent().appendingPathComponent("TK3-geometry.json"))
     }
 
     private func canonicalFixtureData() throws -> Data {
@@ -93,8 +101,9 @@ struct TK3SnapshotRenderTests {
         return store
     }
 
-    private func render<V: View>(_ view: V, name: String, width: CGFloat, scheme: ColorScheme, output: URL) throws {
-        let host = view.frame(width: width, alignment: .topLeading).padding(20).fixedSize(horizontal: false, vertical: true).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme)
+    private func render<V: View>(_ view: V, name: String, width: CGFloat, scheme: ColorScheme, output: URL, geometrySamples: inout [DashboardGeometrySample]) throws {
+        let recorder = DashboardGeometryRecorder()
+        let host = view.frame(width: width, alignment: .topLeading).padding(20).fixedSize(horizontal: false, vertical: true).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme).environment(\.dashboardGeometryRecorder, recorder).coordinateSpace(name: "tk3-geometry")
         let renderer = ImageRenderer(content: host)
         renderer.scale = 2
         let image = try #require(renderer.nsImage)
@@ -102,6 +111,7 @@ struct TK3SnapshotRenderTests {
         let rep = try #require(NSBitmapImageRep(data: tiff))
         let png = try #require(rep.representation(using: .png, properties: [:]))
         try png.write(to: output.appendingPathComponent("\(name).png"))
+        geometrySamples.append(contentsOf: recorder.samples.map { DashboardGeometrySample(id: "\(name)/\($0.id)", role: $0.role, frame: CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)) })
         #expect(rep.pixelsWide == Int((width + 40) * 2))
         #expect(rep.pixelsHigh > 0)
     }

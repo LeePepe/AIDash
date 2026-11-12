@@ -206,8 +206,10 @@ public struct ScheduledPulsePageView: View {
                 .padding(7)
                 .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .captureDashboardGeometry(id: "stage-\(index)", role: "pulseStageTile")
             }
         }
+        .captureDashboardGeometry(id: "pulse-stages", role: "pulseStageGrid")
     }
 
     private var needActions: some View {
