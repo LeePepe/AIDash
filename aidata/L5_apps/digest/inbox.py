@@ -825,6 +825,8 @@ def build_job_actions(
                                 "ref": ref, "revision": matched_prop.revision + 1,
                             }
                             append_jsonl_locked(proposal_file, matched_record)
+                        else:
+                            continue  # Refresh rather than export a superseded decision.
 
         url = _infer_action_url(item, ref)
         effective_ref = ref or f"signal://{action_id}"

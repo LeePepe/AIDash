@@ -25,11 +25,15 @@ from config import (
 
 from L5_apps.digest.proposals import (
     Proposal,
-    append_jsonl_locked as _append_jsonl_locked,
-    jsonl_lock as _jsonl_lock,
     read_all_latest,
     read_latest_records,
     read_pending,
+)
+from L5_apps.digest.proposals import (
+    append_jsonl_locked as _append_jsonl_locked,
+)
+from L5_apps.digest.proposals import (
+    jsonl_lock as _jsonl_lock,
 )
 from L5_apps.digest.todo_sync_provider import (
     LinearTodoSyncProvider,
@@ -701,7 +705,7 @@ def _handle_learning_event(
                 if state == "learned":
                     updated["outcome"] = "owner_reported"
                 else:
-                    updated["next_eligible_at"] = (datetime.now(timezone.utc) + timedelta(days=7 if state == "snoozed" else 30)).isoformat()
+                    updated["next_eligible_at"] = (datetime.now(timezone.utc) + timedelta(days=7 if state == "snoozed" else 30)).isoformat()  # noqa: UP017 - hook Python 3.9
                 if state == "snoozed":
                     result["snoozed"] += 1
                 result["resolved"] += 1
@@ -1775,10 +1779,10 @@ def _claim_learning_job(
             return None, 0
         # A legacy duplicate queued row must never bypass an existing lease.
         job = next((job for job in matches if job.get("status") == "leased"), matches[-1])
-        now = datetime.fromisoformat(_now().replace("Z", "+00:00"))
+        now = datetime.fromisoformat(_now().replace("Z", "+00:00"))  # noqa: FURB162 - Python 3.9 cannot parse Z
         if job.get("status") == "leased":
             try:
-                expires = datetime.fromisoformat(str(job["lease_expires_at"]).replace("Z", "+00:00"))
+                expires = datetime.fromisoformat(str(job["lease_expires_at"]).replace("Z", "+00:00"))  # noqa: FURB162 - Python 3.9 cannot parse Z
                 if expires > now:
                     return None, 0
             except (KeyError, ValueError, TypeError):
@@ -1919,7 +1923,10 @@ def _default_learning_dispatch(job: dict[str, Any]) -> int:
          "--name", name, "--cwd", str(vault), "--prompt", prompt],
         check=False, capture_output=True, text=True, timeout=60,
     )
-    return result.returncode
+    if result.returncode != 0:
+        # The launcher may have started a worker before failing to acknowledge.
+        raise subprocess.SubprocessError("learning launch outcome requires reconciliation")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1936,8 +1943,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.consume_learning:
-        print(json.dumps(consume_learning_queue(proposals_path=args.proposals_path, retry_blocked=args.retry_learning_blocked), ensure_ascii=False))
-        return 0
+        summary = consume_learning_queue(proposals_path=args.proposals_path, retry_blocked=args.retry_learning_blocked)
+        print(json.dumps(summary, ensure_ascii=False))
+        return 1 if summary["blocked"] else 0
 
     events: list[dict] = []
     raw_input = args.events_json.strip()

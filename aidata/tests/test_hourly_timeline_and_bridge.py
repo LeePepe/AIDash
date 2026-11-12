@@ -65,6 +65,10 @@ def test_canonical_skills_roi_snapshot_preserves_report_nulls_and_source_grain(t
     assert all(row["sample_size"] == 2 for row in payload["skills_daily"])
     assert seen == [("skills/daily", {"day_from": "2026-11-05", "day_to": "2026-11-11"})]
     assert json.loads(output.read_text()) == payload
+    failed_producer = write_snapshot(output, fixture, query_runner=query, producer_exit_code=1)
+    assert failed_producer["coverage_status"] == "error"
+    assert failed_producer["diagnostics"] == report
+    assert failed_producer["errors"][0] == "retro producer exited 1"
 
 
 @pytest.mark.unit
@@ -298,6 +302,54 @@ def test_learning_queue_does_not_dispatch_without_durable_lease(tmp_path, monkey
     assert event_bridge.consume_learning_queue(queue, dispatch_runner=lambda job: calls.append(job) or 0) == {"consumed": 0, "blocked": 1}
     assert calls == []
     assert queue.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.unit
+def test_learning_queue_unknown_outcome_and_failed_ack_never_redispatch(tmp_path, monkeypatch):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n")
+    calls = []
+    original_write = event_bridge._write_learning_queue
+    writes = []
+
+    def lose_ack(path, jobs):
+        writes.append(1)
+        if len(writes) == 3:
+            raise OSError("acknowledgement disk failure")
+        original_write(path, jobs)
+
+    monkeypatch.setattr(event_bridge, "_write_learning_queue", lose_ack)
+    run = lambda job: calls.append(job["task_key"]) or 0
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run) == {"consumed": 0, "blocked": 1}
+    monkeypatch.setattr(event_bridge, "_write_learning_queue", original_write)
+    jobs = _queue_records(queue)
+    assert jobs[0]["status"] == "leased"
+    jobs[0]["lease_expires_at"] = "2026-01-01T00:00:00Z"
+    with event_bridge._jsonl_lock(queue):
+        original_write(queue, jobs)
+    assert event_bridge.consume_learning_queue(queue, dispatch_runner=run, retry_blocked=True) == {"consumed": 0, "blocked": 1}
+    assert len(calls) == 1
+    assert _queue_records(queue)[0]["retryable"] is False
+
+
+@pytest.mark.unit
+def test_learning_queue_timeout_and_cli_failure_are_observable(tmp_path, monkeypatch, capsys):
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(json.dumps(_learning_job()) + "\n")
+    monkeypatch.setattr(event_bridge, "LEARNING_QUEUE_PATH", queue)
+    calls = []
+
+    def timeout(job):
+        calls.append(job["task_key"])
+        raise event_bridge.subprocess.TimeoutExpired("fixture launcher", 60)
+
+    monkeypatch.setattr(event_bridge, "_default_learning_dispatch", timeout)
+    assert event_bridge.main(["--consume-learning"]) == 1
+    assert json.loads(capsys.readouterr().out)["blocked"] == 1
+    assert event_bridge.main(["--consume-learning", "--retry-learning-blocked"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"consumed": 0, "blocked": 0}
+    assert len(calls) == 1
+    assert _queue_records(queue)[0]["retryable"] is False
 
 
 @pytest.mark.unit

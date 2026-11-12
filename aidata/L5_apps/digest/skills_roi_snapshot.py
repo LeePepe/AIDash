@@ -32,6 +32,8 @@ _COVERAGE = {"healthy", "partial", "unknown", "missing", "error"}
 def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, errors: list[str] | None = None) -> dict[str, Any]:
     """Validate producer shape while preserving its values, nulls and estimates."""
     problems = list(errors or [])
+    if any(field not in report for field in _META):
+        problems.append("missing root observation metadata")
     for key, kind in _SECTION_TYPES.items():
         section = report.get(key)
         if not isinstance(section, kind):
@@ -50,8 +52,8 @@ def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, error
         problems.append("invalid coverage_status")
     if report.get("ok") is not True:
         problems.append("producer did not return ok=true")
-    if coverage == "healthy" and (sample == 0 or not report.get("source_as_of")):
-        problems.append("healthy producer has no observed sample/freshness")
+    if coverage == "healthy" and (sample == 0 or not report.get("source_as_of") or not report.get("window_start") or not report.get("window_end")):
+        problems.append("healthy producer has no observed sample/freshness/window")
     payload = {
         "schema_version": 1,
         **{key: report.get(key) for key in _META},
@@ -69,14 +71,15 @@ def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, error
 def write_snapshot(
     output: Path, report_path: Path, *,
     query_runner: Callable[..., tuple[list, list[str]]] | None = None,
+    producer_exit_code: int = 0,
 ) -> dict[str, Any]:
     """Capture the real report and query grain, then atomically replace output."""
-    errors: list[str] = []
+    errors: list[str] = [f"retro producer exited {producer_exit_code}"] if producer_exit_code else []
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
         if not isinstance(report, dict):
-            raise ValueError("retro report must be an object")
-    except (OSError, ValueError) as exc:
+            raise TypeError("retro report must be an object")
+    except (OSError, ValueError, TypeError) as exc:
         report = {}
         errors.append(f"retro producer report unavailable: {type(exc).__name__}")
     daily: list[dict[str, Any]] = []
@@ -131,8 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--producer-exit-code", type=int, default=0)
     args = parser.parse_args(argv)
-    payload = write_snapshot(args.output, args.report)
+    payload = write_snapshot(args.output, args.report, producer_exit_code=args.producer_exit_code)
     return 1 if payload.get("errors") else 0
 
 

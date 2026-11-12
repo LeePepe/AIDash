@@ -84,6 +84,33 @@ def test_learning_export_preserves_producer_metadata_after_linear_transfer(tmp_p
 
 
 @pytest.mark.unit
+def test_transfer_does_not_overwrite_newer_owner_decision(tmp_path):
+    import json
+
+    from L5_apps.digest.proposals import append_jsonl_locked, jsonl_lock
+    from L5_apps.digest.todo_sync_provider import LinearTodoSyncProvider
+
+    proposals = tmp_path / "proposals.jsonl"
+    record = {"id": "learning-topic", "ts": "2026-11-12T00:00:00Z", "agent": "knowledge-digest",
+        "title": "Explore one question", "detail": "Concrete evidence", "priority": "high", "status": "pending",
+        "ref": "learning-topic://topic", "topic_key": "topic", "source": "Learning", "scope": "personal", "revision": 1}
+    proposals.write_text(json.dumps(record) + "\n")
+    newer = {**record, "revision": 2, "status": "learned", "learning_state": "learned", "outcome": "owner_reported"}
+    script = tmp_path / "linear.py"
+    script.write_text("# fixture only")
+
+    def promoted(*_):
+        with jsonl_lock(proposals):
+            append_jsonl_locked(proposals, newer)
+        return 0, "TIA-123"
+
+    provider = LinearTodoSyncProvider(script_path=script, idea_runner=promoted)
+    item = inbox_mod.InboxItem(record["title"], "high", "待决策", ref=record["ref"], source="Learning")
+    assert inbox_mod.build_job_actions([item], proposals_path=proposals, provider=provider, sync_triage=True) == []
+    assert json.loads(proposals.read_text().splitlines()[-1]) == newer
+
+
+@pytest.mark.unit
 def test_aggregates_stalls_and_issues(fake_queries):
     items = build_inbox(0.0, proposals_reader=_no_proposals, log_reader=_no_logs)
     buckets = {it.bucket for it in items}
