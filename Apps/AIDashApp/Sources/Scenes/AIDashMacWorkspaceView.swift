@@ -4,6 +4,7 @@ import AppKit
 import SwiftUI
 import AIDashCore
 import AIDashUI
+import DesignKit
 
 public struct DashboardGeometrySample: Codable, Sendable, Equatable {
     public let id: String
@@ -93,93 +94,6 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
     }
 }
 
-public struct SkillsRoiDiagnosticsCardView: View {
-    let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
-    @State private var lens = "Usage"
-
-    public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?) { self.summary = summary }
-
-    public var body: some View {
-        SolidModularCardContainer(title: DashboardL10n.tr("dashboard.skills_roi.title", "Skills 效能与上下文 ROI 诊断 (S1–S12)"), subtitle: freshnessText, symbolName: "sparkles.square.filled.on.square") {
-            Picker(DashboardL10n.tr("dashboard.skills_roi.lens", "分析视角"), selection: $lens) {
-                Text(DashboardL10n.tr("dashboard.skills_roi.usage", "Usage")).tag("Usage")
-                Text(DashboardL10n.tr("dashboard.skills_roi.disclosure", "Disclosure / Escapes")).tag("Disclosure / Escapes")
-                Text(DashboardL10n.tr("dashboard.skills_roi.context", "Context")).tag("Context")
-            }
-            .pickerStyle(.segmented).controlSize(.small).frame(maxWidth: 430)
-            if let roi = summary?.skillsROI {
-                healthPills(for: roi)
-                let selected = diagnosticEntries(for: roi)
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(selected, id: \.key) { entry in
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(entry.key).font(.caption.weight(.semibold)).lineLimit(1)
-                            Spacer()
-                            Text(entry.value).font(.caption.monospacedDigit()).fixedSize(horizontal: true, vertical: false).lineLimit(2)
-                        }
-                        .captureDashboardGeometry(id: "skills-row-\(entry.key)", role: "skillsDiagnosticRow")
-                    }
-                    if lens == "Usage" && !roi.skillsDaily.isEmpty {
-                        Text("skills_daily · \(roi.skillsDaily.count) day/source/skill rows").font(.caption2).foregroundStyle(.secondary)
-                        ForEach(roi.skillsDaily.prefix(3), id: \.self) { Text($0).font(.caption2).foregroundStyle(.secondary).lineLimit(2) }
-                    }
-                }
-                .padding(.top, 4)
-            } else {
-                Text(DashboardL10n.tr("dashboard.skills_roi.missing", "unknown / missing · 等待 metadata-only skills-roi.json"))
-                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private func healthPills(for roi: LiveDashboardTelemetryReader.SkillsRoiSnapshot) -> some View {
-        let ids = ["S1_pin_drift", "S2_gate_catch", "S3_skill_health", "S11_context_composition"]
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-            ForEach(ids, id: \.self) { id in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(id).font(.caption.weight(.semibold)).lineLimit(1)
-                    Text(diagnosticValue(roi, section: id)).font(.caption2.monospacedDigit()).lineLimit(2)
-                }
-                .padding(8)
-                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .captureDashboardGeometry(id: "skills-\(id)", role: "skillsHealthPill")
-            }
-        }
-        .captureDashboardGeometry(id: "skills-health", role: "skillsHealthGrid")
-    }
-
-    private func diagnosticValue(_ roi: LiveDashboardTelemetryReader.SkillsRoiSnapshot, section: String) -> String {
-        let fields = roi.diagnostics[section] ?? [:]
-        return fields.first(where: { $0.key != "window_cst" && $0.key != "source_as_of" && $0.key != "sample_size" && $0.key != "coverage_status" })?.value ?? DashboardL10n.tr("dashboard.skills_roi.metric_unknown", "unknown")
-    }
-
-    private func diagnosticEntries(for roi: LiveDashboardTelemetryReader.SkillsRoiSnapshot) -> [(key: String, value: String)] {
-        let allowed: (String) -> Bool = { key in
-            switch lens {
-            case "Usage": return key.hasPrefix("S1_") || key.hasPrefix("S2_") || key.hasPrefix("S3_") || key.hasPrefix("S4_") || key.hasPrefix("S6_") || key.hasPrefix("S10_")
-            case "Disclosure / Escapes": return key.hasPrefix("S7_") || key.hasPrefix("S8_") || key.hasPrefix("S9_")
-            default: return key.hasPrefix("S11_") || key.hasPrefix("S12_")
-            }
-        }
-        return roi.diagnostics.keys.sorted().flatMap { section in
-            roi.diagnostics[section, default: [:]].keys.sorted().compactMap { field in
-                let key = "\(section).\(field)"
-                return allowed(section) ? (key, roi.diagnostics[section]?[field] ?? DashboardL10n.tr("dashboard.skills_roi.metric_unknown", "unknown")) : nil
-            }
-        }
-    }
-
-    private var freshnessText: String {
-        guard let roi = summary?.skillsROI else { return DashboardL10n.tr("dashboard.skills_roi.coverage_unknown", "Coverage: unknown") }
-        let window = roi.window ?? DashboardL10n.tr("dashboard.skills_roi.window_unknown", "unknown window")
-        let range = [roi.windowStart, roi.windowEnd].compactMap { $0 }.joined(separator: "→")
-        let asOf = roi.sourceAsOf ?? DashboardL10n.tr("dashboard.skills_roi.as_of_unknown", "unknown as_of")
-        let sample = roi.sampleSize.map(String.init) ?? DashboardL10n.tr("dashboard.skills_roi.sample_unknown", "unknown sample")
-        return "Window: \(window)\(range.isEmpty ? "" : " · \(range)") · as of \(asOf) · sample \(sample) · \(roi.coverageStatus)"
-    }
-}
-
 // swiftlint:disable:next type_body_length
 public struct ActionItemsCardView: View {
     @Bindable public var store: DashboardWorkspaceStore
@@ -192,6 +106,7 @@ public struct ActionItemsCardView: View {
     @State private var expandedBugBlockers = false
     @State private var collapsedDomains: Set<DashboardActionDomain> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.theme) private var theme
 
     public init(
         store: DashboardWorkspaceStore,
@@ -750,15 +665,11 @@ public struct ActionItemsCardView: View {
 
     private var domainSummaryStrip: some View {
         ViewThatFits(in: .horizontal) {
-            domainGrid(columns: 4)
-            domainGrid(columns: 2)
-            ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 8) { domainTiles } }
-        }
-    }
-
-    private func domainGrid(columns: Int) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
-            domainTiles
+            DashboardResponsiveGrid { domainTiles }.frame(minWidth: 640)
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(spacing: Space.gap) { domainTiles.frame(width: 240) }
+            }
+            .frame(height: 76)
         }
     }
 
@@ -773,14 +684,17 @@ public struct ActionItemsCardView: View {
                         Image(systemName: domain.symbolName)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(domain.title).font(.caption.weight(.semibold))
-                            Text(domain.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(domain.subtitle).font(.subheadline).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .captureDashboardGeometry(id: "domain-subtitle-\(domain.id)", role: "domainSubtitle")
                         }
                         Spacer(minLength: 2)
                         Text("\(count)").font(.caption.monospacedDigit().weight(.bold)).fixedSize(horizontal: true, vertical: false)
                     }
-                    .padding(9)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .background(store.selectedActionDomain == domain ? Color.accentColor.opacity(0.14) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .padding(Space.gap)
+                    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                    .background(store.selectedActionDomain == domain ? theme.primary.primary.opacity(0.14) : theme.neutrals.inner, in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(store.selectedActionDomain == domain ? Color.accentColor : Color.primary)
@@ -801,8 +715,10 @@ public struct ActionItemsCardView: View {
                     Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
                     Image(systemName: collapsedDomains.contains(domain) ? "chevron.down" : "chevron.up").font(.caption2)
                 }
+                .frame(minHeight: 28)
             }
             .buttonStyle(.plain)
+            .captureDashboardGeometry(id: "domain-section-\(domain.id)", role: "button")
             if !collapsedDomains.contains(domain) {
                 ForEach(items) { item in actionItemRow(item) }
             }
@@ -1048,7 +964,6 @@ public struct ActionItemsCardView: View {
     }
 
     private func actionItemRow(_ item: DashboardActionItem) -> some View {
-        let priorityColor = DashboardSemanticColorPalette.color(for: item.priority.health)
         let statusColor = statusTintColor(for: item.status)
         let isExpanded = expandedActionID == item.id
         let hasDecisionControl = item.controls.contains { $0.id == "decision" && !$0.options.isEmpty }
@@ -1061,51 +976,35 @@ public struct ActionItemsCardView: View {
                     Image(systemName: item.status.symbolName)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(statusColor)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .captureDashboardGeometry(id: "status-\(item.id)", role: "button")
                 .accessibilityLabel(DashboardL10n.format("dashboard.actions.mark_completed_format", "Mark %@ as completed", item.title))
 
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(item.priority.label)
-                            .font(.caption2.weight(.bold))
-                            .monospacedDigit()
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(priorityColor.opacity(0.16), in: Capsule())
-                            .foregroundStyle(priorityColor)
-                        Text(item.title)
-                            .font(.body.weight(.semibold))
-                            .strikethrough(item.isCompleted)
-                            .foregroundStyle(item.isCompleted ? .secondary : .primary)
-                            .lineLimit(actionItemKind(item) == .evalRule ? nil : 1)
-                            .fixedSize(horizontal: false, vertical: actionItemKind(item) == .evalRule)
-                        if let refLabel = item.displayRefLabel, !item.title.contains(refLabel) {
-                            Text(refLabel)
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: Space.gap) {
+                            actionRowTitle(item)
+                            Spacer(minLength: Space.gap)
+                            actionQuickButtons(item, requiresChoice: requiresChoice)
+                        }.frame(minWidth: 900)
+                        HStack(alignment: .top, spacing: Space.gap) {
+                            actionRowTitle(item)
+                            Spacer(minLength: 0)
+                            compactDecisionButtons(item)
                         }
-                        Spacer(minLength: 6)
-                        actionQuickButtons(item, requiresChoice: requiresChoice)
                     }
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(actionItemKind(item) == .evalRule ? evalRulePreview(item.summary) : item.summary)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(actionItemKind(item) == .evalRule || actionItemKind(item) == .decision ? 2 : 1)
-                            .truncationMode(.tail)
-                        Spacer(minLength: 6)
-                        Text("\(item.sourceTag) · \(item.projectFolderName)")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
+                    Text(actionItemKind(item) == .evalRule ? evalRulePreview(item.summary) : item.summary)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
             }
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
+                    Text("\(item.sourceTag) · \(item.projectFolderName) · \(item.displayRefLabel ?? "")")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if actionItemKind(item) == .evalRule {
                         evalRuleExpandedContent(item)
                     } else {
@@ -1140,6 +1039,34 @@ public struct ActionItemsCardView: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
         .captureDashboardGeometry(id: "action-\(item.id)", role: "actionRow")
+    }
+
+    private func actionRowTitle(_ item: DashboardActionItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.gap / 2) {
+            Text(item.priority.label).font(.caption2.weight(.bold)).fixedSize()
+                .foregroundStyle(DashboardSemanticColorPalette.color(for: item.priority.health))
+            Text(item.title).font(.body.weight(.semibold)).strikethrough(item.isCompleted)
+                .fixedSize(horizontal: false, vertical: true)
+                .captureDashboardGeometry(id: "title-\(item.id)", role: "actionTitle")
+        }
+    }
+
+    private func compactDecisionButtons(_ item: DashboardActionItem) -> some View {
+        HStack(spacing: Space.gap / 2) {
+            if !item.isCompleted && (item.isLearningTopic || item.isProposal) {
+                Button(decisionLabel(item.status == .inProgress ? "Done" : "Approve")) {
+                    store.submitActionItemDecision(item, decision: item.status == .inProgress ? "Done" : "Approve", onToggleDone: onToggleDone)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.small).frame(minHeight: 28)
+                .captureDashboardGeometry(id: "primary-\(item.id)", role: "button")
+            }
+            Button { expandedActionID = expandedActionID == item.id ? nil : item.id } label: {
+                Image(systemName: expandedActionID == item.id ? "chevron.up" : "chevron.down")
+                    .frame(minWidth: 28, minHeight: 28)
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+            .captureDashboardGeometry(id: "drawer-\(item.id)", role: "button")
+        }.fixedSize(horizontal: true, vertical: false)
     }
 
     private func specializedMetadata(for item: DashboardActionItem) -> some View {

@@ -133,6 +133,7 @@ public enum LiveDashboardTelemetryReader {
 
     public static var isLiveEnvironment: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
+            && ProcessInfo.processInfo.environment["XCTestBundlePath"] == nil
     }
 
     public static func loadTopicCatalog(
@@ -441,6 +442,7 @@ public enum LiveDashboardTelemetryReader {
             let lineData = Data(line.utf8)
             if let wireAction = try? decoder.decode(JobActionsAction.self, from: lineData),
                wireAction.jobID == definition.id.rawValue {
+                if definition.id == .aidataDigest, !isPersonalJobAction(wireAction) { return nil }
                 let controls = wireAction.controls.compactMap { control -> ScheduledJobActionControl? in
                     guard let kind = ScheduledJobActionControlKind(rawValue: control.kind.rawValue) else { return nil }
                     return ScheduledJobActionControl(
@@ -458,7 +460,8 @@ public enum LiveDashboardTelemetryReader {
                     createdAt: wireAction.createdAt,
                     title: wireAction.title,
                     descriptionMd: wireAction.descriptionMd,
-                    controls: controls
+                    controls: controls,
+                    revision: wireAction.revision
                 )
             }
             if let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
@@ -1844,27 +1847,7 @@ extension LiveDashboardTelemetryReader {
         }
     }
 
-    public struct SkillsRoiSnapshot: Sendable, Equatable {
-        public let window: String?
-        public let windowStart: String?
-        public let windowEnd: String?
-        public let sourceAsOf: String?
-        public let sampleSize: Int?
-        public let coverageStatus: String
-        public let diagnostics: [String: [String: String]]
-        public let skillsDaily: [String]
-
-        public init(window: String? = nil, windowStart: String? = nil, windowEnd: String? = nil, sourceAsOf: String? = nil, sampleSize: Int? = nil, coverageStatus: String = "unknown", diagnostics: [String: [String: String]] = [:], skillsDaily: [String] = []) {
-            self.window = window
-            self.windowStart = windowStart
-            self.windowEnd = windowEnd
-            self.sourceAsOf = sourceAsOf
-            self.sampleSize = sampleSize
-            self.coverageStatus = coverageStatus
-            self.diagnostics = diagnostics
-            self.skillsDaily = skillsDaily
-        }
-    }
+    public typealias SkillsRoiSnapshot = SkillsRoiReport
 
     public struct LiveEfficiencySummary: Sendable, Equatable {
         public var r1ReviewFailRate: Double = 0
@@ -1897,49 +1880,8 @@ extension LiveDashboardTelemetryReader {
 
     private static func loadSkillsRoiSnapshot(homeURL: URL) -> SkillsRoiSnapshot? {
         let url = homeURL.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
-        guard let data = try? Data(contentsOf: url),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        let canonicalKeys = ["S1_pin_drift", "S2_gate_catch", "S3_skill_health", "S4_usage_and_r1", "S6_load_vs_script", "S7_disclosure_funnel", "S8_post_skill_churn", "S9_escape_attribution", "S10_skill_roi_ranking", "S11_context_composition", "S12_tool_context_burn"]
-        let diagnosticsObject = object["diagnostics"] as? [String: Any]
-        let diagnostics = (diagnosticsObject ?? object.filter { canonicalKeys.contains($0.key) }).reduce(into: [String: [String: String]]()) { result, pair in
-            result[pair.key] = flattenSkillRoiValue(pair.value)
-        }
-        let daily = (object["skills_daily"] as? [[String: Any]] ?? []).map { row in
-            row.keys.sorted().map { "\($0)=\(formatSkillRoiValue(row[$0]))" }.joined(separator: " · ")
-        }
-        return SkillsRoiSnapshot(
-            window: object["window_cst"] as? String,
-            windowStart: object["window_start"] as? String,
-            windowEnd: object["window_end"] as? String,
-            sourceAsOf: object["source_as_of"] as? String,
-            sampleSize: (object["sample_size"] as? NSNumber)?.intValue,
-            coverageStatus: object["coverage_status"] as? String ?? "unknown",
-            diagnostics: diagnostics,
-            skillsDaily: daily
-        )
-    }
-
-    private static func flattenSkillRoiValue(_ value: Any) -> [String: String] {
-        guard let object = value as? [String: Any] else { return ["value": formatSkillRoiValue(value)] }
-        var result: [String: String] = [:]
-        func visit(_ value: Any, prefix: String) {
-            if let nested = value as? [String: Any] {
-                for key in nested.keys.sorted() { visit(nested[key] as Any, prefix: prefix.isEmpty ? key : "\(prefix).\(key)") }
-            } else {
-                result[prefix] = formatSkillRoiValue(value)
-            }
-        }
-        visit(object, prefix: "")
-        return result
-    }
-
-    private static func formatSkillRoiValue(_ value: Any?) -> String {
-        guard let value else { return "unknown" }
-        if value is NSNull { return "unknown" }
-        if let number = value as? NSNumber { return number.stringValue }
-        if let string = value as? String { return string.isEmpty ? "unknown" : string }
-        if let array = value as? [Any] { return array.map { formatSkillRoiValue($0) }.joined(separator: ", ") }
-        return String(describing: value)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(SkillsRoiReport.self, from: data)
     }
 
     private static func populateWarehouseReviewSummary(_ summary: inout LiveEfficiencySummary, whURL: URL) {
@@ -1993,7 +1935,8 @@ extension LiveDashboardTelemetryReader {
         let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
         let sources = JobActionsSources.load(
             home: home,
-            jobs: ScheduledPulseRegistry.jobs
+            jobs: ScheduledPulseRegistry.jobs,
+            include: isPersonalJobAction
         ) { url, limit in
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             guard attributes[.type] as? FileAttributeType == .typeRegular else {
@@ -2004,7 +1947,8 @@ extension LiveDashboardTelemetryReader {
             return try handle.read(upToCount: limit) ?? Data()
         }
         let canonicalItems = mapJobActions(sources.actions, acknowledgedActionIDs: acknowledgedActionIDs)
-        if !canonicalItems.isEmpty {
+        let canonicalURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/actions.jsonl")
+        if !canonicalItems.isEmpty || FileManager.default.fileExists(atPath: canonicalURL.path) {
             return canonicalItems
         }
         let proposalsURL = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
@@ -2013,11 +1957,18 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static let personalActionSources: Set<String> = ["Learning", "Linear", "Retro", "retro-loop", "CI Improve", "GTT Blocker", "PR & CI"]
-    private static let personalActionExclusions = ["[bing]", "[flightbook]", "bing", "flightbook", "ado", "msft.ghe.com", "teams", "mail_inbox", "work_teams_bridge"]
+    private static func isPersonalJobAction(_ action: JobActionsAction) -> Bool {
+        guard !["work", "work-business", "work_only"].contains(action.scope?.lowercased() ?? ""),
+              !action.labels.contains(where: { ["work", "work-business", "work_only"].contains($0.lowercased()) }) else { return false }
+        return isPersonalAction(source: action.source, title: action.title + " " + action.descriptionMd,
+                         ref: [action.ref, action.url].compactMap { $0 }.joined(separator: " "),
+                         project: ([action.project, action.scope].compactMap { $0 } + action.labels).joined(separator: " "))
+    }
 
     private static func isPersonalAction(source: String?, title: String, ref: String?, project: String? = nil) -> Bool {
         let haystack = [source, title, ref, project].compactMap { $0?.lowercased() }.joined(separator: " ")
-        guard !personalActionExclusions.contains(where: haystack.contains) else { return false }
+        let workTokens = #"(?<![\p{L}\p{N}])(?:bing|flightbook|ado|teams|mail_inbox|work_teams_bridge)(?![\p{L}\p{N}])"#
+        guard !haystack.contains("msft.ghe.com"), haystack.range(of: workTokens, options: .regularExpression) == nil else { return false }
         let normalizedSource = source?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let normalizedRef = ref?.lowercased() ?? ""
         return personalActionSources.contains(normalizedSource)
@@ -2033,7 +1984,7 @@ extension LiveDashboardTelemetryReader {
         acknowledgedActionIDs: Set<String> = []
     ) -> [DashboardActionItem] {
         guard let data = try? Data(contentsOf: actionsURL),
-              let decoded = try? JobActionsSources.decode(data, jobID: "aidata-digest") else {
+              let decoded = try? JobActionsSources.decode(data, jobID: "aidata-digest", include: isPersonalJobAction) else {
             return []
         }
         return mapJobActions(decoded, acknowledgedActionIDs: acknowledgedActionIDs)
@@ -2050,7 +2001,7 @@ extension LiveDashboardTelemetryReader {
             let status = DashboardActionStatus.from(rawStatus: action.status, isCompleted: false)
             let priority = DashboardActionPriority.from(rawPriority: action.priority)
             let sourceTag = (action.source?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? ""
-            guard isPersonalAction(source: sourceTag, title: action.title, ref: action.ref) else { return nil }
+            guard isPersonalJobAction(action) else { return nil }
             let rawDesc = action.description.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanSummary = cleanActionDescription(rawDesc, title: action.title, ref: action.ref)
             let urlStr = (action.url?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }

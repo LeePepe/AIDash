@@ -11,7 +11,7 @@ enum JobActionsSources {
     static let maximumRetainedActions = 512
     typealias ReadFile = (URL, Int) throws -> Data
 
-    static func load(home: URL, jobs: [ScheduledJobDefinition], read: ReadFile) -> JobActionsSourceSnapshot {
+    static func load(home: URL, jobs: [ScheduledJobDefinition], include: (JobActionsAction) -> Bool = { _ in true }, read: ReadFile) -> JobActionsSourceSnapshot {
         let root = home.appendingPathComponent("Library/Application Support/AIDash/jobs", isDirectory: true)
         var actions: [JobActionsAction] = []
         var diagnostics: [JobActionsDiagnostic] = []
@@ -23,7 +23,7 @@ enum JobActionsSources {
                     diagnostics.append(.init(code: "source-oversized", jobID: job.id.rawValue))
                     continue
                 }
-                actions += try decode(data, jobID: job.id.rawValue)
+                actions += try decode(data, jobID: job.id.rawValue, include: include)
             } catch {
                 let code: String
                 let cocoa = error as NSError
@@ -42,7 +42,7 @@ enum JobActionsSources {
     }
 
     /// Decodes valid lines independently and retains protected high-priority actions when bounded.
-    static func decode(_ data: Data, jobID: String) throws -> [JobActionsAction] {
+    static func decode(_ data: Data, jobID: String, include: (JobActionsAction) -> Bool = { _ in true }) throws -> [JobActionsAction] {
         guard let text = String(data: data, encoding: .utf8) else { throw invalidSource() }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -58,15 +58,17 @@ enum JobActionsSources {
         var actions: [JobActionsAction] = []
         var seenIDs = Set<String>()
         var nonEmptyLineCount = 0
+        var validLineCount = 0
         for line in text.split(whereSeparator: \.isNewline) where !line.trimmingCharacters(in: .whitespaces).isEmpty {
             nonEmptyLineCount += 1
             guard let action = try? decoder.decode(JobActionsAction.self, from: Data(line.utf8)),
                   action.jobID == jobID,
-                  (try? JobActionsValidation.validateAction(action)) != nil,
-                  seenIDs.insert(action.id).inserted else { continue }
+                  (try? JobActionsValidation.validateAction(action)) != nil else { continue }
+            validLineCount += 1
+            guard include(action), seenIDs.insert(action.id).inserted else { continue }
             actions.append(action)
         }
-        guard nonEmptyLineCount == 0 || !actions.isEmpty else { throw invalidSource() }
+        guard nonEmptyLineCount == 0 || validLineCount > 0 else { throw invalidSource() }
         return retain(actions)
     }
 

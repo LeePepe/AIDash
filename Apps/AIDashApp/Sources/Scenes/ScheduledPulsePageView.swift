@@ -1,13 +1,20 @@
 #if os(macOS)
 import SwiftUI
+import DesignKit
 
 @MainActor
 public struct ScheduledPulsePageView: View {
     @Bindable public var store: DashboardWorkspaceStore
     @State private var installerError: String?
+    @Environment(\.theme) private var theme
+    private let registerJobs: @MainActor () -> Void
 
-    public init(store: DashboardWorkspaceStore) {
+    public init(store: DashboardWorkspaceStore, registerJobs: (@MainActor () -> Void)? = nil) {
         self.store = store
+        self.registerJobs = registerJobs ?? {
+            guard JobActionsSources.isProductionEnvironment else { return }
+            _ = ScheduledPulseLaunchdInstaller.shared.registerLiveJobs()
+        }
     }
 
     public var body: some View {
@@ -32,7 +39,7 @@ public struct ScheduledPulsePageView: View {
             }
         }
         .onAppear {
-            _ = ScheduledPulseLaunchdInstaller.shared.registerLiveJobs()
+            registerJobs()
             if store.scheduledJobFrameworkSnapshot.entries.isEmpty {
                 store.refreshFromProvider()
             }
@@ -54,7 +61,7 @@ public struct ScheduledPulsePageView: View {
                         } label: {
                             Text("\(entry.definition.displayName) · \(entry.statusText)")
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(entry.semanticState.semanticHealth == .neutral ? Color.secondary : (entry.isProblem ? Color.orange : Color.green))
+                                .foregroundStyle(jobColor(entry.semanticState))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
                                 .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
@@ -72,8 +79,6 @@ public struct ScheduledPulsePageView: View {
                 }
             }
 
-            frameworkControls
-
             if let installerError {
                 Text(installerError)
                     .font(.caption)
@@ -84,8 +89,8 @@ public struct ScheduledPulsePageView: View {
 
     private var pulseHealthStrip: some View {
         HStack(spacing: 10) {
-            pulseMetric(title: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.online", "在线任务"), value: "\(store.scheduledPulseSnapshot.jobs.filter { $0.definition.isLive }.count)/\(store.scheduledPulseSnapshot.jobs.count)", detail: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.registration", "LaunchAgent 注册"))
-            pulseMetric(title: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.recent", "最近运行"), value: latestRunText, detail: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.success_priority", "成功回执优先"))
+            pulseMetric(title: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.online", "在线任务"), value: loadedJobsText, detail: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.registration", "LaunchAgent 注册"))
+            pulseMetric(title: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.recent", "最近运行"), value: latestRunText, detail: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.success_priority", "任务回执 · 非服务加载时间"))
             pulseMetric(title: DashboardL10n.tr("dashboard.scheduled_pulse.kpi.health", "阶段健康"), value: stageHealthText, detail: DashboardL10n.format("dashboard.scheduled_pulse.kpi.actions_format", "待拍板 %lld 项", store.scheduledJobFrameworkSnapshot.unacknowledgedActions.count))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -104,15 +109,42 @@ public struct ScheduledPulsePageView: View {
     }
 
     private var latestRunText: String {
-        let dates = store.scheduledJobFrameworkSnapshot.entries.compactMap(\.lastRunAt)
+        let dates = store.scheduledJobFrameworkSnapshot.entries.compactMap { $0.state?.lastRunAt }
         guard let date = dates.max() else { return DashboardL10n.tr("dashboard.scheduled_pulse.unknown", "未知") }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     private var stageHealthText: String {
         let stages = store.scheduledJobFrameworkSnapshot.entries.flatMap { $0.state?.stages ?? [] }
-        guard !stages.isEmpty else { return DashboardL10n.tr("dashboard.scheduled_pulse.unknown", "未知") }
-        return "\(stages.filter(\.isSuccess).count)/\(stages.count)"
+        if stages.contains(where: { $0.semanticState == .running }) { return ScheduledStageState.running.title }
+        guard !stages.isEmpty, stages.allSatisfy(\.isKnown) else { return DashboardL10n.tr("dashboard.scheduled_pulse.unknown", "未知") }
+        return "\(stages.filter(\.isSuccess).count)/\(max(5, stages.count))"
+    }
+
+    private var loadedJobsText: String {
+        let entries = store.scheduledJobFrameworkSnapshot.entries.filter { $0.definition.isLive }
+        guard entries.contains(where: { $0.launchdStatus != nil }) else { return DashboardL10n.tr("dashboard.scheduled_pulse.unknown", "未知") }
+        return "\(entries.filter { $0.launchdStatus?.isLoaded == true }.count)/\(entries.count)"
+    }
+
+    private func jobColor(_ state: ScheduledJobSemanticState) -> Color {
+        switch state {
+        case .running: return theme.primary.onPrimarySubtle
+        case .healthy: return theme.successOnSubtle
+        case .partial: return theme.warningOnSubtle
+        case .failed: return theme.dangerOnSubtle
+        case .noState, .coalesced: return theme.neutrals.text(.body)
+        }
+    }
+
+    private func stageColor(_ state: ScheduledStageState) -> Color {
+        switch state {
+        case .running: return theme.primary.onPrimarySubtle
+        case .passed: return theme.successOnSubtle
+        case .warning: return theme.warningOnSubtle
+        case .failed: return theme.dangerOnSubtle
+        case .unknown: return theme.neutrals.text(.body)
+        }
     }
 
     private var frameworkControls: some View {
@@ -138,14 +170,19 @@ public struct ScheduledPulsePageView: View {
     }
 
     private func overviewBlock(_ entry: ScheduledJobFrameworkEntry) -> some View {
-        let isProblem = entry.isProblem
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: Space.gap) {
             HStack(spacing: 8) {
                 Text(entry.definition.displayName).font(.headline)
                 Spacer(minLength: 4)
                 Text(entry.statusText)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(entry.semanticState.semanticHealth == .neutral ? Color.secondary : (isProblem ? Color.orange : Color.green))
+                    .foregroundStyle(jobColor(entry.semanticState))
+            }
+            Text("\(entry.definition.launchAgentLabel) · \(entry.definition.interpreterPath ?? "")")
+                .font(.caption).foregroundStyle(theme.neutrals.text(.body))
+                .fixedSize(horizontal: false, vertical: true)
+            if let asOf = entry.state?.sourceAsOf {
+                Text(DashboardL10n.format("dashboard.scheduled_pulse.source_as_of", "数仓观测截至 %@", asOf)).font(.caption)
             }
             if let overviewMd = entry.state?.overviewMd, !overviewMd.isEmpty {
                 Text(overviewMd).font(.body).fixedSize(horizontal: false, vertical: true)
@@ -168,12 +205,21 @@ public struct ScheduledPulsePageView: View {
             }
             HStack(spacing: 8) {
                 Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "立即运行")) { store.runScheduledJobNow(entry.id) }
-                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(store.runningJobIDs.contains(entry.id))
+                    .buttonStyle(.borderedProminent).controlSize(.small).frame(minHeight: 28)
+                    .disabled(store.runningJobIDs.contains(entry.id) || !entry.definition.isLive)
+                    .captureDashboardGeometry(id: "pulse-run", role: "button")
                 if store.runningJobIDs.contains(entry.id) { ProgressView().controlSize(.small) }
                 Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "刷新状态")) { store.refreshFromProvider() }
-                    .buttonStyle(.bordered).controlSize(.small)
+                    .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
+                    .captureDashboardGeometry(id: "pulse-refresh", role: "button")
+                Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) {
+                    handle(entry.launchdStatus?.isLoaded == true ? store.stopScheduledJob(entry.id) : store.startScheduledJob(entry.id))
+                }.buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
+                    .disabled(!entry.definition.isLive)
+                    .captureDashboardGeometry(id: "pulse-service", role: "button")
                 Button(DashboardL10n.tr("dashboard.scheduled_pulse.copy_command", "复制诊断命令")) { store.copyScheduledJobCommand(ScheduledJobStatus(definition: entry.definition, health: .healthy)) }
-                    .buttonStyle(.bordered).controlSize(.small)
+                    .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
+                    .captureDashboardGeometry(id: "pulse-diagnostics", role: "button")
             }
             .frame(minHeight: 28)
         }
@@ -191,15 +237,16 @@ public struct ScheduledPulsePageView: View {
             DashboardL10n.tr("dashboard.scheduled_pulse.stage.learning", "④ 学习寻题"),
             DashboardL10n.tr("dashboard.scheduled_pulse.stage.brief", "⑤ Brief 投递")
         ]
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5), spacing: 6) {
+        let ids = ["collect", "normalize_merge", "retro_roi", "learning_topics", "digest_push"]
+        return Grid(horizontalSpacing: Space.gap / 2) {
+            GridRow {
             ForEach(Array(titles.enumerated()), id: \.offset) { index, title in
-                let stage = stages.indices.contains(index) ? stages[index] : nil
+                let stage = stages.first { $0.id == ids[index] }
+                let semantic = stage?.semanticState ?? .unknown
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.caption.weight(.semibold)).lineLimit(2)
-                    Text(stage?.isKnown == true ? (stage?.isSuccess == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stage.passed", "通过") : DashboardL10n.tr("dashboard.scheduled_pulse.stage.error", "异常")) : DashboardL10n.tr("dashboard.scheduled_pulse.stage.unknown", "未知"))
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(stage?.isSuccess == true ? Color.green : (stage?.isKnown == true ? Color.orange : Color.secondary))
-                    if let exitCode = stage?.exitCode { Text("exit \(exitCode)").font(.caption2.monospacedDigit()) }
+                    Text(semantic.title).font(.caption.weight(.medium)).foregroundStyle(stageColor(semantic))
+                    if semantic != .running, let exitCode = stage?.exitCode { Text("exit \(exitCode)").font(.caption2.monospacedDigit()).fixedSize() }
                     if let duration = stage?.durationSec { Text("\(duration, specifier: "%.1f")s").font(.caption2.monospacedDigit()) }
                     if let asOf = stage?.sourceAsOf { Text(asOf).font(.caption2).lineLimit(1) }
                 }
@@ -207,6 +254,7 @@ public struct ScheduledPulsePageView: View {
                 .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .captureDashboardGeometry(id: "stage-\(index)", role: "pulseStageTile")
+            }
             }
         }
         .captureDashboardGeometry(id: "pulse-stages", role: "pulseStageGrid")

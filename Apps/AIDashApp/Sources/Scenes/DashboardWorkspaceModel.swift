@@ -52,7 +52,8 @@ public final class DashboardWorkspaceStore {
                 ScheduledJobFrameworkEntry(
                     definition: entry.definition,
                     state: entry.state,
-                    actions: entry.actions.filter { !$0.isAcknowledged(in: acknowledgedScheduledActionIDs) }
+                    actions: entry.actions.filter { !$0.isAcknowledged(in: acknowledgedScheduledActionIDs) },
+                    launchdStatus: entry.launchdStatus
                 )
             }
             scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(
@@ -361,25 +362,28 @@ public final class DashboardWorkspaceStore {
         }
     }
 
+    @discardableResult
     public func acknowledgeScheduledAction(
         _ action: ScheduledJobAction,
         responses: [ScheduledJobActionResponse]
-    ) {
+    ) -> Bool {
         if let scheduledActionWriter {
-            guard scheduledActionWriter(action, responses) else { return }
+            guard scheduledActionWriter(action, responses) else { return false }
         }
         acknowledgedScheduledActionIDs.insert(action.acknowledgementKey)
         let entries = scheduledJobFrameworkSnapshot.entries.map { entry in
             ScheduledJobFrameworkEntry(
                 definition: entry.definition,
                 state: entry.state,
-                actions: entry.actions.filter { $0.acknowledgementKey != action.acknowledgementKey }
+                actions: entry.actions.filter { $0.acknowledgementKey != action.acknowledgementKey },
+                launchdStatus: entry.launchdStatus
             )
         }
         scheduledJobFrameworkSnapshot = ScheduledJobFrameworkSnapshot(
             capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
             entries: entries
         )
+        return true
     }
 
     public func submitActionItemDecision(
@@ -408,7 +412,8 @@ public final class DashboardWorkspaceStore {
                 jobID: jobID,
                 title: item.title,
                 descriptionMd: item.summary,
-                controls: effectiveControls
+                controls: effectiveControls,
+                revision: item.revision
             )
             var values: [String: String] = ["decision": decision]
             if !trimmedNote.isEmpty || effectiveControls.contains(where: { $0.id == "note" }) {
@@ -418,7 +423,7 @@ public final class DashboardWorkspaceStore {
                 values: values,
                 selectedValues: targets.isEmpty ? [:] : ["targets": targets]
             )
-            acknowledgeScheduledAction(scheduledAction, responses: responses)
+            guard acknowledgeScheduledAction(scheduledAction, responses: responses) else { return }
         }
         if let idx = actionItems.firstIndex(where: { $0.id == item.id }) {
             let terminalDecision = ["Done", "Dismiss", "done", "dismissed", "dismiss"].contains(decision)

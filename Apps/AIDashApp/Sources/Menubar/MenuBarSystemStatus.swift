@@ -783,7 +783,8 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         )
     }
     internal static func realUserHomeDirectoryURL() -> URL {
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil {
             return FileManager.default.temporaryDirectory.appendingPathComponent("aidash-test-home", isDirectory: true)
         }
         if let passwd = getpwuid(getuid()), let pwDir = passwd.pointee.pw_dir {

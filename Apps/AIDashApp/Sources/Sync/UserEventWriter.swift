@@ -174,7 +174,7 @@ final class UserEventWriter {
         ) {
             return receipt
         }
-        let responseData = try JSONEncoder().encode(responses)
+        let responseData = try JSONEncoder().encode(JobActionsValidation.receiptResponses(responses, revision: action.revision))
         guard let responseText = String(data: responseData, encoding: .utf8) else {
             throw JobActionsBridgeError.make("persistence-failed")
         }
@@ -199,15 +199,17 @@ final class UserEventWriter {
     @discardableResult
     func acknowledgeScheduledJobAction(
         action: ScheduledJobAction,
-        responses: [ScheduledJobActionResponse]
+        responses: [ScheduledJobActionResponse],
+        device: String? = nil
     ) -> Bool {
         let context = ModelContext(container)
-        let responseData = try? JSONEncoder().encode(responses)
-        let responseText = responseData.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let wireResponses = responses.map { JobActionsResponse(controlID: $0.controlID, value: $0.value) }
+        guard let responseData = try? JSONEncoder().encode(JobActionsValidation.receiptResponses(wireResponses, revision: action.revision)),
+              let responseText = String(data: responseData, encoding: .utf8) else { return false }
         let event = UserEventModel(
             id: UUID().uuidString,
             timestamp: Date(),
-            device: DeviceIdentifier.current(),
+            device: device ?? DeviceIdentifier.current(),
             cardId: "scheduled-pulse/\(action.jobID.rawValue)",
             action: .acknowledgeJobAction,
             itemRef: "\(action.jobID.rawValue):\(action.id)|\(responseText)",
