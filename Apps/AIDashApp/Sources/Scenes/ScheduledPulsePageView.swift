@@ -52,9 +52,9 @@ public struct ScheduledPulsePageView: View {
                         Button {
                             select(entry)
                         } label: {
-                            Text("\(entry.definition.displayName) \(entry.isSuccess ? "✓" : "✗")")
+                            Text("\(entry.definition.displayName) · \(entry.statusText)")
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(entry.isSuccess ? .green : .orange)
+                                .foregroundStyle(entry.semanticState.semanticHealth == .neutral ? Color.secondary : (entry.isProblem ? Color.orange : Color.green))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 6)
                                 .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
@@ -66,15 +66,9 @@ public struct ScheduledPulsePageView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
 
-            if store.scheduledJobFrameworkSnapshot.allHaveNoState {
-                Text(DashboardL10n.tr("dashboard.scheduled_pulse.no_summary", "还没有汇总。"))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(store.scheduledJobFrameworkSnapshot.overviewEntries) { entry in
-                        overviewBlock(entry)
-                    }
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(store.scheduledJobFrameworkSnapshot.entries) { entry in
+                    overviewBlock(entry)
                 }
             }
 
@@ -149,11 +143,9 @@ public struct ScheduledPulsePageView: View {
             HStack(spacing: 8) {
                 Text(entry.definition.displayName).font(.headline)
                 Spacer(minLength: 4)
-                Text(entry.isSuccess
-                    ? DashboardL10n.tr("dashboard.scheduled_pulse.success", "成功")
-                    : DashboardL10n.tr("dashboard.scheduled_pulse.needs_attention", "需要处理"))
+                Text(entry.statusText)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(isProblem ? .orange : .green)
+                    .foregroundStyle(entry.semanticState.semanticHealth == .neutral ? Color.secondary : (isProblem ? Color.orange : Color.green))
             }
             if let overviewMd = entry.state?.overviewMd, !overviewMd.isEmpty {
                 Text(overviewMd).font(.body).fixedSize(horizontal: false, vertical: true)
@@ -164,6 +156,16 @@ public struct ScheduledPulsePageView: View {
                     .font(.body).foregroundStyle(.secondary)
             }
             stageReceiptStrip(entry.state?.stages ?? [])
+            if !entry.actions.isEmpty {
+                Button {
+                    store.selectedFrameworkJobID = entry.id
+                    store.selectedSection = .actionItems
+                } label: {
+                    Label(DashboardL10n.format("dashboard.scheduled_pulse.pending_actions_format", "去待办处理 (%lld)", entry.actions.count), systemImage: "arrow.right")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
             HStack(spacing: 8) {
                 Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "立即运行")) { store.runScheduledJobNow(entry.id) }
                     .buttonStyle(.borderedProminent).controlSize(.small).disabled(store.runningJobIDs.contains(entry.id))
@@ -196,7 +198,7 @@ public struct ScheduledPulsePageView: View {
                     Text(title).font(.caption.weight(.semibold)).lineLimit(2)
                     Text(stage?.isKnown == true ? (stage?.isSuccess == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stage.passed", "通过") : DashboardL10n.tr("dashboard.scheduled_pulse.stage.error", "异常")) : DashboardL10n.tr("dashboard.scheduled_pulse.stage.unknown", "未知"))
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(stage?.isSuccess == true ? .green : (stage?.isKnown == true ? .orange : .secondary))
+                        .foregroundStyle(stage?.isSuccess == true ? Color.green : (stage?.isKnown == true ? Color.orange : Color.secondary))
                     if let exitCode = stage?.exitCode { Text("exit \(exitCode)").font(.caption2.monospacedDigit()) }
                     if let duration = stage?.durationSec { Text("\(duration, specifier: "%.1f")s").font(.caption2.monospacedDigit()) }
                     if let asOf = stage?.sourceAsOf { Text(asOf).font(.caption2).lineLimit(1) }
@@ -274,6 +276,16 @@ private struct ScheduledJobActionView: View {
         .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
     }
 
+    private func decisionLabel(_ option: String) -> String {
+        switch option {
+        case "Approve": return DashboardL10n.tr("dashboard.decision.approve", "Approve")
+        case "Snooze 7d": return DashboardL10n.tr("dashboard.decision.snooze_7d", "Snooze 7d")
+        case "Done": return DashboardL10n.tr("dashboard.decision.done", "Done")
+        case "Dismiss": return DashboardL10n.tr("dashboard.decision.dismiss", "Dismiss")
+        default: return option
+        }
+    }
+
     @ViewBuilder
     private func controlView(_ control: ScheduledJobActionControl) -> some View {
         switch control.kind {
@@ -281,7 +293,7 @@ private struct ScheduledJobActionView: View {
             Label(control.title, systemImage: "checkmark.circle").font(.subheadline)
         case .singleSelect:
             Picker(control.title, selection: binding(for: control)) {
-                ForEach(control.options, id: \.self) { option in Text(option).tag(option) }
+                ForEach(control.options, id: \.self) { option in Text(decisionLabel(option)).tag(option) }
             }
             .pickerStyle(.menu)
         case .multiSelect:

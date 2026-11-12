@@ -58,6 +58,8 @@ public enum JobActionsValidation {
                       selected.sorted().joined(separator: ",") == value else { throw failure("invalid-response") }
             case .textInput:
                 guard value.count <= control.effectiveMaxLength else { throw failure("invalid-response") }
+            case .openURL:
+                break
             }
         }
     }
@@ -72,13 +74,16 @@ public enum JobActionsValidation {
               (action.priority?.count ?? 0) <= 32,
               (action.ref?.utf8.count ?? 0) <= 512,
               (action.url?.utf8.count ?? 0) <= 2048,
-              !action.controls.isEmpty, action.controls.count <= 32,
+              (action.subCategory?.count ?? 0) <= 128,
+              action.controls.count <= 32,
+              !action.controls.isEmpty || action.url != nil,
               Set(action.controls.map(\.id)).count == action.controls.count else {
             throw failure("invalid-response")
         }
         for control in action.controls {
             guard validID(control.id), !control.title.isEmpty, control.title.count <= 512,
                   control.options.count <= 64,
+                  (control.url?.utf8.count ?? 0) <= 2048,
                   Set(control.options).count == control.options.count,
                   control.options.allSatisfy({ !$0.isEmpty && $0.count <= 80 }) else {
                 throw failure("invalid-response")
@@ -89,7 +94,7 @@ public enum JobActionsValidation {
             case .multiSelect:
                 guard !control.options.isEmpty,
                       control.options.allSatisfy({ !$0.contains(",") }) else { throw failure("invalid-response") }
-            case .confirm, .textInput:
+            case .confirm, .textInput, .openURL:
                 break
             }
         }

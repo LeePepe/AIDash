@@ -2,9 +2,21 @@ import Foundation
 
 /// Wire projection of ScheduledJobAction. Job membership is resolved by the App registry.
 public struct JobActionsAction: Codable, Sendable, Equatable {
+    public struct ParentIssue: Codable, Sendable, Equatable {
+        public let identifier: String
+        public let title: String?
+        public let url: String?
+
+        public init(identifier: String, title: String? = nil, url: String? = nil) {
+            self.identifier = identifier
+            self.title = title
+            self.url = url
+        }
+    }
+
     public struct Control: Codable, Sendable, Equatable, Identifiable {
         public enum Kind: String, Codable, Sendable {
-            case confirm, singleSelect, multiSelect, textInput
+            case confirm, singleSelect, multiSelect, textInput, openURL
         }
 
         public let id: String
@@ -12,24 +24,49 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         public let title: String
         public let options: [String]
         public let maxLength: Int?
+        public let url: String?
 
-        public init(id: String, kind: Kind, title: String, options: [String] = [], maxLength: Int? = nil) {
+        public init(
+            id: String,
+            kind: Kind,
+            title: String,
+            options: [String] = [],
+            maxLength: Int? = nil,
+            url: String? = nil
+        ) {
             self.id = id
             self.kind = kind
             self.title = title
             self.options = options
             self.maxLength = maxLength
+            self.url = url
         }
 
         public var effectiveMaxLength: Int { min(max(maxLength ?? 80, 0), 80) }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, kind, title, label, options, maxLength, url
+        }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(String.self, forKey: .id)
             kind = try container.decode(Kind.self, forKey: .kind)
-            title = try container.decode(String.self, forKey: .title)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+                ?? (try container.decode(String.self, forKey: .label))
             options = try container.decodeIfPresent([String].self, forKey: .options) ?? []
             maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
+            url = try container.decodeIfPresent(String.self, forKey: .url)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(kind, forKey: .kind)
+            try container.encode(title, forKey: .title)
+            try container.encode(options, forKey: .options)
+            try container.encodeIfPresent(maxLength, forKey: .maxLength)
+            try container.encodeIfPresent(url, forKey: .url)
         }
     }
 
@@ -53,30 +90,41 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public let coverageRefs: [String]
     public let evidence: String?
     public let freshness: String?
+    public let subCategory: String?
+    public let worthExtracting: Bool?
+    public let labels: [String]
+    public let project: String?
+    public let parentIssue: ParentIssue?
+    public let topicID: String?
     public let controls: [Control]
 
+    private struct SourcePayload: Decodable {
+        let kind: String?
+        let label: String?
+        let url: String?
+        let entityId: String?
+        let headSha: String?
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case id, jobID, createdAt, title, description, descriptionMd
-        case status, source, priority, ref, url
-        case domain
-        case topicKey = "topic_key"
-        case originRef = "origin_ref"
-        case revision
-        case whyNow = "why_now"
-        case sourceURI = "source_uri"
-        case coverageRefs = "coverage_refs"
-        case evidence, freshness, controls
+        case id, jobID, jobId, createdAt, title, description, descriptionMd
+        case status, source, priority, ref, url, subCategory, worthExtracting
+        case labels, project, parentIssue, topicID, topicId, topic_id
+        case domain, topicKey = "topic_key", originRef = "origin_ref", revision
+        case whyNow = "why_now", sourceURI = "source_uri", coverageRefs = "coverage_refs", evidence, freshness, controls
     }
 
     public init(
         id: String, jobID: String, createdAt: Date? = nil,
         title: String, descriptionMd: String,
         status: String? = nil, source: String? = nil, priority: String? = nil,
-        ref: String? = nil, url: String? = nil, domain: String? = nil,
-        topicKey: String? = nil, originRef: String? = nil, revision: String? = nil,
-        whyNow: String? = nil, sourceURI: String? = nil, coverageRefs: [String] = [],
-        evidence: String? = nil, freshness: String? = nil,
+        ref: String? = nil, url: String? = nil,
+        subCategory: String? = nil, worthExtracting: Bool? = nil, labels: [String] = [],
+        project: String? = nil, parentIssue: ParentIssue? = nil, topicID: String? = nil,
+        domain: String? = nil, topicKey: String? = nil, originRef: String? = nil, revision: String? = nil,
+        whyNow: String? = nil, sourceURI: String? = nil, coverageRefs: [String] = [], evidence: String? = nil, freshness: String? = nil,
         controls: [Control]
+
     ) {
         self.id = id
         self.jobID = jobID
@@ -88,6 +136,12 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         self.priority = priority
         self.ref = ref
         self.url = url
+        self.subCategory = subCategory
+        self.worthExtracting = worthExtracting
+        self.labels = labels
+        self.project = project
+        self.parentIssue = parentIssue
+        self.topicID = topicID
         self.domain = domain
         self.topicKey = topicKey
         self.originRef = originRef
@@ -103,7 +157,8 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        jobID = try container.decode(String.self, forKey: .jobID)
+        jobID = try container.decodeIfPresent(String.self, forKey: .jobID)
+            ?? (try container.decode(String.self, forKey: .jobId))
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         title = try container.decode(String.self, forKey: .title)
         if let md = try container.decodeIfPresent(String.self, forKey: .descriptionMd) {
@@ -120,10 +175,29 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
             )
         }
         status = try container.decodeIfPresent(String.self, forKey: .status)
-        source = try container.decodeIfPresent(String.self, forKey: .source)
+        let sourcePayload: SourcePayload?
+        if let sourceString = try? container.decode(String.self, forKey: .source) {
+            source = sourceString
+            sourcePayload = nil
+        } else {
+            sourcePayload = try container.decodeIfPresent(SourcePayload.self, forKey: .source)
+            source = sourcePayload?.label
+        }
         priority = try container.decodeIfPresent(String.self, forKey: .priority)
-        ref = try container.decodeIfPresent(String.self, forKey: .ref)
-        url = try container.decodeIfPresent(String.self, forKey: .url)
+        ref = try container.decodeIfPresent(String.self, forKey: .ref) ?? sourcePayload?.entityId
+        let explicitURL = try container.decodeIfPresent(String.self, forKey: .url)
+        let decodedControls = try container.decode([Control].self, forKey: .controls)
+        let controlURL = decodedControls.first(where: { $0.kind == .openURL })?.url
+        url = explicitURL ?? sourcePayload?.url ?? controlURL
+        subCategory = try container.decodeIfPresent(String.self, forKey: .subCategory)
+        worthExtracting = try container.decodeIfPresent(Bool.self, forKey: .worthExtracting)
+        labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
+        project = try container.decodeIfPresent(String.self, forKey: .project)
+        parentIssue = try container.decodeIfPresent(ParentIssue.self, forKey: .parentIssue)
+        topicID = try container.decodeIfPresent(String.self, forKey: .topicID)
+            ?? (try container.decodeIfPresent(String.self, forKey: .topicId))
+            ?? (try container.decodeIfPresent(String.self, forKey: .topic_id))
+        controls = decodedControls.filter { $0.kind != .openURL }
         domain = try container.decodeIfPresent(String.self, forKey: .domain)
         topicKey = try container.decodeIfPresent(String.self, forKey: .topicKey)
         originRef = try container.decodeIfPresent(String.self, forKey: .originRef)
@@ -133,7 +207,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         coverageRefs = try container.decodeIfPresent([String].self, forKey: .coverageRefs) ?? []
         evidence = try container.decodeIfPresent(String.self, forKey: .evidence)
         freshness = try container.decodeIfPresent(String.self, forKey: .freshness)
-        controls = try container.decode([Control].self, forKey: .controls)
+
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -149,6 +223,12 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         try container.encodeIfPresent(priority, forKey: .priority)
         try container.encodeIfPresent(ref, forKey: .ref)
         try container.encodeIfPresent(url, forKey: .url)
+        try container.encodeIfPresent(subCategory, forKey: .subCategory)
+        try container.encodeIfPresent(worthExtracting, forKey: .worthExtracting)
+        if !labels.isEmpty { try container.encode(labels, forKey: .labels) }
+        try container.encodeIfPresent(project, forKey: .project)
+        try container.encodeIfPresent(parentIssue, forKey: .parentIssue)
+        try container.encodeIfPresent(topicID, forKey: .topicID)
         try container.encodeIfPresent(domain, forKey: .domain)
         try container.encodeIfPresent(topicKey, forKey: .topicKey)
         try container.encodeIfPresent(originRef, forKey: .originRef)

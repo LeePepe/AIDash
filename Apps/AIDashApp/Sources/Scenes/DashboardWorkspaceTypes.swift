@@ -1071,6 +1071,23 @@ public enum DashboardActionFilter: String, CaseIterable, Sendable, Equatable, Id
     }
 }
 
+public struct DashboardLinearActionFilterChip: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let label: String
+    public let count: Int?
+
+    public init(id: String, label: String, count: Int? = nil) {
+        self.id = id
+        self.label = label
+        self.count = count
+    }
+
+    public var displayTitle: String {
+        guard let count else { return label }
+        return "\(label) (\(count))"
+    }
+}
+
 public enum DashboardActionSort: String, CaseIterable, Sendable, Equatable, Identifiable {
     case priority = "Priority", source = "Source", title = "Title"
     public var id: String { rawValue }
@@ -1081,6 +1098,163 @@ public enum DashboardActionSort: String, CaseIterable, Sendable, Equatable, Iden
         case .title: return DashboardL10n.tr("dashboard.action_sort.title", "Title")
         }
     }
+}
+
+public struct DashboardTopic: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let title: String
+    public let group: String
+    public let targetRepo: String
+    public let cwd: String
+    public let keywords: [String]
+    public let aliases: [String]
+
+    public init(id: String, title: String, group: String, targetRepo: String, cwd: String, keywords: [String] = [], aliases: [String] = []) {
+        self.id = id
+        self.title = title
+        self.group = group
+        self.targetRepo = targetRepo
+        self.cwd = cwd
+        self.keywords = keywords
+        self.aliases = aliases
+    }
+
+    public var topicID: String { id }
+    public var topicTitle: String { title }
+    public var topicGroup: String { group }
+    public var topicCwd: String { cwd }
+}
+
+public struct DashboardM2SessionBinding: Codable, Sendable, Equatable, Identifiable {
+    public let topicID: String
+    public let paneID: String?
+    public let workspaceID: String?
+    public let workspaceLabel: String?
+    public let targetRepo: String
+
+    public init(topicID: String, paneID: String? = nil, workspaceID: String? = nil, workspaceLabel: String? = nil, targetRepo: String) {
+        self.topicID = topicID
+        self.paneID = paneID
+        self.workspaceID = workspaceID
+        self.workspaceLabel = workspaceLabel
+        self.targetRepo = targetRepo
+    }
+
+    public var id: String { topicID }
+    public var isExisting: Bool { paneID != nil }
+    public var badgeText: String {
+        if let paneID {
+            let label = workspaceLabel.map { " (\($0))" } ?? ""
+            return "🟢 EXISTING_M2 · \(paneID)\(label)"
+        }
+        return "🆕 NEW_M2 · \(targetRepo)"
+    }
+}
+
+public enum DashboardTopicCatalog {
+    public static let builtInTopics: [DashboardTopic] = [
+        DashboardTopic(id: "sapphire-china-bugs", title: "Sapphire China Bugs", group: "work-business", targetRepo: "bing-growth-sapphire-app", cwd: "~/Development/bing-growth-sapphire-app", keywords: ["China Bugs", "中国区 bug", "devsync", "Bug List"], aliases: ["china bugs", "china bug", "dev sync"]),
+        DashboardTopic(id: "sapphire-smartbanner", title: "Sapphire SmartBanner", group: "work-business", targetRepo: "bing-growth-sapphire-app", cwd: "~/Development/bing-growth-sapphire-app", keywords: ["SmartBanner", "Universal Link", "Adjust", "Upsell"], aliases: ["smart banner", "universal links", "upsell"]),
+        DashboardTopic(id: "sapphire-notification", title: "Sapphire Notification Center", group: "work-business", targetRepo: "bing-growth-sapphire-app", cwd: "~/Development/bing-growth-sapphire-app", keywords: ["Notification Center", "Push", "通知开关", "气象单位"], aliases: ["notification", "push", "weather units", "notification settings"]),
+        DashboardTopic(id: "sapphire-discovery-kumo", title: "Sapphire Discovery Kumo", group: "work-business", targetRepo: "bing-growth-sapphire-app", cwd: "~/Development/bing-growth-sapphire-app", keywords: ["Discovery Feed", "Kumo 组件"], aliases: ["discovery feed", "kumo"]),
+        DashboardTopic(id: "sapphire-dsat-qa-de", title: "Sapphire DSAT QA-DE", group: "work-business", targetRepo: "bing-growth-sapphire-app", cwd: "~/Development/bing-growth-sapphire-app", keywords: ["DSAT", "QA-DE", "Crash", "Postmortem", "线上反馈"], aliases: ["qa de", "crash", "user feedback"]),
+        DashboardTopic(id: "webiq-search", title: "WebIQ Search", group: "work-business", targetRepo: "WebIQSearch", cwd: "~/Development/WebIQSearch", keywords: ["WebIQSearch", "Aquamarine", "Query Lens", "智能搜索"], aliases: ["web iq", "aquamarine", "query lens"]),
+        DashboardTopic(id: "flightbook-status", title: "FlightBook Status", group: "work-business", targetRepo: "FlightBook", cwd: "~/Development/FlightBook", keywords: ["FlightBook", "实验状态", "五面同步", "周报看板"], aliases: ["flight book", "experiment status", "weekly board"]),
+        DashboardTopic(id: "info-email", title: "Work Information Email", group: "work-business", targetRepo: "dsh-personal-plugins", cwd: "~/Development/dsh-personal-plugins", keywords: ["workiq", "邮件汇总", "Outlook", "Email 投递 dsh"], aliases: ["email", "mail summary", "outlook"]),
+        DashboardTopic(id: "info-teams", title: "Work Information Teams", group: "work-business", targetRepo: "dsh-personal-plugins", cwd: "~/Development/Personal/teams-cli", keywords: ["teams-cli", "Teams 消息汇总", "群聊回复"], aliases: ["teams", "teams cli", "group chat"]),
+        DashboardTopic(id: "skills-workflow", title: "Skills Workflow", group: "user-skills", targetRepo: "user-skills", cwd: "~/Development/user-skills", keywords: ["workflow-hub", "howto", "m2-dispatcher", "team-lead", "linear-board"], aliases: ["workflow", "m2", "linear"]),
+        DashboardTopic(id: "skills-design", title: "Skills Design", group: "user-skills", targetRepo: "user-skills", cwd: "~/Development/user-skills", keywords: ["my-designer", "design-studio", "impeccable", "taste-skill"], aliases: ["design", "designer", "visual"]),
+        DashboardTopic(id: "skills-research-knowledge", title: "Skills Research and Knowledge Maintenance", group: "user-skills", targetRepo: "user-skills", cwd: "~/Development/user-skills", keywords: ["deep-research", "knowledge-digest", "save-tool", "skill maintenance", "user-skills code"], aliases: ["research skill code", "knowledge skill maintenance", "digest implementation"]),
+        DashboardTopic(id: "skills-retro-story", title: "Skills Retro and Story Maintenance", group: "user-skills", targetRepo: "user-skills", cwd: "~/Development/user-skills", keywords: ["retro-loop", "story-craft", "skill maintenance", "user-skills code"], aliases: ["retro skill code", "story skill maintenance"]),
+        DashboardTopic(id: "skills-repo-ci", title: "Skills Repository and CI", group: "user-skills", targetRepo: "user-skills", cwd: "~/Development/user-skills", keywords: ["skill-contract", "repo-kit", "code-review", "codebase-design", "shared-ci"], aliases: ["repo ci", "repository", "contracts", "ci"]),
+        DashboardTopic(id: "aidash-aidata", title: "AIDash AIdata", group: "personal-core-gateways", targetRepo: "AIDash", cwd: "~/Development/AIDash", keywords: ["AIDash", "aidata", "MenuBar", "Scheduled Pulse", "pew"], aliases: ["ai dash", "telemetry", "pulse"]),
+        DashboardTopic(id: "dsh-plugins", title: "dsh Plugins", group: "personal-core-gateways", targetRepo: "dsh-personal-plugins", cwd: "~/Development/dsh-personal-plugins", keywords: ["dsh", "deepseek-harness", "dsh-session-sink", "dsh-m2-omni-hub"], aliases: ["deepseek harness", "session sink", "omni hub"]),
+        DashboardTopic(id: "gateway-herdr-jev", title: "Gateway Herdr Jev", group: "personal-core-gateways", targetRepo: "raven", cwd: "~/Development/raven", keywords: ["raven", "Magpie", "Falcon", "Jev", "agent-herdr"], aliases: ["gateway", "herdr", "falcon", "magpie"]),
+        DashboardTopic(id: "voxpocket", title: "VoxPocket", group: "personal-products-home", targetRepo: "VoxPocket", cwd: "~/Development/VoxPocket", keywords: ["VoxPocket", "语音输入", "快捷键录音"], aliases: ["voice input", "recording"]),
+        DashboardTopic(id: "vitalstride", title: "VitalStride", group: "personal-products-home", targetRepo: "VitalStride", cwd: "~/Development/VitalStride", keywords: ["VitalStride", "健康步态", "运动"], aliases: ["health gait", "fitness"]),
+        DashboardTopic(id: "helix", title: "Helix", group: "personal-products-home", targetRepo: "Helix", cwd: "~/Development/Helix", keywords: ["Helix"]),
+        DashboardTopic(id: "davici", title: "Davici", group: "personal-products-home", targetRepo: "Davici", cwd: "~/Development/Davici", keywords: ["Davici"]),
+        DashboardTopic(id: "nas-smart-home", title: "NAS Smart Home", group: "personal-products-home", targetRepo: "Nas", cwd: "~/Development/Nas", keywords: ["Nas", "绿联", "Home Assistant", "Node-RED", "米家"], aliases: ["nas", "smart home", "home assistant", "node red", "mijia"]),
+        DashboardTopic(id: "learning-and-blog", title: "学习与写博客", group: "personal-products-home", targetRepo: "Personal", cwd: "~/Development/Personal", keywords: ["学习", "写博客", "blog", "learn", "knowledge-digest", "story-craft", "save-tool", "knowledge-vault", "collected-tools", "技术博客"], aliases: ["learning", "blog writing", "knowledge vault", "technical blog", "daily digest"])
+    ]
+
+    public static func topic(withID id: String?, in topics: [DashboardTopic] = builtInTopics) -> DashboardTopic? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+        return topics.first { $0.id.caseInsensitiveCompare(id) == .orderedSame }
+    }
+
+    public static func resolve(topicID: String?, id: String, title: String, summary: String, source: String, backingRef: String?, jobID: String?, topics: [DashboardTopic] = builtInTopics) -> DashboardTopic {
+        if let explicit = topic(withID: topicID, in: topics) { return explicit }
+        let haystack = [id, title, summary, source, backingRef ?? ""].joined(separator: " ")
+        let upper = haystack.uppercased()
+        let lower = haystack.lowercased()
+        let smartBannerIDs = id == "POP580-0d776631" || id == "EVAL-RULE-WARM-LAUNCH-SOURCE" || id == "linear-TIA-76"
+        let smartBannerTerms = ["SmartBanner", "Smart Banner", "Universal Link", "UniversalLink", "PR #476", "PR #501", "PR #557", "PR #580", "TIA-76"]
+        if smartBannerIDs || smartBannerTerms.contains(where: { haystack.localizedCaseInsensitiveContains($0) }) {
+            return topic(withID: "sapphire-smartbanner", in: topics) ?? builtInTopics[1]
+        }
+        let notificationIDs = ["EVAL-RULE-SNAPSHOT-REF-PNG", "EVAL-RULE-A11Y-TOGGLE-ROW", "EVAL-RULE-FLAG-LIFETIME-CACHE", "EVAL-RULE-L10N-BUNDLE-KEY"]
+        let notificationTerms = ["Notification", "Push", "气象单位", "PR #358", "PR #392", "PR #630"]
+        if notificationIDs.contains(id) || notificationTerms.contains(where: { haystack.localizedCaseInsensitiveContains($0) }) {
+            return topic(withID: "sapphire-notification", in: topics) ?? builtInTopics[2]
+        }
+        let chinaIDs = ["D617-5221157", "D565-5187442", "D569-5185567", "EVAL-RULE-PBXPROJ-TESTS", "EVAL-RULE-VIEW-SNAPSHOT-TEST", "EVAL-RULE-SWIFTYJSON-DOC-PATH"]
+        let chinaTerms = ["China Bugs", "Bing CN", "devsync", "AB114"]
+        let chinaPR = upper.contains("PR #") && (543...624).contains(Int(upper.split(separator: "#").last.map(String.init) ?? "0") ?? -1)
+        if id.hasPrefix("BUG-AB") || chinaIDs.contains(id) || jobID == "my-pr-supervisor"
+            || chinaTerms.contains(where: { haystack.localizedCaseInsensitiveContains($0) }) || chinaPR {
+            return topic(withID: "sapphire-china-bugs", in: topics) ?? builtInTopics[0]
+        }
+        if (lower.contains("flightbook") || lower.contains("flight book")) && !lower.contains("smartbanner") && !lower.contains("tia-76") {
+            return topic(withID: "flightbook-status", in: topics) ?? builtInTopics[6]
+        }
+        if jobID == ScheduledPulseJobID.aidataDigest.rawValue {
+            return topic(withID: "aidash-aidata", in: topics) ?? builtInTopics[15]
+        }
+        let scored = topics.map { candidate -> (DashboardTopic, Int) in
+            let keywordScore = candidate.keywords.reduce(into: 0) { score, keyword in
+                if lower.contains(keyword.lowercased()) { score += 2 }
+            }
+            let aliasScore = candidate.aliases.reduce(into: 0) { score, alias in
+                if lower.contains(alias.lowercased()) { score += 1 }
+            }
+            return (candidate, keywordScore + aliasScore)
+        }
+        let matchingTopics = scored.filter { $0.1 > 0 }
+        let orderedTopics = matchingTopics.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.0.id < rhs.0.id
+        }
+        if let match = orderedTopics.first { return match.0 }
+        return topic(withID: "aidash-aidata", in: topics) ?? builtInTopics[15]
+    }
+}
+
+public struct DashboardM2DispatchResult: Sendable, Equatable {
+    public let succeeded: Bool
+    public let receipt: String?
+    public let error: String?
+
+    public init(succeeded: Bool, receipt: String? = nil, error: String? = nil) {
+        self.succeeded = succeeded
+        self.receipt = receipt
+        self.error = error
+    }
+}
+
+public struct DashboardTopicColumn: Identifiable, Sendable, Equatable {
+    public let topic: DashboardTopic
+    public let items: [DashboardActionItem]
+    public let session: DashboardM2SessionBinding
+
+    public init(topic: DashboardTopic, items: [DashboardActionItem], session: DashboardM2SessionBinding) {
+        self.topic = topic
+        self.items = items
+        self.session = session
+    }
+
+    public var id: String { topic.id }
+    public var pendingCount: Int { items.filter { !$0.isCompleted }.count }
 }
 
 public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
@@ -1098,6 +1272,11 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public let backingItemRef: String?
     public let jobID: ScheduledPulseJobID?
     public let controls: [ScheduledJobActionControl]
+    public let labels: [String]
+    public let project: String?
+    public let parentIssueKey: String?
+    public let parentIssueTitle: String?
+    public let parentIssueURL: String?
     public let projectFolderName: String
     public let domain: DashboardActionDomain?
     public let topicKey: String?
@@ -1108,6 +1287,11 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public let coverageRefs: [String]
     public let evidence: String?
     public let freshness: String?
+    public let topicID: String
+    public let topicTitle: String
+    public let topicGroup: String
+    public let targetRepo: String
+    public let topicCwd: String
 
     public init(
         id: String, title: String, summary: String, sourceTag: String,
@@ -1117,18 +1301,18 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         backingCardId: String? = nil, backingItemRef: String? = nil,
         jobID: ScheduledPulseJobID? = nil,
         controls: [ScheduledJobActionControl] = [],
-        projectFolderName: String? = nil,
-        domain: DashboardActionDomain? = nil,
-        topicKey: String? = nil,
-        originRef: String? = nil,
-        revision: String? = nil,
-        whyNow: String? = nil,
-        sourceURI: String? = nil,
-        coverageRefs: [String] = [],
-        evidence: String? = nil,
-        freshness: String? = nil
+        labels: [String] = [], project: String? = nil,
+        parentIssueKey: String? = nil, parentIssueTitle: String? = nil, parentIssueURL: String? = nil,
+        projectFolderName: String? = nil, topicID: String? = nil,
+        topicCatalog: [DashboardTopic] = DashboardTopicCatalog.builtInTopics,
+        domain: DashboardActionDomain? = nil, topicKey: String? = nil, originRef: String? = nil, revision: String? = nil,
+        whyNow: String? = nil, sourceURI: String? = nil, coverageRefs: [String] = [], evidence: String? = nil, freshness: String? = nil
     ) {
         let resolvedStatus = status ?? (isCompleted ? .done : .triage)
+        let topic = DashboardTopicCatalog.resolve(
+            topicID: topicID, id: id, title: title, summary: summary, source: sourceTag,
+            backingRef: backingItemRef, jobID: jobID?.rawValue, topics: topicCatalog
+        )
         self.id = id; self.title = title; self.summary = summary; self.sourceTag = sourceTag
         self.cliFilter = cliFilter; self.priority = priority
         self.status = isCompleted ? .done : resolvedStatus
@@ -1137,11 +1321,21 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         self.backingCardId = backingCardId; self.backingItemRef = backingItemRef
         self.jobID = jobID
         self.controls = controls
+        self.labels = labels
+        self.project = project
+        self.parentIssueKey = parentIssueKey
+        self.parentIssueTitle = parentIssueTitle
+        self.parentIssueURL = parentIssueURL
         self.projectFolderName = projectFolderName ?? HerdrSocketClient.inferProjectFolderName(
             title: title,
             summary: summary,
             command: command ?? backingItemRef
         )
+        self.topicID = topic.topicID
+        self.topicTitle = topic.topicTitle
+        self.topicGroup = topic.topicGroup
+        self.targetRepo = topic.targetRepo
+        self.topicCwd = topic.topicCwd
         self.domain = domain
         self.topicKey = topicKey
         self.originRef = originRef
@@ -1153,21 +1347,120 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         self.freshness = freshness
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, title, summary, sourceTag, cliFilter, priority, status, isCompleted
+        case command, externalURLString, backingCardId, backingItemRef, jobID, controls
+        case labels, project, parentIssueKey, parentIssueTitle, parentIssueURL, projectFolderName
+        case topicID, topicId, topic_id, topicTitle, topicGroup, targetRepo, topicCwd
+        case domain, topicKey, originRef, revision, whyNow, sourceURI, coverageRefs, evidence, freshness
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedID = try container.decode(String.self, forKey: .id)
+        let decodedTitle = try container.decode(String.self, forKey: .title)
+        let decodedSummary = try container.decode(String.self, forKey: .summary)
+        let decodedSourceTag = try container.decode(String.self, forKey: .sourceTag)
+        let decodedCLIFilter = try container.decode(DashboardCLIFilter.self, forKey: .cliFilter)
+        let decodedPriority = try container.decode(DashboardActionPriority.self, forKey: .priority)
+        let decodedCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        let decodedStatus = try container.decodeIfPresent(DashboardActionStatus.self, forKey: .status)
+        let resolvedStatus = decodedStatus ?? (decodedCompleted ? .done : .triage)
+        let decodedCommand = try container.decodeIfPresent(String.self, forKey: .command)
+        let decodedBackingRef = try container.decodeIfPresent(String.self, forKey: .backingItemRef)
+        id = decodedID
+        title = decodedTitle
+        summary = decodedSummary
+        sourceTag = decodedSourceTag
+        cliFilter = decodedCLIFilter
+        priority = decodedPriority
+        status = decodedCompleted ? .done : resolvedStatus
+        isCompleted = decodedCompleted || resolvedStatus == .done
+        command = decodedCommand
+        externalURLString = try container.decodeIfPresent(String.self, forKey: .externalURLString)
+        backingCardId = try container.decodeIfPresent(String.self, forKey: .backingCardId)
+        backingItemRef = decodedBackingRef
+        jobID = try container.decodeIfPresent(ScheduledPulseJobID.self, forKey: .jobID)
+        controls = try container.decodeIfPresent([ScheduledJobActionControl].self, forKey: .controls) ?? []
+        labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
+        project = try container.decodeIfPresent(String.self, forKey: .project)
+        parentIssueKey = try container.decodeIfPresent(String.self, forKey: .parentIssueKey)
+        parentIssueTitle = try container.decodeIfPresent(String.self, forKey: .parentIssueTitle)
+        parentIssueURL = try container.decodeIfPresent(String.self, forKey: .parentIssueURL)
+        projectFolderName = try container.decodeIfPresent(String.self, forKey: .projectFolderName)
+            ?? HerdrSocketClient.inferProjectFolderName(title: decodedTitle, summary: decodedSummary, command: decodedCommand ?? decodedBackingRef)
+        let explicitTopicID = try container.decodeIfPresent(String.self, forKey: .topicID)
+            ?? (try container.decodeIfPresent(String.self, forKey: .topicId))
+            ?? (try container.decodeIfPresent(String.self, forKey: .topic_id))
+        let topic = DashboardTopicCatalog.resolve(
+            topicID: explicitTopicID, id: decodedID, title: decodedTitle, summary: decodedSummary,
+            source: decodedSourceTag, backingRef: decodedBackingRef, jobID: jobID?.rawValue
+        )
+        topicID = topic.topicID
+        topicTitle = topic.topicTitle
+        topicGroup = topic.topicGroup
+        targetRepo = topic.targetRepo
+        topicCwd = topic.topicCwd
+        domain = try container.decodeIfPresent(DashboardActionDomain.self, forKey: .domain)
+        topicKey = try container.decodeIfPresent(String.self, forKey: .topicKey)
+        originRef = try container.decodeIfPresent(String.self, forKey: .originRef)
+        revision = try container.decodeIfPresent(String.self, forKey: .revision)
+        whyNow = try container.decodeIfPresent(String.self, forKey: .whyNow)
+        sourceURI = try container.decodeIfPresent(String.self, forKey: .sourceURI)
+        coverageRefs = try container.decodeIfPresent([String].self, forKey: .coverageRefs) ?? []
+        evidence = try container.decodeIfPresent(String.self, forKey: .evidence)
+        freshness = try container.decodeIfPresent(String.self, forKey: .freshness)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(sourceTag, forKey: .sourceTag)
+        try container.encode(cliFilter, forKey: .cliFilter)
+        try container.encode(priority, forKey: .priority)
+        try container.encode(status, forKey: .status)
+        try container.encode(isCompleted, forKey: .isCompleted)
+        try container.encodeIfPresent(command, forKey: .command)
+        try container.encodeIfPresent(externalURLString, forKey: .externalURLString)
+        try container.encodeIfPresent(backingCardId, forKey: .backingCardId)
+        try container.encodeIfPresent(backingItemRef, forKey: .backingItemRef)
+        try container.encodeIfPresent(jobID, forKey: .jobID)
+        try container.encode(controls, forKey: .controls)
+        if !labels.isEmpty { try container.encode(labels, forKey: .labels) }
+        try container.encodeIfPresent(project, forKey: .project)
+        try container.encodeIfPresent(parentIssueKey, forKey: .parentIssueKey)
+        try container.encodeIfPresent(parentIssueTitle, forKey: .parentIssueTitle)
+        try container.encodeIfPresent(parentIssueURL, forKey: .parentIssueURL)
+        try container.encode(projectFolderName, forKey: .projectFolderName)
+        try container.encode(topicID, forKey: .topicID)
+        try container.encode(topicTitle, forKey: .topicTitle)
+        try container.encode(topicGroup, forKey: .topicGroup)
+        try container.encode(targetRepo, forKey: .targetRepo)
+        try container.encode(topicCwd, forKey: .topicCwd)
+        try container.encodeIfPresent(domain, forKey: .domain)
+        try container.encodeIfPresent(topicKey, forKey: .topicKey)
+        try container.encodeIfPresent(originRef, forKey: .originRef)
+        try container.encodeIfPresent(revision, forKey: .revision)
+        try container.encodeIfPresent(whyNow, forKey: .whyNow)
+        try container.encodeIfPresent(sourceURI, forKey: .sourceURI)
+        if !coverageRefs.isEmpty { try container.encode(coverageRefs, forKey: .coverageRefs) }
+        try container.encodeIfPresent(evidence, forKey: .evidence)
+        try container.encodeIfPresent(freshness, forKey: .freshness)
+    }
+
     public var resolvedDomain: DashboardActionDomain {
         if let domain { return domain }
         let ref = backingItemRef?.lowercased() ?? ""
-        if sourceTag == "Learning" || ref.hasPrefix("learning-topic://") || ref.hasPrefix("knowledge://") || ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://") {
-            return .decisions
-        }
         if status == .blocked || sourceTag == "GTT Blocker" { return .blockers }
-        if sourceTag == "Linear" || status == .inProgress { return .planned }
+        if status == .inProgress { return .planned }
+        if sourceTag == "Learning" || ref.hasPrefix("learning-topic://") || ref.hasPrefix("knowledge://") || ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://") { return .decisions }
+        if sourceTag == "Linear" { return .planned }
         return .findings
     }
 
-    public var isLearningTopic: Bool {
-        sourceTag == "Learning" || backingItemRef?.hasPrefix("learning-topic://") == true
-    }
-
+    public var isLearningTopic: Bool { sourceTag == "Learning" || backingItemRef?.hasPrefix("learning-topic://") == true }
     public var isProposal: Bool {
         let ref = backingItemRef ?? ""
         return ref.hasPrefix("proposal://") || ref.hasPrefix("skill-roi://")
@@ -1187,6 +1480,18 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
 
     public var targetOptions: [String] {
         controls.first(where: { $0.id == "targets" && $0.kind == .multiSelect })?.options ?? []
+    }
+
+    public func hasLinearLabel(_ label: String) -> Bool {
+        labels.contains { $0.caseInsensitiveCompare(label) == .orderedSame }
+    }
+
+    public var isLinearNative: Bool {
+        sourceTag.caseInsensitiveCompare("Linear") == .orderedSame || parentIssueKey != nil
+    }
+
+    public var isNeedsDecision: Bool {
+        status == .blocked || hasLinearLabel("needs-decision")
     }
 
     public var noteMaxLength: Int {

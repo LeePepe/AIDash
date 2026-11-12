@@ -9,13 +9,30 @@ import AIDashCore
 @MainActor
 @Suite("TK3 production view screenshots")
 struct TK3SnapshotRenderTests {
+    @Test("decodes the producer-shaped canonical skills-roi artifact")
+    func decodesCanonicalSkillsRoiArtifact() throws {
+        let artifact = try canonicalFixtureData()
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-skills-\(UUID().uuidString)", isDirectory: true)
+        let output = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try artifact.write(to: output.appendingPathComponent("skills-roi.json"))
+        defer { try? FileManager.default.removeItem(at: home) }
+        let summary = LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: home)
+        let roi = try #require(summary?.skillsROI)
+        #expect(roi.diagnostics.count == 11)
+        #expect(roi.diagnostics["S1_pin_drift"]?["sample_size"] == "1")
+        #expect(roi.diagnostics["S12_tool_context_burn"] != nil)
+        #expect(roi.skillsDaily.count >= 0)
+    }
+
     @Test("renders Actionable, Pulse, and Skills production views across states and appearances")
     func rendersProductionViews() throws {
         let output = URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-four-domains-pulse-roi/receipts/TK3-screenshots", isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let states = ["populated", "loading", "empty", "error"]
+        let populatedSummary = try makeCanonicalSummary()
         for state in states {
-            let store = makeStore(populated: state == "populated")
+            let store = makeStore(state: state, skillsSummary: state == "populated" ? populatedSummary : nil)
             for width in [1000.0, 700.0] {
                 for (appearance, scheme) in [("light", ColorScheme.light), ("dark", ColorScheme.dark)] {
                     try render(ActionItemsCardView(store: store), name: "actionable-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output)
@@ -26,7 +43,20 @@ struct TK3SnapshotRenderTests {
         }
     }
 
-    private func makeStore(populated: Bool) -> DashboardWorkspaceStore {
+    private func canonicalFixtureData() throws -> Data {
+        try Data(contentsOf: URL(fileURLWithPath: "/Users/lee/Development/worktrees/aidash-4dom-data-review-fix/aidata/tests/fixtures/skills_roi_report.json"))
+    }
+
+    private func makeCanonicalSummary() throws -> LiveDashboardTelemetryReader.LiveEfficiencySummary {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-render-skills-\(UUID().uuidString)", isDirectory: true)
+        let output = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try canonicalFixtureData().write(to: output.appendingPathComponent("skills-roi.json"))
+        defer { try? FileManager.default.removeItem(at: home) }
+        return try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: home))
+    }
+
+    private func makeStore(state: String, skillsSummary: LiveDashboardTelemetryReader.LiveEfficiencySummary?) -> DashboardWorkspaceStore {
         let snapshot = MenuBarSystemSnapshot(
             capturedAt: .now,
             cpu: CPUStatusSnapshot(usage: 0.2, user: 0.1, system: 0.1, idle: 0.8, coreCount: 8, loadOneMinute: 0.2, loadFiveMinutes: 0.2, loadFifteenMinutes: 0.2),
@@ -38,9 +68,13 @@ struct TK3SnapshotRenderTests {
             tokenUsage: CLITokenUsageSnapshot(items: []),
             attention: AttentionStatusSnapshot()
         )
-        let item = DashboardActionItem(id: "learning-1", title: "字体回退与禁则", summary: "为什么现在学习", sourceTag: "Learning", priority: .p1, backingItemRef: "learning-topic://font-fallback", whyNow: "新缺口", sourceURI: "https://example.invalid", coverageRefs: ["vault://coverage"])
-        let store = DashboardWorkspaceStore(snapshot: snapshot, actionItems: populated ? [item] : [])
-        store.updateScheduledJobFrameworkSnapshot(ScheduledJobFrameworkSnapshot(capturedAt: .now, entries: []))
+        let item = DashboardActionItem(id: "learning-1", title: state == "error" ? "Blocked learning decision" : "字体回退与禁则", summary: "为什么现在学习", sourceTag: "Learning", priority: .p1, status: state == "error" ? .blocked : (state == "loading" ? .inProgress : .triage), backingItemRef: "learning-topic://font-fallback", whyNow: "新缺口", sourceURI: "https://example.invalid", coverageRefs: ["vault://coverage"])
+        let jobs = ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-render"), fileExists: { _ in true })
+        let stages = (0..<5).map { index in ScheduledJobStageReceipt(id: "stage-\(index)", title: "Stage \(index)", status: state == "error" ? "failed" : (state == "loading" ? "running" : "ok"), exitCode: state == "error" ? 1 : (state == "loading" ? nil : 0), durationSec: state == "empty" ? nil : Double(index + 1), sourceAsOf: state == "empty" ? nil : "2026-11-12") }
+        let stateReceipt = ScheduledJobState(id: .aidataDigest, lastResult: state == "error" ? .failed : (state == "populated" ? .succeeded : nil), lastRunAt: state == "empty" ? nil : .now, summary: state == "empty" ? nil : "Fixture \(state) receipt", stages: stages, sourceAsOf: state == "empty" ? nil : "2026-11-12")
+        let framework = ScheduledJobFrameworkSnapshot(capturedAt: .now, entries: [ScheduledJobFrameworkEntry(definition: jobs[2], state: stateReceipt, actions: state == "error" ? [ScheduledJobAction(id: "action", jobID: .aidataDigest, title: "Resolve failure", descriptionMd: "Failure evidence", controls: [])] : [])])
+        let store = DashboardWorkspaceStore(snapshot: snapshot, cliEntries: [], actionItems: state == "empty" ? [] : [item], rankingRows: [], liveEfficiencySummary: skillsSummary)
+        store.updateScheduledJobFrameworkSnapshot(framework)
         return store
     }
 

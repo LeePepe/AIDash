@@ -170,6 +170,9 @@ public enum ScheduledPulseHealth: String, Sendable, Equatable, CaseIterable {
 public struct ScheduledJobStatus: Sendable, Equatable, Identifiable {
     public let definition: ScheduledJobDefinition
     public let health: ScheduledPulseHealth
+    public let isLoaded: Bool
+    public let runningPID: Int32?
+    public let lastExitCode: Int32?
     public let lastRun: Date?
     public let lastTick: Date?
     public let lastError: String?
@@ -177,12 +180,18 @@ public struct ScheduledJobStatus: Sendable, Equatable, Identifiable {
     public init(
         definition: ScheduledJobDefinition,
         health: ScheduledPulseHealth,
+        isLoaded: Bool = false,
+        runningPID: Int32? = nil,
+        lastExitCode: Int32? = nil,
         lastRun: Date? = nil,
         lastTick: Date? = nil,
         lastError: String? = nil
     ) {
         self.definition = definition
         self.health = health
+        self.isLoaded = isLoaded
+        self.runningPID = runningPID
+        self.lastExitCode = lastExitCode
         self.lastRun = lastRun
         self.lastTick = lastTick
         self.lastError = lastError

@@ -103,6 +103,70 @@ struct JobActionsBridgeTests {
         #expect(decoded.coverageRefs.isEmpty)
     }
 
+    @Test("Linear-native attributes round-trip while legacy payloads still decode")
+    func linearNativeAttributesRoundTrip() throws {
+        let parent = JobActionsAction.ParentIssue(
+            identifier: "TIA-83",
+            title: "Parent queue",
+            url: "https://linear.app/example/issue/TIA-83"
+        )
+        let action = JobActionsAction(
+            id: "D617", jobID: "my-pr-supervisor", title: "Decision", descriptionMd: "Summary",
+            labels: ["needs-decision", "testing-skill"], project: "Bing", parentIssue: parent,
+            controls: [.init(id: "decision", kind: .singleSelect, title: "Choice", options: ["A", "B"])]
+        )
+        let encoded = try JSONEncoder().encode(action)
+        let decoded = try JSONDecoder().decode(JobActionsAction.self, from: encoded)
+        #expect(decoded == action)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["labels"] as? [String] == ["needs-decision", "testing-skill"])
+        #expect(object["project"] as? String == "Bing")
+        #expect((object["parentIssue"] as? [String: Any])?["identifier"] as? String == "TIA-83")
+
+        let legacy = Data(#"{"id":"legacy","jobID":"aidata-digest","title":"Legacy","description":"Old","controls":[]}"#.utf8)
+        let legacyAction = try JSONDecoder().decode(JobActionsAction.self, from: legacy)
+        #expect(legacyAction.labels.isEmpty)
+        #expect(legacyAction.project == nil)
+        #expect(legacyAction.parentIssue == nil)
+    }
+
+    @Test("Actionable v2 aliases decode without exposing openURL as a response control")
+    func actionableV2Compatibility() throws {
+        let data = Data(#"""
+        {
+          "id":"D617",
+          "jobId":"my-pr-supervisor",
+          "title":"Preserve logo aspect ratio",
+          "description":"Choose the landing path",
+          "status":"awaiting_owner",
+          "priority":"P0",
+          "source":{"kind":"pr","label":"PR & CI","url":"https://github.com/acme/repo/pull/617","entityId":"PR#617","headSha":"abc123"},
+          "subCategory":"PR_DECISION",
+          "worthExtracting":true,
+          "controls":[
+            {"id":"link","kind":"openURL","label":"Open PR","url":"https://github.com/acme/repo/pull/617"},
+            {"id":"decision","kind":"singleSelect","label":"Choose","options":["Approve","Dismiss"]}
+          ]
+        }
+        """#.utf8)
+        let action = try JSONDecoder().decode(JobActionsAction.self, from: data)
+        #expect(action.jobID == "my-pr-supervisor")
+        #expect(action.source == "PR & CI")
+        #expect(action.ref == "PR#617")
+        #expect(action.url == "https://github.com/acme/repo/pull/617")
+        #expect(action.controls.map(\.id) == ["decision"])
+        #expect(action.controls[0].title == "Choose")
+        #expect(action.subCategory == "PR_DECISION")
+        try JobActionsValidation.validateAction(action)
+
+        let noResponseAction = JobActionsAction(
+            id: "link-only", jobID: "my-pr-supervisor", title: "Open", descriptionMd: "",
+            url: "https://github.com/acme/repo/pull/1", controls: []
+        )
+        try JobActionsValidation.validateAction(noResponseAction)
+
+    }
+
     @Test("Exact fields, Unicode bounds, duplicates, unknown controls, options and noncanonical selections reject")
     func invalidProposals() throws {
         let params = JobActionsPresentParams(requestID: UUID().uuidString, jobID: "my-pr-supervisor",

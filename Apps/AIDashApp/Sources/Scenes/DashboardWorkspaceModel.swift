@@ -1,6 +1,7 @@
 #if os(macOS)
 // swiftlint:disable file_length
 import AppKit
+import Darwin
 import Foundation
 import Observation
 import SQLite3
@@ -28,6 +29,7 @@ public final class DashboardWorkspaceStore {
     public var selectedCLI: DashboardCLIFilter = .all
     public var selectedChartCategory: String?
     public var actionFilter: DashboardActionFilter = .all
+    public var selectedLinearActionFilter: String = "all"
     public var actionSort: DashboardActionSort = .priority
     public var selectedRankingRowID: String?
     public var rankingAscending: Bool = false
@@ -57,13 +59,8 @@ public final class DashboardWorkspaceStore {
                 capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
                 entries: entries
             )
-            for idx in actionItems.indices {
-                if let ackKey = actionItems[idx].acknowledgementKey,
-                   acknowledgedScheduledActionIDs.contains(ackKey) {
-                    actionItems[idx].isCompleted = true
-                    actionItems[idx].status = .done
-                }
-            }
+            // A recorded acknowledgement is a receipt, not authoritative task completion.
+            // The producer's later revision is the source of truth for Done/Dismiss.
         }
     }
     public var availableDates: [String] = DashboardWorkspaceStore.recentDateStrings()
@@ -74,6 +71,13 @@ public final class DashboardWorkspaceStore {
     public private(set) var cliEntries: [CLICostQuotaEntry] = []
     public private(set) var actionItems: [DashboardActionItem] = []
     public private(set) var rankingRows: [AgentRankingRow] = []
+    public private(set) var topicCatalog: [DashboardTopic] = DashboardTopicCatalog.builtInTopics
+    public private(set) var topicSessionBindings: [String: DashboardM2SessionBinding] = [:]
+    public var selectedTopicGroup: String = "all"
+    public var selectedTopicLabelFilter: String = "all"
+    public var stagedTopicDecisions: [String: String] = [:]
+    public private(set) var lastDispatchedTopicStatus: [String: String] = [:]
+    public var m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)?
     public private(set) var liveEfficiencySummary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
     public private(set) var scheduledPulseSnapshot: ScheduledPulseSnapshot = .defaultSnapshot()
     public private(set) var scheduledJobFrameworkSnapshot: ScheduledJobFrameworkSnapshot = .init(capturedAt: Date(), entries: [])
@@ -122,10 +126,16 @@ public final class DashboardWorkspaceStore {
     public init(
         statusProvider: (any MenuBarSystemStatusProviding)? = nil,
         deferInitialRefresh: Bool = false,
-        scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution
+        scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution,
+        topicCatalog: [DashboardTopic]? = nil,
+        sessionBindings: [String: DashboardM2SessionBinding]? = nil,
+        m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil
     ) {
         self.statusProvider = statusProvider ?? LiveMenuBarSystemStatusProvider()
         self.scheduledJobExecution = scheduledJobExecution
+        self.topicCatalog = topicCatalog ?? (LiveDashboardTelemetryReader.isLiveEnvironment ? LiveDashboardTelemetryReader.loadTopicCatalog() : DashboardTopicCatalog.builtInTopics)
+        self.topicSessionBindings = sessionBindings ?? Self.defaultTopicBindings(for: self.topicCatalog)
+        self.m2DispatchExecutor = m2DispatchExecutor
         if !deferInitialRefresh {
             refreshFromProvider()
         }
@@ -138,10 +148,17 @@ public final class DashboardWorkspaceStore {
         actionItems: [DashboardActionItem]? = nil,
         rankingRows: [AgentRankingRow]? = nil,
         scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil,
-        scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution
+        liveEfficiencySummary: LiveDashboardTelemetryReader.LiveEfficiencySummary? = nil,
+        scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution,
+        topicCatalog: [DashboardTopic]? = nil,
+        sessionBindings: [String: DashboardM2SessionBinding]? = nil,
+        m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil
     ) {
         self.statusProvider = LiveMenuBarSystemStatusProvider(tokenDatabasePaths: CLITokenDatabasePaths())
         self.scheduledJobExecution = scheduledJobExecution
+        self.topicCatalog = topicCatalog ?? DashboardTopicCatalog.builtInTopics
+        self.topicSessionBindings = sessionBindings ?? Self.defaultTopicBindings(for: self.topicCatalog)
+        self.m2DispatchExecutor = m2DispatchExecutor
         if let scheduledPulseSnapshot {
             self.scheduledPulseSnapshot = scheduledPulseSnapshot
             self.scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
@@ -153,6 +170,13 @@ public final class DashboardWorkspaceStore {
             customActions: actionItems,
             customRankings: rankingRows
         )
+        if let liveEfficiencySummary { self.liveEfficiencySummary = liveEfficiencySummary }
+    }
+
+    private static func defaultTopicBindings(for topics: [DashboardTopic]) -> [String: DashboardM2SessionBinding] {
+        Dictionary(uniqueKeysWithValues: topics.map {
+            ($0.id, DashboardM2SessionBinding(topicID: $0.id, targetRepo: $0.targetRepo))
+        })
     }
 
     public static func todayDateString() -> String {
@@ -246,6 +270,9 @@ public final class DashboardWorkspaceStore {
 
     public func refreshFromProvider() {
         let state = statusProvider.captureStatusState()
+        topicCatalog = LiveDashboardTelemetryReader.loadTopicCatalog()
+        let sessions = LiveDashboardTelemetryReader.loadHerdrM2SessionSnapshot()
+        topicSessionBindings = sessions.bindings(for: topicCatalog)
         systemState = state
         scheduledPulseSnapshot = LiveDashboardTelemetryReader.loadScheduledPulseSnapshot()
         scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
@@ -352,10 +379,6 @@ public final class DashboardWorkspaceStore {
             capturedAt: scheduledJobFrameworkSnapshot.capturedAt,
             entries: entries
         )
-        for idx in actionItems.indices where actionItems[idx].acknowledgementKey == action.acknowledgementKey {
-            actionItems[idx].isCompleted = true
-            actionItems[idx].status = .done
-        }
     }
 
     public func submitActionItemDecision(
@@ -366,6 +389,12 @@ public final class DashboardWorkspaceStore {
         onToggleDone: ((String, String, Bool) -> Void)? = nil
     ) {
         let trimmedNote = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(item.noteMaxLength))
+        if item.id.hasPrefix("EVAL-") {
+            persistEvalDecision(itemID: item.id, decision: decision, note: trimmedNote)
+        }
+        if item.jobID == .myPRSupervisor, item.id.hasPrefix("D") {
+            persistMyPRSupervisorDecision(itemID: item.id, decision: decision, note: trimmedNote)
+        }
         if let jobID = item.jobID {
             let effectiveControls = item.controls.isEmpty
                 ? [
@@ -391,16 +420,303 @@ public final class DashboardWorkspaceStore {
             acknowledgeScheduledAction(scheduledAction, responses: responses)
         }
         if let idx = actionItems.firstIndex(where: { $0.id == item.id }) {
-            actionItems[idx].isCompleted = true
-            actionItems[idx].status = .done
+            let terminalDecision = ["Done", "Dismiss", "done", "dismissed", "dismiss"].contains(decision)
+            actionItems[idx].isCompleted = terminalDecision
+            actionItems[idx].status = terminalDecision ? .done : .inProgress
             let updated = actionItems[idx]
             if let cardId = updated.backingCardId, let itemRef = updated.backingItemRef {
-                onToggleDone?(cardId, itemRef, true)
-            }
-            if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
-                LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
+                onToggleDone?(cardId, itemRef, terminalDecision)
             }
         }
+    }
+
+    private func persistEvalDecision(itemID: String, decision: String, note: String) {
+        guard LiveDashboardTelemetryReader.isLiveEnvironment else { return }
+        let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let decisionsURL = homeURL.appendingPathComponent(
+            "Development/job skills/my-pr-supervisor/config/eval-decisions.jsonl"
+        )
+        let record: [String: String] = [
+            "id": itemID,
+            "decision": decision,
+            "note": note,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+        ]
+        do {
+            let directory = decisionsURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let replacementData = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+            let existing = FileManager.default.fileExists(atPath: decisionsURL.path)
+                ? (try String(contentsOf: decisionsURL, encoding: .utf8))
+                : ""
+            let merged = Self.replacingEvalDecisionLines(
+                existing: existing,
+                replacement: replacementData,
+                itemID: itemID
+            )
+            try Data(merged.utf8).write(to: decisionsURL, options: [.atomic])
+        } catch {
+            return
+        }
+    }
+
+    static func replacingEvalDecisionLines(existing: String, replacement: Data, itemID: String) -> String {
+        let replacementLine = String(data: replacement, encoding: .utf8) ?? "{}"
+        var output: [String] = []
+        var replaced = false
+        for line in existing.split(whereSeparator: \.isNewline).map(String.init) {
+            if let data = line.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               object["id"] as? String == itemID {
+                if !replaced {
+                    output.append(replacementLine)
+                    replaced = true
+                }
+            } else {
+                output.append(line)
+            }
+        }
+        if !replaced { output.append(replacementLine) }
+        return output.joined(separator: "\n") + "\n"
+    }
+
+    private func persistMyPRSupervisorDecision(itemID: String, decision: String, note: String) {
+        guard LiveDashboardTelemetryReader.isLiveEnvironment else { return }
+        let homeURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let configURL = homeURL.appendingPathComponent(
+            "Development/job skills/my-pr-supervisor/config/my-prs.json"
+        )
+        let lockURL = URL(fileURLWithPath: configURL.path + ".lock")
+        let fileManager = FileManager.default
+
+        do {
+            guard fileManager.fileExists(atPath: configURL.path) else { return }
+            if !fileManager.fileExists(atPath: lockURL.path) {
+                guard fileManager.createFile(atPath: lockURL.path, contents: nil) else { return }
+            }
+            let lockHandle = try FileHandle(forWritingTo: lockURL)
+            defer { try? lockHandle.close() }
+            guard flock(lockHandle.fileDescriptor, LOCK_EX) == 0 else { return }
+            defer { _ = flock(lockHandle.fileDescriptor, LOCK_UN) }
+
+            let data = try Data(contentsOf: configURL)
+            guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  var pendingDecisions = root["pending_decisions"] as? [String: Any] else {
+                return
+            }
+
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+            let matchingKeys: [String] = pendingDecisions.compactMap { key, value -> String? in
+                guard let entry = value as? [String: Any],
+                      (entry["decision_id"] as? String) == itemID else {
+                    return nil
+                }
+                return key
+            }
+            guard !matchingKeys.isEmpty else { return }
+            for key in matchingKeys {
+                guard var entry = pendingDecisions[key] as? [String: Any] else { continue }
+                entry["status"] = "owner_replied"
+                entry["owner_choice"] = decision
+                entry["owner_note"] = note
+                entry["replied_at"] = timestamp
+                pendingDecisions[key] = entry
+            }
+
+            root["pending_decisions"] = pendingDecisions
+            let updatedData = try JSONSerialization.data(
+                withJSONObject: root,
+                options: [.prettyPrinted, .sortedKeys]
+            )
+            try updatedData.write(to: configURL, options: .atomic)
+        } catch {
+            return
+        }
+    }
+
+    public var topicGroupFilters: [(id: String, title: String)] {
+        [("all", "全部话题"), ("work-business", "🏢 Work Business"), ("user-skills", "🛠 user-skills"), ("personal-core-gateways", "⚙️ Personal Core"), ("personal-products-home", "🏠 Personal Products"), ("completed", "✅ 已完成 (\(completedActionCount))")]
+    }
+
+    public var topicLabelFilters: [(id: String, title: String)] {
+        [("all", "全部类型"), ("needs-decision", "🔴 需拍板"), ("pop", "🔐 待 PoP"), ("eval", "💡 评论规则"), ("bug-blocker", "🧱 Bug 阻塞")]
+    }
+
+    private func matchesTopicBoardFilters(_ item: DashboardActionItem) -> Bool {
+        if selectedTopicGroup == "completed" {
+            guard item.isCompleted else { return false }
+        } else if selectedTopicGroup != "all", item.topicGroup != selectedTopicGroup {
+            return false
+        }
+        if selectedTopicLabelFilter == "needs-decision" { return item.isNeedsDecision }
+        if selectedTopicLabelFilter != "all" { return item.hasLinearLabel(selectedTopicLabelFilter) }
+        return true
+    }
+
+    public var topicColumns: [DashboardTopicColumn] {
+        let filteredItems = kanbanActionItems.filter(matchesTopicBoardFilters)
+        let topicIDs = Set(filteredItems.map(\.topicID))
+        let orderedTopics = topicCatalog.filter { topicIDs.contains($0.id) }.sorted { lhs, rhs in
+            let lhsPending = filteredItems.filter { $0.topicID == lhs.id && !$0.isCompleted }.count
+            let rhsPending = filteredItems.filter { $0.topicID == rhs.id && !$0.isCompleted }.count
+            let priority: [String: Int] = ["sapphire-china-bugs": 0, "sapphire-smartbanner": 1, "sapphire-notification": 2, "aidash-aidata": 3]
+            let lp = priority[lhs.id] ?? 10
+            let rp = priority[rhs.id] ?? 10
+            if lp != rp { return lp < rp }
+            if lhsPending != rhsPending { return lhsPending > rhsPending }
+            return lhs.id < rhs.id
+        }
+        return orderedTopics.map { topic in
+            DashboardTopicColumn(
+                topic: topic,
+                items: filteredItems.filter { $0.topicID == topic.id },
+                session: topicSessionBindings[topic.id] ?? DashboardM2SessionBinding(topicID: topic.id, targetRepo: topic.targetRepo)
+            )
+        }
+    }
+
+    public func stageTopicDecision(_ item: DashboardActionItem, decision: String) {
+        guard !item.isCompleted else { return }
+        stagedTopicDecisions[item.id] = decision
+    }
+
+    public func clearStagedTopicDecision(for itemID: String) {
+        stagedTopicDecisions.removeValue(forKey: itemID)
+    }
+
+    public func stagedItems(for topicID: String) -> [(DashboardActionItem, String, String)] {
+        actionItems.compactMap { item in
+            guard item.topicID == topicID, !item.isCompleted, let decision = stagedTopicDecisions[item.id] else { return nil }
+            return (item, decision, "")
+        }
+    }
+
+    public func dispatchStagedTopic(
+        topicID: String,
+        onToggleDone: ((String, String, Bool) -> Void)? = nil
+    ) -> DashboardM2DispatchResult {
+        var selected = stagedItems(for: topicID)
+        if selected.isEmpty {
+            selected = actionItems.filter { item in
+                item.topicID == topicID && !item.isCompleted && !item.hasLinearLabel("bug-blocker")
+            }
+            .sorted {
+                if $0.priority != $1.priority { return $0.priority < $1.priority }
+                return $0.id < $1.id
+            }
+            .prefix(3)
+            .map { ($0, $0.decisionOptions.first ?? "Approve", "") }
+        }
+        guard !selected.isEmpty else {
+            let result = DashboardM2DispatchResult(succeeded: false, error: "没有可派发事项")
+            lastDispatchedTopicStatus[topicID] = "⚠️ \(result.error ?? "dispatch failed")"
+            return result
+        }
+        return dispatchTopicToM2(topicID: topicID, items: selected, onToggleDone: onToggleDone)
+    }
+
+    @discardableResult
+    public func dispatchTopicToM2(
+        topicID: String,
+        items: [(DashboardActionItem, String, String)],
+        onToggleDone: ((String, String, Bool) -> Void)? = nil
+    ) -> DashboardM2DispatchResult {
+        guard let topic = topicCatalog.first(where: { $0.id == topicID }) ?? DashboardTopicCatalog.topic(withID: topicID) else {
+            return DashboardM2DispatchResult(succeeded: false, error: "未知 topic")
+        }
+        let pending = items.compactMap { entry -> (DashboardActionItem, String, String)? in
+            guard let current = actionItems.first(where: { $0.id == entry.0.id }),
+                  !current.isCompleted, current.topicID == topicID else { return nil }
+            return (current, entry.1, entry.2)
+        }
+        guard !pending.isEmpty else {
+            return DashboardM2DispatchResult(succeeded: false, error: "事项已处理，禁止重复派发")
+        }
+        let prompt = makeTopicSubPrompt(topic: topic, items: pending)
+        let targetJSON = makeRouterTargetsJSON(topic: topic, prompt: prompt, sessionID: topicSessionBindings[topicID]?.paneID)
+        let result: DashboardM2DispatchResult
+        if let m2DispatchExecutor {
+            result = m2DispatchExecutor(prompt, targetJSON, topicSessionBindings[topicID]?.paneID)
+        } else if LiveDashboardTelemetryReader.isLiveEnvironment {
+            result = runM2Router(topic: topic, prompt: prompt, targetJSON: targetJSON, homeURL: LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL())
+        } else {
+            result = DashboardM2DispatchResult(succeeded: false, error: "offline/test environment")
+        }
+        guard result.succeeded else {
+            lastDispatchedTopicStatus[topicID] = "⚠️ \(result.error ?? "dispatch failed")"
+            return result
+        }
+        for (item, decision, note) in pending {
+            if item.id.hasPrefix("EVAL-") { persistEvalDecision(itemID: item.id, decision: decision, note: note) }
+            if item.jobID == .myPRSupervisor, item.id.hasPrefix("D") { persistMyPRSupervisorDecision(itemID: item.id, decision: decision, note: note) }
+            submitActionItemDecision(item, decision: decision, note: note, onToggleDone: onToggleDone)
+            if let index = actionItems.firstIndex(where: { $0.id == item.id }) {
+                actionItems[index].isCompleted = true
+                actionItems[index].status = .done
+                onToggleDone?(actionItems[index].backingCardId ?? "", actionItems[index].backingItemRef ?? "", true)
+            }
+            stagedTopicDecisions.removeValue(forKey: item.id)
+        }
+        let pane = topicSessionBindings[topicID]?.paneID ?? "NEW_M2"
+        lastDispatchedTopicStatus[topicID] = result.receipt ?? "✓ 已派发至 \(pane)"
+        return result
+    }
+
+    private func makeTopicSubPrompt(topic: DashboardTopic, items: [(DashboardActionItem, String, String)]) -> String {
+        var lines = ["请按 Owner 在 AIDash 拍板的决策处理以下 \(topic.title) 事项："]
+        for (index, entry) in items.enumerated() {
+            let item = entry.0
+            let ref = item.externalURLString ?? item.displayRefLabel ?? item.backingItemRef ?? "无引用"
+            let note = entry.2.isEmpty ? "" : "；备注：\(HerdrSocketClient.sanitizeMetadataToken(entry.2, maxLength: 300))"
+            lines.append("\(index + 1). [\(item.id)] \(HerdrSocketClient.sanitizeMetadataToken(item.title, maxLength: 180)) (\(ref)) → 决策：\(HerdrSocketClient.sanitizeMetadataToken(entry.1, maxLength: 120))\(note)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func makeRouterTargetsJSON(topic: DashboardTopic, prompt: String, sessionID: String?) -> String {
+        let payload: [String: Any] = [
+            "route": "ROUTE_SINGLE",
+            "targets": [[
+                "topic_id": topic.id, "target_repo": topic.targetRepo,
+                "session_id": sessionID ?? "", "sub_prompt": prompt, "wave_order": 1
+            ]]
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"route\":\"ROUTE_SINGLE\",\"targets\":[]}" }
+        return string
+    }
+
+    private func runM2Router(topic: DashboardTopic, prompt: String, targetJSON: String, homeURL: URL) -> DashboardM2DispatchResult {
+        let router = "/Users/tianpli/.agents/skills/personal-m2-assistant/scripts/m2-router.py"
+        guard FileManager.default.fileExists(atPath: router) else { return DashboardM2DispatchResult(succeeded: false, error: "m2-router.py unavailable") }
+        func run(_ args: [String]) -> (Int32, String) {
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            process.arguments = args
+            process.standardOutput = pipe
+            process.standardError = pipe
+            var env = ProcessInfo.processInfo.environment
+            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "")
+            process.environment = env
+            do { try process.run(); process.waitUntilExit() } catch { return (-1, "") }
+            return (process.terminationStatus, String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+        }
+        let plan = run([router, "--plan", "--message", "AIDash \(topic.title) dispatch", "--targets-json", targetJSON, "--json"])
+        guard plan.0 == 0, !plan.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return DashboardM2DispatchResult(succeeded: false, error: "m2-router plan failed")
+        }
+        let planDirectory = homeURL.appendingPathComponent("Library/Application Support/AIDash/m2-plans", isDirectory: true)
+        let planURL = planDirectory.appendingPathComponent("aidash-m2-plan-\(UUID().uuidString).json")
+        do {
+            try FileManager.default.createDirectory(at: planDirectory, withIntermediateDirectories: true)
+            try Data(plan.1.utf8).write(to: planURL, options: [.atomic])
+            defer { try? FileManager.default.removeItem(at: planURL) }
+        } catch { return DashboardM2DispatchResult(succeeded: false, error: "cannot persist router plan") }
+        let applied = run([router, "--apply", "--plan-file", planURL.path, "--approve", "--json"])
+        guard applied.0 == 0 else { return DashboardM2DispatchResult(succeeded: false, error: "m2-router apply failed") }
+        let pane = topicSessionBindings[topic.id]?.paneID ?? "NEW_M2"
+        return DashboardM2DispatchResult(succeeded: true, receipt: "✓ 已派发至 \(pane)")
     }
 
     public var scheduledPulseRows: [ScheduledJobStatus] {
@@ -448,6 +764,16 @@ public final class DashboardWorkspaceStore {
         lastCopiedScheduledJobID = status.id
     }
 
+    private static func isArchivedActionItem(_ item: DashboardActionItem) -> Bool {
+        if item.hasLinearLabel("bug-blocker") || item.hasLinearLabel("eval") || item.hasLinearLabel("pop") {
+            return false
+        }
+        let haystack = [item.id, item.title, item.summary, item.sourceTag, item.backingItemRef ?? ""]
+            .joined(separator: " ")
+            .uppercased()
+        return haystack.contains("EVAL_CANDIDATE") || haystack.contains("BUG_BLOCKER")
+    }
+
     private func applySnapshot(
         _ snapshot: MenuBarSystemSnapshot,
         customTrends: [TrendDataPoint]? = nil,
@@ -468,14 +794,14 @@ public final class DashboardWorkspaceStore {
             cliEntries: derivedCLIs,
             acknowledgedActionIDs: acknowledgedScheduledActionIDs
         )
-        for index in nextActions.indices {
-            if preservedCompletedIDs.contains(nextActions[index].id)
-                || (nextActions[index].acknowledgementKey.map { acknowledgedScheduledActionIDs.contains($0) } ?? false) {
-                nextActions[index].isCompleted = true
-                nextActions[index].status = .done
-            }
+        for index in nextActions.indices where preservedCompletedIDs.contains(nextActions[index].id) {
+            nextActions[index].isCompleted = true
+            nextActions[index].status = .done
         }
-        actionItems = nextActions
+        actionItems = nextActions.filter { !Self.isArchivedActionItem($0) }
+        if !availableLinearActionFilters.contains(where: { $0.id == selectedLinearActionFilter }) {
+            selectedLinearActionFilter = "all"
+        }
         rankingRows = customRankings ?? liveDataset?.rankings ?? Self.deriveRankingRows(from: derivedCLIs)
         liveEfficiencySummary = (customCLIs == nil && customRankings == nil)
             ? LiveDashboardTelemetryReader.loadLiveEfficiencySummary()
@@ -502,7 +828,7 @@ public final class DashboardWorkspaceStore {
     // MARK: - IP-004 Context-Preserving Scoped Empty Recovery
 
     public var hasScopedSubFilter: Bool {
-        selectedChartCategory != nil || actionFilter != .all
+        selectedChartCategory != nil || actionFilter != .all || selectedLinearActionFilter != "all"
     }
 
     public func clearScopedFilterOnly() {
@@ -510,6 +836,8 @@ public final class DashboardWorkspaceStore {
             selectedChartCategory = nil
         } else if actionFilter != .all {
             actionFilter = .all
+        } else if selectedLinearActionFilter != "all" {
+            selectedLinearActionFilter = "all"
         }
     }
 
@@ -525,9 +853,6 @@ public final class DashboardWorkspaceStore {
         let updated = actionItems[idx]
         if let cardId = updated.backingCardId, let itemRef = updated.backingItemRef {
             onToggleDone?(cardId, itemRef, updated.isCompleted)
-        }
-        if LiveDashboardTelemetryReader.isLiveEnvironment, updated.id.hasPrefix("proposal-") {
-            LiveDashboardTelemetryReader.persistProposalStatus(item: updated)
         }
     }
 
@@ -611,6 +936,84 @@ public final class DashboardWorkspaceStore {
         return filters.count > 1 ? filters : DashboardCLIFilter.allCases
     }
 
+    public var availableLinearActionFilters: [DashboardLinearActionFilterChip] {
+        let activeLinearItems = actionItems.filter { $0.isLinearNative }
+        let orderedLabels: [(String, String)] = [
+            ("needs-decision", "🔴 needs-decision · 需单独拍板"),
+            ("pop", "🔐 label:pop · 待合入"),
+            ("eval", "💡 label:eval · 评论改进建议"),
+            ("bug-blocker", "🧱 label:bug-blocker · Bug 阻塞")
+        ]
+        var filters = [DashboardLinearActionFilterChip(id: "all", label: "全部")]
+        var knownLabels = Set<String>()
+        for (label, display) in orderedLabels {
+            knownLabels.insert(label)
+            let count = activeLinearItems.filter { item in
+                label == "needs-decision" ? item.isNeedsDecision : item.hasLinearLabel(label)
+            }.count
+            if count > 0 {
+                filters.append(DashboardLinearActionFilterChip(id: label, label: display, count: count))
+            }
+        }
+        let extraLabels = Set(activeLinearItems.flatMap(\.labels))
+            .filter { !knownLabels.contains($0.lowercased()) }
+            .sorted()
+        for label in extraLabels {
+            let count = activeLinearItems.filter { $0.hasLinearLabel(label) }.count
+            filters.append(DashboardLinearActionFilterChip(id: label, label: "label:\(label)", count: count))
+        }
+        return filters
+    }
+
+    private func matchesLinearActionFilter(_ item: DashboardActionItem) -> Bool {
+        guard selectedLinearActionFilter != "all" else { return true }
+        if selectedLinearActionFilter == "needs-decision" {
+            return item.isNeedsDecision
+        }
+        return item.hasLinearLabel(selectedLinearActionFilter)
+    }
+
+    private func matchesSelectedFrameworkJob(_ item: DashboardActionItem) -> Bool {
+        guard let selectedFrameworkJobID else { return true }
+        return item.jobID == selectedFrameworkJobID
+    }
+
+    private func sortActionItems(_ items: [DashboardActionItem]) -> [DashboardActionItem] {
+        items.sorted { lhs, rhs in
+            switch actionSort {
+            case .priority:
+                if lhs.isCompleted != rhs.isCompleted { return !lhs.isCompleted }
+                if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
+                return lhs.title < rhs.title
+            case .source:
+                if lhs.sourceTag != rhs.sourceTag { return lhs.sourceTag < rhs.sourceTag }
+                return lhs.priority < rhs.priority
+            case .title:
+                return lhs.title < rhs.title
+            }
+        }
+    }
+
+    public var kanbanActionItems: [DashboardActionItem] {
+        let filtered = actionItems.filter { item in
+            guard matchesActiveCLIFilter(item.cliFilter),
+                  matchesChartCategory(item.cliFilter, categoryName: item.sourceTag),
+                  matchesLinearActionFilter(item),
+                  matchesSelectedFrameworkJob(item) else {
+                return false
+            }
+            switch actionFilter {
+            case .all, .pending:
+                return true
+            case .completed:
+                return item.isCompleted || item.status == .done
+            case .highPriorityOnly:
+                return item.priority == .p0 || item.priority == .p1
+            }
+        }
+        return sortActionItems(filtered)
+    }
+
     public var filteredCLIEntries: [CLICostQuotaEntry] {
         cliEntries.filter { entry in
             matchesActiveCLIFilter(entry.cliFilter)
@@ -626,7 +1029,9 @@ public final class DashboardWorkspaceStore {
         let filtered = actionItems.filter { item in
             guard matchesActiveCLIFilter(item.cliFilter),
                   matchesChartCategory(item.cliFilter, categoryName: item.sourceTag),
-                  selectedActionDomain == nil || item.resolvedDomain == selectedActionDomain else {
+                  selectedActionDomain == nil || item.resolvedDomain == selectedActionDomain,
+                  matchesLinearActionFilter(item),
+                  matchesSelectedFrameworkJob(item) else {
                 return false
             }
             switch actionFilter {
@@ -636,19 +1041,7 @@ public final class DashboardWorkspaceStore {
             case .highPriorityOnly: return item.priority == .p0 || item.priority == .p1
             }
         }
-        return filtered.sorted { lhs, rhs in
-            switch actionSort {
-            case .priority:
-                if lhs.isCompleted != rhs.isCompleted { return !lhs.isCompleted }
-                if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
-                return lhs.title < rhs.title
-            case .source:
-                if lhs.sourceTag != rhs.sourceTag { return lhs.sourceTag < rhs.sourceTag }
-                return lhs.priority < rhs.priority
-            case .title:
-                return lhs.title < rhs.title
-            }
-        }
+        return sortActionItems(filtered)
     }
 
     public var filteredRankingRows: [AgentRankingRow] {

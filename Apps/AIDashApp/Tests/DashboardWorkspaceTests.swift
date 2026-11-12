@@ -234,6 +234,67 @@ struct DashboardWorkspaceTests {
         #expect(event.2 == true)
     }
 
+    @Test("Kanban source keeps completed cards visible under pending filter and honors job filters")
+    func kanbanActionItemsIncludeDoneAndFilterByJob() {
+        let actions = [
+            DashboardActionItem(
+                id: "eval-done",
+                title: "Done eval rule",
+                summary: "Already recorded",
+                sourceTag: "Linear",
+                priority: .p1,
+                status: .done,
+                isCompleted: true,
+                jobID: .myPRSupervisor,
+                labels: ["eval"]
+            ),
+            DashboardActionItem(
+                id: "eval-triage",
+                title: "Pending eval rule",
+                summary: "Needs review",
+                sourceTag: "Linear",
+                priority: .p1,
+                status: .triage,
+                jobID: .myPRSupervisor,
+                labels: ["eval"]
+            ),
+            DashboardActionItem(
+                id: "other-job",
+                title: "Other job item",
+                summary: "Should be scoped out",
+                sourceTag: "Linear",
+                priority: .p1,
+                status: .blocked,
+                jobID: .aidataDigest,
+                labels: ["bug-blocker"]
+            )
+        ]
+        let store = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: actions)
+        store.actionFilter = .pending
+        store.selectedLinearActionFilter = "eval"
+        #expect(store.kanbanActionItems.map(\.id) == ["eval-triage", "eval-done"])
+        store.selectedFrameworkJobID = .aidataDigest
+        #expect(store.kanbanActionItems.map(\.id) == [])
+    }
+
+    @Test("eval decision line merge replaces every duplicate id with one latest record")
+    func evalDecisionLinesAreIdempotentByID() throws {
+        let replacement = try JSONSerialization.data(withJSONObject: [
+            "id": "EVAL-1", "decision": "忽略", "note": "latest"
+        ], options: [.sortedKeys])
+        let existing = "{\"id\":\"EVAL-1\",\"decision\":\"旧\"}\n{\"id\":\"other\",\"decision\":\"保留\"}\n{\"id\":\"EVAL-1\",\"decision\":\"重复\"}\n"
+        let merged = DashboardWorkspaceStore.replacingEvalDecisionLines(
+            existing: existing,
+            replacement: replacement,
+            itemID: "EVAL-1"
+        )
+        let lines = merged.split(whereSeparator: \.isNewline)
+        #expect(lines.count == 2)
+        #expect(lines.filter { $0.contains("EVAL-1") }.count == 1)
+        #expect(merged.contains("latest"))
+        #expect(merged.contains("other"))
+    }
+
     @Test("modular card views and workspace view construct bodies across all sections")
     func modularViewsRenderSmokeTest() {
         let snapshot = sampleSnapshot()
@@ -875,7 +936,8 @@ struct DashboardWorkspaceTests {
 
         let actionsURL = digestDir.appendingPathComponent("actions.jsonl")
         let sampleLines = [
-            #"{"id":"linear-TIA-76","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[Bing] iOS Smart Banner / SERP","description":"[in_progress] TIA-76 [Bing] iOS Smart Banner / SERP","status":"in_progress","source":"Linear","priority":"P1","ref":"linear://TIA-76","url":"https://linear.app/tianpeili/issue/TIA-76","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
+            #"{"id":"linear-TIA-76","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"Personal AIDash rollout","description":"[in_progress] TIA-76 Personal AIDash rollout","status":"in_progress","source":"Linear","priority":"P1","ref":"linear://TIA-76","url":"https://github.com/LeePepe/AIDash/issues/76","labels":["pop"],"project":"LeePepe/AIDash","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://github.com/LeePepe/AIDash/issues/83"},"controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
+            #"{"id":"EVAL-RULE-VIEW-SNAPSHOT-TEST","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[Bing] external work noise","description":"external work","status":"triage","source":"Linear","priority":"P1","ref":"eval://EVAL-RULE-VIEW-SNAPSHOT-TEST","url":"https://msft.ghe.com/san/bing-growth-sapphire-app/pull/617","labels":["eval"],"project":"Bing","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://github.com/LeePepe/AIDash/issues/83"},"controls":[]}"#,
             #"{"id":"proposal-review-pingpong","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"Shrink Review Ping-Pong","description":"R1 fail rate 55.7%","status":"triage","source":"Retro","priority":"P0","ref":"proposal://review-pingpong","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"targets","kind":"multiSelect","title":"Targets","options":["item-a","item-b"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
             #"{"id":"gtt-blocker-1","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"GTT Blocker: aidash-ops","description":"Waiting on Owner GO","status":"blocked","source":"GTT Blocker","priority":"P0","ref":"aidash-ops","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#
         ]
@@ -887,14 +949,21 @@ struct DashboardWorkspaceTests {
         )
         #expect(loaded.count == 3)
 
+        #expect(loaded.first(where: { $0.id == "EVAL-RULE-VIEW-SNAPSHOT-TEST" }) == nil)
+
         let linearItem = try #require(loaded.first(where: { $0.id == "linear-TIA-76" }))
         #expect(linearItem.status == .inProgress)
         #expect(!linearItem.isCompleted)
         #expect(linearItem.sourceTag == "Linear")
         #expect(linearItem.priority == .p1)
         #expect(linearItem.displayRefLabel == "TIA-76")
-        #expect(linearItem.externalURLString == "https://linear.app/tianpeili/issue/TIA-76")
-        #expect(linearItem.summary == "[Bing] iOS Smart Banner / SERP")
+        #expect(linearItem.externalURLString == "https://github.com/LeePepe/AIDash/issues/76")
+        #expect(linearItem.labels == ["pop"])
+        #expect(linearItem.project == "LeePepe/AIDash")
+        #expect(linearItem.parentIssueKey == "TIA-83")
+        #expect(linearItem.parentIssueTitle == "Parent queue")
+        #expect(linearItem.parentIssueURL == "https://github.com/LeePepe/AIDash/issues/83")
+        #expect(linearItem.summary == "Personal AIDash rollout")
         #expect(linearItem.decisionOptions == ["Approve", "Done", "Dismiss"])
 
         let retroItem = try #require(loaded.first(where: { $0.id == "proposal-review-pingpong" }))
@@ -902,10 +971,14 @@ struct DashboardWorkspaceTests {
         #expect(retroItem.sourceTag == "Retro")
         #expect(retroItem.priority == .p0)
         #expect(retroItem.targetOptions == ["item-a", "item-b"])
+        let filterStore = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: loaded)
+        #expect(filterStore.availableLinearActionFilters.map(\.id) == ["all", "pop"])
+        filterStore.selectedLinearActionFilter = "pop"
+        #expect(filterStore.filteredActionItems.map(\.id) == ["linear-TIA-76"])
 
         let ackedItem = try #require(loaded.first(where: { $0.id == "gtt-blocker-1" }))
-        #expect(ackedItem.status == .done)
-        #expect(ackedItem.isCompleted)
+        #expect(ackedItem.status == .blocked)
+        #expect(!ackedItem.isCompleted)
 
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: loaded)
         var capturedAction: ScheduledJobAction?
@@ -930,12 +1003,89 @@ struct DashboardWorkspaceTests {
         #expect(capturedResponses.contains(ScheduledJobActionResponse(controlID: "targets", value: "item-a,item-b")))
         #expect(capturedResponses.contains(ScheduledJobActionResponse(controlID: "note", value: "Ship in wave 1")))
         #expect(store.acknowledgedScheduledActionIDs.contains("aidata-digest:proposal-review-pingpong"))
-        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.isCompleted == true)
-        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.status == .done)
+        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.isCompleted == false)
+        #expect(store.actionItems.first(where: { $0.id == "proposal-review-pingpong" })?.status == .inProgress)
         #expect(toggledEvent?.0 == "scheduled-pulse/aidata-digest")
         #expect(toggledEvent?.1 == "proposal://review-pingpong")
-        #expect(toggledEvent?.2 == true)
+        #expect(toggledEvent?.2 == false)
         _ = ActionItemsCardView(store: store).body
+    }
+
+    @Test("M2 topic resolution prefers explicit IDs and applies deterministic fallback rules")
+    func m2TopicResolutionIsCanonical() {
+        let explicit = DashboardActionItem(
+            id: "unknown", title: "Unrelated", summary: "", sourceTag: "Linear", topicID: "sapphire-notification"
+        )
+        let chinaBug = DashboardActionItem(
+            id: "BUG-AB11440223", title: "Bing CN devsync blocker", summary: "", sourceTag: "my-pr-supervisor"
+        )
+        let smartBanner = DashboardActionItem(
+            id: "linear-TIA-76", title: "FlightBook SmartBanner Universal Link", summary: "", sourceTag: "Linear"
+        )
+        #expect(explicit.topicID == "sapphire-notification")
+        #expect(explicit.targetRepo == "bing-growth-sapphire-app")
+        #expect(chinaBug.topicID == "sapphire-china-bugs")
+        #expect(smartBanner.topicID == "sapphire-smartbanner")
+        #expect(smartBanner.topicGroup == "work-business")
+    }
+
+    @Test("Herdr JSON parsing binds known panes and falls back to NEW_M2")
+    func herdrSessionParsingAndBinding() throws {
+        let workspaces = #"{"result":{"workspaces":[{"workspace_id":"w1","label":"China bugs 修复","active_tab_id":"w1:t1","pane_count":1},{"workspace_id":"w10","label":"SmartBanner","active_tab_id":"w10:t1","pane_count":1}]}}"#
+        let agents = #"{"result":{"agents":[{"workspace_id":"w1","pane_id":"w1:p1","cwd":"/Users/test/Development/bing-growth-sapphire-app","terminal_title_stripped":"Review bugs"},{"workspace_id":"w10","pane_id":"w10:p1","cwd":"/Users/test/Development/bing-growth-sapphire-app","terminal_title_stripped":"SmartBanner"}]}}"#
+        let snapshot = LiveDashboardTelemetryReader.parseHerdrM2SessionSnapshot(workspaceOutput: workspaces, agentOutput: agents)
+        let bindings = snapshot.bindings(for: DashboardTopicCatalog.builtInTopics)
+        #expect(bindings["sapphire-china-bugs"]?.paneID == "w1:p1")
+        #expect(bindings["sapphire-smartbanner"]?.paneID == "w10:p1")
+        #expect(bindings["sapphire-notification"]?.isExisting == false)
+        #expect(bindings["sapphire-notification"]?.badgeText == "🆕 NEW_M2 · bing-growth-sapphire-app")
+    }
+
+    @Test("Topic columns group cards and dispatch guards prevent repeats")
+    func topicGroupingAndDispatchGuard() throws {
+        let actions = [
+            DashboardActionItem(id: "D617-5221157", title: "PR #617", summary: "China Bugs", sourceTag: "my-pr-supervisor", priority: .p0),
+            DashboardActionItem(id: "linear-TIA-76", title: "SmartBanner Universal Link", summary: "", sourceTag: "Linear", priority: .p1)
+        ]
+        var calls = 0
+        var targetJSON = ""
+        let store = DashboardWorkspaceStore(
+            snapshot: sampleSnapshot(), actionItems: actions,
+            sessionBindings: ["sapphire-china-bugs": DashboardM2SessionBinding(topicID: "sapphire-china-bugs", paneID: "w1:p1", workspaceID: "w1", workspaceLabel: "China bugs 修复", targetRepo: "bing-growth-sapphire-app")],
+            m2DispatchExecutor: { prompt, targets, pane in
+                calls += 1
+                targetJSON = targets
+                #expect(prompt.contains("PR #617"))
+                #expect(pane == "w1:p1")
+                return DashboardM2DispatchResult(succeeded: true, receipt: "✓ 已派发至 w1:p1")
+            }
+        )
+        #expect(store.topicColumns.map(\.id) == ["sapphire-china-bugs", "sapphire-smartbanner"])
+        let first = store.dispatchStagedTopic(topicID: "sapphire-china-bugs")
+        #expect(first.succeeded)
+        #expect(calls == 1)
+        #expect(targetJSON.contains("sapphire-china-bugs"))
+        #expect(store.actionItems.first?.isCompleted == true)
+        #expect(store.dispatchTopicToM2(topicID: "sapphire-china-bugs", items: [(actions[0], "Approve", "")]).succeeded == false)
+        #expect(calls == 1)
+    }
+
+    @Test("Linear parent rows are removed when they only serve as containers")
+    func linearParentContainerRowsAreDeduplicated() throws {
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-linear-parent-container-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+        let digestDir = tempHome.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: digestDir, withIntermediateDirectories: true)
+        let actionsURL = digestDir.appendingPathComponent("actions.jsonl")
+        let lines = [
+            #"{"id":"linear-TIA-83","jobID":"aidata-digest","title":"Parent","description":"Parent","status":"in_progress","source":"Linear","ref":"linear://TIA-83","controls":[{"id":"confirm","kind":"confirm","title":"Confirm"}],"parentIssue":{"identifier":"TIA-83","title":"Parent","url":"https://linear.app/example/issue/TIA-83"}}"#,
+            #"{"id":"child-1","jobID":"aidata-digest","title":"Child","description":"Child","status":"triage","source":"Linear","ref":"linear://CHILD-1","controls":[{"id":"confirm","kind":"confirm","title":"Confirm"}],"parentIssue":{"identifier":"TIA-83","title":"Parent","url":"https://linear.app/example/issue/TIA-83"}}"#
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: actionsURL, atomically: true, encoding: .utf8)
+
+        let loaded = LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: tempHome)
+        #expect(loaded.map(\.id) == ["child-1"])
     }
 }
 #endif

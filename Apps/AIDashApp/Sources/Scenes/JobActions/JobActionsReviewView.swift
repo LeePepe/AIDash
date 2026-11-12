@@ -27,19 +27,10 @@ struct JobActionsReviewView: View {
                         HStack(spacing: 6) {
                             Text(verbatim: jobLabel).font(.caption).foregroundStyle(.secondary)
                             if let priority = review.action.priority, !priority.isEmpty {
-                                Text(verbatim: priority)
-                                    .font(.caption2.weight(.bold))
-                                    .monospacedDigit()
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(theme.neutrals.card, in: Capsule())
+                                StatusPill(priority, tone: priorityTone(priority))
                             }
                             if let status = review.action.status, !status.isEmpty {
-                                Text(verbatim: status)
-                                    .font(.caption2.weight(.semibold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(theme.neutrals.card, in: Capsule())
+                                StatusPill(status, tone: statusTone(status))
                             }
                             if let source = review.action.source, !source.isEmpty {
                                 Text(verbatim: source)
@@ -57,6 +48,19 @@ struct JobActionsReviewView: View {
                             .font(.body)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
+                        if let url = URLPolicy.validate(review.action.url) {
+                            Button {
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                Label(
+                                    DashboardL10n.tr("dashboard.actions.open_link", "Open Link"),
+                                    systemImage: "arrow.up.right.square"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .frame(minHeight: 28)
+                        }
                     }
                     ForEach(review.action.controls) { control in
                         VStack(alignment: .leading, spacing: Space.gap) {
@@ -134,6 +138,23 @@ struct JobActionsReviewView: View {
                 .font(.body).foregroundStyle(theme.dangerOnSubtle)
         case .cancelled:
             Text("job_actions.review.cancelled").font(.body).foregroundStyle(.secondary)
+        }
+    }
+
+    private func priorityTone(_ priority: String) -> PillTone {
+        switch DashboardActionPriority.from(rawPriority: priority) {
+        case .p0: return .danger
+        case .p1: return .warning
+        case .p2: return .neutral
+        }
+    }
+
+    private func statusTone(_ status: String) -> PillTone {
+        switch DashboardActionStatus.from(rawStatus: status) {
+        case .blocked: return .danger
+        case .triage: return .warning
+        case .inProgress: return .primary
+        case .done: return .success
         }
     }
 
