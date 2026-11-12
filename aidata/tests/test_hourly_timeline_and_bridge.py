@@ -37,6 +37,59 @@ def test_verify_hourly_timeline_rejects_cross_hour_evidence():
 
 
 @pytest.mark.unit
+def test_canonical_skills_roi_snapshot_preserves_report_nulls_and_source_grain(tmp_path):
+    from L5_apps.digest.skills_roi_snapshot import write_snapshot
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    report = json.loads(fixture.read_text(encoding="utf-8"))
+    seen = []
+
+    def query(name, params):
+        seen.append((name, params))
+        return ([("2026-11-11", "claude_attribution", "team-lead", 2, 1),
+                 ("2026-11-11", "claude_skill_tool", "team-lead", 2, 1)],
+                ["day", "source", "skill", "n", "sessions"])
+
+    output = tmp_path / "skills-roi.json"
+    payload = write_snapshot(output, fixture, query_runner=query)
+    assert payload["diagnostics"] == report
+    assert payload["schema_version"] == 1
+    assert payload["source_as_of"] == report["source_as_of"]
+    assert payload["sample_size"] == 4
+    assert payload["coverage_status"] == "healthy"
+    assert "metrics" not in payload and "S5" not in payload["diagnostics"]
+    assert payload["diagnostics"]["S10_skill_roi_ranking"][0]["roi_score"] is None
+    assert payload["diagnostics"]["S11_context_composition"]["estimated"] is True
+    assert [row["n"] for row in payload["skills_daily"]] == [2, 2]
+    assert [row["source"] for row in payload["skills_daily"]] == ["claude_attribution", "claude_skill_tool"]
+    assert all(row["sample_size"] == 2 for row in payload["skills_daily"])
+    assert seen == [("skills/daily", {"day_from": "2026-11-05", "day_to": "2026-11-11"})]
+    assert json.loads(output.read_text()) == payload
+
+
+@pytest.mark.unit
+def test_canonical_skills_roi_snapshot_reports_missing_and_query_failure(tmp_path):
+    from L5_apps.digest.skills_roi_snapshot import write_snapshot
+
+    output = tmp_path / "skills-roi.json"
+    missing = write_snapshot(output, tmp_path / "absent.json", query_runner=lambda *_: pytest.fail("must not query without an observed window"))
+    assert missing["coverage_status"] == "missing"
+    assert missing["source_as_of"] is None and missing["sample_size"] == 0
+    assert missing["skills_daily"] == []
+    assert missing["errors"]
+
+    def broken_query(*_):
+        raise sqlite3.OperationalError("missing source")
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    degraded = write_snapshot(output, fixture, query_runner=broken_query)
+    assert degraded["coverage_status"] == "error"
+    assert degraded["diagnostics"] == json.loads(fixture.read_text())
+    assert degraded["skills_daily"] == []
+    assert "skills/daily unavailable" in degraded["errors"][0]
+
+
+@pytest.mark.unit
 def test_jev_offline_degrades_to_ok():
     def offline(*_args, **_kwargs):
         raise OSError("offline")
