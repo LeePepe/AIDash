@@ -77,11 +77,14 @@ STAGE2_STATUS=$([ "$STAGE2_RC" -eq 0 ] && echo "ok" || echo "failed")
 # Stage 3: Compute M1-M5 Agent Efficiency, S1-S12 Skill ROI, and L4 Retro Signals
 STAGE3_START="$(date +%s)"
 STAGE3_RC=0
-RETRO_ENGINE="$HOME/Development/user-skills/skills/retro-loop/scripts/retro_story_engine.py"
+RETRO_ENGINE="${RETRO_ENGINE:-$HOME/Development/user-skills/skills/retro-loop/scripts/retro_story_engine.py}"
+mkdir -p "$JOB_OUTPUT_DIR"
+ROI_REPORT="$(mktemp "$JOB_OUTPUT_DIR/.skills-roi-report.XXXXXX")" || exit 1
+trap 'rm -f "$ROI_REPORT"' EXIT
 if [ -f "$RETRO_ENGINE" ]; then
   python3 "$RETRO_ENGINE" agent-efficiency --auto-propose >/dev/null \
     || { echo "[aidata-digest]   ! agent-efficiency auto-propose warning"; STAGE3_RC=1; }
-  python3 "$RETRO_ENGINE" skill-roi --auto-propose >/dev/null \
+  python3 "$RETRO_ENGINE" skill-roi --auto-propose >"$ROI_REPORT" \
     || { echo "[aidata-digest]   ! skill-roi auto-propose warning"; STAGE3_RC=1; }
   python3 "$RETRO_ENGINE" discover >/dev/null \
     || { echo "[aidata-digest]   ! retro discover warning"; STAGE3_RC=1; }
@@ -89,36 +92,7 @@ else
   echo "[aidata-digest]   ! retro engine missing"
   STAGE3_RC=1
 fi
-mkdir -p "$JOB_OUTPUT_DIR"
-if ! python3 - "$SKILLS_ROI_FILE" <<'PYEOF'
-import json
-import sys
-from L5_apps.digest.sources import fetch_skill_roi_trends
-
-path = sys.argv[1]
-trends = fetch_skill_roi_trends()
-payload = {
-    "schema_version": 1,
-    "source_as_of": max((r.source_as_of for r in trends.skills), default=""),
-    "window": max((r.time_window for r in trends.skills), default="7d CST"),
-    "coverage_status": trends.health.state,
-    "skills_daily": [
-        {"skill": r.skill, "loads_7d": r.loads_7d, "loads_30d": r.loads_30d,
-         "sample_size": r.sample_size, "coverage_status": r.coverage_status,
-         "estimated": r.estimated, "r1_pass_rate": r.r1_pass_rate,
-         "script_touch_rate": r.script_touch_rate, "roi_score": r.roi_score,
-         "source_as_of": r.source_as_of, "window": r.time_window}
-        for r in trends.skills
-    ],
-    "diagnostics": {"gate_catch_ratio": trends.gate_catch_ratio,
-                    "skill_audit_pass_ratio": trends.skill_audit_pass_ratio,
-                    "kv_cache_hit_pct": trends.kv_cache_hit_pct},
-}
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(payload, handle, ensure_ascii=False, indent=2)
-    handle.write("\n")
-PYEOF
-then
+if ! python3 -m L5_apps.digest.skills_roi_snapshot --report "$ROI_REPORT" --output "$SKILLS_ROI_FILE"; then
   echo "[aidata-digest]   ! skills-roi snapshot failed"
   STAGE3_RC=1
 fi
@@ -128,7 +102,7 @@ STAGE3_STATUS=$([ "$STAGE3_RC" -eq 0 ] && echo "ok" || echo "warning")
 # Stage 4: Daily Learning Topic Candidate Discovery (--no-materialize)
 STAGE4_START="$(date +%s)"
 STAGE4_RC=0
-DIGEST_VAULT_SCRIPT="$HOME/Development/user-skills/skills/knowledge-digest/scripts/digest_vault.py"
+DIGEST_VAULT_SCRIPT="${DIGEST_VAULT_SCRIPT:-$HOME/Development/user-skills/skills/knowledge-digest/scripts/digest_vault.py}"
 if [ -f "$DIGEST_VAULT_SCRIPT" ]; then
   python3 "$DIGEST_VAULT_SCRIPT" discover-topics --top 1 --propose-aidash --no-materialize >/dev/null \
     || { echo "[aidata-digest]   ! discover-topics warning"; STAGE4_RC=1; }
