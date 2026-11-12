@@ -224,7 +224,7 @@ def test_old_cron_log_line_is_not_actionable(tmp_path):
 def test_recent_embedded_cron_timestamp_is_actionable(tmp_path):
     from datetime import datetime, timedelta, timezone
 
-    recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: UP017 - Python 3.9 compatibility
     log = tmp_path / "cron-errors.log"
     log.write_text(f"{recent_iso} — recent failure\n", encoding="utf-8")
     old = time.time() - 8 * 24 * 60 * 60
