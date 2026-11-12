@@ -60,16 +60,14 @@ _WORK_ITEM_PATTERNS = re.compile(
 )
 
 
-def _is_personal_inbox_item(item: "InboxItem") -> bool:
+def _is_personal_inbox_item(item: InboxItem) -> bool:
     if item.category == "work_watch":
         return False
     ref_lower = (item.ref or "").strip().lower()
     if ref_lower.startswith(("teams:", "mail:", "ado://")):
         return False
     text = f"{item.title or ''} {item.description or ''} {item.ref or ''}"
-    if _WORK_ITEM_PATTERNS.search(text):
-        return False
-    return True
+    return not _WORK_ITEM_PATTERNS.search(text)
 
 
 @dataclass(frozen=True)

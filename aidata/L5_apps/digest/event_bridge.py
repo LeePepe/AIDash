@@ -13,7 +13,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from config import HOME, LEARNING_QUEUE_PATH, LINEAR_SYNC_SCRIPT, LOCAL_TODOS_PATH, PROPOSALS_PATH
+from config import (
+    HOME,
+    LEARNING_QUEUE_PATH,
+    LINEAR_SYNC_SCRIPT,
+    LOCAL_TODOS_PATH,
+    PROPOSALS_PATH,
+)
 
 from L5_apps.digest.proposals import Proposal, read_all_latest, read_pending
 from L5_apps.digest.todo_sync_provider import (
@@ -1022,7 +1028,7 @@ def process_user_events(
 
             if rc == 0:
                 if linked_learning is not None:
-                    now_dt = datetime.now(timezone.utc)
+                    now_dt = datetime.now(timezone.utc)  # noqa: UP017 - Python 3.9 compatibility
                     if "snooze" in decision_lower or "延后" in decision_lower:
                         next_el = (now_dt + timedelta(days=7)).isoformat(timespec="seconds").replace("+00:00", "Z")
                         updated_prop = _build_full_proposal_record(
@@ -1082,7 +1088,7 @@ def process_user_events(
             if matched_prop is None:
                 result["ignored"] += 1
                 continue
-            now_dt = datetime.now(timezone.utc)
+            now_dt = datetime.now(timezone.utc)  # noqa: UP017 - Python 3.9 compatibility
             if "snooze" in decision_lower or "延后" in decision_lower:
                 next_el = (now_dt + timedelta(days=7)).isoformat(timespec="seconds").replace("+00:00", "Z")
                 base_prop = matched_prop or Proposal(
