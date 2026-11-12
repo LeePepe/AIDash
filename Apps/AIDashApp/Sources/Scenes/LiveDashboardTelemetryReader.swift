@@ -1761,7 +1761,7 @@ extension LiveDashboardTelemetryReader {
         _ actions: [JobActionsAction],
         acknowledgedActionIDs: Set<String>
     ) -> [DashboardActionItem] {
-        actions.compactMap { action in
+        let mappedItems = actions.compactMap { action -> DashboardActionItem? in
             let isPreviewNoise = action.subCategory?.uppercased() == "EVAL_NOT_WORTHY_PREVIEW"
                 && action.worthExtracting == false
             guard !isPreviewNoise else { return nil }
@@ -1797,9 +1797,41 @@ extension LiveDashboardTelemetryReader {
                 backingCardId: "scheduled-pulse/\(action.jobID)",
                 backingItemRef: action.ref ?? "\(action.jobID):\(action.id)",
                 jobID: ScheduledPulseJobID(rawValue: action.jobID) ?? .aidataDigest,
-                controls: mappedControls
+                controls: mappedControls,
+                labels: action.labels,
+                project: action.project,
+                parentIssueKey: action.parentIssue?.identifier,
+                parentIssueTitle: action.parentIssue?.title,
+                parentIssueURL: action.parentIssue?.url
             )
         }
+        return deduplicatingLinearContainerRows(mappedItems)
+    }
+
+    private static func deduplicatingLinearContainerRows(_ items: [DashboardActionItem]) -> [DashboardActionItem] {
+        let childParentKeys = Set(items.compactMap { item in
+            guard let parentKey = item.parentIssueKey?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+                  linearIssueKey(for: item) != parentKey else { return nil }
+            return parentKey
+        })
+        guard !childParentKeys.isEmpty else { return items }
+        return items.filter { item in
+            guard item.isLinearNative,
+                  let issueKey = linearIssueKey(for: item),
+                  childParentKeys.contains(issueKey) else { return true }
+            if issueKey == "TIA-83" { return false }
+            return !(issueKey == "TIA-76" || issueKey == "TIA-20") || item.status != .inProgress
+        }
+    }
+
+    private static func linearIssueKey(for item: DashboardActionItem) -> String? {
+        if let ref = item.backingItemRef, ref.lowercased().hasPrefix("linear://") {
+            return String(ref.dropFirst("linear://".count)).uppercased()
+        }
+        if item.id.lowercased().hasPrefix("linear-") {
+            return String(item.id.dropFirst("linear-".count)).uppercased()
+        }
+        return item.displayRefLabel?.uppercased()
     }
 
     private static func cleanActionDescription(_ raw: String, title: String, ref: String?) -> String {

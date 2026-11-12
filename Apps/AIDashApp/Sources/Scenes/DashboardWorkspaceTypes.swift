@@ -1026,6 +1026,23 @@ public enum DashboardActionFilter: String, CaseIterable, Sendable, Equatable, Id
     }
 }
 
+public struct DashboardLinearActionFilterChip: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let label: String
+    public let count: Int?
+
+    public init(id: String, label: String, count: Int? = nil) {
+        self.id = id
+        self.label = label
+        self.count = count
+    }
+
+    public var displayTitle: String {
+        guard let count else { return label }
+        return "\(label) (\(count))"
+    }
+}
+
 public enum DashboardActionSort: String, CaseIterable, Sendable, Equatable, Identifiable {
     case priority = "Priority", source = "Source", title = "Title"
     public var id: String { rawValue }
@@ -1053,6 +1070,11 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
     public let backingItemRef: String?
     public let jobID: ScheduledPulseJobID?
     public let controls: [ScheduledJobActionControl]
+    public let labels: [String]
+    public let project: String?
+    public let parentIssueKey: String?
+    public let parentIssueTitle: String?
+    public let parentIssueURL: String?
     public let projectFolderName: String
 
     public init(
@@ -1063,6 +1085,8 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         backingCardId: String? = nil, backingItemRef: String? = nil,
         jobID: ScheduledPulseJobID? = nil,
         controls: [ScheduledJobActionControl] = [],
+        labels: [String] = [], project: String? = nil,
+        parentIssueKey: String? = nil, parentIssueTitle: String? = nil, parentIssueURL: String? = nil,
         projectFolderName: String? = nil
     ) {
         let resolvedStatus = status ?? (isCompleted ? .done : .triage)
@@ -1074,11 +1098,82 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
         self.backingCardId = backingCardId; self.backingItemRef = backingItemRef
         self.jobID = jobID
         self.controls = controls
+        self.labels = labels
+        self.project = project
+        self.parentIssueKey = parentIssueKey
+        self.parentIssueTitle = parentIssueTitle
+        self.parentIssueURL = parentIssueURL
         self.projectFolderName = projectFolderName ?? HerdrSocketClient.inferProjectFolderName(
             title: title,
             summary: summary,
             command: command ?? backingItemRef
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, summary, sourceTag, cliFilter, priority, status, isCompleted
+        case command, externalURLString, backingCardId, backingItemRef, jobID, controls
+        case labels, project, parentIssueKey, parentIssueTitle, parentIssueURL, projectFolderName
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedID = try container.decode(String.self, forKey: .id)
+        let decodedTitle = try container.decode(String.self, forKey: .title)
+        let decodedSummary = try container.decode(String.self, forKey: .summary)
+        let decodedSourceTag = try container.decode(String.self, forKey: .sourceTag)
+        let decodedCLIFilter = try container.decode(DashboardCLIFilter.self, forKey: .cliFilter)
+        let decodedPriority = try container.decode(DashboardActionPriority.self, forKey: .priority)
+        let decodedCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        let decodedStatus = try container.decodeIfPresent(DashboardActionStatus.self, forKey: .status)
+        let resolvedStatus = decodedStatus ?? (decodedCompleted ? .done : .triage)
+        let decodedCommand = try container.decodeIfPresent(String.self, forKey: .command)
+        let decodedBackingRef = try container.decodeIfPresent(String.self, forKey: .backingItemRef)
+        id = decodedID
+        title = decodedTitle
+        summary = decodedSummary
+        sourceTag = decodedSourceTag
+        cliFilter = decodedCLIFilter
+        priority = decodedPriority
+        status = decodedCompleted ? .done : resolvedStatus
+        isCompleted = decodedCompleted || resolvedStatus == .done
+        command = decodedCommand
+        externalURLString = try container.decodeIfPresent(String.self, forKey: .externalURLString)
+        backingCardId = try container.decodeIfPresent(String.self, forKey: .backingCardId)
+        backingItemRef = decodedBackingRef
+        jobID = try container.decodeIfPresent(ScheduledPulseJobID.self, forKey: .jobID)
+        controls = try container.decodeIfPresent([ScheduledJobActionControl].self, forKey: .controls) ?? []
+        labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
+        project = try container.decodeIfPresent(String.self, forKey: .project)
+        parentIssueKey = try container.decodeIfPresent(String.self, forKey: .parentIssueKey)
+        parentIssueTitle = try container.decodeIfPresent(String.self, forKey: .parentIssueTitle)
+        parentIssueURL = try container.decodeIfPresent(String.self, forKey: .parentIssueURL)
+        projectFolderName = try container.decodeIfPresent(String.self, forKey: .projectFolderName)
+            ?? HerdrSocketClient.inferProjectFolderName(title: decodedTitle, summary: decodedSummary, command: decodedCommand ?? decodedBackingRef)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(sourceTag, forKey: .sourceTag)
+        try container.encode(cliFilter, forKey: .cliFilter)
+        try container.encode(priority, forKey: .priority)
+        try container.encode(status, forKey: .status)
+        try container.encode(isCompleted, forKey: .isCompleted)
+        try container.encodeIfPresent(command, forKey: .command)
+        try container.encodeIfPresent(externalURLString, forKey: .externalURLString)
+        try container.encodeIfPresent(backingCardId, forKey: .backingCardId)
+        try container.encodeIfPresent(backingItemRef, forKey: .backingItemRef)
+        try container.encodeIfPresent(jobID, forKey: .jobID)
+        try container.encode(controls, forKey: .controls)
+        if !labels.isEmpty { try container.encode(labels, forKey: .labels) }
+        try container.encodeIfPresent(project, forKey: .project)
+        try container.encodeIfPresent(parentIssueKey, forKey: .parentIssueKey)
+        try container.encodeIfPresent(parentIssueTitle, forKey: .parentIssueTitle)
+        try container.encodeIfPresent(parentIssueURL, forKey: .parentIssueURL)
+        try container.encode(projectFolderName, forKey: .projectFolderName)
     }
 
     public var acknowledgementKey: String? {
@@ -1095,6 +1190,18 @@ public struct DashboardActionItem: Codable, Sendable, Equatable, Identifiable {
 
     public var targetOptions: [String] {
         controls.first(where: { $0.id == "targets" && $0.kind == .multiSelect })?.options ?? []
+    }
+
+    public func hasLinearLabel(_ label: String) -> Bool {
+        labels.contains { $0.caseInsensitiveCompare(label) == .orderedSame }
+    }
+
+    public var isLinearNative: Bool {
+        sourceTag.caseInsensitiveCompare("Linear") == .orderedSame || parentIssueKey != nil
+    }
+
+    public var isNeedsDecision: Bool {
+        status == .blocked || hasLinearLabel("needs-decision")
     }
 
     public var noteMaxLength: Int {

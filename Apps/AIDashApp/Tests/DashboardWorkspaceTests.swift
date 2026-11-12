@@ -875,7 +875,7 @@ struct DashboardWorkspaceTests {
 
         let actionsURL = digestDir.appendingPathComponent("actions.jsonl")
         let sampleLines = [
-            #"{"id":"linear-TIA-76","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[Bing] iOS Smart Banner / SERP","description":"[in_progress] TIA-76 [Bing] iOS Smart Banner / SERP","status":"in_progress","source":"Linear","priority":"P1","ref":"linear://TIA-76","url":"https://linear.app/tianpeili/issue/TIA-76","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
+            #"{"id":"linear-TIA-76","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"[Bing] iOS Smart Banner / SERP","description":"[in_progress] TIA-76 [Bing] iOS Smart Banner / SERP","status":"in_progress","source":"Linear","priority":"P1","ref":"linear://TIA-76","url":"https://linear.app/tianpeili/issue/TIA-76","labels":["pop"],"project":"Bing","parentIssue":{"identifier":"TIA-83","title":"Parent queue","url":"https://linear.app/example/issue/TIA-83"},"controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
             #"{"id":"proposal-review-pingpong","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"Shrink Review Ping-Pong","description":"R1 fail rate 55.7%","status":"triage","source":"Retro","priority":"P0","ref":"proposal://review-pingpong","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"targets","kind":"multiSelect","title":"Targets","options":["item-a","item-b"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#,
             #"{"id":"gtt-blocker-1","jobID":"aidata-digest","createdAt":"2026-11-11T16:00:00Z","title":"GTT Blocker: aidash-ops","description":"Waiting on Owner GO","status":"blocked","source":"GTT Blocker","priority":"P0","ref":"aidash-ops","url":"","controls":[{"id":"decision","kind":"singleSelect","title":"Action","options":["Approve","Done","Dismiss"]},{"id":"note","kind":"textInput","title":"Note","maxLength":80}]}"#
         ]
@@ -894,6 +894,11 @@ struct DashboardWorkspaceTests {
         #expect(linearItem.priority == .p1)
         #expect(linearItem.displayRefLabel == "TIA-76")
         #expect(linearItem.externalURLString == "https://linear.app/tianpeili/issue/TIA-76")
+        #expect(linearItem.labels == ["pop"])
+        #expect(linearItem.project == "Bing")
+        #expect(linearItem.parentIssueKey == "TIA-83")
+        #expect(linearItem.parentIssueTitle == "Parent queue")
+        #expect(linearItem.parentIssueURL == "https://linear.app/example/issue/TIA-83")
         #expect(linearItem.summary == "[Bing] iOS Smart Banner / SERP")
         #expect(linearItem.decisionOptions == ["Approve", "Done", "Dismiss"])
 
@@ -902,6 +907,10 @@ struct DashboardWorkspaceTests {
         #expect(retroItem.sourceTag == "Retro")
         #expect(retroItem.priority == .p0)
         #expect(retroItem.targetOptions == ["item-a", "item-b"])
+        let filterStore = DashboardWorkspaceStore(snapshot: sampleSnapshot(), actionItems: loaded)
+        #expect(filterStore.availableLinearActionFilters.map(\.id) == ["all", "pop"])
+        filterStore.selectedLinearActionFilter = "pop"
+        #expect(filterStore.filteredActionItems.map(\.id) == ["linear-TIA-76"])
 
         let ackedItem = try #require(loaded.first(where: { $0.id == "gtt-blocker-1" }))
         #expect(ackedItem.status == .done)

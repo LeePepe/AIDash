@@ -75,6 +75,33 @@ struct JobActionsBridgeTests {
         #expect(encodedCrossDevice?["url"] as? String == "https://linear.app/tianpeili/issue/TIA-76")
     }
 
+    @Test("Linear-native attributes round-trip while legacy payloads still decode")
+    func linearNativeAttributesRoundTrip() throws {
+        let parent = JobActionsAction.ParentIssue(
+            identifier: "TIA-83",
+            title: "Parent queue",
+            url: "https://linear.app/example/issue/TIA-83"
+        )
+        let action = JobActionsAction(
+            id: "D617", jobID: "my-pr-supervisor", title: "Decision", descriptionMd: "Summary",
+            labels: ["needs-decision", "testing-skill"], project: "Bing", parentIssue: parent,
+            controls: [.init(id: "decision", kind: .singleSelect, title: "Choice", options: ["A", "B"])]
+        )
+        let encoded = try JSONEncoder().encode(action)
+        let decoded = try JSONDecoder().decode(JobActionsAction.self, from: encoded)
+        #expect(decoded == action)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["labels"] as? [String] == ["needs-decision", "testing-skill"])
+        #expect(object["project"] as? String == "Bing")
+        #expect((object["parentIssue"] as? [String: Any])?["identifier"] as? String == "TIA-83")
+
+        let legacy = Data(#"{"id":"legacy","jobID":"aidata-digest","title":"Legacy","description":"Old","controls":[]}"#.utf8)
+        let legacyAction = try JSONDecoder().decode(JobActionsAction.self, from: legacy)
+        #expect(legacyAction.labels.isEmpty)
+        #expect(legacyAction.project == nil)
+        #expect(legacyAction.parentIssue == nil)
+    }
+
     @Test("Actionable v2 aliases decode without exposing openURL as a response control")
     func actionableV2Compatibility() throws {
         let data = Data(#"""

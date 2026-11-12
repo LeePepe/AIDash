@@ -27,6 +27,7 @@ public final class DashboardWorkspaceStore {
     public var selectedCLI: DashboardCLIFilter = .all
     public var selectedChartCategory: String?
     public var actionFilter: DashboardActionFilter = .all
+    public var selectedLinearActionFilter: String = "all"
     public var actionSort: DashboardActionSort = .priority
     public var selectedRankingRowID: String?
     public var rankingAscending: Bool = false
@@ -464,6 +465,9 @@ public final class DashboardWorkspaceStore {
     }
 
     private static func isArchivedActionItem(_ item: DashboardActionItem) -> Bool {
+        if item.hasLinearLabel("bug-blocker") || item.hasLinearLabel("eval") || item.hasLinearLabel("pop") {
+            return false
+        }
         let haystack = [item.id, item.title, item.summary, item.sourceTag, item.backingItemRef ?? ""]
             .joined(separator: " ")
             .uppercased()
@@ -498,6 +502,9 @@ public final class DashboardWorkspaceStore {
             }
         }
         actionItems = nextActions.filter { !Self.isArchivedActionItem($0) }
+        if !availableLinearActionFilters.contains(where: { $0.id == selectedLinearActionFilter }) {
+            selectedLinearActionFilter = "all"
+        }
         rankingRows = customRankings ?? liveDataset?.rankings ?? Self.deriveRankingRows(from: derivedCLIs)
         liveEfficiencySummary = (customCLIs == nil && customRankings == nil)
             ? LiveDashboardTelemetryReader.loadLiveEfficiencySummary()
@@ -524,7 +531,7 @@ public final class DashboardWorkspaceStore {
     // MARK: - IP-004 Context-Preserving Scoped Empty Recovery
 
     public var hasScopedSubFilter: Bool {
-        selectedChartCategory != nil || actionFilter != .all
+        selectedChartCategory != nil || actionFilter != .all || selectedLinearActionFilter != "all"
     }
 
     public func clearScopedFilterOnly() {
@@ -532,6 +539,8 @@ public final class DashboardWorkspaceStore {
             selectedChartCategory = nil
         } else if actionFilter != .all {
             actionFilter = .all
+        } else if selectedLinearActionFilter != "all" {
+            selectedLinearActionFilter = "all"
         }
     }
 
@@ -633,6 +642,43 @@ public final class DashboardWorkspaceStore {
         return filters.count > 1 ? filters : DashboardCLIFilter.allCases
     }
 
+    public var availableLinearActionFilters: [DashboardLinearActionFilterChip] {
+        let activeLinearItems = actionItems.filter { !$0.isCompleted && $0.isLinearNative }
+        let orderedLabels: [(String, String)] = [
+            ("needs-decision", "🔴 needs-decision · 需单独拍板"),
+            ("pop", "🔐 label:pop · 待合入"),
+            ("eval", "💡 label:eval · 评论改进建议"),
+            ("bug-blocker", "🧱 label:bug-blocker · Bug 阻塞")
+        ]
+        var filters = [DashboardLinearActionFilterChip(id: "all", label: "全部")]
+        var knownLabels = Set<String>()
+        for (label, display) in orderedLabels {
+            knownLabels.insert(label)
+            let count = activeLinearItems.filter { item in
+                label == "needs-decision" ? item.isNeedsDecision : item.hasLinearLabel(label)
+            }.count
+            if count > 0 {
+                filters.append(DashboardLinearActionFilterChip(id: label, label: display, count: count))
+            }
+        }
+        let extraLabels = Set(activeLinearItems.flatMap(\.labels))
+            .filter { !knownLabels.contains($0.lowercased()) }
+            .sorted()
+        for label in extraLabels {
+            let count = activeLinearItems.filter { $0.hasLinearLabel(label) }.count
+            filters.append(DashboardLinearActionFilterChip(id: label, label: "label:\(label)", count: count))
+        }
+        return filters
+    }
+
+    private func matchesLinearActionFilter(_ item: DashboardActionItem) -> Bool {
+        guard selectedLinearActionFilter != "all" else { return true }
+        if selectedLinearActionFilter == "needs-decision" {
+            return item.isNeedsDecision
+        }
+        return item.hasLinearLabel(selectedLinearActionFilter)
+    }
+
     public var filteredCLIEntries: [CLICostQuotaEntry] {
         cliEntries.filter { entry in
             matchesActiveCLIFilter(entry.cliFilter)
@@ -647,7 +693,8 @@ public final class DashboardWorkspaceStore {
     public var filteredActionItems: [DashboardActionItem] {
         let filtered = actionItems.filter { item in
             guard matchesActiveCLIFilter(item.cliFilter),
-                  matchesChartCategory(item.cliFilter, categoryName: item.sourceTag) else {
+                  matchesChartCategory(item.cliFilter, categoryName: item.sourceTag),
+                  matchesLinearActionFilter(item) else {
                 return false
             }
             switch actionFilter {

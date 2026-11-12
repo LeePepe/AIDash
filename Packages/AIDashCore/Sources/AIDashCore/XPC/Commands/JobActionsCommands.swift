@@ -2,6 +2,18 @@ import Foundation
 
 /// Wire projection of ScheduledJobAction. Job membership is resolved by the App registry.
 public struct JobActionsAction: Codable, Sendable, Equatable {
+    public struct ParentIssue: Codable, Sendable, Equatable {
+        public let identifier: String
+        public let title: String?
+        public let url: String?
+
+        public init(identifier: String, title: String? = nil, url: String? = nil) {
+            self.identifier = identifier
+            self.title = title
+            self.url = url
+        }
+    }
+
     public struct Control: Codable, Sendable, Equatable, Identifiable {
         public enum Kind: String, Codable, Sendable {
             case confirm, singleSelect, multiSelect, textInput, openURL
@@ -71,6 +83,9 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public let url: String?
     public let subCategory: String?
     public let worthExtracting: Bool?
+    public let labels: [String]
+    public let project: String?
+    public let parentIssue: ParentIssue?
     public let controls: [Control]
 
     private struct SourcePayload: Decodable {
@@ -83,7 +98,8 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case id, jobID, jobId, createdAt, title, description, descriptionMd
-        case status, source, priority, ref, url, subCategory, worthExtracting, controls
+        case status, source, priority, ref, url, subCategory, worthExtracting
+        case labels, project, parentIssue, controls
     }
 
     public init(
@@ -92,6 +108,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         status: String? = nil, source: String? = nil, priority: String? = nil,
         ref: String? = nil, url: String? = nil,
         subCategory: String? = nil, worthExtracting: Bool? = nil,
+        labels: [String] = [], project: String? = nil, parentIssue: ParentIssue? = nil,
         controls: [Control]
     ) {
         self.id = id
@@ -106,6 +123,9 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         self.url = url
         self.subCategory = subCategory
         self.worthExtracting = worthExtracting
+        self.labels = labels
+        self.project = project
+        self.parentIssue = parentIssue
         self.controls = controls
     }
 
@@ -146,6 +166,9 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         url = explicitURL ?? sourcePayload?.url ?? controlURL
         subCategory = try container.decodeIfPresent(String.self, forKey: .subCategory)
         worthExtracting = try container.decodeIfPresent(Bool.self, forKey: .worthExtracting)
+        labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
+        project = try container.decodeIfPresent(String.self, forKey: .project)
+        parentIssue = try container.decodeIfPresent(ParentIssue.self, forKey: .parentIssue)
         controls = decodedControls.filter { $0.kind != .openURL }
     }
 
@@ -164,6 +187,9 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         try container.encodeIfPresent(url, forKey: .url)
         try container.encodeIfPresent(subCategory, forKey: .subCategory)
         try container.encodeIfPresent(worthExtracting, forKey: .worthExtracting)
+        if !labels.isEmpty { try container.encode(labels, forKey: .labels) }
+        try container.encodeIfPresent(project, forKey: .project)
+        try container.encodeIfPresent(parentIssue, forKey: .parentIssue)
         try container.encode(controls, forKey: .controls)
     }
 }

@@ -36,6 +36,7 @@ public struct ActionItemsCardView: View {
     @State private var selectedDecisions: [String: String] = [:]
     @State private var selectedTargets: [String: Set<String>] = [:]
     @State private var noteInputs: [String: String] = [:]
+    @State private var expandedLinearClusterLabels: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
@@ -57,8 +58,9 @@ public struct ActionItemsCardView: View {
             ),
             symbolName: "checklist"
         ) {
-            HStack(spacing: 12) {
-                Picker(DashboardL10n.tr("dashboard.actions.filter_label", "Filter"), selection: $store.actionFilter) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    Picker(DashboardL10n.tr("dashboard.actions.filter_label", "Filter"), selection: $store.actionFilter) {
                     ForEach(DashboardActionFilter.allCases) { filter in
                         Text(filter.displayTitle).tag(filter)
                     }
@@ -81,21 +83,209 @@ public struct ActionItemsCardView: View {
                     )
                         .font(.caption)
                 }
-                .controlSize(.small)
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minHeight: 28)
+                    .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minHeight: 28)
+                }
+                if store.availableLinearActionFilters.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(store.availableLinearActionFilters) { filter in
+                                Button {
+                                    store.selectedLinearActionFilter = filter.id
+                                } label: {
+                                    Text(filter.displayTitle)
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(store.selectedLinearActionFilter == filter.id ? .accentColor : nil)
+                                .controlSize(.small)
+                                .frame(minHeight: 28)
+                            }
+                        }
+                    }
+                }
             }
         } content: {
             if store.filteredActionItems.isEmpty {
                 actionEmptyStateContent
                     .frame(minHeight: 150)
             } else {
-                VStack(spacing: 8) {
-                    ForEach(store.filteredActionItems) { item in
+                actionItemsContent(store.filteredActionItems)
+            }
+        }
+    }
+
+    private static let linearClusterLabels = ["pop", "eval", "bug-blocker"]
+
+    private func actionItemsContent(_ items: [DashboardActionItem]) -> some View {
+        var parentKeys: [String] = []
+        for item in items where item.isLinearNative {
+            guard let key = item.parentIssueKey, !key.isEmpty else { continue }
+            if !parentKeys.contains(key) { parentKeys.append(key) }
+        }
+        let groupedIDs = Set(items.filter { item in
+            guard let key = item.parentIssueKey else { return false }
+            return parentKeys.contains(key)
+        }.map(\.id))
+        let standaloneItems = items.filter { !groupedIDs.contains($0.id) }
+        return VStack(alignment: .leading, spacing: 12) {
+            ForEach(parentKeys, id: \.self) { key in
+                let groupItems = items.filter { $0.parentIssueKey == key }
+                linearParentGroup(key: key, items: groupItems)
+            }
+            if !standaloneItems.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(DashboardL10n.tr("dashboard.actions.system_section", "系统与独立事项"))
+                        .font(.headline)
+                    ForEach(standaloneItems) { item in
                         actionItemRow(item)
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func linearParentGroup(key: String, items: [DashboardActionItem]) -> some View {
+        let decisionItems = items.filter(\.isNeedsDecision)
+        let decisionIDs = Set(decisionItems.map(\.id))
+        let clusterItems = items.filter { item in
+            !decisionIDs.contains(item.id)
+                && Self.linearClusterLabels.contains(where: item.hasLinearLabel)
+        }
+        let clusterIDs = Set(clusterItems.map(\.id))
+        let otherItems = items.filter { !decisionIDs.contains($0.id) && !clusterIDs.contains($0.id) }
+        VStack(alignment: .leading, spacing: 8) {
+            linearParentHeader(key: key, items: items)
+            if !decisionItems.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(DashboardL10n.tr("dashboard.actions.needs_decision_section", "需单独拍板"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(decisionItems) { item in
+                        actionItemRow(item)
+                    }
+                }
+            }
+            ForEach(Self.linearClusterLabels, id: \.self) { label in
+                let labelItems = clusterItems.filter { $0.hasLinearLabel(label) }
+                if !labelItems.isEmpty {
+                    linearClusterRow(label: label, items: labelItems)
+                }
+            }
+            ForEach(otherItems) { item in
+                actionItemRow(item)
+            }
+        }
+    }
+
+    private func linearParentHeader(key: String, items: [DashboardActionItem]) -> some View {
+        let first = items.first
+        let needsDecisionCount = items.filter(\.isNeedsDecision).count
+        let popCount = items.filter { $0.hasLinearLabel("pop") }.count
+        let evalCount = items.filter { $0.hasLinearLabel("eval") }.count
+        let bugCount = items.filter { $0.hasLinearLabel("bug-blocker") }.count
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "link.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(key)
+                    .font(.headline.monospaced())
+                if let project = first?.project, !project.isEmpty {
+                    Text("Project: \(project)")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(.secondary.opacity(0.14), in: Capsule())
+                }
+                Spacer(minLength: 4)
+                if let url = URLPolicy.validate(first?.parentIssueURL) {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label(
+                            DashboardL10n.format("dashboard.actions.open_parent_format", "打开 Linear %@ ↗", key),
+                            systemImage: "arrow.up.right.square"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(minHeight: 28)
+                }
+            }
+            if let title = first?.parentIssueTitle, !title.isEmpty {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(nil)
+            }
+            Text(DashboardL10n.format(
+                "dashboard.actions.parent_summary_format",
+                "%lld 需拍板 · %lld 待 PoP · %lld 评论建议 · %lld Bug 阻塞",
+                needsDecisionCount, popCount, evalCount, bugCount
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.bottom, 4)
+    }
+
+    @ViewBuilder
+    private func linearClusterRow(label: String, items: [DashboardActionItem]) -> some View {
+        let isExpanded = expandedLinearClusterLabels.contains(label) || store.selectedLinearActionFilter == label
+        let labelText: String
+        switch label {
+        case "pop": labelText = "📦 🏷️ pop · 待 PoP / 手动合入"
+        case "eval": labelText = "📦 🏷️ eval · Triage 评论衍生改进建议"
+        default: labelText = "📦 🏷️ bug-blocker · Triage 未提 PR 的 Bug 阻塞"
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Button {
+                    toggleLinearCluster(label)
+                } label: {
+                    Label(
+                        "\(labelText) (\(items.count))",
+                        systemImage: isExpanded ? "chevron.down" : "chevron.right"
+                    )
+                    .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: 28)
+                Spacer(minLength: 4)
+                if label == "pop", let url = URLPolicy.validate(items.first?.externalURLString) {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label(DashboardL10n.tr("dashboard.actions.open_cluster_pr", "一键打开 PR ↗"), systemImage: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(minHeight: 28)
+                }
+                Text(DashboardL10n.format("dashboard.actions.expand_cluster_format", "展开逐条处理 (%lld)", items.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(items) { item in
+                        actionItemRow(item)
+                    }
+                }
+                .padding(.leading, 14)
+            }
+        }
+    }
+
+    private func toggleLinearCluster(_ label: String) {
+        if expandedLinearClusterLabels.contains(label) {
+            expandedLinearClusterLabels.remove(label)
+        } else {
+            expandedLinearClusterLabels.insert(label)
         }
     }
 
@@ -302,7 +492,8 @@ public struct ActionItemsCardView: View {
                         onToggleDone: onToggleDone
                     )
                 } label: {
-                    Text(decisionButtonTitle(index: index))
+                    Text(option)
+                        .lineLimit(1)
                 }
                 .help(option)
                 .buttonStyle(.borderedProminent)
@@ -354,11 +545,6 @@ public struct ActionItemsCardView: View {
             }
             detailsButton(for: item)
         }
-    }
-
-    private func decisionButtonTitle(index: Int) -> String {
-        let suffix = index == 0 ? "A" : "B"
-        return DashboardL10n.format("dashboard.actions.decision_option_format", "方案 %@", suffix)
     }
 
     private func detailsButton(for item: DashboardActionItem) -> some View {
