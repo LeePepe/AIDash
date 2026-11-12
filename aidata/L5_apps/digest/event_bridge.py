@@ -981,7 +981,6 @@ def process_user_events(
                 )
                 _append_jsonl(proposal_path, dismissed_rec)
                 raw_records[proposal.id] = dismissed_rec
-                pending.pop(proposal.id, None)
                 result["resolved"] += 1
             else:
                 result["ignored"] += 1
