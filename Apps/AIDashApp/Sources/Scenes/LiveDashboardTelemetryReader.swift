@@ -51,8 +51,197 @@ public struct RealQuotaSnapshot: Sendable, Equatable {
 @MainActor
 // swiftlint:disable:next type_body_length
 public enum LiveDashboardTelemetryReader {
+    public typealias TopicMapDataReader = (URL) -> Data?
+    public typealias HerdrCommandRunner = ([String]) -> String?
+
+    private struct TopicMapEnvelope: Decodable {
+        struct Group: Decodable {
+            let group: String
+            let topics: [Topic]
+        }
+        struct Topic: Decodable {
+            let topicID: String
+            let title: String
+            let group: String?
+            let targetRepo: String
+            let cwd: String
+            let keywords: [String]
+            let aliases: [String]
+
+            // swiftlint:disable:next nesting
+            enum CodingKeys: String, CodingKey {
+                case topicID = "topic_id"
+                case title, group
+                case targetRepo = "target_repo"
+                case cwd, keywords, aliases
+            }
+        }
+        let groups: [Group]
+    }
+
+    public struct HerdrWorkspaceRecord: Codable, Sendable, Equatable {
+        public let workspaceID: String
+        public let label: String
+        public let activeTabID: String?
+        public let paneCount: Int
+
+        public init(workspaceID: String, label: String, activeTabID: String? = nil, paneCount: Int = 1) {
+            self.workspaceID = workspaceID
+            self.label = label
+            self.activeTabID = activeTabID
+            self.paneCount = paneCount
+        }
+    }
+
+    public struct HerdrAgentRecord: Codable, Sendable, Equatable {
+        public let workspaceID: String
+        public let paneID: String
+        public let cwd: String?
+        public let foregroundCwd: String?
+        public let terminalTitle: String?
+        public let name: String?
+
+        public init(workspaceID: String, paneID: String, cwd: String? = nil, foregroundCwd: String? = nil, terminalTitle: String? = nil, name: String? = nil) {
+            self.workspaceID = workspaceID
+            self.paneID = paneID
+            self.cwd = cwd
+            self.foregroundCwd = foregroundCwd
+            self.terminalTitle = terminalTitle
+            self.name = name
+        }
+    }
+
+    public struct HerdrM2SessionSnapshot: Codable, Sendable, Equatable {
+        public let workspaces: [HerdrWorkspaceRecord]
+        public let agents: [HerdrAgentRecord]
+
+        public init(workspaces: [HerdrWorkspaceRecord] = [], agents: [HerdrAgentRecord] = []) {
+            self.workspaces = workspaces
+            self.agents = agents
+        }
+
+        @MainActor
+        public func bindings(for topics: [DashboardTopic]) -> [String: DashboardM2SessionBinding] {
+            var result: [String: DashboardM2SessionBinding] = [:]
+            for topic in topics {
+                let binding = LiveDashboardTelemetryReader.bind(topic: topic, workspaces: workspaces, agents: agents)
+                result[topic.id] = binding
+            }
+            return result
+        }
+    }
+
     public static var isLiveEnvironment: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
+    }
+
+    public static func loadTopicCatalog(
+        homeURL: URL? = nil,
+        dataReader: TopicMapDataReader? = nil
+    ) -> [DashboardTopic] {
+        let read = dataReader ?? { try? Data(contentsOf: $0) }
+        let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+        let candidates = [
+            URL(fileURLWithPath: "/Users/tianpli/.agents/skills/personal-m2-assistant/references/m2-domain-map.json"),
+            home.appendingPathComponent("Development/user-skills/skills/personal-m2-assistant/references/m2-domain-map.json"),
+            URL(fileURLWithPath: "/Users/tianpli/Development/user-skills/skills/personal-m2-assistant/references/m2-domain-map.json")
+        ]
+        let decoder = JSONDecoder()
+        for url in candidates {
+            guard let data = read(url), let envelope = try? decoder.decode(TopicMapEnvelope.self, from: data) else { continue }
+            let topics = envelope.groups.flatMap { group in
+                group.topics.map { raw in
+                    DashboardTopic(
+                        id: raw.topicID, title: raw.title, group: raw.group ?? group.group,
+                        targetRepo: raw.targetRepo, cwd: raw.cwd, keywords: raw.keywords, aliases: raw.aliases
+                    )
+                }
+            }
+            if !topics.isEmpty { return topics }
+        }
+        return DashboardTopicCatalog.builtInTopics
+    }
+
+    public static func productionHerdrCommandRunner(_ arguments: [String]) -> String? {
+        guard FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/herdr") else { return nil }
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/herdr")
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            return String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+        } catch {
+            return nil
+        }
+    }
+
+    public static func loadHerdrM2SessionSnapshot(
+        commandRunner: HerdrCommandRunner? = nil
+    ) -> HerdrM2SessionSnapshot {
+        guard isLiveEnvironment || commandRunner != nil else { return HerdrM2SessionSnapshot() }
+        let run = commandRunner ?? productionHerdrCommandRunner
+        guard let workspaceOutput = run(["workspace", "list"]),
+              let agentOutput = run(["agent", "list"]) else { return HerdrM2SessionSnapshot() }
+        return parseHerdrM2SessionSnapshot(workspaceOutput: workspaceOutput, agentOutput: agentOutput)
+    }
+
+    public static func parseHerdrM2SessionSnapshot(workspaceOutput: String, agentOutput: String) -> HerdrM2SessionSnapshot {
+        func object(from output: String) -> [String: Any]? {
+            guard let data = output.data(using: .utf8) else { return nil }
+            return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        }
+        let workspaceRoot = object(from: workspaceOutput)?["result"] as? [String: Any]
+        let workspaceRows = (workspaceRoot?["workspaces"] as? [[String: Any]] ?? []).compactMap { row -> HerdrWorkspaceRecord? in
+            guard let id = (row["workspace_id"] as? String) ?? (row["id"] as? String), !id.isEmpty,
+                  let label = row["label"] as? String else { return nil }
+            return HerdrWorkspaceRecord(workspaceID: id, label: label, activeTabID: row["active_tab_id"] as? String, paneCount: row["pane_count"] as? Int ?? 1)
+        }
+        let agentRoot = object(from: agentOutput)?["result"] as? [String: Any]
+        let agentRows = (agentRoot?["agents"] as? [[String: Any]] ?? []).compactMap { row -> HerdrAgentRecord? in
+            guard let workspaceID = row["workspace_id"] as? String,
+                  let paneID = row["pane_id"] as? String else { return nil }
+            return HerdrAgentRecord(
+                workspaceID: workspaceID, paneID: paneID, cwd: row["cwd"] as? String,
+                foregroundCwd: row["foreground_cwd"] as? String,
+                terminalTitle: (row["terminal_title_stripped"] as? String) ?? (row["terminal_title"] as? String),
+                name: row["name"] as? String
+            )
+        }
+        return HerdrM2SessionSnapshot(workspaces: workspaceRows, agents: agentRows)
+    }
+
+    private static func bind(topic: DashboardTopic, workspaces: [HerdrWorkspaceRecord], agents: [HerdrAgentRecord]) -> DashboardM2SessionBinding {
+        let knownWorkspaceIDs: [String: [String]] = [
+            "sapphire-china-bugs": ["w1"], "sapphire-smartbanner": ["w10"], "sapphire-notification": ["w25"],
+            "flightbook-status": ["w27"], "aidash-aidata": ["w55"], "info-teams": ["w5N"], "info-email": ["w5M"],
+            "skills-workflow": ["w5A", "w5K"]
+        ]
+        let knownIDs = knownWorkspaceIDs[topic.id] ?? []
+        let candidates = workspaces.filter { workspace in
+            if knownIDs.contains(workspace.workspaceID) { return true }
+            let text = [workspace.label, workspace.workspaceID].joined(separator: " ").lowercased()
+            let agentText = agents.filter { $0.workspaceID == workspace.workspaceID }
+                .flatMap { [$0.cwd ?? "", $0.foregroundCwd ?? "", $0.terminalTitle ?? "", $0.name ?? ""] }
+                .joined(separator: " ").lowercased()
+            return text.contains(topic.id.lowercased()) || agentText.contains(topic.id.lowercased())
+                || topic.keywords.contains { text.localizedCaseInsensitiveContains($0) || agentText.localizedCaseInsensitiveContains($0) }
+                || topic.aliases.contains { text.localizedCaseInsensitiveContains($0) || agentText.localizedCaseInsensitiveContains($0) }
+                || text.localizedCaseInsensitiveContains(topic.title) || agentText.localizedCaseInsensitiveContains(topic.targetRepo)
+        }
+        guard let workspace = candidates.sorted(by: { $0.workspaceID < $1.workspaceID }).first else {
+            return DashboardM2SessionBinding(topicID: topic.id, targetRepo: topic.targetRepo)
+        }
+        let agent = agents.first { $0.workspaceID == workspace.workspaceID && $0.paneID.hasSuffix(":p1") }
+            ?? agents.first { $0.workspaceID == workspace.workspaceID }
+        return DashboardM2SessionBinding(
+            topicID: topic.id, paneID: agent?.paneID ?? "\(workspace.workspaceID):p1",
+            workspaceID: workspace.workspaceID, workspaceLabel: workspace.label, targetRepo: topic.targetRepo
+        )
     }
 
     public static func loadLiveDataset(
@@ -1802,7 +1991,9 @@ extension LiveDashboardTelemetryReader {
                 project: action.project,
                 parentIssueKey: action.parentIssue?.identifier,
                 parentIssueTitle: action.parentIssue?.title,
-                parentIssueURL: action.parentIssue?.url
+                parentIssueURL: action.parentIssue?.url,
+                topicID: action.topicID,
+                topicCatalog: loadTopicCatalog()
             )
         }
         return deduplicatingLinearContainerRows(mappedItems)

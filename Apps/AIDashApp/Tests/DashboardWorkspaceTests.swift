@@ -1015,6 +1015,65 @@ struct DashboardWorkspaceTests {
         _ = ActionItemsCardView(store: store).body
     }
 
+    @Test("M2 topic resolution prefers explicit IDs and applies deterministic fallback rules")
+    func m2TopicResolutionIsCanonical() {
+        let explicit = DashboardActionItem(
+            id: "unknown", title: "Unrelated", summary: "", sourceTag: "Linear", topicID: "sapphire-notification"
+        )
+        let chinaBug = DashboardActionItem(
+            id: "BUG-AB11440223", title: "Bing CN devsync blocker", summary: "", sourceTag: "my-pr-supervisor"
+        )
+        let smartBanner = DashboardActionItem(
+            id: "linear-TIA-76", title: "FlightBook SmartBanner Universal Link", summary: "", sourceTag: "Linear"
+        )
+        #expect(explicit.topicID == "sapphire-notification")
+        #expect(explicit.targetRepo == "bing-growth-sapphire-app")
+        #expect(chinaBug.topicID == "sapphire-china-bugs")
+        #expect(smartBanner.topicID == "sapphire-smartbanner")
+        #expect(smartBanner.topicGroup == "work-business")
+    }
+
+    @Test("Herdr JSON parsing binds known panes and falls back to NEW_M2")
+    func herdrSessionParsingAndBinding() throws {
+        let workspaces = #"{"result":{"workspaces":[{"workspace_id":"w1","label":"China bugs 修复","active_tab_id":"w1:t1","pane_count":1},{"workspace_id":"w10","label":"SmartBanner","active_tab_id":"w10:t1","pane_count":1}]}}"#
+        let agents = #"{"result":{"agents":[{"workspace_id":"w1","pane_id":"w1:p1","cwd":"/Users/test/Development/bing-growth-sapphire-app","terminal_title_stripped":"Review bugs"},{"workspace_id":"w10","pane_id":"w10:p1","cwd":"/Users/test/Development/bing-growth-sapphire-app","terminal_title_stripped":"SmartBanner"}]}}"#
+        let snapshot = LiveDashboardTelemetryReader.parseHerdrM2SessionSnapshot(workspaceOutput: workspaces, agentOutput: agents)
+        let bindings = snapshot.bindings(for: DashboardTopicCatalog.builtInTopics)
+        #expect(bindings["sapphire-china-bugs"]?.paneID == "w1:p1")
+        #expect(bindings["sapphire-smartbanner"]?.paneID == "w10:p1")
+        #expect(bindings["sapphire-notification"]?.isExisting == false)
+        #expect(bindings["sapphire-notification"]?.badgeText == "🆕 NEW_M2 · bing-growth-sapphire-app")
+    }
+
+    @Test("Topic columns group cards and dispatch guards prevent repeats")
+    func topicGroupingAndDispatchGuard() throws {
+        let actions = [
+            DashboardActionItem(id: "D617-5221157", title: "PR #617", summary: "China Bugs", sourceTag: "my-pr-supervisor", priority: .p0),
+            DashboardActionItem(id: "linear-TIA-76", title: "SmartBanner Universal Link", summary: "", sourceTag: "Linear", priority: .p1)
+        ]
+        var calls = 0
+        var targetJSON = ""
+        let store = DashboardWorkspaceStore(
+            snapshot: sampleSnapshot(), actionItems: actions,
+            sessionBindings: ["sapphire-china-bugs": DashboardM2SessionBinding(topicID: "sapphire-china-bugs", paneID: "w1:p1", workspaceID: "w1", workspaceLabel: "China bugs 修复", targetRepo: "bing-growth-sapphire-app")],
+            m2DispatchExecutor: { prompt, targets, pane in
+                calls += 1
+                targetJSON = targets
+                #expect(prompt.contains("PR #617"))
+                #expect(pane == "w1:p1")
+                return DashboardM2DispatchResult(succeeded: true, receipt: "✓ 已派发至 w1:p1")
+            }
+        )
+        #expect(store.topicColumns.map(\.id) == ["sapphire-china-bugs", "sapphire-smartbanner"])
+        let first = store.dispatchStagedTopic(topicID: "sapphire-china-bugs")
+        #expect(first.succeeded)
+        #expect(calls == 1)
+        #expect(targetJSON.contains("sapphire-china-bugs"))
+        #expect(store.actionItems.first?.isCompleted == true)
+        #expect(store.dispatchTopicToM2(topicID: "sapphire-china-bugs", items: [(actions[0], "Approve", "")]).succeeded == false)
+        #expect(calls == 1)
+    }
+
     @Test("Linear parent rows are removed when they only serve as containers")
     func linearParentContainerRowsAreDeduplicated() throws {
         let tempHome = FileManager.default.temporaryDirectory

@@ -38,6 +38,7 @@ public struct ActionItemsCardView: View {
     @State private var selectedTargets: [String: Set<String>] = [:]
     @State private var noteInputs: [String: String] = [:]
     @State private var expandedLinearClusterLabels: Set<String> = []
+    @State private var expandedBugBlockers = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
@@ -62,6 +63,16 @@ public struct ActionItemsCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let parent = parentIssueForBoard {
                     parentIssueBanner(parent)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(store.topicGroupFilters, id: \.id) { filter in
+                            Button(filter.title) { store.selectedTopicGroup = filter.id }
+                                .buttonStyle(.bordered)
+                                .tint(store.selectedTopicGroup == filter.id ? .accentColor : nil)
+                                .controlSize(.small)
+                        }
+                    }
                 }
                 HStack(spacing: 12) {
                     Picker(DashboardL10n.tr("dashboard.actions.filter_label", "Filter"), selection: $store.actionFilter) {
@@ -90,6 +101,16 @@ public struct ActionItemsCardView: View {
                     .controlSize(.small)
                     .fixedSize(horizontal: true, vertical: false)
                     .frame(minHeight: 28)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(store.topicLabelFilters, id: \.id) { filter in
+                            Button(filter.title) { store.selectedTopicLabelFilter = filter.id }
+                                .buttonStyle(.bordered)
+                                .tint(store.selectedTopicLabelFilter == filter.id ? .accentColor : nil)
+                                .controlSize(.small)
+                        }
+                    }
                 }
                 if store.availableLinearActionFilters.count > 1 {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -199,12 +220,74 @@ public struct ActionItemsCardView: View {
     private var kanbanBoardContent: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 12) {
-                ForEach(kanbanColumns, id: \.title) { column in
-                    kanbanColumn(column)
+                ForEach(store.topicColumns) { column in
+                    topicColumn(column)
                 }
             }
             .padding(.vertical, 2)
         }
+    }
+
+    private func topicColumn(_ column: DashboardTopicColumn) -> some View {
+        let bugItems = column.items.filter { $0.hasLinearLabel("bug-blocker") }
+        let regularItems = column.items.filter { !$0.hasLinearLabel("bug-blocker") }
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 7) {
+                    Text(column.topic.topicTitle)
+                        .font(.subheadline.weight(.bold))
+                    Text(column.topic.topicID)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 3)
+                        .background(.secondary.opacity(0.12), in: Capsule())
+                    Spacer(minLength: 4)
+                    Text("\(column.pendingCount)")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.secondary.opacity(0.12), in: Capsule())
+                }
+                Text(column.session.badgeText)
+                    .font(.caption2)
+                    .foregroundStyle(column.session.isExisting ? .green : .secondary)
+                    .lineLimit(1)
+                    .help(column.session.badgeText)
+                HStack(spacing: 6) {
+                    Button {
+                        let result = store.dispatchStagedTopic(topicID: column.topic.id, onToggleDone: onToggleDone)
+                        if !result.succeeded { expandedActionID = nil }
+                    } label: {
+                        Label("⚡ 派发给此 M2 (已选 \(store.stagedItems(for: column.topic.id).count) 项) →", systemImage: "bolt.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(column.items.allSatisfy(\.isCompleted))
+                }
+                if let status = store.lastDispatchedTopicStatus[column.topic.id] {
+                    Text(status)
+                        .font(.caption2)
+                        .foregroundStyle(status.hasPrefix("✓") ? .green : .orange)
+                }
+            }
+            if regularItems.isEmpty && bugItems.isEmpty {
+                Text("无事项").font(.caption).foregroundStyle(.secondary).frame(minHeight: 80)
+            } else {
+                ForEach(regularItems) { item in kanbanCard(item) }
+                if !bugItems.isEmpty && column.topic.id == "sapphire-china-bugs" {
+                    DisclosureGroup("📦 未提 PR 的 Bug 阻塞 (\(bugItems.count))", isExpanded: $expandedBugBlockers) {
+                        ForEach(bugItems) { item in kanbanCard(item) }
+                    }
+                    .font(.caption.weight(.semibold))
+                } else {
+                    ForEach(bugItems) { item in kanbanCard(item) }
+                }
+            }
+        }
+        .padding(10)
+        .frame(minWidth: 300, idealWidth: 340, maxWidth: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func kanbanColumn(_ column: KanbanColumn) -> some View {
@@ -358,42 +441,57 @@ public struct ActionItemsCardView: View {
     @ViewBuilder
     private func kanbanActionFooter(_ item: DashboardActionItem, isDone: Bool) -> some View {
         if isDone {
-            Label("已处理", systemImage: "checkmark.circle.fill")
+            Label(store.lastDispatchedTopicStatus[item.topicID] ?? "已处理", systemImage: "checkmark.circle.fill")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(DashboardSemanticColorPalette.color(for: .healthy))
         } else {
-            switch actionItemKind(item) {
-            case .popGate:
-                HStack(spacing: 6) {
-                    openExternalActionButton(item, title: "打开 PR 合并 ↗", prominent: true)
-                    markDoneButton(item)
-                }
-            case .decision:
-                VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 6) {
+                switch actionItemKind(item) {
+                case .popGate:
+                    HStack(spacing: 6) {
+                        openExternalActionButton(item, title: "打开 PR 合并 ↗", prominent: true)
+                        markDoneButton(item)
+                    }
+                case .decision:
+                    VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(item.decisionOptions.prefix(2).enumerated()), id: \.offset) { index, option in
                         Button {
-                            store.submitActionItemDecision(item, decision: option, note: noteInputs[item.id] ?? "", onToggleDone: onToggleDone)
+                            store.stageTopicDecision(item, decision: option)
                         } label: {
-                            Text(option)
+                            Text(store.stagedTopicDecisions[item.id] == option ? "✓ \(option)" : option)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .modifier(KanbanButtonStyleModifier(prominent: index == 0))
+                        .modifier(KanbanButtonStyleModifier(prominent: store.stagedTopicDecisions[item.id] == option || (store.stagedTopicDecisions[item.id] == nil && index == 0)))
                         .controlSize(.small)
                         .frame(minHeight: 28)
                     }
                 }
-            case .evalRule:
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 6) {
+                case .evalRule:
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 6) {
                     evalFooterButton(item, title: "两个都加", decision: "两个都加", prominent: true)
                     evalFooterButton(item, title: "记规范", decision: "记入编码规范 (防再犯)", prominent: false)
                     evalFooterButton(item, title: "入题库", decision: "加入审查题库 (防漏审)", prominent: false)
                     evalFooterButton(item, title: "忽略", decision: "忽略", prominent: false)
                 }
-            case .general:
-                HStack(spacing: 6) {
-                    approveButton(item)
-                    ignoreButton(item)
+                case .general:
+                    HStack(spacing: 6) {
+                        approveButton(item)
+                        ignoreButton(item)
+                    }
                 }
+                Button {
+                    let decision = store.stagedTopicDecisions[item.id] ?? item.decisionOptions.first ?? "Approve"
+                    _ = store.dispatchTopicToM2(
+                        topicID: item.topicID,
+                        items: [(item, decision, noteInputs[item.id] ?? "")],
+                        onToggleDone: onToggleDone
+                    )
+                } label: {
+                    Label("立即派发 →", systemImage: "bolt.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .frame(minHeight: 28)
             }
         }
     }
@@ -423,12 +521,12 @@ public struct ActionItemsCardView: View {
 
     private func evalFooterButton(_ item: DashboardActionItem, title: String, decision: String, prominent: Bool) -> some View {
         Button {
-            store.submitActionItemDecision(item, decision: decision, note: noteInputs[item.id] ?? "", onToggleDone: onToggleDone)
+            store.stageTopicDecision(item, decision: decision)
         } label: {
-            Text(title)
+            Text(store.stagedTopicDecisions[item.id] == decision ? "✓ \(title)" : title)
                 .frame(maxWidth: .infinity)
         }
-        .modifier(KanbanButtonStyleModifier(prominent: prominent))
+        .modifier(KanbanButtonStyleModifier(prominent: store.stagedTopicDecisions[item.id] == decision || prominent))
         .controlSize(.small)
         .frame(minHeight: 28)
     }

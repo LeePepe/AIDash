@@ -86,6 +86,8 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     public let labels: [String]
     public let project: String?
     public let parentIssue: ParentIssue?
+    /// Optional canonical M2 topic supplied by the producer. Older producers omit it.
+    public let topicID: String?
     public let controls: [Control]
 
     private struct SourcePayload: Decodable {
@@ -99,7 +101,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case id, jobID, jobId, createdAt, title, description, descriptionMd
         case status, source, priority, ref, url, subCategory, worthExtracting
-        case labels, project, parentIssue, controls
+        case labels, project, parentIssue, topicID, topicId, topic_id, controls
     }
 
     public init(
@@ -109,7 +111,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         ref: String? = nil, url: String? = nil,
         subCategory: String? = nil, worthExtracting: Bool? = nil,
         labels: [String] = [], project: String? = nil, parentIssue: ParentIssue? = nil,
-        controls: [Control]
+        topicID: String? = nil, controls: [Control]
     ) {
         self.id = id
         self.jobID = jobID
@@ -126,6 +128,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         self.labels = labels
         self.project = project
         self.parentIssue = parentIssue
+        self.topicID = topicID
         self.controls = controls
     }
 
@@ -169,6 +172,9 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
         project = try container.decodeIfPresent(String.self, forKey: .project)
         parentIssue = try container.decodeIfPresent(ParentIssue.self, forKey: .parentIssue)
+        topicID = try container.decodeIfPresent(String.self, forKey: .topicID)
+            ?? (try container.decodeIfPresent(String.self, forKey: .topicId))
+            ?? (try container.decodeIfPresent(String.self, forKey: .topic_id))
         controls = decodedControls.filter { $0.kind != .openURL }
     }
 
@@ -190,6 +196,7 @@ public struct JobActionsAction: Codable, Sendable, Equatable {
         if !labels.isEmpty { try container.encode(labels, forKey: .labels) }
         try container.encodeIfPresent(project, forKey: .project)
         try container.encodeIfPresent(parentIssue, forKey: .parentIssue)
+        try container.encodeIfPresent(topicID, forKey: .topicId)
         try container.encode(controls, forKey: .controls)
     }
 }

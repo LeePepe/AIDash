@@ -71,6 +71,13 @@ public final class DashboardWorkspaceStore {
     public private(set) var cliEntries: [CLICostQuotaEntry] = []
     public private(set) var actionItems: [DashboardActionItem] = []
     public private(set) var rankingRows: [AgentRankingRow] = []
+    public private(set) var topicCatalog: [DashboardTopic] = DashboardTopicCatalog.builtInTopics
+    public private(set) var topicSessionBindings: [String: DashboardM2SessionBinding] = [:]
+    public var selectedTopicGroup: String = "all"
+    public var selectedTopicLabelFilter: String = "all"
+    public var stagedTopicDecisions: [String: String] = [:]
+    public private(set) var lastDispatchedTopicStatus: [String: String] = [:]
+    public var m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)?
     public private(set) var liveEfficiencySummary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
     public private(set) var scheduledPulseSnapshot: ScheduledPulseSnapshot = .defaultSnapshot()
     public private(set) var scheduledJobFrameworkSnapshot: ScheduledJobFrameworkSnapshot = .init(capturedAt: Date(), entries: [])
@@ -118,9 +125,15 @@ public final class DashboardWorkspaceStore {
 
     public init(
         statusProvider: (any MenuBarSystemStatusProviding)? = nil,
-        deferInitialRefresh: Bool = false
+        deferInitialRefresh: Bool = false,
+        topicCatalog: [DashboardTopic]? = nil,
+        sessionBindings: [String: DashboardM2SessionBinding]? = nil,
+        m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil
     ) {
         self.statusProvider = statusProvider ?? LiveMenuBarSystemStatusProvider()
+        self.topicCatalog = topicCatalog ?? (LiveDashboardTelemetryReader.isLiveEnvironment ? LiveDashboardTelemetryReader.loadTopicCatalog() : DashboardTopicCatalog.builtInTopics)
+        self.topicSessionBindings = sessionBindings ?? Self.defaultTopicBindings(for: self.topicCatalog)
+        self.m2DispatchExecutor = m2DispatchExecutor
         if !deferInitialRefresh {
             refreshFromProvider()
         }
@@ -132,9 +145,15 @@ public final class DashboardWorkspaceStore {
         cliEntries: [CLICostQuotaEntry]? = nil,
         actionItems: [DashboardActionItem]? = nil,
         rankingRows: [AgentRankingRow]? = nil,
-        scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil
+        scheduledPulseSnapshot: ScheduledPulseSnapshot? = nil,
+        topicCatalog: [DashboardTopic]? = nil,
+        sessionBindings: [String: DashboardM2SessionBinding]? = nil,
+        m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil
     ) {
         self.statusProvider = LiveMenuBarSystemStatusProvider(tokenDatabasePaths: CLITokenDatabasePaths())
+        self.topicCatalog = topicCatalog ?? DashboardTopicCatalog.builtInTopics
+        self.topicSessionBindings = sessionBindings ?? Self.defaultTopicBindings(for: self.topicCatalog)
+        self.m2DispatchExecutor = m2DispatchExecutor
         if let scheduledPulseSnapshot {
             self.scheduledPulseSnapshot = scheduledPulseSnapshot
             self.scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
@@ -146,6 +165,12 @@ public final class DashboardWorkspaceStore {
             customActions: actionItems,
             customRankings: rankingRows
         )
+    }
+
+    private static func defaultTopicBindings(for topics: [DashboardTopic]) -> [String: DashboardM2SessionBinding] {
+        Dictionary(uniqueKeysWithValues: topics.map {
+            ($0.id, DashboardM2SessionBinding(topicID: $0.id, targetRepo: $0.targetRepo))
+        })
     }
 
     public static func todayDateString() -> String {
@@ -239,6 +264,9 @@ public final class DashboardWorkspaceStore {
 
     public func refreshFromProvider() {
         let state = statusProvider.captureStatusState()
+        topicCatalog = LiveDashboardTelemetryReader.loadTopicCatalog()
+        let sessions = LiveDashboardTelemetryReader.loadHerdrM2SessionSnapshot()
+        topicSessionBindings = sessions.bindings(for: topicCatalog)
         systemState = state
         scheduledPulseSnapshot = LiveDashboardTelemetryReader.loadScheduledPulseSnapshot()
         scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
@@ -470,6 +498,180 @@ public final class DashboardWorkspaceStore {
         } catch {
             return
         }
+    }
+
+    public var topicGroupFilters: [(id: String, title: String)] {
+        [("all", "全部话题"), ("work-business", "🏢 Work Business"), ("user-skills", "🛠 user-skills"), ("personal-core-gateways", "⚙️ Personal Core"), ("personal-products-home", "🏠 Personal Products"), ("completed", "✅ 已完成 (\(completedActionCount))")]
+    }
+
+    public var topicLabelFilters: [(id: String, title: String)] {
+        [("all", "全部类型"), ("needs-decision", "🔴 需拍板"), ("pop", "🔐 待 PoP"), ("eval", "💡 评论规则"), ("bug-blocker", "🧱 Bug 阻塞")]
+    }
+
+    private func matchesTopicBoardFilters(_ item: DashboardActionItem) -> Bool {
+        if selectedTopicGroup == "completed" {
+            guard item.isCompleted else { return false }
+        } else if selectedTopicGroup != "all", item.topicGroup != selectedTopicGroup {
+            return false
+        }
+        if selectedTopicLabelFilter == "needs-decision" { return item.isNeedsDecision }
+        if selectedTopicLabelFilter != "all" { return item.hasLinearLabel(selectedTopicLabelFilter) }
+        return true
+    }
+
+    public var topicColumns: [DashboardTopicColumn] {
+        let filteredItems = kanbanActionItems.filter(matchesTopicBoardFilters)
+        let topicIDs = Set(filteredItems.map(\.topicID))
+        let orderedTopics = topicCatalog.filter { topicIDs.contains($0.id) }.sorted { lhs, rhs in
+            let lhsPending = filteredItems.filter { $0.topicID == lhs.id && !$0.isCompleted }.count
+            let rhsPending = filteredItems.filter { $0.topicID == rhs.id && !$0.isCompleted }.count
+            let priority: [String: Int] = ["sapphire-china-bugs": 0, "sapphire-smartbanner": 1, "sapphire-notification": 2, "aidash-aidata": 3]
+            let lp = priority[lhs.id] ?? 10
+            let rp = priority[rhs.id] ?? 10
+            if lp != rp { return lp < rp }
+            if lhsPending != rhsPending { return lhsPending > rhsPending }
+            return lhs.id < rhs.id
+        }
+        return orderedTopics.map { topic in
+            DashboardTopicColumn(
+                topic: topic,
+                items: filteredItems.filter { $0.topicID == topic.id },
+                session: topicSessionBindings[topic.id] ?? DashboardM2SessionBinding(topicID: topic.id, targetRepo: topic.targetRepo)
+            )
+        }
+    }
+
+    public func stageTopicDecision(_ item: DashboardActionItem, decision: String) {
+        guard !item.isCompleted else { return }
+        stagedTopicDecisions[item.id] = decision
+    }
+
+    public func clearStagedTopicDecision(for itemID: String) {
+        stagedTopicDecisions.removeValue(forKey: itemID)
+    }
+
+    public func stagedItems(for topicID: String) -> [(DashboardActionItem, String, String)] {
+        actionItems.compactMap { item in
+            guard item.topicID == topicID, !item.isCompleted, let decision = stagedTopicDecisions[item.id] else { return nil }
+            return (item, decision, "")
+        }
+    }
+
+    public func dispatchStagedTopic(
+        topicID: String,
+        onToggleDone: ((String, String, Bool) -> Void)? = nil
+    ) -> DashboardM2DispatchResult {
+        var selected = stagedItems(for: topicID)
+        if selected.isEmpty {
+            selected = actionItems.filter { $0.topicID == topicID && !$0.isCompleted }
+                .sorted {
+                    if $0.priority != $1.priority { return $0.priority < $1.priority }
+                    return $0.id < $1.id
+                }
+                .prefix(3)
+                .map { ($0, $0.decisionOptions.first ?? "Approve", "") }
+        }
+        guard !selected.isEmpty else {
+            let result = DashboardM2DispatchResult(succeeded: false, error: "没有可派发事项")
+            lastDispatchedTopicStatus[topicID] = "⚠️ \(result.error ?? "dispatch failed")"
+            return result
+        }
+        return dispatchTopicToM2(topicID: topicID, items: selected, onToggleDone: onToggleDone)
+    }
+
+    @discardableResult
+    public func dispatchTopicToM2(
+        topicID: String,
+        items: [(DashboardActionItem, String, String)],
+        onToggleDone: ((String, String, Bool) -> Void)? = nil
+    ) -> DashboardM2DispatchResult {
+        guard let topic = topicCatalog.first(where: { $0.id == topicID }) ?? DashboardTopicCatalog.topic(withID: topicID) else {
+            return DashboardM2DispatchResult(succeeded: false, error: "未知 topic")
+        }
+        let pending = items.filter { !$0.0.isCompleted && $0.0.topicID == topicID }
+        guard !pending.isEmpty else {
+            return DashboardM2DispatchResult(succeeded: false, error: "事项已处理，禁止重复派发")
+        }
+        let prompt = makeTopicSubPrompt(topic: topic, items: pending)
+        let targetJSON = makeRouterTargetsJSON(topic: topic, prompt: prompt, sessionID: topicSessionBindings[topicID]?.paneID)
+        let result: DashboardM2DispatchResult
+        if let m2DispatchExecutor {
+            result = m2DispatchExecutor(prompt, targetJSON, topicSessionBindings[topicID]?.paneID)
+        } else if LiveDashboardTelemetryReader.isLiveEnvironment {
+            result = runM2Router(topic: topic, prompt: prompt, targetJSON: targetJSON, homeURL: LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL())
+        } else {
+            result = DashboardM2DispatchResult(succeeded: false, error: "offline/test environment")
+        }
+        guard result.succeeded else {
+            lastDispatchedTopicStatus[topicID] = "⚠️ \(result.error ?? "dispatch failed")"
+            return result
+        }
+        for (item, decision, note) in pending {
+            if item.id.hasPrefix("EVAL-") { persistEvalDecision(itemID: item.id, decision: decision, note: note) }
+            if item.jobID == .myPRSupervisor, item.id.hasPrefix("D") { persistMyPRSupervisorDecision(itemID: item.id, decision: decision, note: note) }
+            submitActionItemDecision(item, decision: decision, note: note, onToggleDone: onToggleDone)
+            stagedTopicDecisions.removeValue(forKey: item.id)
+        }
+        let pane = topicSessionBindings[topicID]?.paneID ?? "NEW_M2"
+        lastDispatchedTopicStatus[topicID] = result.receipt ?? "✓ 已派发至 \(pane)"
+        return result
+    }
+
+    private func makeTopicSubPrompt(topic: DashboardTopic, items: [(DashboardActionItem, String, String)]) -> String {
+        var lines = ["请按 Owner 在 AIDash 拍板的决策处理以下 \(topic.title) 事项："]
+        for (index, entry) in items.enumerated() {
+            let item = entry.0
+            let ref = item.externalURLString ?? item.displayRefLabel ?? item.backingItemRef ?? "无引用"
+            let note = entry.2.isEmpty ? "" : "；备注：\(HerdrSocketClient.sanitizeMetadataToken(entry.2, maxLength: 300))"
+            lines.append("\(index + 1). [\(item.id)] \(HerdrSocketClient.sanitizeMetadataToken(item.title, maxLength: 180)) (\(ref)) → 决策：\(HerdrSocketClient.sanitizeMetadataToken(entry.1, maxLength: 120))\(note)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func makeRouterTargetsJSON(topic: DashboardTopic, prompt: String, sessionID: String?) -> String {
+        let payload: [String: Any] = [
+            "route": "ROUTE_SINGLE",
+            "targets": [[
+                "topic_id": topic.id, "target_repo": topic.targetRepo,
+                "session_id": sessionID ?? "", "sub_prompt": prompt, "wave_order": 1
+            ]]
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"route\":\"ROUTE_SINGLE\",\"targets\":[]}" }
+        return string
+    }
+
+    private func runM2Router(topic: DashboardTopic, prompt: String, targetJSON: String, homeURL: URL) -> DashboardM2DispatchResult {
+        let router = "/Users/tianpli/.agents/skills/personal-m2-assistant/scripts/m2-router.py"
+        guard FileManager.default.fileExists(atPath: router) else { return DashboardM2DispatchResult(succeeded: false, error: "m2-router.py unavailable") }
+        func run(_ args: [String]) -> (Int32, String) {
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            process.arguments = args
+            process.standardOutput = pipe
+            process.standardError = pipe
+            var env = ProcessInfo.processInfo.environment
+            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "")
+            process.environment = env
+            do { try process.run(); process.waitUntilExit() } catch { return (-1, "") }
+            return (process.terminationStatus, String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+        }
+        let plan = run([router, "--plan", "--message", "AIDash \(topic.title) dispatch", "--targets-json", targetJSON, "--json"])
+        guard plan.0 == 0, !plan.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return DashboardM2DispatchResult(succeeded: false, error: "m2-router plan failed")
+        }
+        let planDirectory = homeURL.appendingPathComponent("Library/Application Support/AIDash/m2-plans", isDirectory: true)
+        let planURL = planDirectory.appendingPathComponent("aidash-m2-plan-\(UUID().uuidString).json")
+        do {
+            try FileManager.default.createDirectory(at: planDirectory, withIntermediateDirectories: true)
+            try Data(plan.1.utf8).write(to: planURL, options: [.atomic])
+            defer { try? FileManager.default.removeItem(at: planURL) }
+        } catch { return DashboardM2DispatchResult(succeeded: false, error: "cannot persist router plan") }
+        let applied = run([router, "--apply", "--plan-file", planURL.path, "--approve", "--json"])
+        guard applied.0 == 0 else { return DashboardM2DispatchResult(succeeded: false, error: "m2-router apply failed") }
+        let pane = topicSessionBindings[topic.id]?.paneID ?? "NEW_M2"
+        return DashboardM2DispatchResult(succeeded: true, receipt: "✓ 已派发至 \(pane)")
     }
 
     public var scheduledPulseRows: [ScheduledJobStatus] {
