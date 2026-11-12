@@ -1946,14 +1946,9 @@ extension LiveDashboardTelemetryReader {
             defer { try? handle.close() }
             return try handle.read(upToCount: limit) ?? Data()
         }
-        let canonicalItems = mapJobActions(sources.actions, acknowledgedActionIDs: acknowledgedActionIDs)
-        let canonicalURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/actions.jsonl")
-        if !canonicalItems.isEmpty || FileManager.default.fileExists(atPath: canonicalURL.path) {
-            return canonicalItems
-        }
-        let proposalsURL = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
-        let whURL = home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
-        return parsePendingProposals(fromURL: proposalsURL) + querySlowCIActionItems(whURL: whURL)
+        // Registered producer output is authoritative. Missing/filtered sources do not
+        // reopen local proposals or warehouse work data as a second action writer.
+        return mapJobActions(sources.actions, acknowledgedActionIDs: acknowledgedActionIDs)
     }
 
     private static let personalActionSources: Set<String> = ["Learning", "Linear", "Retro", "retro-loop", "CI Improve", "GTT Blocker", "PR & CI"]

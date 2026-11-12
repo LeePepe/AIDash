@@ -154,6 +154,11 @@ struct TK3SemanticTests {
         #expect(loaded.count == 5)
         try Data().write(to: url)
         #expect(LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: home).isEmpty)
+        let legacy = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"id":"legacy-work","status":"pending","title":"Local work proposal","agent":"retro-loop","scope":"work"}"#.utf8).write(to: legacy)
+        try FileManager.default.removeItem(at: url)
+        #expect(LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: home).isEmpty)
     }
 }
 #endif

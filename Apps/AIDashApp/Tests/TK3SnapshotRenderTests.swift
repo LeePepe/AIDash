@@ -59,6 +59,11 @@ struct TK3SnapshotRenderTests {
                         for lens in [SkillsRoiLens.disclosure, .context] {
                             try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialLens: lens), name: "skills-\(lens.rawValue)-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                         }
+                        try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, showDailyPopulations: true), name: "skills-daily-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                        let context = try #require(store.liveEfficiencySummary?.skillsROI?.diagnostics.context)
+                        let evidence = [SkillsEvidence(title: "KV hit (%)", value: context.cacheHitPercent.value.map { String($0) } ?? "Unknown", metadata: context.cacheHitPercent.metadata),
+                                        SkillsEvidence(title: "Saved tokens", value: context.savedTokens.value.map { String($0) } ?? "Unknown", metadata: context.savedTokens.metadata)]
+                        try render(SkillsObservationDrawer(evidence: evidence), name: "skills-evidence-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                     }
                 }
             }
@@ -158,7 +163,9 @@ struct TK3SnapshotRenderTests {
         }
         if name.hasPrefix("pulse-") {
             #expect(samples.filter { $0.role == "pulseStageTile" }.count == 5)
-            #expect(samples.filter { $0.role == "button" && $0.id.hasPrefix("pulse-") }.count == 4)
+            let footerIDs = ["pulse-run", "pulse-refresh", "pulse-service", "pulse-diagnostics"]
+            #expect(samples.filter { $0.role == "button" && footerIDs.contains($0.id) }.count == 4)
+            #expect(samples.filter { $0.role == "button" && $0.id.hasPrefix("pulse-tab-") }.count == 2)
         }
         if name.hasPrefix("skills-populated") {
             for column in ["skill", "loads", "roi", "r1", "touch", "unpracticed", "evidence"] {

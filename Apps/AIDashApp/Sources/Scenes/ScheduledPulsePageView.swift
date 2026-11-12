@@ -19,17 +19,16 @@ public struct ScheduledPulsePageView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Picker(
-                DashboardL10n.tr("dashboard.scheduled_pulse.page_picker", "页面"),
-                selection: $store.scheduledPulseTab
-            ) {
+            HStack(spacing: Space.gap / 2) {
                 ForEach(ScheduledPulsePageTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
+                    Button(tab.title) { store.scheduledPulseTab = tab }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .tint(store.scheduledPulseTab == tab ? theme.primary.primary : theme.neutrals.text(.body))
+                        .frame(minWidth: 28, minHeight: 28)
+                        .accessibilityAddTraits(store.scheduledPulseTab == tab ? .isSelected : [])
+                        .captureDashboardGeometry(id: "pulse-tab-\(tab.id)", role: "button")
                 }
             }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .frame(maxWidth: 280)
 
             switch store.scheduledPulseTab {
             case .overview:

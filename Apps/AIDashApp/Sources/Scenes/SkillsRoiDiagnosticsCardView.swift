@@ -31,11 +31,13 @@ public struct SkillsRoiDiagnosticsCardView: View {
     @State private var lens: SkillsRoiLens
     @State private var evidence: [SkillsEvidence] = []
     @State private var showingEvidence = false
+    @State private var dailyExpanded: Bool
     @Environment(\.theme) private var theme
 
-    public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?, initialLens: SkillsRoiLens = .usage) {
+    public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?, initialLens: SkillsRoiLens = .usage, showDailyPopulations: Bool = false) {
         self.summary = summary
         _lens = State(initialValue: initialLens)
+        _dailyExpanded = State(initialValue: showDailyPopulations)
     }
 
     public var body: some View {
@@ -46,10 +48,16 @@ public struct SkillsRoiDiagnosticsCardView: View {
                 if let roi = summary?.skillsROI {
                     observationSummary(roi.metadata)
                     healthPills(roi.diagnostics)
-                    Picker(skillsText("lens", "分析视角"), selection: $lens) {
-                        ForEach(SkillsRoiLens.allCases) { Text($0.title).tag($0) }
+                    HStack(spacing: Space.gap / 2) {
+                        ForEach(SkillsRoiLens.allCases) { option in
+                            Button(option.title) { lens = option }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .tint(lens == option ? theme.primary.primary : theme.neutrals.text(.body))
+                                .frame(minWidth: 28, minHeight: 28)
+                                .accessibilityAddTraits(lens == option ? .isSelected : [])
+                                .captureDashboardGeometry(id: "skills-lens-\(option.id)", role: "button")
+                        }
                     }
-                    .pickerStyle(.segmented).frame(maxWidth: 480, minHeight: 28)
                     if roi.metadata.coverage == "error" {
                         Label(skillsText("error_state", "Source error · retained observations are not current health"), systemImage: "exclamationmark.triangle")
                             .foregroundStyle(theme.dangerOnSubtle)
@@ -147,7 +155,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
                 Grid(alignment: .leading, horizontalSpacing: Space.gap, verticalSpacing: Space.gap) {
                     GridRow {
                         columnHeader(skillsText("skill", "Skill"), "skill")
-                        columnHeader(skillsText("loads", "Loads\n7d / 30d"), "loads")
+                        columnHeader(skillsText("loads", "Loads") + "\n7d / 30d", "loads")
                         columnHeader("ROI", "roi")
                         columnHeader(skillsText("r1", "R1 pass"), "r1")
                         columnHeader(skillsText("touch", "Script\ntouch"), "touch")
@@ -165,7 +173,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
 
     private func dailyObservations(_ rows: [SkillsDailyObservation]) -> some View {
         Group {
-            DisclosureGroup(skillsText("daily_title", "Daily populations · day / source / skill (not additive)")) {
+            DisclosureGroup(skillsText("daily_title", "Daily populations · day / source / skill (not additive)"), isExpanded: $dailyExpanded) {
                 VStack(alignment: .leading, spacing: Space.gap) {
                     Text(skillsText("daily_notice", "Attribution, tool and slash populations may overlap. No cross-source sum.")).font(.caption)
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
@@ -314,20 +322,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
     }
     private func show(_ facts: [SkillsEvidence?]) { evidence = facts.compactMap { $0 }; showingEvidence = true }
     private var evidenceDrawer: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.gap) {
-                Text(skillsText("evidence", "Evidence")).font(.headline)
-                if evidence.isEmpty { missingPopulation }
-                ForEach(evidence) { item in
-                    VStack(alignment: .leading, spacing: Space.gap / 2) {
-                        Text(item.title + " · " + item.value).font(.caption.weight(.semibold))
-                        Text(metadataLine(item.metadata)).font(.caption)
-                        Text((item.metadata.start ?? unknown) + " → " + (item.metadata.end ?? unknown)).font(.caption)
-                        if let method = item.metadata.method { Text(method).font(.caption).foregroundStyle(theme.neutrals.text(.body)) }
-                    }
-                }
-            }.padding(Space.cardPadding)
-        }.frame(width: 440).frame(maxHeight: 500)
+        ScrollView { SkillsObservationDrawer(evidence: evidence) }.frame(width: 440).frame(maxHeight: 500)
     }
     private var missingPopulation: some View {
         Text(skillsText("no_samples", "Unknown · no observed samples")).font(.caption).foregroundStyle(theme.neutrals.text(.body))
@@ -343,7 +338,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
         }
     }
     private func metadataLine(_ m: SkillsObservationMetadata) -> String {
-        "\(m.window ?? unknown) CST · " + skillsText("as_of", "As of") + " \(m.asOf ?? unknown) · " + skillsText("sample", "Sample") + " \(number(m.sample)) · \(coverage(m.coverage))" + (m.estimated == true ? " · " + skillsText("estimated", "Estimated") : "")
+        SkillsObservationDrawer.metadataLine(m)
     }
     private func number(_ value: Int?) -> String { value.map(String.init) ?? unknown }
     private func integer(_ metric: SkillsMetric<Int>?) -> String { metric.flatMap { $0.metadata.hasSamples ? $0.value : nil }.map(String.init) ?? unknown }
@@ -363,6 +358,46 @@ public struct SkillsRoiDiagnosticsCardView: View {
             value = unknown
         }
         return .init(title: title, value: value, metadata: metric.metadata)
+    }
+}
+
+/// The same evidence content is used by the production popover and the hostless render proof.
+struct SkillsObservationDrawer: View {
+    let evidence: [SkillsEvidence]
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.gap) {
+            Text(skillsText("evidence", "Evidence")).font(.headline)
+            if evidence.isEmpty { Text(skillsText("no_samples", "Unknown · no observed samples")).font(.caption) }
+            ForEach(evidence) { item in
+                VStack(alignment: .leading, spacing: Space.gap / 2) {
+                    Text(item.title + " · " + item.value).font(.caption.weight(.semibold))
+                    Text(Self.metadataLine(item.metadata)).font(.caption)
+                    Text((item.metadata.start ?? skillsText("metric_unknown", "Unknown")) + " → " + (item.metadata.end ?? skillsText("metric_unknown", "Unknown"))).font(.caption)
+                    if let method = item.metadata.method { Text(method).font(.caption).foregroundStyle(theme.neutrals.text(.body)) }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .captureDashboardGeometry(id: "evidence-\(item.id)", role: "skillsEvidence")
+            }
+        }.padding(Space.cardPadding)
+    }
+
+    static func metadataLine(_ metadata: SkillsObservationMetadata) -> String {
+        let unknown = skillsText("metric_unknown", "Unknown")
+        let status: String
+        switch metadata.coverage {
+        case "healthy": status = skillsText("observed", "Observed")
+        case "partial": status = skillsText("partial", "Partial")
+        case "missing": status = skillsText("missing_short", "Missing")
+        case "error": status = skillsText("error_short", "Error")
+        default: status = unknown
+        }
+        let window = "\(metadata.window ?? unknown) CST"
+        let asOf = skillsText("as_of", "As of") + " " + (metadata.asOf ?? unknown)
+        let sample = skillsText("sample", "Sample") + " " + (metadata.sample.map(String.init) ?? unknown)
+        let parts = [window, asOf, sample, status] + (metadata.estimated == true ? [skillsText("estimated", "Estimated")] : [])
+        return parts.joined(separator: " · ")
     }
 }
 #endif
