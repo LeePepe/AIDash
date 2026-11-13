@@ -1551,18 +1551,38 @@ public struct AIDashMacWorkspaceView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 8) {
-                        if case let .populated(snapshot) = store.systemState {
-                            hardwareCompanionPill(snapshot: snapshot)
-                        }
-                        refreshToolbarButton
+                    if case let .populated(snapshot) = store.systemState {
+                        rightToolbarCluster(snapshot: snapshot)
+                    } else {
+                        rightToolbarCluster(snapshot: nil)
                     }
                 }
             }
         }
     }
 
-    private var unifiedDateNavigationToolbarCluster: some View {
+    @ViewBuilder
+    internal func rightToolbarCluster(snapshot: MenuBarSystemSnapshot?) -> some View {
+        HStack(spacing: 8) {
+            if let snapshot {
+                hardwareCompanionPill(snapshot: snapshot)
+                Divider()
+                    .frame(height: 12)
+            }
+            refreshToolbarButton
+        }
+        .padding(.horizontal, 6)
+    }
+
+    @ViewBuilder
+    internal func toolbarHeaderComparisonPreview(snapshot: MenuBarSystemSnapshot?) -> some View {
+        HStack(spacing: 20) {
+            unifiedDateNavigationToolbarCluster
+            rightToolbarCluster(snapshot: snapshot)
+        }
+    }
+
+    internal var unifiedDateNavigationToolbarCluster: some View {
         HStack(spacing: 6) {
             Button {
                 store.selectPreviousDate()
@@ -1592,7 +1612,7 @@ public struct AIDashMacWorkspaceView: View {
             .disabled(!store.canSelectNextDate)
 
             Divider()
-                .frame(height: 14)
+                .frame(height: 12)
 
             Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) {
                 store.selectToday()
@@ -1600,12 +1620,10 @@ public struct AIDashMacWorkspaceView: View {
             .buttonStyle(.borderless)
             .font(.caption.weight(.semibold))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.65), in: Capsule())
+        .padding(.horizontal, 6)
     }
 
-    private var refreshToolbarButton: some View {
+    internal var refreshToolbarButton: some View {
         Button {
             if reduceMotion {
                 store.refreshFromProvider()
@@ -1615,14 +1633,16 @@ public struct AIDashMacWorkspaceView: View {
                 }
             }
         } label: {
-            Label(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"), systemImage: "arrow.clockwise")
+            Image(systemName: "arrow.clockwise")
+                .font(.caption.weight(.semibold))
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.borderless)
+        .help(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"))
+        .accessibilityLabel(DashboardL10n.tr("dashboard.toolbar.refresh", "Refresh"))
         .keyboardShortcut("r", modifiers: .command)
     }
 
-    private func hardwareCompanionPill(snapshot: MenuBarSystemSnapshot) -> some View {
+    internal func hardwareCompanionPill(snapshot: MenuBarSystemSnapshot) -> some View {
         let cpuPct = Int((snapshot.cpu.usage * 100).rounded())
         let memStr = MenuBarStatusView.compactMemoryPair(used: snapshot.memory.usedBytes, total: snapshot.memory.totalBytes)
         let isWarn = snapshot.cpu.usage >= 0.75 || snapshot.memory.pressure != .normal
@@ -1630,18 +1650,18 @@ public struct AIDashMacWorkspaceView: View {
         return Button {
             store.selectedSection = .systemAndCosts
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "cpu").font(.caption2).foregroundStyle(tint)
+            HStack(spacing: 5) {
+                Image(systemName: "cpu")
+                    .font(.caption)
+                    .foregroundStyle(tint)
                 Text("CPU \(cpuPct)% · \(memStr)")
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(.primary)
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Color(nsColor: .windowBackgroundColor).opacity(0.75), in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
+        .accessibilityIdentifier("toolbar.hardwareCompanion")
         .help(
             DashboardL10n.format(
                 "dashboard.telemetry.load_avg_format",

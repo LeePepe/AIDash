@@ -1,8 +1,11 @@
 #if os(macOS)
+import AppKit
+import CryptoKit
 import Foundation
 import SQLite3
 import SwiftUI
 import Testing
+import DesignKit
 #if AIDASHAPP_LOGIC_TESTS
 @testable import AIDashAppLogic
 #else
@@ -105,6 +108,44 @@ struct DashboardWorkspaceTests {
                     )
                 ]
             )
+        )
+    }
+
+    private func toolbarSnapshot(
+        cpuUsage: Double,
+        memoryUsedBytes: UInt64,
+        memoryTotalBytes: UInt64,
+        pressure: MemoryPressureLevel
+    ) -> MenuBarSystemSnapshot {
+        let base = sampleSnapshot()
+        let cpu = CPUStatusSnapshot(
+            usage: cpuUsage,
+            user: cpuUsage * 0.6,
+            system: cpuUsage * 0.4,
+            idle: max(0, 1 - cpuUsage),
+            coreCount: base.cpu.coreCount,
+            loadOneMinute: 12.4,
+            loadFiveMinutes: 10.1,
+            loadFifteenMinutes: 8.7
+        )
+        let memory = MemoryStatusSnapshot(
+            usedBytes: memoryUsedBytes,
+            totalBytes: memoryTotalBytes,
+            freeBytes: memoryTotalBytes - memoryUsedBytes,
+            wiredBytes: 8 * 1_073_741_824,
+            compressedBytes: 4 * 1_073_741_824,
+            pressure: pressure
+        )
+        return MenuBarSystemSnapshot(
+            capturedAt: base.capturedAt,
+            machine: base.machine,
+            cpu: cpu,
+            memory: memory,
+            network: base.network,
+            storage: base.storage,
+            tokenUsage: base.tokenUsage,
+            attention: base.attention,
+            gateway: base.gateway
         )
     }
 
@@ -318,6 +359,167 @@ struct DashboardWorkspaceTests {
         ).body
         _ = ActionItemsCardView(store: store).body
         _ = RankingTableCardView(store: store).body
+    }
+
+    private func toolbarHeaderBitmap<Content: View>(
+        for content: Content,
+        scheme: ColorScheme
+    ) throws -> NSBitmapImageRep {
+        // Borderless buttons are AppKit-backed; ImageRenderer substitutes unsupported-view panels.
+        _ = NSApplication.shared
+        let appearance = try #require(NSAppearance(named: scheme == .dark ? .darkAqua : .aqua))
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.appearance = appearance
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: 1, height: 1),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = hostingView
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let fittingSize = hostingView.fittingSize
+        #expect(fittingSize.width.isFinite && fittingSize.width > 0)
+        #expect(fittingSize.height.isFinite && fittingSize.height > 0)
+        window.setContentSize(fittingSize)
+        hostingView.frame = NSRect(origin: .zero, size: fittingSize)
+        hostingView.layoutSubtreeIfNeeded()
+        let bitmap = try #require(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
+        appearance.performAsCurrentDrawingAppearance {
+            hostingView.displayIfNeeded()
+            hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+        }
+        return bitmap
+    }
+
+    private func containsUnsupportedViewPlaceholder(_ bitmap: NSBitmapImageRep) -> Bool {
+        for y in 0..<bitmap.pixelsHigh {
+            var yellowRun = 0
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let isPlaceholderYellow = color.alphaComponent > 0.99
+                    && color.redComponent > 0.99
+                    && abs(color.greenComponent - 0.8) < 0.01
+                    && color.blueComponent < 0.01
+                yellowRun = isPlaceholderYellow ? yellowRun + 1 : 0
+                if yellowRun >= 8 { return true }
+            }
+        }
+        return false
+    }
+
+    @Test("Top toolbar header clusters are single-layer without nested capsule backgrounds or bordered bezels")
+    func topToolbarHeaderClustersAreSingleLayerAndRenderSnapshots() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/Scenes/AIDashMacWorkspaceView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let clusterStart = try #require(source.range(of: "internal func rightToolbarCluster(snapshot:"))
+        let clusterEnd = try #require(source.range(of: "    private var sidebarContent", range: clusterStart.upperBound..<source.endIndex))
+        let toolbarSource = String(source[clusterStart.lowerBound..<clusterEnd.lowerBound])
+        #expect(!toolbarSource.contains(".background("))
+        #expect(!toolbarSource.contains("Capsule()"))
+        #expect(!toolbarSource.contains(".overlay("))
+        #expect(!toolbarSource.contains(".shadow("))
+        #expect(!toolbarSource.contains(".buttonStyle(.bordered)"))
+        #expect(!toolbarSource.contains(".buttonStyle(.plain)"))
+        #expect(toolbarSource.contains(".buttonStyle(.borderless)"))
+        #expect(toolbarSource.contains("toolbar.hardwareCompanion"))
+        #expect(toolbarSource.contains("Divider()"))
+        #expect(toolbarSource.contains(".padding(.horizontal, 6)"))
+
+        let environment = ProcessInfo.processInfo.environment
+        let configuredPath: String? = [
+            environment["AIDASH_HEADER_SCREENSHOT_DIR"],
+            environment["TEST_RUNNER_AIDASH_HEADER_SCREENSHOT_DIR"]
+        ].compactMap { value in
+            guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return value
+        }.first
+        let ownsOutput = configuredPath == nil
+        let output = configuredPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("aidash-header-flat-toolbar-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if ownsOutput { try? FileManager.default.removeItem(at: output) }
+        }
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+        let selectedDate = DashboardWorkspaceStore.todayDateString()
+        let states: [(name: String, snapshot: MenuBarSystemSnapshot?, date: String, cpu: String, memory: String)] = [
+            ("populated", sampleSnapshot(), selectedDate, "34%", "18.0 / 32.0 GB"),
+            ("no-snapshot", nil, selectedDate, "n/a", "n/a"),
+            ("high-values", toolbarSnapshot(cpuUsage: 0.98, memoryUsedBytes: 62 * 1_073_741_824, memoryTotalBytes: 64 * 1_073_741_824, pressure: .warning), selectedDate, "98%", "62.0 / 64.0 GB"),
+            ("long-localized-copy", sampleSnapshot(), "2026-11-11 · 周三 · 早间简报", "34%", "18.0 / 32.0 GB")
+        ]
+        var geometry: [[String: Any]] = []
+        var hashes: [String: String] = [:]
+        var pixelHashes: [String: String] = [:]
+        for state in states {
+            let store: DashboardWorkspaceStore
+            if let snapshot = state.snapshot {
+                store = DashboardWorkspaceStore(snapshot: snapshot)
+            } else {
+                store = DashboardWorkspaceStore(deferInitialRefresh: true)
+            }
+            store.availableDates = [state.date]
+            store.selectedDateString = state.date
+            let view = AIDashMacWorkspaceView(store: store)
+            for scheme in [ColorScheme.light, ColorScheme.dark] {
+                let appearance = scheme == .dark ? "dark" : "light"
+                let standalone = view.toolbarHeaderComparisonPreview(snapshot: state.snapshot)
+                    .padding(12)
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.theme, Theme(isDark: scheme == .dark))
+                let platters = HStack(spacing: 12) {
+                    view.unifiedDateNavigationToolbarCluster
+                        .padding(12)
+                        .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
+                    view.rightToolbarCluster(snapshot: state.snapshot)
+                        .padding(12)
+                        .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
+                }
+                .padding(12)
+                .background(Color(nsColor: .underPageBackgroundColor))
+                .environment(\.colorScheme, scheme)
+                .environment(\.theme, Theme(isDark: scheme == .dark))
+                for (kind, renderable) in [("standalone", AnyView(standalone)), ("two-platter-simulation", AnyView(platters))] {
+                    let bitmap = try toolbarHeaderBitmap(for: renderable, scheme: scheme)
+                    let png = try #require(bitmap.representation(using: .png, properties: [:]))
+                    let image = try #require(bitmap.cgImage)
+                    let pixelData = try #require(image.dataProvider?.data) as Data
+                    let digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
+                    let pixelDigest = SHA256.hash(data: pixelData).map { String(format: "%02x", $0) }.joined()
+                    let key = "\(state.name)-\(kind)-\(appearance)"
+                    hashes[key] = digest
+                    pixelHashes[key] = pixelDigest
+                    let file = output.appendingPathComponent("toolbar-header-\(key).png")
+                    try png.write(to: file)
+                    #expect(png.isEmpty == false)
+                    #expect(bitmap.pixelsWide > 0)
+                    #expect(bitmap.pixelsHigh > 0)
+                    #expect(!containsUnsupportedViewPlaceholder(bitmap), "Unsupported-view yellow panel in \(key)")
+                    geometry.append(["state": state.name, "kind": kind, "appearance": appearance, "width": bitmap.pixelsWide, "height": bitmap.pixelsHigh, "cpu": state.cpu, "memory": state.memory, "date": state.date, "sha256": digest, "pixelSHA256": pixelDigest])
+                }
+            }
+        }
+        let populatedDarkPixels = try #require(pixelHashes["populated-standalone-dark"])
+        let highValuesDarkPixels = try #require(pixelHashes["high-values-standalone-dark"])
+        #expect(populatedDarkPixels != highValuesDarkPixels)
+        #expect(hashes["populated-standalone-dark"] != hashes["high-values-standalone-dark"])
+        #expect(hashes["populated-standalone-light"] != hashes["high-values-standalone-light"])
+        #expect(hashes["populated-standalone-light"] != hashes["long-localized-copy-standalone-light"])
+        #expect(hashes["populated-two-platter-simulation-dark"] != hashes["high-values-two-platter-simulation-dark"])
+        #expect(hashes["populated-two-platter-simulation-dark"] != hashes["long-localized-copy-two-platter-simulation-dark"])
+        let geometryData = try JSONSerialization.data(withJSONObject: ["platform": "desktop", "children": geometry], options: [.prettyPrinted, .sortedKeys])
+        try geometryData.write(to: output.appendingPathComponent("toolbar-header-geometry.json"))
     }
 
     @Test("shared workspace store initializes without dispatch_once re-entrancy trap")
