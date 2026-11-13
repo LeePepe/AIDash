@@ -361,6 +361,61 @@ struct DashboardWorkspaceTests {
         _ = RankingTableCardView(store: store).body
     }
 
+    private func toolbarHeaderBitmap<Content: View>(
+        for content: Content,
+        scheme: ColorScheme
+    ) throws -> NSBitmapImageRep {
+        // Borderless buttons are AppKit-backed; ImageRenderer substitutes unsupported-view panels.
+        _ = NSApplication.shared
+        let appearance = try #require(NSAppearance(named: scheme == .dark ? .darkAqua : .aqua))
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.appearance = appearance
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: 1, height: 1),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = hostingView
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let fittingSize = hostingView.fittingSize
+        #expect(fittingSize.width.isFinite && fittingSize.width > 0)
+        #expect(fittingSize.height.isFinite && fittingSize.height > 0)
+        let size = NSSize(width: ceil(fittingSize.width), height: ceil(fittingSize.height))
+        window.setContentSize(size)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        hostingView.layoutSubtreeIfNeeded()
+        let bitmap = try #require(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
+        appearance.performAsCurrentDrawingAppearance {
+            hostingView.displayIfNeeded()
+            hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+        }
+        return bitmap
+    }
+
+    private func containsUnsupportedViewPlaceholder(_ bitmap: NSBitmapImageRep) -> Bool {
+        for y in 0..<bitmap.pixelsHigh {
+            var yellowRun = 0
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let isPlaceholderYellow = color.alphaComponent > 0.99
+                    && color.redComponent > 0.99
+                    && abs(color.greenComponent - 0.8) < 0.01
+                    && color.blueComponent < 0.01
+                yellowRun = isPlaceholderYellow ? yellowRun + 1 : 0
+                if yellowRun >= 8 { return true }
+            }
+        }
+        return false
+    }
+
     @Test("Top toolbar header clusters are single-layer without nested capsule backgrounds or bordered bezels")
     func topToolbarHeaderClustersAreSingleLayerAndRenderSnapshots() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)
@@ -398,63 +453,72 @@ struct DashboardWorkspaceTests {
         }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
 
+        let selectedDate = DashboardWorkspaceStore.todayDateString()
         let states: [(name: String, snapshot: MenuBarSystemSnapshot?, date: String, cpu: String, memory: String)] = [
-            ("populated", sampleSnapshot(), DashboardWorkspaceStore.todayDateString(), "34%", "18.0 / 32.0 GB"),
-            ("no-snapshot", nil, DashboardWorkspaceStore.todayDateString(), "n/a", "n/a"),
-            ("high-values", toolbarSnapshot(cpuUsage: 0.98, memoryUsedBytes: 62 * 1_073_741_824, memoryTotalBytes: 64 * 1_073_741_824, pressure: .warning), DashboardWorkspaceStore.todayDateString(), "98%", "62.0 / 64.0 GB"),
+            ("populated", sampleSnapshot(), selectedDate, "34%", "18.0 / 32.0 GB"),
+            ("no-snapshot", nil, selectedDate, "n/a", "n/a"),
+            ("high-values", toolbarSnapshot(cpuUsage: 0.98, memoryUsedBytes: 62 * 1_073_741_824, memoryTotalBytes: 64 * 1_073_741_824, pressure: .warning), selectedDate, "98%", "62.0 / 64.0 GB"),
             ("long-localized-copy", sampleSnapshot(), "2026-11-11 · 周三 · 早间简报", "34%", "18.0 / 32.0 GB")
         ]
         var geometry: [[String: Any]] = []
         var hashes: [String: String] = [:]
+        var pixelHashes: [String: String] = [:]
         for state in states {
             let store: DashboardWorkspaceStore
             if let snapshot = state.snapshot {
                 store = DashboardWorkspaceStore(snapshot: snapshot)
-                if state.name == "long-localized-copy" {
-                    store.availableDates = [state.date]
-                    store.selectedDateString = state.date
-                }
             } else {
                 store = DashboardWorkspaceStore(deferInitialRefresh: true)
             }
+            store.availableDates = [state.date]
+            store.selectedDateString = state.date
             let view = AIDashMacWorkspaceView(store: store)
             for scheme in [ColorScheme.light, ColorScheme.dark] {
                 let appearance = scheme == .dark ? "dark" : "light"
                 let standalone = view.toolbarHeaderComparisonPreview(snapshot: state.snapshot)
                     .padding(12)
-                    .background(Color(nsColor: .windowBackgroundColor))
                     .environment(\.colorScheme, scheme)
                     .environment(\.theme, Theme(isDark: scheme == .dark))
-                let platter = view.toolbarHeaderComparisonPreview(snapshot: state.snapshot)
-                    .padding(12)
-                    .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
-                    .padding(12)
-                    .background(Color(nsColor: .underPageBackgroundColor))
-                    .environment(\.colorScheme, scheme)
-                    .environment(\.theme, Theme(isDark: scheme == .dark))
-                for (kind, renderable) in [("standalone", AnyView(standalone)), ("single-platter-simulation", AnyView(platter))] {
-                    let renderer = ImageRenderer(content: renderable)
-                    renderer.scale = 2
-                    let image = try #require(renderer.nsImage)
-                    let tiff = try #require(image.tiffRepresentation)
-                    let bitmap = try #require(NSBitmapImageRep(data: tiff))
+                let platters = HStack(spacing: 12) {
+                    view.unifiedDateNavigationToolbarCluster
+                        .padding(12)
+                        .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
+                    view.rightToolbarCluster(snapshot: state.snapshot)
+                        .padding(12)
+                        .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
+                }
+                .padding(12)
+                .background(Color(nsColor: .underPageBackgroundColor))
+                .environment(\.colorScheme, scheme)
+                .environment(\.theme, Theme(isDark: scheme == .dark))
+                for (kind, renderable) in [("standalone", AnyView(standalone)), ("two-platter-simulation", AnyView(platters))] {
+                    let bitmap = try toolbarHeaderBitmap(for: renderable, scheme: scheme)
                     let png = try #require(bitmap.representation(using: .png, properties: [:]))
+                    let image = try #require(bitmap.cgImage)
+                    let pixelData = try #require(image.dataProvider?.data) as Data
                     let digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
+                    let pixelDigest = SHA256.hash(data: pixelData).map { String(format: "%02x", $0) }.joined()
                     let key = "\(state.name)-\(kind)-\(appearance)"
                     hashes[key] = digest
+                    pixelHashes[key] = pixelDigest
                     let file = output.appendingPathComponent("toolbar-header-\(key).png")
                     try png.write(to: file)
                     #expect(png.isEmpty == false)
                     #expect(bitmap.pixelsWide > 0)
                     #expect(bitmap.pixelsHigh > 0)
-                    geometry.append(["state": state.name, "kind": kind, "appearance": appearance, "width": bitmap.pixelsWide, "height": bitmap.pixelsHigh, "cpu": state.cpu, "memory": state.memory, "date": state.date, "sha256": digest])
+                    #expect(!containsUnsupportedViewPlaceholder(bitmap), "Unsupported-view yellow panel in \(key)")
+                    geometry.append(["state": state.name, "kind": kind, "appearance": appearance, "width": bitmap.pixelsWide, "height": bitmap.pixelsHigh, "cpu": state.cpu, "memory": state.memory, "date": state.date, "sha256": digest, "pixelSHA256": pixelDigest])
                 }
             }
         }
+        let populatedDarkPixels = try #require(pixelHashes["populated-standalone-dark"])
+        let highValuesDarkPixels = try #require(pixelHashes["high-values-standalone-dark"])
+        #expect(populatedDarkPixels != highValuesDarkPixels)
+        #expect(hashes["populated-standalone-dark"] != hashes["high-values-standalone-dark"])
         #expect(hashes["populated-standalone-light"] != hashes["high-values-standalone-light"])
         #expect(hashes["populated-standalone-light"] != hashes["long-localized-copy-standalone-light"])
-        #expect(hashes["populated-single-platter-simulation-dark"] != hashes["high-values-single-platter-simulation-dark"])
-        #expect(hashes["populated-single-platter-simulation-dark"] != hashes["long-localized-copy-single-platter-simulation-dark"])
+        #expect(hashes["populated-two-platter-simulation-dark"] != hashes["high-values-two-platter-simulation-dark"])
+        #expect(hashes["populated-two-platter-simulation-dark"] != hashes["long-localized-copy-two-platter-simulation-dark"])
         let geometryData = try JSONSerialization.data(withJSONObject: ["platform": "desktop", "children": geometry], options: [.prettyPrinted, .sortedKeys])
         try geometryData.write(to: output.appendingPathComponent("toolbar-header-geometry.json"))
     }
