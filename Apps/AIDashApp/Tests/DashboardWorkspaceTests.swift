@@ -388,9 +388,8 @@ struct DashboardWorkspaceTests {
         let fittingSize = hostingView.fittingSize
         #expect(fittingSize.width.isFinite && fittingSize.width > 0)
         #expect(fittingSize.height.isFinite && fittingSize.height > 0)
-        let size = NSSize(width: ceil(fittingSize.width), height: ceil(fittingSize.height))
-        window.setContentSize(size)
-        hostingView.frame = NSRect(origin: .zero, size: size)
+        window.setContentSize(fittingSize)
+        hostingView.frame = NSRect(origin: .zero, size: fittingSize)
         hostingView.layoutSubtreeIfNeeded()
         let bitmap = try #require(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
         appearance.performAsCurrentDrawingAppearance {
