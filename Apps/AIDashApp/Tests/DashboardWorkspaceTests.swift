@@ -341,8 +341,7 @@ struct DashboardWorkspaceTests {
 
         let configuredOutput = ProcessInfo.processInfo.environment["AIDASH_HEADER_SCREENSHOT_DIR"]
             .map(URL.init(fileURLWithPath:))
-        let output = configuredOutput ?? FileManager.default.temporaryDirectory
-            .appendingPathComponent("aidash-header-flat-toolbar", isDirectory: true)
+        let output = configuredOutput ?? URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-header-flat-toolbar/receipts/screenshots", isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let states: [(String, MenuBarSystemSnapshot?)] = [
             ("populated", sampleSnapshot()),
