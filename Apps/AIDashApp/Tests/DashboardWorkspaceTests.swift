@@ -1,8 +1,10 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import SQLite3
 import SwiftUI
 import Testing
+import DesignKit
 #if AIDASHAPP_LOGIC_TESTS
 @testable import AIDashAppLogic
 #else
@@ -318,6 +320,72 @@ struct DashboardWorkspaceTests {
         ).body
         _ = ActionItemsCardView(store: store).body
         _ = RankingTableCardView(store: store).body
+    }
+
+    @Test("Top toolbar header clusters are single-layer without nested capsule backgrounds or bordered bezels")
+    func topToolbarHeaderClustersAreSingleLayerAndRenderSnapshots() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/Scenes/AIDashMacWorkspaceView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let clusterStart = try #require(source.range(of: "internal var unifiedDateNavigationToolbarCluster"))
+        let clusterEnd = try #require(source.range(of: "    private var sidebarContent", range: clusterStart.upperBound..<source.endIndex))
+        let toolbarSource = String(source[clusterStart.lowerBound..<clusterEnd.lowerBound])
+        #expect(!toolbarSource.contains(".background("))
+        #expect(!toolbarSource.contains("Capsule()"))
+        #expect(!toolbarSource.contains(".buttonStyle(.bordered)"))
+        #expect(toolbarSource.contains(".buttonStyle(.borderless)"))
+        #expect(toolbarSource.contains("Divider()"))
+        #expect(toolbarSource.contains(".padding(.horizontal, 6)"))
+
+        let configuredOutput = ProcessInfo.processInfo.environment["AIDASH_HEADER_SCREENSHOT_DIR"]
+            .map(URL.init(fileURLWithPath:))
+        let output = configuredOutput ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-header-flat-toolbar", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let states: [(String, MenuBarSystemSnapshot?)] = [
+            ("populated", sampleSnapshot()),
+            ("no-snapshot", nil),
+            ("high-values", sampleSnapshot()),
+            ("long-localized-copy", sampleSnapshot())
+        ]
+        var geometry: [[String: Any]] = []
+        for (state, snapshot) in states {
+            let view = snapshot.map { AIDashMacWorkspaceView(store: DashboardWorkspaceStore(snapshot: $0)) }
+                ?? AIDashMacWorkspaceView(store: DashboardWorkspaceStore(deferInitialRefresh: true))
+            for scheme in [ColorScheme.light, ColorScheme.dark] {
+                let appearance = scheme == .dark ? "dark" : "light"
+                let standalone = view.toolbarHeaderComparisonPreview(snapshot: snapshot)
+                    .padding(12)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.theme, Theme(isDark: scheme == .dark))
+                let platter = view.toolbarHeaderComparisonPreview(snapshot: snapshot)
+                    .padding(12)
+                    .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
+                    .padding(12)
+                    .background(Color(nsColor: .underPageBackgroundColor))
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.theme, Theme(isDark: scheme == .dark))
+                for (kind, renderable) in [("standalone", AnyView(standalone)), ("single-platter-simulation", AnyView(platter))] {
+                    let renderer = ImageRenderer(content: renderable)
+                    renderer.scale = 2
+                    let image = try #require(renderer.nsImage)
+                    let tiff = try #require(image.tiffRepresentation)
+                    let bitmap = try #require(NSBitmapImageRep(data: tiff))
+                    let png = try #require(bitmap.representation(using: .png, properties: [:]))
+                    let file = output.appendingPathComponent("toolbar-header-\(state)-\(kind)-\(appearance).png")
+                    try png.write(to: file)
+                    #expect(png.isEmpty == false)
+                    #expect(bitmap.pixelsWide > 0)
+                    #expect(bitmap.pixelsHigh > 0)
+                    geometry.append(["state": state, "kind": kind, "appearance": appearance, "width": bitmap.pixelsWide, "height": bitmap.pixelsHigh])
+                }
+            }
+        }
+        let geometryData = try JSONSerialization.data(withJSONObject: ["platform": "desktop", "children": geometry], options: [.prettyPrinted, .sortedKeys])
+        try geometryData.write(to: output.appendingPathComponent("toolbar-header-geometry.json"))
     }
 
     @Test("shared workspace store initializes without dispatch_once re-entrancy trap")
