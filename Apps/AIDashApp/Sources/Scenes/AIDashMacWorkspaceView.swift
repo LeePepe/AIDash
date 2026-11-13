@@ -1612,7 +1612,7 @@ public struct AIDashMacWorkspaceView: View {
             .disabled(!store.canSelectNextDate)
 
             Divider()
-                .frame(height: 14)
+                .frame(height: 12)
 
             Button(DashboardL10n.tr("dashboard.toolbar.today", "Today")) {
                 store.selectToday()
@@ -1661,6 +1661,7 @@ public struct AIDashMacWorkspaceView: View {
             }
         }
         .buttonStyle(.borderless)
+        .accessibilityIdentifier("toolbar.hardwareCompanion")
         .help(
             DashboardL10n.format(
                 "dashboard.telemetry.load_avg_format",

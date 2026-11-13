@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import CryptoKit
 import Foundation
 import SQLite3
 import SwiftUI
@@ -107,6 +108,44 @@ struct DashboardWorkspaceTests {
                     )
                 ]
             )
+        )
+    }
+
+    private func toolbarSnapshot(
+        cpuUsage: Double,
+        memoryUsedBytes: UInt64,
+        memoryTotalBytes: UInt64,
+        pressure: MemoryPressureLevel
+    ) -> MenuBarSystemSnapshot {
+        let base = sampleSnapshot()
+        let cpu = CPUStatusSnapshot(
+            usage: cpuUsage,
+            user: cpuUsage * 0.6,
+            system: cpuUsage * 0.4,
+            idle: max(0, 1 - cpuUsage),
+            coreCount: base.cpu.coreCount,
+            loadOneMinute: 12.4,
+            loadFiveMinutes: 10.1,
+            loadFifteenMinutes: 8.7
+        )
+        let memory = MemoryStatusSnapshot(
+            usedBytes: memoryUsedBytes,
+            totalBytes: memoryTotalBytes,
+            freeBytes: memoryTotalBytes - memoryUsedBytes,
+            wiredBytes: 8 * 1_073_741_824,
+            compressedBytes: 4 * 1_073_741_824,
+            pressure: pressure
+        )
+        return MenuBarSystemSnapshot(
+            capturedAt: base.capturedAt,
+            machine: base.machine,
+            cpu: cpu,
+            memory: memory,
+            network: base.network,
+            storage: base.storage,
+            tokenUsage: base.tokenUsage,
+            attention: base.attention,
+            gateway: base.gateway
         )
     }
 
@@ -329,38 +368,64 @@ struct DashboardWorkspaceTests {
             .deletingLastPathComponent()
             .appendingPathComponent("Sources/Scenes/AIDashMacWorkspaceView.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        let clusterStart = try #require(source.range(of: "internal var unifiedDateNavigationToolbarCluster"))
+        let clusterStart = try #require(source.range(of: "internal func rightToolbarCluster(snapshot:"))
         let clusterEnd = try #require(source.range(of: "    private var sidebarContent", range: clusterStart.upperBound..<source.endIndex))
         let toolbarSource = String(source[clusterStart.lowerBound..<clusterEnd.lowerBound])
         #expect(!toolbarSource.contains(".background("))
         #expect(!toolbarSource.contains("Capsule()"))
+        #expect(!toolbarSource.contains(".overlay("))
+        #expect(!toolbarSource.contains(".shadow("))
         #expect(!toolbarSource.contains(".buttonStyle(.bordered)"))
+        #expect(!toolbarSource.contains(".buttonStyle(.plain)"))
         #expect(toolbarSource.contains(".buttonStyle(.borderless)"))
+        #expect(toolbarSource.contains("toolbar.hardwareCompanion"))
         #expect(toolbarSource.contains("Divider()"))
         #expect(toolbarSource.contains(".padding(.horizontal, 6)"))
 
-        let configuredOutput = ProcessInfo.processInfo.environment["AIDASH_HEADER_SCREENSHOT_DIR"]
-            .map(URL.init(fileURLWithPath:))
-        let output = configuredOutput ?? URL(fileURLWithPath: "/Users/lee/Development/handoff/aidash-header-flat-toolbar/receipts/screenshots", isDirectory: true)
+        let environment = ProcessInfo.processInfo.environment
+        let configuredPath: String? = [
+            environment["AIDASH_HEADER_SCREENSHOT_DIR"],
+            environment["TEST_RUNNER_AIDASH_HEADER_SCREENSHOT_DIR"]
+        ].compactMap { value in
+            guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return value
+        }.first
+        let ownsOutput = configuredPath == nil
+        let output = configuredPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("aidash-header-flat-toolbar-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if ownsOutput { try? FileManager.default.removeItem(at: output) }
+        }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        let states: [(String, MenuBarSystemSnapshot?)] = [
-            ("populated", sampleSnapshot()),
-            ("no-snapshot", nil),
-            ("high-values", sampleSnapshot()),
-            ("long-localized-copy", sampleSnapshot())
+
+        let states: [(name: String, snapshot: MenuBarSystemSnapshot?, date: String, cpu: String, memory: String)] = [
+            ("populated", sampleSnapshot(), DashboardWorkspaceStore.todayDateString(), "34%", "18.0 / 32.0 GB"),
+            ("no-snapshot", nil, DashboardWorkspaceStore.todayDateString(), "n/a", "n/a"),
+            ("high-values", toolbarSnapshot(cpuUsage: 0.98, memoryUsedBytes: 62 * 1_073_741_824, memoryTotalBytes: 64 * 1_073_741_824, pressure: .warning), DashboardWorkspaceStore.todayDateString(), "98%", "62.0 / 64.0 GB"),
+            ("long-localized-copy", sampleSnapshot(), "2026-11-11 · 周三 · 早间简报", "34%", "18.0 / 32.0 GB")
         ]
         var geometry: [[String: Any]] = []
-        for (state, snapshot) in states {
-            let view = snapshot.map { AIDashMacWorkspaceView(store: DashboardWorkspaceStore(snapshot: $0)) }
-                ?? AIDashMacWorkspaceView(store: DashboardWorkspaceStore(deferInitialRefresh: true))
+        var hashes: [String: String] = [:]
+        for state in states {
+            let store: DashboardWorkspaceStore
+            if let snapshot = state.snapshot {
+                store = DashboardWorkspaceStore(snapshot: snapshot)
+                if state.name == "long-localized-copy" {
+                    store.availableDates = [state.date]
+                    store.selectedDateString = state.date
+                }
+            } else {
+                store = DashboardWorkspaceStore(deferInitialRefresh: true)
+            }
+            let view = AIDashMacWorkspaceView(store: store)
             for scheme in [ColorScheme.light, ColorScheme.dark] {
                 let appearance = scheme == .dark ? "dark" : "light"
-                let standalone = view.toolbarHeaderComparisonPreview(snapshot: snapshot)
+                let standalone = view.toolbarHeaderComparisonPreview(snapshot: state.snapshot)
                     .padding(12)
                     .background(Color(nsColor: .windowBackgroundColor))
                     .environment(\.colorScheme, scheme)
                     .environment(\.theme, Theme(isDark: scheme == .dark))
-                let platter = view.toolbarHeaderComparisonPreview(snapshot: snapshot)
+                let platter = view.toolbarHeaderComparisonPreview(snapshot: state.snapshot)
                     .padding(12)
                     .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
                     .padding(12)
@@ -374,15 +439,22 @@ struct DashboardWorkspaceTests {
                     let tiff = try #require(image.tiffRepresentation)
                     let bitmap = try #require(NSBitmapImageRep(data: tiff))
                     let png = try #require(bitmap.representation(using: .png, properties: [:]))
-                    let file = output.appendingPathComponent("toolbar-header-\(state)-\(kind)-\(appearance).png")
+                    let digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
+                    let key = "\(state.name)-\(kind)-\(appearance)"
+                    hashes[key] = digest
+                    let file = output.appendingPathComponent("toolbar-header-\(key).png")
                     try png.write(to: file)
                     #expect(png.isEmpty == false)
                     #expect(bitmap.pixelsWide > 0)
                     #expect(bitmap.pixelsHigh > 0)
-                    geometry.append(["state": state, "kind": kind, "appearance": appearance, "width": bitmap.pixelsWide, "height": bitmap.pixelsHigh])
+                    geometry.append(["state": state.name, "kind": kind, "appearance": appearance, "width": bitmap.pixelsWide, "height": bitmap.pixelsHigh, "cpu": state.cpu, "memory": state.memory, "date": state.date, "sha256": digest])
                 }
             }
         }
+        #expect(hashes["populated-standalone-light"] != hashes["high-values-standalone-light"])
+        #expect(hashes["populated-standalone-light"] != hashes["long-localized-copy-standalone-light"])
+        #expect(hashes["populated-single-platter-simulation-dark"] != hashes["high-values-single-platter-simulation-dark"])
+        #expect(hashes["populated-single-platter-simulation-dark"] != hashes["long-localized-copy-single-platter-simulation-dark"])
         let geometryData = try JSONSerialization.data(withJSONObject: ["platform": "desktop", "children": geometry], options: [.prettyPrinted, .sortedKeys])
         try geometryData.write(to: output.appendingPathComponent("toolbar-header-geometry.json"))
     }
