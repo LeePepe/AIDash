@@ -18,6 +18,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 import config
 
@@ -99,6 +100,112 @@ def test_digest_runner_exports_real_full_report_and_disjoint_daily_grains(tmp_pa
     assert state["stages"][2]["status"] == "ok"
     assert state["stages"][2]["sourceAsOf"] == report["source_as_of"]
     assert not list(job_dir.glob(".skills-roi-report.*"))
+
+
+def _run_job_wrapper(
+    script_name: str,
+    tmp_path: Path,
+    fixture_body: str,
+    *,
+    exit_code: int = 0,
+    state_path: Optional[Path] = None,
+):
+    script = Path(__file__).resolve().parent.parent / "scripts" / script_name
+    fixture = tmp_path / "fixture.py"
+    fixture.write_text(fixture_body, encoding="utf-8")
+    state = state_path or (tmp_path / "state.json")
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path / "home"),
+        "AIDASH_JOB_STATE_FILE": str(state),
+        "PATH": "/usr/bin:/bin",
+        "FIXTURE_EXIT": str(exit_code),
+        "CALLS_FILE": str(tmp_path / "calls.txt"),
+    }
+    if script_name == "daily_learning_run.sh":
+        env["DIGEST_VAULT_SCRIPT"] = str(fixture)
+    else:
+        env["LINEAR_BOT_BRIDGE_SCRIPT"] = str(fixture)
+    proc = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=30)
+    payload = json.loads(state.read_text(encoding="utf-8")) if state.is_file() else None
+    return proc, payload
+
+
+def test_daily_learning_wrapper_falls_back_when_linear_option_is_unsupported(tmp_path: Path):
+    proc, state = _run_job_wrapper(
+        "daily_learning_run.sh",
+        tmp_path,
+        """import sys
+if '--propose-linear' in sys.argv:
+    print('error: unrecognized arguments: --propose-linear', file=sys.stderr)
+    raise SystemExit(2)
+print('fallback proposal complete')
+""",
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert state["id"] == state["jobID"] == "daily-learning"
+    assert state["lastResult"] == "succeeded"
+    assert "AIDash-only; Linear unsupported" in state["overviewMd"]
+    assert "fallback proposal complete" in state["overviewMd"]
+
+
+def test_daily_learning_does_not_fallback_for_unrelated_failure(tmp_path: Path):
+    proc, state = _run_job_wrapper(
+        "daily_learning_run.sh",
+        tmp_path,
+        """from pathlib import Path
+import os, sys
+count = Path(os.environ['CALLS_FILE'])
+count.write_text(str(int(count.read_text()) + 1) if count.exists() else '1')
+print('unknown option: --other-flag', file=sys.stderr)
+raise SystemExit(2)
+""",
+    )
+    assert proc.returncode == 2
+    assert state["lastResult"] == "failed"
+    assert (tmp_path / "calls.txt").read_text() == "1"
+
+
+def test_linear_bot_bridge_wrapper_preserves_nonzero_exit_and_state(tmp_path: Path):
+    proc, state = _run_job_wrapper(
+        "linear_bot_bridge_run.sh",
+        tmp_path,
+        """import os
+print('bridge failed')
+raise SystemExit(int(os.environ['FIXTURE_EXIT']))
+""",
+        exit_code=7,
+    )
+    assert proc.returncode == 7
+    assert state["id"] == state["jobID"] == "linear-bot-bridge"
+    assert state["lastResult"] == "failed"
+    assert "bridge failed" in state["overviewMd"]
+
+
+def test_linear_bot_bridge_preserves_pretty_structured_output(tmp_path: Path):
+    proc, state = _run_job_wrapper(
+        "linear_bot_bridge_run.sh",
+        tmp_path,
+        """import json
+print(json.dumps({'scanned': 2, 'triggered': 1}, indent=2))
+""",
+    )
+    assert proc.returncode == 0
+    assert '"scanned": 2' in state["overviewMd"]
+    assert '"triggered": 1' in state["overviewMd"]
+
+
+def test_wrapper_reports_state_write_failure_and_cleans_temp(tmp_path: Path):
+    state_target = tmp_path / "state-target"
+    state_target.mkdir()
+    proc, _ = _run_job_wrapper(
+        "linear_bot_bridge_run.sh",
+        tmp_path,
+        "print('upstream succeeded')\n",
+        state_path=state_target,
+    )
+    assert proc.returncode != 0
+    assert not list(tmp_path.glob(".state-target.*.tmp"))
 
 
 def test_digest_runner_proposes_three_learning_topics_to_linear_and_aidash(tmp_path):
