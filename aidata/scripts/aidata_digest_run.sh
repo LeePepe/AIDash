@@ -101,12 +101,12 @@ fi
 STAGE3_DUR=$(( $(date +%s) - STAGE3_START ))
 STAGE3_STATUS=$([ "$STAGE3_RC" -eq 0 ] && echo "ok" || echo "warning")
 
-# Stage 4: Daily Learning Topic Candidate Discovery (--no-materialize)
+# Stage 4: Three Daily Learning Topic Candidates → Linear & AIDash (--no-materialize)
 STAGE4_START="$(date +%s)"
 STAGE4_RC=0
 DIGEST_VAULT_SCRIPT="${DIGEST_VAULT_SCRIPT:-$HOME/Development/user-skills/skills/knowledge-digest/scripts/digest_vault.py}"
 if [ -f "$DIGEST_VAULT_SCRIPT" ]; then
-  python3 "$DIGEST_VAULT_SCRIPT" discover-topics --top 1 --propose-aidash --no-materialize >/dev/null \
+  python3 "$DIGEST_VAULT_SCRIPT" discover-topics --top 3 --propose-aidash --propose-linear --no-materialize >/dev/null \
     || { echo "[aidata-digest]   ! discover-topics warning"; STAGE4_RC=1; }
 else
   echo "[aidata-digest]   ! digest vault missing"
@@ -213,7 +213,7 @@ stages = [
         "exitCode": 0 if s4_st == "ok" else 1,
         "durationSec": int(s4_dur),
         "sourceAsOf": report_date,
-        "detail": "每日 1 题候选",
+        "detail": "每日 3 题候选 → Linear & AIDash",
     },
     {
         "id": "digest_push",

@@ -64,7 +64,11 @@ def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None, 
     if producer_present:
         engine.write_text('import os, sys\nfrom pathlib import Path\nif sys.argv[1] == "skill-roi":\n    print(Path(os.environ["FIXTURE_REPORT"]).read_text())\n    raise SystemExit(int(os.environ["FIXTURE_PRODUCER_EXIT"]))\n')
     vault = root / "vault.py"
-    vault.write_text("# Discovery fixture; no materialization or publication\n")
+    vault.write_text(
+        'import json, os, sys\nfrom pathlib import Path\n'
+        'args_file = Path(os.environ["AIDASH_JOB_OUTPUT_DIR"]) / "learning-topics-args.json"\n'
+        'args_file.write_text(json.dumps(sys.argv[1:]))\n'
+    )
     state = root / "job" / "state.json"
     state.parent.mkdir()
     state.write_text(json.dumps({"jobID": "aidata-digest", "schedulerField": "preserve-me"}))
@@ -95,6 +99,18 @@ def test_digest_runner_exports_real_full_report_and_disjoint_daily_grains(tmp_pa
     assert state["stages"][2]["status"] == "ok"
     assert state["stages"][2]["sourceAsOf"] == report["source_as_of"]
     assert not list(job_dir.glob(".skills-roi-report.*"))
+
+
+def test_digest_runner_proposes_three_learning_topics_to_linear_and_aidash(tmp_path):
+    proc, _, state, job_dir = _run_isolated_digest_chain(tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads((job_dir / "learning-topics-args.json").read_text()) == [
+        "discover-topics", "--top", "3", "--propose-aidash", "--propose-linear", "--no-materialize",
+    ]
+    learning_stage = state["stages"][3]
+    assert learning_stage["id"] == "learning_topics"
+    assert learning_stage["status"] == "ok"
+    assert learning_stage["detail"] == "每日 3 题候选 → Linear & AIDash"
 
 
 def test_digest_runner_failed_producer_preserves_report_but_never_claims_healthy(tmp_path):
