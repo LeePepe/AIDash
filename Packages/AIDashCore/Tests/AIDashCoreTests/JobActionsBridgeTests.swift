@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Job actions wire validation")
 struct JobActionsBridgeTests {
-    private let jobs: Set<String> = ["my-pr-supervisor", "pr-auto-review", "aidata-digest"]
+    private let jobs: Set<String> = ["my-pr-supervisor", "pr-auto-review", "aidata-digest", "daily-learning", "linear-bot-bridge"]
     private func action(createdAt: Date? = Date(timeIntervalSince1970: 123.25)) -> JobActionsAction {
         JobActionsAction(id: "sample", jobID: "my-pr-supervisor", createdAt: createdAt, title: "Synthetic",
                          descriptionMd: "Safe text", controls: [

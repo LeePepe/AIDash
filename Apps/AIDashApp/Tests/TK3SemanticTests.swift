@@ -423,6 +423,9 @@ struct TK3SemanticTests {
         let timestampOnly = ScheduledJobStageReceipt(id: "collect", title: "Collect", sourceAsOf: "2026-11-11")
         #expect(!timestampOnly.isKnown)
         #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .aidataDigest, lastResult: .succeeded), launchdStatus: nil) == .noState)
+        #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .dailyLearning, lastResult: .succeeded), launchdStatus: nil) == .healthy)
+        let failedNonDigest = ScheduledJobStageReceipt(id: "run", title: "Run", status: "failed", exitCode: 1)
+        #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .linearBotBridge, lastResult: .succeeded, stages: [failedNonDigest]), launchdStatus: nil) == .failed)
         let ids = ["collect", "normalize_merge", "retro_roi", "learning_topics", "digest_push"]
         let passed = ids.map { ScheduledJobStageReceipt(id: $0, title: $0, status: "passed", exitCode: 0) }
         #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .aidataDigest, lastResult: .succeeded, stages: passed), launchdStatus: nil) == .healthy)

@@ -255,7 +255,13 @@ def _default_linear_comment_runner(issue_id: str, body: str) -> int:
 
 _JOB_ACTION_TIA_RE = re.compile(r"^(?:linear-)?(TIA-\d+)$", re.IGNORECASE)
 _JOB_ACTION_LOCAL_RE = re.compile(r"^(?:local-)?(LOCAL-\d+)$", re.IGNORECASE)
-_REGISTERED_PULSE_JOBS = frozenset({"my-pr-supervisor", "pr-auto-review", "aidata-digest"})
+_REGISTERED_PULSE_JOBS = frozenset({
+    "my-pr-supervisor",
+    "pr-auto-review",
+    "aidata-digest",
+    "daily-learning",
+    "linear-bot-bridge",
+})
 _AIDATA_ACTION_OWNING_JOB = "aidata-digest"
 
 

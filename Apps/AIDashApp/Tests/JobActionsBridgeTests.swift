@@ -237,7 +237,7 @@ struct JobActionsAppBridgeTests {
             return Data(repeating: 32, count: limit)
         }
         #expect(snapshot.actions.count == 1)
-        #expect(snapshot.diagnostics.map(\.code) == ["source-missing", "source-oversized"])
+        #expect(snapshot.diagnostics.map(\.code) == ["source-missing", "source-oversized", "source-oversized", "source-oversized"])
     }
 
     @Test("Large JSONL retains protected v2 actions beyond the legacy line and byte limits")
