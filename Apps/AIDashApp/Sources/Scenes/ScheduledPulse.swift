@@ -5,6 +5,8 @@ public enum ScheduledPulseJobID: String, CaseIterable, Codable, Sendable, Equata
     case myPRSupervisor = "my-pr-supervisor"
     case prAutoReview = "pr-auto-review"
     case aidataDigest = "aidata-digest"
+    case dailyLearning = "daily-learning"
+    case linearBotBridge = "linear-bot-bridge"
 
     public var id: String { rawValue }
 }
@@ -79,12 +81,21 @@ public struct ScheduledJobDefinition: Sendable, Equatable, Identifiable {
             return homeURL.appendingPathComponent("Development/handoff/my-pr-supervisor/precheck.py").path
         case .aidataDigest:
             return homeURL.appendingPathComponent("Development/AIDash/aidata/scripts/aidata_digest_run.sh").path
+        case .dailyLearning:
+            return homeURL.appendingPathComponent("Development/AIDash/aidata/scripts/daily_learning_run.sh").path
+        case .linearBotBridge:
+            return homeURL.appendingPathComponent("Development/AIDash/aidata/scripts/linear_bot_bridge_run.sh").path
         }
     }
 
     public var interpreterPath: String? {
         guard isLive else { return nil }
-        return id == .aidataDigest ? "/bin/bash" : "/usr/bin/python3"
+        switch id {
+        case .aidataDigest, .dailyLearning, .linearBotBridge:
+            return "/bin/bash"
+        case .myPRSupervisor, .prAutoReview:
+            return "/usr/bin/python3"
+        }
     }
 
     public func entrypointPath(homeURL: URL) -> String? {
@@ -106,10 +117,14 @@ public enum ScheduledPulseRegistry {
         let myPR = homeURL.appendingPathComponent("Development/handoff/my-pr-supervisor/precheck.py").path
         let autoReview = homeURL.appendingPathComponent("Development/handoff/pr-auto-review/precheck.py").path
         let digest = homeURL.appendingPathComponent("Development/AIDash/aidata/scripts/aidata_digest_run.sh").path
+        let dailyLearning = homeURL.appendingPathComponent("Development/AIDash/aidata/scripts/daily_learning_run.sh").path
+        let linearBotBridge = homeURL.appendingPathComponent("Development/AIDash/aidata/scripts/linear_bot_bridge_run.sh").path
         return [
             ScheduledJobDefinition(id: .myPRSupervisor, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.my_pr_supervisor", "我的 PR"), program: "~/Development/handoff/my-pr-supervisor/precheck.py", cadence: .interval(seconds: 300), isLive: fileExists(myPR)),
             ScheduledJobDefinition(id: .prAutoReview, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.pr_auto_review", "特定人 PR"), program: "~/Development/handoff/pr-auto-review/precheck.py", cadence: .interval(seconds: 300), isLive: fileExists(autoReview)),
-            ScheduledJobDefinition(id: .aidataDigest, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.aidata_digest", "每日简报"), program: "aidata/scripts/aidata_digest_run.sh", cadence: .daily(hour: 4, minute: 0, timeZoneIdentifier: "Asia/Shanghai"), isLive: fileExists(digest))
+            ScheduledJobDefinition(id: .aidataDigest, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.aidata_digest", "每日简报"), program: "aidata/scripts/aidata_digest_run.sh", cadence: .daily(hour: 4, minute: 0, timeZoneIdentifier: "Asia/Shanghai"), isLive: fileExists(digest)),
+            ScheduledJobDefinition(id: .dailyLearning, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.daily_learning", "每日学习推荐"), program: "aidata/scripts/daily_learning_run.sh", cadence: .daily(hour: 4, minute: 15, timeZoneIdentifier: "Asia/Shanghai"), isLive: fileExists(dailyLearning)),
+            ScheduledJobDefinition(id: .linearBotBridge, displayName: DashboardL10n.tr("dashboard.scheduled_pulse.job.linear_bot_bridge", "Linear @bot 桥接"), program: "aidata/scripts/linear_bot_bridge_run.sh", cadence: .interval(seconds: 60), isLive: fileExists(linearBotBridge))
         ]
     }
 

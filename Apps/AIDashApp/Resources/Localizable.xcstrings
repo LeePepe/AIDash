@@ -4612,6 +4612,22 @@
         }
       }
     },
+    "dashboard.scheduled_pulse.job.daily_learning": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Daily Learning"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "每日学习推荐"}}
+      }
+    },
+    "dashboard.scheduled_pulse.job.linear_bot_bridge": {
+      "comment": "Scheduled Pulse UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Linear Bot Bridge"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "Linear @bot 桥接"}}
+      }
+    },
     "dashboard.scheduled_pulse.job.my_pr_supervisor": {
       "comment": "Scheduled Pulse UI copy.",
       "extractionState": "manual",

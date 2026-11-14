@@ -435,7 +435,11 @@ public enum ScheduledJobFrameworkLogic {
         }
         if state?.lastResult == .succeeded {
             if let launchdStatus, let code = launchdStatus.lastExitCode, code != 0 { return .partial }
-            guard stages.count == 5, stages.allSatisfy(\.isSuccess) else { return .noState }
+            if state?.id == .aidataDigest {
+                guard stages.count == 5, stages.allSatisfy(\.isSuccess) else { return .noState }
+            } else if !stages.isEmpty {
+                guard stages.allSatisfy(\.isSuccess) else { return .noState }
+            }
             return .healthy
         }
         if let launchdStatus, launchdStatus.health == .critical || (launchdStatus.lastExitCode ?? 0) != 0 {

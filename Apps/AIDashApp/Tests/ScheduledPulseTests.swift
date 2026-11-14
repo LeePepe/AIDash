@@ -12,18 +12,20 @@ import Testing
 struct ScheduledPulseTests {
     private var fixtureJobs: [ScheduledJobDefinition] {
         ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-scheduled-pulse"), fileExists: { path in
-            path.hasSuffix("aidata_digest_run.sh")
+            path.hasSuffix("aidata_digest_run.sh") || path.hasSuffix("daily_learning_run.sh") || path.hasSuffix("linear_bot_bridge_run.sh")
         })
     }
 
     @Test("registry reserves unavailable external prechecks")
     func registryShape() {
-        #expect(fixtureJobs.map(\.id) == [.myPRSupervisor, .prAutoReview, .aidataDigest])
-        #expect(fixtureJobs.contains { $0.id == .aidataDigest && $0.isLive })
+        #expect(fixtureJobs.map(\.id) == [.myPRSupervisor, .prAutoReview, .aidataDigest, .dailyLearning, .linearBotBridge])
+        #expect(fixtureJobs.filter(\.isLive).map(\.id) == [.aidataDigest, .dailyLearning, .linearBotBridge])
         #expect(fixtureJobs.filter { !$0.isLive }.map(\.id) == [.myPRSupervisor, .prAutoReview])
         #expect(fixtureJobs.first { $0.id == .myPRSupervisor }?.displayName == "我的 PR")
         #expect(fixtureJobs.first { $0.id == .prAutoReview }?.displayName == "特定人 PR")
         #expect(fixtureJobs.first { $0.id == .aidataDigest }?.displayName == "每日简报")
+        #expect(fixtureJobs.first { $0.id == .dailyLearning }?.displayName == "每日学习推荐")
+        #expect(fixtureJobs.first { $0.id == .linearBotBridge }?.displayName == "Linear @bot 桥接")
     }
 
     @Test("live plists use absolute programs and interpreter ProgramArguments")
@@ -32,7 +34,9 @@ struct ScheduledPulseTests {
         let expected: [(ScheduledPulseJobID, String, String)] = [
             (.myPRSupervisor, "/usr/bin/python3", "/Users/tester/Development/handoff/my-pr-supervisor/precheck.py"),
             (.prAutoReview, "/usr/bin/python3", "/Users/tester/Development/handoff/pr-auto-review/precheck.py"),
-            (.aidataDigest, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/aidata_digest_run.sh")
+            (.aidataDigest, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/aidata_digest_run.sh"),
+            (.dailyLearning, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/daily_learning_run.sh"),
+            (.linearBotBridge, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/linear_bot_bridge_run.sh")
         ]
         let wrapper = "/Users/tester/Development/AIDash/scripts/scheduled-job-entrypoint.sh"
         let definitions = ScheduledPulseRegistry.jobs(homeURL: home, fileExists: { _ in true })
@@ -43,11 +47,11 @@ struct ScheduledPulseTests {
             #expect(plist["Label"] as? String == definition.launchAgentLabel)
             #expect(plist["Program"] as? String == "/bin/zsh")
             #expect(plist["ProgramArguments"] as? [String] == ["/bin/zsh", wrapper, id.rawValue, interpreter, program])
-            if id == .aidataDigest {
+            if id == .aidataDigest || id == .dailyLearning {
                 #expect(plist["StartCalendarInterval"] as? [String: Any] != nil)
                 #expect((plist["StartCalendarInterval"] as? [String: Any])?["TimeZone"] == nil)
             } else {
-                #expect(plist["StartInterval"] as? Int == 300)
+                #expect(plist["StartInterval"] as? Int == (id == .linearBotBridge ? 60 : 300))
             }
         }
     }
@@ -251,9 +255,9 @@ struct ScheduledPulseTests {
             },
             homeURL: home
         )
-        #expect(reader.entries.count == 3)
+        #expect(reader.entries.count == 5)
         #expect(reader.overviewEntries.first?.id == ScheduledPulseJobID.prAutoReview)
-        #expect(reader.overviewEntries.count == 3)
+        #expect(reader.overviewEntries.count == 5)
         #expect(reader.entries.first(where: { $0.id == .prAutoReview })?.semanticState == .failed)
         #expect(reader.unacknowledgedActions.count == 1)
         let control = try #require(reader.unacknowledgedActions.first?.controls.last)
@@ -392,7 +396,7 @@ struct ScheduledPulseTests {
         )
         _ = view.body
         #expect(ScheduledJobFrameworkLogic.successStripText(for: snapshot).contains("特定人 PR 失败"))
-        #expect(snapshot.entries.count == 3)
+        #expect(snapshot.entries.count == 5)
         view.onOpenScheduledPulse()
         #expect(opens == 1)
     }
