@@ -520,7 +520,13 @@ _ISSUE_TITLE_PREFIX_RE = re.compile(
 )
 _PROPOSAL_TITLE_PREFIX_RE = re.compile(r"^待决策（[^）]+）：\s*(.+)$")
 _JOBS_SUBPATH = Path("Library") / "Application Support" / "AIDash" / "jobs"
-_DEFAULT_REGISTERED_JOB_IDS = ("my-pr-supervisor", "pr-auto-review", "aidata-digest")
+_DEFAULT_REGISTERED_JOB_IDS = (
+    "my-pr-supervisor",
+    "pr-auto-review",
+    "aidata-digest",
+    "daily-learning",
+    "linear-bot-bridge",
+)
 _PRIORITY_TO_P = {
     "high": "P0",
     "p0": "P0",

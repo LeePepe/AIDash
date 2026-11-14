@@ -232,8 +232,22 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
         personal_only=False,
     )
     assert exported is not None and exported.is_file()
-    assert (jobs_root / "my-pr-supervisor" / "actions.jsonl").is_file()
-    assert (jobs_root / "pr-auto-review" / "actions.jsonl").is_file()
+    for job_id in (
+        "my-pr-supervisor",
+        "pr-auto-review",
+        "aidata-digest",
+        "daily-learning",
+        "linear-bot-bridge",
+    ):
+        assert (jobs_root / job_id / "actions.jsonl").is_file()
+
+    for job_id in ("daily-learning", "linear-bot-bridge"):
+        assert event_bridge._parse_job_action_receipt({
+            "action": "acknowledgeJobAction",
+            "cardType": "scheduledPulse",
+            "cardId": f"scheduled-pulse/{job_id}",
+            "itemRef": f'{job_id}:sample|[{json.dumps({"controlID": "confirm", "value": "Done"})}]',
+        }) == (job_id, "sample", {"confirm": "Done"})
 
     lines = [
         json.loads(line)
