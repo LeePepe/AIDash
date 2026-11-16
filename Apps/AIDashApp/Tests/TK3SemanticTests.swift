@@ -615,6 +615,149 @@ struct TK3SnapshotRenderTests {
         try JSONSerialization.data(withJSONObject: geometryDocument, options: [.prettyPrinted]).write(to: receipts.appendingPathComponent("TK3-geometry.json"))
     }
 
+    @Test("uses a fixed desktop viewport, collision gate, and job-specific pulse stages")
+    func fixedViewportPulseLayoutAndDynamicSwitching() throws {
+        let store = makeStore(state: "populated", skillsSummary: nil)
+        let viewport = CGSize(width: 1280, height: 800)
+        let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"] ?? NSTemporaryDirectory(), isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let pulseHost = makePulseHostingView(store: store, viewport: viewport, scheme: .dark)
+        let controls = visibleLeafControls(in: pulseHost.hostingView)
+        #expect(!controls.contains { $0.isNestedButton })
+        for (index, lhs) in controls.enumerated() {
+            for rhs in controls.dropFirst(index + 1) {
+                let intersection = lhs.frame.intersection(rhs.frame)
+                let area = max(0, intersection.width) * max(0, intersection.height)
+                #expect(area <= 2.0, "leaf controls overlap by \(area)pt²: \(lhs.label) / \(rhs.label)")
+            }
+        }
+        let maxY = max(controls.map(\.frame.maxY).max() ?? 0, pulseHost.hostingView.fittingSize.height)
+        #expect(maxY >= viewport.height * 0.60)
+
+        let renderer = ImageRenderer(content: AnyView(
+            ScheduledPulsePageView(store: store, registerJobs: {})
+                .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
+                .environment(\.colorScheme, .dark)
+                .environment(\.theme, Theme(isDark: true))
+        ))
+        renderer.scale = 1
+        let image = try #require(renderer.nsImage)
+        let tiff = try #require(image.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: tiff))
+        #expect(rep.pixelsWide == Int(viewport.width))
+        #expect(rep.pixelsHigh == Int(viewport.height))
+        if let png = rep.representation(using: .png, properties: [:]) {
+            try png.write(to: output.appendingPathComponent("pulse-fixed-1280x800-dark.png"))
+        }
+
+        let expectedStageLabels: [ScheduledPulseJobID: (String, String)] = [
+            .myPRSupervisor: ("PR scan", "PR 巡检"),
+            .prAutoReview: ("Queue precheck", "队列预检"),
+            .aidataDigest: ("Personal source collection", "个人源采集"),
+            .dailyLearning: ("Candidate scan", "候选扫描"),
+            .linearBotBridge: ("Message polling", "消息轮询")
+        ]
+        let digestLabels = Set(ScheduledPulseStageCatalog.labels(for: .aidataDigest))
+        let prDefinition = try #require(store.scheduledJobFrameworkSnapshot.entries.first(where: { $0.id == .prAutoReview })?.definition)
+        let sparseReceiptEntry = ScheduledJobFrameworkEntry(
+            definition: prDefinition,
+            state: ScheduledJobState(
+                id: .prAutoReview,
+                lastResult: .failed,
+                stages: [ScheduledJobStageReceipt(id: "dual_review", title: "dual_review", status: "failed", exitCode: 1)]
+            )
+        )
+        let sparseStages = ScheduledPulseStageCatalog.stages(for: sparseReceiptEntry)
+        #expect(sparseStages[2].semanticState == .failed)
+        #expect(sparseStages[0].semanticState == .unknown)
+        for jobID in ScheduledPulseJobID.allCases {
+            store.selectedFrameworkJobID = jobID
+            let view = makePulseHostingView(store: store, viewport: viewport, scheme: .dark)
+            let labels = expectedStageLabels[jobID] ?? ("", "")
+            let renderedLabels = ScheduledPulseStageCatalog.labels(for: jobID)
+            #expect(renderedLabels.count == 5)
+            #expect(renderedLabels.contains { $0.contains(labels.0) || $0.contains(labels.1) }, "missing stage label for \(jobID.rawValue)")
+            #expect(view.hostingView.fittingSize.height >= viewport.height * 0.60)
+            #expect(jobID.rawValue == store.selectedFrameworkJobID?.rawValue)
+            if jobID == .prAutoReview {
+                #expect(!renderedLabels.contains(where: digestLabels.contains))
+            }
+        }
+    }
+
+    private final class PulseHost {
+        let window: NSWindow
+        let hostingView: NSHostingView<AnyView>
+
+        deinit {
+            window.contentView = nil
+            window.close()
+        }
+
+        init(window: NSWindow, hostingView: NSHostingView<AnyView>) {
+            self.window = window
+            self.hostingView = hostingView
+        }
+    }
+
+    private func makePulseHostingView(store: DashboardWorkspaceStore, viewport: CGSize, scheme: ColorScheme) -> PulseHost {
+        let root = AnyView(
+            ScheduledPulsePageView(store: store, registerJobs: {})
+                .environment(\.colorScheme, scheme)
+                .environment(\.theme, Theme(isDark: scheme == .dark))
+        )
+        let hostingView = NSHostingView(rootView: root)
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        hostingView.appearance = appearance
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: viewport.width, height: viewport.height),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = hostingView
+        window.setContentSize(viewport)
+        hostingView.frame = NSRect(origin: .zero, size: viewport)
+        hostingView.layoutSubtreeIfNeeded()
+        if let bitmap = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) {
+            appearance?.performAsCurrentDrawingAppearance {
+                hostingView.displayIfNeeded()
+                hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+            }
+        }
+        return PulseHost(window: window, hostingView: hostingView)
+    }
+
+    private struct LeafControl {
+        let label: String
+        let frame: CGRect
+        let isNestedButton: Bool
+    }
+
+    private func visibleLeafControls(in root: NSView) -> [LeafControl] {
+        let views = descendantViews(of: root)
+        return views.compactMap { view in
+            guard !view.isHidden, view.alphaValue > 0.01 else { return nil }
+            let isButton = view is NSButton
+            let isText = view is NSTextField
+            guard isButton || isText else { return nil }
+            guard !descendantViews(of: view).contains(where: { $0 is NSButton || $0 is NSTextField }) else { return nil }
+            let hasButtonAncestor = sequence(first: view.superview, next: { $0?.superview }).contains { $0 is NSButton }
+            if isText && hasButtonAncestor { return nil }
+            let frame = view.convert(view.bounds, to: root)
+            let label = (view as? NSButton)?.title ?? (view as? NSTextField)?.stringValue ?? ""
+            return LeafControl(label: label, frame: frame, isNestedButton: isButton && hasButtonAncestor)
+        }
+    }
+
+    private func descendantViews(of root: NSView) -> [NSView] {
+        root.subviews.flatMap { [$0] + descendantViews(of: $0) }
+    }
+
     private func canonicalFixtureData() throws -> Data {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // Tests
@@ -663,14 +806,43 @@ struct TK3SnapshotRenderTests {
             DashboardActionItem(id: "finding", title: "Shared pins 需要同步", summary: "只读诊断 · 两个 consumer 落后", sourceTag: "CI Improve", domain: .findings),
             DashboardActionItem(id: "planned", title: "个人学习卡片在途", summary: "已批准 · 后台探索尚未完成", sourceTag: "Linear", status: .inProgress)]
         let jobs = ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-render"), fileExists: { $0.hasSuffix("aidata_digest_run.sh") })
-        let ids = ["collect", "normalize_merge", "retro_roi", "learning_topics", "digest_push"]
-        let stages: [ScheduledJobStageReceipt] = state == "empty" ? [] : ids.enumerated().map { index, id in
+        let digestStageIDs = ["collect", "normalize_merge", "retro_roi", "learning_topics", "digest_push"]
+        let digestStages: [ScheduledJobStageReceipt] = state == "empty" ? [] : digestStageIDs.enumerated().map { index, id in
             let status = state == "loading" ? (index < 2 ? "passed" : (index == 2 ? "running" : "unknown")) : (state == "error" && index == 2 ? "failed" : "passed")
-            return ScheduledJobStageReceipt(id: id, title: id, status: status, exitCode: status == "unknown" ? nil : 0, durationSec: status == "passed" ? Double(index + 1) : nil, sourceAsOf: status == "passed" ? "2026-11-11" : nil)
+            return ScheduledJobStageReceipt(id: id, title: id, status: status, exitCode: status == "unknown" ? nil : (status == "failed" ? 1 : 0), durationSec: status == "passed" ? Double(index + 1) : nil, sourceAsOf: status == "passed" ? "2026-11-11" : nil)
         }
         let date = Date(timeIntervalSince1970: 1794412800)
-        let stateReceipt: ScheduledJobState? = state == "empty" ? nil : .init(id: .aidataDigest, lastResult: state == "error" ? .failed : (state == "loading" ? .running : .succeeded), lastRunAt: date, summary: state == "loading" ? "诊断阶段正在运行；后续阶段尚无回执。" : (state == "error" ? "诊断阶段明确失败；旧 exit 0 不代表通过。" : "个人源入仓，Skills 诊断与每日新题已投递。"), stages: stages, sourceAsOf: state == "loading" ? nil : "2026-11-11")
-        let framework = ScheduledJobFrameworkSnapshot(capturedAt: date, entries: [ScheduledJobFrameworkEntry(definition: jobs[2], state: stateReceipt, actions: state == "error" ? [ScheduledJobAction(id: "action", jobID: .aidataDigest, title: "Resolve failure", descriptionMd: "Failure evidence", controls: [])] : [])])
+        let frameworkEntries = jobs.map { definition -> ScheduledJobFrameworkEntry in
+            switch definition.id {
+            case .myPRSupervisor:
+                let action = ScheduledJobAction(id: "my-pr-action", jobID: .myPRSupervisor, title: "确认我的 PR 落地路径", descriptionMd: "存在一项待拍板动作。", controls: controls)
+                let receipt = ScheduledJobState(id: .myPRSupervisor, lastResult: .succeeded, lastRunAt: date, summary: "PR 巡检完成，发现一项待处理动作。", overviewMd: "## My PRs\\n- SUCCESS · queue scanned\\n- PENDING · owner decision", sourceAsOf: "2026-11-11")
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt, actions: [action])
+            case .prAutoReview:
+                let receipt = ScheduledJobState(id: .prAutoReview, lastResult: .failed, lastRunAt: date, summary: "双模审查失败；exit 1。", overviewMd: "## Watched PRs\\n- FAILURE · review worker exit 1\\n- PENDING · comment writeback", sourceAsOf: "2026-11-11")
+                let launchd = ScheduledJobStatus(definition: definition, health: .critical, lastExitCode: 1, lastRun: date)
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt, launchdStatus: launchd)
+            case .aidataDigest:
+                let receipt: ScheduledJobState? = state == "empty" ? nil : .init(
+                    id: .aidataDigest,
+                    lastResult: state == "error" ? .failed : (state == "loading" ? .running : .succeeded),
+                    lastRunAt: date,
+                    summary: state == "loading" ? "诊断阶段正在运行；后续阶段尚无回执。" : (state == "error" ? "诊断阶段明确失败；旧 exit 0 不代表通过。" : "个人源入仓，Skills 诊断与每日新题已投递。"),
+                    overviewMd: "## Daily Digest\\n- SUCCESS · personal sources collected\\n- SUCCESS · Brief delivered",
+                    stages: digestStages,
+                    sourceAsOf: state == "loading" ? nil : "2026-11-11"
+                )
+                let action = ScheduledJobAction(id: "digest-action", jobID: .aidataDigest, title: "Resolve digest failure", descriptionMd: "Failure evidence", controls: [])
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt, actions: state == "error" ? [action] : [])
+            case .dailyLearning:
+                let receipt = ScheduledJobState(id: .dailyLearning, lastResult: .succeeded, lastRunAt: date, summary: "候选主题已生成并同步到看板。", overviewMd: "## Daily Learning\\n- SUCCESS · candidates deduped\\n- SUCCESS · board synced", sourceAsOf: "2026-11-11")
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt)
+            case .linearBotBridge:
+                let receipt = ScheduledJobState(id: .linearBotBridge, lastResult: .succeeded, lastRunAt: date, summary: "消息游标已同步，桥接回执已写入。", overviewMd: "## Linear Bridge\\n- SUCCESS · messages routed\\n- SUCCESS · receipt written", sourceAsOf: "2026-11-11")
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt)
+            }
+        }
+        let framework = ScheduledJobFrameworkSnapshot(capturedAt: date, entries: frameworkEntries)
         let store = DashboardWorkspaceStore(snapshot: snapshot, cliEntries: [], actionItems: state == "empty" ? [] : (state == "populated" ? domainItems : [item]), rankingRows: [], scheduledPulseSnapshot: .init(capturedAt: date, jobs: []), liveEfficiencySummary: skillsSummary, scheduledJobExecution: { _ in Issue.record("Snapshot attempted execution"); return false }, topicCatalog: [], sessionBindings: [:], m2DispatchExecutor: { _, _, _ in Issue.record("Snapshot attempted dispatch"); return .init(succeeded: false, error: "fixture") })
         store.scheduledActionWriter = { _, _ in Issue.record("Snapshot attempted receipt write"); return false }
         store.updateScheduledJobFrameworkSnapshot(framework)

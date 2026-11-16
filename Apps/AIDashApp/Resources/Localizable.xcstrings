@@ -1,6 +1,403 @@
 {
   "sourceLanguage": "en",
   "strings": {
+
+    "dashboard.scheduled_pulse.pending_actions_format": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View pending actions (%lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "去待办处理 (%lld)"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.more_format": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%lld more"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其余 %lld 项"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.pr_auto_review.queue_precheck": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "① Queue precheck"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "① 队列预检"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.pr_auto_review.diff_fetch": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "② Diff fetch"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "② Diff 拉取"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.pr_auto_review.dual_review": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "③ Dual review"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "③ 双模审查"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.pr_auto_review.comment_writeback": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "④ Comment writeback"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "④ 评论回写"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.pr_auto_review.receipt_archive": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⑤ Receipt archive"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⑤ 回执归档"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.my_pr_supervisor.pr_scan": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "① PR scan"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "① PR 巡检"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.my_pr_supervisor.policy_reconcile": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "② Policy reconcile"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "② 门禁对账"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.my_pr_supervisor.comment_scan": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "③ Comment scan"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "③ 评论扫描"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.my_pr_supervisor.todo_create": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "④ Todo creation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "④ 待办生成"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.my_pr_supervisor.receipt_archive": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⑤ Receipt archive"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⑤ 回执归档"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.daily_learning.candidate_scan": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "① Candidate scan"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "① 候选扫描"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.daily_learning.knowledge_dedupe": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "② Knowledge dedupe"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "② 知识库去重"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.daily_learning.topic_match": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "③ Topic match"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "③ 主题匹配"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.daily_learning.proposal_create": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "④ Proposal creation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "④ 提案生成"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.daily_learning.board_sync": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⑤ Board sync"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⑤ 看板同步"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.linear_bot_bridge.message_poll": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "① Message polling"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "① 消息轮询"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.linear_bot_bridge.cursor_dedupe": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "② Cursor dedupe"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "② 游标去重"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.linear_bot_bridge.topic_route": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "③ Topic routing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "③ 话题路由"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.linear_bot_bridge.state_sync": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "④ State sync"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "④ 状态同步"
+          }
+        }
+      }
+    },
+    "dashboard.scheduled_pulse.stage.linear_bot_bridge.receipt_write": {
+      "comment": "Scheduled Pulse dynamic stage or overview label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⑤ Bridge receipt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⑤ 桥接回执"
+          }
+        }
+      }
+    },
     "dashboard.skills_roi.churn": {
       "extractionState": "manual",
       "localizations": {
