@@ -671,6 +671,7 @@ struct TK3SnapshotRenderTests {
         let sparseStages = ScheduledPulseStageCatalog.stages(for: sparseReceiptEntry)
         #expect(sparseStages[2].semanticState == .failed)
         #expect(sparseStages[0].semanticState == .unknown)
+        var selectedHeights: [ScheduledPulseJobID: CGFloat] = [:]
         for jobID in ScheduledPulseJobID.allCases {
             store.selectedFrameworkJobID = jobID
             let view = makePulseHostingView(store: store, viewport: viewport, scheme: .dark)
@@ -680,10 +681,27 @@ struct TK3SnapshotRenderTests {
             #expect(renderedLabels.contains { $0.contains(labels.0) || $0.contains(labels.1) }, "missing stage label for \(jobID.rawValue)")
             #expect(view.hostingView.fittingSize.height >= viewport.height * 0.60)
             #expect(jobID.rawValue == store.selectedFrameworkJobID?.rawValue)
+            selectedHeights[jobID] = view.hostingView.fittingSize.height
+            let selectedControls = visibleLeafControls(in: view.hostingView)
+            #expect(!selectedControls.contains { $0.isNestedButton })
+            for (index, lhs) in selectedControls.enumerated() {
+                for rhs in selectedControls.dropFirst(index + 1) {
+                    let intersection = lhs.frame.intersection(rhs.frame)
+                    let area = max(0, intersection.width) * max(0, intersection.height)
+                    #expect(area <= 2.0, "selected \(jobID.rawValue) controls overlap by \(area)pt²: \(lhs.label) / \(rhs.label)")
+                }
+            }
             if jobID == .prAutoReview {
                 #expect(!renderedLabels.contains(where: digestLabels.contains))
             }
         }
+        #expect(Set(selectedHeights.values.map { Int($0.rounded()) }).count == 1)
+
+        let navigationStore = makeStore(state: "error", skillsSummary: nil)
+        navigationStore.scheduledPulseTab = .needActions
+        #expect(navigationStore.scheduledPulseTab == .needActions)
+        navigationStore.scheduledPulseTab = .overview
+        #expect(navigationStore.scheduledPulseTab == .overview)
     }
 
     private final class PulseHost {

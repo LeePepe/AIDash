@@ -108,10 +108,8 @@ private struct ScheduledPulseCompartmentView: View {
     let selectedEntryID: ScheduledPulseJobID?
     @Binding var hoveredJobID: ScheduledPulseJobID?
     let select: (ScheduledJobFrameworkEntry) -> Void
-    let run: (ScheduledJobFrameworkEntry) -> Void
-    let toggle: (ScheduledJobFrameworkEntry) -> Void
-    let copy: (ScheduledJobFrameworkEntry) -> Void
     let color: (ScheduledJobSemanticState) -> Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -121,51 +119,7 @@ private struct ScheduledPulseCompartmentView: View {
                 Text("\(compartment.entries.count)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             }
             ForEach(compartment.entries) { entry in
-                let expanded = hoveredJobID == entry.id || selectedEntryID == entry.id
-                VStack(alignment: .leading, spacing: 7) {
-                    Button { select(entry) } label: {
-                        HStack(spacing: 8) {
-                            Circle().fill(color(entry.semanticState)).frame(width: 8, height: 8)
-                            Text(entry.definition.displayName).font(.subheadline.weight(.semibold))
-                            Spacer(minLength: 4)
-                            Text(entry.statusText).font(.caption2.weight(.semibold)).foregroundStyle(color(entry.semanticState))
-                            Text(entry.definition.cadence.displayText).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(entry.definition.displayName)
-                    .onHover { hoveredJobID = $0 ? entry.id : nil }
-                    if expanded {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 8) {
-                                Text(entry.statusText).font(.caption.weight(.semibold)).foregroundStyle(color(entry.semanticState))
-                                if let date = entry.lastRunAt, let relative = ScheduledJobTimeFormatting.relativeText(from: date) {
-                                    Text(relative).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Text(summary(for: entry)).font(.caption).lineLimit(1).foregroundStyle(.secondary)
-                            HStack(spacing: 6) {
-                                Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "Run now")) { run(entry) }
-                                    .frame(minWidth: 28, minHeight: 28)
-                                Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "Stop") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "Start")) { toggle(entry) }
-                                    .frame(minWidth: 28, minHeight: 28)
-                                Button(DashboardL10n.tr("dashboard.scheduled_pulse.copy_command", "Copy diagnostic command")) { copy(entry) }
-                                    .frame(minWidth: 28, minHeight: 28)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                        .padding(.leading, 16)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                }
-                .padding(10)
-                .fixedSize(horizontal: false, vertical: true)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.58), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1) }
-                .onHover { hoveredJobID = $0 ? entry.id : nil }
-                .animation(.spring(response: 0.36, dampingFraction: 0.8), value: expanded)
+                jobCard(for: entry)
             }
             if compartment.entries.isEmpty { Text("—").font(.caption).foregroundStyle(.tertiary) }
         }
@@ -173,6 +127,71 @@ private struct ScheduledPulseCompartmentView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.48), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1) }
+    }
+
+    private func jobCard(for entry: ScheduledJobFrameworkEntry) -> some View {
+        let isSelected = selectedEntryID == entry.id
+        let isHovered = hoveredJobID == entry.id
+        let backgroundOpacity = isSelected ? 0.74 : (isHovered ? 0.66 : 0.58)
+        let strokeColor = borderColor(for: entry, isSelected: isSelected, isHovered: isHovered)
+        let strokeWidth: CGFloat = isSelected ? 1.5 : 1
+        return Button { select(entry) } label: {
+            cardLabel(for: entry)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(entry.definition.displayName)
+        .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 58, maxHeight: 58, alignment: .leading)
+        .background(
+            Color(nsColor: .controlBackgroundColor).opacity(backgroundOpacity),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(strokeColor, lineWidth: strokeWidth)
+        )
+        .onHover { hoveredJobID = $0 ? entry.id : nil }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isHovered)
+    }
+
+    private func borderColor(for entry: ScheduledJobFrameworkEntry, isSelected: Bool, isHovered: Bool) -> Color {
+        if isSelected { return color(entry.semanticState).opacity(0.85) }
+        if isHovered { return Color.primary.opacity(0.28) }
+        return Color(nsColor: .separatorColor).opacity(0.65)
+    }
+
+    private func cardLabel(for entry: ScheduledJobFrameworkEntry) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Circle().fill(color(entry.semanticState)).frame(width: 8, height: 8)
+                Text(entry.definition.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(entry.statusText)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(color(entry.semanticState))
+                    .lineLimit(1)
+                Text(entry.definition.cadence.displayText)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 6) {
+                if let date = entry.lastRunAt,
+                   let relative = ScheduledJobTimeFormatting.relativeText(from: date) {
+                    Text(relative)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Text(summary(for: entry))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func summary(for entry: ScheduledJobFrameworkEntry) -> String {
@@ -188,6 +207,7 @@ public struct ScheduledPulsePageView: View {
     @Bindable public var store: DashboardWorkspaceStore
     @State private var installerError: String?
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let registerJobs: @MainActor () -> Void
 
     public init(store: DashboardWorkspaceStore, registerJobs: (@MainActor () -> Void)? = nil) {
@@ -200,12 +220,17 @@ public struct ScheduledPulsePageView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            switch store.scheduledPulseTab {
-            case .overview:
-                overview
-            case .needActions:
-                needActions
+            pulseHealthStrip
+            Group {
+                switch store.scheduledPulseTab {
+                case .overview:
+                    overview
+                case .needActions:
+                    needActions
+                }
             }
+            .transition(.opacity)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: store.scheduledPulseTab)
         }
         .onAppear {
             registerJobs()
@@ -217,7 +242,6 @@ public struct ScheduledPulsePageView: View {
 
     private var overview: some View {
         VStack(alignment: .leading, spacing: 16) {
-            pulseHealthStrip
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 18) {
                     organizerBox
@@ -252,9 +276,6 @@ public struct ScheduledPulsePageView: View {
                     selectedEntryID: selectedEntry?.id,
                     hoveredJobID: $hoveredJobID,
                     select: select,
-                    run: { store.runScheduledJobNow($0.id) },
-                    toggle: { entry in handle(entry.launchdStatus?.isLoaded == true ? store.stopScheduledJob(entry.id) : store.startScheduledJob(entry.id)) },
-                    copy: { store.copyScheduledJobCommand(ScheduledJobStatus(definition: $0.definition, health: .healthy)) },
                     color: jobColor
                 )
             }
@@ -284,7 +305,7 @@ public struct ScheduledPulsePageView: View {
                         Spacer(minLength: 8)
                         if !entry.actions.isEmpty {
                             Button(DashboardL10n.format("dashboard.scheduled_pulse.pending_actions_format", "View pending actions (%lld)", entry.actions.count)) {
-                                store.selectedSection = .actionItems
+                                store.selectedFrameworkJobID = entry.id
                                 store.scheduledPulseTab = .needActions
                             }
                             .buttonStyle(.borderedProminent)
@@ -317,6 +338,8 @@ public struct ScheduledPulsePageView: View {
         }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
+        .transition(.opacity)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: selectedEntry?.id)
     }
 
     @ViewBuilder
@@ -537,7 +560,7 @@ public struct ScheduledPulsePageView: View {
             if !entry.actions.isEmpty {
                 Button {
                     store.selectedFrameworkJobID = entry.id
-                    store.selectedSection = .actionItems
+                    store.scheduledPulseTab = .needActions
                 } label: {
                     Label(DashboardL10n.format("dashboard.scheduled_pulse.pending_actions_format", "去待办处理 (%lld)", entry.actions.count), systemImage: "arrow.right")
                 }
@@ -610,9 +633,20 @@ public struct ScheduledPulsePageView: View {
         return SolidModularCardContainer(
             title: DashboardL10n.tr("dashboard.scheduled_pulse.need_actions.title", "需要处理"),
             subtitle: DashboardL10n.tr("dashboard.scheduled_pulse.need_actions.subtitle", "任务自己声明控件；回执只写 UserEvent"),
-            symbolName: "checklist"
-        ) {
-            VStack(alignment: .leading, spacing: 12) {
+            symbolName: "checklist",
+            accessory: {
+                Button {
+                    store.scheduledPulseTab = .overview
+                } label: {
+                    Label(DashboardL10n.tr("dashboard.scheduled_pulse.back_to_overview", "← Back to Overview"), systemImage: "arrow.left")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minWidth: 28, minHeight: 28)
+                .captureDashboardGeometry(id: "pulse-back-overview", role: "button")
+            },
+            content: {
+                VStack(alignment: .leading, spacing: 12) {
                 if actions.isEmpty {
                     Text(DashboardL10n.tr("dashboard.scheduled_pulse.need_actions.empty", "没有需要你拍板的事。"))
                         .foregroundStyle(.secondary)
@@ -626,6 +660,7 @@ public struct ScheduledPulsePageView: View {
                 }
             }
         }
+        )
     }
 
     private func select(_ entry: ScheduledJobFrameworkEntry) {

@@ -5563,6 +5563,24 @@
         }
       }
     },
+    "dashboard.scheduled_pulse.back_to_overview": {
+      "comment": "Scheduled Job Framework UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "← Back to Overview"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "← 返回概览"
+          }
+        }
+      }
+    },
     "dashboard.scheduled_pulse.needs_attention": {
       "comment": "Scheduled Job Framework UI copy.",
       "extractionState": "manual",
