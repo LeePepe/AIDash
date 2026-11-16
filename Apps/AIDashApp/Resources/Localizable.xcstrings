@@ -1,6 +1,48 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "dashboard.scheduled_pulse.organizer.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Organized by cadence"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "按频率分类收纳"}}
+      }
+    },
+    "dashboard.scheduled_pulse.compartment.exceptions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Exceptions & attention"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "异常与待处理"}}
+      }
+    },
+    "dashboard.scheduled_pulse.compartment.daily": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Daily pipelines (04:00–05:00)"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "每日核心流水线 (04:00–05:00)"}}
+      }
+    },
+    "dashboard.scheduled_pulse.compartment.interval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "High-frequency monitors (1m–5m)"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "高频同步与巡检 (1m–5m)"}}
+      }
+    },
+    "dashboard.scheduled_pulse.pending_actions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "View pending actions"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "去待办处理"}}
+      }
+    },
+    "dashboard.scheduled_pulse.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "No scheduled job receipts"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无定时任务回执"}}
+      }
+    },
     "dashboard.skills_roi.read_only": {
       "extractionState": "manual",
       "localizations": {
@@ -5397,7 +5439,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%2$@ 已用 %1$lld%%"
+            "value": "已用 %lld%%（%@）"
           }
         }
       }

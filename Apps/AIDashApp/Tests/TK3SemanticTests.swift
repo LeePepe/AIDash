@@ -413,6 +413,15 @@ struct TK3SemanticTests {
         #expect(report.skillsDaily.map(\.count) == [4, 4, 4])
     }
 
+    @Test("Selected Skills ROI row resolves without expanding the seven-column list")
+    func selectedSkillOverviewResolution() throws {
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.data("skills-roi-dense.json"))
+        let selected = SkillsRoiDiagnosticsCardView.activeSkillRow(in: report.diagnostics, selectedSkill: "team-lead")
+        #expect(selected?.skill == "team-lead")
+        #expect(SkillsRoiDiagnosticsCardView.activeSkillRow(in: report.diagnostics, selectedSkill: "missing")?.skill == report.diagnostics.usageRows.first?.skill)
+        #expect(report.diagnostics.usageRows.count > 0)
+    }
+
     @Test("Explicit stage states override stale exits, absent stages remain unknown, and receipts do not require launchd")
     func pulseStates() throws {
         for (status, exit, expected) in [("running", 1, ScheduledStageState.running), ("in_progress", 0, .running), ("failed", 0, .failed), ("warning", 0, .warning), ("passed", 1, .passed), ("unknown", 0, .unknown)] {

@@ -1,10 +1,34 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import SwiftUI
 import AIDashUI
 import DesignKit
 
 private func skillsText(_ key: String, _ fallback: String) -> String {
     DashboardL10n.tr("dashboard.skills_roi.\(key)", fallback)
+}
+
+private struct SkillsFlowCanvas: View {
+    let l1: Double
+    let touch: Double
+    let theme: Theme
+
+    var body: some View {
+        Canvas { context, size in
+            let start = CGPoint(x: 8, y: size.height / 2)
+            let middle = CGPoint(x: size.width * 0.38, y: size.height / 2)
+            let l1End = CGPoint(x: size.width - 8, y: size.height * 0.25)
+            let scriptEnd = CGPoint(x: size.width - 8, y: size.height * 0.75)
+            var first = Path(); first.move(to: start); first.addCurve(to: middle, control1: CGPoint(x: size.width * 0.18, y: 8), control2: CGPoint(x: size.width * 0.25, y: size.height - 8))
+            var second = Path(); second.move(to: middle); second.addCurve(to: l1End, control1: CGPoint(x: size.width * 0.58, y: 8), control2: CGPoint(x: size.width * 0.72, y: size.height * 0.2))
+            var third = Path(); third.move(to: middle); third.addCurve(to: scriptEnd, control1: CGPoint(x: size.width * 0.58, y: size.height - 8), control2: CGPoint(x: size.width * 0.72, y: size.height * 0.8))
+            context.stroke(first, with: .color(theme.primary.primary.opacity(0.7)), lineWidth: 3)
+            context.stroke(second, with: .color(theme.success.opacity(max(0.2, l1))), lineWidth: 3)
+            context.stroke(third, with: .color(theme.warning.opacity(max(0.2, touch))), lineWidth: 3)
+            context.fill(Path(ellipseIn: CGRect(x: start.x - 4, y: start.y - 4, width: 8, height: 8)), with: .color(theme.primary.primary))
+            context.fill(Path(ellipseIn: CGRect(x: middle.x - 4, y: middle.y - 4, width: 8, height: 8)), with: .color(theme.neutrals.text(.body)))
+        }
+    }
 }
 
 public enum SkillsRoiLens: String, CaseIterable, Identifiable {
@@ -24,13 +48,17 @@ struct SkillsEvidence: Identifiable { let title: String, value: String, metadata
 public struct SkillsRoiDiagnosticsCardView: View {
     let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
     @State private var lens: SkillsRoiLens
+    @State private var selectedSkill: String?
     @State private var evidence: [SkillsEvidence] = []
     @State private var showingEvidence = false
     @State private var dailyExpanded: Bool
     @Environment(\.theme) private var theme
 
-    public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?, initialLens: SkillsRoiLens = .usage, showDailyPopulations: Bool = false) {
-        self.summary = summary; _lens = State(initialValue: initialLens); _dailyExpanded = State(initialValue: showDailyPopulations)
+    public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?, initialLens: SkillsRoiLens = .usage, showDailyPopulations: Bool = false, initialSelectedSkill: String? = nil) {
+        self.summary = summary
+        _lens = State(initialValue: initialLens)
+        _selectedSkill = State(initialValue: initialSelectedSkill)
+        _dailyExpanded = State(initialValue: showDailyPopulations)
     }
 
     public var body: some View {
@@ -110,10 +138,90 @@ public struct SkillsRoiDiagnosticsCardView: View {
 
     private func usage(_ roi: SkillsRoiReport) -> some View {
         VStack(alignment: .leading, spacing: Space.gap) {
+            if !roi.diagnostics.usageRows.isEmpty { selectedSkillOverviewCard(roi) }
             Text(skillsText("usage_title", "Skill use, ROI and practice")).font(.headline)
             if let active = roi.diagnostics.usage { Text(activeSummary(active)).font(.caption).foregroundStyle(theme.neutrals.text(.body)) }
             usageTable(roi.diagnostics); dailyObservations(roi.skillsDaily)
         }
+    }
+
+    public static func activeSkillRow(in diagnostics: SkillsRoiDiagnostics, selectedSkill: String?) -> SkillsUsageRow? {
+        diagnostics.usageRows.first { $0.skill == selectedSkill } ?? diagnostics.usageRows.first
+    }
+
+    private func activeSkillRow(in diagnostics: SkillsRoiDiagnostics) -> SkillsUsageRow? {
+        Self.activeSkillRow(in: diagnostics, selectedSkill: selectedSkill)
+    }
+
+    private func selectedSkillOverviewCard(_ roi: SkillsRoiReport) -> some View {
+        let row = activeSkillRow(in: roi.diagnostics)
+        let disclosure = row.flatMap { selected in roi.diagnostics.disclosure.first { $0.skill == selected.skill } }
+        return VStack(alignment: .leading, spacing: 12) {
+            if let row {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(row.skill).font(.headline)
+                        Text(rowHealth(row)).font(.caption.weight(.semibold)).foregroundStyle(theme.primary.onPrimarySubtle)
+                        Text(row.diagnosis ?? unknown).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("ROI").font(.caption).foregroundStyle(.secondary)
+                        Text(decimal(row.roi)).font(.title3.monospacedDigit().weight(.semibold))
+                    }
+                }
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(alignment: .top, spacing: 12) {
+                        skillsOverviewPane(0, title: "调用频次与僵尸识别", width: 200) {
+                            metricPair("7d / 30d", integer(row.loads7d) + " / " + integer(row.loads30d))
+                            metricPair(skillsText("active", "Active skills"), integer(roi.diagnostics.usage?.active))
+                            metricPair("30d", roi.diagnostics.usage?.idle.contains(row.skill) == true ? "僵尸" : "活跃")
+                            metricPair("ROI", decimal(row.roi))
+                        }
+                        skillsOverviewPane(1, title: "上下文 Token 与 Cache", width: 220) {
+                            metricPair("L0 / L1 / Deep-read", disclosure.map { rate($0.l0) + " / " + rate($0.l1) + " / " + rate($0.greedy) } ?? unknown)
+                            metricPair("平均上下文 Token", disclosure.map { decimal($0.contextTokens) } ?? unknown)
+                            metricPair("KV Cache", percent(roi.diagnostics.context?.cacheHitPercent))
+                        }
+                        skillsOverviewPane(2, title: "Prompt → L0 → L1 & Scripts", width: 300) {
+                            SkillsFlowCanvas(l1: disclosure?.l1.value ?? 0, touch: row.touch.value ?? 0, theme: theme)
+                                .frame(height: 76)
+                            Text("Prompt  →  SKILL.md  →  References / scripts").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        skillsOverviewPane(3, title: "scripts/*.py 调用与耗时账本", width: 220) {
+                            metricPair("Script 触达率", rate(row.touch)); metricPair("脚本执行次数", integer(row.scriptExecs)); metricPair("未实践率", rate(row.unpracticed))
+                            if let tool = roi.diagnostics.tools.first { metricPair("dominant p95", decimal(tool.p95) + " tok") }
+                        }
+                        skillsOverviewPane(4, title: "Eval 评测集与门禁拦截/逃逸", width: 220) {
+                            metricPair("Eval 用例数", integer(roi.diagnostics.audit?.evals) + " (+" + integer(roi.diagnostics.audit?.evalDelta) + ")")
+                            metricPair("R1 通过率", rate(row.r1Pass)); metricPair("CI 拦截率", rate(roi.diagnostics.gates?.catchRate))
+                            if let escape = roi.diagnostics.escapes.first(where: { $0.skill == row.skill }) { metricPair("IMPL_BUG / SPEC_GAP", "\(integer(escape.implementation)) / \(integer(escape.specification))") }
+                            if let churn = roi.diagnostics.churn.first(where: { $0.skill == row.skill }) { metricPair("编辑/重试 Churn", "\(integer(churn.edits)) / \(integer(churn.retries))") }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
+    }
+
+    private func skillsOverviewPane<Content: View>(_ index: Int, title: String, width: CGFloat, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) { Text(title).font(.caption.weight(.semibold)); content() }
+            .padding(10).frame(width: width, alignment: .topLeading).background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .captureDashboardGeometry(id: "skills-overview-pane-\(index)", role: "skillsOverviewPane")
+    }
+
+    private func metricPair(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) { Text(title).font(.caption2).foregroundStyle(.secondary); Spacer(minLength: 4); Text(value).font(.caption.monospacedDigit()).multilineTextAlignment(.trailing) }
+    }
+
+    private func rowHealth(_ row: SkillsUsageRow) -> String {
+        if row.loads30d.value == 0 { return "30d 僵尸" }
+        if (row.roi.value ?? 0) >= 1 { return "主力健康" }
+        return "待优化"
     }
 
     private func activeSummary(_ population: SkillsUsagePopulation) -> String {
@@ -164,11 +272,17 @@ public struct SkillsRoiDiagnosticsCardView: View {
             .init(title: skillsText("diagnosis", "Diagnosis"), value: row.diagnosis ?? unknown, metadata: row.metadata)
         ]
         return GridRow {
-            VStack(alignment: .leading, spacing: Space.gap / 2) {
-                Text(row.skill).font(.caption.weight(.semibold))
-                Text(row.diagnosis ?? unknown).font(.caption2).foregroundStyle(theme.neutrals.text(.body))
+            Button {
+                selectedSkill = row.skill
+            } label: {
+                VStack(alignment: .leading, spacing: Space.gap / 2) {
+                    Text(row.skill).font(.caption.weight(.semibold))
+                    Text(row.diagnosis ?? unknown).font(.caption2).foregroundStyle(theme.neutrals.text(.body))
+                }
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: Space.gap * 12, minHeight: 28, alignment: .leading)
             }
-            .fixedSize(horizontal: false, vertical: true).frame(maxWidth: Space.gap * 12, alignment: .leading)
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selectedSkill == row.skill ? .isSelected : [])
             .captureDashboardGeometry(id: "usage-\(row.skill)-skill", role: "skillsTableCell")
             tableValue(integer(row.loads7d) + " / " + integer(row.loads30d), row.skill, "loads")
             tableValue(decimal(row.roi), row.skill, "roi")

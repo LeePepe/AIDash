@@ -2,6 +2,69 @@
 import SwiftUI
 import DesignKit
 
+public struct ScheduledPulseCompartment: Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let entries: [ScheduledJobFrameworkEntry]
+
+    public init(id: String, title: String, entries: [ScheduledJobFrameworkEntry]) {
+        self.id = id
+        self.title = title
+        self.entries = entries
+    }
+}
+
+@MainActor
+private struct ScheduledPulseCompartmentView: View {
+    let compartment: ScheduledPulseCompartment
+    let selectedEntryID: ScheduledPulseJobID?
+    @Binding var hoveredJobID: ScheduledPulseJobID?
+    let select: (ScheduledJobFrameworkEntry) -> Void
+    let run: (ScheduledJobFrameworkEntry) -> Void
+    let toggle: (ScheduledJobFrameworkEntry) -> Void
+    let copy: (ScheduledJobFrameworkEntry) -> Void
+    let color: (ScheduledJobSemanticState) -> Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(compartment.title).font(.caption.weight(.semibold))
+                Spacer()
+                Text("\(compartment.entries.count)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            ForEach(compartment.entries) { entry in
+                let expanded = hoveredJobID == entry.id || selectedEntryID == entry.id
+                Button { select(entry) } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Circle().fill(color(entry.semanticState)).frame(width: 8, height: 8)
+                            Text(entry.definition.displayName).font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(entry.definition.cadence.displayText).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        if expanded {
+                            HStack {
+                                Text(entry.statusText).font(.caption.weight(.semibold)).foregroundStyle(color(entry.semanticState))
+                                if let date = entry.lastRunAt, let relative = ScheduledJobTimeFormatting.relativeText(from: date) { Text(relative).font(.caption).foregroundStyle(.secondary) }
+                            }
+                            Text(entry.state?.summary ?? entry.state?.overviewMd ?? "—").font(.caption).lineLimit(1).foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "立即运行")) { run(entry) }
+                                Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) { toggle(entry) }
+                                Button(DashboardL10n.tr("dashboard.scheduled_pulse.copy_command", "复制诊断命令")) { copy(entry) }
+                            }.buttonStyle(.bordered).controlSize(.small)
+                        }
+                    }.frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .onHover { hoveredJobID = $0 ? entry.id : nil }
+                .animation(.spring(response: 0.36, dampingFraction: 0.8), value: hoveredJobID)
+            }
+            if compartment.entries.isEmpty { Text("—").font(.caption).foregroundStyle(.tertiary) }
+        }
+    }
+}
+
 @MainActor
 public struct ScheduledPulsePageView: View {
     @Bindable public var store: DashboardWorkspaceStore
@@ -48,42 +111,112 @@ public struct ScheduledPulsePageView: View {
     private var overview: some View {
         VStack(alignment: .leading, spacing: 16) {
             pulseHealthStrip
-            SolidModularCardContainer(
-                title: DashboardL10n.tr("dashboard.scheduled_pulse.result.title", "定时任务结果"),
-                subtitle: DashboardL10n.tr("dashboard.scheduled_pulse.result.subtitle", "按登记表动态汇总 · 只读产出"),
-                symbolName: "checkmark.circle"
-            ) {
-                HStack(spacing: 8) {
-                    ForEach(store.scheduledJobFrameworkSnapshot.entries) { entry in
-                        Button {
-                            select(entry)
-                        } label: {
-                            Text("\(entry.definition.displayName) · \(entry.statusText)")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(jobColor(entry.semanticState))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 6)
-                                .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(entry.definition.displayName)
-                    }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 18) {
+                    organizerBox
+                        .frame(minWidth: 250, idealWidth: 360, maxWidth: 420, alignment: .topLeading)
+                    reportStage
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(store.scheduledJobFrameworkSnapshot.entries) { entry in
-                    overviewBlock(entry)
+                VStack(alignment: .leading, spacing: 16) {
+                    organizerBox
+                    reportStage
                 }
             }
-
             if let installerError {
-                Text(installerError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                Text(installerError).font(.caption).foregroundStyle(theme.dangerOnSubtle)
             }
         }
+    }
+
+    private var organizerBox: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(DashboardL10n.tr("dashboard.scheduled_pulse.result.title", "定时任务结果"), systemImage: "folder")
+                    .font(.headline)
+                Spacer()
+                Text(DashboardL10n.tr("dashboard.scheduled_pulse.organizer.subtitle", "按分类收纳"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(Self.categorizedCompartments(from: store.scheduledJobFrameworkSnapshot.entries)) { compartment in
+                ScheduledPulseCompartmentView(
+                    compartment: compartment,
+                    selectedEntryID: selectedEntry?.id,
+                    hoveredJobID: $hoveredJobID,
+                    select: select,
+                    run: { store.runScheduledJobNow($0.id) },
+                    toggle: { entry in handle(entry.launchdStatus?.isLoaded == true ? store.stopScheduledJob(entry.id) : store.startScheduledJob(entry.id)) },
+                    copy: { store.copyScheduledJobCommand(ScheduledJobStatus(definition: $0.definition, health: .healthy)) },
+                    color: jobColor
+                )
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
+        .opacity(appearsActive ? 1 : 0.72)
+    }
+
+    private var reportStage: some View {
+        Group {
+            if let entry = selectedEntry {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.definition.displayName).font(.title3.weight(.semibold))
+                            Text("\(entry.statusText) · \(entry.definition.launchAgentLabel)").font(.caption).foregroundStyle(jobColor(entry.semanticState))
+                            if let asOf = entry.state?.sourceAsOf { Text(asOf).font(.caption2).foregroundStyle(.secondary) }
+                        }
+                        Spacer()
+                        if !entry.actions.isEmpty {
+                            Button(DashboardL10n.tr("dashboard.scheduled_pulse.pending_actions", "去待办处理")) {
+                                store.selectedSection = .actionItems
+                                store.scheduledPulseTab = .needActions
+                            }.buttonStyle(.borderedProminent).controlSize(.small).frame(minHeight: 28)
+                        }
+                    }
+                    stageReceiptStrip(entry.state?.stages ?? [])
+                    Text(entry.state?.summary ?? entry.state?.overviewMd ?? DashboardL10n.tr("dashboard.scheduled_pulse.no_success_receipt", "尚无成功执行回执；状态未知，不视为失败。"))
+                        .font(.body).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "立即运行")) { store.runScheduledJobNow(entry.id) }
+                            .buttonStyle(.borderedProminent).frame(minWidth: 28, minHeight: 28).captureDashboardGeometry(id: "pulse-run", role: "button")
+                        Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "刷新状态")) { store.refreshFromProvider() }
+                            .buttonStyle(.bordered).frame(minWidth: 28, minHeight: 28).captureDashboardGeometry(id: "pulse-refresh", role: "button")
+                        Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) {
+                            handle(entry.launchdStatus?.isLoaded == true ? store.stopScheduledJob(entry.id) : store.startScheduledJob(entry.id))
+                        }.buttonStyle(.bordered).frame(minWidth: 28, minHeight: 28).captureDashboardGeometry(id: "pulse-service", role: "button")
+                        Button(DashboardL10n.tr("dashboard.scheduled_pulse.copy_command", "复制诊断命令")) { store.copyScheduledJobCommand(ScheduledJobStatus(definition: entry.definition, health: .healthy)) }
+                            .buttonStyle(.bordered).frame(minWidth: 28, minHeight: 28).captureDashboardGeometry(id: "pulse-diagnostics", role: "button")
+                    }
+                }
+                .padding(16)
+            } else {
+                Text(DashboardL10n.tr("dashboard.scheduled_pulse.empty", "暂无定时任务回执"))
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 180, alignment: .leading).padding(16)
+            }
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
+    }
+
+    private var selectedEntry: ScheduledJobFrameworkEntry? {
+        let entries = store.scheduledJobFrameworkSnapshot.overviewEntries
+        return entries.first { $0.id == store.selectedFrameworkJobID } ?? entries.first
+    }
+
+    @State private var hoveredJobID: ScheduledPulseJobID?
+    @Environment(\.appearsActive) private var appearsActive
+
+    public static func categorizedCompartments(from entries: [ScheduledJobFrameworkEntry]) -> [ScheduledPulseCompartment] {
+        let exceptions = entries.filter { $0.isProblem || !$0.actions.isEmpty }
+        let daily = entries.filter { if case .daily = $0.definition.cadence { return true }; return false }
+        let interval = entries.filter { if case .interval = $0.definition.cadence { return true }; return false }
+        return [
+            ScheduledPulseCompartment(id: "exceptions", title: DashboardL10n.tr("dashboard.scheduled_pulse.compartment.exceptions", "异常与待处理"), entries: exceptions),
+            ScheduledPulseCompartment(id: "daily", title: DashboardL10n.tr("dashboard.scheduled_pulse.compartment.daily", "每日核心流水线 (04:00–05:00)"), entries: daily),
+            ScheduledPulseCompartment(id: "interval", title: DashboardL10n.tr("dashboard.scheduled_pulse.compartment.interval", "高频同步与巡检 (1m–5m)"), entries: interval)
+        ]
     }
 
     private var pulseHealthStrip: some View {
