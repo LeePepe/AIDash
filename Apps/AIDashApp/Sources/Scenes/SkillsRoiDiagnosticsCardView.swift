@@ -170,15 +170,14 @@ public struct SkillsRoiDiagnosticsCardView: View {
                         Text(decimal(row.roi)).font(.title3.monospacedDigit().weight(.semibold))
                     }
                 }
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(alignment: .top, spacing: 12) {
-                        skillsOverviewPane(0, title: skillsText("calls_zombie", "Calls & zombie status"), width: 200) {
+                DashboardResponsiveGrid(wideColumns: 5, compactColumns: 2) {
+                        skillsOverviewPane(0, title: skillsText("calls_zombie", "Calls & zombie status")) {
                             metricPair(skillsText("loads_7d_30d", "7d / 30d"), integer(row.loads7d) + " / " + integer(row.loads30d))
                             metricPair(skillsText("active", "Active skills"), integer(roi.diagnostics.usage?.active))
                             metricPair(skillsText("days_30", "30d"), roi.diagnostics.usage?.idle.contains(row.skill) == true ? skillsText("zombie", "Zombie") : skillsText("active_status", "Active"))
                             metricPair(skillsText("roi_score", "ROI"), decimal(row.roi))
                         }
-                        skillsOverviewPane(1, title: skillsText("context_token_cache", "Context tokens & cache"), width: 220) {
+                        skillsOverviewPane(1, title: skillsText("context_token_cache", "Context tokens & cache")) {
                             metricPair(skillsText("l0_l1_deep", "L0 / L1 / Deep-read"), disclosure.map { rate($0.l0) + " / " + rate($0.l1) + " / " + rate($0.greedy) } ?? unknown)
                             metricPair(skillsText("avg_context_tokens", "Average context tokens"), disclosure.map { decimal($0.contextTokens) } ?? unknown)
                             metricPair(skillsText("kv_cache", "KV Cache"), percent(roi.diagnostics.context?.cacheHitPercent))
@@ -186,22 +185,21 @@ public struct SkillsRoiDiagnosticsCardView: View {
                                 metricPair(sliceTitle(slice.key), percent(slice.share))
                             }
                         }
-                        skillsOverviewPane(2, title: skillsText("prompt_flow", "Prompt → L0 → L1 & Scripts"), width: 300) {
+                        skillsOverviewPane(2, title: skillsText("prompt_flow", "Prompt → L0 → L1 & Scripts")) {
                             SkillsFlowCanvas(l1: disclosure?.l1.value ?? 0, touch: row.touch.value ?? 0, theme: theme)
                                 .frame(height: 76)
                             Text(skillsText("prompt_flow_caption", "Prompt → SKILL.md → References / scripts")).font(.caption2).foregroundStyle(.secondary)
                         }
-                        skillsOverviewPane(3, title: skillsText("script_ledger", "scripts/*.py execution ledger"), width: 220) {
+                        skillsOverviewPane(3, title: skillsText("script_ledger", "scripts/*.py execution ledger")) {
                             metricPair(skillsText("script_touch_rate", "Script touch rate"), rate(row.touch)); metricPair(skillsText("script_exec_count", "Script executions"), integer(row.scriptExecs)); metricPair(skillsText("unpracticed_rate", "Unpracticed rate"), rate(row.unpracticed))
                             if let tool = roi.diagnostics.tools.first { metricPair(skillsText("dominant_p95", "Dominant p95"), decimal(tool.p95) + " " + skillsText("tokens", "tokens")) }
                         }
-                        skillsOverviewPane(4, title: skillsText("eval_gate_escape", "Eval, gates & escapes"), width: 220) {
+                        skillsOverviewPane(4, title: skillsText("eval_gate_escape", "Eval, gates & escapes")) {
                             metricPair(skillsText("eval_cases", "Eval cases"), integer(roi.diagnostics.audit?.evals) + " (+" + integer(roi.diagnostics.audit?.evalDelta) + ")")
                             metricPair(skillsText("r1_pass_rate", "R1 pass rate"), rate(row.r1Pass)); metricPair(skillsText("ci_catch_rate", "CI catch rate"), rate(roi.diagnostics.gates?.catchRate))
                             if let escape = roi.diagnostics.escapes.first(where: { $0.skill == row.skill }) { metricPair(skillsText("escape_attribution", "IMPL_BUG / SPEC_GAP"), "\(integer(escape.implementation)) / \(integer(escape.specification))") }
                             if let churn = roi.diagnostics.churn.first(where: { $0.skill == row.skill }) { metricPair(skillsText("churn", "Edit / retry churn"), "\(integer(churn.edits)) / \(integer(churn.retries))") }
                         }
-                    }
                     .padding(.vertical, 2)
                 }
             }
@@ -211,9 +209,10 @@ public struct SkillsRoiDiagnosticsCardView: View {
         .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
     }
 
-    private func skillsOverviewPane<Content: View>(_ index: Int, title: String, width: CGFloat, @ViewBuilder content: () -> Content) -> some View {
+    private func skillsOverviewPane<Content: View>(_ index: Int, title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) { Text(title).font(.caption.weight(.semibold)); content() }
-            .padding(10).frame(width: width, alignment: .topLeading).background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .captureDashboardGeometry(id: "skills-overview-pane-\(index)", role: "skillsOverviewPane")
     }
 

@@ -1,6 +1,13 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "dashboard.skills_roi.churn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Edit / retry churn"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "编辑/重试 Churn"}}
+      }
+    },
     "dashboard.skills_roi.roi_score": {
       "extractionState": "manual",
       "localizations": {
