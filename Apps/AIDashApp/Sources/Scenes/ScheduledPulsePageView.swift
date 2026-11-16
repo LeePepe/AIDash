@@ -28,16 +28,17 @@ enum ScheduledPulseStageCatalog {
     static func stages(for entry: ScheduledJobFrameworkEntry) -> [ScheduledPulseDisplayStage] {
 
         let titles = titles(for: entry.id)
-        let receipts = entry.state?.stages ?? []
-        return titles.enumerated().map { index, definition in
-            let receipt = receipts.indices.contains(index) ? receipts[index] : nil
-            let semanticState = receipt?.semanticState ?? synthesizedState(for: entry.semanticState, index: index)
-            let exitCode = receipt?.exitCode ?? (semanticState == .failed ? Int(entry.launchdExitCode ?? 1) : nil)
+        let receiptsByID = (entry.state?.stages ?? []).reduce(into: [String: ScheduledJobStageReceipt]()) { result, receipt in
+            result[receipt.id] = receipt
+        }
+        return titles.map { definition in
+            let receipt = receiptsByID[definition.id]
+            let semanticState = receipt?.semanticState ?? .unknown
             return ScheduledPulseDisplayStage(
                 id: definition.id,
                 title: definition.title,
                 semanticState: semanticState,
-                exitCode: exitCode,
+                exitCode: receipt?.exitCode,
                 durationSec: receipt?.durationSec,
                 sourceAsOf: receipt?.sourceAsOf
             )
@@ -46,17 +47,6 @@ enum ScheduledPulseStageCatalog {
 
     static func labels(for id: ScheduledPulseJobID) -> [String] {
         titles(for: id).map(\.title)
-    }
-
-    private static func synthesizedState(for state: ScheduledJobSemanticState, index: Int) -> ScheduledStageState {
-        switch state {
-        case .healthy: return .passed
-        case .running: return index < 2 ? .passed : (index == 2 ? .running : .unknown)
-        case .failed: return index < 2 ? .passed : (index == 2 ? .failed : .unknown)
-        case .partial: return index < 2 ? .passed : (index == 2 ? .warning : .unknown)
-        case .coalesced: return index == 0 ? .warning : .unknown
-        case .noState: return .unknown
-        }
     }
 
     private static func titles(for id: ScheduledPulseJobID) -> [(id: String, title: String)] {

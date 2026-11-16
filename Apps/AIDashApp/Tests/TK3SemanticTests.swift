@@ -658,6 +658,18 @@ struct TK3SnapshotRenderTests {
             .linearBotBridge: ("Message polling", "消息轮询")
         ]
         let digestLabels = Set(ScheduledPulseStageCatalog.labels(for: .aidataDigest))
+        let prDefinition = try #require(store.scheduledJobFrameworkSnapshot.entries.first(where: { $0.id == .prAutoReview })?.definition)
+        let sparseReceiptEntry = ScheduledJobFrameworkEntry(
+            definition: prDefinition,
+            state: ScheduledJobState(
+                id: .prAutoReview,
+                lastResult: .failed,
+                stages: [ScheduledJobStageReceipt(id: "dual_review", title: "dual_review", status: "failed", exitCode: 1)]
+            )
+        )
+        let sparseStages = ScheduledPulseStageCatalog.stages(for: sparseReceiptEntry)
+        #expect(sparseStages[2].semanticState == .failed)
+        #expect(sparseStages[0].semanticState == .unknown)
         for jobID in ScheduledPulseJobID.allCases {
             store.selectedFrameworkJobID = jobID
             let view = makePulseHostingView(store: store, viewport: viewport, scheme: .dark)
