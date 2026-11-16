@@ -131,6 +131,87 @@ def _run_job_wrapper(
     return proc, payload
 
 
+def _run_teams_digest_wrapper(
+    tmp_path: Path,
+    *,
+    deliver_output: str,
+    deliver_exit: int = 0,
+    read_output: str = "",
+    read_exit: int = 0,
+):
+    script = Path(__file__).resolve().parent.parent / "scripts" / "teams_digest_run.sh"
+    fake_node = tmp_path / "node"
+    cli_script = tmp_path / "cli.js"
+    deliver_file = tmp_path / "deliver.txt"
+    read_file = tmp_path / "read.txt"
+    calls_file = tmp_path / "calls.txt"
+    deliver_file.write_text(deliver_output, encoding="utf-8")
+    read_file.write_text(read_output, encoding="utf-8")
+    cli_script.write_text("// fixture\n", encoding="utf-8")
+    fake_node.write_text(
+        "#!/bin/bash\n"
+        "printf '%s\\n' \"$@\" >> \"$CALLS_FILE\"\n"
+        "if [[ \" $* \" == *\" --deliver-self-meeting \"* ]]; then\n"
+        "  cat \"$DELIVER_FILE\"\n"
+        f"  exit {deliver_exit}\n"
+        "fi\n"
+        "cat \"$READ_FILE\"\n"
+        f"exit {read_exit}\n",
+        encoding="utf-8",
+    )
+    fake_node.chmod(0o755)
+    state = tmp_path / "jobs" / "teams-digest" / "state.json"
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path / "home"),
+        "AIDASH_JOB_STATE_FILE": str(state),
+        "AIDASH_JOB_OUTPUT_DIR": str(state.parent),
+        "TEAMS_DIGEST_CLI_SCRIPT": str(cli_script),
+        "NODE_BIN": str(fake_node),
+        "DELIVER_FILE": str(deliver_file),
+        "READ_FILE": str(read_file),
+        "CALLS_FILE": str(calls_file),
+        "PATH": "/usr/bin:/bin",
+    }
+    proc = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=30)
+    payload = json.loads(state.read_text(encoding="utf-8")) if state.is_file() else None
+    calls = calls_file.read_text(encoding="utf-8").splitlines() if calls_file.is_file() else []
+    return proc, payload, calls
+
+
+def test_teams_digest_wrapper_runs_deliver_self_meeting_and_parses_4_stages(tmp_path: Path):
+    output = """[Stage 1/4] Auth Check: passed\n[Stage 2/4] Unread Sync: 3 unread\n[Stage 3/4] Jev & Draft: draft ready\n[Stage 4/4] Self-Meeting Delivery: delivered\n"""
+    proc, state, calls = _run_teams_digest_wrapper(tmp_path, deliver_output=output)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert calls[-1] == "--deliver-self-meeting"
+    assert [stage["id"] for stage in state["stages"]] == [
+        "auth_check", "unread_sync", "jev_draft", "self_meeting_delivery"
+    ]
+    assert all(stage["status"] == "passed" for stage in state["stages"])
+    assert all(f"- [Stage {index}/4]" in state["overviewMd"] for index in range(1, 5))
+
+
+def test_teams_digest_wrapper_falls_back_to_read_only_when_deliver_flag_unsupported(tmp_path: Path):
+    unsupported = "only `run --read-only` is supported\n"
+    readonly = "[Stage 1/4] Auth Check: passed\n[Stage 2/4] Unread Sync: passed\n"
+    proc, state, calls = _run_teams_digest_wrapper(
+        tmp_path, deliver_output=unsupported, deliver_exit=2, read_output=readonly
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert calls[-1] == "--read-only"
+    assert "- Compatibility fallback: --read-only" in state["overviewMd"]
+    assert state["lastResult"] == "succeeded"
+
+
+def test_teams_digest_wrapper_preserves_nonzero_exit_and_failed_state(tmp_path: Path):
+    output = "[Stage 1/4] Auth Check: failed\n"
+    proc, state, calls = _run_teams_digest_wrapper(tmp_path, deliver_output=output, deliver_exit=7)
+    assert proc.returncode == 7
+    assert calls[-1] == "--deliver-self-meeting"
+    assert state["lastResult"] == "failed"
+    assert state["stages"][0]["status"] == "failed"
+
+
 def test_daily_learning_wrapper_falls_back_when_linear_option_is_unsupported(tmp_path: Path):
     proc, state = _run_job_wrapper(
         "daily_learning_run.sh",
