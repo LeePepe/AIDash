@@ -413,6 +413,15 @@ struct TK3SemanticTests {
         #expect(report.skillsDaily.map(\.count) == [4, 4, 4])
     }
 
+    @Test("Selected Skills ROI row resolves without expanding the seven-column list")
+    func selectedSkillOverviewResolution() throws {
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.data("skills-roi-dense.json"))
+        let selected = SkillsRoiDiagnosticsCardView.activeSkillRow(in: report.diagnostics, selectedSkill: "team-lead")
+        #expect(selected?.skill == "team-lead")
+        #expect(SkillsRoiDiagnosticsCardView.activeSkillRow(in: report.diagnostics, selectedSkill: "missing")?.skill == report.diagnostics.usageRows.first?.skill)
+        #expect(report.diagnostics.usageRows.count > 0)
+    }
+
     @Test("Explicit stage states override stale exits, absent stages remain unknown, and receipts do not require launchd")
     func pulseStates() throws {
         for (status, exit, expected) in [("running", 1, ScheduledStageState.running), ("in_progress", 0, .running), ("failed", 0, .failed), ("warning", 0, .warning), ("passed", 1, .passed), ("unknown", 0, .unknown)] {
@@ -554,8 +563,14 @@ struct TK3SnapshotRenderTests {
         #expect(!LiveDashboardTelemetryReader.isLiveEnvironment)
         let output: URL
         let temporary: URL?
-        if let configured = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"], !configured.isEmpty {
+        let configured = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_AIDASH_TK3_SCREENSHOT_DIR"]
+        let handoffDirectory = URL(fileURLWithPath: "/Volumes/SSD/Development/handoff/aidash-cards-redesign/receipts/phase1-swiftui/screenshots", isDirectory: true)
+        if let configured, !configured.isEmpty {
             output = URL(fileURLWithPath: configured, isDirectory: true)
+            temporary = nil
+        } else if FileManager.default.fileExists(atPath: handoffDirectory.path) {
+            output = handoffDirectory
             temporary = nil
         } else {
             let root = try TK3Fixtures.home()

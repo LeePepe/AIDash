@@ -1,6 +1,230 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "dashboard.skills_roi.churn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Edit / retry churn"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "编辑/重试 Churn"}}
+      }
+    },
+    "dashboard.skills_roi.roi_score": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "ROI"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "ROI"}}
+      }
+    },
+    "dashboard.skills_roi.calls_zombie": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Calls & zombie status"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "调用频次与僵尸识别"}}
+      }
+    },
+    "dashboard.skills_roi.loads_7d_30d": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "7d / 30d"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "7d / 30d"}}
+      }
+    },
+    "dashboard.skills_roi.days_30": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "30d"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "30d"}}
+      }
+    },
+    "dashboard.skills_roi.zombie": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Zombie"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "僵尸"}}
+      }
+    },
+    "dashboard.skills_roi.active_status": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Active"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "活跃"}}
+      }
+    },
+    "dashboard.skills_roi.context_token_cache": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Context tokens & cache"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "上下文 Token 与 Cache"}}
+      }
+    },
+    "dashboard.skills_roi.l0_l1_deep": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "L0 / L1 / Deep-read"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "L0 / L1 / Deep-read"}}
+      }
+    },
+    "dashboard.skills_roi.avg_context_tokens": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Average context tokens"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "平均上下文 Token"}}
+      }
+    },
+    "dashboard.skills_roi.kv_cache": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "KV Cache"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "KV Cache"}}
+      }
+    },
+    "dashboard.skills_roi.prompt_flow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Prompt → L0 → L1 & Scripts"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "Prompt → L0 → L1 与 Scripts"}}
+      }
+    },
+    "dashboard.skills_roi.prompt_flow_caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Prompt → SKILL.md → References / scripts"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "Prompt → SKILL.md → References / scripts"}}
+      }
+    },
+    "dashboard.skills_roi.script_ledger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "scripts/*.py execution ledger"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "scripts/*.py 调用与耗时账本"}}
+      }
+    },
+    "dashboard.skills_roi.script_touch_rate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Script touch rate"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "Script 触达率"}}
+      }
+    },
+    "dashboard.skills_roi.script_exec_count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Script executions"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "脚本执行次数"}}
+      }
+    },
+    "dashboard.skills_roi.unpracticed_rate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Unpracticed rate"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "未实践率"}}
+      }
+    },
+    "dashboard.skills_roi.dominant_p95": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Dominant p95"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "主要 p95"}}
+      }
+    },
+    "dashboard.skills_roi.eval_gate_escape": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Eval, gates & escapes"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "Eval、门禁与逃逸"}}
+      }
+    },
+    "dashboard.skills_roi.eval_cases": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Eval cases"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "Eval 用例数"}}
+      }
+    },
+    "dashboard.skills_roi.r1_pass_rate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "R1 pass rate"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "R1 通过率"}}
+      }
+    },
+    "dashboard.skills_roi.ci_catch_rate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "CI catch rate"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "CI 拦截率"}}
+      }
+    },
+    "dashboard.skills_roi.escape_attribution": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "IMPL_BUG / SPEC_GAP"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "IMPL_BUG / SPEC_GAP"}}
+      }
+    },
+    "dashboard.skills_roi.health_zombie": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "30d zombie"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "30d 僵尸"}}
+      }
+    },
+    "dashboard.skills_roi.health_healthy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Core healthy"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "主力健康"}}
+      }
+    },
+    "dashboard.skills_roi.health_optimize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Needs optimization"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "待优化"}}
+      }
+    },
+    "dashboard.scheduled_pulse.organizer.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Organized by cadence"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "按频率分类收纳"}}
+      }
+    },
+    "dashboard.scheduled_pulse.compartment.exceptions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Exceptions & attention"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "异常与待处理"}}
+      }
+    },
+    "dashboard.scheduled_pulse.compartment.daily": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Daily pipelines (04:00–05:00)"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "每日核心流水线 (04:00–05:00)"}}
+      }
+    },
+    "dashboard.scheduled_pulse.compartment.interval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "High-frequency monitors (1m–5m)"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "高频同步与巡检 (1m–5m)"}}
+      }
+    },
+    "dashboard.scheduled_pulse.pending_actions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "View pending actions"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "去待办处理"}}
+      }
+    },
+    "dashboard.scheduled_pulse.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "No scheduled job receipts"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无定时任务回执"}}
+      }
+    },
     "dashboard.skills_roi.read_only": {
       "extractionState": "manual",
       "localizations": {
@@ -5397,7 +5621,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%2$@ 已用 %1$lld%%"
+            "value": "已用 %lld%%（%@）"
           }
         }
       }

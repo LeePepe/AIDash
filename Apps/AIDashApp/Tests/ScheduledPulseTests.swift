@@ -473,6 +473,22 @@ struct ScheduledPulseTests {
         #expect(failedWithoutState.isProblem)
     }
 
+    @Test("categorized compartments separate exceptions, daily and interval jobs")
+    func categorizedCompartments() {
+        let definitions = ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-compartments"), fileExists: { _ in true })
+        let entries = definitions.map { definition in
+            ScheduledJobFrameworkEntry(
+                definition: definition,
+                state: definition.id == .prAutoReview ? .init(id: definition.id, lastResult: .failed) : .init(id: definition.id, lastResult: .succeeded)
+            )
+        }
+        let compartments = ScheduledPulsePageView.categorizedCompartments(from: entries)
+        #expect(compartments.map(\.id) == ["exceptions", "daily", "interval"])
+        #expect(compartments[0].entries.map(\.id) == [.prAutoReview])
+        #expect(Set(compartments[1].entries.map(\.id)) == [.aidataDigest, .dailyLearning])
+        #expect(Set(compartments[2].entries.map(\.id)) == [.myPRSupervisor, .linearBotBridge])
+    }
+
     @Test("overview parser prioritizes failures and keeps relative time compact")
     func overviewParsingAndRelativeTime() throws {
         let markdown = """
