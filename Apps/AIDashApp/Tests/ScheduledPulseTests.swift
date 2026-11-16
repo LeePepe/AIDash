@@ -486,7 +486,7 @@ struct ScheduledPulseTests {
         #expect(compartments.map(\.id) == ["exceptions", "daily", "interval"])
         #expect(compartments[0].entries.map(\.id) == [.prAutoReview])
         #expect(Set(compartments[1].entries.map(\.id)) == [.aidataDigest, .dailyLearning])
-        #expect(Set(compartments[2].entries.map(\.id)) == [.myPRSupervisor, .prAutoReview, .linearBotBridge])
+        #expect(Set(compartments[2].entries.map(\.id)) == [.myPRSupervisor, .linearBotBridge])
     }
 
     @Test("overview parser prioritizes failures and keeps relative time compact")

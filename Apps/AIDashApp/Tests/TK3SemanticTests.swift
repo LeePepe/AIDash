@@ -563,8 +563,14 @@ struct TK3SnapshotRenderTests {
         #expect(!LiveDashboardTelemetryReader.isLiveEnvironment)
         let output: URL
         let temporary: URL?
-        if let configured = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"], !configured.isEmpty {
+        let configured = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_AIDASH_TK3_SCREENSHOT_DIR"]
+        let handoffDirectory = URL(fileURLWithPath: "/Volumes/SSD/Development/handoff/aidash-cards-redesign/receipts/phase1-swiftui/screenshots", isDirectory: true)
+        if let configured, !configured.isEmpty {
             output = URL(fileURLWithPath: configured, isDirectory: true)
+            temporary = nil
+        } else if FileManager.default.fileExists(atPath: handoffDirectory.path) {
+            output = handoffDirectory
             temporary = nil
         } else {
             let root = try TK3Fixtures.home()

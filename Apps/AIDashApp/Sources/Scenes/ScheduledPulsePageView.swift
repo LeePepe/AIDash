@@ -50,8 +50,11 @@ private struct ScheduledPulseCompartmentView: View {
                             Text(entry.state?.summary ?? entry.state?.overviewMd ?? "—").font(.caption).lineLimit(1).foregroundStyle(.secondary)
                             HStack(spacing: 6) {
                                 Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "立即运行")) { run(entry) }
+                                    .frame(minWidth: 28, minHeight: 28)
                                 Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) { toggle(entry) }
+                                    .frame(minWidth: 28, minHeight: 28)
                                 Button(DashboardL10n.tr("dashboard.scheduled_pulse.copy_command", "复制诊断命令")) { copy(entry) }
+                                    .frame(minWidth: 28, minHeight: 28)
                             }.buttonStyle(.bordered).controlSize(.small)
                         }
                     }.frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
@@ -176,7 +179,7 @@ public struct ScheduledPulsePageView: View {
                         }
                     }
                     stageReceiptStrip(entry.state?.stages ?? [])
-                    Text(entry.state?.summary ?? entry.state?.overviewMd ?? DashboardL10n.tr("dashboard.scheduled_pulse.no_success_receipt", "尚无成功执行回执；状态未知，不视为失败。"))
+                    Text(entry.state?.overviewMd ?? entry.state?.summary ?? DashboardL10n.tr("dashboard.scheduled_pulse.no_success_receipt", "尚无成功执行回执；状态未知，不视为失败。"))
                         .font(.body).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "立即运行")) { store.runScheduledJobNow(entry.id) }
@@ -210,8 +213,9 @@ public struct ScheduledPulsePageView: View {
 
     public static func categorizedCompartments(from entries: [ScheduledJobFrameworkEntry]) -> [ScheduledPulseCompartment] {
         let exceptions = entries.filter { $0.isProblem || !$0.actions.isEmpty }
-        let daily = entries.filter { if case .daily = $0.definition.cadence { return true }; return false }
-        let interval = entries.filter { if case .interval = $0.definition.cadence { return true }; return false }
+        let routineEntries = entries.filter { !exceptions.contains($0) }
+        let daily = routineEntries.filter { if case .daily = $0.definition.cadence { return true }; return false }
+        let interval = routineEntries.filter { if case .interval = $0.definition.cadence { return true }; return false }
         return [
             ScheduledPulseCompartment(id: "exceptions", title: DashboardL10n.tr("dashboard.scheduled_pulse.compartment.exceptions", "异常与待处理"), entries: exceptions),
             ScheduledPulseCompartment(id: "daily", title: DashboardL10n.tr("dashboard.scheduled_pulse.compartment.daily", "每日核心流水线 (04:00–05:00)"), entries: daily),
@@ -419,7 +423,7 @@ public struct ScheduledPulsePageView: View {
 
     private func select(_ entry: ScheduledJobFrameworkEntry) {
         store.selectedFrameworkJobID = entry.id
-        store.scheduledPulseTab = entry.actions.isEmpty ? .overview : .needActions
+        store.scheduledPulseTab = .overview
     }
 
     private func handle(_ outcome: ScheduledPulseLaunchdInstaller.RegistrationOutcome) {
