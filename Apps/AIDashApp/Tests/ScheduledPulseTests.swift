@@ -12,20 +12,21 @@ import Testing
 struct ScheduledPulseTests {
     private var fixtureJobs: [ScheduledJobDefinition] {
         ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-scheduled-pulse"), fileExists: { path in
-            path.hasSuffix("aidata_digest_run.sh") || path.hasSuffix("daily_learning_run.sh") || path.hasSuffix("linear_bot_bridge_run.sh")
+            path.hasSuffix("aidata_digest_run.sh") || path.hasSuffix("daily_learning_run.sh") || path.hasSuffix("linear_bot_bridge_run.sh") || path.hasSuffix("teams_digest_run.sh")
         })
     }
 
     @Test("registry reserves unavailable external prechecks")
     func registryShape() {
-        #expect(fixtureJobs.map(\.id) == [.myPRSupervisor, .prAutoReview, .aidataDigest, .dailyLearning, .linearBotBridge])
-        #expect(fixtureJobs.filter(\.isLive).map(\.id) == [.aidataDigest, .dailyLearning, .linearBotBridge])
+        #expect(fixtureJobs.map(\.id) == [.myPRSupervisor, .prAutoReview, .aidataDigest, .dailyLearning, .linearBotBridge, .teamsDigest])
+        #expect(fixtureJobs.filter(\.isLive).map(\.id) == [.aidataDigest, .dailyLearning, .linearBotBridge, .teamsDigest])
         #expect(fixtureJobs.filter { !$0.isLive }.map(\.id) == [.myPRSupervisor, .prAutoReview])
         #expect(fixtureJobs.first { $0.id == .myPRSupervisor }?.displayName == "我的 PR")
         #expect(fixtureJobs.first { $0.id == .prAutoReview }?.displayName == "特定人 PR")
         #expect(fixtureJobs.first { $0.id == .aidataDigest }?.displayName == "每日简报")
         #expect(fixtureJobs.first { $0.id == .dailyLearning }?.displayName == "每日学习推荐")
         #expect(fixtureJobs.first { $0.id == .linearBotBridge }?.displayName == "Linear @bot 桥接")
+        #expect(fixtureJobs.first { $0.id == .teamsDigest }?.displayName == "Teams 会话草稿")
     }
 
     @Test("live plists use absolute programs and interpreter ProgramArguments")
@@ -36,7 +37,8 @@ struct ScheduledPulseTests {
             (.prAutoReview, "/usr/bin/python3", "/Users/tester/Development/handoff/pr-auto-review/precheck.py"),
             (.aidataDigest, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/aidata_digest_run.sh"),
             (.dailyLearning, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/daily_learning_run.sh"),
-            (.linearBotBridge, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/linear_bot_bridge_run.sh")
+            (.linearBotBridge, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/linear_bot_bridge_run.sh"),
+            (.teamsDigest, "/bin/bash", "/Users/tester/Development/AIDash/aidata/scripts/teams_digest_run.sh")
         ]
         let wrapper = "/Users/tester/Development/AIDash/scripts/scheduled-job-entrypoint.sh"
         let definitions = ScheduledPulseRegistry.jobs(homeURL: home, fileExists: { _ in true })
@@ -255,9 +257,9 @@ struct ScheduledPulseTests {
             },
             homeURL: home
         )
-        #expect(reader.entries.count == 5)
+        #expect(reader.entries.count == 6)
         #expect(reader.overviewEntries.first?.id == ScheduledPulseJobID.prAutoReview)
-        #expect(reader.overviewEntries.count == 5)
+        #expect(reader.overviewEntries.count == 6)
         #expect(reader.entries.first(where: { $0.id == .prAutoReview })?.semanticState == .failed)
         #expect(reader.unacknowledgedActions.count == 1)
         let control = try #require(reader.unacknowledgedActions.first?.controls.last)
@@ -396,7 +398,7 @@ struct ScheduledPulseTests {
         )
         _ = view.body
         #expect(ScheduledJobFrameworkLogic.successStripText(for: snapshot).contains("特定人 PR 失败"))
-        #expect(snapshot.entries.count == 5)
+        #expect(snapshot.entries.count == 6)
         view.onOpenScheduledPulse()
         #expect(opens == 1)
     }
@@ -486,7 +488,7 @@ struct ScheduledPulseTests {
         #expect(compartments.map(\.id) == ["exceptions", "daily", "interval"])
         #expect(compartments[0].entries.map(\.id) == [.prAutoReview])
         #expect(Set(compartments[1].entries.map(\.id)) == [.aidataDigest, .dailyLearning])
-        #expect(Set(compartments[2].entries.map(\.id)) == [.myPRSupervisor, .linearBotBridge])
+        #expect(Set(compartments[2].entries.map(\.id)) == [.myPRSupervisor, .linearBotBridge, .teamsDigest])
     }
 
     @Test("overview parser prioritizes failures and keeps relative time compact")

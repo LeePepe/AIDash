@@ -655,7 +655,8 @@ struct TK3SnapshotRenderTests {
             .prAutoReview: ("Queue precheck", "队列预检"),
             .aidataDigest: ("Personal source collection", "个人源采集"),
             .dailyLearning: ("Candidate scan", "候选扫描"),
-            .linearBotBridge: ("Message polling", "消息轮询")
+            .linearBotBridge: ("Message polling", "消息轮询"),
+            .teamsDigest: ("Auth Check", "身份验证")
         ]
         let digestLabels = Set(ScheduledPulseStageCatalog.labels(for: .aidataDigest))
         let prDefinition = try #require(store.scheduledJobFrameworkSnapshot.entries.first(where: { $0.id == .prAutoReview })?.definition)
@@ -670,19 +671,37 @@ struct TK3SnapshotRenderTests {
         let sparseStages = ScheduledPulseStageCatalog.stages(for: sparseReceiptEntry)
         #expect(sparseStages[2].semanticState == .failed)
         #expect(sparseStages[0].semanticState == .unknown)
+        var selectedHeights: [ScheduledPulseJobID: CGFloat] = [:]
         for jobID in ScheduledPulseJobID.allCases {
             store.selectedFrameworkJobID = jobID
             let view = makePulseHostingView(store: store, viewport: viewport, scheme: .dark)
             let labels = expectedStageLabels[jobID] ?? ("", "")
             let renderedLabels = ScheduledPulseStageCatalog.labels(for: jobID)
-            #expect(renderedLabels.count == 5)
+            #expect(renderedLabels.count == (jobID == .teamsDigest ? 4 : 5))
             #expect(renderedLabels.contains { $0.contains(labels.0) || $0.contains(labels.1) }, "missing stage label for \(jobID.rawValue)")
             #expect(view.hostingView.fittingSize.height >= viewport.height * 0.60)
             #expect(jobID.rawValue == store.selectedFrameworkJobID?.rawValue)
+            selectedHeights[jobID] = view.hostingView.fittingSize.height
+            let selectedControls = visibleLeafControls(in: view.hostingView)
+            #expect(!selectedControls.contains { $0.isNestedButton })
+            for (index, lhs) in selectedControls.enumerated() {
+                for rhs in selectedControls.dropFirst(index + 1) {
+                    let intersection = lhs.frame.intersection(rhs.frame)
+                    let area = max(0, intersection.width) * max(0, intersection.height)
+                    #expect(area <= 2.0, "selected \(jobID.rawValue) controls overlap by \(area)pt²: \(lhs.label) / \(rhs.label)")
+                }
+            }
             if jobID == .prAutoReview {
                 #expect(!renderedLabels.contains(where: digestLabels.contains))
             }
         }
+        #expect(Set(selectedHeights.values.map { Int($0.rounded()) }).count == 1)
+
+        let navigationStore = makeStore(state: "error", skillsSummary: nil)
+        navigationStore.scheduledPulseTab = .needActions
+        #expect(navigationStore.scheduledPulseTab == .needActions)
+        navigationStore.scheduledPulseTab = .overview
+        #expect(navigationStore.scheduledPulseTab == .overview)
     }
 
     private final class PulseHost {
@@ -805,11 +824,16 @@ struct TK3SnapshotRenderTests {
             DashboardActionItem(id: "blocker", title: "个人 CI 门禁等待修复", summary: "收集阶段待处理", sourceTag: "GTT Blocker", status: .blocked),
             DashboardActionItem(id: "finding", title: "Shared pins 需要同步", summary: "只读诊断 · 两个 consumer 落后", sourceTag: "CI Improve", domain: .findings),
             DashboardActionItem(id: "planned", title: "个人学习卡片在途", summary: "已批准 · 后台探索尚未完成", sourceTag: "Linear", status: .inProgress)]
-        let jobs = ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-render"), fileExists: { $0.hasSuffix("aidata_digest_run.sh") })
+        let jobs = ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-render"), fileExists: { $0.hasSuffix("aidata_digest_run.sh") || $0.hasSuffix("teams_digest_run.sh") })
         let digestStageIDs = ["collect", "normalize_merge", "retro_roi", "learning_topics", "digest_push"]
+        let teamsStageIDs = ["auth_check", "unread_sync", "jev_draft", "self_meeting_delivery"]
         let digestStages: [ScheduledJobStageReceipt] = state == "empty" ? [] : digestStageIDs.enumerated().map { index, id in
             let status = state == "loading" ? (index < 2 ? "passed" : (index == 2 ? "running" : "unknown")) : (state == "error" && index == 2 ? "failed" : "passed")
             return ScheduledJobStageReceipt(id: id, title: id, status: status, exitCode: status == "unknown" ? nil : (status == "failed" ? 1 : 0), durationSec: status == "passed" ? Double(index + 1) : nil, sourceAsOf: status == "passed" ? "2026-11-11" : nil)
+        }
+        let teamsStages: [ScheduledJobStageReceipt] = state == "empty" ? [] : teamsStageIDs.enumerated().map { index, id in
+            let status = state == "error" && index == 3 ? "failed" : "passed"
+            return ScheduledJobStageReceipt(id: id, title: id, status: status, exitCode: status == "failed" ? 7 : 0, durationSec: Double(index + 1), sourceAsOf: "2026-11-11")
         }
         let date = Date(timeIntervalSince1970: 1794412800)
         let frameworkEntries = jobs.map { definition -> ScheduledJobFrameworkEntry in
@@ -840,6 +864,9 @@ struct TK3SnapshotRenderTests {
             case .linearBotBridge:
                 let receipt = ScheduledJobState(id: .linearBotBridge, lastResult: .succeeded, lastRunAt: date, summary: "消息游标已同步，桥接回执已写入。", overviewMd: "## Linear Bridge\\n- SUCCESS · messages routed\\n- SUCCESS · receipt written", sourceAsOf: "2026-11-11")
                 return ScheduledJobFrameworkEntry(definition: definition, state: receipt)
+            case .teamsDigest:
+                let receipt = ScheduledJobState(id: .teamsDigest, lastResult: state == "error" ? .failed : .succeeded, lastRunAt: date, summary: "Teams 未读扫描与 Self-Meeting 草稿投递。", overviewMd: "## Teams Drafts\\n- SUCCESS · unread sync\\n- SUCCESS · self-meeting draft", stages: teamsStages, sourceAsOf: "2026-11-11")
+                return ScheduledJobFrameworkEntry(definition: definition, state: state == "empty" ? nil : receipt)
             }
         }
         let framework = ScheduledJobFrameworkSnapshot(capturedAt: date, entries: frameworkEntries)
@@ -868,7 +895,7 @@ struct TK3SnapshotRenderTests {
             #expect(samples.filter { $0.role == "domainSubtitle" }.allSatisfy { $0.width >= (width == 700 ? 200 : 100) && $0.height >= 14 })
         }
         if name.hasPrefix("pulse-") {
-            #expect(samples.filter { $0.role == "pulseStageTile" }.count == 5)
+            #expect([4, 5].contains(samples.filter { $0.role == "pulseStageTile" }.count))
             let footerIDs = ["pulse-run", "pulse-refresh", "pulse-service", "pulse-diagnostics"]
             #expect(samples.filter { $0.role == "button" && footerIDs.contains($0.id) }.count == 4)
             #expect(samples.filter { $0.role == "button" && $0.id.hasPrefix("pulse-tab-") }.count == 2)

@@ -261,6 +261,7 @@ _REGISTERED_PULSE_JOBS = frozenset({
     "aidata-digest",
     "daily-learning",
     "linear-bot-bridge",
+    "teams-digest",
 })
 _AIDATA_ACTION_OWNING_JOB = "aidata-digest"
 
