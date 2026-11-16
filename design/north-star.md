@@ -11,6 +11,10 @@
 ## 0. 一句话原则
 
 > **留白舍得给,层级拉得开,数字配上图,配色管得住。**
+>
+> 单列每日 Briefing 仍以 `1200pt` 为内容上限；macOS 多列 Workspace
+> (`AIDashMacWorkspaceView`) 则在 100% 全出血的 `ScrollView` 背景中，将居中内容列扩展到
+> `1680pt`，以利用宽屏而不拉稀卡片。
 
 当前界面的四宗罪与对治:
 | 病 | 治 |
@@ -24,7 +28,8 @@
 
 ## 1. 布局与栅格 (Layout)
 
-- **最大内容宽度**:`1200pt`,水平居中(`.frame(maxWidth: 1200).frame(maxWidth: .infinity)`)。超宽屏不再把卡片拉稀。
+- **最大内容宽度**:单列每日 Briefing 为 `1200pt`,水平居中(`.frame(maxWidth: 1200).frame(maxWidth: .infinity)`)。超宽屏不再把卡片拉稀。
+- **macOS Workspace 宽屏列**:`AIDashMacWorkspaceView` 的多列 detail 使用 100% 全出血 `ScrollView` 背景(`.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .underPageBackgroundColor), ignoresSafeAreaEdges: .all)`)，其内容列以 `.padding(20).frame(maxWidth: 1680, alignment: .leading).frame(maxWidth: .infinity, alignment: .top)` 居中扩展至 `1680pt`。
 - **页面水平内边距**:macOS `24pt` / iOS `20pt`(沿用现有 token)。
 - **页面垂直内边距**:顶部/底部 `28pt`。
 - **分区(容器)间距**:分区与分区之间 `32pt`(比现在的 24 更舒展)。
