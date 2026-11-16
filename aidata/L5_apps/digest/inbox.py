@@ -526,6 +526,7 @@ _DEFAULT_REGISTERED_JOB_IDS = (
     "aidata-digest",
     "daily-learning",
     "linear-bot-bridge",
+    "teams-digest",
 )
 _PRIORITY_TO_P = {
     "high": "P0",

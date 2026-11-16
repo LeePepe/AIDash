@@ -238,10 +238,11 @@ def test_export_job_actions_and_acknowledge_job_action_bridge(tmp_path: Path):
         "aidata-digest",
         "daily-learning",
         "linear-bot-bridge",
+        "teams-digest",
     ):
         assert (jobs_root / job_id / "actions.jsonl").is_file()
 
-    for job_id in ("daily-learning", "linear-bot-bridge"):
+    for job_id in ("daily-learning", "linear-bot-bridge", "teams-digest"):
         assert event_bridge._parse_job_action_receipt({
             "action": "acknowledgeJobAction",
             "cardType": "scheduledPulse",
