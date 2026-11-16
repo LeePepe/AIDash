@@ -91,6 +91,13 @@ enum ScheduledPulseStageCatalog {
                 ("state_sync", DashboardL10n.tr("dashboard.scheduled_pulse.stage.linear_bot_bridge.state_sync", "④ State sync")),
                 ("receipt_write", DashboardL10n.tr("dashboard.scheduled_pulse.stage.linear_bot_bridge.receipt_write", "⑤ Bridge receipt"))
             ]
+        case .teamsDigest:
+            return [
+                ("auth_check", DashboardL10n.tr("dashboard.scheduled_pulse.stage.teams_digest.auth_check", "[Stage 1/4] Auth Check")),
+                ("unread_sync", DashboardL10n.tr("dashboard.scheduled_pulse.stage.teams_digest.unread_sync", "[Stage 2/4] Unread Sync")),
+                ("jev_draft", DashboardL10n.tr("dashboard.scheduled_pulse.stage.teams_digest.jev_draft", "[Stage 3/4] Jev & Draft")),
+                ("self_meeting_delivery", DashboardL10n.tr("dashboard.scheduled_pulse.stage.teams_digest.self_meeting_delivery", "[Stage 4/4] Self-Meeting Delivery"))
+            ]
         }
     }
 }
