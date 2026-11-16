@@ -704,6 +704,57 @@ struct TK3SnapshotRenderTests {
         #expect(navigationStore.scheduledPulseTab == .overview)
     }
 
+    @Test("uses a full-bleed detail scroll view and centered 1680pt workspace column")
+    func workspaceWidescreenGeometry() throws {
+        let store = makeStore(state: "populated", skillsSummary: nil)
+        store.selectedSection = .scheduledPulse
+        let recorder = DashboardGeometryRecorder()
+        let viewport = CGSize(width: 2200, height: 1200)
+        let root = AnyView(
+            GeometryReader { _ in
+                AIDashMacWorkspaceView(store: store)
+            }
+            .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
+            .environment(\.colorScheme, .dark)
+            .environment(\.theme, Theme(isDark: true))
+            .environment(\.dashboardGeometryRecorder, recorder)
+            .coordinateSpace(name: "tk3-geometry")
+        )
+        let hostingView = NSHostingView(rootView: root)
+        let appearance = NSAppearance(named: .darkAqua)
+        hostingView.appearance = appearance
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: viewport.width, height: viewport.height),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = hostingView
+        window.setContentSize(viewport)
+        hostingView.frame = NSRect(origin: .zero, size: viewport)
+        hostingView.layoutSubtreeIfNeeded()
+        appearance?.performAsCurrentDrawingAppearance {
+            hostingView.displayIfNeeded()
+        }
+
+        let scroll = try #require(recorder.samples.first(where: { $0.id == "workspace-detail-scroll" }))
+        let column = try #require(recorder.samples.first(where: { $0.id == "workspace-detail-column" }))
+        #expect(scroll.width > 1900)
+        #expect(column.width >= 1600 && column.width <= 1680)
+        #expect(abs(column.width - 1640) <= 1)
+        let scrollMidX = scroll.x + scroll.width / 2
+        let columnMidX = column.x + column.width / 2
+        #expect(abs(columnMidX - scrollMidX) <= 2)
+    }
+
     private final class PulseHost {
         let window: NSWindow
         let hostingView: NSHostingView<AnyView>

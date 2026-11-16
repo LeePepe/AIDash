@@ -1512,7 +1512,7 @@ public struct RankingTableCardView: View {
 
 public struct AIDashMacWorkspaceView: View {
     @State private var store: DashboardWorkspaceStore
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
     @State private var activeOverviewLens: OverviewWorkbenchLens = .trends
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1539,10 +1539,15 @@ public struct AIDashMacWorkspaceView: View {
                         workspaceDetailContent(snapshot: snapshot)
                     }
                 }
+                .captureDashboardGeometry(id: "workspace-detail-column", role: "workspaceDetailColumn")
                 .padding(20)
-                .frame(maxWidth: 1280, alignment: .leading)
+                .frame(maxWidth: 1680, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .background(Color(nsColor: .underPageBackgroundColor))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .underPageBackgroundColor), ignoresSafeAreaEdges: .all)
+            .captureDashboardGeometry(id: "workspace-detail-scroll", role: "workspaceDetailScroll")
+            .navigationSplitViewColumnWidth(min: 320, ideal: 1980, max: .infinity)
             .navigationTitle(store.selectedSection.title)
             .toolbar {
                 if store.selectedSection != .settings && store.selectedSection != .scheduledPulse {
@@ -1559,6 +1564,7 @@ public struct AIDashMacWorkspaceView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
