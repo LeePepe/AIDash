@@ -63,6 +63,8 @@ try:
     except OSError:
         pass
     before_sig = state_signature(state_path)
+    os.environ.setdefault("HERDR_AUTO_CREATE_STICKY_TL", "1")
+    os.environ.setdefault("HERDR_HOST_WORKSPACE", "w55")
     proc = subprocess.run([interpreter, script_path], close_fds=True)
     exit_code = proc.returncode
     after_sig = state_signature(state_path)
