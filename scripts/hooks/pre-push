@@ -130,6 +130,9 @@ swift_paths=()
 while IFS= read -r changed_path; do
     case "$changed_path" in
         *.swift)
+            case "$changed_path" in
+                */Tests/*) continue ;;
+            esac
             if [ -f "$changed_path" ]; then
                 swift_paths+=("$changed_path")
             fi
