@@ -65,6 +65,8 @@ try:
     before_sig = state_signature(state_path)
     os.environ.setdefault("HERDR_AUTO_CREATE_STICKY_TL", "1")
     os.environ.setdefault("HERDR_HOST_WORKSPACE", "w55")
+    os.environ.setdefault("HERDR_ALLOW_LIVE_HERDR", "1")
+    os.environ.setdefault("HERDR_ALLOW_LIVE_STATUS", "1")
     proc = subprocess.run([interpreter, script_path], close_fds=True)
     exit_code = proc.returncode
     after_sig = state_signature(state_path)
