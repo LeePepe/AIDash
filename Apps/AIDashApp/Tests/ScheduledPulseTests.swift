@@ -150,6 +150,74 @@ struct ScheduledPulseTests {
         #expect(entry.state?.summary == "exit 2")
     }
 
+    @Test("my PR supervisor surfaces signal stages and deferred Sticky TL as a partial exception")
+    func myPRSupervisorStagesAndDeliveryState() throws {
+        let warningData = Data(#"""
+        {
+            "id":"my-pr-supervisor",
+            "lastResult":"succeeded",
+            "summary":"0 awaiting owner (0 PoP · 0 decisions) · 1 pending heal (S1:1 S2:1 S3:1) · Sticky TL deferred",
+            "overviewMd":"## Sticky TL & Auto-Heal Queue\n- Sticky TL: my-pr-supervisor-sticky-tl · local_deferred=true",
+            "stages":[
+                {"id":"pr_scan","title":"① PR 巡检","status":"passed","exitCode":0},
+                {"id":"policy_reconcile","title":"② 门禁对账","status":"warning","exitCode":0},
+                {"id":"comment_scan","title":"③ 评论扫描","status":"warning","exitCode":0},
+                {"id":"todo_create","title":"④ 待办生成","status":"passed","exitCode":0},
+                {"id":"receipt_archive","title":"⑤ 回执归档","status":"warning","exitCode":75}
+            ]
+        }
+        """#.replacingOccurrences(of: "            ", with: "").data(using: .utf8)!)
+        let warningSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            fileReader: { url in
+                url.lastPathComponent == "state.json" && url.path.contains("my-pr-supervisor") ? warningData : nil
+            },
+            homeURL: URL(fileURLWithPath: "/Users/tester")
+        )
+        let warningEntry = try #require(warningSnapshot.entries.first(where: { $0.id == .myPRSupervisor }))
+        #expect(ScheduledPulseStageCatalog.stages(for: warningEntry).map(\.id) == ["pr_scan", "policy_reconcile", "comment_scan", "todo_create", "receipt_archive"])
+        #expect(warningEntry.semanticState == .partial)
+        #expect(warningEntry.isProblem)
+        #expect(warningEntry.state?.overviewMd?.contains("## Sticky TL & Auto-Heal Queue") == true)
+        #expect(ScheduledPulsePageView.categorizedCompartments(from: warningSnapshot.entries).first?.entries.contains(where: { $0.id == .myPRSupervisor }) == true)
+
+        let healthyData = Data(#"""
+        {
+            "id":"my-pr-supervisor",
+            "lastResult":"succeeded",
+            "stages":[
+                {"id":"pr_scan","title":"① PR 巡检","status":"passed","exitCode":0},
+                {"id":"policy_reconcile","title":"② 门禁对账","status":"passed","exitCode":0},
+                {"id":"comment_scan","title":"③ 评论扫描","status":"passed","exitCode":0},
+                {"id":"todo_create","title":"④ 待办生成","status":"passed","exitCode":0},
+                {"id":"receipt_archive","title":"⑤ 回执归档","status":"passed","exitCode":0}
+            ]
+        }
+        """#.replacingOccurrences(of: "            ", with: "").data(using: .utf8)!)
+        let healthySnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            fileReader: { url in
+                url.lastPathComponent == "state.json" && url.path.contains("my-pr-supervisor") ? healthyData : nil
+            },
+            homeURL: URL(fileURLWithPath: "/Users/tester")
+        )
+        let healthyEntry = try #require(healthySnapshot.entries.first(where: { $0.id == .myPRSupervisor }))
+        #expect(healthyEntry.semanticState == .healthy)
+        #expect(!healthyEntry.isProblem)
+    }
+
+    @Test("scheduled entrypoint enables Sticky TL host mounting by default")
+    func scheduledEntrypointDefaultsStickyTLHost() throws {
+        let scriptURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("scripts/scheduled-job-entrypoint.sh")
+        let script = try String(contentsOf: scriptURL, encoding: .utf8)
+        #expect(script.contains("HERDR_AUTO_CREATE_STICKY_TL"))
+        #expect(script.contains("HERDR_HOST_WORKSPACE"))
+        #expect(script.contains("\"w55\""))
+    }
+
     @Test("acknowledging an action in one job does not hide a same-id action in another job")
     func acknowledgementIsScopedByJobIDAndActionID() {
         let store = DashboardWorkspaceStore(snapshot: Self.menuSnapshot())
