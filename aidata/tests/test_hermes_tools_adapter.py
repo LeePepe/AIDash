@@ -192,3 +192,57 @@ def test_copilot_real_skill_markers_are_bounded_metadata_and_deduped(tmp_path, m
     monkeypatch.setattr(copilot, "write_clean", lambda source, table, ddl, rows, cols: clean.extend(rows) or len(rows))
     assert copilot.normalize() == len(expected)
     assert all(row["n"] == 1 for row in clean)
+
+
+@pytest.mark.unit
+def test_copilot_distinguishes_script_execution_from_reads_edits_and_mentions(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    db = tmp_path / "session-store.db"
+    state_dir = tmp_path / "session-state" / "s-exec"
+    state_dir.mkdir(parents=True)
+    with sqlite3.connect(db) as con:
+        con.execute("CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, turn_index INTEGER, timestamp TEXT, user_message TEXT, assistant_response TEXT)")
+        con.execute(
+            "INSERT INTO turns VALUES (1, 's-exec', 0, '2026-11-12T01:00:00Z', "
+            "'Please inspect skills/demo/scripts/not_run.py and skills/demo/references/not_read.md', "
+            "'Reviewed skills/demo/scripts/not_run.py')"
+        )
+        con.execute("CREATE TABLE session_files (session_id TEXT, file_path TEXT, tool_name TEXT, turn_index INTEGER, first_seen_at TEXT)")
+        con.executemany("INSERT INTO session_files VALUES (?, ?, ?, ?, ?)", [
+            ("s-exec", "/Users/test/.agents/skills/demo/scripts/edited.py", "edit", 0, "2026-11-12T01:00:01Z"),
+            ("s-exec", "/Users/test/.agents/skills/demo/references/edited_ref.md", "apply_patch", 0, "2026-11-12T01:00:02Z"),
+        ])
+        con.commit()
+    events_jsonl = state_dir / "events.jsonl"
+    events_jsonl.write_text("\n".join(json.dumps(item) for item in [
+        {"type": "tool.execution_start", "timestamp": "2026-11-12T01:00:03.000Z",
+         "data": {"toolCallId": "c-view-sc", "toolName": "view", "turnId": 0,
+                  "arguments": {"path": "/Users/test/.agents/skills/demo/scripts/viewed.py"}}},
+        {"type": "tool.execution_complete", "timestamp": "2026-11-12T01:00:03.050Z",
+         "data": {"toolCallId": "c-view-sc", "success": True, "result": "ok"}},
+        {"type": "tool.execution_start", "timestamp": "2026-11-12T01:00:04.000Z",
+         "data": {"toolCallId": "c-view-ref", "toolName": "view", "turnId": 0,
+                  "arguments": {"path": "/Users/test/.agents/skills/demo/references/read_me.md"}}},
+        {"type": "tool.execution_complete", "timestamp": "2026-11-12T01:00:04.020Z",
+         "data": {"toolCallId": "c-view-ref", "success": True, "result": "ok"}},
+        {"type": "tool.execution_start", "timestamp": "2026-11-12T01:00:05.000Z",
+         "data": {"toolCallId": "c-run-sc", "toolName": "bash", "turnId": 0,
+                  "arguments": {"command": "python3 /Users/test/.agents/skills/demo/scripts/real_run.py --json"}}},
+        {"type": "tool.execution_complete", "timestamp": "2026-11-12T01:00:05.420Z",
+         "data": {"toolCallId": "c-run-sc", "success": True, "result": "completed with exit code 0"}},
+    ]) + "\n", encoding="utf-8")
+
+    raw = []
+    monkeypatch.setattr(copilot, "COPILOT_SESSION_DB", db)
+    monkeypatch.setattr(copilot, "get_watermark", lambda _: {})
+    monkeypatch.setattr(copilot, "set_watermark", lambda *_: None)
+    monkeypatch.setattr(copilot, "write_raw", lambda _, rows: raw.extend(rows) or len(rows))
+    now = datetime(2026, 11, 12, 12, tzinfo=timezone.utc)  # noqa: UP017
+    assert copilot.collect(now=now) == 2
+    refs = [r for r in raw if r.get("kind") == "reference_hit"]
+    scripts = [r for r in raw if r.get("kind") == "script_call"]
+    assert [r["reference_path"] for r in refs] == ["skills/demo/references/read_me.md"]
+    assert [(s["script_path"], s["exit_code"], s["duration_ms"]) for s in scripts] == [
+        ("skills/demo/scripts/real_run.py", 0, 420)
+    ]

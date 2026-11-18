@@ -83,8 +83,22 @@ _FORMAT_RESPONSE_ITEM = "response_item"
 _FORMAT_LEGACY = "legacy"
 _SKILL_PATH = re.compile(r"(?:^|[/\\])([^/\\\s\"'`()<>]+)/SKILL\.md(?:$|[\s\"'`()<>])")
 _METRIC_PATH = re.compile(
-    r"(?:^|[\s/\\])skills[/\\](?P<skill>[A-Za-z0-9][A-Za-z0-9._-]{0,127})"
-    r"[/\\](?P<kind>references|scripts)[/\\](?P<rel>[^\s\"'`()<>]+)"
+    r"(?:^|[\s/\\=:\"'])skills[/\\](?P<skill>[A-Za-z0-9][A-Za-z0-9._-]{0,127})"
+    r"[/\\](?P<kind>references|scripts)[/\\](?P<rel>[^\s\"'`;|&()<>]+)"
+)
+_READ_CALL_NAMES = frozenset({"read", "view", "read_file"})
+_SHELL_CALL_NAMES = frozenset({"exec_command", "exec", "shell", "shell_command", "bash", "terminal"})
+_EXEC_SEGMENT_RE = re.compile(
+    r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:sudo\s+|env\s+|nohup\s+|time\s+)*"
+    r"(?:(?:python3?|/usr/bin/python3?|bash|sh|zsh|node|npx|ruby|perl|uv\s+run)"
+    r"(?:\s+(?!-[cm]\b)-\S+)*\s+)?"
+    r"(?P<target>[^\s\"'`;|&()<>]*skills[/\\][A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+    r"[/\\]scripts[/\\][^\s\"'`;|&()<>]+)"
+)
+_SHELL_READ_RE = re.compile(
+    r"\b(?:cat|head|tail|sed|awk|less|more|bat|jq)\b[^\n;|&]*"
+    r"(?P<target>[^\s\"'`;|&()<>]*skills[/\\][A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+    r"[/\\]references[/\\][^\s\"'`;|&()<>]+)"
 )
 
 
@@ -98,35 +112,96 @@ def _parse_codex_output_metrics(output: str) -> tuple[int | None, int | None]:
     return exit_code, duration_ms
 
 
+def _canonical_codex_target(raw_target: str, expected_kind: str) -> tuple[str, str] | None:
+    match = _METRIC_PATH.search(raw_target)
+    if not match or match.group("kind") != expected_kind:
+        return None
+    skill = match.group("skill")
+    relative = match.group("rel").lstrip("/").lstrip(chr(92)).rstrip("/").rstrip(chr(92))
+    if not relative:
+        return None
+    return skill, f"skills/{skill}/{expected_kind}/{relative}"
+
+
 def _metric_candidates(obj: dict[str, Any], meta: dict[str, Any], rel_path: str, offset: int) -> list[dict[str, Any]]:
     payload = obj.get("payload") or {}
     if obj.get("type") != "response_item" or payload.get("type") not in {"custom_tool_call", "function_call"}:
         return []
+    call_name = str(payload.get("name") or "").strip().lower()
     value = payload.get("arguments", payload.get("input"))
     if isinstance(value, str):
         try:
             value = json.loads(value)
         except json.JSONDecodeError:
             pass
-    values = value.values() if isinstance(value, dict) else (value,)
-    text = " ".join(str(item) for item in values if isinstance(item, str))
     call_key = str(payload.get("call_id") or payload.get("id") or f"{rel_path}:{offset}")
+    base_common = {"timestamp": obj.get("timestamp"), "session_id": meta.get("session_id"),
+                   "turn_uuid": call_key, "call_id": call_key, "file_id": rel_path, **meta}
     result: list[dict[str, Any]] = []
-    for index, match in enumerate(_METRIC_PATH.finditer(text)):
-        skill = match.group("skill")
-        relative = match.group("rel").lstrip("/").lstrip(chr(92)).rstrip("/").rstrip(chr(92))
-        canonical = f"skills/{skill}/{match.group('kind')}/{relative}"
-        identity = f"{rel_path}:{call_key}:{index}:{canonical}"
-        base = {"timestamp": obj.get("timestamp"), "session_id": meta.get("session_id"),
-                "turn_uuid": call_key, "call_id": call_key, "skill": skill, "file_id": rel_path, **meta}
-        if match.group("kind") == "references":
-            result.append({"_kind": "reference_hit", "hit_uid": hashlib.sha256(identity.encode()).hexdigest(),
-                           "reference_path": canonical, "byte_len": len(canonical.encode()), **base})
-        else:
-            exit_code, duration_ms = _parse_codex_output_metrics(text)
-            result.append({"_kind": "script_call", "call_uid": hashlib.sha256(identity.encode()).hexdigest(),
-                           "script_path": canonical, "exit_code": exit_code,
-                           "duration_ms": duration_ms, **base})
+    if call_name in _READ_CALL_NAMES:
+        raw_path = (
+            str(value.get("file_path") or value.get("path") or "")
+            if isinstance(value, dict)
+            else str(value or "")
+        )
+        parsed = _canonical_codex_target(raw_path, "references")
+        if parsed is not None:
+            skill, canonical = parsed
+            identity = f"{rel_path}:{call_key}:0:{canonical}"
+            result.append({
+                "_kind": "reference_hit",
+                "hit_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                "skill": skill,
+                "reference_path": canonical,
+                "byte_len": len(canonical.encode()),
+                **base_common,
+            })
+        return result
+    if call_name in _SHELL_CALL_NAMES or (not call_name and payload.get("type") in {"custom_tool_call", "function_call"}):
+        cmd = (
+            str(value.get("cmd") or value.get("command") or "")
+            if isinstance(value, dict)
+            else str(value or "")
+        )
+        if not cmd:
+            return []
+        seen_refs: set[str] = set()
+        for idx, ref_match in enumerate(_SHELL_READ_RE.finditer(cmd)):
+            parsed = _canonical_codex_target(ref_match.group("target"), "references")
+            if parsed is None or parsed[1] in seen_refs:
+                continue
+            skill, canonical = parsed
+            seen_refs.add(canonical)
+            identity = f"{rel_path}:{call_key}:ref:{idx}:{canonical}"
+            result.append({
+                "_kind": "reference_hit",
+                "hit_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                "skill": skill,
+                "reference_path": canonical,
+                "byte_len": len(canonical.encode()),
+                **base_common,
+            })
+        seen_scripts: set[str] = set()
+        for idx, seg in enumerate(re.split(r"(?:&&|\|\||;|\n)", cmd)):
+            exec_match = _EXEC_SEGMENT_RE.match(seg)
+            if not exec_match:
+                continue
+            parsed = _canonical_codex_target(exec_match.group("target"), "scripts")
+            if parsed is None or parsed[1] in seen_scripts:
+                continue
+            skill, canonical = parsed
+            seen_scripts.add(canonical)
+            identity = f"{rel_path}:{call_key}:{idx}:{canonical}"
+            exit_code, duration_ms = _parse_codex_output_metrics(cmd)
+            result.append({
+                "_kind": "script_call",
+                "call_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                "skill": skill,
+                "script_path": canonical,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
+                **base_common,
+            })
     return result
 
 

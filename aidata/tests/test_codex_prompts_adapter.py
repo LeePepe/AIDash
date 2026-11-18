@@ -201,6 +201,19 @@ def test_metric_candidates_extract_reference_and_script():
     assert script[0]["script_path"] == "skills/demo/scripts/check.sh"
     assert script[0]["duration_ms"] is None
     assert script[0]["exit_code"] is None
+    # Viewing/reading a script or editing a file must never emit script_call
+    assert cx._metric_candidates(
+        {"type": "response_item", "timestamp": "2026-08-03T04:02:00Z",
+         "payload": {"type": "function_call", "call_id": "read-sc", "name": "view",
+                     "arguments": json.dumps({"path": "skills/demo/scripts/check.sh"})}},
+        meta, "file.jsonl", 11,
+    ) == []
+    assert cx._metric_candidates(
+        {"type": "response_item", "timestamp": "2026-08-03T04:02:00Z",
+         "payload": {"type": "function_call", "call_id": "cat-sc", "name": "exec_command",
+                     "arguments": json.dumps({"cmd": "sed -n '1,40p' skills/demo/scripts/check.sh"})}},
+        meta, "file.jsonl", 12,
+    ) == []
 
 
 @pytest.mark.unit

@@ -300,3 +300,31 @@ def test_normalize_skips_aux_turns_and_deduplicates_auxiliary_records(monkeypatc
     assert captured["reference_hit"][0]["byte_len"] == 11
     assert captured["script_call"][0]["exit_code"] == 1
     assert captured["script_call"][0]["duration_ms"] == 125
+
+
+@pytest.mark.unit
+def test_path_records_reject_script_read_edit_and_mention():
+    obj = {"uuid": "turn-x", "timestamp": "2026-07-27T01:02:03Z"}
+    assert cj._path_records(
+        {"type": "tool_use", "id": "t1", "name": "Read",
+         "input": {"file_path": "skills/demo/scripts/check.sh"}},
+        obj, "sess-A",
+    ) == []
+    assert cj._path_records(
+        {"type": "tool_use", "id": "t2", "name": "Edit",
+         "input": {"file_path": "skills/demo/scripts/check.sh", "old_str": "a", "new_str": "b"}},
+        obj, "sess-A",
+    ) == []
+    assert cj._path_records(
+        {"type": "tool_use", "id": "t3", "name": "Bash",
+         "input": {"command": "cat skills/demo/scripts/check.sh && ls skills/demo/references/guide.md"}},
+        obj, "sess-A",
+    ) == []
+    real_exec = cj._path_records(
+        {"type": "tool_use", "id": "t4", "name": "Bash",
+         "input": {"command": "python3 skills/demo/scripts/check.py --strict"}},
+        obj, "sess-A",
+    )
+    assert len(real_exec) == 1
+    assert real_exec[0]["_kind"] == "script_call"
+    assert real_exec[0]["script_path"] == "skills/demo/scripts/check.py"

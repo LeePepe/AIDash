@@ -36,46 +36,125 @@ from state import get_watermark, set_watermark
 
 SOURCE = "claude_jsonl"
 _PATH_RE = re.compile(
-    r"(?:^|[\s/\\])skills[/\\](?P<skill>[A-Za-z0-9][A-Za-z0-9._-]{0,127})"
-    r"[/\\](?P<kind>references|scripts)[/\\](?P<rel>[^\s\"'`()<>]+)"
+    r"(?:^|[\s/\\=:\"'])skills[/\\](?P<skill>[A-Za-z0-9][A-Za-z0-9._-]{0,127})"
+    r"[/\\](?P<kind>references|scripts)[/\\](?P<rel>[^\s\"'`;|&()<>]+)"
+)
+_READ_TOOLS = frozenset({"read", "view", "read_file"})
+_SHELL_TOOLS = frozenset({"bash", "execute_code", "terminal", "shell"})
+_EXEC_SEGMENT_RE = re.compile(
+    r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:sudo\s+|env\s+|nohup\s+|time\s+)*"
+    r"(?:(?:python3?|/usr/bin/python3?|bash|sh|zsh|node|npx|ruby|perl|uv\s+run)"
+    r"(?:\s+(?!-[cm]\b)-\S+)*\s+)?"
+    r"(?P<target>[^\s\"'`;|&()<>]*skills[/\\][A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+    r"[/\\]scripts[/\\][^\s\"'`;|&()<>]+)"
+)
+_SHELL_READ_RE = re.compile(
+    r"\b(?:cat|head|tail|sed|awk|less|more|bat|jq)\b[^\n;|&]*"
+    r"(?P<target>[^\s\"'`;|&()<>]*skills[/\\][A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+    r"[/\\]references[/\\][^\s\"'`;|&()<>]+)"
 )
 
 
-def _path_record(block: dict[str, Any], obj: dict[str, Any], session_id: Any) -> dict[str, Any] | None:
-    tool_input = block.get("input")
-    if not isinstance(tool_input, dict):
-        return None
-    haystack = " ".join(str(value) for value in tool_input.values() if isinstance(value, str))
-    match = _PATH_RE.search(haystack)
-    if not match:
-        return None
-    skill = match.group("skill")
-    rel = match.group("rel").strip("/\\")
-    canonical = f"skills/{skill}/{match.group('kind')}/{rel}"
-    matched_path = match.group(0).strip(" \t\r\n\"'`()<>")
+def _resolve_byte_len(matched_path: str, canonical: str, cwd: Any = None) -> int:
     candidates = [Path(matched_path).expanduser()]
     if not Path(matched_path).is_absolute():
-        if obj.get("cwd"):
-            candidates.append(Path(str(obj["cwd"])) / matched_path)
-        candidates.extend(Path.home() / root / matched_path for root in (".agents", ".copilot", "Development/user-skills"))
-    byte_len = len(canonical.encode("utf-8"))
+        if cwd:
+            candidates.append(Path(str(cwd)) / matched_path)
+        candidates.extend(
+            Path.home() / root / matched_path
+            for root in (".agents", ".copilot", "Development/user-skills")
+        )
     for candidate in candidates:
         try:
             if candidate.is_file():
-                byte_len = candidate.stat().st_size
-                break
+                return candidate.stat().st_size
         except OSError:
             continue
+    return len(canonical.encode("utf-8"))
+
+
+def _canonical_target(raw_target: str, expected_kind: str) -> tuple[str, str, str] | None:
+    match = _PATH_RE.search(raw_target)
+    if not match or match.group("kind") != expected_kind:
+        return None
+    skill = match.group("skill")
+    rel = match.group("rel").lstrip("/").lstrip(chr(92)).rstrip("/").rstrip(chr(92))
+    if not rel:
+        return None
+    matched_path = match.group(0).lstrip(" =\"'(").rstrip(" \"'<>),;")
+    return skill, f"skills/{skill}/{expected_kind}/{rel}", matched_path
+
+
+def _path_records(block: dict[str, Any], obj: dict[str, Any], session_id: Any) -> list[dict[str, Any]]:
+    tool_name = str(block.get("name") or "").strip().lower()
+    tool_input = block.get("input")
+    if not isinstance(tool_input, dict):
+        return []
     base = {
         "sessionId": session_id, "turn_uuid": obj.get("uuid"),
-        "skill": skill, "timestamp": obj.get("timestamp"),
+        "timestamp": obj.get("timestamp"),
     }
-    if match.group("kind") == "references":
-        return {"_kind": "reference_hit", "hit_uid": f"{obj.get('uuid')}:{block.get('id')}",
-                "reference_path": canonical, "byte_len": byte_len, **base}
-    return {"_kind": "script_call", "call_uid": f"{obj.get('uuid')}:{block.get('id')}",
-            "tool_use_id": block.get("id"), "script_path": canonical,
-            "exit_code": None, "duration_ms": None, **base}
+    records: list[dict[str, Any]] = []
+    if tool_name in _READ_TOOLS:
+        raw_path = str(tool_input.get("file_path") or tool_input.get("path") or "")
+        parsed = _canonical_target(raw_path, "references")
+        if parsed is not None:
+            skill, canonical, matched_path = parsed
+            records.append({
+                "_kind": "reference_hit",
+                "hit_uid": f"{obj.get('uuid')}:{block.get('id')}",
+                "skill": skill,
+                "reference_path": canonical,
+                "byte_len": _resolve_byte_len(matched_path, canonical, obj.get("cwd")),
+                **base,
+            })
+        return records
+    if tool_name in _SHELL_TOOLS:
+        cmd = str(tool_input.get("command") or tool_input.get("cmd") or "")
+        if not cmd:
+            return []
+        seen_refs: set[str] = set()
+        for idx, ref_match in enumerate(_SHELL_READ_RE.finditer(cmd)):
+            parsed = _canonical_target(ref_match.group("target"), "references")
+            if parsed is None or parsed[1] in seen_refs:
+                continue
+            skill, canonical, matched_path = parsed
+            seen_refs.add(canonical)
+            records.append({
+                "_kind": "reference_hit",
+                "hit_uid": f"{obj.get('uuid')}:{block.get('id')}:ref:{idx}",
+                "skill": skill,
+                "reference_path": canonical,
+                "byte_len": _resolve_byte_len(matched_path, canonical, obj.get("cwd")),
+                **base,
+            })
+        seen_scripts: set[str] = set()
+        for idx, seg in enumerate(re.split(r"(?:&&|\|\||;|\n)", cmd)):
+            exec_match = _EXEC_SEGMENT_RE.match(seg)
+            if not exec_match:
+                continue
+            parsed = _canonical_target(exec_match.group("target"), "scripts")
+            if parsed is None or parsed[1] in seen_scripts:
+                continue
+            skill, canonical, _ = parsed
+            seen_scripts.add(canonical)
+            suffix = "" if idx == 0 and len(seen_scripts) == 1 else f":{idx}"
+            records.append({
+                "_kind": "script_call",
+                "call_uid": f"{obj.get('uuid')}:{block.get('id')}{suffix}",
+                "tool_use_id": block.get("id"),
+                "skill": skill,
+                "script_path": canonical,
+                "exit_code": None,
+                "duration_ms": None,
+                **base,
+            })
+    return records
+
+
+def _path_record(block: dict[str, Any], obj: dict[str, Any], session_id: Any) -> dict[str, Any] | None:
+    records = _path_records(block, obj, session_id)
+    return records[0] if records else None
 
 
 def _exit_code(value: Any) -> int | None:
@@ -134,11 +213,10 @@ def collect() -> int:
                     batch.append(turn)
                     for block in (obj.get("message") or {}).get("content") or []:
                         if isinstance(block, dict) and block.get("type") == "tool_use":
-                            record = _path_record(block, obj, obj.get("sessionId"))
-                            if record is not None:
+                            for record in _path_records(block, obj, obj.get("sessionId")):
                                 batch.append(record)
                                 if record.get("_kind") == "script_call" and record.get("tool_use_id"):
-                                    pending[str(record["tool_use_id"])] = dict(record)
+                                    pending.setdefault(str(record["tool_use_id"]), []).append(dict(record))
                 elif obj.get("type") == "user":
                     for block in (obj.get("message") or {}).get("content") or []:
                         if not isinstance(block, dict) or block.get("type") != "tool_result":
@@ -146,19 +224,21 @@ def collect() -> int:
                         tool_id = block.get("tool_use_id")
                         if not tool_id:
                             continue
-                        record = next(
-                            (item for item in reversed(batch)
-                             if item.get("_kind") == "script_call"
-                             and item.get("tool_use_id") == tool_id),
-                            None,
-                        )
-                        if record is None:
-                            record = pending.pop(str(tool_id), None)
-                            if record is not None:
-                                batch.append(record)
+                        matches = [
+                            item for item in batch
+                            if item.get("_kind") == "script_call"
+                            and item.get("tool_use_id") == tool_id
+                        ]
+                        if not matches:
+                            resumed = pending.pop(str(tool_id), None)
+                            if isinstance(resumed, dict):
+                                matches = [resumed]
+                            elif isinstance(resumed, list):
+                                matches = resumed
+                            batch.extend(matches)
                         else:
                             pending.pop(str(tool_id), None)
-                        if record is not None:
+                        for record in matches:
                             record["exit_code"] = 1 if block.get("is_error") else _exit_code(block.get("content"))
                             record["duration_ms"] = _elapsed_ms(record.get("timestamp"), obj.get("timestamp"))
         if batch:
