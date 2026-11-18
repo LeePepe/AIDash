@@ -111,11 +111,13 @@ review_agg AS (
 eval_effect AS (
     SELECT CASE WHEN lower(goal_id) LIKE '%design%' OR lower(goal_id) LIKE '%ui%' OR lower(goal_id) LIKE '%feel%' THEN 'my-designer' ELSE 'team-lead' END AS skill,
            CASE WHEN upper(COALESCE(note_preview, '')) LIKE '%GATE%' OR evt_type IN ('REVIEW_FAIL', 'TASK_BLOCKED') THEN 1 ELSE 0 END AS interception,
-           CASE WHEN upper(COALESCE(note_preview, '')) LIKE '%IMPL_BUG%' OR upper(COALESCE(note_preview, '')) LIKE '%SPEC_GAP%' OR evt_type = 'REVIEW_FAIL' THEN 1 ELSE 0 END AS escape_flag
+           CASE WHEN upper(COALESCE(note_preview, '')) LIKE '%IMPL_BUG%' OR upper(COALESCE(note_preview, '')) LIKE '%SPEC_GAP%' OR evt_type = 'REVIEW_FAIL' THEN 1 ELSE 0 END AS escape_flag,
+           CASE WHEN upper(COALESCE(note_preview, '')) LIKE '%SPEC_GAP%' OR evt_type IN ('RULING', 'CHANGE_REQUEST') THEN 1 ELSE 0 END AS spec_gap_flag
     FROM fact_gtt_event
 ),
 eval_agg AS (
     SELECT skill, SUM(interception) AS interception, SUM(escape_flag) AS escape_count,
+           SUM(spec_gap_flag) AS spec_gap_count,
            SUM(interception) + SUM(escape_flag) AS eval_effect FROM eval_effect GROUP BY skill
 ),
 all_skills AS (
@@ -146,7 +148,8 @@ SELECT s.skill,
        COALESCE(e.interception, 0) AS interception, COALESCE(e.escape_count, 0) AS "escape",
        COALESCE(e.eval_effect, 0) AS eval_effect,
        COALESCE(e.escape_count, COALESCE(r.r1_fail, 0)) AS impl_bug_count,
-       ROUND(CASE WHEN COALESCE(r.r1_total, 0) > 0 AND u.avg_context_tokens IS NOT NULL THEN (1.0 * r.r1_pass / r.r1_total) / (0.5 + MIN(2.0, u.avg_context_tokens / 10000.0) + COALESCE(r.rework_rounds, 0) * 0.25 + CASE WHEN COALESCE(u.session_count, 0) > 0 THEN 1.0 - 1.0 * u.script_exec_sessions / u.session_count ELSE 0 END * 0.6 + COALESCE(e.escape_count, COALESCE(r.r1_fail, 0)) * 0.2) ELSE NULL END, 4) AS roi_score,
+       COALESCE(e.spec_gap_count, 0) AS spec_gap_count,
+       ROUND(CASE WHEN COALESCE(r.r1_total, 0) > 0 AND u.avg_context_tokens IS NOT NULL THEN (1.0 * r.r1_pass / r.r1_total) / (0.5 + MIN(2.0, u.avg_context_tokens / 10000.0) + COALESCE(r.rework_rounds, 0) * 0.25 + CASE WHEN COALESCE(u.session_count, 0) > 0 THEN 1.0 - 1.0 * u.script_exec_sessions / u.session_count ELSE 0 END * 0.6 + COALESCE(e.escape_count, COALESCE(r.r1_fail, 0)) * 0.2 + COALESCE(e.spec_gap_count, 0) * 0.15) ELSE NULL END, 4) AS roi_score,
        anchor.max_day AS source_as_of,
        date(anchor.max_day, '-6 days') || ' → ' || anchor.max_day AS time_window,
        COALESCE(u.session_count, r.r1_total, 0) AS sample_size,

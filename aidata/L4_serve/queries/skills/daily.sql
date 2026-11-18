@@ -76,7 +76,7 @@ codex_slash AS (
     WHERE source_kind LIKE 'slash_command%'
       AND day BETWEEN COALESCE(:day_from, '0000-01-01')
                   AND COALESCE(:day_to, '9999-12-31')
-    GROUP BY day
+    GROUP BY day, skill
 ),
 hermes AS (
     SELECT day, 'hermes_skill_view' AS source, skill, n,
