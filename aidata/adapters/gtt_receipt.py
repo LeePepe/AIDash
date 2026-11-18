@@ -355,11 +355,12 @@ def normalize() -> int:
                 _field(content, ("Timestamp", "Updated", "Ended", "Reviewed At"))
             ) or _normalize_iso(record.get("mtime_iso")),
             **meta,
+            '"escape"': meta.get("escape"),
         }
     task_cols = ("receipt_uid", "goal_uid", "machine_id", "goal_id", "task_id", "role_name",
                  "round_no", "agent_name", "cli_tool", "model_id", "vendor", "status",
                  "v5_verdict", "head_sha", "receipt_sha256", "completed_at", "skills_used",
-                 "eval_case", "interception", "escape")
+                 "eval_case", "interception", '"escape"')
     role_map = {row["role_model_key"]: row for row in _profiles()}
     roles = list(role_map.values())
     role_cols = ("role_model_key", "role_name", "tier", "cli_tool", "model_id", "vendor", "is_escalated")

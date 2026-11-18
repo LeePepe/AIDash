@@ -114,17 +114,6 @@ def collect(*, now: datetime | None = None) -> int:
                         f"SELECT {selected} FROM {table} WHERE substr({stamp}, 1, 10) BETWEEN ? AND ? ORDER BY {stamp} LIMIT 100000",
                         (cutoff, today.isoformat()),
                     ))
-                    turn_stamps: dict[tuple[str, int], datetime] = {}
-                    if table == "turns":
-                        for session_id, turn_id, timestamp, *_ in rows:
-                            if session_id and turn_id is not None:
-                                try:
-                                    parsed_ts = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))  # noqa: FURB162
-                                    if parsed_ts.tzinfo is None:
-                                        parsed_ts = parsed_ts.replace(tzinfo=timezone.utc)  # noqa: UP017
-                                    turn_stamps[(str(session_id), int(turn_id))] = parsed_ts
-                                except ValueError:
-                                    pass
                     for session_id, turn_id, timestamp, *texts in rows:
                         if not session_id or turn_id is None or not _cst_day(timestamp):
                             continue
@@ -132,12 +121,7 @@ def collect(*, now: datetime | None = None) -> int:
                         for skill in sorted({skill for text in text_values for skill in _metadata_skills(text)}):
                             event = _skill_event(str(session_id), int(turn_id), str(timestamp), skill)
                             events.setdefault(event["event_id"], event)
-                        cur_ts = turn_stamps.get((str(session_id), int(turn_id)))
-                        nxt_ts = turn_stamps.get((str(session_id), int(turn_id) + 1))
-                        est_ms = int(max(0.0, min(600000.0, (nxt_ts - cur_ts).total_seconds() * 1000))) if (cur_ts and nxt_ts and nxt_ts > cur_ts) else None
                         for metric_event in (event for text in text_values for event in _metric_events(str(session_id), int(turn_id), str(timestamp), text)):
-                            if metric_event.get("kind") == "script_call" and est_ms is not None:
-                                metric_event["duration_ms"] = est_ms
                             events.setdefault(metric_event.get("hit_uid") or metric_event.get("call_uid"), metric_event)
                 except sqlite3.Error:
                     continue  # One missing/legacy table must not hide another.

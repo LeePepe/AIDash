@@ -600,6 +600,12 @@ def run_merge() -> dict[str, int]:
                 "SELECT count(*) FROM fact_github_pr").fetchone()[0]
 
         _merge_skill_facts(conn)
+        counts["reference_hits"] = conn.execute(
+            "SELECT count(*) FROM reference_hits"
+        ).fetchone()[0]
+        counts["script_call"] = conn.execute(
+            "SELECT count(*) FROM script_call"
+        ).fetchone()[0]
 
         # --- dim_session rollup (from fact_request, claude-cli only) ---
         conn.execute("""
