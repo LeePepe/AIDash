@@ -1017,19 +1017,44 @@ def test_event_bridge_skill_roi_star_and_done_and_sql_query(tmp_path):
         )
         conn.execute(
             "CREATE TABLE fact_gtt_task_run (goal_id TEXT, task_id TEXT, role_name TEXT, "
-            "round_no INTEGER, v5_verdict TEXT, status TEXT, cst_day TEXT)"
+            "round_no INTEGER, v5_verdict TEXT, status TEXT, cst_day TEXT, skills_used TEXT)"
         )
         conn.execute(
-            "CREATE TABLE fact_gtt_event (goal_id TEXT, evt_type TEXT, note_preview TEXT, cst_day TEXT)"
+            "CREATE TABLE fact_gtt_event (goal_id TEXT, evt_type TEXT, note_preview TEXT, cst_day TEXT, "
+            "eval_case TEXT, interception INTEGER, \"escape\" INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE reference_hits (hit_uid TEXT, source TEXT, session_id TEXT, turn_uuid TEXT, "
+            "skill TEXT, reference_path TEXT, byte_len INTEGER, ts TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE script_call (call_uid TEXT, source TEXT, session_id TEXT, turn_uuid TEXT, "
+            "skill TEXT, script_path TEXT, exit_code INTEGER, duration_ms INTEGER, ts TEXT)"
         )
         conn.execute(
             "INSERT INTO fact_turn VALUES ('u1', 's1', '2026-11-10', 'my-designer', '[\"my-designer\"]', '[\"Read\",\"Read\",\"Read\",\"Read\"]', 8000, 1000, 1000)"
         )
-        conn.execute(
-            "INSERT INTO fact_gtt_task_run VALUES ('ui-feel-design', 'T1', 'code_reviewer', 1, 'FAIL', 'failed', '2026-11-10')"
+        conn.executemany(
+            "INSERT INTO fact_gtt_task_run VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ('ui-feel-design', 'T1', 'code_reviewer', 1, 'FAIL', 'failed', '2026-11-10', '[\"my-designer\"]'),
+                ('retro-goal', 'T2', 'code_reviewer', 2, 'PASS', 'completed', '2026-11-10', '[\"my-designer\"]'),
+            ],
         )
         conn.execute(
-            "INSERT INTO fact_gtt_event VALUES ('ui-feel-design', 'REVIEW_FAIL', '[IMPL_BUG] clip', '2026-11-10')"
+            "INSERT INTO fact_gtt_event VALUES ('ui-feel-design', 'REVIEW_FAIL', '[IMPL_BUG] clip', '2026-11-10', 'EV-001', 1, 1)"
+        )
+        conn.executemany(
+            "INSERT INTO reference_hits VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [("hit-1", "claude_jsonl", "s1", "u1", "my-designer", "skills/my-designer/references/guide.md", 42, "2026-11-10T01:00:00Z")],
+        )
+        conn.executemany(
+            "INSERT INTO script_call VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("call-1", "claude_jsonl", "s1", "u1", "my-designer", "skills/my-designer/scripts/check.sh", 1, 100, "2026-11-10T01:01:00Z"),
+                ("call-2", "claude_jsonl", "s1", "u1", "my-designer", "skills/my-designer/scripts/unknown.sh", None, None, "2026-11-10T01:02:00Z"),
+                ("call-3", "copilot_cli", "s-unmeasured", "u-x", "unmeasured", "skills/unmeasured/scripts/check.sh", None, None, "2026-11-10T01:03:00Z"),
+            ],
         )
         cur = conn.execute(sql_text)
         cols = [d[0] for d in cur.description]
@@ -1037,9 +1062,23 @@ def test_event_bridge_skill_roi_star_and_done_and_sql_query(tmp_path):
     assert rows
     designer_row = next(r for r in rows if r["skill"] == "my-designer")
     assert designer_row["r1_pass_rate"] == 0.0
-    assert designer_row["unpracticed_rate"] == 1.0
+    assert designer_row["unpracticed_rate"] == 0.0
     assert designer_row["impl_bug_count"] >= 1
+    assert designer_row["reference_hit_count"] == 1
+    assert designer_row["script_success_rate"] == 0.0
+    assert designer_row["rework_rounds"] == 1
+    assert designer_row["avg_script_duration_ms"] == 100.0
+    assert designer_row["p95_ms"] == 100
+    assert designer_row["script_latency"] == 100
+    assert designer_row["interception"] == 1
+    assert designer_row["escape"] == 1
+    assert designer_row["eval_effect"] == 2
     assert designer_row["roi_score"] == 0.0
+    unmeasured_row = next(r for r in rows if r["skill"] == "unmeasured")
+    assert unmeasured_row["avg_script_duration_ms"] is None
+    assert unmeasured_row["p95_ms"] is None
+    assert unmeasured_row["script_latency"] is None
+    assert unmeasured_row["script_success_rate"] is None
 
     # Test S11 context_composition.sql and S12 tool_context_burn.sql
     s11_sql = (Path(__file__).resolve().parent.parent / "L4_serve" / "queries" / "retro" / "context_composition.sql").read_text(encoding="utf-8")

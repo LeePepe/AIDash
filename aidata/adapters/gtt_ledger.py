@@ -99,6 +99,20 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
         return
 
 
+def _eval_metadata(content: str, *, fallback_case: str | None = None) -> dict[str, Any]:
+    upper = content.upper()
+    case = next((value for value in re.findall(r"\b(?:EV|CASE)[-_]?[A-Z0-9]+\b", content, re.IGNORECASE)), None)
+    return {
+        "eval_case": case or fallback_case,
+        "interception": int(any(token in upper for token in ("REVIEW_FAIL", "TASK_BLOCKED", "GATE", "CONTRACT", "EVAL CATCH"))),
+        "escape": int(any(token in upper for token in ("[IMPL_BUG]", "[SPEC_GAP]", "REGRESSION", "REVIEW FAIL"))),
+    }
+
+
+def _ledger_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {**record, **_eval_metadata(str(record.get("content", "")))}
+
+
 def _local_records() -> Iterable[dict[str, Any]]:
     for root in GTT_HANDOFF_ROOTS:
         try:
@@ -128,14 +142,15 @@ def collect() -> int:
     from adapters import cloud_sync
 
     cloud_sync.pull_remote_batches()
-    records = list(_local_records())
+    records = [_ledger_record(record) for record in _local_records()]
     try:
         bundles = sorted(GTT_XFER_DIR.rglob("*.jsonl"))
         bundles.extend(sorted(GTT_XFER_DIR.rglob("*.tgz")))
     except OSError:
         bundles = []
     for bundle in bundles:
-        records.extend(_bundle_records(bundle))
+        records.extend(_ledger_record(record) for record in _bundle_records(bundle))
+    records = [_ledger_record(record) for record in records]
     old = dict(get_watermark(SOURCE) or {})
     changed = []
     current: dict[str, str] = {}
@@ -262,6 +277,12 @@ def _parse_event(line: str, line_number: int, goal_id: str) -> dict[str, Any] | 
         "is_bot_bypass": 1 if fields.get("bypass", "").lower() in {"1", "true", "yes"} else 0,
         "blocker_class": fields.get("blocker_class") or fields.get("blocker"),
         "note_preview": redact(note or "")[:300] or None,
+        **_eval_metadata(
+            f"{match.group('evt')} {fields.get('case_id', '')} "
+            f"{fields.get('blocker_class') or fields.get('blocker') or ''} {note or ''}",
+            fallback_case=fields.get("case_id") or fields.get("blocker_class")
+            or fields.get("blocker") or match.group("evt"),
+        ),
     }
 
 
@@ -299,9 +320,8 @@ def _open_blockers(events: list[dict[str, Any]]) -> set[str]:
                 open_blockers.discard(task)
             else:
                 open_blockers.clear()
-        elif event["evt_type"] in {"DONE", "MERGED", "REVIEW_PASS"}:
-            if task:
-                open_blockers.discard(task)
+        elif event["evt_type"] in {"DONE", "MERGED", "REVIEW_PASS"} and task:
+            open_blockers.discard(task)
     return open_blockers
 
 
@@ -321,7 +341,7 @@ CREATE TABLE gtt_event (
     ts TEXT NOT NULL, evt_type TEXT NOT NULL, task_id TEXT, actor_from TEXT,
     actor_to TEXT, ref_artifact TEXT, head_sha TEXT, pr_number INTEGER,
     model_id TEXT, contract_sha TEXT, is_bot_bypass INTEGER, blocker_class TEXT,
-    note_preview TEXT
+    note_preview TEXT, eval_case TEXT, interception INTEGER, "escape" INTEGER
 )
 """
 
@@ -403,7 +423,10 @@ def normalize() -> int:
         "tl_model", "contract_sha", "static_header_status", "derived_actual_status",
         "is_status_drifted", "task_total_count", "task_done_count", "task_blocked_count",
         "created_at", "last_event_at", "ledger_sha256"))
-    return write_clean(SOURCE, "gtt_event", _EVENT_DDL, events, (
+    event_columns = (
         "event_uid", "goal_uid", "machine_id", "goal_id", "line_no", "event_id", "ts",
         "evt_type", "task_id", "actor_from", "actor_to", "ref_artifact", "head_sha",
-        "pr_number", "model_id", "contract_sha", "is_bot_bypass", "blocker_class", "note_preview"))
+        "pr_number", "model_id", "contract_sha", "is_bot_bypass", "blocker_class", "note_preview",
+        "eval_case", "interception", '"escape"')
+    event_rows = [{**event, '"escape"': event.get("escape")} for event in events]
+    return write_clean(SOURCE, "gtt_event", _EVENT_DDL, event_rows, event_columns)

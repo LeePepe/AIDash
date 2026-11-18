@@ -110,6 +110,36 @@ def test_gtt_receipt_accepts_bundle_style_record(monkeypatch):
 
 
 @pytest.mark.unit
+def test_gtt_receipt_normalize_writes_real_sqlite_with_quoted_escape(monkeypatch, tmp_path):
+    import cleanio
+
+    raw = [{
+        "machine_id": "macbook",
+        "goal_id": "demo",
+        "record_type": "receipt",
+        "rel_path": "demo/receipts/reviewer-r1.md",
+        "skills_used": '["team-lead", "aidash-metrics"]',
+        "content": (
+            "- **Status**: failed\n"
+            "- **Role / Model**: code_reviewer / gemini-4-argon\n"
+            "- **Verdict**: FAIL\n"
+            "- **Findings**: [IMPL_BUG] EV-001 gate catch\n"
+            "Timestamp: 2026-10-28T01:00:00+08:00\n"
+        ),
+    }]
+    monkeypatch.setattr(gtt_receipt, "read_raw", lambda _source: raw)
+    monkeypatch.setattr(gtt_receipt, "_profiles", list)
+    monkeypatch.setattr(cleanio, "CLEAN_DIR", tmp_path)
+    monkeypatch.setattr(cleanio, "clean_path", lambda source: tmp_path / f"{source}.db")
+    assert gtt_receipt.normalize() == 1
+    with sqlite3.connect(tmp_path / "gtt_receipt.db") as conn:
+        row = conn.execute(
+            'SELECT skills_used, eval_case, interception, "escape" FROM task_run'
+        ).fetchone()
+    assert row == ('["aidash-metrics", "team-lead"]', "EV-001", 1, 1)
+
+
+@pytest.mark.unit
 def test_gtt_receipt_maps_hyphenated_role_and_failure(monkeypatch):
     raw = [{
         "machine_id": "MACBOOK",

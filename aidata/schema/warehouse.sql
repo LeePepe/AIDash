@@ -83,6 +83,24 @@ CREATE TABLE IF NOT EXISTS fact_turn (
 CREATE INDEX IF NOT EXISTS idx_turn_session ON fact_turn(session_id);
 CREATE INDEX IF NOT EXISTS idx_turn_cst_day ON fact_turn(cst_day);
 
+-- Progressive-disclosure and script-offload facts. Each row retains the
+-- source/session/turn grain so L4 can distinguish observed reads and executions.
+CREATE TABLE IF NOT EXISTS reference_hits (
+    hit_uid TEXT PRIMARY KEY, source TEXT NOT NULL, session_id TEXT, turn_uuid TEXT,
+    skill TEXT, reference_path TEXT NOT NULL, byte_len INTEGER, ts TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_reference_hits_session_skill
+    ON reference_hits(session_id, skill);
+
+CREATE TABLE IF NOT EXISTS script_call (
+    call_uid TEXT PRIMARY KEY, source TEXT NOT NULL, session_id TEXT, turn_uuid TEXT,
+    skill TEXT, script_path TEXT NOT NULL, exit_code INTEGER, duration_ms INTEGER, ts TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_script_call_session_skill
+    ON script_call(session_id, skill);
+
 -- ---------------------------------------------------------------------------
 -- fact_issue — grain = one Multica issue. `issue_number` is the time-ordered
 -- primary axis (monotonic with created_at; sparse/non-contiguous).
@@ -327,7 +345,7 @@ CREATE TABLE IF NOT EXISTS fact_gtt_event (
     ts TEXT NOT NULL, evt_type TEXT NOT NULL, task_id TEXT, actor_from TEXT,
     actor_to TEXT, ref_artifact TEXT, head_sha TEXT, pr_number INTEGER,
     model_id TEXT, contract_sha TEXT, is_bot_bypass INTEGER, blocker_class TEXT,
-    note_preview TEXT,
+    note_preview TEXT, eval_case TEXT, interception INTEGER, "escape" INTEGER,
     cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_gtt_event_cst_day ON fact_gtt_event(cst_day);
@@ -337,7 +355,8 @@ CREATE TABLE IF NOT EXISTS fact_gtt_task_run (
     goal_id TEXT NOT NULL, task_id TEXT NOT NULL, role_name TEXT NOT NULL,
     round_no INTEGER NOT NULL, agent_name TEXT, cli_tool TEXT, model_id TEXT,
     vendor TEXT, status TEXT, v5_verdict TEXT, head_sha TEXT,
-    receipt_sha256 TEXT NOT NULL, completed_at TEXT,
+    receipt_sha256 TEXT NOT NULL, completed_at TEXT, skills_used TEXT,
+    eval_case TEXT, interception INTEGER, "escape" INTEGER,
     cst_day TEXT GENERATED ALWAYS AS (date(completed_at, '+8 hours')) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_gtt_task_run_cst_day ON fact_gtt_task_run(cst_day);

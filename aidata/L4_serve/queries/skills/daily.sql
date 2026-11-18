@@ -38,15 +38,27 @@ codex_skill_read AS (
 claude_slash AS (
     SELECT day, 'claude_slash' AS source,
            CASE
-             WHEN instr(text_preview, '<command-name>') > 0
-              AND instr(text_preview, '</command-name>') >
-                  instr(text_preview, '<command-name>') + length('<command-name>')
+             WHEN instr(COALESCE(text_preview, prefix_100, ''), '<command-name>') > 0
+              AND instr(COALESCE(text_preview, prefix_100, ''), '</command-name>') >
+                  instr(COALESCE(text_preview, prefix_100, ''), '<command-name>') + length('<command-name>')
+             THEN trim(ltrim(substr(COALESCE(text_preview, prefix_100),
+                    instr(COALESCE(text_preview, prefix_100), '<command-name>') + length('<command-name>'),
+                    instr(COALESCE(text_preview, prefix_100), '</command-name>') -
+                    instr(COALESCE(text_preview, prefix_100), '<command-name>') - length('<command-name>')), '/'))
+             WHEN instr(COALESCE(text_preview, prefix_100, ''), '<command-message>') > 0
+              AND instr(COALESCE(text_preview, prefix_100, ''), '</command-message>') >
+                  instr(COALESCE(text_preview, prefix_100, ''), '<command-message>') + length('<command-message>')
+             THEN trim(ltrim(substr(COALESCE(text_preview, prefix_100),
+                    instr(COALESCE(text_preview, prefix_100), '<command-message>') + length('<command-message>'),
+                    instr(COALESCE(text_preview, prefix_100), '</command-message>') -
+                    instr(COALESCE(text_preview, prefix_100), '<command-message>') - length('<command-message>')), '/'))
+             WHEN lower(trim(COALESCE(text_preview, prefix_100, ''))) LIKE '/skill %'
              THEN substr(
-                    text_preview,
-                    instr(text_preview, '<command-name>') + length('<command-name>'),
-                    instr(text_preview, '</command-name>') -
-                    instr(text_preview, '<command-name>') - length('<command-name>')
-                  )
+                    substr(trim(COALESCE(text_preview, prefix_100)), length('/skill ') + 1),
+                    1,
+                    instr(substr(trim(COALESCE(text_preview, prefix_100)), length('/skill ') + 1) || ' ', ' ') - 1)
+             WHEN substr(ltrim(COALESCE(text_preview, prefix_100, '')), 1, 1) = '/'
+             THEN substr(ltrim(COALESCE(text_preview, prefix_100)), 2, instr(substr(ltrim(COALESCE(text_preview, prefix_100)), 2) || ' ', ' ') - 1)
              ELSE '(unrecorded)'
            END AS skill,
            count(*) AS n, count(DISTINCT session_id) AS sessions
@@ -57,13 +69,37 @@ claude_slash AS (
     GROUP BY day, skill
 ),
 codex_slash AS (
-    SELECT day, 'codex_slash' AS source, '(unrecorded)' AS skill,
+    SELECT day, 'codex_slash' AS source,
+           CASE
+             WHEN instr(lower(trim(COALESCE(text_preview, prefix_100, ''))), '<command-name>') > 0
+              AND instr(lower(COALESCE(text_preview, prefix_100, '')), '</command-name>') >
+                  instr(lower(COALESCE(text_preview, prefix_100, '')), '<command-name>') + length('<command-name>')
+             THEN trim(ltrim(substr(COALESCE(text_preview, prefix_100),
+                    instr(lower(COALESCE(text_preview, prefix_100)), '<command-name>') + length('<command-name>'),
+                    instr(lower(COALESCE(text_preview, prefix_100)), '</command-name>') -
+                    instr(lower(COALESCE(text_preview, prefix_100)), '<command-name>') - length('<command-name>')), '/'))
+             WHEN instr(lower(trim(COALESCE(text_preview, prefix_100, ''))), '<command-message>') > 0
+              AND instr(lower(COALESCE(text_preview, prefix_100, '')), '</command-message>') >
+                  instr(lower(COALESCE(text_preview, prefix_100, '')), '<command-message>') + length('<command-message>')
+             THEN trim(ltrim(substr(COALESCE(text_preview, prefix_100),
+                    instr(lower(COALESCE(text_preview, prefix_100)), '<command-message>') + length('<command-message>'),
+                    instr(lower(COALESCE(text_preview, prefix_100)), '</command-message>') -
+                    instr(lower(COALESCE(text_preview, prefix_100)), '<command-message>') - length('<command-message>')), '/'))
+             WHEN lower(trim(COALESCE(text_preview, prefix_100, ''))) LIKE '/skill %'
+             THEN substr(
+                    substr(trim(COALESCE(text_preview, prefix_100)), length('/skill ') + 1),
+                    1,
+                    instr(substr(trim(COALESCE(text_preview, prefix_100)), length('/skill ') + 1) || ' ', ' ') - 1)
+             WHEN substr(ltrim(COALESCE(text_preview, prefix_100, '')), 1, 1) = '/'
+             THEN substr(ltrim(COALESCE(text_preview, prefix_100)), 2, instr(substr(ltrim(COALESCE(text_preview, prefix_100)), 2) || ' ', ' ') - 1)
+             ELSE '(unrecorded)'
+           END AS skill,
            count(*) AS n, count(DISTINCT session_id) AS sessions
     FROM codex_prompts.prompt
-    WHERE source_kind = 'slash_command'
+    WHERE source_kind LIKE 'slash_command%'
       AND day BETWEEN COALESCE(:day_from, '0000-01-01')
                   AND COALESCE(:day_to, '9999-12-31')
-    GROUP BY day
+    GROUP BY day, skill
 ),
 hermes AS (
     SELECT day, 'hermes_skill_view' AS source, skill, n,

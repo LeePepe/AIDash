@@ -31,9 +31,37 @@ _META = ("window_cst", "window_start", "window_end", "source_as_of", "sample_siz
 _COVERAGE = {"healthy", "partial", "unknown", "missing", "error"}
 
 
+def _validate_optional_metric_sections(report: dict[str, Any], problems: list[str]) -> None:
+    """Validate optional observed metric sections without changing the report."""
+    required = {
+        "reference_hits": {"reference_path": True},
+        "script_latency": {"duration_ms": True, "p95_ms": True},
+        "eval_effect": {"interception": True, "escape": True},
+    }
+    for section_name, field_map in required.items():
+        fields = tuple(field_map)
+        if section_name not in report:
+            continue
+        section = report[section_name]
+        if not isinstance(section, list):
+            problems.append(f"optional metric section {section_name} must be a list")
+            continue
+        for index, item in enumerate(section):
+            if not isinstance(item, dict):
+                problems.append(f"optional metric section {section_name}[{index}] must be an object")
+                continue
+            missing = [field for field in fields if field not in item]
+            if missing:
+                problems.append(
+                    f"optional metric section {section_name}[{index}] missing: {', '.join(missing)}"
+                )
+
+
+
 def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, errors: list[str] | None = None) -> dict[str, Any]:
     """Validate producer shape while preserving its values, nulls and estimates."""
     problems = list(errors or [])
+    _validate_optional_metric_sections(report, problems)
     if any(field not in report for field in _META):
         problems.append("missing root observation metadata")
     for key, kind in _SECTION_TYPES.items():

@@ -126,6 +126,26 @@ def test_slim_keeps_stop_reason():
 
 
 @pytest.mark.unit
+def test_path_records_keep_reference_and_script_dimensions():
+    obj = {"uuid": "turn-1", "timestamp": "2026-07-27T01:02:03Z"}
+    reference = cj._path_record(
+        {"id": "read-1", "name": "Read", "input": {"file_path": "skills/demo/references/guide.md"}},
+        obj,
+        "session-1",
+    )
+    script = cj._path_record(
+        {"id": "bash-1", "name": "Bash", "input": {"command": "skills/demo/scripts/check.sh"}},
+        obj,
+        "session-1",
+    )
+    assert reference["reference_path"] == "skills/demo/references/guide.md"
+    assert reference["byte_len"] > 0
+    assert script["script_path"] == "skills/demo/scripts/check.sh"
+    assert script["duration_ms"] is None
+    assert script["exit_code"] is None
+
+
+@pytest.mark.unit
 def test_slim_stop_reason_nullable():
     # streaming/control assistant frames may omit stop_reason -> None, not error.
     line = _assistant_line("u2", None)
@@ -243,3 +263,68 @@ def test_normalize_dedupes_on_uuid(monkeypatch):
     # for the same turn overwrites an older one. Critical for full re-collect
     # backfill — the newer shard carries fields the old parser dropped.
     assert captured["rows"][0]["finish_reason"] == "max_tokens"
+
+
+@pytest.mark.unit
+def test_normalize_skips_aux_turns_and_deduplicates_auxiliary_records(monkeypatch):
+    turn = cj._slim(_assistant_line("turn-1", "end_turn"))
+    raw = [
+        turn,
+        {"_kind": "reference_hit", "hit_uid": "hit-1", "sessionId": "sess-A",
+         "turn_uuid": "turn-1", "skill": "demo", "reference_path": "skills/demo/references/a.md",
+         "byte_len": 10, "timestamp": "2026-07-27T01:02:03Z"},
+        {"_kind": "reference_hit", "hit_uid": "hit-1", "sessionId": "sess-A",
+         "turn_uuid": "turn-1", "skill": "demo", "reference_path": "skills/demo/references/a.md",
+         "byte_len": 11, "timestamp": "2026-07-27T01:02:04Z"},
+        {"_kind": "script_call", "call_uid": "call-1", "sessionId": "sess-A",
+         "turn_uuid": "turn-1", "skill": "demo", "script_path": "skills/demo/scripts/a.sh",
+         "exit_code": None, "duration_ms": None, "timestamp": "2026-07-27T01:02:03Z"},
+        {"_kind": "script_call", "call_uid": "call-1", "sessionId": "sess-A",
+         "turn_uuid": "turn-1", "skill": "demo", "script_path": "skills/demo/scripts/a.sh",
+         "exit_code": 1, "duration_ms": 125, "timestamp": "2026-07-27T01:02:04Z"},
+    ]
+    monkeypatch.setattr(cj, "read_raw", lambda source: raw)
+    captured = {}
+
+    def capture(source, table, ddl, rows, cols):
+        captured[table] = rows
+        return len(rows)
+
+    monkeypatch.setattr(cj, "write_clean", capture)
+    monkeypatch.setattr(cj, "_DEFAULT_WRITE_CLEAN", capture)
+    monkeypatch.setattr(cj, "_write_aux_clean",
+                        lambda table, ddl, rows, cols: captured.__setitem__(table, rows))
+    assert cj.normalize() == 1
+    assert len(captured["turn"]) == 1
+    assert captured["turn"][0]["turn_uuid"] == "turn-1"
+    assert captured["reference_hit"][0]["byte_len"] == 11
+    assert captured["script_call"][0]["exit_code"] == 1
+    assert captured["script_call"][0]["duration_ms"] == 125
+
+
+@pytest.mark.unit
+def test_path_records_reject_script_read_edit_and_mention():
+    obj = {"uuid": "turn-x", "timestamp": "2026-07-27T01:02:03Z"}
+    assert cj._path_records(
+        {"type": "tool_use", "id": "t1", "name": "Read",
+         "input": {"file_path": "skills/demo/scripts/check.sh"}},
+        obj, "sess-A",
+    ) == []
+    assert cj._path_records(
+        {"type": "tool_use", "id": "t2", "name": "Edit",
+         "input": {"file_path": "skills/demo/scripts/check.sh", "old_str": "a", "new_str": "b"}},
+        obj, "sess-A",
+    ) == []
+    assert cj._path_records(
+        {"type": "tool_use", "id": "t3", "name": "Bash",
+         "input": {"command": "cat skills/demo/scripts/check.sh && ls skills/demo/references/guide.md"}},
+        obj, "sess-A",
+    ) == []
+    real_exec = cj._path_records(
+        {"type": "tool_use", "id": "t4", "name": "Bash",
+         "input": {"command": "python3 skills/demo/scripts/check.py --strict"}},
+        obj, "sess-A",
+    )
+    assert len(real_exec) == 1
+    assert real_exec[0]["_kind"] == "script_call"
+    assert real_exec[0]["script_path"] == "skills/demo/scripts/check.py"
