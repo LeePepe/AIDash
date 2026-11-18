@@ -99,6 +99,19 @@ script_skill_stats AS (
     FROM script_latency_ranked
     GROUP BY skill
 ),
+ref_skill_agg AS (
+    SELECT skill, COUNT(DISTINCT COALESCE(session_id, '') || ':' || reference_path) AS reference_hit_count
+    FROM reference_events
+    GROUP BY skill
+),
+script_skill_outcomes AS (
+    SELECT skill,
+           COUNT(*) AS script_count,
+           SUM(CASE WHEN exit_code IS NOT NULL THEN 1 ELSE 0 END) AS script_exit_count,
+           SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS script_success_count
+    FROM script_events
+    GROUP BY skill
+),
 session_skill_rollup AS (
     SELECT b.skill, b.session_id, b.turn_loads_7d, b.turn_loads_30d,
            b.session_tokens, b.session_script_exec, b.file_edit_calls,
@@ -198,10 +211,14 @@ SELECT s.skill,
        COALESCE(u.l1_greedy_sessions, 0) AS l1_greedy_sessions,
        COALESCE(u.empty_load_sessions, 0) AS empty_load_sessions,
        ROUND(CASE WHEN COALESCE(u.session_count, 0) > 0 THEN 1.0 * COALESCE(u.empty_load_sessions, 0) / u.session_count ELSE NULL END, 4) AS empty_load_rate,
-       COALESCE(u.reference_hit_count, 0) AS reference_hit_count,
+       COALESCE(ra.reference_hit_count, u.reference_hit_count, 0) AS reference_hit_count,
        u.avg_context_tokens,
-       COALESCE(u.script_success_count, 0) AS script_success_count,
-       CASE WHEN COALESCE(u.script_exit_count, 0) > 0 THEN 1.0 * u.script_success_count / u.script_exit_count ELSE NULL END AS script_success_rate,
+       COALESCE(so.script_success_count, u.script_success_count, 0) AS script_success_count,
+       CASE
+           WHEN COALESCE(so.script_exit_count, u.script_exit_count, 0) > 0
+           THEN ROUND(1.0 * COALESCE(so.script_success_count, u.script_success_count, 0) / COALESCE(so.script_exit_count, u.script_exit_count), 4)
+           ELSE NULL
+       END AS script_success_rate,
        stats.avg_script_duration_ms,
        stats.p95_ms,
        stats.p95_ms AS script_latency,
@@ -215,12 +232,14 @@ SELECT s.skill,
        ROUND(CASE WHEN COALESCE(r.r1_total, 0) > 0 AND u.avg_context_tokens IS NOT NULL THEN (1.0 * r.r1_pass / r.r1_total) / (0.5 + MIN(2.0, u.avg_context_tokens / 10000.0) + COALESCE(r.rework_rounds, 0) * 0.25 + CASE WHEN COALESCE(u.session_count, 0) > 0 THEN 1.0 - 1.0 * u.script_exec_sessions / u.session_count ELSE 0 END * 0.6 + COALESCE(e.escape_count, COALESCE(r.r1_fail, 0)) * 0.2 + COALESCE(e.spec_gap_count, 0) * 0.15) ELSE NULL END, 4) AS roi_score,
        anchor.max_day AS source_as_of,
        date(anchor.max_day, '-6 days') || ' → ' || anchor.max_day AS time_window,
-       COALESCE(u.session_count, r.r1_total, 0) AS sample_size,
-       CASE WHEN COALESCE(u.session_count, r.r1_total, 0) > 0 THEN 'covered' ELSE 'unknown' END AS coverage_status,
+       COALESCE(u.session_count, r.r1_total, ra.reference_hit_count, so.script_count, 0) AS sample_size,
+       CASE WHEN COALESCE(u.session_count, r.r1_total, ra.reference_hit_count, so.script_count, 0) > 0 THEN 'covered' ELSE 'unknown' END AS coverage_status,
        0 AS estimated
 FROM all_skills s CROSS JOIN anchor
 LEFT JOIN usage_agg u ON u.skill = s.skill
 LEFT JOIN review_agg r ON r.skill = s.skill
 LEFT JOIN eval_agg e ON e.skill = s.skill
+LEFT JOIN ref_skill_agg ra ON ra.skill = s.skill
+LEFT JOIN script_skill_outcomes so ON so.skill = s.skill
 LEFT JOIN script_skill_stats stats ON stats.skill = s.skill
 ORDER BY roi_score ASC, loads_30d DESC, s.skill ASC;

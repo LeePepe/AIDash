@@ -88,11 +88,21 @@ _METRIC_PATH = re.compile(
 )
 
 
+def _parse_codex_output_metrics(output: str) -> tuple[int | None, int | None]:
+    exit_match = re.search(
+        r"(?:Process exited with code|Exit code:)\s+(-?\d+)", output, re.IGNORECASE
+    )
+    wall_match = re.search(r"Wall time:\s*([0-9.]+)\s*seconds", output, re.IGNORECASE)
+    exit_code = int(exit_match.group(1)) if exit_match else None
+    duration_ms = int(float(wall_match.group(1)) * 1000) if wall_match else None
+    return exit_code, duration_ms
+
+
 def _metric_candidates(obj: dict[str, Any], meta: dict[str, Any], rel_path: str, offset: int) -> list[dict[str, Any]]:
     payload = obj.get("payload") or {}
-    if obj.get("type") != "response_item" or payload.get("type") not in {"custom_tool_call", "function_call", "function_call_output"}:
+    if obj.get("type") != "response_item" or payload.get("type") not in {"custom_tool_call", "function_call"}:
         return []
-    value = payload.get("arguments", payload.get("input", payload.get("output")))
+    value = payload.get("arguments", payload.get("input"))
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -100,24 +110,23 @@ def _metric_candidates(obj: dict[str, Any], meta: dict[str, Any], rel_path: str,
             pass
     values = value.values() if isinstance(value, dict) else (value,)
     text = " ".join(str(item) for item in values if isinstance(item, str))
+    call_key = str(payload.get("call_id") or payload.get("id") or f"{rel_path}:{offset}")
     result: list[dict[str, Any]] = []
     for index, match in enumerate(_METRIC_PATH.finditer(text)):
         skill = match.group("skill")
         relative = match.group("rel").lstrip("/").lstrip(chr(92)).rstrip("/").rstrip(chr(92))
         canonical = f"skills/{skill}/{match.group('kind')}/{relative}"
-        identity = f"{rel_path}:{offset}:{index}:{canonical}"
+        identity = f"{rel_path}:{call_key}:{index}:{canonical}"
         base = {"timestamp": obj.get("timestamp"), "session_id": meta.get("session_id"),
-                "turn_uuid": payload.get("id") or payload.get("call_id"), "skill": skill, "file_id": rel_path, **meta}
+                "turn_uuid": call_key, "call_id": call_key, "skill": skill, "file_id": rel_path, **meta}
         if match.group("kind") == "references":
             result.append({"_kind": "reference_hit", "hit_uid": hashlib.sha256(identity.encode()).hexdigest(),
                            "reference_path": canonical, "byte_len": len(canonical.encode()), **base})
         else:
-            output = text
-            exit_match = re.search(r"Process exited with code\s+(-?\d+)", output, re.IGNORECASE)
-            wall_match = re.search(r"Wall time:\s*([0-9.]+)\s*seconds", output, re.IGNORECASE)
+            exit_code, duration_ms = _parse_codex_output_metrics(text)
             result.append({"_kind": "script_call", "call_uid": hashlib.sha256(identity.encode()).hexdigest(),
-                           "script_path": canonical, "exit_code": int(exit_match.group(1)) if exit_match else None,
-                           "duration_ms": int(float(wall_match.group(1)) * 1000) if wall_match else None, **base})
+                           "script_path": canonical, "exit_code": exit_code,
+                           "duration_ms": duration_ms, **base})
     return result
 
 
@@ -297,8 +306,16 @@ def collect() -> int:
     """Scan session logs from this source's own offsets. Returns records written."""
     if not CODEX_SESSIONS_DIR.exists():
         return 0
-    offsets: dict[str, int] = dict(get_watermark(SOURCE) or {})
-    new_offsets = dict(offsets)
+    watermark = get_watermark(SOURCE) or {}
+    offsets: dict[str, int] = {
+        k: v for k, v in watermark.items() if k != "__pending_scripts__"
+    }
+    pending_scripts: dict[str, list[dict[str, Any]]] = {
+        k: [dict(item) for item in v]
+        for k, v in (watermark.get("__pending_scripts__") or {}).items()
+        if isinstance(v, list)
+    }
+    new_offsets: dict[str, Any] = dict(offsets)
     total = 0
 
     for path in CODEX_SESSIONS_DIR.glob("**/*.jsonl"):
@@ -340,6 +357,7 @@ def collect() -> int:
             continue
 
         batch: list[dict[str, Any]] = []
+        batch_scripts: dict[str, list[dict[str, Any]]] = {}
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             fh.seek(start)
             # `fh.tell()` is exact and legal here. It is NOT usable inside a
@@ -371,12 +389,47 @@ def collect() -> int:
                 if prompt is not None:
                     batch.append(prompt)
                 batch.extend(_skill_candidates(obj, meta, rel_path, current_offset))
-                batch.extend(_metric_candidates(obj, meta, rel_path, current_offset))
+                metrics = _metric_candidates(obj, meta, rel_path, current_offset)
+                for item in metrics:
+                    batch.append(item)
+                    if item.get("_kind") == "script_call" and item.get("call_id"):
+                        cid = f"{rel_path}:{item['call_id']}"
+                        batch_scripts.setdefault(cid, []).append(item)
+                        pending_scripts.setdefault(cid, []).append(dict(item))
+                payload = obj.get("payload") or {}
+                if (
+                    obj.get("type") == "response_item"
+                    and payload.get("type") in {"function_call_output", "custom_tool_call_output"}
+                    and payload.get("call_id")
+                ):
+                    cid = f"{rel_path}:{payload['call_id']}"
+                    out_raw = payload.get("output")
+                    out_text = (
+                        out_raw
+                        if isinstance(out_raw, str)
+                        else json.dumps(out_raw, ensure_ascii=False)
+                        if out_raw is not None
+                        else ""
+                    )
+                    targets = batch_scripts.get(cid)
+                    if targets is None:
+                        resumed = pending_scripts.pop(cid, None)
+                        if resumed:
+                            targets = resumed
+                            batch.extend(targets)
+                    else:
+                        pending_scripts.pop(cid, None)
+                    for target in targets or ():
+                        exit_code, duration_ms = _parse_codex_output_metrics(out_text)
+                        target["exit_code"] = exit_code
+                        target["duration_ms"] = duration_ms
             new_offsets[key] = line_offset
         if batch:
             total += write_raw(SOURCE, batch)
 
-    if new_offsets != offsets:
+    if pending_scripts:
+        new_offsets["__pending_scripts__"] = pending_scripts
+    if new_offsets != watermark:
         set_watermark(SOURCE, new_offsets)
     return total
 
