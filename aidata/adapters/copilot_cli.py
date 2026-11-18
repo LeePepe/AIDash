@@ -45,7 +45,7 @@ def _metric_events(session_id: str, turn_id: int, timestamp: str, text: str) -> 
                            "reference_path": canonical, "byte_len": byte_len, **base})
         else:
             events.append({"kind": "script_call", "call_uid": hashlib.sha256(identity.encode()).hexdigest(),
-                           "script_path": canonical, "exit_code": 0, "duration_ms": 0, **base})
+                           "script_path": canonical, "exit_code": None, "duration_ms": None, **base})
     return events
 
 
@@ -134,9 +134,9 @@ def collect(*, now: datetime | None = None) -> int:
                             events.setdefault(event["event_id"], event)
                         cur_ts = turn_stamps.get((str(session_id), int(turn_id)))
                         nxt_ts = turn_stamps.get((str(session_id), int(turn_id) + 1))
-                        est_ms = int(max(0.0, min(600000.0, (nxt_ts - cur_ts).total_seconds() * 1000))) if (cur_ts and nxt_ts and nxt_ts > cur_ts) else 0
+                        est_ms = int(max(0.0, min(600000.0, (nxt_ts - cur_ts).total_seconds() * 1000))) if (cur_ts and nxt_ts and nxt_ts > cur_ts) else None
                         for metric_event in (event for text in text_values for event in _metric_events(str(session_id), int(turn_id), str(timestamp), text)):
-                            if metric_event.get("kind") == "script_call" and est_ms > 0:
+                            if metric_event.get("kind") == "script_call" and est_ms is not None:
                                 metric_event["duration_ms"] = est_ms
                             events.setdefault(metric_event.get("hit_uid") or metric_event.get("call_uid"), metric_event)
                 except sqlite3.Error:
@@ -186,19 +186,27 @@ def normalize() -> int:
             counts[(day, skill)] += 1
     rows = [{"day": day, "skill": skill, "n": n} for (day, skill), n in counts.items()]
     skill_count = write_clean(SOURCE, "skill_day", _CLEAN_DDL, rows, _CLEAN_COLS)
-    references = []
-    scripts = []
+    references: dict[str, dict[str, Any]] = {}
+    scripts: dict[str, dict[str, Any]] = {}
     for record in read_raw(SOURCE):
         if record.get("kind") == "reference_hit":
-            references.append({"hit_uid": record.get("hit_uid"), "session_id": record.get("session_id"),
-                               "turn_uuid": record.get("turn_id"), "skill": record.get("skill"),
-                               "reference_path": record.get("reference_path"), "byte_len": record.get("byte_len"),
-                               "ts": record.get("timestamp")})
+            row = {"hit_uid": record.get("hit_uid"), "session_id": record.get("session_id"),
+                   "turn_uuid": record.get("turn_id"), "skill": record.get("skill"),
+                   "reference_path": record.get("reference_path"), "byte_len": record.get("byte_len"),
+                   "ts": record.get("timestamp")}
+            if row["hit_uid"]:
+                references[str(row["hit_uid"])] = row
         elif record.get("kind") == "script_call":
-            scripts.append({"call_uid": record.get("call_uid"), "session_id": record.get("session_id"),
-                            "turn_uuid": record.get("turn_id"), "skill": record.get("skill"),
-                            "script_path": record.get("script_path"), "exit_code": record.get("exit_code", 0),
-                            "duration_ms": record.get("duration_ms", 0), "ts": record.get("timestamp")})
-    write_clean(SOURCE, "reference_hit", _REF_DDL, references, _REF_COLS)
-    write_clean(SOURCE, "script_call", _SCRIPT_DDL, scripts, _SCRIPT_COLS)
+            row = {"call_uid": record.get("call_uid"), "session_id": record.get("session_id"),
+                   "turn_uuid": record.get("turn_id"), "skill": record.get("skill"),
+                   "script_path": record.get("script_path"), "exit_code": record.get("exit_code"),
+                   "duration_ms": record.get("duration_ms"), "ts": record.get("timestamp")}
+            call_uid = row["call_uid"]
+            if call_uid:
+                previous = scripts.get(str(call_uid))
+                if previous is None or any(row[field] is not None and previous[field] is None
+                                           for field in ("exit_code", "duration_ms")):
+                    scripts[str(call_uid)] = row
+    write_clean(SOURCE, "reference_hit", _REF_DDL, list(references.values()), _REF_COLS)
+    write_clean(SOURCE, "script_call", _SCRIPT_DDL, list(scripts.values()), _SCRIPT_COLS)
     return skill_count

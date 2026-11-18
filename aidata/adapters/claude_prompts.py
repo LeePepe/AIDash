@@ -291,6 +291,7 @@ CREATE TABLE prompt (
     day           TEXT,
     ts            REAL,
     source_kind   TEXT,
+    slash_skill   TEXT,
     text_len      INTEGER,
     text_preview  TEXT,
     prompt_sha    TEXT,
@@ -301,7 +302,7 @@ CREATE TABLE prompt (
 )
 """
 _PROMPT_COLS = ("prompt_id", "agent", "session_id", "day", "ts", "source_kind",
-                "text_len", "text_preview", "prompt_sha", "prefix_100",
+                "slash_skill", "text_len", "text_preview", "prompt_sha", "prefix_100",
                 "cwd", "repo", "git_branch")
 
 _ASK_DDL = """

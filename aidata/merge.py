@@ -147,20 +147,30 @@ def _merge_skill_facts(conn: sqlite3.Connection) -> None:
         try:
             if _has_table(conn, alias, "reference_hit"):
                 columns = {row[1] for row in conn.execute(f"PRAGMA {alias}.table_info(reference_hit)")}
-                path = "reference_path" if "reference_path" in columns else "file_path"
-                conn.execute(f"""
-                    INSERT OR REPLACE INTO reference_hits
-                      (hit_uid, source, session_id, turn_uuid, skill, reference_path, byte_len, ts)
-                    SELECT hit_uid, ?, session_id, turn_uuid, skill, {path}, byte_len, ts
-                    FROM {alias}.reference_hit WHERE {path} IS NOT NULL
-                """, (source,))
+                path = "reference_path" if "reference_path" in columns else "file_path" if "file_path" in columns else None
+                if path:
+                    conn.execute(f"""
+                        INSERT OR REPLACE INTO reference_hits
+                          (hit_uid, source, session_id, turn_uuid, skill, reference_path, byte_len, ts)
+                        SELECT hit_uid, ?, session_id, turn_uuid, skill, {path}, byte_len, ts
+                        FROM {alias}.reference_hit WHERE {path} IS NOT NULL
+                    """, (source,))
             if _has_table(conn, alias, "script_call"):
-                conn.execute(f"""
-                    INSERT OR REPLACE INTO script_call
-                      (call_uid, source, session_id, turn_uuid, skill, script_path, exit_code, duration_ms, ts)
-                    SELECT call_uid, ?, session_id, turn_uuid, skill, script_path, exit_code, duration_ms, ts
-                    FROM {alias}.script_call WHERE script_path IS NOT NULL
-                """, (source,))
+                columns = {row[1] for row in conn.execute(f"PRAGMA {alias}.table_info(script_call)")}
+                required = {"script_path", "call_uid"}
+                if required.issubset(columns):
+                    selected = {
+                        name: name if name in columns else f"NULL AS {name}"
+                        for name in ("session_id", "turn_uuid", "skill", "exit_code", "duration_ms", "ts")
+                    }
+                    conn.execute(f"""
+                        INSERT OR REPLACE INTO script_call
+                          (call_uid, source, session_id, turn_uuid, skill, script_path, exit_code, duration_ms, ts)
+                        SELECT call_uid, ?, {selected['session_id']}, {selected['turn_uuid']},
+                               {selected['skill']}, script_path, {selected['exit_code']},
+                               {selected['duration_ms']}, {selected['ts']}
+                        FROM {alias}.script_call WHERE script_path IS NOT NULL
+                    """, (source,))
         finally:
             _detach(conn, alias)
 

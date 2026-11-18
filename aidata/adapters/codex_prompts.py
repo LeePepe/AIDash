@@ -116,8 +116,8 @@ def _metric_candidates(obj: dict[str, Any], meta: dict[str, Any], rel_path: str,
             exit_match = re.search(r"Process exited with code\s+(-?\d+)", output, re.IGNORECASE)
             wall_match = re.search(r"Wall time:\s*([0-9.]+)\s*seconds", output, re.IGNORECASE)
             result.append({"_kind": "script_call", "call_uid": hashlib.sha256(identity.encode()).hexdigest(),
-                           "script_path": canonical, "exit_code": int(exit_match.group(1)) if exit_match else 0,
-                           "duration_ms": int(float(wall_match.group(1)) * 1000) if wall_match else 0, **base})
+                           "script_path": canonical, "exit_code": int(exit_match.group(1)) if exit_match else None,
+                           "duration_ms": int(float(wall_match.group(1)) * 1000) if wall_match else None, **base})
     return result
 
 
@@ -390,6 +390,7 @@ CREATE TABLE prompt (
     day           TEXT,
     ts            REAL,
     source_kind   TEXT,          -- 'typed' (tier A) | 'agent_authored' (tier B)
+    slash_skill   TEXT,          -- parsed command name when the prompt is a slash wrapper
     text_len      INTEGER,
     text_preview  TEXT,          -- tier A only; NULL for tier B by design
     prompt_sha    TEXT,          -- hash of the first 100 chars: the grouping key
@@ -398,7 +399,7 @@ CREATE TABLE prompt (
 )
 """
 _CLEAN_COLS = ("prompt_id", "agent", "session_id", "originator", "day", "ts",
-               "source_kind", "text_len", "text_preview", "prompt_sha",
+               "source_kind", "slash_skill", "text_len", "text_preview", "prompt_sha",
                "prefix_100", "cwd")
 
 _REF_DDL = """
@@ -447,6 +448,7 @@ def _row(rec: dict[str, Any]) -> dict[str, Any] | None:
         "day": _cst_day(rec.get("timestamp")),
         "ts": _iso_to_epoch(rec.get("timestamp")),
         "source_kind": source_kind,
+        "slash_skill": _slash_skill(text),
         "text_len": len(text),
         # Body kept ONLY for `typed`. Keyed off source_kind, not originator:
         # 232 of 583 interactive records are CLI-generated wrappers
@@ -516,19 +518,27 @@ def normalize() -> int:
             "INSERT OR IGNORE INTO skill_use (day, session_id, ts, call_id, skill) "
             "VALUES (:day, :session_id, :ts, :call_id, :skill)", skill_rows)
         conn.commit()
-    reference_rows = []
-    script_rows = []
+    reference_rows: dict[str, dict[str, Any]] = {}
+    script_rows: dict[str, dict[str, Any]] = {}
     for rec in read_raw(SOURCE):
         if rec.get("_kind") == "reference_hit":
-            reference_rows.append({"hit_uid": rec.get("hit_uid"), "session_id": rec.get("session_id"),
-                                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
-                                   "reference_path": rec.get("reference_path"), "byte_len": rec.get("byte_len"),
-                                   "ts": rec.get("timestamp")})
+            row = {"hit_uid": rec.get("hit_uid"), "session_id": rec.get("session_id"),
+                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
+                   "reference_path": rec.get("reference_path"), "byte_len": rec.get("byte_len"),
+                   "ts": rec.get("timestamp")}
+            if row["hit_uid"]:
+                reference_rows[str(row["hit_uid"])] = row
         elif rec.get("_kind") == "script_call":
-            script_rows.append({"call_uid": rec.get("call_uid"), "session_id": rec.get("session_id"),
-                                "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
-                                "script_path": rec.get("script_path"), "exit_code": rec.get("exit_code", 0),
-                                "duration_ms": rec.get("duration_ms", 0), "ts": rec.get("timestamp")})
-    write_clean(SOURCE, "reference_hit", _REF_DDL, reference_rows, _REF_COLS)
-    write_clean(SOURCE, "script_call", _SCRIPT_DDL, script_rows, _SCRIPT_COLS)
+            row = {"call_uid": rec.get("call_uid"), "session_id": rec.get("session_id"),
+                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
+                   "script_path": rec.get("script_path"), "exit_code": rec.get("exit_code"),
+                   "duration_ms": rec.get("duration_ms"), "ts": rec.get("timestamp")}
+            call_uid = row["call_uid"]
+            if call_uid:
+                previous = script_rows.get(str(call_uid))
+                if previous is None or any(row[field] is not None and previous[field] is None
+                                           for field in ("exit_code", "duration_ms")):
+                    script_rows[str(call_uid)] = row
+    write_clean(SOURCE, "reference_hit", _REF_DDL, list(reference_rows.values()), _REF_COLS)
+    write_clean(SOURCE, "script_call", _SCRIPT_DDL, list(script_rows.values()), _SCRIPT_COLS)
     return prompt_count

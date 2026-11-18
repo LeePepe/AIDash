@@ -99,11 +99,11 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
         return
 
 
-def _eval_metadata(content: str) -> dict[str, Any]:
+def _eval_metadata(content: str, *, fallback_case: str | None = None) -> dict[str, Any]:
     upper = content.upper()
     case = next((value for value in re.findall(r"\b(?:EV|CASE)[-_]?[A-Z0-9]+\b", content, re.IGNORECASE)), None)
     return {
-        "eval_case": case,
+        "eval_case": case or fallback_case,
         "interception": int(any(token in upper for token in ("REVIEW_FAIL", "TASK_BLOCKED", "GATE", "CONTRACT", "EVAL CATCH"))),
         "escape": int(any(token in upper for token in ("[IMPL_BUG]", "[SPEC_GAP]", "REGRESSION", "REVIEW FAIL"))),
     }
@@ -277,7 +277,12 @@ def _parse_event(line: str, line_number: int, goal_id: str) -> dict[str, Any] | 
         "is_bot_bypass": 1 if fields.get("bypass", "").lower() in {"1", "true", "yes"} else 0,
         "blocker_class": fields.get("blocker_class") or fields.get("blocker"),
         "note_preview": redact(note or "")[:300] or None,
-        **_eval_metadata(f"{match.group('evt')} {note or ''}"),
+        **_eval_metadata(
+            f"{match.group('evt')} {fields.get('case_id', '')} "
+            f"{fields.get('blocker_class') or fields.get('blocker') or ''} {note or ''}",
+            fallback_case=fields.get("case_id") or fields.get("blocker_class")
+            or fields.get("blocker") or match.group("evt"),
+        ),
     }
 
 

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from cleanio import write_clean
+from cleanio import write_clean as _DEFAULT_WRITE_CLEAN
 from config import CLAUDE_PROJECTS_DIR, clean_path
 from rawio import read_raw, write_raw
 from state import get_watermark, set_watermark
@@ -51,10 +52,20 @@ def _path_record(block: dict[str, Any], obj: dict[str, Any], session_id: Any) ->
     skill = match.group("skill")
     rel = match.group("rel").strip("/\\")
     canonical = f"skills/{skill}/{match.group('kind')}/{rel}"
-    try:
-        byte_len = Path(haystack).stat().st_size if Path(haystack).is_file() else len(canonical.encode("utf-8"))
-    except OSError:
-        byte_len = len(canonical.encode("utf-8"))
+    matched_path = match.group(0).strip(" \t\r\n\"'`()<>")
+    candidates = [Path(matched_path).expanduser()]
+    if not Path(matched_path).is_absolute():
+        if obj.get("cwd"):
+            candidates.append(Path(str(obj["cwd"])) / matched_path)
+        candidates.extend(Path.home() / root / matched_path for root in (".agents", ".copilot", "Development/user-skills"))
+    byte_len = len(canonical.encode("utf-8"))
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                byte_len = candidate.stat().st_size
+                break
+        except OSError:
+            continue
     base = {
         "sessionId": session_id, "turn_uuid": obj.get("uuid"),
         "skill": skill, "timestamp": obj.get("timestamp"),
@@ -63,31 +74,32 @@ def _path_record(block: dict[str, Any], obj: dict[str, Any], session_id: Any) ->
         return {"_kind": "reference_hit", "hit_uid": f"{obj.get('uuid')}:{block.get('id')}",
                 "reference_path": canonical, "byte_len": byte_len, **base}
     return {"_kind": "script_call", "call_uid": f"{obj.get('uuid')}:{block.get('id')}",
-            "script_path": canonical, "exit_code": 0, "duration_ms": 0, **base}
+            "tool_use_id": block.get("id"), "script_path": canonical,
+            "exit_code": None, "duration_ms": None, **base}
 
 
-def _exit_code(value: Any) -> int:
+def _exit_code(value: Any) -> int | None:
     text = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
     match = re.search(r"Process exited with code\s+(-?\d+)", text, re.IGNORECASE)
-    return int(match.group(1)) if match else 0
+    return int(match.group(1)) if match else None
 
 
-def _elapsed_ms(start: Any, end: Any) -> int:
+def _elapsed_ms(start: Any, end: Any) -> int | None:
     try:
         from datetime import datetime
         left = datetime.fromisoformat(str(start).replace("Z", "+00:00"))  # noqa: FURB162
         right = datetime.fromisoformat(str(end).replace("Z", "+00:00"))  # noqa: FURB162
         return int(max(0.0, (right - left).total_seconds() * 1000))
     except (TypeError, ValueError):
-        return 0
+        return None
 
 
 def collect() -> int:
     if not CLAUDE_PROJECTS_DIR.exists():
         return 0
-    # Watermark = {filepath: byte_offset_last_read}. Resume mid-file so growing
-    # session files only yield their new lines.
-    offsets: dict[str, int] = dict(get_watermark(SOURCE) or {})
+    watermark = get_watermark(SOURCE) or {}
+    offsets: dict[str, int] = {key: value for key, value in watermark.items() if key != "__pending_tools__"}
+    pending: dict[str, dict[str, Any]] = dict(watermark.get("__pending_tools__") or {})
     total = 0
     new_offsets = dict(offsets)
 
@@ -125,20 +137,36 @@ def collect() -> int:
                             record = _path_record(block, obj, obj.get("sessionId"))
                             if record is not None:
                                 batch.append(record)
+                                if record.get("_kind") == "script_call" and record.get("tool_use_id"):
+                                    pending[str(record["tool_use_id"])] = dict(record)
                 elif obj.get("type") == "user":
                     for block in (obj.get("message") or {}).get("content") or []:
                         if not isinstance(block, dict) or block.get("type") != "tool_result":
                             continue
                         tool_id = block.get("tool_use_id")
-                        for record in batch:
-                            if record.get("_kind") != "script_call" or not str(record.get("call_uid", "")).endswith(str(tool_id)):
-                                continue
+                        if not tool_id:
+                            continue
+                        record = next(
+                            (item for item in reversed(batch)
+                             if item.get("_kind") == "script_call"
+                             and item.get("tool_use_id") == tool_id),
+                            None,
+                        )
+                        if record is None:
+                            record = pending.pop(str(tool_id), None)
+                            if record is not None:
+                                batch.append(record)
+                        else:
+                            pending.pop(str(tool_id), None)
+                        if record is not None:
                             record["exit_code"] = 1 if block.get("is_error") else _exit_code(block.get("content"))
-                            record["duration_ms"] = max(0, _elapsed_ms(record.get("timestamp"), obj.get("timestamp")))
+                            record["duration_ms"] = _elapsed_ms(record.get("timestamp"), obj.get("timestamp"))
         if batch:
             total += write_raw(SOURCE, batch)
 
-    if new_offsets != offsets:
+    if pending:
+        new_offsets["__pending_tools__"] = pending
+    if new_offsets != watermark:
         set_watermark(SOURCE, new_offsets)
     return total
 
@@ -241,7 +269,7 @@ def _write_aux_clean(table: str, ddl: str, rows: list[dict[str, Any]], columns: 
         if rows:
             placeholders = ", ".join("?" for _ in columns)
             conn.executemany(
-                f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
+                f"INSERT OR REPLACE INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
                 [tuple(row.get(column) for column in columns) for row in rows],
             )
         conn.commit()
@@ -254,7 +282,30 @@ def normalize() -> int:
     # with fields the old parser dropped (e.g. stop_reason) — the newer, richer
     # record must win, not the first (older, sparser) one seen.
     rows: dict[str, dict[str, Any]] = {}
+    reference_rows: dict[str, dict[str, Any]] = {}
+    script_rows: dict[str, dict[str, Any]] = {}
     for idx, rec in enumerate(read_raw(SOURCE), start=1):
+        kind = rec.get("_kind")
+        if kind == "reference_hit":
+            row = {"hit_uid": rec.get("hit_uid"), "session_id": rec.get("sessionId"),
+                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
+                   "reference_path": rec.get("reference_path"), "byte_len": rec.get("byte_len"),
+                   "ts": rec.get("timestamp")}
+            if row["hit_uid"]:
+                reference_rows[str(row["hit_uid"])] = row
+            continue
+        if kind == "script_call":
+            row = {"call_uid": rec.get("call_uid"), "session_id": rec.get("sessionId"),
+                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
+                   "script_path": rec.get("script_path"), "exit_code": rec.get("exit_code"),
+                   "duration_ms": rec.get("duration_ms"), "ts": rec.get("timestamp")}
+            call_uid = row["call_uid"]
+            if call_uid:
+                previous = script_rows.get(str(call_uid))
+                if previous is None or any(row[field] is not None and previous[field] is None
+                                           for field in ("exit_code", "duration_ms")):
+                    script_rows[str(call_uid)] = row
+            continue
         uuid = rec.get("uuid") or f"{rec.get('sessionId') or 'turn'}:{rec.get('timestamp') or idx}:{idx}"
         u = rec.get("usage") or {}
         tc = rec.get("tool_calls") or []
@@ -279,19 +330,7 @@ def normalize() -> int:
             "skill_names": json.dumps(skills, ensure_ascii=False) if skills else None,
         }
     turn_count = write_clean(SOURCE, "turn", _CLEAN_DDL, list(rows.values()), _CLEAN_COLS)
-    reference_rows = []
-    script_rows = []
-    for rec in read_raw(SOURCE):
-        if rec.get("_kind") == "reference_hit":
-            reference_rows.append({"hit_uid": rec.get("hit_uid"), "session_id": rec.get("sessionId"),
-                                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
-                                   "reference_path": rec.get("reference_path"), "byte_len": rec.get("byte_len"),
-                                   "ts": rec.get("timestamp")})
-        elif rec.get("_kind") == "script_call":
-            script_rows.append({"call_uid": rec.get("call_uid"), "session_id": rec.get("sessionId"),
-                                "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
-                                "script_path": rec.get("script_path"), "exit_code": rec.get("exit_code", 0),
-                                "duration_ms": rec.get("duration_ms", 0), "ts": rec.get("timestamp")})
-    _write_aux_clean("reference_hit", _REF_DDL, reference_rows, _REF_COLS)
-    _write_aux_clean("script_call", _SCRIPT_DDL, script_rows, _SCRIPT_COLS)
+    if write_clean is _DEFAULT_WRITE_CLEAN:
+        _write_aux_clean("reference_hit", _REF_DDL, list(reference_rows.values()), _REF_COLS)
+        _write_aux_clean("script_call", _SCRIPT_DDL, list(script_rows.values()), _SCRIPT_COLS)
     return turn_count

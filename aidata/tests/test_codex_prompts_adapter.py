@@ -199,7 +199,8 @@ def test_metric_candidates_extract_reference_and_script():
     )
     assert reference[0]["reference_path"] == "skills/demo/references/guide.md"
     assert script[0]["script_path"] == "skills/demo/scripts/check.sh"
-    assert script[0]["duration_ms"] == 0
+    assert script[0]["duration_ms"] is None
+    assert script[0]["exit_code"] is None
 
 
 @pytest.mark.unit
