@@ -85,13 +85,20 @@ def _merge_gtt_events(conn: sqlite3.Connection) -> None:
     Legacy-only rows lack the original line: hash those stored fields instead.
     The next normalize/merge rebuild replaces that fallback with the raw hash.
     """
-    cursor = conn.execute("""
-        SELECT event_uid, goal_uid, machine_id, goal_id, line_no, event_id, ts,
-               evt_type, task_id, actor_from, actor_to, ref_artifact, head_sha,
-               pr_number, model_id, contract_sha, is_bot_bypass, blocker_class,
-               note_preview
-        FROM gl.gtt_event
-    """)
+    source_columns = {row[1] for row in conn.execute("PRAGMA gl.table_info(gtt_event)")}
+    event_columns = [
+        "event_uid", "goal_uid", "machine_id", "goal_id", "line_no", "event_id", "ts",
+        "evt_type", "task_id", "actor_from", "actor_to", "ref_artifact", "head_sha",
+        "pr_number", "model_id", "contract_sha", "is_bot_bypass", "blocker_class",
+        "note_preview", "eval_case", "interception", "escape",
+    ]
+    select_list = ", ".join(
+        f'"{column}"' if column in source_columns and column == "escape"
+        else column if column in source_columns
+        else f'NULL AS "{column}"' if column == "escape" else f"NULL AS {column}"
+        for column in event_columns
+    )
+    cursor = conn.execute(f"SELECT {select_list} FROM gl.gtt_event")
     columns = [column[0] for column in cursor.description]
     rows = [{column: values[index] for index, column in enumerate(columns)} for values in cursor]
     canonical = {}
@@ -112,7 +119,7 @@ def _merge_gtt_events(conn: sqlite3.Connection) -> None:
     # Canonical rows win over legacy aliases, including their line_no metadata.
     ordered = [row for row, _, _ in legacy]
     ordered.extend(canonical_rows)
-    names = ", ".join(columns)
+    names = ", ".join('"escape"' if column == "escape" else column for column in columns)
     placeholders = ", ".join("?" for _ in columns)
     conn.executemany(
         f"INSERT OR REPLACE INTO fact_gtt_event ({names}) VALUES ({placeholders})",
@@ -129,6 +136,33 @@ def _goal_timestamp_key(value: str | None) -> str:
         return stamp.astimezone(timezone.utc).isoformat(timespec="microseconds")  # noqa: UP017
     except (ValueError, OverflowError):
         return ""
+
+
+def _merge_skill_facts(conn: sqlite3.Connection) -> None:
+    """Merge optional per-source reference/script facts with legacy tolerance."""
+    for source in ("claude_jsonl", "copilot_cli", "codex_prompts"):
+        alias = f"m_{source}"
+        if not _attach(conn, source, alias):
+            continue
+        try:
+            if _has_table(conn, alias, "reference_hit"):
+                columns = {row[1] for row in conn.execute(f"PRAGMA {alias}.table_info(reference_hit)")}
+                path = "reference_path" if "reference_path" in columns else "file_path"
+                conn.execute(f"""
+                    INSERT OR REPLACE INTO reference_hits
+                      (hit_uid, source, session_id, turn_uuid, skill, reference_path, byte_len, ts)
+                    SELECT hit_uid, ?, session_id, turn_uuid, skill, {path}, byte_len, ts
+                    FROM {alias}.reference_hit WHERE {path} IS NOT NULL
+                """, (source,))
+            if _has_table(conn, alias, "script_call"):
+                conn.execute(f"""
+                    INSERT OR REPLACE INTO script_call
+                      (call_uid, source, session_id, turn_uuid, skill, script_path, exit_code, duration_ms, ts)
+                    SELECT call_uid, ?, session_id, turn_uuid, skill, script_path, exit_code, duration_ms, ts
+                    FROM {alias}.script_call WHERE script_path IS NOT NULL
+                """, (source,))
+        finally:
+            _detach(conn, alias)
 
 
 def run_merge() -> dict[str, int]:
@@ -195,12 +229,24 @@ def run_merge() -> dict[str, int]:
                        is_escalated
                 FROM grt.model_role
             """)
-            conn.execute("""
+            receipt_columns = {row[1] for row in conn.execute("PRAGMA grt.table_info(task_run)")}
+            receipt_fields = [
+                "receipt_uid", "goal_uid", "machine_id", "goal_id", "task_id", "role_name",
+                "round_no", "agent_name", "cli_tool", "model_id", "vendor", "status",
+                "v5_verdict", "head_sha", "receipt_sha256", "completed_at", "skills_used",
+                "eval_case", "interception", "escape",
+            ]
+            receipt_select = ", ".join(
+                f'"{field}"' if field in receipt_columns and field == "escape"
+                else field if field in receipt_columns
+                else f'NULL AS "{field}"' if field == "escape" else f"NULL AS {field}"
+                for field in receipt_fields
+            )
+            receipt_names = ", ".join('"escape"' if field == "escape" else field for field in receipt_fields)
+            conn.execute(f"""
                 INSERT OR REPLACE INTO fact_gtt_task_run
-                SELECT receipt_uid, goal_uid, machine_id, goal_id, task_id, role_name,
-                       round_no, agent_name, cli_tool, model_id, vendor, status,
-                       v5_verdict, head_sha, receipt_sha256, completed_at
-                FROM grt.task_run
+                ({receipt_names})
+                SELECT {receipt_select} FROM grt.task_run
             """)
             counts["dim_model_role"] = conn.execute(
                 "SELECT count(*) FROM dim_model_role").fetchone()[0]
@@ -542,6 +588,8 @@ def run_merge() -> dict[str, int]:
             _detach(conn, "gp")
             counts["fact_github_pr"] = conn.execute(
                 "SELECT count(*) FROM fact_github_pr").fetchone()[0]
+
+        _merge_skill_facts(conn)
 
         # --- dim_session rollup (from fact_request, claude-cli only) ---
         conn.execute("""

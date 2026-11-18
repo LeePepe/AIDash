@@ -183,6 +183,26 @@ def test_skill_use_keeps_name_and_call_metadata_only():
 
 
 @pytest.mark.unit
+def test_metric_candidates_extract_reference_and_script():
+    meta = {"session_id": "s1"}
+    reference = cx._metric_candidates(
+        {"type": "response_item", "timestamp": "2026-08-03T04:02:00Z",
+         "payload": {"type": "custom_tool_call", "call_id": "ref-1",
+                     "input": "cat skills/demo/references/guide.md"}},
+        meta, "file.jsonl", 9,
+    )
+    script = cx._metric_candidates(
+        {"type": "response_item", "timestamp": "2026-08-03T04:02:00Z",
+         "payload": {"type": "function_call", "call_id": "script-1",
+                     "input": "bash skills/demo/scripts/check.sh"}},
+        meta, "file.jsonl", 10,
+    )
+    assert reference[0]["reference_path"] == "skills/demo/references/guide.md"
+    assert script[0]["script_path"] == "skills/demo/scripts/check.sh"
+    assert script[0]["duration_ms"] == 0
+
+
+@pytest.mark.unit
 def test_session_meta_parsing_and_degradation():
     got = cx._session_meta(_meta(originator="Codex Desktop", session="s9"))
     assert got["originator"] == "Codex Desktop"

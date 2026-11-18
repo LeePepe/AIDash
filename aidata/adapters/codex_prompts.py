@@ -82,6 +82,44 @@ _FORMAT_ITEM_COMPLETED = "item_completed"
 _FORMAT_RESPONSE_ITEM = "response_item"
 _FORMAT_LEGACY = "legacy"
 _SKILL_PATH = re.compile(r"(?:^|[/\\])([^/\\\s\"'`()<>]+)/SKILL\.md(?:$|[\s\"'`()<>])")
+_METRIC_PATH = re.compile(
+    r"(?:^|[\s/\\])skills[/\\](?P<skill>[A-Za-z0-9][A-Za-z0-9._-]{0,127})"
+    r"[/\\](?P<kind>references|scripts)[/\\](?P<rel>[^\s\"'`()<>]+)"
+)
+
+
+def _metric_candidates(obj: dict[str, Any], meta: dict[str, Any], rel_path: str, offset: int) -> list[dict[str, Any]]:
+    payload = obj.get("payload") or {}
+    if obj.get("type") != "response_item" or payload.get("type") not in {"custom_tool_call", "function_call", "function_call_output"}:
+        return []
+    value = payload.get("arguments", payload.get("input", payload.get("output")))
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            pass
+    values = value.values() if isinstance(value, dict) else (value,)
+    text = " ".join(str(item) for item in values if isinstance(item, str))
+    result: list[dict[str, Any]] = []
+    for index, match in enumerate(_METRIC_PATH.finditer(text)):
+        skill = match.group("skill")
+        relative = match.group("rel").lstrip("/").lstrip(chr(92)).rstrip("/").rstrip(chr(92))
+        canonical = f"skills/{skill}/{match.group('kind')}/{relative}"
+        identity = f"{rel_path}:{offset}:{index}:{canonical}"
+        base = {"timestamp": obj.get("timestamp"), "session_id": meta.get("session_id"),
+                "turn_uuid": payload.get("id") or payload.get("call_id"), "skill": skill, "file_id": rel_path, **meta}
+        if match.group("kind") == "references":
+            result.append({"_kind": "reference_hit", "hit_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                           "reference_path": canonical, "byte_len": len(canonical.encode()), **base})
+        else:
+            output = text
+            exit_match = re.search(r"Process exited with code\s+(-?\d+)", output, re.IGNORECASE)
+            wall_match = re.search(r"Wall time:\s*([0-9.]+)\s*seconds", output, re.IGNORECASE)
+            result.append({"_kind": "script_call", "call_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                           "script_path": canonical, "exit_code": int(exit_match.group(1)) if exit_match else 0,
+                           "duration_ms": int(float(wall_match.group(1)) * 1000) if wall_match else 0, **base})
+    return result
+
 
 # Originators that mean a human was at the keyboard. Everything else is TIER B.
 HUMAN_ORIGINATORS = frozenset({"codex-tui", "Codex Desktop"})
@@ -333,6 +371,7 @@ def collect() -> int:
                 if prompt is not None:
                     batch.append(prompt)
                 batch.extend(_skill_candidates(obj, meta, rel_path, current_offset))
+                batch.extend(_metric_candidates(obj, meta, rel_path, current_offset))
             new_offsets[key] = line_offset
         if batch:
             total += write_raw(SOURCE, batch)
@@ -361,6 +400,36 @@ CREATE TABLE prompt (
 _CLEAN_COLS = ("prompt_id", "agent", "session_id", "originator", "day", "ts",
                "source_kind", "text_len", "text_preview", "prompt_sha",
                "prefix_100", "cwd")
+
+_REF_DDL = """
+CREATE TABLE reference_hit (
+    hit_uid TEXT PRIMARY KEY, session_id TEXT, turn_uuid TEXT, skill TEXT,
+    reference_path TEXT, byte_len INTEGER, ts TEXT
+)
+"""
+_REF_COLS = ("hit_uid", "session_id", "turn_uuid", "skill", "reference_path", "byte_len", "ts")
+_SCRIPT_DDL = """
+CREATE TABLE script_call (
+    call_uid TEXT PRIMARY KEY, session_id TEXT, turn_uuid TEXT, skill TEXT,
+    script_path TEXT, exit_code INTEGER, duration_ms INTEGER, ts TEXT
+)
+"""
+_SCRIPT_COLS = ("call_uid", "session_id", "turn_uuid", "skill", "script_path", "exit_code", "duration_ms", "ts")
+
+
+def _slash_skill(text: str | None) -> str | None:
+    if not isinstance(text, str):
+        return None
+    for pattern in (
+        r"<command-name>\s*/?([A-Za-z0-9][A-Za-z0-9._-]{0,127})\s*</command-name>",
+        r"<command-message>\s*/?([A-Za-z0-9][A-Za-z0-9._-]{0,127})\s*</command-message>",
+        r"(?:^|\n)\s*/skill\s+([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?=\s|$)",
+        r"(?:^|\n)\s*/([A-Za-z][A-Za-z0-9._-]{0,127})(?=\s|$)",
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _row(rec: dict[str, Any]) -> dict[str, Any] | None:
@@ -447,4 +516,19 @@ def normalize() -> int:
             "INSERT OR IGNORE INTO skill_use (day, session_id, ts, call_id, skill) "
             "VALUES (:day, :session_id, :ts, :call_id, :skill)", skill_rows)
         conn.commit()
+    reference_rows = []
+    script_rows = []
+    for rec in read_raw(SOURCE):
+        if rec.get("_kind") == "reference_hit":
+            reference_rows.append({"hit_uid": rec.get("hit_uid"), "session_id": rec.get("session_id"),
+                                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
+                                   "reference_path": rec.get("reference_path"), "byte_len": rec.get("byte_len"),
+                                   "ts": rec.get("timestamp")})
+        elif rec.get("_kind") == "script_call":
+            script_rows.append({"call_uid": rec.get("call_uid"), "session_id": rec.get("session_id"),
+                                "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
+                                "script_path": rec.get("script_path"), "exit_code": rec.get("exit_code", 0),
+                                "duration_ms": rec.get("duration_ms", 0), "ts": rec.get("timestamp")})
+    write_clean(SOURCE, "reference_hit", _REF_DDL, reference_rows, _REF_COLS)
+    write_clean(SOURCE, "script_call", _SCRIPT_DDL, script_rows, _SCRIPT_COLS)
     return prompt_count

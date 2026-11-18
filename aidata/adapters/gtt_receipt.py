@@ -73,6 +73,33 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
         return
 
 
+_SKILL_RE = re.compile(r"(?:/([A-Za-z][A-Za-z0-9._-]{1,127})\b|skills/([A-Za-z][A-Za-z0-9._-]{1,127})\b|\bSkill\s*[:=]\s*([A-Za-z][A-Za-z0-9._-]{1,127}))", re.IGNORECASE)
+
+
+def _skills_used(content: str) -> list[str]:
+    aliases = {"goal-target-task": "team-lead", "goal-task": "team-lead"}
+    found = set()
+    for match in _SKILL_RE.finditer(content):
+        value = next((part for part in match.groups() if part), None)
+        if value and value.lower() != "skill.md":
+            found.add(aliases.get(value.lower(), value))
+    return sorted(found)
+
+
+def _eval_metadata(content: str) -> dict[str, Any]:
+    upper = content.upper()
+    case = next((value for value in re.findall(r"\b(?:EV|CASE)[-_]?[A-Z0-9]+\b", content, re.IGNORECASE)), None)
+    interception = int(any(token in upper for token in ("REVIEW_FAIL", "TASK_BLOCKED", "GATE", "CONTRACT", "EVAL CATCH")))
+    escape = int(any(token in upper for token in ("[IMPL_BUG]", "[SPEC_GAP]", "REGRESSION", "REVIEW FAIL")))
+    return {"skills_used": json.dumps(_skills_used(content), ensure_ascii=False), "eval_case": case,
+            "interception": interception, "escape": escape}
+
+
+def _receipt_record(record: dict[str, Any]) -> dict[str, Any]:
+    content = str(record.get("content", ""))
+    return {**record, **_eval_metadata(content)}
+
+
 def collect() -> int:
     from adapters import cloud_sync
 
@@ -103,6 +130,7 @@ def collect() -> int:
         bundles = []
     for bundle in bundles:
         records.extend(_bundle_records(bundle))
+    records = [_receipt_record(record) for record in records]
     old = dict(get_watermark(SOURCE) or {})
     changed = []
     current: dict[str, str] = {}
@@ -183,7 +211,8 @@ CREATE TABLE task_run (
     goal_id TEXT NOT NULL, task_id TEXT NOT NULL, role_name TEXT NOT NULL,
     round_no INTEGER NOT NULL, agent_name TEXT, cli_tool TEXT, model_id TEXT,
     vendor TEXT, status TEXT, v5_verdict TEXT, head_sha TEXT,
-    receipt_sha256 TEXT NOT NULL, completed_at TEXT
+    receipt_sha256 TEXT NOT NULL, completed_at TEXT, skills_used TEXT,
+    eval_case TEXT, interception INTEGER, "escape" INTEGER
 )
 """
 _ROLE_DDL = """
@@ -295,10 +324,12 @@ def normalize() -> int:
             "completed_at": _normalize_iso(
                 _field(content, ("Timestamp", "Updated", "Ended", "Reviewed At"))
             ) or _normalize_iso(record.get("mtime_iso")),
+            **_eval_metadata(content),
         }
     task_cols = ("receipt_uid", "goal_uid", "machine_id", "goal_id", "task_id", "role_name",
                  "round_no", "agent_name", "cli_tool", "model_id", "vendor", "status",
-                 "v5_verdict", "head_sha", "receipt_sha256", "completed_at")
+                 "v5_verdict", "head_sha", "receipt_sha256", "completed_at", "skills_used",
+                 "eval_case", "interception", "escape")
     role_map = {row["role_model_key"]: row for row in _profiles()}
     roles = list(role_map.values())
     role_cols = ("role_model_key", "role_name", "tier", "cli_tool", "model_id", "vendor", "is_escalated")

@@ -38,15 +38,24 @@ codex_skill_read AS (
 claude_slash AS (
     SELECT day, 'claude_slash' AS source,
            CASE
-             WHEN instr(text_preview, '<command-name>') > 0
-              AND instr(text_preview, '</command-name>') >
-                  instr(text_preview, '<command-name>') + length('<command-name>')
-             THEN substr(
-                    text_preview,
+             WHEN instr(COALESCE(text_preview, ''), '<command-name>') > 0
+              AND instr(COALESCE(text_preview, ''), '</command-name>') >
+                  instr(COALESCE(text_preview, ''), '<command-name>') + length('<command-name>')
+             THEN trim(substr(text_preview,
                     instr(text_preview, '<command-name>') + length('<command-name>'),
                     instr(text_preview, '</command-name>') -
-                    instr(text_preview, '<command-name>') - length('<command-name>')
-                  )
+                    instr(text_preview, '<command-name>') - length('<command-name>')))
+             WHEN instr(COALESCE(text_preview, ''), '<command-message>') > 0
+              AND instr(COALESCE(text_preview, ''), '</command-message>') >
+                  instr(COALESCE(text_preview, ''), '<command-message>') + length('<command-message>')
+             THEN trim(substr(text_preview,
+                    instr(text_preview, '<command-message>') + length('<command-message>'),
+                    instr(text_preview, '</command-message>') -
+                    instr(text_preview, '<command-message>') - length('<command-message>')))
+             WHEN lower(trim(COALESCE(text_preview, ''))) LIKE '/skill %'
+             THEN trim(substr(trim(text_preview), length('/skill ') + 1))
+             WHEN substr(ltrim(COALESCE(text_preview, '')), 1, 1) = '/'
+             THEN substr(ltrim(text_preview), 2, instr(substr(ltrim(text_preview), 2) || ' ', ' ') - 1)
              ELSE '(unrecorded)'
            END AS skill,
            count(*) AS n, count(DISTINCT session_id) AS sessions
@@ -57,10 +66,14 @@ claude_slash AS (
     GROUP BY day, skill
 ),
 codex_slash AS (
-    SELECT day, 'codex_slash' AS source, '(unrecorded)' AS skill,
+    SELECT day, 'codex_slash' AS source,
+           CASE
+             WHEN instr(source_kind, ':') > 0 THEN substr(source_kind, instr(source_kind, ':') + 1)
+             ELSE '(unrecorded)'
+           END AS skill,
            count(*) AS n, count(DISTINCT session_id) AS sessions
     FROM codex_prompts.prompt
-    WHERE source_kind = 'slash_command'
+    WHERE source_kind LIKE 'slash_command%'
       AND day BETWEEN COALESCE(:day_from, '0000-01-01')
                   AND COALESCE(:day_to, '9999-12-31')
     GROUP BY day

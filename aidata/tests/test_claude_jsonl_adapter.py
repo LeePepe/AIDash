@@ -126,6 +126,25 @@ def test_slim_keeps_stop_reason():
 
 
 @pytest.mark.unit
+def test_path_records_keep_reference_and_script_dimensions():
+    obj = {"uuid": "turn-1", "timestamp": "2026-07-27T01:02:03Z"}
+    reference = cj._path_record(
+        {"id": "read-1", "name": "Read", "input": {"file_path": "skills/demo/references/guide.md"}},
+        obj,
+        "session-1",
+    )
+    script = cj._path_record(
+        {"id": "bash-1", "name": "Bash", "input": {"command": "skills/demo/scripts/check.sh"}},
+        obj,
+        "session-1",
+    )
+    assert reference["reference_path"] == "skills/demo/references/guide.md"
+    assert reference["byte_len"] > 0
+    assert script["script_path"] == "skills/demo/scripts/check.sh"
+    assert script["duration_ms"] == 0
+
+
+@pytest.mark.unit
 def test_slim_stop_reason_nullable():
     # streaming/control assistant frames may omit stop_reason -> None, not error.
     line = _assistant_line("u2", None)

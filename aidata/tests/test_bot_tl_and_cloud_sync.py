@@ -317,7 +317,8 @@ def test_gtt_legacy_merge_and_historical_raw_replay(monkeypatch, tmp_path, mixed
         if mixed_keys:
             rows.append(canonical)
     cleanio.write_clean("gtt_ledger", "goal", gtt_ledger._GOAL_DDL, [], ())
-    cleanio.write_clean("gtt_ledger", "gtt_event", gtt_ledger._EVENT_DDL, rows, tuple(rows[0]))
+    columns = tuple(f'"{column}"' if column == "escape" else column for column in rows[0])
+    cleanio.write_clean("gtt_ledger", "gtt_event", gtt_ledger._EVENT_DDL, rows, columns)
 
     def source_event_count():
         with sqlite3.connect(clean / "gtt_ledger.db") as conn:

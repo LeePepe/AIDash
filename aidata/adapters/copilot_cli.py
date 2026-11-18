@@ -16,6 +16,29 @@ from state import get_watermark, set_watermark
 from timeutil import epoch_s_to_cst_day
 
 SOURCE = "copilot_cli"
+_PATH_RE = re.compile(
+    r"(?:^|[\s/\\])skills[/\\](?P<skill>[A-Za-z0-9][A-Za-z0-9._-]{0,127})"
+    r"[/\\](?P<kind>references|scripts)[/\\](?P<rel>[^\s\"'`()<>]+)"
+)
+
+
+def _metric_events(session_id: str, turn_id: int, timestamp: str, text: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for index, match in enumerate(_PATH_RE.finditer(text)):
+        skill = match.group("skill")
+        relative = match.group("rel").lstrip("/").lstrip(chr(92)).rstrip("/").rstrip(chr(92))
+        canonical = f"skills/{skill}/{match.group('kind')}/{relative}"
+        identity = f"{session_id}\0{turn_id}\0{canonical}\0{index}"
+        base = {"session_id": session_id, "turn_id": turn_id, "timestamp": timestamp, "skill": skill}
+        if match.group("kind") == "references":
+            events.append({"kind": "reference_hit", "hit_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                           "reference_path": canonical, "byte_len": len(canonical.encode()), **base})
+        else:
+            events.append({"kind": "script_call", "call_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                           "script_path": canonical, "exit_code": 0, "duration_ms": 0, **base})
+    return events
+
+
 _SKILL_PATTERNS = (
     re.compile(r"(?:^|\n)\s*/skill\s+([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?=\s|$)", re.IGNORECASE),
     re.compile(r'''<skill-context\s+name=["']([A-Za-z0-9][A-Za-z0-9._-]{0,127})["']''', re.IGNORECASE),
@@ -84,9 +107,12 @@ def collect(*, now: datetime | None = None) -> int:
                     for session_id, turn_id, timestamp, *texts in rows:
                         if not session_id or turn_id is None or not _cst_day(timestamp):
                             continue
-                        for skill in sorted({skill for text in texts for skill in _metadata_skills(text)}):
+                        text_values = [text for text in texts if isinstance(text, str)]
+                        for skill in sorted({skill for text in text_values for skill in _metadata_skills(text)}):
                             event = _skill_event(str(session_id), int(turn_id), str(timestamp), skill)
                             events.setdefault(event["event_id"], event)
+                        for metric_event in (event for text in text_values for event in _metric_events(str(session_id), int(turn_id), str(timestamp), text)):
+                            events.setdefault(metric_event.get("hit_uid") or metric_event.get("call_uid"), metric_event)
                 except sqlite3.Error:
                     continue  # One missing/legacy table must not hide another.
     except sqlite3.Error:
@@ -106,6 +132,20 @@ CREATE TABLE IF NOT EXISTS skill_day (
 )
 """
 _CLEAN_COLS = ("day", "skill", "n")
+_REF_DDL = """
+CREATE TABLE reference_hit (
+    hit_uid TEXT PRIMARY KEY, session_id TEXT, turn_uuid TEXT, skill TEXT,
+    reference_path TEXT, byte_len INTEGER, ts TEXT
+)
+"""
+_REF_COLS = ("hit_uid", "session_id", "turn_uuid", "skill", "reference_path", "byte_len", "ts")
+_SCRIPT_DDL = """
+CREATE TABLE script_call (
+    call_uid TEXT PRIMARY KEY, session_id TEXT, turn_uuid TEXT, skill TEXT,
+    script_path TEXT, exit_code INTEGER, duration_ms INTEGER, ts TEXT
+)
+"""
+_SCRIPT_COLS = ("call_uid", "session_id", "turn_uuid", "skill", "script_path", "exit_code", "duration_ms", "ts")
 
 
 def normalize() -> int:
@@ -119,4 +159,20 @@ def normalize() -> int:
             seen.add(identity)
             counts[(day, skill)] += 1
     rows = [{"day": day, "skill": skill, "n": n} for (day, skill), n in counts.items()]
-    return write_clean(SOURCE, "skill_day", _CLEAN_DDL, rows, _CLEAN_COLS)
+    skill_count = write_clean(SOURCE, "skill_day", _CLEAN_DDL, rows, _CLEAN_COLS)
+    references = []
+    scripts = []
+    for record in read_raw(SOURCE):
+        if record.get("kind") == "reference_hit":
+            references.append({"hit_uid": record.get("hit_uid"), "session_id": record.get("session_id"),
+                               "turn_uuid": record.get("turn_id"), "skill": record.get("skill"),
+                               "reference_path": record.get("reference_path"), "byte_len": record.get("byte_len"),
+                               "ts": record.get("timestamp")})
+        elif record.get("kind") == "script_call":
+            scripts.append({"call_uid": record.get("call_uid"), "session_id": record.get("session_id"),
+                            "turn_uuid": record.get("turn_id"), "skill": record.get("skill"),
+                            "script_path": record.get("script_path"), "exit_code": record.get("exit_code", 0),
+                            "duration_ms": record.get("duration_ms", 0), "ts": record.get("timestamp")})
+    write_clean(SOURCE, "reference_hit", _REF_DDL, references, _REF_COLS)
+    write_clean(SOURCE, "script_call", _SCRIPT_DDL, scripts, _SCRIPT_COLS)
+    return skill_count

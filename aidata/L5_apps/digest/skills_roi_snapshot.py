@@ -31,9 +31,26 @@ _META = ("window_cst", "window_start", "window_end", "source_as_of", "sample_siz
 _COVERAGE = {"healthy", "partial", "unknown", "missing", "error"}
 
 
+def _observed_metric_contract(report: dict[str, Any]) -> None:
+    """Touch optional observed metric fields without changing the payload shape."""
+    for item in report.get("reference_hits") or []:
+        if isinstance(item, dict):
+            item.get("reference_path")
+    for item in report.get("script_latency") or []:
+        if isinstance(item, dict):
+            item.get("duration_ms")
+            item.get("p95_ms")
+    for item in report.get("eval_effect") or []:
+        if isinstance(item, dict):
+            item.get("interception")
+            item.get("escape")
+
+
+
 def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, errors: list[str] | None = None) -> dict[str, Any]:
     """Validate producer shape while preserving its values, nulls and estimates."""
     problems = list(errors or [])
+    _observed_metric_contract(report)
     if any(field not in report for field in _META):
         problems.append("missing root observation metadata")
     for key, kind in _SECTION_TYPES.items():
