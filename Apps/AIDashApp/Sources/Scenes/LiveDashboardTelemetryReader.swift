@@ -2207,6 +2207,99 @@ extension LiveDashboardTelemetryReader {
         return try? JSONDecoder().decode(SkillsRoiReport.self, from: data)
     }
 
+    private static let allowedSkillPreviewExtensions: Set<String> = [
+        "md", "json", "yaml", "yml", "py", "sh", "ts"
+    ]
+    private static let maxSkillPreviewBytes = 65_536
+
+    public static func loadSkillDocumentPreview(
+        skillDir: String,
+        relativePath: String,
+        homeURL: URL? = nil
+    ) -> String? {
+        guard isLiveEnvironment || homeURL != nil else { return nil }
+        let trimmedSkillDir = skillDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRelative = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSkillDir.isEmpty, !trimmedRelative.isEmpty, !trimmedRelative.hasPrefix("/") else {
+            return nil
+        }
+        let relSegments = trimmedRelative.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard !relSegments.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else {
+            return nil
+        }
+
+        let resolvedHome = (homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL())
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+
+        let baseSkillURL: URL
+        if trimmedSkillDir == "~" {
+            baseSkillURL = resolvedHome
+        } else if trimmedSkillDir.hasPrefix("~/") {
+            baseSkillURL = resolvedHome.appendingPathComponent(String(trimmedSkillDir.dropFirst(2)), isDirectory: true)
+        } else if trimmedSkillDir.hasPrefix("/") {
+            baseSkillURL = URL(fileURLWithPath: trimmedSkillDir, isDirectory: true)
+        } else {
+            return nil
+        }
+
+        let candidateURL = baseSkillURL
+            .appendingPathComponent(trimmedRelative, isDirectory: false)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+
+        let ext = candidateURL.pathExtension.lowercased()
+        guard allowedSkillPreviewExtensions.contains(ext),
+              isAllowedSkillDocumentURL(candidateURL, resolvedHome: resolvedHome) else {
+            return nil
+        }
+
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: candidateURL.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let handle = try? FileHandle(forReadingFrom: candidateURL) else {
+            return nil
+        }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: maxSkillPreviewBytes) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func isAllowedSkillDocumentURL(_ candidateURL: URL, resolvedHome: URL) -> Bool {
+        let candidatePath = candidateURL.path
+        let directRoots = [
+            resolvedHome.appendingPathComponent("Development/user-skills/skills", isDirectory: true),
+            resolvedHome.appendingPathComponent(".agents/skills", isDirectory: true),
+            resolvedHome.appendingPathComponent(".claude/skills", isDirectory: true)
+        ]
+        for root in directRoots {
+            let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
+            if candidatePath.hasPrefix(rootPath.hasSuffix("/") ? rootPath : rootPath + "/") {
+                return true
+            }
+        }
+
+        let devRoot = resolvedHome.appendingPathComponent("Development", isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        let devPrefix = devRoot.hasSuffix("/") ? devRoot : devRoot + "/"
+        guard candidatePath.hasPrefix(devPrefix) else { return false }
+        let remainder = String(candidatePath.dropFirst(devPrefix.count))
+        let parts = remainder.split(separator: "/").map(String.init)
+        guard parts.count >= 3 else { return false }
+        let repoName = parts[0]
+        guard !repoName.isEmpty, repoName != ".", repoName != "..", repoName != "worktrees", repoName != "handoff" else {
+            return false
+        }
+        if (parts[1] == ".agents" || parts[1] == ".claude") && parts[2] == "skills" && parts.count >= 5 {
+            return true
+        }
+        if parts[1] == "skills" && parts.count >= 4 {
+            return true
+        }
+        return false
+    }
+
     private static func populateWarehouseReviewSummary(_ summary: inout LiveEfficiencySummary, whURL: URL) {
         guard let db = openReadOnlySQLite(path: whURL.path) else { return }
         defer { sqlite3_close(db) }
