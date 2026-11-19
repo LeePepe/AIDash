@@ -597,12 +597,12 @@ def test_loop6a_dismissed_missing_state_and_corrupt_history_preserve_source(tmp_
     (vault / "topic-ledger.json").write_bytes(ledger_bytes)
     proposals = root / "L5_apps/digest/state/proposals.jsonl"
     proposals.parent.mkdir(parents=True)
+    # Omit trailing newline on last record to verify append inserts a separating newline without corrupting JSONL
     proposals.write_text(
         "{malformed historical line}\n"
         + json.dumps({"id": "p1", "ref": "learning-topic://legacy-topic", "learning_state": "proposed", "status": "pending", "revision": 2})
         + "\n"
         + json.dumps({"id": "unrelated-topic-dismissed", "topic_key": "other-topic-dismissed", "learning_state": "proposed", "status": "pending", "revision": 1})
-        + "\n"
     )
     audit = mod.cross_file_state_audit(root, vault_dir=vault)
     assert audit["drifted_topics"]

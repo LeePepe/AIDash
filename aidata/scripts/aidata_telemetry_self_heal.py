@@ -729,16 +729,23 @@ def _default_reconcile_learning_drift(aidata_home: Path, *, vault_dir: Path, dri
                         new["outcome"] = "reconciled_from_ledger"
                     if new != old:
                         additions.append(json.dumps(new, ensure_ascii=False, separators=(",", ":")))
-            if changed_state:
-                state["updated_at"] = now
-                _atomic_json_replace(state_path, state)
-                actions.append({"action": "reconcile_learning_state", "count": len(drifted_topics), "ok": True})
             if additions:
+                needs_leading_newline = False
+                if proposals_path.is_file() and proposals_path.stat().st_size > 0:
+                    with proposals_path.open("rb") as reader:
+                        reader.seek(-1, os.SEEK_END)
+                        needs_leading_newline = reader.read(1) not in {b"\n", b"\r"}
                 with proposals_path.open("a", encoding="utf-8") as stream:
+                    if needs_leading_newline:
+                        stream.write("\n")
                     stream.write("\n".join(additions) + "\n")
                     stream.flush()
                     os.fsync(stream.fileno())
                 actions.append({"action": "reconcile_learning_proposals", "count": len(additions), "ok": True})
+            if changed_state:
+                state["updated_at"] = now
+                _atomic_json_replace(state_path, state)
+                actions.append({"action": "reconcile_learning_state", "count": len(drifted_topics), "ok": True})
     except (OSError, TimeoutError):
         return [{"action": "reconcile_learning_topic_drift", "ok": False, "error": "proposals_lock_failed"}]
     return actions
