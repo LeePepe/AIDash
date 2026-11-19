@@ -194,8 +194,17 @@ def _fixture_paths(
     return path_value(aidata_home, "aidata_home"), path_value(shared_telemetry_dir, "shared_telemetry_dir"), path_value(vault_dir, "vault_dir"), data, True
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def render_dual_zone_markdown(*, tldr: str, items: Sequence[str | Mapping[str, Any]], cursor: str, ai_payload: Mapping[str, Any] | None = None) -> str:
-    clean_cursor = _sanitize_human_text(cursor).replace(" ", "-")
+    clean_cursor = re.sub(r"-{2,}|[<>]", "-", _sanitize_human_text(cursor)).replace(" ", "-").strip("-") or LOOP_ID
     lines = [f"<!-- multica-cursor:{clean_cursor} -->", "", f"**一句话结论**：{_sanitize_human_text(tldr)}", ""]
     for index, item in enumerate(items[:6], start=1):
         if isinstance(item, Mapping):
@@ -518,27 +527,34 @@ def _load_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 
 def _topic_identifiers(topic_key: str, entry: Mapping[str, Any]) -> set[str]:
-    values = {topic_key, f"learning-topic://{topic_key}", f"knowledge://{topic_key}"}
+    values: set[str] = set()
     aliases = entry.get("aliases", [])
     if isinstance(aliases, str):
         aliases = [aliases]
+    keys = [topic_key]
     if isinstance(aliases, Sequence):
-        for alias in aliases:
-            alias_text = str(alias).strip()
-            if alias_text:
-                values.update({alias_text, f"learning-topic://{alias_text}", f"knowledge://{alias_text}"})
+        keys.extend(str(alias).strip() for alias in aliases if str(alias).strip())
+    for key in keys:
+        values.update(
+            {
+                key,
+                f"learning-topic-{key}",
+                f"learning-{key}",
+                f"learning-topic://{key}",
+                f"knowledge://{key}",
+            }
+        )
     return {value for value in values if value}
 
 
 def _proposal_matches(proposal_id: str, proposal: Mapping[str, Any], identifiers: set[str], topic_key: str) -> bool:
-    candidates = {proposal_id}
+    del topic_key
+    candidates = {proposal_id.strip()}
     for field in ("topic_key", "ref", "origin_ref"):
         value = proposal.get(field)
-        if value:
-            candidates.add(str(value))
-    normalized = {item.replace("://", "-").replace("/", "-") for item in candidates}
-    expected = identifiers | {item.replace("://", "-").replace("/", "-") for item in identifiers}
-    return bool(candidates & expected or normalized & expected or proposal_id.endswith(topic_key))
+        if value and str(value).strip():
+            candidates.add(str(value).strip())
+    return bool(candidates & identifiers)
 
 
 def cross_file_state_audit(aidata_home: Path, *, vault_dir: Path | None = None) -> dict[str, Any]:
@@ -589,14 +605,14 @@ def cross_file_state_audit(aidata_home: Path, *, vault_dir: Path | None = None) 
         ledger_state = str(entry.get("learning_state") or "").lower()
         if ledger_state not in {"learned", "dismissed"}:
             continue
-        ledger_revision = int(entry.get("revision") or 1)
+        ledger_revision = _safe_int(entry.get("revision"), 1) or 1
         state_entry = state_topics.get(topic_key) if isinstance(state_topics, dict) else None
-        state_drift = state_error is None and (not state_path.is_file() or not isinstance(state_entry, dict) or str(state_entry.get("learning_state") or "").lower() != ledger_state or int(state_entry.get("revision") or 0) < ledger_revision or state_entry.get("exploration_authorized") is not False)
+        state_drift = state_error is None and (not state_path.is_file() or not isinstance(state_entry, dict) or str(state_entry.get("learning_state") or "").lower() != ledger_state or _safe_int(state_entry.get("revision"), 0) < ledger_revision or state_entry.get("exploration_authorized") is not False)
         identifiers = _topic_identifiers(topic_key, entry)
         matched: list[tuple[str, dict[str, Any]]] = [(proposal_id, proposal) for proposal_id, proposal in proposals.items() if _proposal_matches(proposal_id, proposal, identifiers, topic_key)]
-        proposal_drift = any(str(proposal.get("learning_state") or "").lower() != ledger_state or str(proposal.get("status") or "").lower() != "dismissed" or proposal.get("exploration_authorized") is not False or (ledger_state == "learned" and proposal.get("outcome") != "reconciled_from_ledger") or int(proposal.get("revision") or 0) < ledger_revision for _, proposal in matched)
+        proposal_drift = any(str(proposal.get("learning_state") or "").lower() != ledger_state or str(proposal.get("status") or "").lower() != "dismissed" or proposal.get("exploration_authorized") is not False or (ledger_state == "learned" and proposal.get("outcome") != "reconciled_from_ledger") or _safe_int(proposal.get("revision"), 0) < ledger_revision for _, proposal in matched)
         if state_drift or proposal_drift:
-            drifted.append({"topic_key": topic_key, "ledger_learning_state": ledger_state, "ledger_revision": ledger_revision, "aliases": sorted(identifiers), "state_revision": int(state_entry.get("revision") or 0) if isinstance(state_entry, dict) else 0, "proposal_revisions": [int(item.get("revision") or 0) for _, item in matched], "proposal_ids": [proposal_id for proposal_id, _ in matched], "state_file_drift": state_drift, "proposal_drift": proposal_drift})
+            drifted.append({"topic_key": topic_key, "ledger_learning_state": ledger_state, "ledger_revision": ledger_revision, "aliases": sorted(identifiers), "state_revision": _safe_int(state_entry.get("revision"), 0) if isinstance(state_entry, dict) else 0, "proposal_revisions": [_safe_int(item.get("revision"), 0) for _, item in matched], "proposal_ids": [proposal_id for proposal_id, _ in matched], "state_file_drift": state_drift, "proposal_drift": proposal_drift})
             anomalies.append({"dimension": "cross_file_state_audit", "kind": "learning_topic_state_drift", "severity": "medium", "healable": True, "detail": "知识库主题状态与消费端状态或提案终态不一致"})
     return {"ok": not anomalies, "ledger_present": True, "drifted_topics": drifted, "anomalies": anomalies}
 
@@ -692,10 +708,10 @@ def _default_reconcile_learning_drift(aidata_home: Path, *, vault_dir: Path, dri
             for drift in drifted_topics:
                 key = str(drift.get("topic_key") or "")
                 old_state = topics.get(key) if isinstance(topics.get(key), dict) else {}
-                state_revision = int(old_state.get("revision") or 0)
+                state_revision = _safe_int(old_state.get("revision"), 0)
                 matched = [item for proposal_id, item in latest.items() if proposal_id in {str(value) for value in drift.get("proposal_ids") or []}]
-                proposal_revision = max((int(item.get("revision") or 0) for item in matched), default=0)
-                new_revision = max(int(drift.get("ledger_revision") or 1), state_revision, proposal_revision) + 1
+                proposal_revision = max((_safe_int(item.get("revision"), 0) for item in matched), default=0)
+                new_revision = max(_safe_int(drift.get("ledger_revision"), 1) or 1, state_revision, proposal_revision) + 1
                 target = str(drift.get("ledger_learning_state") or "learned")
                 desired_state = dict(old_state)
                 desired_state.update({"topic_key": key, "learning_state": target, "revision": new_revision, "exploration_authorized": False, "updated_at": now})
@@ -1079,23 +1095,28 @@ def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: 
     collected = inspect_and_self_heal(aidata_home=aidata_home, shared_telemetry_dir=shared_telemetry_dir, vault_dir=vault_dir, fixture_json=fixture_json, target_date=target_date, now=now, auto_heal=auto_heal, dry_run=dry_run, normalize_merge_healer=normalize_merge_healer)
     previous = _load_watermarks(state_path).get(LOOP_ID, {})
     previous_watermark = str(previous.get("watermark") or "") if isinstance(previous, Mapping) else ""
+    pending_watermark = str(previous.get("pending_autopilot_watermark") or "") if isinstance(previous, Mapping) else ""
+    in_autopilot = bool(from_autopilot or os.environ.get("MULTICA_FROM_AUTOPILOT") == "1")
     watermark = str(collected.get("watermark") or "")
-    if not force and (not collected["has_delta"] or watermark == previous_watermark):
+    has_unconsumed_handoff = in_autopilot and bool(watermark and pending_watermark == watermark)
+    if not force and (not collected["has_delta"] or (watermark == previous_watermark and not has_unconsumed_handoff)):
         return {"ok": True, "loop_id": LOOP_ID, "status": "SKIPPED_NO_DELTA" if not collected.get("healed_items") else "HEALED_LOCALLY_NO_ALERT", "layer_reached": 0, "token_cost": 0, "watermark": watermark, "previous_watermark": previous_watermark, "healed_items": collected.get("healed_items", []), "residual_unhealable_items": collected.get("residual_unhealable_items", [])}
     fixture_mode = fixture_json is not None
     effective_jev_fn = jev_fn or ((lambda **_: None) if fixture_mode and mock_jev_json is None else None)
     verdict = evaluate_jev_decision(collected, mock_jev_json=mock_jev_json, jev_fn=effective_jev_fn)
     if not verdict["actionable"]:
         if not dry_run and watermark:
-            _save_watermarks({LOOP_ID: {"watermark": watermark, "last_status": "SKIPPED_NOT_ACTIONABLE"}}, state_path)
+            _save_watermarks({LOOP_ID: {"watermark": watermark, "pending_autopilot_watermark": "", "last_status": "SKIPPED_NOT_ACTIONABLE"}}, state_path)
         return {"ok": True, "loop_id": LOOP_ID, "status": "SKIPPED_NOT_ACTIONABLE", "layer_reached": 1, "watermark": watermark, "jev": verdict}
     route = str(verdict.get("route") or "dual_zone_issue")
-    if route == "autopilot_trigger" and (from_autopilot or os.environ.get("MULTICA_FROM_AUTOPILOT") == "1"):
+    if route == "autopilot_trigger" and in_autopilot:
         route = "dual_zone_issue"
     delivery: dict[str, Any]
     if route == "autopilot_trigger":
         if dry_run:
             delivery = {"ok": True, "action": "dry_run_trigger", "route": route}
+        elif watermark and pending_watermark == watermark:
+            return {"ok": True, "loop_id": LOOP_ID, "status": "SKIPPED_AUTOPILOT_PENDING", "layer_reached": 2, "route": route, "watermark": watermark, "jev": verdict}
         else:
             server = _runtime_value(server_url, "MULTICA_SERVER_URL")
             workspace = _runtime_value(workspace_id, "MULTICA_WORKSPACE_ID")
@@ -1118,7 +1139,10 @@ def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: 
             delivery = {"ok": False, "error": "delivery_failed"}
     delivered = bool(delivery.get("ok"))
     if not dry_run and delivered and watermark:
-        _save_watermarks({LOOP_ID: {"watermark": watermark, "last_status": "ACTION_TAKEN", "route": route}}, state_path)
+        if route == "autopilot_trigger":
+            _save_watermarks({LOOP_ID: {"watermark": previous_watermark, "pending_autopilot_watermark": watermark, "last_status": "AUTOPILOT_TRIGGERED", "route": route}}, state_path)
+        else:
+            _save_watermarks({LOOP_ID: {"watermark": watermark, "pending_autopilot_watermark": "", "last_status": "ACTION_TAKEN", "route": route}}, state_path)
     return {"ok": delivered, "loop_id": LOOP_ID, "status": "ACTION_TAKEN" if delivered else "DELIVERY_FAILED", "layer_reached": 2, "route": route, "watermark": watermark, "jev": verdict, "delivery": delivery, "dual_zone_verification": collected.get("dual_zone_verification")}
 
 

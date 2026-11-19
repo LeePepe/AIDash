@@ -597,18 +597,29 @@ def test_loop6a_dismissed_missing_state_and_corrupt_history_preserve_source(tmp_
     (vault / "topic-ledger.json").write_bytes(ledger_bytes)
     proposals = root / "L5_apps/digest/state/proposals.jsonl"
     proposals.parent.mkdir(parents=True)
-    proposals.write_text("{malformed historical line}\n" + json.dumps({"id": "p1", "ref": "learning-topic://legacy-topic", "learning_state": "proposed", "status": "pending", "revision": 2}) + "\n")
+    proposals.write_text(
+        "{malformed historical line}\n"
+        + json.dumps({"id": "p1", "ref": "learning-topic://legacy-topic", "learning_state": "proposed", "status": "pending", "revision": 2})
+        + "\n"
+        + json.dumps({"id": "unrelated-topic-dismissed", "topic_key": "other-topic-dismissed", "learning_state": "proposed", "status": "pending", "revision": 1})
+        + "\n"
+    )
     audit = mod.cross_file_state_audit(root, vault_dir=vault)
     assert audit["drifted_topics"]
+    assert audit["drifted_topics"][0]["proposal_ids"] == ["p1"]
     result = mod._default_reconcile_learning_drift(root, vault_dir=vault, drifted_topics=audit["drifted_topics"])
     assert any(item["ok"] for item in result)
     assert (vault / "topic-ledger.json").read_bytes() == ledger_bytes
     state = json.loads((root / "L5_apps/digest/state/learning-topics-state.json").read_text())
     assert state["topics"]["topic-dismissed"]["learning_state"] == "dismissed"
-    proposal = json.loads(proposals.read_text().splitlines()[-1])
+    parsed_lines = [json.loads(ln) for ln in proposals.read_text().splitlines() if ln.startswith("{") and "malformed" not in ln]
+    proposal = [p for p in parsed_lines if p["id"] == "p1"][-1]
+    unrelated = [p for p in parsed_lines if p["id"] == "unrelated-topic-dismissed"][-1]
     assert proposal["status"] == "dismissed"
     assert proposal["learning_state"] == "dismissed"
     assert proposal["exploration_authorized"] is False
+    assert unrelated["status"] == "pending"
+    assert unrelated["learning_state"] == "proposed"
     assert "{malformed historical line}" in proposals.read_text()
     second = mod.cross_file_state_audit(root, vault_dir=vault)
     assert not any(item["kind"] == "learning_topic_state_drift" for item in second["anomalies"])
@@ -707,9 +718,23 @@ def test_loop6a_layer2_routes_snapshot_recursion_fallback_and_dry_run(tmp_path: 
     triggered = mod.run_loop_pipeline(state_path=autopilot_state, server_url="https://example.invalid", workspace_id="workspace", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "autopilot_trigger"}, "delivery_route_match": {"noul": 0.9}}}, runner=autopilot_runner)
     assert triggered["ok"]
     assert ["autopilot", "trigger", "ap-1", "--output", "json"] in calls
+    saved_after_trigger = json.loads(autopilot_state.read_text())[mod.LOOP_ID]
+    assert saved_after_trigger["watermark"] == ""
+    assert saved_after_trigger["pending_autopilot_watermark"] == triggered["watermark"]
     snapshot = Path(triggered["delivery"]["snapshot"])
     assert snapshot.is_file() and snapshot.stat().st_mode & 0o777 == 0o600
     assert not any(call[:2] == ["autopilot", "update"] or call[:2] == ["autopilot", "create"] for call in calls)
+
+    # Child run --from-autopilot sharing the SAME state_path must NOT be swallowed by watermark dedup:
+    # it consumes pending_autopilot_watermark, materializes Dual-Zone issue, and commits final watermark.
+    calls.clear()
+    child = mod.run_loop_pipeline(state_path=autopilot_state, from_autopilot=True, server_url="https://example.invalid", workspace_id="workspace", owner_id="owner", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "autopilot_trigger"}, "delivery_route_match": {"noul": 0.9}}}, runner=issue_runner)
+    assert child["ok"] and child["status"] == "ACTION_TAKEN" and child["route"] == "dual_zone_issue"
+    assert any(call[:2] == ["issue", "create"] for call in calls)
+    saved_after_child = json.loads(autopilot_state.read_text())[mod.LOOP_ID]
+    assert saved_after_child["watermark"] == child["watermark"]
+    assert saved_after_child["pending_autopilot_watermark"] == ""
+    assert mod.run_loop_pipeline(state_path=autopilot_state, from_autopilot=True, server_url="https://example.invalid", workspace_id="workspace", owner_id="owner", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "autopilot_trigger"}, "delivery_route_match": {"noul": 0.9}}}, runner=issue_runner)["status"] == "SKIPPED_NO_DELTA"
 
     calls.clear()
     monkeypatch.setattr(mod, "inspect_and_self_heal", lambda **_: collected("autopilot_trigger"))
