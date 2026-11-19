@@ -355,3 +355,89 @@ def test_agent_efficiency_snapshot_degrades_cleanly_when_queries_fail(tmp_path):
     assert payload["sample_size"] == 0
     assert payload["errors"]
 
+
+@pytest.mark.unit
+def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
+    import json
+    from pathlib import Path
+
+    from L5_apps.digest.skills_roi_snapshot import build_snapshot, write_snapshot
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    base_report = json.loads(fixture.read_text(encoding="utf-8"))
+    skill_details = [
+        {
+            "window_cst": "30d",
+            "window_start": "2026-10-13T00:00:00+08:00",
+            "window_end": "2026-11-12T00:00:00+08:00",
+            "source_as_of": "2026-11-11T14:00:00+08:00",
+            "sample_size": 2,
+            "coverage_status": "healthy",
+            "skill": "team-lead",
+            "scope": "global",
+            "repo": "user-skills",
+            "skill_dir": "~/Development/user-skills/skills/team-lead",
+            "skill_md_path": "SKILL.md",
+            "skill_md_lines": 124,
+            "frontmatter_tokens_est": 48,
+            "body_tokens_est": 1820,
+            "loads_7d": 2,
+            "loads_30d": 2,
+            "status_label": "active",
+            "references": [
+                {
+                    "rel_path": "references/playbook.md",
+                    "line_count": 140,
+                    "tokens_est": 1600,
+                    "hits_30d": 2,
+                    "sessions_30d": 1,
+                    "is_unhit": False,
+                }
+            ],
+            "scripts": [
+                {
+                    "rel_path": "scripts/goal-queue.py",
+                    "calls_30d": 4,
+                    "success_rate": 1.0,
+                    "p95_ms": 110.0,
+                    "is_unpracticed": False,
+                }
+            ],
+            "eval_cases": [
+                {
+                    "id": "EV-001",
+                    "title": "pre-review-check CLI help",
+                    "kind": "cli",
+                    "assertion_summary": "python3 skills/team-lead/scripts/feedback_guard.py --help",
+                    "status": "active",
+                    "interceptions_30d": 1,
+                    "escapes_30d": 0,
+                }
+            ],
+        }
+    ]
+    enriched = {**base_report, "skill_details": skill_details}
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(enriched), encoding="utf-8")
+    output_path = tmp_path / "skills-roi.json"
+
+    snapshot = write_snapshot(
+        output_path,
+        report_path,
+        query_runner=lambda name, params: (
+            [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1)],
+            ["day", "source", "skill", "n", "sessions"],
+        ),
+    )
+    assert snapshot["coverage_status"] == "healthy"
+    assert "errors" not in snapshot
+    assert snapshot["skill_details"] == skill_details
+    assert snapshot["diagnostics"]["skill_details"] == skill_details
+    assert json.loads(output_path.read_text(encoding="utf-8"))["skill_details"] == skill_details
+
+    # Missing required fields on skill_details flags degraded error status without dropping diagnostics
+    malformed = {**base_report, "skill_details": [{"skill": "broken-only"}]}
+    bad_snapshot = build_snapshot(malformed, [])
+    assert bad_snapshot["coverage_status"] == "error"
+    assert any("skill_details[0] missing" in err for err in bad_snapshot.get("errors", []))
+

@@ -37,6 +37,7 @@ def _validate_optional_metric_sections(report: dict[str, Any], problems: list[st
         "reference_hits": {"reference_path": True},
         "script_latency": {"duration_ms": True, "p95_ms": True},
         "eval_effect": {"interception": True, "escape": True},
+        "skill_details": {"skill": True, "scope": True, "references": True, "scripts": True, "eval_cases": True},
     }
     for section_name, field_map in required.items():
         fields = tuple(field_map)
@@ -55,6 +56,13 @@ def _validate_optional_metric_sections(report: dict[str, Any], problems: list[st
                 problems.append(
                     f"optional metric section {section_name}[{index}] missing: {', '.join(missing)}"
                 )
+                continue
+            if section_name == "skill_details":
+                for list_key in ("references", "scripts", "eval_cases"):
+                    if not isinstance(item.get(list_key), list):
+                        problems.append(
+                            f"optional metric section skill_details[{index}].{list_key} must be a list"
+                        )
 
 
 
@@ -93,6 +101,8 @@ def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, error
         "diagnostics": report,
         "skills_daily": daily,
     }
+    if isinstance(report.get("skill_details"), list):
+        payload["skill_details"] = report["skill_details"]
     if problems:
         payload["errors"] = problems
     return payload

@@ -1,34 +1,12 @@
 #if os(macOS)
 // swiftlint:disable file_length
+import AppKit
 import SwiftUI
 import AIDashUI
 import DesignKit
 
 private func skillsText(_ key: String, _ fallback: String) -> String {
     DashboardL10n.tr("dashboard.skills_roi.\(key)", fallback)
-}
-
-private struct SkillsFlowCanvas: View {
-    let l1: Double
-    let touch: Double
-    let theme: Theme
-
-    var body: some View {
-        Canvas { context, size in
-            let start = CGPoint(x: 8, y: size.height / 2)
-            let middle = CGPoint(x: size.width * 0.38, y: size.height / 2)
-            let l1End = CGPoint(x: size.width - 8, y: size.height * 0.25)
-            let scriptEnd = CGPoint(x: size.width - 8, y: size.height * 0.75)
-            var first = Path(); first.move(to: start); first.addCurve(to: middle, control1: CGPoint(x: size.width * 0.18, y: 8), control2: CGPoint(x: size.width * 0.25, y: size.height - 8))
-            var second = Path(); second.move(to: middle); second.addCurve(to: l1End, control1: CGPoint(x: size.width * 0.58, y: 8), control2: CGPoint(x: size.width * 0.72, y: size.height * 0.2))
-            var third = Path(); third.move(to: middle); third.addCurve(to: scriptEnd, control1: CGPoint(x: size.width * 0.58, y: size.height - 8), control2: CGPoint(x: size.width * 0.72, y: size.height * 0.8))
-            context.stroke(first, with: .color(theme.primary.primary.opacity(0.7)), lineWidth: 3)
-            context.stroke(second, with: .color(theme.success.opacity(max(0.2, l1))), lineWidth: 3)
-            context.stroke(third, with: .color(theme.warning.opacity(max(0.2, touch))), lineWidth: 3)
-            context.fill(Path(ellipseIn: CGRect(x: start.x - 4, y: start.y - 4, width: 8, height: 8)), with: .color(theme.primary.primary))
-            context.fill(Path(ellipseIn: CGRect(x: middle.x - 4, y: middle.y - 4, width: 8, height: 8)), with: .color(theme.neutrals.text(.body)))
-        }
-    }
 }
 
 public enum SkillsRoiLens: String, CaseIterable, Identifiable {
@@ -45,36 +23,58 @@ public enum SkillsRoiLens: String, CaseIterable, Identifiable {
 
 struct SkillsEvidence: Identifiable { let title: String, value: String, metadata: SkillsObservationMetadata; var id: String { title } }
 
+// swiftlint:disable:next type_body_length
 public struct SkillsRoiDiagnosticsCardView: View {
     let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
+    let previewHomeURL: URL?
     @State private var lens: SkillsRoiLens
     @State private var selectedSkill: String?
+    @State private var inspectorFilter: SkillInspectorFilter
+    @State private var inspectorSubTab: SkillInspectorSubTab
+    @State private var previewRelativePath: String?
+    @State private var showAllDirectorySkills = false
+    @State private var copiedFeedback: String?
     @State private var evidence: [SkillsEvidence] = []
     @State private var showingEvidence = false
     @State private var dailyExpanded: Bool
     @Environment(\.theme) private var theme
 
-    public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?, initialLens: SkillsRoiLens = .usage, showDailyPopulations: Bool = false, initialSelectedSkill: String? = nil) {
+    public init(
+        summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?,
+        initialLens: SkillsRoiLens = .usage,
+        showDailyPopulations: Bool = false,
+        initialSelectedSkill: String? = nil,
+        initialFilter: SkillInspectorFilter = .all,
+        initialSubTab: SkillInspectorSubTab = .definition,
+        initialPreviewRelativePath: String? = nil,
+        previewHomeURL: URL? = nil
+    ) {
         self.summary = summary
+        self.previewHomeURL = previewHomeURL
         _lens = State(initialValue: initialLens)
         _selectedSkill = State(initialValue: initialSelectedSkill)
+        _inspectorFilter = State(initialValue: initialFilter)
+        _inspectorSubTab = State(initialValue: initialSubTab)
+        _previewRelativePath = State(initialValue: initialPreviewRelativePath)
         _dailyExpanded = State(initialValue: showDailyPopulations)
     }
 
     public var body: some View {
-        SolidModularCardContainer(title: skillsText("title", "Skills 效能与上下文 ROI 诊断 (S1–S12)"),
+        SolidModularCardContainer(title: skillsText("title", "Skills 效能与上下文 ROI 工作台"),
                                   subtitle: summary.map { _ in skillsText("read_only", "Personal observations · read-only") } ?? skillsText("coverage_unknown", "Coverage: unknown"),
                                   symbolName: "sparkles.square.filled.on.square") {
             VStack(alignment: .leading, spacing: Space.gap) {
                 if let roi = summary?.skillsROI {
                     observationSummary(roi.metadata); healthPills(roi.diagnostics)
-                    HStack(spacing: Space.gap / 2) {
-                        ForEach(SkillsRoiLens.allCases) { option in
-                            Button(option.title) { lens = option }
-                                .buttonStyle(.bordered).controlSize(.small)
-                                .tint(lens == option ? theme.primary.primary : theme.neutrals.text(.body))
-                                .frame(minWidth: 28, minHeight: 28).accessibilityAddTraits(lens == option ? .isSelected : [])
-                                .captureDashboardGeometry(id: "skills-lens-\(option.id)", role: "button")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: Space.gap / 2) {
+                            ForEach(SkillsRoiLens.allCases) { option in
+                                Button(option.title) { lens = option }
+                                    .buttonStyle(.bordered).controlSize(.small)
+                                    .tint(lens == option ? theme.primary.primary : theme.neutrals.text(.body))
+                                    .frame(minWidth: 28, minHeight: 28).accessibilityAddTraits(lens == option ? .isSelected : [])
+                                    .captureDashboardGeometry(id: "skills-lens-\(option.id)", role: "button")
+                            }
                         }
                     }
                     if roi.metadata.coverage == "error" {
@@ -105,13 +105,13 @@ public struct SkillsRoiDiagnosticsCardView: View {
 
     private func healthPills(_ d: SkillsRoiDiagnostics) -> some View {
         DashboardResponsiveGrid(wideColumns: 4, compactColumns: 2) {
-            healthPill("pins", title: skillsText("pins", "S1 · Shared pins"), value: pinText(d.pins), detail: skillsText("inspected", "Inspected") + " · " + number(d.pins?.metadata.sample),
+            healthPill("pins", title: skillsText("pins", "共享底座版本同步"), value: pinText(d.pins), detail: skillsText("inspected", "Inspected") + " · " + number(d.pins?.metadata.sample),
                        facts: [fact(skillsText("behind", "Pins behind"), d.pins?.behind), fact(skillsText("synchronized", "Synchronized"), d.pins?.synchronized)])
-            healthPill("gates", title: skillsText("gates", "S2 · CI catch / noise"), value: rate(d.gates?.catchRate) + " / " + rate(d.gates?.noiseRate), detail: skillsText("runs", "Runs") + " · " + integer(d.gates?.runs),
+            healthPill("gates", title: skillsText("gates", "CI 门禁拦截与噪音"), value: rate(d.gates?.catchRate) + " / " + rate(d.gates?.noiseRate), detail: skillsText("runs", "Runs") + " · " + integer(d.gates?.runs),
                        facts: [fact(skillsText("catch", "Catch ratio"), d.gates?.catchRate), fact(skillsText("noise", "Noise ratio"), d.gates?.noiseRate), fact(skillsText("runs", "Runs"), d.gates?.runs)])
-            healthPill("audit", title: skillsText("audit", "S3 · Audit / Evals"), value: integer(d.audit?.passed) + " / " + integer(d.audit?.total), detail: skillsText("evals", "Evals") + " " + integer(d.audit?.evals) + " (+" + integer(d.audit?.evalDelta) + ")",
+            healthPill("audit", title: skillsText("audit", "契约审计与回归用例"), value: integer(d.audit?.passed) + " / " + integer(d.audit?.total), detail: skillsText("evals", "Evals") + " " + integer(d.audit?.evals) + " (+" + integer(d.audit?.evalDelta) + ")",
                        facts: [fact(skillsText("passed", "Audit passes"), d.audit?.passed), fact(skillsText("total", "Skills inspected"), d.audit?.total), fact(skillsText("evals", "Evals"), d.audit?.evals), fact(skillsText("eval_delta", "Weekly Eval change"), d.audit?.evalDelta)])
-            healthPill("cache", title: skillsText("cache", "S11 · KV cache"), value: percent(d.context?.cacheHitPercent), detail: skillsText("saved", "Saved") + " · " + decimal(d.context?.savedTokens) + " tok",
+            healthPill("cache", title: skillsText("cache", "KV 缓存命中"), value: percent(d.context?.cacheHitPercent), detail: skillsText("saved", "Saved") + " · " + decimal(d.context?.savedTokens) + " tok",
                        facts: [fact(skillsText("cache_hit", "KV hit (%)"), d.context?.cacheHitPercent), fact(skillsText("saved", "Saved tokens"), d.context?.savedTokens)])
         }.captureDashboardGeometry(id: "skills-health", role: "skillsHealthGrid")
     }
@@ -136,113 +136,480 @@ public struct SkillsRoiDiagnosticsCardView: View {
         }.buttonStyle(.plain).frame(minHeight: 28).captureDashboardGeometry(id: "skills-\(id)", role: "skillsHealthPill")
     }
 
-    private func usage(_ roi: SkillsRoiReport) -> some View {
-        VStack(alignment: .leading, spacing: Space.gap) {
-            if !roi.diagnostics.usageRows.isEmpty { selectedSkillOverviewCard(roi) }
-            Text(skillsText("usage_title", "Skill use, ROI and practice")).font(.headline)
-            if let active = roi.diagnostics.usage { Text(activeSummary(active)).font(.caption).foregroundStyle(theme.neutrals.text(.body)) }
-            usageTable(roi.diagnostics); dailyObservations(roi.skillsDaily)
-        }
-    }
-
     public static func activeSkillRow(in diagnostics: SkillsRoiDiagnostics, selectedSkill: String?) -> SkillsUsageRow? {
         diagnostics.usageRows.first { $0.skill == selectedSkill } ?? diagnostics.usageRows.first
     }
 
-    private func activeSkillRow(in diagnostics: SkillsRoiDiagnostics) -> SkillsUsageRow? {
-        Self.activeSkillRow(in: diagnostics, selectedSkill: selectedSkill)
+    public static func activeSkillDetail(
+        in report: SkillsRoiReport,
+        selectedSkill: String?,
+        filter: SkillInspectorFilter = .all
+    ) -> SkillInspectorDetail? {
+        let filtered = report.skillDetails.filter { filter.matches($0) }
+        let pool = filtered.isEmpty ? report.skillDetails : filtered
+        return pool.first { $0.skill == selectedSkill } ?? pool.first
     }
 
-    private func selectedSkillOverviewCard(_ roi: SkillsRoiReport) -> some View {
-        let row = activeSkillRow(in: roi.diagnostics)
-        let disclosure = row.flatMap { selected in roi.diagnostics.disclosure.first { $0.skill == selected.skill } }
-        return VStack(alignment: .leading, spacing: 12) {
-            if let row {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(row.skill).font(.headline)
-                        Text(rowHealth(row)).font(.caption.weight(.semibold)).foregroundStyle(theme.primary.onPrimarySubtle)
-                        Text(row.diagnosis ?? unknown).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(skillsText("roi_score", "ROI")).font(.caption).foregroundStyle(.secondary)
-                        Text(decimal(row.roi)).font(.title3.monospacedDigit().weight(.semibold))
-                    }
+    private func usage(_ roi: SkillsRoiReport) -> some View {
+        let allDetails = roi.skillDetails
+        let filtered = allDetails.filter { inspectorFilter.matches($0) }
+        let activeDetail = Self.activeSkillDetail(in: roi, selectedSkill: selectedSkill, filter: inspectorFilter)
+        return VStack(alignment: .leading, spacing: Space.gap) {
+            Text(skillsText("usage_title", "Skill use, ROI and practice")).font(.headline)
+            if let active = roi.diagnostics.usage {
+                Text(activeSummary(active)).font(.caption).foregroundStyle(theme.neutrals.text(.body))
+            }
+            filterPillsBar(allDetails: allDetails)
+            if allDetails.isEmpty {
+                missingPopulation
+            } else {
+                SkillsPrimaryDetailSplitLayout {
+                    primarySkillListPane(filtered: filtered, selected: activeDetail?.skill)
+                    inspectorDetailPane(detail: activeDetail, diagnostics: roi.diagnostics)
                 }
-                DashboardResponsiveGrid(wideColumns: 5, compactColumns: 2) {
-                        skillsOverviewPane(0, title: skillsText("calls_zombie", "Calls & zombie status")) {
-                            metricPair(skillsText("loads_7d_30d", "7d / 30d"), integer(row.loads7d) + " / " + integer(row.loads30d))
-                            metricPair(skillsText("active", "Active skills"), integer(roi.diagnostics.usage?.active))
-                            metricPair(skillsText("days_30", "30d"), roi.diagnostics.usage?.idle.contains(row.skill) == true ? skillsText("zombie", "Zombie") : skillsText("active_status", "Active"))
-                            metricPair(skillsText("roi_score", "ROI"), decimal(row.roi))
-                        }
-                        skillsOverviewPane(1, title: skillsText("context_token_cache", "Context tokens & cache")) {
-                            metricPair(skillsText("l0_l1_deep", "L0 / L1 / Deep-read"), disclosure.map { rate($0.l0) + " / " + rate($0.l1) + " / " + rate($0.greedy) } ?? unknown)
-                            metricPair(skillsText("avg_context_tokens", "Average context tokens"), disclosure.map { decimal($0.contextTokens) } ?? unknown)
-                            metricPair(skillsText("kv_cache", "KV Cache"), percent(roi.diagnostics.context?.cacheHitPercent))
-                            ForEach(Array((roi.diagnostics.context?.slices ?? []).prefix(5).enumerated()), id: \.offset) { _, slice in
-                                metricPair(sliceTitle(slice.key), percent(slice.share))
-                            }
-                        }
-                        skillsOverviewPane(2, title: skillsText("prompt_flow", "Prompt → L0 → L1 & Scripts")) {
-                            SkillsFlowCanvas(l1: disclosure?.l1.value ?? 0, touch: row.touch.value ?? 0, theme: theme)
-                                .frame(height: 76)
-                            Text(skillsText("prompt_flow_caption", "Prompt → SKILL.md → References / scripts")).font(.caption2).foregroundStyle(.secondary)
-                        }
-                        skillsOverviewPane(3, title: skillsText("script_ledger", "scripts/*.py execution ledger")) {
-                            metricPair(skillsText("script_touch_rate", "Script touch rate"), rate(row.touch)); metricPair(skillsText("script_exec_count", "Script executions"), integer(row.scriptExecs)); metricPair(skillsText("unpracticed_rate", "Unpracticed rate"), rate(row.unpracticed))
-                            if let tool = roi.diagnostics.tools.first { metricPair(skillsText("dominant_p95", "Dominant p95"), decimal(tool.p95) + " " + skillsText("tokens", "tokens")) }
-                        }
-                        skillsOverviewPane(4, title: skillsText("eval_gate_escape", "Eval, gates & escapes")) {
-                            metricPair(skillsText("eval_cases", "Eval cases"), integer(roi.diagnostics.audit?.evals) + " (+" + integer(roi.diagnostics.audit?.evalDelta) + ")")
-                            metricPair(skillsText("r1_pass_rate", "R1 pass rate"), rate(row.r1Pass)); metricPair(skillsText("ci_catch_rate", "CI catch rate"), rate(roi.diagnostics.gates?.catchRate))
-                            if let escape = roi.diagnostics.escapes.first(where: { $0.skill == row.skill }) { metricPair(skillsText("escape_attribution", "IMPL_BUG / SPEC_GAP"), "\(integer(escape.implementation)) / \(integer(escape.specification))") }
-                            if let churn = roi.diagnostics.churn.first(where: { $0.skill == row.skill }) { metricPair(skillsText("churn", "Edit / retry churn"), "\(integer(churn.edits)) / \(integer(churn.retries))") }
-                        }
-                    .padding(.vertical, 2)
+                .captureDashboardGeometry(id: "skills-primary-detail", role: "skillsWorkbench")
+            }
+            dailyObservations(roi.skillsDaily)
+        }
+    }
+
+    private func filterPillsBar(allDetails: [SkillInspectorDetail]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Space.gap / 2) {
+                ForEach(SkillInspectorFilter.allCases) { option in
+                    let count = allDetails.filter { option.matches($0) }.count
+                    Button("\(option.title) (\(count))") {
+                        inspectorFilter = option
+                        previewRelativePath = nil
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .tint(inspectorFilter == option ? theme.primary.primary : theme.neutrals.text(.body))
+                    .frame(minWidth: 28, minHeight: 28)
+                    .accessibilityAddTraits(inspectorFilter == option ? .isSelected : [])
+                    .captureDashboardGeometry(id: "skills-filter-\(option.id)", role: "button")
                 }
             }
         }
-        .padding(14)
+    }
+
+    public static func shellQuotedSingleArgument(_ raw: String) -> String {
+        let stripped = raw.replacingOccurrences(of: "\0", with: "")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+        return "'" + stripped.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    public static func evalCommandString(forSkill skill: String) -> String {
+        "python3 ~/Development/user-skills/skills/skill-contract/scripts/skill_contract.py eval --skill \(shellQuotedSingleArgument(skill)) --strict"
+    }
+
+    private func primarySkillListPane(filtered: [SkillInspectorDetail], selected: String?) -> some View {
+        let visibleItems = showAllDirectorySkills ? filtered : Array(filtered.prefix(18))
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(skillsText("directory_list_title", "Skill Directory")).font(.caption.weight(.semibold)).foregroundStyle(theme.neutrals.text(.meta))
+            if filtered.isEmpty {
+                Text(skillsText("filter_empty", "No matching skills in this filter")).font(.caption).foregroundStyle(theme.neutrals.text(.body)).padding(.vertical, 8)
+            } else {
+                ForEach(visibleItems) { item in
+                    primarySkillRow(item, isSelected: item.skill == selected)
+                }
+                if filtered.count > 18 {
+                    Button(showAllDirectorySkills ? skillsText("collapse_directory", "Collapse") : "\(skillsText("filter_all", "All")) (\(filtered.count))") {
+                        showAllDirectorySkills.toggle()
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .frame(minWidth: 28, minHeight: 28)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .captureDashboardGeometry(id: "skills-primary-list", role: "skillsPrimaryPane")
+    }
+
+    private func primarySkillRow(_ item: SkillInspectorDetail, isSelected: Bool) -> some View {
+        Button {
+            selectedSkill = item.skill
+            previewRelativePath = nil
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(item.skill).font(.caption.weight(.semibold)).foregroundStyle(theme.neutrals.text(.heading)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(item.roiScore.map { $0.formatted(.number.precision(.fractionLength(0...2))) } ?? unknown)
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(theme.neutrals.text(.heading))
+                        .layoutPriority(1)
+                }
+                HStack(spacing: 6) {
+                    scopeBadge(item)
+                    statusBadge(item)
+                    Spacer(minLength: 4)
+                    Text("\(item.loads7d) / \(item.loads30d)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(theme.neutrals.text(.meta))
+                        .layoutPriority(1)
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .background(isSelected ? theme.primary.primary.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? theme.primary.primary.opacity(0.55) : theme.neutrals.border.opacity(0.5), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .captureDashboardGeometry(id: "primary-skill-\(item.skill)", role: "skillsPrimaryRow")
+    }
+
+    private func scopeBadge(_ item: SkillInspectorDetail) -> some View {
+        let label = item.scope == "repo_bound"
+            ? skillsText("scope_repo_bound", "Repo-Bound") + " (\(item.repo))"
+            : skillsText("scope_global", "Global")
+        return Text(label)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .foregroundStyle(item.scope == "repo_bound" ? theme.warningOnSubtle : theme.primary.onPrimarySubtle)
+            .background((item.scope == "repo_bound" ? theme.warning : theme.primary.primary).opacity(0.14), in: Capsule())
+    }
+
+    private func statusBadge(_ item: SkillInspectorDetail) -> some View {
+        let (label, fg, bg): (String, Color, Color) = {
+            if item.loads30d == 0 || item.statusLabel == "zombie_30d" {
+                return (skillsText("health_zombie", "30d Idle"), theme.neutrals.text(.meta), theme.neutrals.card)
+            }
+            if item.statusLabel == "needs_optimization" || item.implBugEscapes > 0 || item.specGapEscapes > 0 {
+                return (skillsText("health_optimize", "Needs Optimization"), theme.warningOnSubtle, theme.warning.opacity(0.14))
+            }
+            return (skillsText("health_healthy", "Active"), theme.successOnSubtle, theme.success.opacity(0.14))
+        }()
+        return Text(label).font(.caption2.weight(.medium)).padding(.horizontal, 6).padding(.vertical, 2)
+            .foregroundStyle(fg).background(bg, in: Capsule())
+    }
+
+    private func inspectorDetailPane(detail: SkillInspectorDetail?, diagnostics: SkillsRoiDiagnostics) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let detail {
+                inspectorHeaderCard(detail, diagnostics: diagnostics)
+                inspectorSubTabBar(detail)
+                switch inspectorSubTab {
+                case .definition: inspectorDefinitionTreeSection(detail)
+                case .scripts: inspectorScriptsLedgerSection(detail)
+                case .evals: inspectorEvalCasesSection(detail)
+                }
+            } else {
+                missingPopulation
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
+        .captureDashboardGeometry(id: "skills-inspector-detail", role: "skillsInspectorPane")
+    }
+
+    private func inspectorHeaderCard(_ detail: SkillInspectorDetail, diagnostics: SkillsRoiDiagnostics) -> some View {
+        let diagRow = diagnostics.usageRows.first { $0.skill == detail.skill }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(detail.skill).font(.headline)
+                        scopeBadge(detail)
+                        statusBadge(detail)
+                    }
+                    Text(diagRow?.diagnosis ?? detail.skillDir)
+                        .font(.caption)
+                        .foregroundStyle(theme.neutrals.text(.body))
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 6) {
+                    Button(skillsText("copy_path", "Copy Path")) {
+                        copyToPasteboard("\(detail.skillDir)/\(detail.skillMdPath)")
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .frame(minWidth: 28, minHeight: 28)
+                    .captureDashboardGeometry(id: "inspector-copy-path", role: "button")
+
+                    Button(skillsText("copy_eval_cmd", "Copy Eval Command")) {
+                        copyToPasteboard(Self.evalCommandString(forSkill: detail.skill))
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .frame(minWidth: 28, minHeight: 28)
+                    .captureDashboardGeometry(id: "inspector-copy-eval", role: "button")
+                }
+            }
+            if let feedback = copiedFeedback {
+                Text(feedback).font(.caption2).foregroundStyle(theme.successOnSubtle)
+            }
+            DashboardResponsiveGrid(wideColumns: 3, compactColumns: 2, spacing: 8) {
+                skillsOverviewPane(0, title: skillsText("header_calls_channels", "Calls & Channels")) {
+                    metricPair(skillsText("loads_7d_30d", "7d / 30d"), "\(detail.loads7d) / \(detail.loads30d)")
+                    metricPair(skillsText("empty_load_rate", "Empty-load rate"), formatRatio(detail.emptyLoadRate))
+                    metricPair(skillsText("channels_summary", "Channels (30d)"), channelSummary(detail.sourceBreakdown))
+                }
+                skillsOverviewPane(1, title: skillsText("header_roi_context", "ROI & Context")) {
+                    metricPair(skillsText("roi_score", "ROI"), formatDecimal(detail.roiScore, digits: 2))
+                    metricPair(skillsText("r1_pass_rate", "R1 pass rate"), formatRatio(detail.r1PassRate))
+                    metricPair(skillsText("avg_context_tokens", "Average context tokens"), formatTokens(detail.avgContextTokens))
+                    metricPair(skillsText("kv_cache", "KV Cache"), detail.kvCacheHitPct.map { $0.formatted(.number.precision(.fractionLength(0...1))) + "%" } ?? unknown)
+                }
+                skillsOverviewPane(2, title: skillsText("header_churn_escapes", "Churn & Gate Signals")) {
+                    metricPair(skillsText("churn", "Edit / retry churn"), "\(detail.editChurn) / \(detail.retryChurn)")
+                    metricPair(skillsText("interceptions_30d", "Gate interceptions"), "\(detail.evalInterceptions)")
+                    metricPair(skillsText("escape_attribution", "IMPL_BUG / SPEC_GAP"), "\(detail.implBugEscapes) / \(detail.specGapEscapes)")
+                }
+            }
+        }
+    }
+
+    private func inspectorSubTabBar(_ detail: SkillInspectorDetail) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(SkillInspectorSubTab.allCases) { tab in
+                    let badge: String = {
+                        switch tab {
+                        case .definition: return "\(detail.references.count + 1)"
+                        case .scripts: return "\(detail.scripts.count)"
+                        case .evals: return "\(detail.evalCases.count)"
+                        }
+                    }()
+                    Button("\(tab.title) (\(badge))") { inspectorSubTab = tab }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .tint(inspectorSubTab == tab ? theme.primary.primary : theme.neutrals.text(.body))
+                        .frame(minWidth: 28, minHeight: 28)
+                        .accessibilityAddTraits(inspectorSubTab == tab ? .isSelected : [])
+                        .captureDashboardGeometry(id: "inspector-tab-\(tab.id)", role: "button")
+                }
+            }
+        }
+    }
+
+    private func inspectorDefinitionTreeSection(_ detail: SkillInspectorDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(skillsText("definition_section_title", "Definition & Progressive Disclosure Tree")).font(.subheadline.weight(.semibold))
+            definitionFileRow(
+                id: "skill-md",
+                title: detail.skillMdPath,
+                subtitle: skillsText("frontmatter_budget", "Frontmatter") + " ~\(detail.frontmatterTokensEst) tok · \(detail.skillMdLines) " + skillsText("lines_unit", "lines") + " (~\(detail.bodyTokensEst) tok)",
+                badgeText: "L0",
+                isWarning: detail.skillMdLines > 180,
+                relativePath: detail.skillMdPath
+            )
+            if detail.references.isEmpty {
+                Text(skillsText("no_references", "No physical references/ files in this skill bundle"))
+                    .font(.caption).foregroundStyle(theme.neutrals.text(.body))
+            } else {
+                ForEach(detail.references) { ref in
+                    let hitLabel = ref.hits30d.map { "\($0) " + skillsText("hits_unit", "hits") } ?? unknown
+                    let sessLabel = ref.sessions30d.map { "\($0) " + skillsText("sessions_unit", "sessions") } ?? unknown
+                    definitionFileRow(
+                        id: "ref-\(ref.relPath)",
+                        title: ref.relPath,
+                        subtitle: "\(ref.lineCount) " + skillsText("lines_unit", "lines") + " · ~\(ref.tokensEst) tok · \(sessLabel)",
+                        badgeText: ref.isUnhit ? skillsText("zero_hits_badge", "0 hits") : hitLabel,
+                        isWarning: ref.isUnhit,
+                        relativePath: ref.relPath
+                    )
+                }
+            }
+            if let relPath = previewRelativePath {
+                inlineDocumentPreviewBox(detail: detail, relativePath: relPath)
+            }
+        }
+    }
+
+    private func definitionFileRow(id: String, title: String, subtitle: String, badgeText: String, isWarning: Bool, relativePath: String) -> some View {
+        let isOpen = previewRelativePath == relativePath
+        return Button {
+            previewRelativePath = isOpen ? nil : relativePath
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: isOpen ? "doc.text.magnifyingglass" : "doc.text")
+                    .foregroundStyle(theme.primary.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(theme.neutrals.text(.heading))
+                    Text(subtitle).font(.caption2.monospacedDigit()).foregroundStyle(theme.neutrals.text(.meta))
+                }
+                Spacer(minLength: 6)
+                Text(badgeText)
+                    .font(.caption2.monospacedDigit().weight(.medium))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .foregroundStyle(isWarning ? theme.warningOnSubtle : theme.primary.onPrimarySubtle)
+                    .background((isWarning ? theme.warning : theme.primary.primary).opacity(0.14), in: Capsule())
+                    .layoutPriority(1)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .captureDashboardGeometry(id: "inspector-file-\(id)", role: "skillsFileRow")
+    }
+
+    private func inlineDocumentPreviewBox(detail: SkillInspectorDetail, relativePath: String) -> some View {
+        let content = LiveDashboardTelemetryReader.loadSkillDocumentPreview(
+            skillDir: detail.skillDir,
+            relativePath: relativePath,
+            homeURL: previewHomeURL
+        )
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("\(detail.skill)/\(relativePath)").font(.caption.weight(.semibold))
+                Spacer()
+                Button(skillsText("close_preview", "Close Preview")) { previewRelativePath = nil }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                    .frame(minWidth: 28, minHeight: 24)
+            }
+            if let content, !content.isEmpty {
+                ScrollView(.vertical) {
+                    Text(content)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(theme.neutrals.text(.body))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .captureDashboardGeometry(id: "inspector-doc-preview-content:\(relativePath)", role: "skillsPreviewContent")
+                }
+                .frame(maxHeight: 220)
+            } else {
+                Text(skillsText("preview_unavailable", "Read-only preview unavailable outside local skill whitelist or missing on disk"))
+                    .font(.caption)
+                    .foregroundStyle(theme.neutrals.text(.meta))
+            }
+        }
+        .padding(10)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
+        .captureDashboardGeometry(id: "inspector-doc-preview", role: "skillsPreviewBox")
+    }
+
+    private func inspectorScriptsLedgerSection(_ detail: SkillInspectorDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(skillsText("scripts_section_title", "Deterministic Script Execution Ledger")).font(.subheadline.weight(.semibold))
+            if detail.scripts.isEmpty {
+                Text(skillsText("no_scripts", "No deterministic scripts configured in scripts/"))
+                    .font(.caption).foregroundStyle(theme.neutrals.text(.body))
+            } else {
+                Grid(alignment: .leading, horizontalSpacing: Space.gap, verticalSpacing: 6) {
+                    GridRow {
+                        columnHeader(skillsText("script_col_path", "Script"), "script-path")
+                        columnHeader(skillsText("script_col_calls", "30d Calls"), "script-calls")
+                        columnHeader(skillsText("script_col_success", "Success"), "script-success")
+                        columnHeader(skillsText("script_col_p95", "P95 (ms)"), "script-p95")
+                    }
+                    ForEach(detail.scripts) { sc in
+                        GridRow {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sc.relPath).font(.caption.weight(.semibold))
+                                if sc.isUnpracticed {
+                                    Text(skillsText("unpracticed_badge", "Unpracticed (0 calls)"))
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundStyle(theme.warningOnSubtle)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            tableValue(sc.calls30d.map(String.init) ?? unknown, detail.skill, "sc-calls-\(sc.relPath)")
+                            tableValue(formatRatio(sc.successRate), detail.skill, "sc-succ-\(sc.relPath)")
+                            tableValue(sc.p95Ms.map { $0.formatted(.number.precision(.fractionLength(0...0))) + " ms" } ?? unknown, detail.skill, "sc-p95-\(sc.relPath)")
+                        }
+                    }
+                }
+                .padding(8)
+                .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
+    }
+
+    private func inspectorEvalCasesSection(_ detail: SkillInspectorDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(skillsText("evals_section_title", "Eval Cases & Gate Interceptions")).font(.subheadline.weight(.semibold))
+            if detail.evalCases.isEmpty {
+                Text(skillsText("no_eval_drawer", "No eval-cases.json drawer configured"))
+                    .font(.caption).foregroundStyle(theme.neutrals.text(.body))
+            } else {
+                ForEach(detail.evalCases) { ev in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(ev.id).font(.caption.monospaced().weight(.bold))
+                            Text(ev.kind.uppercased())
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .foregroundStyle(theme.primary.onPrimarySubtle)
+                                .background(theme.primary.primary.opacity(0.14), in: Capsule())
+                            Text(ev.title).font(.caption.weight(.medium)).lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text(skillsText("intercept_short", "Caught") + " \(ev.interceptions30d) · " + skillsText("escape_short", "Escaped") + " \(ev.escapes30d)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(ev.escapes30d > 0 ? theme.dangerOnSubtle : theme.neutrals.text(.meta))
+                                .layoutPriority(1)
+                        }
+                        if !ev.assertionSummary.isEmpty {
+                            Text(ev.assertionSummary)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(theme.neutrals.text(.meta))
+                                .lineLimit(2)
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .captureDashboardGeometry(id: "inspector-eval-\(ev.id)", role: "skillsEvalRow")
+                }
+            }
+        }
     }
 
     private func skillsOverviewPane<Content: View>(_ index: Int, title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) { Text(title).font(.caption.weight(.semibold)); content() }
+        VStack(alignment: .leading, spacing: 6) { Text(title).font(.caption.weight(.semibold)); content() }
             .padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .captureDashboardGeometry(id: "skills-overview-pane-\(index)", role: "skillsOverviewPane")
     }
 
     private func metricPair(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) { Text(title).font(.caption2).foregroundStyle(.secondary); Spacer(minLength: 4); Text(value).font(.caption.monospacedDigit()).multilineTextAlignment(.trailing) }
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Text(value).font(.caption.monospacedDigit()).multilineTextAlignment(.trailing).layoutPriority(1)
+        }
     }
 
-    private func rowHealth(_ row: SkillsUsageRow) -> String {
-        if row.loads30d.value == 0 { return skillsText("health_zombie", "30d zombie") }
-        if (row.roi.value ?? 0) >= 1 { return skillsText("health_healthy", "Core healthy") }
-        return skillsText("health_optimize", "Needs optimization")
+    private func channelSummary(_ breakdown: [String: Int]) -> String {
+        let ordered = [("claude", "Claude"), ("copilot", "Copilot"), ("codex", "Codex"), ("hermes", "Hermes"), ("gtt", "GTT")]
+        let nonZero = ordered.compactMap { key, label -> String? in
+            guard let count = breakdown[key], count > 0 else { return nil }
+            return "\(label) \(count)"
+        }
+        return nonZero.isEmpty ? unknown : nonZero.joined(separator: " · ")
+    }
+
+    private func formatRatio(_ value: Double?) -> String {
+        guard let value else { return unknown }
+        return (value * 100).formatted(.number.precision(.fractionLength(0...1))) + "%"
+    }
+
+    private func formatDecimal(_ value: Double?, digits: Int = 1) -> String {
+        guard let value else { return unknown }
+        return value.formatted(.number.precision(.fractionLength(0...digits)))
+    }
+
+    private func formatTokens(_ value: Double?) -> String {
+        guard let value else { return unknown }
+        return value.formatted(.number.precision(.fractionLength(0...0))) + " tok"
+    }
+
+    private func copyToPasteboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+        copiedFeedback = skillsText("copied_feedback", "Copied to clipboard")
     }
 
     private func activeSummary(_ population: SkillsUsagePopulation) -> String {
         let count = integer(population.active), idle = population.idle.isEmpty ? unknown : population.idle.joined(separator: ", ")
         return [skillsText("active", "Active skills"), count, skillsText("idle", "Idle (30d)"), idle].joined(separator: " · ")
-    }
-
-    private func usageTable(_ diagnostics: SkillsRoiDiagnostics) -> some View {
-        Group {
-            if diagnostics.usageRows.isEmpty { missingPopulation } else {
-                Grid(alignment: .leading, horizontalSpacing: Space.gap, verticalSpacing: Space.gap) {
-                    GridRow {
-                        columnHeader(skillsText("skill", "Skill"), "skill"); columnHeader(skillsText("loads", "Loads") + "\n7d / 30d", "loads"); columnHeader("ROI", "roi")
-                        columnHeader(skillsText("r1", "R1 pass"), "r1"); columnHeader(skillsText("touch", "Script\ntouch"), "touch"); columnHeader(skillsText("unpracticed", "Unpracticed"), "unpracticed"); columnHeader(skillsText("evidence", "Evidence"), "evidence")
-                    }
-                    ForEach(diagnostics.usageRows, id: \.skill) { row in usageRow(row, script: diagnostics.scripts.first { $0.skill == row.skill }) }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
     }
 
     private func dailyObservations(_ rows: [SkillsDailyObservation]) -> some View {
@@ -263,47 +630,22 @@ public struct SkillsRoiDiagnosticsCardView: View {
         }
     }
 
-    private func usageRow(_ row: SkillsUsageRow, script: SkillsUsageRow?) -> some View {
-        let touch = row.touch.value == nil ? script?.touch : row.touch
-        let unpracticed = row.unpracticed.value == nil ? script?.unpracticed : row.unpracticed
-        let facts: [SkillsEvidence?] = [
-            fact("7d " + skillsText("loads", "Loads"), row.loads7d),
-            fact("30d " + skillsText("loads", "Loads"), row.loads30d), fact("ROI", row.roi),
-            fact(skillsText("r1", "R1 pass"), row.r1Pass), fact(skillsText("r1_sample", "R1 reviews"), row.r1Total),
-            fact(skillsText("touch", "Script touch"), touch), fact(skillsText("unpracticed", "Unpracticed"), unpracticed),
-            .init(title: skillsText("diagnosis", "Diagnosis"), value: row.diagnosis ?? unknown, metadata: row.metadata)
-        ]
-        return GridRow {
-            Button {
-                selectedSkill = row.skill
-            } label: {
-                VStack(alignment: .leading, spacing: Space.gap / 2) {
-                    Text(row.skill).font(.caption.weight(.semibold))
-                    Text(row.diagnosis ?? unknown).font(.caption2).foregroundStyle(theme.neutrals.text(.body))
-                }
-                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: Space.gap * 12, minHeight: 28, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(selectedSkill == row.skill ? .isSelected : [])
-            .captureDashboardGeometry(id: "usage-\(row.skill)-skill", role: "skillsTableCell")
-            tableValue(integer(row.loads7d) + " / " + integer(row.loads30d), row.skill, "loads")
-            tableValue(decimal(row.roi), row.skill, "roi")
-            tableValue((row.r1Total.value ?? 0) > 0 ? rate(row.r1Pass) : unknown, row.skill, "r1")
-            tableValue(rate(touch), row.skill, "touch")
-            tableValue(rate(unpracticed), row.skill, "unpracticed")
-            infoButton(facts, id: row.skill).frame(maxWidth: .infinity, alignment: .leading)
-                .captureDashboardGeometry(id: "usage-\(row.skill)-evidence", role: "skillsTableCell")
-        }
-    }
-
     private func disclosure(_ d: SkillsRoiDiagnostics) -> some View {
         VStack(alignment: .leading, spacing: Space.gap) {
-            Text(skillsText("funnel_title", "S7 · L0 → L1 disclosure")).font(.headline)
+            Text(skillsText("funnel_title", "渐进披露漏斗 (L0 → L1)")).font(.headline)
             Text(skillsText("funnel_notice", "Deep-read violations are observed separately; no measured L2 completion count.")).font(.caption).foregroundStyle(theme.neutrals.text(.body))
             if d.disclosure.isEmpty { missingPopulation }
             ForEach(d.disclosure, id: \.skill) { row in
                 HStack(alignment: .top) {
-                    Text(row.skill).font(.caption.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        selectedSkill = row.skill
+                        inspectorFilter = .all
+                        inspectorSubTab = .definition
+                        lens = .usage
+                    } label: {
+                        Text(row.skill).font(.caption.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
                     VStack(alignment: .leading, spacing: Space.gap / 2) {
                         Text("L0 " + rate(row.l0) + " · L1 " + rate(row.l1)).font(.caption.monospacedDigit())
                         Text(skillsText("greedy", "Deep-read violations") + " " + rate(row.greedy)).font(.caption.monospacedDigit())
@@ -312,12 +654,12 @@ public struct SkillsRoiDiagnosticsCardView: View {
                     infoButton([fact("L0", row.l0), fact("L1", row.l1), fact(skillsText("greedy", "Deep-read violations"), row.greedy), fact(skillsText("context_tokens", "Context tokens"), row.contextTokens)], id: "funnel-\(row.skill)")
                 }.captureDashboardGeometry(id: "funnel-\(row.skill)", role: "skillsDiagnosticRow")
             }
-            Text(skillsText("churn_title", "S8 · Post-skill churn")).font(.headline)
+            Text(skillsText("churn_title", "调用后擦写与重试")).font(.headline)
             if d.churn.isEmpty { missingPopulation }
             ForEach(d.churn, id: \.skill) { row in
                 metricRow(row.skill, value: skillsText("edits", "Edits") + " " + integer(row.edits) + " · " + skillsText("retries", "Retries") + " " + integer(row.retries), facts: [fact(skillsText("edits", "Edits"), row.edits), fact(skillsText("retries", "Retries"), row.retries)], id: "churn-\(row.skill)")
             }
-            Text(skillsText("escape_title", "S9 · Escapes by attribution")).font(.headline)
+            Text(skillsText("escape_title", "漏网缺陷归因")).font(.headline)
             if d.escapes.isEmpty { missingPopulation }
             ForEach(d.escapes, id: \.skill) { row in
                 metricRow(row.skill, value: "IMPL_BUG " + integer(row.implementation) + " · SPEC_GAP " + integer(row.specification), facts: [fact("IMPL_BUG", row.implementation), fact("SPEC_GAP", row.specification)], id: "escapes-\(row.skill)")
@@ -327,7 +669,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
 
     private func context(_ d: SkillsRoiDiagnostics) -> some View {
         VStack(alignment: .leading, spacing: Space.gap) {
-            Text(skillsText("composition_title", "S11 · Context composition")).font(.headline)
+            Text(skillsText("composition_title", "上下文构成分布")).font(.headline)
             if let context = d.context, !context.slices.isEmpty {
                 proportionalBar(context.slices.map { $0.share.metadata.hasSamples ? $0.share.value : nil })
                 ForEach(Array(context.slices.enumerated()), id: \.offset) { index, slice in
@@ -341,11 +683,25 @@ public struct SkillsRoiDiagnosticsCardView: View {
                 }
                 Text(skillsText("estimated", "Estimated") + " · " + decimal(context.total) + " tok").font(.caption).foregroundStyle(theme.warningOnSubtle)
             } else { missingPopulation }
-            Text(skillsText("burn_title", "S12 · Tool calls above 10k tokens")).font(.headline)
+            Text(skillsText("burn_title", "高消耗工具调用 (>10k tok)")).font(.headline)
             let tools = d.tools.filter { ($0.bloated.value ?? 0) > 0 }
             if tools.isEmpty { missingPopulation }
             ForEach(tools, id: \.tool) { tool in
-                metricRow(tool.tool, value: integer(tool.bloated) + " / " + integer(tool.calls) + " · p95 " + decimal(tool.p95) + " tok", facts: [fact(skillsText("bloated", "Calls >10k"), tool.bloated), fact(skillsText("calls", "Calls"), tool.calls), fact(skillsText("total_tokens", "Total tokens"), tool.total), fact("p95 tok", tool.p95), fact(skillsText("share", "Share (%)"), tool.share)], id: "tool-\(tool.tool)")
+                HStack {
+                    Button {
+                        if let dom = tool.dominantSkill {
+                            selectedSkill = dom
+                            inspectorFilter = .all
+                            lens = .usage
+                        }
+                    } label: {
+                        Text(tool.tool).font(.caption.weight(.semibold)).frame(minHeight: 28, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                    Text(integer(tool.bloated) + " / " + integer(tool.calls) + " · p95 " + decimal(tool.p95) + " tok").font(.caption.monospacedDigit()).fixedSize(horizontal: false, vertical: true)
+                    infoButton([fact(skillsText("bloated", "Calls >10k"), tool.bloated), fact(skillsText("calls", "Calls"), tool.calls), fact(skillsText("total_tokens", "Total tokens"), tool.total), fact("p95 tok", tool.p95), fact(skillsText("share", "Share (%)"), tool.share)], id: "tool-\(tool.tool)")
+                }.captureDashboardGeometry(id: "tool-\(tool.tool)", role: "skillsDiagnosticRow")
             }
         }
     }
@@ -678,26 +1034,270 @@ public struct SkillsDailyObservation: Decodable, Sendable, Equatable {
     }
 }
 
-public struct SkillsRoiDiagnostics: Decodable, Sendable, Equatable {
-    public let pins: SkillsPinHealth?, gates: SkillsGateHealth?, audit: SkillsAuditHealth?, usage: SkillsUsagePopulation?
-    public let scripts: [SkillsUsageRow], disclosure: [SkillsDisclosureRow], churn: [SkillsChurnRow], escapes: [SkillsEscapeRow], ranking: [SkillsUsageRow], context: SkillsContextHealth?, tools: [SkillsToolBurnRow]
+public struct SkillReferenceDetail: Decodable, Sendable, Equatable, Identifiable {
+    public let relPath: String, lineCount: Int, tokensEst: Int, hits30d: Int?, sessions30d: Int?, isUnhit: Bool
+    public var id: String { relPath }
+
+    public init(relPath: String, lineCount: Int = 0, tokensEst: Int = 0, hits30d: Int? = nil, sessions30d: Int? = nil, isUnhit: Bool = false) {
+        self.relPath = relPath; self.lineCount = lineCount; self.tokensEst = tokensEst
+        self.hits30d = hits30d; self.sessions30d = sessions30d; self.isUnhit = isUnhit
+    }
+
     public init(from decoder: Decoder) throws {
         let f = try SkillsFields(decoder)
+        relPath = try f.container.decode(String.self, forKey: .init("rel_path"))
+        lineCount = try f.value("line_count") ?? 0
+        tokensEst = try f.value("tokens_est") ?? 0
+        hits30d = try f.value("hits_30d")
+        sessions30d = try f.value("sessions_30d")
+        isUnhit = try f.value("is_unhit") ?? (hits30d == 0)
+    }
+}
+
+public struct SkillScriptDetail: Decodable, Sendable, Equatable, Identifiable {
+    public let relPath: String, calls30d: Int?, successRate: Double?, p95Ms: Double?, isUnpracticed: Bool
+    public var id: String { relPath }
+
+    public init(relPath: String, calls30d: Int? = nil, successRate: Double? = nil, p95Ms: Double? = nil, isUnpracticed: Bool = false) {
+        self.relPath = relPath; self.calls30d = calls30d; self.successRate = successRate
+        self.p95Ms = p95Ms; self.isUnpracticed = isUnpracticed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder)
+        relPath = try f.container.decode(String.self, forKey: .init("rel_path"))
+        calls30d = try f.value("calls_30d")
+        successRate = try f.value("success_rate")
+        p95Ms = try f.value("p95_ms")
+        isUnpracticed = try f.value("is_unpracticed") ?? (calls30d == 0)
+    }
+}
+
+public struct SkillEvalCaseDetail: Decodable, Sendable, Equatable, Identifiable {
+    public let id: String, title: String, kind: String, assertionSummary: String, status: String, interceptions30d: Int, escapes30d: Int
+
+    public init(id: String, title: String, kind: String = "contract", assertionSummary: String = "", status: String = "active", interceptions30d: Int = 0, escapes30d: Int = 0) {
+        self.id = id; self.title = title; self.kind = kind; self.assertionSummary = assertionSummary
+        self.status = status; self.interceptions30d = interceptions30d; self.escapes30d = escapes30d
+    }
+
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder)
+        id = try f.container.decode(String.self, forKey: .init("id"))
+        title = try f.value("title") ?? id
+        kind = try f.value("kind") ?? "contract"
+        assertionSummary = try f.value("assertion_summary") ?? ""
+        status = try f.value("status") ?? "active"
+        interceptions30d = try f.value("interceptions_30d") ?? 0
+        escapes30d = try f.value("escapes_30d") ?? 0
+    }
+}
+
+public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable {
+    public let metadata: SkillsObservationMetadata
+    public let skill: String, scope: String, repo: String, skillDir: String, skillMdPath: String
+    public let skillMdLines: Int, frontmatterTokensEst: Int, bodyTokensEst: Int
+    public let loads7d: Int, loads30d: Int, emptyLoadRate: Double?, roiScore: Double?, r1PassRate: Double?
+    public let avgContextTokens: Double?, kvCacheHitPct: Double?, editChurn: Int, retryChurn: Int
+    public let implBugEscapes: Int, specGapEscapes: Int, evalInterceptions: Int, evalEscapes: Int
+    public let statusLabel: String, sourceBreakdown: [String: Int]
+    public let references: [SkillReferenceDetail], scripts: [SkillScriptDetail], evalCases: [SkillEvalCaseDetail]
+    public var id: String { skill }
+
+    public init(
+        metadata: SkillsObservationMetadata, skill: String, scope: String = "global", repo: String = "user-skills",
+        skillDir: String, skillMdPath: String = "SKILL.md", skillMdLines: Int = 0, frontmatterTokensEst: Int = 0, bodyTokensEst: Int = 0,
+        loads7d: Int = 0, loads30d: Int = 0, emptyLoadRate: Double? = nil, roiScore: Double? = nil, r1PassRate: Double? = nil,
+        avgContextTokens: Double? = nil, kvCacheHitPct: Double? = nil, editChurn: Int = 0, retryChurn: Int = 0,
+        implBugEscapes: Int = 0, specGapEscapes: Int = 0, evalInterceptions: Int = 0, evalEscapes: Int = 0,
+        statusLabel: String = "active", sourceBreakdown: [String: Int] = [:],
+        references: [SkillReferenceDetail] = [], scripts: [SkillScriptDetail] = [], evalCases: [SkillEvalCaseDetail] = []
+    ) {
+        self.metadata = metadata; self.skill = skill; self.scope = scope; self.repo = repo
+        self.skillDir = skillDir; self.skillMdPath = skillMdPath; self.skillMdLines = skillMdLines
+        self.frontmatterTokensEst = frontmatterTokensEst; self.bodyTokensEst = bodyTokensEst
+        self.loads7d = loads7d; self.loads30d = loads30d; self.emptyLoadRate = emptyLoadRate
+        self.roiScore = roiScore; self.r1PassRate = r1PassRate; self.avgContextTokens = avgContextTokens
+        self.kvCacheHitPct = kvCacheHitPct; self.editChurn = editChurn; self.retryChurn = retryChurn
+        self.implBugEscapes = implBugEscapes; self.specGapEscapes = specGapEscapes
+        self.evalInterceptions = evalInterceptions; self.evalEscapes = evalEscapes
+        self.statusLabel = statusLabel; self.sourceBreakdown = sourceBreakdown
+        self.references = references; self.scripts = scripts; self.evalCases = evalCases
+    }
+
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder); metadata = f.metadata
+        skill = try f.container.decode(String.self, forKey: .init("skill"))
+        scope = try f.value("scope") ?? "global"
+        repo = try f.value("repo") ?? (scope == "repo_bound" ? "repo" : "user-skills")
+        skillDir = try f.value("skill_dir") ?? "~/Development/user-skills/skills/\(skill)"
+        skillMdPath = try f.value("skill_md_path") ?? "SKILL.md"
+        skillMdLines = try f.value("skill_md_lines") ?? 0
+        frontmatterTokensEst = try f.value("frontmatter_tokens_est") ?? 0
+        bodyTokensEst = try f.value("body_tokens_est") ?? 0
+        loads7d = try f.value("loads_7d") ?? 0
+        loads30d = try f.value("loads_30d") ?? 0
+        emptyLoadRate = try f.value("empty_load_rate")
+        roiScore = try f.value("roi_score")
+        r1PassRate = try f.value("r1_pass_rate")
+        avgContextTokens = try f.value("avg_context_tokens")
+        kvCacheHitPct = try f.value("kv_cache_hit_pct")
+        editChurn = try f.value("edit_churn") ?? 0
+        retryChurn = try f.value("retry_churn") ?? 0
+        implBugEscapes = try f.value("impl_bug_escapes") ?? 0
+        specGapEscapes = try f.value("spec_gap_escapes") ?? 0
+        evalInterceptions = try f.value("eval_interceptions") ?? 0
+        evalEscapes = try f.value("eval_escapes") ?? 0
+        statusLabel = try f.value("status_label") ?? (loads30d == 0 ? "zombie_30d" : "active")
+        sourceBreakdown = try f.value("source_breakdown") ?? [:]
+        references = try f.value("references") ?? []
+        scripts = try f.value("scripts") ?? []
+        evalCases = try f.value("eval_cases") ?? []
+    }
+}
+
+public enum SkillInspectorFilter: String, CaseIterable, Identifiable, Sendable {
+    case all, active, needsOptimization, idle30d, repoBound
+    public var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: return skillsText("filter_all", "All")
+        case .active: return skillsText("filter_active", "Active")
+        case .needsOptimization: return skillsText("filter_needs_opt", "Needs Optimization")
+        case .idle30d: return skillsText("filter_idle_30d", "30d Idle")
+        case .repoBound: return skillsText("filter_repo_bound", "Repo-Bound")
+        }
+    }
+    public func matches(_ detail: SkillInspectorDetail) -> Bool {
+        switch self {
+        case .all: return true
+        case .active: return detail.loads30d > 0 && detail.statusLabel != "needs_optimization"
+        case .needsOptimization:
+            return detail.statusLabel == "needs_optimization" || detail.implBugEscapes > 0 || detail.specGapEscapes > 0 || detail.editChurn >= 4
+        case .idle30d: return detail.loads30d == 0 || detail.statusLabel == "zombie_30d"
+        case .repoBound: return detail.scope == "repo_bound"
+        }
+    }
+}
+
+public enum SkillInspectorSubTab: String, CaseIterable, Identifiable, Sendable {
+    case definition, scripts, evals
+    public var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .definition: return skillsText("tab_definition", "Definition & References")
+        case .scripts: return skillsText("tab_scripts", "Script Ledger")
+        case .evals: return skillsText("tab_evals", "Eval & Interceptions")
+        }
+    }
+}
+
+struct SkillsPrimaryDetailSplitLayout: Layout {
+    var primaryFraction: CGFloat = 0.34, minPrimaryWidth: CGFloat = 240, maxPrimaryWidth: CGFloat = 340, spacing: CGFloat = Space.gap
+    private func isSplit(_ width: CGFloat) -> Bool { width >= 760 }
+    private func primaryWidth(_ width: CGFloat) -> CGFloat { min(maxPrimaryWidth, max(minPrimaryWidth, floor(width * primaryFraction))) }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 760
+        guard subviews.count >= 2 else {
+            return subviews.first?.sizeThatFits(.init(width: width, height: nil)) ?? .zero
+        }
+        if isSplit(width) {
+            let pw = primaryWidth(width), dw = max(0, width - pw - spacing)
+            let ph = subviews[0].sizeThatFits(.init(width: pw, height: nil)).height
+            let dh = subviews[1].sizeThatFits(.init(width: dw, height: nil)).height
+            return .init(width: width, height: max(ph, dh))
+        }
+        let ph = subviews[0].sizeThatFits(.init(width: width, height: nil)).height
+        let dh = subviews[1].sizeThatFits(.init(width: width, height: nil)).height
+        return .init(width: width, height: ph + dh + spacing)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count >= 2 else {
+            subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: .init(width: bounds.width, height: bounds.height))
+            return
+        }
+        if isSplit(bounds.width) {
+            let pw = primaryWidth(bounds.width), dw = max(0, bounds.width - pw - spacing)
+            let ph = subviews[0].sizeThatFits(.init(width: pw, height: nil)).height
+            let dh = subviews[1].sizeThatFits(.init(width: dw, height: nil)).height
+            let rowH = max(ph, dh)
+            subviews[0].place(at: .init(x: bounds.minX, y: bounds.minY), anchor: .topLeading, proposal: .init(width: pw, height: rowH))
+            subviews[1].place(at: .init(x: bounds.minX + pw + spacing, y: bounds.minY), anchor: .topLeading, proposal: .init(width: dw, height: rowH))
+        } else {
+            let ph = subviews[0].sizeThatFits(.init(width: bounds.width, height: nil)).height
+            let dh = subviews[1].sizeThatFits(.init(width: bounds.width, height: nil)).height
+            subviews[0].place(at: .init(x: bounds.minX, y: bounds.minY), anchor: .topLeading, proposal: .init(width: bounds.width, height: ph))
+            subviews[1].place(at: .init(x: bounds.minX, y: bounds.minY + ph + spacing), anchor: .topLeading, proposal: .init(width: bounds.width, height: dh))
+        }
+    }
+}
+
+public struct SkillsRoiDiagnostics: Decodable, Sendable, Equatable {
+    public let metadata: SkillsObservationMetadata
+    public let pins: SkillsPinHealth?, gates: SkillsGateHealth?, audit: SkillsAuditHealth?, usage: SkillsUsagePopulation?
+    public let scripts: [SkillsUsageRow], disclosure: [SkillsDisclosureRow], churn: [SkillsChurnRow], escapes: [SkillsEscapeRow], ranking: [SkillsUsageRow], context: SkillsContextHealth?, tools: [SkillsToolBurnRow]
+    public let skillDetails: [SkillInspectorDetail]
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder); metadata = f.metadata
         pins = try f.value("S1_pin_drift"); gates = try f.value("S2_gate_catch"); audit = try f.value("S3_skill_health"); usage = try f.value("S4_usage_and_r1")
         scripts = try f.value("S6_load_vs_script") ?? []; disclosure = try f.value("S7_disclosure_funnel") ?? []; churn = try f.value("S8_post_skill_churn") ?? []
         escapes = try f.value("S9_escape_attribution") ?? []; ranking = try f.value("S10_skill_roi_ranking") ?? []; context = try f.value("S11_context_composition"); tools = try f.value("S12_tool_context_burn") ?? []
+        skillDetails = try f.value("skill_details") ?? []
     }
     public var usageRows: [SkillsUsageRow] {
         let ranked = ranking.isEmpty ? (usage?.top ?? []) : ranking, names = Set(ranked.map(\.skill))
         return ranked + scripts.filter { !names.contains($0.skill) }
     }
+    public var resolvedSkillDetails: [SkillInspectorDetail] {
+        if !skillDetails.isEmpty { return skillDetails }
+        var synthesized: [SkillInspectorDetail] = []
+        var seen: Set<String> = []
+        for row in usageRows {
+            seen.insert(row.skill)
+            let disc = disclosure.first { $0.skill == row.skill }
+            let ch = churn.first { $0.skill == row.skill }
+            let esc = escapes.first { $0.skill == row.skill }
+            let scRow = scripts.first { $0.skill == row.skill }
+            let calls = row.scriptExecs.value ?? scRow?.scriptExecs.value
+            let unprac = (row.unpracticed.value ?? scRow?.unpracticed.value ?? 0) >= 0.5 && (calls ?? 0) == 0
+            let fallbackScripts: [SkillScriptDetail] = (calls != nil || scRow != nil)
+                ? [SkillScriptDetail(relPath: "scripts/*.py", calls30d: calls, successRate: nil, p95Ms: nil, isUnpracticed: calls == 0 || unprac)]
+                : []
+            let l30 = row.loads30d.value ?? 0
+            let implEsc = esc?.implementation.value ?? 0, specEsc = esc?.specification.value ?? 0
+            let status: String = l30 == 0 ? "zombie_30d" : ((implEsc + specEsc > 0 || (ch?.edits.value ?? 0) >= 4 || ((row.roi.value ?? 1.0) < 0.8 && row.roi.value != nil)) ? "needs_optimization" : "active")
+            synthesized.append(SkillInspectorDetail(
+                metadata: row.metadata, skill: row.skill, scope: "global", repo: "user-skills",
+                skillDir: "~/Development/user-skills/skills/\(row.skill)", skillMdPath: "SKILL.md",
+                loads7d: row.loads7d.value ?? 0, loads30d: l30, roiScore: row.roi.value, r1PassRate: row.r1Pass.value,
+                avgContextTokens: disc?.contextTokens.value, kvCacheHitPct: context?.cacheHitPercent.value,
+                editChurn: ch?.edits.value ?? 0, retryChurn: ch?.retries.value ?? 0,
+                implBugEscapes: implEsc, specGapEscapes: specEsc, statusLabel: status, scripts: fallbackScripts
+            ))
+        }
+        for idleSkill in (usage?.idle ?? []) where !seen.contains(idleSkill) {
+            seen.insert(idleSkill)
+            synthesized.append(SkillInspectorDetail(
+                metadata: usage?.metadata ?? metadata, skill: idleSkill, scope: "global", repo: "user-skills",
+                skillDir: "~/Development/user-skills/skills/\(idleSkill)", skillMdPath: "SKILL.md", statusLabel: "zombie_30d"
+            ))
+        }
+        return synthesized
+    }
 }
 
 public struct SkillsRoiReport: Decodable, Sendable, Equatable {
-    public let metadata: SkillsObservationMetadata, diagnostics: SkillsRoiDiagnostics, skillsDaily: [SkillsDailyObservation], errors: [String]
+    public let metadata: SkillsObservationMetadata, diagnostics: SkillsRoiDiagnostics, skillsDaily: [SkillsDailyObservation], skillDetails: [SkillInspectorDetail], errors: [String]
     public init(from decoder: Decoder) throws {
         let f = try SkillsFields(decoder); metadata = f.metadata
-        diagnostics = try f.value("diagnostics") ?? SkillsRoiDiagnostics(from: decoder); skillsDaily = try f.value("skills_daily") ?? []; errors = try f.value("errors") ?? []
+        let diag = try f.value("diagnostics") ?? SkillsRoiDiagnostics(from: decoder)
+        diagnostics = diag
+        skillsDaily = try f.value("skills_daily") ?? []
+        let topLevelDetails: [SkillInspectorDetail]? = try f.value("skill_details")
+        skillDetails = (topLevelDetails?.isEmpty == false) ? (topLevelDetails ?? []) : diag.resolvedSkillDetails
+        errors = try f.value("errors") ?? []
     }
 }
 
@@ -712,4 +1312,8 @@ extension SkillsChurnRow: SkillsObjectPopulation {}
 extension SkillsEscapeRow: SkillsObjectPopulation {}
 extension SkillsContextSlice: SkillsObjectPopulation {}
 extension SkillsToolBurnRow: SkillsObjectPopulation {}
+extension SkillReferenceDetail: SkillsObjectPopulation {}
+extension SkillScriptDetail: SkillsObjectPopulation {}
+extension SkillEvalCaseDetail: SkillsObjectPopulation {}
+extension SkillInspectorDetail: SkillsObjectPopulation {}
 #endif
