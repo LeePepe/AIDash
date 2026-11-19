@@ -1,8 +1,7 @@
 import sqlite3
 
-import pytest
-
 import merge
+import pytest
 
 
 def _make_clean_raven(path, *, with_cache):
@@ -57,3 +56,21 @@ def test_merge_copies_cache_tokens_and_defaults_old_clean_db(
 
     assert row[:2] == (100, 20)
     assert row[2:] == ((30, 4) if with_cache else (None, None))
+
+
+@pytest.mark.unit
+def test_run_merge_loads_dated_raven_model_price(tmp_path, monkeypatch):
+    warehouse = tmp_path / "warehouse.db"
+    monkeypatch.setattr(merge, "WAREHOUSE_DB", warehouse)
+    monkeypatch.setattr(merge, "clean_path", lambda source: tmp_path / f"{source}.db")
+
+    merge.run_merge()
+
+    conn = sqlite3.connect(warehouse)
+    row = conn.execute(
+        "SELECT input_per_mtok, output_per_mtok, cache_read_per_mtok, "
+        "cache_write_per_mtok FROM dim_model WHERE model = ?",
+        ("gpt-4.1-2025-04-14",),
+    ).fetchone()
+    conn.close()
+    assert row == (2.0, 8.0, 0.5, 0.0)

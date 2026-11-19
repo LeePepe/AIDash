@@ -8,7 +8,8 @@ derived artifacts — safe to rebuild from raw at any time.
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from config import CLEAN_DIR, clean_path
 
@@ -30,7 +31,7 @@ def write_clean(source: str, table: str, ddl: str, rows: Sequence[dict[str, Any]
             placeholders = ", ".join("?" for _ in columns)
             collist = ", ".join(columns)
             conn.executemany(
-                f"INSERT INTO {table} ({collist}) VALUES ({placeholders})",
+                f"INSERT OR REPLACE INTO {table} ({collist}) VALUES ({placeholders})",
                 [tuple(r.get(c) for c in columns) for r in rows],
             )
         conn.commit()
