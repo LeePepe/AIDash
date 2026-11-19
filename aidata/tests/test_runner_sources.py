@@ -545,7 +545,7 @@ def test_loop6a_autopilot_reconciles_schedule_with_trigger_update() -> None:
             return subprocess.CompletedProcess(args, 0, json.dumps({"autopilots": [{"id": "ap-1", "title": mod.AUTOPILOT_TITLE}]}), "")
         if args[:2] == ["autopilot", "trigger-list"]:
             trigger_reads += 1
-            trigger = {"id": "tr-1", "kind": "schedule", "cron": mod.AUTOPILOT_CRON if trigger_reads > 1 else "0 0 * * *", "timezone": mod.AUTOPILOT_TIMEZONE if trigger_reads > 1 else "UTC", "enabled": trigger_reads > 1}
+            trigger = {"id": "tr-1", "kind": "schedule", "cron_expression": mod.AUTOPILOT_CRON if trigger_reads > 1 else "0 0 * * *", "timezone": mod.AUTOPILOT_TIMEZONE if trigger_reads > 1 else "UTC", "enabled": trigger_reads > 1}
             return subprocess.CompletedProcess(args, 0, json.dumps({"triggers": [trigger]}), "")
         return subprocess.CompletedProcess(args, 0, "{}", "")
     result = mod.sync_autopilot(server_url="https://example.invalid", workspace_id="workspace", agent_id="agent", subscriber_id="owner", runner=runner)
