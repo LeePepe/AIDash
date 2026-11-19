@@ -406,3 +406,144 @@ def test_pending_issues_includes_triage_and_excludes_backlog(tmp_path):
     assert [r[2] for r in rows] == ["blocked", "triage", "in_progress"]
 
 
+def test_agent_role_and_daily_efficiency_queries_aggregate_rounds_durations_and_tokens(tmp_path):
+    db = tmp_path / "warehouse.db"
+    role_sql = (QUERIES / "retro" / "agent_role_efficiency.sql").read_text(encoding="utf-8")
+    daily_sql = (QUERIES / "retro" / "daily_agent_efficiency.sql").read_text(encoding="utf-8")
+    con = sqlite3.connect(db)
+    try:
+        con.executescript(
+            """
+            CREATE TABLE fact_gtt_task_run (
+                receipt_uid TEXT PRIMARY KEY,
+                goal_uid TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                role_name TEXT NOT NULL,
+                round_no INTEGER NOT NULL,
+                status TEXT,
+                v5_verdict TEXT,
+                completed_at TEXT,
+                cst_day TEXT
+            );
+            CREATE TABLE fact_gtt_event (
+                event_uid TEXT PRIMARY KEY,
+                goal_uid TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                evt_type TEXT NOT NULL,
+                task_id TEXT,
+                cst_day TEXT
+            );
+            CREATE TABLE fact_bot_tl_supervision (
+                supervision_uid TEXT PRIMARY KEY,
+                goal_id TEXT NOT NULL,
+                action_kind TEXT NOT NULL,
+                status TEXT,
+                ts TEXT NOT NULL,
+                cst_day TEXT
+            );
+            CREATE TABLE fact_turn (
+                turn_uuid TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                attribution_skill TEXT,
+                skill_names TEXT
+            );
+            CREATE TABLE fact_request (
+                request_id TEXT PRIMARY KEY,
+                client TEXT,
+                model_canon TEXT,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                cache_read INTEGER,
+                cache_write INTEGER,
+                total_tokens INTEGER,
+                latency_ms INTEGER,
+                cst_day TEXT
+            );
+            """
+        )
+        con.executemany(
+            "INSERT INTO fact_gtt_task_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("r1", "mac:g1", "T1", "writer", 1, "completed", "PASS", "2026-11-18T10:10:00+08:00", "2026-11-18"),
+                ("r2", "mac:g1", "T1", "reviewer", 1, "completed", "PASS", "2026-11-18T10:15:00+08:00", "2026-11-18"),
+                ("r3", "mac:g1", "T2", "writer", 1, "failed", "FAIL", "2026-11-18T11:10:00+08:00", "2026-11-18"),
+                ("r4", "mac:g1", "T2", "writer_escalated", 2, "completed", "PASS", "2026-11-18T11:30:00+08:00", "2026-11-18"),
+                ("r5", "mac:g1", "T2", "code_reviewer", 3, "completed", "PASS", "2026-11-18T11:40:00+08:00", "2026-11-18"),
+                ("r6", "mac:g1", "T1", "designer", 1, "completed", "PASS", "2026-11-18T10:05:00+08:00", "2026-11-18"),
+                ("r7", "mac:g1", "T1", "explorer", 10, "completed", "PASS", "2026-11-18T10:02:00+08:00", "2026-11-18"),
+                ("r8", "mac:g1", "T1", "pr_monitor", 1, "completed", "PASS", "2026-11-18T10:20:00+08:00", "2026-11-18"),
+            ],
+        )
+        con.executemany(
+            "INSERT INTO fact_gtt_event VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("e1", "mac:g1", "E1", "2026-11-18T10:00:00+08:00", "DISPATCHED", "T1", "2026-11-18"),
+                ("e2", "mac:g1", "E2", "2026-11-18T10:12:00+08:00", "IN_REVIEW", "T1", "2026-11-18"),
+                ("e3", "mac:g1", "E3", "2026-11-18T10:15:00+08:00", "REVIEW_PASS", "T1", "2026-11-18"),
+                ("e4", "mac:g1", "E4", "2026-11-18T10:20:00+08:00", "DONE", "T1", "2026-11-18"),
+                ("e5", "mac:g1", "E5", "2026-11-18T11:00:00+08:00", "DISPATCHED", "T2", "2026-11-18"),
+                ("e6", "mac:g1", "E6", "2026-11-18T11:15:00+08:00", "REVIEW_FAIL", "T2", "2026-11-18"),
+                ("e7", "mac:g1", "E7", "2026-11-18T11:40:00+08:00", "DONE", "T2", "2026-11-18"),
+                ("e8", "mac:g1", "E8", "2026-11-18T11:45:00+08:00", "GOAL_DONE", None, "2026-11-18"),
+            ],
+        )
+        con.execute(
+            "INSERT INTO fact_bot_tl_supervision VALUES ('s1', 'g1', 'HOT_APPEND', 'ok', '2026-11-18T09:59:00+08:00', '2026-11-18')"
+        )
+        con.execute(
+            "INSERT INTO fact_turn VALUES ('u1', 'sess1', 'personal-m2-assistant', '[\"personal-m2-assistant\"]')"
+        )
+        con.executemany(
+            "INSERT INTO fact_request VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("req1", "claude-cli", "claude-4", 1000, 500, 0, 0, 1500, 1200, "2026-11-18"),
+                ("req2", "codex-tui", "gpt-6.1-sol", 2000, 500, 0, 0, 2500, 2000, "2026-11-18"),
+                ("req3", "magpie", "gpt-5.6-luna", 4000, 2000, 0, 0, 6000, 3500, "2026-11-18"),
+                ("req4", "magpie-router", "microsoft-decision-1", 400, 100, 0, 0, 500, 450, "2026-11-18"),
+            ],
+        )
+        con.commit()
+
+        cur = con.execute(role_sql)
+        role_rows = cur.fetchall()
+        role_cols = [d[0] for d in cur.description]
+        by_role = {r[role_cols.index("role_key")]: dict(zip(role_cols, r)) for r in role_rows}
+
+        cur2 = con.execute(daily_sql, {"until_day": "2026-11-18"})
+        daily_rows = cur2.fetchall()
+        daily_cols = [d[0] for d in cur2.description]
+        by_day = {r[daily_cols.index("cst_day")]: dict(zip(daily_cols, r)) for r in daily_rows}
+    finally:
+        con.close()
+
+    assert [r[0] for r in role_rows] == [
+        "m3", "m2", "m1", "designer", "writer", "reviewer", "explorer", "pr_monitor",
+    ]
+    assert by_role["m3"]["runs_count"] == 1
+    assert by_role["m2"]["runs_count"] == 1
+    assert by_role["m1"]["runs_count"] == 1
+    assert by_role["writer"]["runs_count"] == 3
+    assert by_role["writer"]["r1_count"] == 1
+    assert by_role["writer"]["r2_count"] == 1
+    assert by_role["writer"]["r1_pass_rate"] == 0.5
+    assert by_role["reviewer"]["r1_count"] == 1
+    assert by_role["reviewer"]["r3_plus_count"] == 1
+    assert by_role["explorer"]["r1_count"] == 1  # *-r10.md normalized to round 1
+    assert by_role["writer"]["median_duration_sec"] == 1800.0
+    assert by_role["writer"]["p90_duration_sec"] == 2400.0
+
+    assert len(daily_rows) == 14
+    day = by_day["2026-11-18"]
+    assert day["goals_completed"] == 1
+    assert day["tasks_completed"] == 2
+    assert day["r1_count"] == 1
+    assert day["r3_plus_count"] == 1
+    assert day["r1_pass_rate"] == 0.5
+    assert day["blocked_events"] == 1
+    assert day["steering_tokens"] == 4500
+    assert day["coding_tokens"] == 6000
+    assert day["total_tokens"] == 10500
+
+
+
