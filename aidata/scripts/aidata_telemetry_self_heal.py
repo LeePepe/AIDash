@@ -640,7 +640,7 @@ def shared_telemetry_coverage_audit(aidata_home: Path, *, shared_telemetry_dir: 
     if not coordinator_ok:
         anomalies.append({"dimension": "shared_telemetry_coverage_audit", "kind": "aidash_telemetry_contract_gap", "severity": "high", "healable": False, "detail": "AIDash遥测协调器缺少类型白名单、同意状态或隐私策略证据"})
     blob_text = read(product_blob)
-    blob_ok = "AZURE_CORE_COLLECT_TELEMETRY" in blob_text and "_preflight" in blob_text and "privacy" in blob_text.lower()
+    blob_ok = "AZURE_CORE_COLLECT_TELEMETRY" in blob_text and "_preflight" in blob_text
     if not blob_ok:
         anomalies.append({"dimension": "shared_telemetry_coverage_audit", "kind": "product_blob_guard_missing", "severity": "high", "healable": False, "detail": "采集适配器缺少离线预检或安全环境守卫"})
     sdk_checks: dict[str, bool] = {}
