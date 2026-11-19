@@ -1289,5 +1289,167 @@ struct DashboardWorkspaceTests {
         let loaded = LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: tempHome)
         #expect(loaded.map(\.id) == ["child-1"])
     }
+
+    @Test("AgentEfficiencyWorkbenchSnapshot decodes v1 JSON, falls back to warehouse.db, renders 4x2 PNGs, and exposes zero bare M1-M5 or S1-S12 codes")
+    func agentEfficiencyWorkbenchDecodesRendersAndForbidsInternalCodes() throws {
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-agent-eff-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+        let digestDir = tempHome.appendingPathComponent(
+            "Library/Application Support/AIDash/jobs/aidata-digest",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: digestDir, withIntermediateDirectories: true)
+
+        let snapshotJSON = """
+        {
+          "contract": "aidash-agent-efficiency/v1",
+          "schema_version": 1,
+          "window_cst": "14d",
+          "window_start": "2026-11-06",
+          "window_end": "2026-11-19",
+          "source_as_of": "2026-11-19",
+          "sample_size": 124,
+          "coverage_status": "healthy",
+          "roles": [
+            {"role_key": "m3", "role_label": "总控协调", "role_label_en": "Top-Level Coordinator", "runs_count": 6, "goals_count": 4, "tasks_count": 6, "r1_count": 6, "r2_count": 0, "r3_plus_count": 0, "r1_pass_rate": 1.0, "median_duration_sec": 1.2, "p90_duration_sec": 2.8, "estimated_tokens": 1100000, "token_share_pct": 1.2},
+            {"role_key": "m2", "role_label": "话题编排", "role_label_en": "Topic Dispatcher", "runs_count": 18, "goals_count": 10, "tasks_count": 14, "r1_count": 14, "r2_count": 0, "r3_plus_count": 0, "r1_pass_rate": 1.0, "median_duration_sec": 9.4, "p90_duration_sec": 26.0, "estimated_tokens": 8400000, "token_share_pct": 9.3},
+            {"role_key": "m1", "role_label": "Goal 主控 (TL)", "role_label_en": "Goal Lead (TL)", "runs_count": 28, "goals_count": 12, "tasks_count": 24, "r1_count": 23, "r2_count": 1, "r3_plus_count": 0, "r1_pass_rate": 0.9583, "median_duration_sec": 1800.0, "p90_duration_sec": 4200.0, "estimated_tokens": 9200000, "token_share_pct": 10.2},
+            {"role_key": "designer", "role_label": "视觉设计 (Designer)", "role_label_en": "Visual Design (Designer)", "runs_count": 8, "goals_count": 5, "tasks_count": 6, "r1_count": 5, "r2_count": 1, "r3_plus_count": 0, "r1_pass_rate": 0.8333, "median_duration_sec": 420.0, "p90_duration_sec": 680.0, "estimated_tokens": 6100000, "token_share_pct": 6.8},
+            {"role_key": "writer", "role_label": "编码实现 (Writer)", "role_label_en": "Code Implementation (Writer)", "runs_count": 32, "goals_count": 12, "tasks_count": 24, "r1_count": 18, "r2_count": 4, "r3_plus_count": 2, "r1_pass_rate": 0.75, "median_duration_sec": 1560.0, "p90_duration_sec": 3900.0, "estimated_tokens": 36000000, "token_share_pct": 40.0},
+            {"role_key": "reviewer", "role_label": "独立审查 (Reviewer)", "role_label_en": "Independent Review (Reviewer)", "runs_count": 20, "goals_count": 12, "tasks_count": 18, "r1_count": 13, "r2_count": 3, "r3_plus_count": 2, "r1_pass_rate": 0.7222, "median_duration_sec": 920.0, "p90_duration_sec": 2100.0, "estimated_tokens": 24000000, "token_share_pct": 26.7},
+            {"role_key": "explorer", "role_label": "代码探查 (Explorer)", "role_label_en": "Code Exploration (Explorer)", "runs_count": 6, "goals_count": 4, "tasks_count": 6, "r1_count": 6, "r2_count": 0, "r3_plus_count": 0, "r1_pass_rate": 1.0, "median_duration_sec": 210.0, "p90_duration_sec": 540.0, "estimated_tokens": 2800000, "token_share_pct": 3.1},
+            {"role_key": "pr_monitor", "role_label": "交付监控 (PR Monitor)", "role_label_en": "Delivery Monitor (PR Monitor)", "runs_count": 6, "goals_count": 6, "tasks_count": 6, "r1_count": 5, "r2_count": 1, "r3_plus_count": 0, "r1_pass_rate": 0.8333, "median_duration_sec": 640.0, "p90_duration_sec": 1800.0, "estimated_tokens": 2400000, "token_share_pct": 2.7}
+          ],
+          "round_summary": {
+            "r1_count": 36,
+            "r2_count": 8,
+            "r3_plus_count": 4,
+            "evaluated_tasks": 48,
+            "r1_pass_rate": 0.75,
+            "median_duration_sec": 1180.0,
+            "p90_duration_sec": 3900.0,
+            "steering_token_share": 0.207,
+            "ttft_p90_sec": 3.8,
+            "cache_hit_rate": 0.86
+          },
+          "daily_series": [
+            {"day": "2026-11-17", "goals_completed": 4, "tasks_completed": 11, "r1_count": 9, "r2_count": 2, "r3_plus_count": 0, "r1_pass_rate": 0.8182, "median_duration_sec": 1120.0, "p90_duration_sec": 2800.0, "blocked_events": 1, "steering_tokens": 4200000, "coding_tokens": 18500000, "total_tokens": 22700000},
+            {"day": "2026-11-18", "goals_completed": 5, "tasks_completed": 14, "r1_count": 11, "r2_count": 2, "r3_plus_count": 1, "r1_pass_rate": 0.7857, "median_duration_sec": 1340.0, "p90_duration_sec": 3400.0, "blocked_events": 2, "steering_tokens": 5100000, "coding_tokens": 21900000, "total_tokens": 27000000},
+            {"day": "2026-11-19", "goals_completed": 3, "tasks_completed": 8, "r1_count": 7, "r2_count": 1, "r3_plus_count": 0, "r1_pass_rate": 0.875, "median_duration_sec": 980.0, "p90_duration_sec": 2200.0, "blocked_events": 0, "steering_tokens": 3300000, "coding_tokens": 14200000, "total_tokens": 17500000}
+          ]
+        }
+        """
+        let snapshotURL = digestDir.appendingPathComponent("agent-efficiency.json")
+        try Data(snapshotJSON.utf8).write(to: snapshotURL)
+
+        let summary = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: tempHome))
+        let workbench = try #require(summary.agentEfficiency)
+        #expect(workbench.coverageStatus == "healthy")
+        #expect(workbench.sampleSize == 124)
+        #expect(workbench.roles.count == 8)
+        #expect(workbench.roundSummary.r1Count == 36)
+        #expect(workbench.roundSummary.r2Count == 8)
+        #expect(workbench.roundSummary.r3PlusCount == 4)
+        #expect(workbench.dailySeries.count == 3)
+        #expect(workbench.dailySeries.last?.shortDayLabel == "11-19")
+
+        // Verify warehouse.db fallback when agent-efficiency.json is absent.
+        let fallbackHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-agent-eff-fb-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: fallbackHome) }
+        let whDir = fallbackHome.appendingPathComponent("Development/AIDash/aidata/L3_merge", isDirectory: true)
+        try FileManager.default.createDirectory(at: whDir, withIntermediateDirectories: true)
+        let whURL = whDir.appendingPathComponent("warehouse.db")
+        var whDB: OpaquePointer?
+        #expect(sqlite3_open(whURL.path, &whDB) == SQLITE_OK)
+        if let whDB {
+            let whSQL = """
+            CREATE TABLE fact_gtt_task_run (goal_uid TEXT, goal_id TEXT, task_id TEXT, role_name TEXT, round_no INTEGER, v5_verdict TEXT);
+            CREATE TABLE fact_gtt_event (goal_uid TEXT, task_id TEXT, evt_type TEXT, cst_day TEXT);
+            INSERT INTO fact_gtt_task_run VALUES ('m:g1', 'g1', 'T1', 'writer', 1, 'PASS');
+            INSERT INTO fact_gtt_task_run VALUES ('m:g1', 'g1', 'T1', 'reviewer', 1, 'PASS');
+            INSERT INTO fact_gtt_event VALUES ('m:g1', 'T1', 'DONE', '2026-11-19');
+            INSERT INTO fact_gtt_event VALUES ('m:g1', NULL, 'GOAL_DONE', '2026-11-19');
+            """
+            #expect(sqlite3_exec(whDB, whSQL, nil, nil, nil) == SQLITE_OK)
+            sqlite3_close(whDB)
+        }
+        let fbSummary = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: fallbackHome))
+        let fbWorkbench = try #require(fbSummary.agentEfficiency)
+        #expect(fbWorkbench.coverageStatus == "partial")
+        #expect(fbWorkbench.roles.count == 8)
+        #expect(fbWorkbench.dailySeries.first?.goalsCompleted == 1)
+
+        // Strict Redline: zero bare M1-M5 or S1-S12 metric codes in AgentEfficiencyChartsCardView source or xcstrings keys.
+        let cardSourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/Scenes/DashboardModularCardViews.swift")
+        let cardSource = try String(contentsOf: cardSourceURL, encoding: .utf8)
+        let viewStart = try #require(cardSource.range(of: "public struct AgentEfficiencyChartsCardView: View"))
+        let viewSnippet = String(cardSource[viewStart.lowerBound...])
+        let forbiddenRegex = try NSRegularExpression(pattern: #"\b(?:M[1-5]|S(?:[1-9]|1[0-2]))\b"#)
+        let matches = forbiddenRegex.matches(
+            in: viewSnippet,
+            range: NSRange(viewSnippet.startIndex..<viewSnippet.endIndex, in: viewSnippet)
+        )
+        #expect(matches.isEmpty, "Found forbidden bare M1-M5 or S1-S12 internal codes in AgentEfficiencyChartsCardView")
+
+        // Render 4 states x 2 appearances PNGs for Visual Traceback when env dir is configured (or temp dir).
+        let env = ProcessInfo.processInfo.environment
+        let configuredDir: String? = [
+            env["AIDASH_AGENT_EFF_SCREENSHOT_DIR"],
+            env["TEST_RUNNER_AIDASH_AGENT_EFF_SCREENSHOT_DIR"],
+        ].compactMap { val -> String? in
+            guard let val, !val.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return val
+        }.first
+        let ownsOut = configuredDir == nil
+        let outDir = configuredDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("aidash-agent-eff-shots-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if ownsOut { try? FileManager.default.removeItem(at: outDir) }
+        }
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+        var degradedSummary = summary
+        degradedSummary.agentEfficiency = AgentEfficiencyWorkbenchSnapshot(
+            schemaVersion: 1,
+            windowCST: "14d",
+            windowStart: "2026-11-06",
+            windowEnd: "2026-11-19",
+            sourceAsOf: "2026-11-19",
+            sampleSize: workbench.sampleSize,
+            coverageStatus: "error",
+            roles: workbench.roles,
+            roundSummary: workbench.roundSummary,
+            dailySeries: workbench.dailySeries
+        )
+
+        let states: [(String, LiveDashboardTelemetryReader.LiveEfficiencySummary?)] = [
+            ("populated", summary),
+            ("partial", fbSummary),
+            ("degraded", degradedSummary),
+            ("empty", nil),
+        ]
+        for (stateName, stateSummary) in states {
+            for scheme in [ColorScheme.light, ColorScheme.dark] {
+                let appearance = scheme == .dark ? "dark" : "light"
+                let card = AgentEfficiencyChartsCardView(summary: stateSummary)
+                    .frame(width: 1080)
+                    .padding(16)
+                    .background(Color(nsColor: .underPageBackgroundColor))
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.theme, Theme(isDark: scheme == .dark))
+                let bmp = try toolbarHeaderBitmap(for: card, scheme: scheme)
+                let png = try #require(bmp.representation(using: .png, properties: [:]))
+                #expect(!png.isEmpty)
+                #expect(bmp.pixelsWide >= 1000)
+                #expect(bmp.pixelsHigh >= 120)
+                try png.write(to: outDir.appendingPathComponent("agent-efficiency-\(stateName)-\(appearance).png"))
+            }
+        }
+    }
 }
 #endif

@@ -1767,6 +1767,7 @@ public struct AIDashMacWorkspaceView: View {
             ScheduledPulsePageView(store: store)
         case .agentEfficiency:
             KPISummaryCardView(metrics: store.effectiveKPIMetrics)
+            AgentEfficiencyChartsCardView(summary: store.liveEfficiencySummary)
             TrendChartCardView(
                 points: store.filteredTrendPoints,
                 selectedCategory: store.selectedChartCategory,
@@ -1830,7 +1831,10 @@ public struct AIDashMacWorkspaceView: View {
                     showInlineCrossFilterPills: false
                 )
             case .rankings:
-                RankingTableCardView(store: store)
+                VStack(alignment: .leading, spacing: 14) {
+                    AgentEfficiencyChartsCardView(summary: store.liveEfficiencySummary)
+                    RankingTableCardView(store: store)
+                }
             case .actionItems:
                 ActionItemsCardView(store: store, onToggleDone: onToggleDone)
             case .skills:
