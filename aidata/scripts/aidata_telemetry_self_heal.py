@@ -1014,7 +1014,7 @@ def sync_autopilot(*, server_url: str | None = None, workspace_id: str | None = 
         trigger_id = str(schedule.get("id") or schedule.get("trigger_id") or "")
         if not trigger_id:
             return {"ok": False, "error": "schedule_trigger_id_missing", "autopilot_id": autopilot_id}
-        current_cron = str(schedule.get("cron") or "")
+        current_cron = str(schedule.get("cron") or schedule.get("cron_expression") or "")
         current_tz = str(schedule.get("timezone") or schedule.get("tz") or "")
         enabled = schedule.get("enabled", True)
         if current_cron != AUTOPILOT_CRON or current_tz != tz_name or enabled is False:
@@ -1025,7 +1025,8 @@ def sync_autopilot(*, server_url: str | None = None, workspace_id: str | None = 
     readback = _parse_json_stdout(runner(["autopilot", "trigger-list", autopilot_id, "--output", "json"], **kwargs), "autopilot trigger-list readback")
     readback_triggers = readback.get("triggers", []) if isinstance(readback, Mapping) else readback if isinstance(readback, list) else []
     persisted = next((item for item in readback_triggers if isinstance(item, Mapping) and str(item.get("id") or item.get("trigger_id") or "") == trigger_id), None)
-    if not isinstance(persisted, Mapping) or str(persisted.get("cron") or "") != AUTOPILOT_CRON or str(persisted.get("timezone") or persisted.get("tz") or "") != tz_name or persisted.get("enabled", True) is False:
+    persisted_cron = str(persisted.get("cron") or persisted.get("cron_expression") or "") if isinstance(persisted, Mapping) else ""
+    if not isinstance(persisted, Mapping) or persisted_cron != AUTOPILOT_CRON or str(persisted.get("timezone") or persisted.get("tz") or "") != tz_name or persisted.get("enabled", True) is False:
         return {"ok": False, "error": "schedule_readback_mismatch", "autopilot_id": autopilot_id, "trigger_id": trigger_id}
     return {"ok": True, "loop_id": LOOP_ID, "autopilot_id": autopilot_id, "trigger_id": trigger_id, "action": action, "trigger_action": trigger_action, "cron": AUTOPILOT_CRON, "timezone": tz_name}
 
