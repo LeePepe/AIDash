@@ -1,8 +1,10 @@
 import ast
 import builtins
 import importlib.util
+import sqlite3
 from pathlib import Path
 
+import cleanio
 import config
 import pytest
 
@@ -124,3 +126,34 @@ def test_product_blob_is_not_activated():
         config.SCHEDULED_SOURCES,
     ):
         assert "product_blob" not in registry
+
+
+@pytest.mark.unit
+def test_write_clean_replaces_duplicate_primary_keys(tmp_path, monkeypatch):
+    monkeypatch.setattr(cleanio, "CLEAN_DIR", tmp_path)
+    monkeypatch.setattr(cleanio, "clean_path", lambda source: tmp_path / f"{source}.db")
+
+    ddl = "CREATE TABLE req (request_id TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    rows = [
+        {"request_id": "req-1", "value": "first"},
+        {"request_id": "req-1", "value": "latest"},
+    ]
+
+    assert cleanio.write_clean("fixture", "req", ddl, rows, ("request_id", "value")) == 2
+
+    conn = sqlite3.connect(tmp_path / "fixture.db")
+    stored = conn.execute("SELECT request_id, value FROM req").fetchall()
+    conn.close()
+    assert stored == [("req-1", "latest")]
+
+
+@pytest.mark.unit
+def test_unpriced_models_include_gateway_models():
+    assert {
+        "gpt-6.1-sol",
+        "gpt-6.1-terra",
+        "gpt-6-luna",
+        "gemini-4-argon",
+        "gemini-4-carbon",
+        "microsoft-decision-1",
+    } <= set(config.UNPRICED_MODELS)

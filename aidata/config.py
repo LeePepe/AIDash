@@ -168,7 +168,16 @@ WORK_TEAMS_DROP_DIR = HOME / ".aidash-state" / "work-teams-drop"
 # MISSING PRICE, never about missing usage. Keep this list narrow: a NEW
 # unpriced model SHOULD fail that gate loudly rather than quietly join the
 # exempt set. Remove a name here the moment a real price is known.
-UNPRICED_MODELS: tuple[str, ...] = ("gpt-5.6-terra", "gpt-5.6-luna")
+UNPRICED_MODELS: tuple[str, ...] = (
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+    "gpt-6-luna",
+    "gemini-4-argon",
+    "gemini-4-carbon",
+    "microsoft-decision-1",
+)
 
 # Workspaces the digest collects from (ADR-5 / EXT-2): an explicit allow-list of
 # (uuid, friendly_name); the friendly name is used verbatim in the digest's
