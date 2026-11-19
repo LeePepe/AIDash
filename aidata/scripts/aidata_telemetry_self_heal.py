@@ -8,6 +8,7 @@ consumer-side learning state; source vault data is never written.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import html
 import importlib.util
@@ -40,10 +41,10 @@ CST = timezone(timedelta(hours=8))
 CORE_SOURCES: tuple[str, ...] = ("raven", "copilot_cli", "claude_jsonl", "gtt_ledger", "gtt_receipt")
 SOURCE_PRIMARY_KEYS: dict[str, tuple[str, ...]] = {
     "raven": ("id", "request_id"),
-    "copilot_cli": ("event_id", "hit_uid", "call_uid"),
-    "claude_jsonl": ("turn_uuid", "uuid", "id"),
-    "gtt_ledger": ("event_uid", "event_id"),
-    "gtt_receipt": ("run_uid", "receipt_uid", "run_id"),
+    "copilot_cli": ("event_id",),
+    "claude_jsonl": ("uuid",),
+    "gtt_ledger": ("machine_id", "rel_path"),
+    "gtt_receipt": ("machine_id", "rel_path"),
 }
 CLEAN_TABLE_SPECS: dict[str, tuple[str, str | None]] = {
     "raven": ("req", "fact_request"),
@@ -54,10 +55,16 @@ CLEAN_TABLE_SPECS: dict[str, tuple[str, str | None]] = {
 }
 # Raw records at these grains are allowed to have no corresponding fact table.
 _SOURCE_GRAIN_FIELDS: dict[str, tuple[str, ...]] = {
-    "copilot_cli": ("skill", "skill_name", "skill_id"),
-    "gtt_ledger": ("event_uid", "event_id", "event_type", "evt_type"),
-    "gtt_receipt": ("run_uid", "receipt_uid", "run_id", "receipt_id"),
+    "copilot_cli": ("event_id", "skill"),
+    "claude_jsonl": ("uuid",),
+    "gtt_ledger": ("machine_id", "rel_path"),
+    "gtt_receipt": ("machine_id", "rel_path"),
 }
+_GTT_EVENT_RE = re.compile(r"^\s*-\s*\S+\s*\|\s*EVT=\S+\s*\|")
+_GTT_RECEIPT_FILE_RE = re.compile(r"^.+?-r\d+\.md$")
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+_PATH_RE = re.compile(r"(?:/Users/|/home/|[A-Za-z]:[\\/])")
+_CLI_RE = re.compile(r"(?:\b(?:python3?|pytest|bash|sh|curl|gh|multica|git)\s+|(?:^|\s)\./scripts/)")
 _SOURCE_LABELS = {
     "raven": "网关请求",
     "copilot_cli": "技能使用",
@@ -141,27 +148,23 @@ def _atomic_json_replace(path: Path, value: Mapping[str, Any]) -> None:
 
 @contextmanager
 def _sidecar_lock(path: Path, *, timeout: float = 5.0) -> Iterator[None]:
-    """Small cross-process lock for the existing producer/consumer sidecars."""
-    lock = path.with_name(path.name + ".lock")
+    """Use the persistent advisory lock shared by digest producers/consumers."""
+    lock = path.with_suffix(path.suffix + ".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + timeout
-    fd: int | None = None
-    while fd is None:
+    with lock.open("a+", encoding="utf-8") as handle:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"lock timeout for {path.name}")
+                time.sleep(0.02)
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.write(fd, str(os.getpid()).encode("ascii"))
-        except FileExistsError:
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"lock timeout for {path.name}")
-            time.sleep(0.02)
-    try:
-        yield
-    finally:
-        os.close(fd)
-        try:
-            lock.unlink()
-        except FileNotFoundError:
-            pass
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _fixture_paths(
@@ -237,6 +240,12 @@ def verify_dual_zone_markdown(markdown_text: str, *, max_human_lines: int = 15) 
             violations.append({"code": "human-zone-fenced-code", "line": number})
         if _INTERNAL_RE.search(stripped) or _UUID_RE.search(stripped) or _SHA_RE.search(stripped):
             violations.append({"code": "human-zone-private-token", "line": number})
+        if _PATH_RE.search(stripped):
+            violations.append({"code": "human-zone-path", "line": number})
+        if _CLI_RE.search(stripped):
+            violations.append({"code": "human-zone-cli-command", "line": number})
+        if not _CJK_RE.search(stripped):
+            violations.append({"code": "human-zone-not-chinese", "line": number})
         if stripped.startswith("|") and stripped.endswith("|"):
             violations.append({"code": "human-zone-table", "line": number})
     if len(visible) > max_human_lines:
@@ -269,18 +278,16 @@ def _sqlite_daily_cost_days(warehouse_db: Path) -> int | None:
             cols = {row[1] for row in conn.execute("PRAGMA table_info(fact_request)")}
             if "cst_day" not in cols:
                 return None
-            cost_expr = "1"
-            if "cost_usd" in cols:
-                cost_expr = "cost_usd IS NOT NULL"
-            elif "input_tokens" in cols or "output_tokens" in cols:
-                terms = [c for c in ("input_tokens", "output_tokens") if c in cols]
-                cost_expr = " OR ".join(f"{c} IS NOT NULL" for c in terms)
-            return int(conn.execute(f"SELECT COUNT(DISTINCT cst_day) FROM fact_request WHERE cst_day IS NOT NULL AND ({cost_expr})").fetchone()[0])
+            # Match trend/daily-cost.sql: every non-null CST day counts, even
+            # when pricing is unknown or the stored cost is zero.
+            return int(conn.execute("SELECT COUNT(DISTINCT cst_day) FROM fact_request WHERE cst_day IS NOT NULL").fetchone()[0])
     except (OSError, sqlite3.Error):
         return None
 
 
 def _record_pk(record: Mapping[str, Any], fields: Sequence[str]) -> tuple[str, str] | None:
+    if len(fields) == 2 and all(str(record.get(field) or "").strip() for field in fields):
+        return "composite", ":".join(str(record[field]).strip() for field in fields)
     for field in fields:
         value = record.get(field)
         if value is not None and str(value).strip():
@@ -291,21 +298,39 @@ def _record_pk(record: Mapping[str, Any], fields: Sequence[str]) -> tuple[str, s
 def _record_relevant(source: str, record: Mapping[str, Any], pk: tuple[str, str] | None) -> bool:
     if pk is None:
         return False
-    fields = _SOURCE_GRAIN_FIELDS.get(source)
-    if not fields:
-        return True
     if source == "copilot_cli":
-        return any(str(record.get(field) or "").strip() for field in fields)
-    return any(str(record.get(field) or "").strip() for field in fields)
+        if record.get("kind") in {"reference_hit", "script_call"}:
+            return False
+        return bool(record.get("event_id") and record.get("skill") and _valid_event_timestamp(record.get("timestamp")))
+    if source == "claude_jsonl":
+        return record.get("_kind") not in {"reference_hit", "script_call"} and bool(record.get("uuid"))
+    if source == "gtt_ledger":
+        return record.get("record_type") == "ledger" and bool(_GTT_EVENT_RE.search(str(record.get("content") or "")))
+    if source == "gtt_receipt":
+        return record.get("record_type") == "receipt" and bool(_GTT_RECEIPT_FILE_RE.match(Path(str(record.get("rel_path") or "")).name))
+    return True
+
+
+def _valid_event_timestamp(value: Any) -> bool:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return math.isfinite(float(value))
+    if isinstance(value, str):
+        try:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))  # noqa: FURB162 - Python 3.9 accepts neither trailing Z nor all source forms
+            return True
+        except ValueError:
+            return False
+    return False
 
 
 def _scan_raw_shards(raw_source_dir: Path, *, pk_fields: Sequence[str]) -> dict[str, Any]:
-    result: dict[str, Any] = {"shard_count": 0, "record_count": 0, "relevant_record_count": 0, "unique_pk_count": 0, "duplicate_pk_count": 0, "latest_shard_date": None, "latest_mtime": None, "max_numeric_ts": None, "coverage_complete": True, "malformed_lines": 0}
+    result: dict[str, Any] = {"shard_count": 0, "record_count": 0, "relevant_record_count": 0, "unique_pk_count": 0, "duplicate_pk_count": 0, "latest_shard_date": None, "latest_event_date": None, "latest_mtime": None, "max_numeric_ts": None, "coverage_complete": True, "malformed_lines": 0}
     if not raw_source_dir.is_dir():
         return result
     shards = sorted(p for p in raw_source_dir.glob("*.jsonl") if p.is_file())
     result["shard_count"] = len(shards)
     seen: set[tuple[str, str]] = set()
+    duplicate_keys: set[tuple[str, str]] = set()
     first_shard: dict[tuple[str, str], str] = {}
     for shard in shards:
         try:
@@ -330,6 +355,14 @@ def _scan_raw_shards(raw_source_dir: Path, *, pk_fields: Sequence[str]) -> dict[
                     ts = obj.get("timestamp", obj.get("ts"))
                     if isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(float(ts)):
                         result["max_numeric_ts"] = max(int(ts), int(result["max_numeric_ts"] or ts))
+                        try:
+                            seconds = float(ts) / 1000 if abs(float(ts)) > 10_000_000_000 else float(ts)
+                            event_day = datetime.fromtimestamp(seconds, tz=CST).date().isoformat()
+                            result["latest_event_date"] = max(str(result["latest_event_date"] or "0000-00-00"), event_day)
+                        except (OverflowError, OSError, ValueError):
+                            pass
+                    elif isinstance(ts, str):
+                        result["latest_event_date"] = max(str(result["latest_event_date"] or "0000-00-00"), ts[:10])
                     pk = _record_pk(obj, pk_fields)
                     if not _record_relevant(raw_source_dir.name, obj, pk):
                         continue
@@ -337,11 +370,12 @@ def _scan_raw_shards(raw_source_dir: Path, *, pk_fields: Sequence[str]) -> dict[
                     if pk is None:
                         continue
                     if pk in seen and first_shard.get(pk) != shard.name:
-                        result["duplicate_pk_count"] += 1
+                        duplicate_keys.add(pk)
                     seen.add(pk)
                     first_shard.setdefault(pk, shard.name)
         except (OSError, UnicodeError):
             result["coverage_complete"] = False
+    result["duplicate_pk_count"] = len(duplicate_keys)
     result["unique_pk_count"] = len(seen)
     if result["latest_mtime"] == 0:
         result["latest_mtime"] = None
@@ -374,32 +408,66 @@ def _freshness_stale(report: Mapping[str, Any], now: datetime, hours: float = 48
     return bool(mtime and now.timestamp() - float(mtime) > hours * 3600)
 
 
+def _source_watermark_status(source: str, value: Any, report: Mapping[str, Any]) -> tuple[bool, bool, str | None]:
+    """Return (present, regressed, reason) without treating hashes/offsets as epochs."""
+    if source == "raven":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False, False, "numeric_epoch_ms_required"
+        regressed = report.get("max_numeric_ts") is not None and float(value) < float(report["max_numeric_ts"])
+        return True, regressed, "numeric_epoch_ms"
+    if source == "copilot_cli":
+        if not isinstance(value, Mapping) or not isinstance(value.get("seen"), Mapping) or not value.get("seen"):
+            return False, False, "schema_version_seen_required"
+        dates = [str(day) for day in value["seen"].values() if isinstance(day, str)]
+        latest_raw = str(report.get("latest_event_date") or "")
+        regressed = bool(latest_raw and dates and max(dates) < latest_raw)
+        return True, regressed, "seen_dates"
+    if source == "claude_jsonl":
+        if not isinstance(value, Mapping) or not value or not all(isinstance(offset, int) and not isinstance(offset, bool) and offset >= 0 for offset in value.values()):
+            return False, False, "nonnegative_file_offsets_required"
+        return True, False, "file_offsets_regression_unsupported"
+    if source in {"gtt_ledger", "gtt_receipt"}:
+        if not isinstance(value, Mapping) or not value or not all(isinstance(digest, str) and bool(digest) for digest in value.values()):
+            return False, False, "digest_map_required"
+        return True, False, "content_digest_regression_unsupported"
+    return value is not None, False, None
+
+
 def watermark_and_shard_audit(aidata_home: Path, *, now: datetime | None = None, core_sources: Sequence[str] = CORE_SOURCES, staleness_hours: float = 48.0) -> dict[str, Any]:
     now = now or datetime.now(CST)
     state_path = aidata_home / "state.json"
-    try:
-        loaded = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
-        state = loaded if isinstance(loaded, dict) else {}
-    except (OSError, ValueError):
-        state = {}
+    state_error: str | None = None
+    if not state_path.is_file():
+        state: dict[str, Any] = {}
+    else:
+        try:
+            loaded = json.loads(state_path.read_text(encoding="utf-8"))
+            state = loaded if isinstance(loaded, dict) else {}
+            if not isinstance(loaded, dict):
+                state_error = "state_not_object"
+        except (OSError, ValueError, UnicodeError):
+            state = {}
+            state_error = "state_corrupt_or_unreadable"
     reports: dict[str, Any] = {}
     anomalies: list[dict[str, Any]] = []
+    if state_error:
+        anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "corrupt_state_json", "severity": "medium", "healable": False, "detail": "水位线状态文件损坏或不可读"})
     for source in core_sources:
         report = _scan_raw_shards(aidata_home / "L1_collect" / "raw" / source, pk_fields=SOURCE_PRIMARY_KEYS.get(source, ("id",)))
         raw_count = int(report["relevant_record_count"])
-        wm = _watermark_value(state.get(source))
-        missing = raw_count > 0 and wm is None
-        regressed = wm is not None and report["max_numeric_ts"] is not None and float(wm) < float(report["max_numeric_ts"])
+        present, regressed, watermark_kind = _source_watermark_status(source, state.get(source), report)
         stale = raw_count > 0 and _freshness_stale(report, now, staleness_hours)
-        reports[source] = {**report, "watermark_present": wm is not None, "missing_watermark": missing, "regressed_watermark": regressed, "stale_48h": stale}
+        reports[source] = {**report, "watermark_present": present, "watermark_kind": watermark_kind, "regressed_watermark": regressed, "stale_48h": stale}
         if report["shard_count"] == 0:
             anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "source_missing_or_empty", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}没有可核验的原始分片"})
         elif report["record_count"] == 0:
             anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "source_missing_or_empty", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}最新分片为空，覆盖状态未知"})
         if not report["coverage_complete"] or report["malformed_lines"]:
             anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "raw_coverage_incomplete", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}原始分片存在不可读记录"})
-        if missing or regressed:
-            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "watermark_regression_or_missing", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}水位线缺失或落后"})
+        if raw_count > 0 and not present:
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "watermark_regression_or_missing", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}水位线结构缺失或不符合来源契约"})
+        if regressed:
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "watermark_regression_or_missing", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}水位线落后于可比较的原始证据"})
         if report["duplicate_pk_count"]:
             anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "cross_shard_duplicate_pk", "source": source, "severity": "low", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}跨分片存在重复主键，原始层保持追加只读"})
         if stale:
@@ -412,26 +480,30 @@ def zero_table_and_warehouse_audit(aidata_home: Path, *, raw_audit: Mapping[str,
     warehouse = aidata_home / "L3_merge" / "warehouse.db"
     tables: dict[str, Any] = {}
     anomalies: list[dict[str, Any]] = []
+    direct_l2_grain = {"raven", "claude_jsonl", "gtt_receipt"}
+    direct_l3_grain = {"raven", "claude_jsonl", "gtt_receipt"}
     for source in core_sources:
         clean_table, fact_table = CLEAN_TABLE_SPECS[source]
         source_report = raw_sources.get(source, {})
         relevant = int(source_report.get("relevant_record_count") or 0)
+        unique_count = int(source_report.get("unique_pk_count") or relevant)
         clean_rows = _sqlite_table_count(aidata_home / "L2_normalize" / "clean" / f"{source}.db", clean_table)
         fact_rows = _sqlite_table_count(warehouse, fact_table) if fact_table else None
         clean_zero = relevant > 0 and (clean_rows is None or clean_rows == 0)
-        # Do not compare unlike grains.  Only the direct fact mappings are checked.
-        fact_zero = relevant > 0 and fact_table is not None and (fact_rows is None or fact_rows == 0) and not clean_zero
-        tables[source] = {"raw_relevant_records": relevant, "clean_rows": clean_rows, "fact_rows": fact_rows, "clean_zero_or_missing": clean_zero, "fact_zero_or_missing": fact_zero}
-        if clean_zero:
-            anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "l2_clean_zero_table", "source": source, "severity": "high", "healable": True, "detail": f"{_SOURCE_LABELS.get(source, source)}原始记录非空但清洗表为空或缺失"})
-        if fact_zero:
-            anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "l3_warehouse_zero_or_lagging_table", "source": source, "severity": "high", "healable": True, "detail": f"{_SOURCE_LABELS.get(source, source)}对应事实表为空或缺失"})
+        clean_lag = source in direct_l2_grain and clean_rows is not None and clean_rows < unique_count
+        fact_zero = relevant > 0 and fact_table is not None and (fact_rows is None or fact_rows == 0)
+        fact_lag = source in direct_l3_grain and clean_rows is not None and fact_rows is not None and fact_rows < clean_rows
+        tables[source] = {"raw_relevant_records": relevant, "raw_unique_identities": unique_count, "clean_rows": clean_rows, "fact_rows": fact_rows, "clean_zero_or_missing": clean_zero, "clean_lagging": clean_lag, "fact_zero_or_missing": fact_zero, "fact_lagging": fact_lag}
+        if clean_zero or clean_lag:
+            anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "l2_clean_zero_table" if clean_zero else "l2_clean_lagging_table", "source": source, "severity": "high", "healable": True, "detail": f"{_SOURCE_LABELS.get(source, source)}原始身份数量超过清洗层可核验数量"})
+        if fact_zero or fact_lag:
+            anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "l3_warehouse_zero_or_lagging_table", "source": source, "severity": "high", "healable": True, "detail": f"{_SOURCE_LABELS.get(source, source)}对应事实表为空或落后于同粒度清洗表"})
     raven_relevant = int((tables.get("raven") or {}).get("raw_relevant_records") or 0)
     daily_cost_days = _sqlite_daily_cost_days(warehouse)
     if raven_relevant > 0 and daily_cost_days is None:
-        anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "daily_cost_schema_unreadable", "source": "raven", "severity": "high", "healable": True, "detail": "网关请求原始记录非空但每日成本字段或事实表不可核验"})
+        anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "daily_cost_schema_unreadable", "source": "raven", "severity": "high", "healable": True, "detail": "网关请求原始记录非空但每日成本事实表不可核验"})
     elif raven_relevant > 0 and daily_cost_days == 0:
-        anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "daily_cost_zero_days", "source": "raven", "severity": "high", "healable": True, "detail": "网关请求原始记录非空但每日成本有效天数为零"})
+        anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "daily_cost_zero_days", "source": "raven", "severity": "high", "healable": True, "detail": "网关请求原始记录非空但每日成本查询没有有效日期"})
     return {"ok": not anomalies, "tables": tables, "daily_cost_days": daily_cost_days, "anomalies": anomalies}
 
 
@@ -443,6 +515,30 @@ def _load_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         return (value, None) if isinstance(value, dict) else (None, "not_object")
     except (OSError, ValueError, UnicodeError):
         return None, "corrupt"
+
+
+def _topic_identifiers(topic_key: str, entry: Mapping[str, Any]) -> set[str]:
+    values = {topic_key, f"learning-topic://{topic_key}", f"knowledge://{topic_key}"}
+    aliases = entry.get("aliases", [])
+    if isinstance(aliases, str):
+        aliases = [aliases]
+    if isinstance(aliases, Sequence):
+        for alias in aliases:
+            alias_text = str(alias).strip()
+            if alias_text:
+                values.update({alias_text, f"learning-topic://{alias_text}", f"knowledge://{alias_text}"})
+    return {value for value in values if value}
+
+
+def _proposal_matches(proposal_id: str, proposal: Mapping[str, Any], identifiers: set[str], topic_key: str) -> bool:
+    candidates = {proposal_id}
+    for field in ("topic_key", "ref", "origin_ref"):
+        value = proposal.get(field)
+        if value:
+            candidates.add(str(value))
+    normalized = {item.replace("://", "-").replace("/", "-") for item in candidates}
+    expected = identifiers | {item.replace("://", "-").replace("/", "-") for item in identifiers}
+    return bool(candidates & expected or normalized & expected or proposal_id.endswith(topic_key))
 
 
 def cross_file_state_audit(aidata_home: Path, *, vault_dir: Path | None = None) -> dict[str, Any]:
@@ -491,61 +587,75 @@ def cross_file_state_audit(aidata_home: Path, *, vault_dir: Path | None = None) 
     drifted: list[dict[str, Any]] = []
     for topic_key, entry in sorted(ledger_topics.items()):
         ledger_state = str(entry.get("learning_state") or "").lower()
-        # approved is deliberately not an authorization state here.
         if ledger_state not in {"learned", "dismissed"}:
             continue
         ledger_revision = int(entry.get("revision") or 1)
         state_entry = state_topics.get(topic_key) if isinstance(state_topics, dict) else None
-        state_drift = state_path.is_file() and (not isinstance(state_entry, dict) or str(state_entry.get("learning_state") or "").lower() != ledger_state or int(state_entry.get("revision") or 0) < ledger_revision)
-        proposal_ids: list[str] = []
-        proposal_drift = False
-        for proposal_id, proposal in proposals.items():
-            proposal_key = str(proposal.get("topic_key") or "")
-            if not proposal_key and proposal_id.startswith("learning-topic-"):
-                proposal_key = proposal_id.removeprefix("learning-topic-")
-            if proposal_key != topic_key:
-                continue
-            proposal_ids.append(proposal_id)
-            if str(proposal.get("learning_state") or "").lower() != ledger_state or str(proposal.get("status") or "pending").lower() in {"pending", "proposed", "open"} or int(proposal.get("revision") or 0) < ledger_revision:
-                proposal_drift = True
+        state_drift = state_error is None and (not state_path.is_file() or not isinstance(state_entry, dict) or str(state_entry.get("learning_state") or "").lower() != ledger_state or int(state_entry.get("revision") or 0) < ledger_revision or state_entry.get("exploration_authorized") is not False)
+        identifiers = _topic_identifiers(topic_key, entry)
+        matched: list[tuple[str, dict[str, Any]]] = [(proposal_id, proposal) for proposal_id, proposal in proposals.items() if _proposal_matches(proposal_id, proposal, identifiers, topic_key)]
+        proposal_drift = any(str(proposal.get("learning_state") or "").lower() != ledger_state or str(proposal.get("status") or "").lower() != "dismissed" or proposal.get("exploration_authorized") is not False or (ledger_state == "learned" and proposal.get("outcome") != "reconciled_from_ledger") or int(proposal.get("revision") or 0) < ledger_revision for _, proposal in matched)
         if state_drift or proposal_drift:
-            drifted.append({"topic_key": topic_key, "ledger_learning_state": ledger_state, "ledger_revision": ledger_revision, "expected_status": "dismissed" if ledger_state == "dismissed" else "approved", "state_file_drift": state_drift, "proposal_drift": proposal_drift, "proposal_ids": proposal_ids})
-            anomalies.append({"dimension": "cross_file_state_audit", "kind": "learning_topic_state_drift", "severity": "medium", "healable": True, "detail": "知识库主题状态与消费端状态或提案版本不一致"})
+            drifted.append({"topic_key": topic_key, "ledger_learning_state": ledger_state, "ledger_revision": ledger_revision, "aliases": sorted(identifiers), "state_revision": int(state_entry.get("revision") or 0) if isinstance(state_entry, dict) else 0, "proposal_revisions": [int(item.get("revision") or 0) for _, item in matched], "proposal_ids": [proposal_id for proposal_id, _ in matched], "state_file_drift": state_drift, "proposal_drift": proposal_drift})
+            anomalies.append({"dimension": "cross_file_state_audit", "kind": "learning_topic_state_drift", "severity": "medium", "healable": True, "detail": "知识库主题状态与消费端状态或提案终态不一致"})
     return {"ok": not anomalies, "ledger_present": True, "drifted_topics": drifted, "anomalies": anomalies}
+
+
+def _read_nonempty_contract_files(root: Path, suffixes: set[str]) -> tuple[bool, bool, str]:
+    """Return (has_file, readable, text) for concrete source evidence."""
+    if not root.is_dir():
+        return False, False, ""
+    texts: list[str] = []
+    try:
+        files = [item for item in root.rglob("*") if item.is_file() and item.suffix.lower() in suffixes]
+    except OSError:
+        return False, False, ""
+    readable = True
+    for item in files:
+        try:
+            text = item.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            readable = False
+            continue
+        if text.strip():
+            texts.append(text)
+    return bool(texts), readable, "\n".join(texts)
 
 
 def shared_telemetry_coverage_audit(aidata_home: Path, *, shared_telemetry_dir: Path | None = None) -> dict[str, Any]:
     shared = shared_telemetry_dir or _default_shared_telemetry_dir()
     repo_root = aidata_home.parent
     coordinator = repo_root / "Apps" / "AIDashApp" / "Sources" / "Telemetry" / "AIDashTelemetryCoordinator.swift"
+    preferences = repo_root / "Apps" / "AIDashApp" / "Sources" / "Telemetry" / "AIDashTelemetryPreferences.swift"
+    factory = repo_root / "Apps" / "AIDashApp" / "Sources" / "Telemetry" / "AIDashTelemetryFactory.swift"
     product_blob = aidata_home / "adapters" / "product_blob.py"
     anomalies: list[dict[str, Any]] = []
-    coordinator_text = ""
-    try:
-        coordinator_text = coordinator.read_text(encoding="utf-8") if coordinator.is_file() else ""
-    except (OSError, UnicodeError):
-        pass
-    coordinator_ok = all(token in coordinator_text for token in ("briefing_viewed", "aidash.performance.ready_scene", "establishedEnabled"))
+    def read(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8") if path.is_file() else ""
+        except (OSError, UnicodeError):
+            return ""
+    coordinator_text, preference_text, factory_text = read(coordinator), read(preferences), read(factory)
+    coordinator_ok = all(token in coordinator_text for token in ("enum AIDashTelemetryAction", "briefing_viewed", "establishedEnabled")) and "consent" in preference_text and "establishedEnabled" in preference_text and "AzureBlobPrivacyPolicy" in factory_text
     if not coordinator_ok:
-        anomalies.append({"dimension": "shared_telemetry_coverage_audit", "kind": "aidash_telemetry_contract_gap", "severity": "high", "healable": False, "detail": "AIDash遥测协调器缺少事件与同意守卫证据"})
-    blob_text = ""
-    try:
-        blob_text = product_blob.read_text(encoding="utf-8") if product_blob.is_file() else ""
-    except (OSError, UnicodeError):
-        pass
-    blob_ok = "AZURE_CORE_COLLECT_TELEMETRY" in blob_text and "_preflight" in blob_text
+        anomalies.append({"dimension": "shared_telemetry_coverage_audit", "kind": "aidash_telemetry_contract_gap", "severity": "high", "healable": False, "detail": "AIDash遥测协调器缺少类型白名单、同意状态或隐私策略证据"})
+    blob_text = read(product_blob)
+    blob_ok = "AZURE_CORE_COLLECT_TELEMETRY" in blob_text and "_preflight" in blob_text and "privacy" in blob_text.lower()
     if not blob_ok:
         anomalies.append({"dimension": "shared_telemetry_coverage_audit", "kind": "product_blob_guard_missing", "severity": "high", "healable": False, "detail": "采集适配器缺少离线预检或安全环境守卫"})
-    sdk_checks = {}
-    for key, relative in (("swift_sdk", "sdks/swift"), ("web_sdk", "sdks/web"), ("python_sdk", "sdks/python"), ("tech_context", "docs/architecture/tech-context.md")):
-        target = shared / relative
-        try:
-            exists = target.exists()
-        except OSError:
-            exists = False
-        sdk_checks[key] = exists
-        if not exists:
-            anomalies.append({"dimension": "shared_telemetry_coverage_audit", "kind": f"shared_telemetry_missing_{key}", "severity": "medium", "healable": False, "detail": "共享遥测契约覆盖不完整"})
+    sdk_checks: dict[str, bool] = {}
+    for key, relative, suffixes in (("swift_sdk", "sdks/swift", {".swift", ".md"}), ("web_sdk", "sdks/web", {".ts", ".tsx", ".js", ".md"}), ("python_sdk", "sdks/python", {".py", ".md"})):
+        has_file, readable, text = _read_nonempty_contract_files(shared / relative, suffixes)
+        ok = has_file and readable and bool(re.search(r"telemetr|event|consent|privacy", text, re.IGNORECASE))
+        sdk_checks[key] = ok
+        if not ok:
+            anomalies.append({"dimension": "shared_telemetry_coverage_audit", "kind": f"shared_telemetry_missing_{key}", "severity": "medium", "healable": False, "detail": "共享遥测SDK缺少可读的非空契约证据"})
+    context_path = shared / "docs" / "architecture" / "tech-context.md"
+    context_text = read(context_path)
+    context_ok = bool(context_text.strip()) and bool(re.search(r"telemetr|privacy|consent|contract", context_text, re.IGNORECASE))
+    sdk_checks["tech_context"] = context_ok
+    if not context_ok:
+        anomalies.append({"dimension": "shared_telemetry_coverage_audit", "kind": "shared_telemetry_missing_tech_context", "severity": "medium", "healable": False, "detail": "共享遥测架构契约缺少可读内容"})
     return {"ok": not anomalies, "checks": {"aidash_telemetry_coordinator": coordinator_ok, "product_blob_adapter": blob_ok, "shared_telemetry_repo": shared.is_dir(), "sdks": sdk_checks}, "anomalies": anomalies}
 
 
@@ -557,56 +667,56 @@ def _default_reconcile_learning_drift(aidata_home: Path, *, vault_dir: Path, dri
     now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")  # noqa: UP017 - Python 3.9 gate
     actions: list[dict[str, Any]] = []
     try:
-        with _sidecar_lock(state_path):
-            # Re-read while holding the same consumer lock used for writes.
+        # This is deliberately the proposals lock, matching proposals.py and
+        # digest_vault.py, held across both downstream files.
+        with _sidecar_lock(proposals_path):
             state, error = _load_json_object(state_path)
-            if error or state is None:
+            if error:
                 return [{"action": "reconcile_learning_topic_drift", "ok": False, "error": "corrupt_learning_state"}]
+            if state is None:
+                state = {"schema_version": 1, "updated_at": now, "topics": {}, "consumed_events": {}}
             topics = state.get("topics")
             if not isinstance(topics, dict):
                 return [{"action": "reconcile_learning_topic_drift", "ok": False, "error": "invalid_learning_state_topics"}]
-            changed = False
-            for drift in drifted_topics:
-                key = str(drift.get("topic_key") or "")
-                old = topics.get(key) if isinstance(topics.get(key), dict) else {}
-                revision = max(int(drift.get("ledger_revision") or 1), int(old.get("revision") or 0))
-                desired = dict(old)
-                desired.update({"topic_key": key, "learning_state": str(drift.get("ledger_learning_state") or "learned"), "revision": revision, "updated_at": now})
-                if desired != old:
-                    topics[key] = desired
-                    changed = True
-            if changed:
-                state["updated_at"] = now
-                _atomic_json_replace(state_path, state)
-                actions.append({"action": "reconcile_learning_state", "count": sum(1 for _ in drifted_topics), "ok": True})
-    except (OSError, TimeoutError):
-        return [{"action": "reconcile_learning_topic_drift", "ok": False, "error": "learning_state_lock_failed"}]
-    if not proposals_path.is_file():
-        return actions
-    try:
-        with _sidecar_lock(proposals_path):
             latest: dict[str, dict[str, Any]] = {}
-            lines = proposals_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            for line in lines:
-                try:
-                    item = json.loads(line) if line.strip() else None
-                except ValueError:
-                    continue
-                if isinstance(item, dict) and item.get("id"):
-                    latest[str(item["id"])] = item
+            if proposals_path.is_file():
+                for line in proposals_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                    try:
+                        item = json.loads(line) if line.strip() else None
+                    except ValueError:
+                        continue
+                    if isinstance(item, dict) and item.get("id"):
+                        latest[str(item["id"])] = item
+            changed_state = False
             additions: list[str] = []
             for drift in drifted_topics:
+                key = str(drift.get("topic_key") or "")
+                old_state = topics.get(key) if isinstance(topics.get(key), dict) else {}
+                state_revision = int(old_state.get("revision") or 0)
+                matched = [item for proposal_id, item in latest.items() if proposal_id in {str(value) for value in drift.get("proposal_ids") or []}]
+                proposal_revision = max((int(item.get("revision") or 0) for item in matched), default=0)
+                new_revision = max(int(drift.get("ledger_revision") or 1), state_revision, proposal_revision) + 1
                 target = str(drift.get("ledger_learning_state") or "learned")
-                status = str(drift.get("expected_status") or ("dismissed" if target == "dismissed" else "approved"))
-                revision = int(drift.get("ledger_revision") or 1)
-                for proposal_id in drift.get("proposal_ids") or []:
-                    old = latest.get(str(proposal_id))
-                    if not isinstance(old, dict):
+                desired_state = dict(old_state)
+                desired_state.update({"topic_key": key, "learning_state": target, "revision": new_revision, "exploration_authorized": False, "updated_at": now})
+                if target == "learned":
+                    desired_state["outcome"] = "reconciled_from_ledger"
+                if desired_state != old_state or not state_path.is_file():
+                    topics[key] = desired_state
+                    changed_state = True
+                for proposal_id, old in latest.items():
+                    if proposal_id not in {str(value) for value in drift.get("proposal_ids") or []}:
                         continue
                     new = dict(old)
-                    new.update({"learning_state": target, "status": status, "revision": max(revision, int(old.get("revision") or 0)), "ts": now})
+                    new.update({"learning_state": target, "status": "dismissed", "exploration_authorized": False, "revision": new_revision, "ts": now})
+                    if target == "learned":
+                        new["outcome"] = "reconciled_from_ledger"
                     if new != old:
                         additions.append(json.dumps(new, ensure_ascii=False, separators=(",", ":")))
+            if changed_state:
+                state["updated_at"] = now
+                _atomic_json_replace(state_path, state)
+                actions.append({"action": "reconcile_learning_state", "count": len(drifted_topics), "ok": True})
             if additions:
                 with proposals_path.open("a", encoding="utf-8") as stream:
                     stream.write("\n".join(additions) + "\n")
@@ -614,7 +724,7 @@ def _default_reconcile_learning_drift(aidata_home: Path, *, vault_dir: Path, dri
                     os.fsync(stream.fileno())
                 actions.append({"action": "reconcile_learning_proposals", "count": len(additions), "ok": True})
     except (OSError, TimeoutError):
-        actions.append({"action": "reconcile_learning_proposals", "ok": False, "error": "proposals_lock_failed"})
+        return [{"action": "reconcile_learning_topic_drift", "ok": False, "error": "proposals_lock_failed"}]
     return actions
 
 
@@ -624,12 +734,16 @@ def _default_normalize_and_merge_healer(aidata_home: Path, sources_to_normalize:
     if not cli.is_file():
         return [{"action": "normalize_source", "ok": False, "error": "cli_missing"}]
     for source in dict.fromkeys(sources_to_normalize):
+        env = dict(os.environ)
+        env["AIDATA_HOME"] = str(aidata_home)
+        env["PYTHONPATH"] = str(aidata_home)
         try:
-            proc = subprocess.run([sys.executable, str(cli), "normalize", "--source", source], cwd=str(aidata_home), capture_output=True, text=True, timeout=timeout_sec, check=False)
+            proc = subprocess.run([sys.executable, str(cli), "normalize", "--source", source], cwd=str(aidata_home), env=env, capture_output=True, text=True, timeout=timeout_sec, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
             actions.append({"action": "normalize_source", "source": source, "ok": False, "error": type(exc).__name__})
             continue
-        if proc.returncode != 0:
+        failed_output = bool(re.search(r"\bERROR\s*:", proc.stderr or ""))
+        if proc.returncode != 0 or failed_output:
             actions.append({"action": "normalize_source", "source": source, "ok": False, "error": "command_failed"})
         else:
             actions.append({"action": "normalize_source", "source": source, "ok": True})
@@ -692,7 +806,10 @@ def inspect_and_self_heal(*, aidata_home: Path | None = None, shared_telemetry_d
             fn = normalize_merge_healer or _default_normalize_and_merge_healer
             attempted.extend(fn(resolved_aidata, sources, need_merge=need_merge))
             healed.extend(item for item in attempted if item.get("ok") is True)
-        healed.extend(_default_reconcile_learning_drift(resolved_aidata, vault_dir=resolved_vault, drifted_topics=audits["cross_file_state_audit"].get("drifted_topics", []))) if audits["cross_file_state_audit"].get("drifted_topics") else None
+        if audits["cross_file_state_audit"].get("drifted_topics"):
+            reconcile_actions = _default_reconcile_learning_drift(resolved_aidata, vault_dir=resolved_vault, drifted_topics=audits["cross_file_state_audit"]["drifted_topics"])
+            attempted.extend(reconcile_actions)
+            healed.extend(item for item in reconcile_actions if item.get("ok") is True)
         # Always re-audit after an attempted action.  A failed command cannot claim healing.
         if attempted or audits["cross_file_state_audit"].get("drifted_topics"):
             audits["watermark_and_shard_audit"] = watermark_and_shard_audit(resolved_aidata, now=now, core_sources=core_sources)
@@ -714,10 +831,11 @@ def inspect_and_self_heal(*, aidata_home: Path | None = None, shared_telemetry_d
     if not items and healed:
         items = [{"what": "复核本次数仓与遥测自愈结果", "why": "本地可修复漂移已恢复一致"}]
     payload = {"loop_id": LOOP_ID, "watermark": watermark, "delta_count": len(residuals), "severity": severity, "healed_count": len(healed), "audits": _audit_payload(audits)}
-    markdown = render_dual_zone_markdown(tldr=summary, items=items, cursor=LOOP_ID, ai_payload=payload)
+    cursor = f"{LOOP_ID}-{target_date.isoformat()}"
+    markdown = render_dual_zone_markdown(tldr=summary, items=items, cursor=cursor, ai_payload=payload)
     verification = verify_dual_zone_markdown(markdown)
     status = "RESIDUAL_ANOMALIES_FOUND" if has_delta else ("HEALED_LOCALLY_NO_ALERT" if healed else "SKIPPED_NO_DELTA")
-    return {"ok": True, "loop_id": LOOP_ID, "date": target_date.isoformat(), "status": status, "token_cost": 0, "has_delta": has_delta, "delta_count": len(residuals), "severity": severity, "watermark": watermark, "cursor": LOOP_ID, "title": ISSUE_TITLE_TEMPLATE.format(date=target_date.isoformat()), "summary": summary, "items": items, "dual_zone_markdown": markdown, "dual_zone_verification": verification, "healed_items": healed, "healed_actions": healed, "residual_unhealable_items": residuals, "residual_anomalies": residuals, "audits": audits, "raw": {"daily_cost_days": audits["zero_table_and_warehouse_audit"].get("daily_cost_days"), "fixture_mode": fixture_mode}}
+    return {"ok": True, "loop_id": LOOP_ID, "date": target_date.isoformat(), "status": status, "token_cost": 0, "has_delta": has_delta, "delta_count": len(residuals), "severity": severity, "watermark": watermark, "cursor": cursor, "title": ISSUE_TITLE_TEMPLATE.format(date=target_date.isoformat()), "summary": summary, "items": items, "dual_zone_markdown": markdown, "dual_zone_verification": verification, "healed_items": healed, "healed_actions": healed, "residual_unhealable_items": residuals, "residual_anomalies": residuals, "audits": audits, "raw": {"daily_cost_days": audits["zero_table_and_warehouse_audit"].get("daily_cost_days"), "fixture_mode": fixture_mode}}
 
 
 def _extract_prob(value: Any, field: str) -> float | None:
@@ -755,7 +873,7 @@ def _default_jev_decide(*, state: Mapping[str, Any], questions: Mapping[str, Any
     token = os.environ.get("FALCON_API_KEY") or os.environ.get("JEV_API_KEY")
     if not token:
         return None
-    request = urllib.request.Request("http://127.0.0.1:19823/v1/systemone", data=json.dumps({"model": "microsoft-decision-1", "state": dict(state), "questions": dict(questions)}).encode(), headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", "X-Falcon-Agent": agent_role, "X-Falcon-Run-ID": goal_id}, method="POST")
+    request = urllib.request.Request("http://127.0.0.1:19823/v1/systemone", data=json.dumps({"model": "microsoft-decision-1", "state": dict(state), "questions": dict(questions), "falcon_only": falcon_only}).encode(), headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", "X-Falcon-Agent": agent_role, "X-Falcon-Run-ID": goal_id}, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout_sec) as response:
             result = json.loads(response.read().decode())
@@ -772,7 +890,10 @@ def evaluate_jev_decision(collected: Mapping[str, Any], *, mock_jev_json: Any = 
     fallback_actionable = bool(residuals) and high_medium
     state = {"loop_id": LOOP_ID, "delta_count": len(residuals), "severity": str(collected.get("severity") or "low"), "anomaly_kinds": sorted({str(item.get("kind")) for item in residuals})}
     questions = {"actionable_probability": {"type": "noul"}, "delivery_route": {"type": "choice"}, "delivery_route_match": {"type": "noul"}, "urgency_score": {"type": "score"}}
-    response = (jev_fn or _default_jev_decide)(state=state, questions=questions, agent_role="team-lead", goal_id=LOOP_ID, timeout_sec=1.5, falcon_only=True, mock_response=_parse_mock_jev(mock_jev_json))
+    try:
+        response = (jev_fn or _default_jev_decide)(state=state, questions=questions, agent_role="team-lead", goal_id=LOOP_ID, timeout_sec=1.5, falcon_only=True, mock_response=_parse_mock_jev(mock_jev_json))
+    except Exception:  # noqa: BLE001 - Jev is an optional bounded decision service
+        response = None
     if not isinstance(response, Mapping):
         return {"actionable": fallback_actionable, "route": "dual_zone_issue" if fallback_actionable else "ignore", "probability": None, "delivery_route_match": None, "urgency_score": None, "decision_source": "deterministic_fallback_unavailable"}
     answers = response.get("answers", response)
@@ -792,8 +913,9 @@ def evaluate_jev_decision(collected: Mapping[str, Any], *, mock_jev_json: Any = 
     if probability > 0.70:
         return {"actionable": True, "route": "dual_zone_issue" if route == "ignore" else route, "probability": probability, "delivery_route_match": match, "urgency_score": urgency, "decision_source": "jev_high_confidence"}
     if probability < 0.30:
-        return {"actionable": fallback_actionable, "route": "dual_zone_issue" if fallback_actionable else "ignore", "probability": probability, "delivery_route_match": match, "urgency_score": urgency, "decision_source": "deterministic_fallback_missing_match" if route == "ignore" and match is None else "jev_low_confidence_reject"}
-    return {"actionable": fallback_actionable, "route": ("dual_zone_issue" if route == "ignore" else route) if fallback_actionable else "ignore", "probability": probability, "delivery_route_match": match, "urgency_score": urgency, "decision_source": "jev_grey_zone_fallback"}
+        return {"actionable": False, "route": "ignore", "probability": probability, "delivery_route_match": match, "urgency_score": urgency, "decision_source": "jev_low_confidence_reject"}
+    safe_route = route if route != "autopilot_trigger" or (match is not None and match >= 0.50) else "dual_zone_issue"
+    return {"actionable": fallback_actionable, "route": ("dual_zone_issue" if safe_route == "ignore" else safe_route) if fallback_actionable else "ignore", "probability": probability, "delivery_route_match": match, "urgency_score": urgency, "decision_source": "jev_grey_zone_fallback"}
 
 
 def _resolve_multica_bin(explicit: str | None = None) -> str:
@@ -821,8 +943,8 @@ def _parse_json_stdout(proc: subprocess.CompletedProcess[str], context: str) -> 
         raise RuntimeError(f"multica {context} returned invalid JSON") from exc
 
 
-def build_autopilot_description() -> str:
-    return (f"# {AUTOPILOT_TITLE}\n\n" "This scheduled tick executes the repository Loop 6A script.\n\n" "```bash\npython3 \"$AIDASH_ROOT/aidata/scripts/aidata_telemetry_self_heal.py\" run --json\n```\n")
+def build_autopilot_description(snapshot_ref: str = "~/.cache/multica-loop-runner/loop-telemetry-aidata-self-heal/snapshot.json") -> str:
+    return (f"# {AUTOPILOT_TITLE}\n\n" "This scheduled tick executes the repository Loop 6A script.\n\n" "```bash\npython3 \"$AIDASH_ROOT/aidata/scripts/aidata_telemetry_self_heal.py\" run --from-autopilot --json\n```\n\n" f"The bounded redacted snapshot is read from `{snapshot_ref}`; an autopilot tick never triggers this autopilot again.\n")
 
 
 def _runtime_value(value: str | None, env_name: str) -> str | None:
@@ -862,6 +984,8 @@ def sync_autopilot(*, server_url: str | None = None, workspace_id: str | None = 
     if schedule is None:
         added = _parse_json_stdout(runner(["autopilot", "trigger-add", autopilot_id, "--kind", "schedule", "--cron", AUTOPILOT_CRON, "--timezone", tz_name, "--label", AUTOPILOT_TRIGGER_LABEL, "--output", "json"], **kwargs), "autopilot trigger-add")
         trigger_id = str(added.get("id") or (added.get("trigger") or {}).get("id") or "") if isinstance(added, Mapping) else ""
+        if not trigger_id:
+            return {"ok": False, "error": "schedule_trigger_id_missing", "autopilot_id": autopilot_id}
         trigger_action = "created"
     else:
         trigger_id = str(schedule.get("id") or schedule.get("trigger_id") or "")
@@ -875,6 +999,11 @@ def sync_autopilot(*, server_url: str | None = None, workspace_id: str | None = 
             trigger_action = "updated"
         else:
             trigger_action = "kept"
+    readback = _parse_json_stdout(runner(["autopilot", "trigger-list", autopilot_id, "--output", "json"], **kwargs), "autopilot trigger-list readback")
+    readback_triggers = readback.get("triggers", []) if isinstance(readback, Mapping) else readback if isinstance(readback, list) else []
+    persisted = next((item for item in readback_triggers if isinstance(item, Mapping) and str(item.get("id") or item.get("trigger_id") or "") == trigger_id), None)
+    if not isinstance(persisted, Mapping) or str(persisted.get("cron") or "") != AUTOPILOT_CRON or str(persisted.get("timezone") or persisted.get("tz") or "") != tz_name or persisted.get("enabled", True) is False:
+        return {"ok": False, "error": "schedule_readback_mismatch", "autopilot_id": autopilot_id, "trigger_id": trigger_id}
     return {"ok": True, "loop_id": LOOP_ID, "autopilot_id": autopilot_id, "trigger_id": trigger_id, "action": action, "trigger_action": trigger_action, "cron": AUTOPILOT_CRON, "timezone": tz_name}
 
 
@@ -897,16 +1026,16 @@ def _save_watermarks(state: Mapping[str, Any], path: Path | None = None) -> None
 
 def _upsert_dual_zone_issue(*, title: str, description: str, cursor: str, assignee_id: str | None = None, priority: str = "medium", status: str = "todo", server_url: str | None = None, workspace_id: str | None = None, dry_run: bool = False, runner: Callable[..., subprocess.CompletedProcess[str]] = _default_multica_runner, multica_bin: str | None = None, allow_external_helpers: bool = True) -> dict[str, Any]:
     verification = verify_dual_zone_markdown(description)
-    if allow_external_helpers:
-        helper = _load_optional_helper("team-lead/scripts/multica_loop_runner.py")
-        if helper is not None and hasattr(helper, "upsert_multica_dual_zone_issue"):
-            return dict(helper.upsert_multica_dual_zone_issue(title=title, description=description, cursor=cursor, assignee_id=assignee_id, priority=priority, status=status, server_url=server_url, workspace_id=workspace_id, dry_run=dry_run, runner=runner, multica_bin=multica_bin))
     if not verification["ok"]:
         return {"ok": False, "error": "invalid_dual_zone", "verification": verification}
     if dry_run:
         return {"ok": True, "action": "dry_run", "cursor": cursor, "dual_zone_verification": verification}
     if not server_url or not workspace_id or not assignee_id:
         return {"ok": False, "error": "missing_runtime_configuration"}
+    if allow_external_helpers:
+        helper = _load_optional_helper("team-lead/scripts/multica_loop_runner.py")
+        if helper is not None and hasattr(helper, "upsert_multica_dual_zone_issue"):
+            return dict(helper.upsert_multica_dual_zone_issue(title=title, description=description, cursor=cursor, assignee_id=assignee_id, priority=priority, status=status, server_url=server_url, workspace_id=workspace_id, dry_run=False, runner=runner, multica_bin=multica_bin))
     kwargs = {"multica_bin": multica_bin, "server_url": server_url, "workspace_id": workspace_id}
     listed = _parse_json_stdout(runner(["issue", "list", "--limit", "100", "--output", "json"], **kwargs), "issue list")
     issues = listed.get("issues", []) if isinstance(listed, Mapping) else listed if isinstance(listed, list) else []
@@ -920,14 +1049,33 @@ def _upsert_dual_zone_issue(*, title: str, description: str, cursor: str, assign
     return {"ok": True, "action": "created", "issue": _parse_json_stdout(proc, "issue create")}
 
 
-def _trigger_autopilot(*, autopilot_id: str, trigger_id: str | None, runner: Callable[..., subprocess.CompletedProcess[str]], server_url: str, workspace_id: str, multica_bin: str | None) -> dict[str, Any]:
-    if not trigger_id:
-        return {"ok": False, "error": "trigger_id_missing"}
-    proc = runner(["autopilot", "trigger", autopilot_id, trigger_id, "--output", "json"], multica_bin=multica_bin, server_url=server_url, workspace_id=workspace_id)
+def _trigger_autopilot(*, autopilot_id: str, runner: Callable[..., subprocess.CompletedProcess[str]], server_url: str, workspace_id: str, multica_bin: str | None) -> dict[str, Any]:
+    if not autopilot_id:
+        return {"ok": False, "error": "autopilot_id_missing"}
+    proc = runner(["autopilot", "trigger", autopilot_id, "--output", "json"], multica_bin=multica_bin, server_url=server_url, workspace_id=workspace_id)
     return {"ok": proc.returncode == 0, "response": _parse_json_stdout(proc, "autopilot trigger") if proc.returncode == 0 else None}
 
 
-def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: Path | None = None, vault_dir: Path | None = None, fixture_json: Path | Mapping[str, Any] | None = None, target_date: date | None = None, now: datetime | None = None, state_path: Path | None = None, auto_heal: bool = True, dry_run: bool = False, force: bool = False, mock_jev_json: Any = None, server_url: str | None = None, workspace_id: str | None = None, owner_id: str | None = None, jev_fn: Callable[..., Mapping[str, Any] | None] | None = None, runner: Callable[..., subprocess.CompletedProcess[str]] = _default_multica_runner, multica_bin: str | None = None, normalize_merge_healer: Callable[..., list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+def _existing_autopilot_id(*, runner: Callable[..., subprocess.CompletedProcess[str]], server_url: str, workspace_id: str, multica_bin: str | None) -> str | None:
+    listed = _parse_json_stdout(runner(["autopilot", "list", "--output", "json"], multica_bin=multica_bin, server_url=server_url, workspace_id=workspace_id), "autopilot list")
+    autopilots = listed.get("autopilots", []) if isinstance(listed, Mapping) else listed if isinstance(listed, list) else []
+    for item in autopilots:
+        if isinstance(item, Mapping) and (item.get("title") == AUTOPILOT_TITLE or LOOP_ID in str(item.get("description") or "")):
+            identifier = str(item.get("id") or item.get("autopilot_id") or "")
+            if identifier:
+                return identifier
+    return None
+
+
+def _write_autopilot_snapshot(collected: Mapping[str, Any], state_path: Path | None) -> Path:
+    target = (state_path.parent / f".{LOOP_ID}.snapshot.json") if state_path else Path.home() / ".cache" / "multica-loop-runner" / f"{LOOP_ID}.snapshot.json"
+    payload = {"loop_id": LOOP_ID, "watermark": collected.get("watermark"), "delta_count": int(collected.get("delta_count") or 0), "severity": collected.get("severity"), "anomaly_kinds": sorted({str(item.get("kind")) for item in collected.get("residual_unhealable_items", []) if item.get("kind")})}
+    _atomic_json_replace(target, payload)
+    os.chmod(target, 0o600)
+    return target
+
+
+def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: Path | None = None, vault_dir: Path | None = None, fixture_json: Path | Mapping[str, Any] | None = None, target_date: date | None = None, now: datetime | None = None, state_path: Path | None = None, auto_heal: bool = True, dry_run: bool = False, force: bool = False, mock_jev_json: Any = None, server_url: str | None = None, workspace_id: str | None = None, owner_id: str | None = None, jev_fn: Callable[..., Mapping[str, Any] | None] | None = None, runner: Callable[..., subprocess.CompletedProcess[str]] = _default_multica_runner, multica_bin: str | None = None, normalize_merge_healer: Callable[..., list[dict[str, Any]]] | None = None, from_autopilot: bool = False) -> dict[str, Any]:
     collected = inspect_and_self_heal(aidata_home=aidata_home, shared_telemetry_dir=shared_telemetry_dir, vault_dir=vault_dir, fixture_json=fixture_json, target_date=target_date, now=now, auto_heal=auto_heal, dry_run=dry_run, normalize_merge_healer=normalize_merge_healer)
     previous = _load_watermarks(state_path).get(LOOP_ID, {})
     previous_watermark = str(previous.get("watermark") or "") if isinstance(previous, Mapping) else ""
@@ -942,6 +1090,8 @@ def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: 
             _save_watermarks({LOOP_ID: {"watermark": watermark, "last_status": "SKIPPED_NOT_ACTIONABLE"}}, state_path)
         return {"ok": True, "loop_id": LOOP_ID, "status": "SKIPPED_NOT_ACTIONABLE", "layer_reached": 1, "watermark": watermark, "jev": verdict}
     route = str(verdict.get("route") or "dual_zone_issue")
+    if route == "autopilot_trigger" and (from_autopilot or os.environ.get("MULTICA_FROM_AUTOPILOT") == "1"):
+        route = "dual_zone_issue"
     delivery: dict[str, Any]
     if route == "autopilot_trigger":
         if dry_run:
@@ -949,12 +1099,16 @@ def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: 
         else:
             server = _runtime_value(server_url, "MULTICA_SERVER_URL")
             workspace = _runtime_value(workspace_id, "MULTICA_WORKSPACE_ID")
-            agent = _runtime_value(None, "MULTICA_AGENT_ID")
-            subscriber = _runtime_value(owner_id, "MULTICA_SUBSCRIBER_ID")
-            sync = sync_autopilot(server_url=server, workspace_id=workspace, agent_id=agent, subscriber_id=subscriber, dry_run=False, runner=runner, multica_bin=multica_bin)
-            delivery = sync
-            if sync.get("ok") and server and workspace:
-                delivery = {**sync, "trigger": _trigger_autopilot(autopilot_id=str(sync.get("autopilot_id")), trigger_id=sync.get("trigger_id"), runner=runner, server_url=server, workspace_id=workspace, multica_bin=multica_bin)}
+            if not server or not workspace:
+                delivery = {"ok": False, "error": "missing_runtime_configuration"}
+            else:
+                snapshot = _write_autopilot_snapshot(collected, state_path)
+                autopilot_id = _existing_autopilot_id(runner=runner, server_url=server, workspace_id=workspace, multica_bin=multica_bin)
+                if not autopilot_id:
+                    delivery = {"ok": False, "error": "autopilot_not_registered", "retryable": True}
+                else:
+                    delivery = {"ok": True, "action": "triggered", "autopilot_id": autopilot_id, "snapshot": str(snapshot), "trigger": _trigger_autopilot(autopilot_id=autopilot_id, runner=runner, server_url=server, workspace_id=workspace, multica_bin=multica_bin)}
+                    delivery["ok"] = bool(delivery["trigger"].get("ok"))
     else:
         delivery = _upsert_dual_zone_issue(title=str(collected["title"]), description=str(collected["dual_zone_markdown"]), cursor=str(collected["cursor"]), assignee_id=_runtime_value(owner_id, "MULTICA_SUBSCRIBER_ID"), server_url=_runtime_value(server_url, "MULTICA_SERVER_URL"), workspace_id=_runtime_value(workspace_id, "MULTICA_WORKSPACE_ID"), dry_run=dry_run, runner=runner, multica_bin=multica_bin, allow_external_helpers=not fixture_mode)
     delivered = bool(delivery.get("ok"))
@@ -995,6 +1149,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--server-url")
     run.add_argument("--workspace-id")
     run.add_argument("--owner-id")
+    run.add_argument("--from-autopilot", action="store_true")
     return parser
 
 
@@ -1006,7 +1161,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             target = datetime.now(CST).date() if ns.date == "today" else date.fromisoformat(ns.date)
             if ns.subcommand == "run":
-                result = run_loop_pipeline(aidata_home=ns.aidata_home, shared_telemetry_dir=ns.shared_telemetry_dir, vault_dir=ns.vault_dir, fixture_json=ns.fixture_json, target_date=target, auto_heal=not ns.no_heal, dry_run=ns.dry_run, force=ns.force, mock_jev_json=ns.mock_jev_json, state_path=ns.state_file, server_url=ns.server_url, workspace_id=ns.workspace_id, owner_id=ns.owner_id)
+                result = run_loop_pipeline(aidata_home=ns.aidata_home, shared_telemetry_dir=ns.shared_telemetry_dir, vault_dir=ns.vault_dir, fixture_json=ns.fixture_json, target_date=target, auto_heal=not ns.no_heal, dry_run=ns.dry_run, force=ns.force, mock_jev_json=ns.mock_jev_json, state_path=ns.state_file, server_url=ns.server_url, workspace_id=ns.workspace_id, owner_id=ns.owner_id, from_autopilot=ns.from_autopilot)
             else:
                 result = inspect_and_self_heal(aidata_home=ns.aidata_home, shared_telemetry_dir=ns.shared_telemetry_dir, vault_dir=ns.vault_dir, fixture_json=ns.fixture_json, target_date=target, auto_heal=not ns.no_heal and ns.subcommand == "self-heal", dry_run=ns.dry_run)
         print(json.dumps(result, ensure_ascii=False, indent=2))

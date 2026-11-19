@@ -411,12 +411,18 @@ def _telemetry_fixture(tmp_path: Path):
     (state_dir / "learning-topics-state.json").write_text(json.dumps({"topics": {"topic-a": {"topic_key": "topic-a", "learning_state": "proposed", "revision": 1}}}))
     (state_dir / "proposals.jsonl").write_text(json.dumps({"id": "learning-topic-topic-a", "topic_key": "topic-a", "status": "pending", "learning_state": "proposed", "revision": 1}) + "\n")
     (root.parent / "Apps" / "AIDashApp" / "Sources" / "Telemetry").mkdir(parents=True)
-    (root.parent / "Apps" / "AIDashApp" / "Sources" / "Telemetry" / "AIDashTelemetryCoordinator.swift").write_text("briefing_viewed aidash.performance.ready_scene establishedEnabled")
+    telemetry_dir = root.parent / "Apps" / "AIDashApp" / "Sources" / "Telemetry"
+    (telemetry_dir / "AIDashTelemetryCoordinator.swift").write_text("enum AIDashTelemetryAction { case briefing_viewed } establishedEnabled")
+    (telemetry_dir / "AIDashTelemetryPreferences.swift").write_text("consent establishedEnabled")
+    (telemetry_dir / "AIDashTelemetryFactory.swift").write_text("AzureBlobPrivacyPolicy")
     (root / "adapters").mkdir()
-    (root / "adapters" / "product_blob.py").write_text("AZURE_CORE_COLLECT_TELEMETRY = 'false'\ndef _preflight(): pass\n")
+    (root / "adapters" / "product_blob.py").write_text("AZURE_CORE_COLLECT_TELEMETRY = 'false'\ndef _preflight(): pass\n# privacy allowlist\n")
     for rel in ("sdks/swift", "sdks/web", "sdks/python", "docs/architecture"):
         (shared / rel).mkdir(parents=True)
-    (shared / "docs/architecture/tech-context.md").write_text("contract")
+    (shared / "sdks/swift" / "Telemetry.swift").write_text("telemetry consent privacy")
+    (shared / "sdks/web" / "telemetry.ts").write_text("export const telemetry = true")
+    (shared / "sdks/python" / "telemetry.py").write_text("def emit_event(): pass")
+    (shared / "docs/architecture/tech-context.md").write_text("telemetry contract privacy")
     return mod, root, shared, vault
 
 
@@ -464,7 +470,9 @@ def test_loop6a_heals_with_injected_real_commands_and_is_idempotent(tmp_path: Pa
     state = json.loads((root / "L5_apps/digest/state/learning-topics-state.json").read_text())
     assert state["topics"]["topic-a"]["learning_state"] == "learned"
     proposal = json.loads((root / "L5_apps/digest/state/proposals.jsonl").read_text().splitlines()[-1])
-    assert proposal["status"] == "approved"
+    assert proposal["status"] == "dismissed"
+    assert proposal["outcome"] == "reconciled_from_ledger"
+    assert proposal["exploration_authorized"] is False
     again = mod.inspect_and_self_heal(aidata_home=root, shared_telemetry_dir=shared, vault_dir=vault, core_sources=("raven",), now=datetime(2026, 11, 19, 12, tzinfo=timezone.utc))  # noqa: UP017 - Python 3.9 gate
     assert again["status"] == "SKIPPED_NO_DELTA"
     assert (vault / "topic-ledger.json").read_text().count("topic-a") == 1
@@ -529,13 +537,124 @@ def test_loop6a_fixture_mode_is_closed_and_dual_zone_is_bounded(tmp_path: Path) 
 def test_loop6a_autopilot_reconciles_schedule_with_trigger_update() -> None:
     mod = _load_self_heal_module()
     calls = []
+    trigger_reads = 0
     def runner(args, **kwargs):
+        nonlocal trigger_reads
         calls.append(list(args))
         if args[:2] == ["autopilot", "list"]:
             return subprocess.CompletedProcess(args, 0, json.dumps({"autopilots": [{"id": "ap-1", "title": mod.AUTOPILOT_TITLE}]}), "")
         if args[:2] == ["autopilot", "trigger-list"]:
-            return subprocess.CompletedProcess(args, 0, json.dumps({"triggers": [{"id": "tr-1", "kind": "schedule", "cron": "0 0 * * *", "timezone": "UTC", "enabled": False}]}), "")
+            trigger_reads += 1
+            trigger = {"id": "tr-1", "kind": "schedule", "cron": mod.AUTOPILOT_CRON if trigger_reads > 1 else "0 0 * * *", "timezone": mod.AUTOPILOT_TIMEZONE if trigger_reads > 1 else "UTC", "enabled": trigger_reads > 1}
+            return subprocess.CompletedProcess(args, 0, json.dumps({"triggers": [trigger]}), "")
         return subprocess.CompletedProcess(args, 0, "{}", "")
     result = mod.sync_autopilot(server_url="https://example.invalid", workspace_id="workspace", agent_id="agent", subscriber_id="owner", runner=runner)
     assert result["ok"]
     assert any(call[:3] == ["autopilot", "trigger-update", "ap-1"] and "--enabled=true" in call for call in calls)
+
+
+def test_loop6a_actual_dict_watermarks_and_raw_grains(tmp_path: Path) -> None:
+    mod = _load_self_heal_module()
+    root = tmp_path / "aidata"
+    state = {
+        "raven": 1795020000000,
+        "copilot_cli": {"schema_version": 2, "seen": {"event-1": "2026-11-19"}},
+        "claude_jsonl": {"~/transcript.jsonl": 12},
+        "gtt_ledger": {"machine:goal/ledger.md": "digest"},
+        "gtt_receipt": {"machine:goal/receipts/task-r1.md": "digest"},
+    }
+    (root / "L1_collect/raw/raven").mkdir(parents=True)
+    (root / "L1_collect/raw/copilot_cli").mkdir(parents=True)
+    (root / "L1_collect/raw/claude_jsonl").mkdir(parents=True)
+    (root / "L1_collect/raw/gtt_ledger").mkdir(parents=True)
+    (root / "L1_collect/raw/gtt_receipt").mkdir(parents=True)
+    (root / "state.json").write_text(json.dumps(state))
+    (root / "L1_collect/raw/raven/2026-11-19.jsonl").write_text(json.dumps({"id": "r1", "timestamp": 1795020000000}) + "\n")
+    (root / "L1_collect/raw/copilot_cli/2026-11-19.jsonl").write_text(
+        json.dumps({"event_id": "event-1", "skill": "team-lead", "timestamp": "2026-11-19T00:00:00Z"}) + "\n"
+        + json.dumps({"event_id": "ref-1", "skill": "team-lead", "kind": "reference_hit", "timestamp": "2026-11-19T00:00:00Z"}) + "\n"
+    )
+    (root / "L1_collect/raw/claude_jsonl/2026-11-19.jsonl").write_text(
+        json.dumps({"uuid": "turn-1", "timestamp": "2026-11-19T00:00:00Z"}) + "\n"
+        + json.dumps({"uuid": "turn-1", "turn_uuid": "turn-1", "_kind": "reference_hit", "timestamp": "2026-11-19T00:00:00Z"}) + "\n"
+    )
+    (root / "L1_collect/raw/gtt_ledger/2026-11-19.jsonl").write_text(json.dumps({"machine_id": "machine", "rel_path": "goal/ledger.md", "record_type": "ledger", "content": "- 2026-11-19T00:00:00Z | EVT=READY | ok"}) + "\n")
+    (root / "L1_collect/raw/gtt_receipt/2026-11-19.jsonl").write_text(json.dumps({"machine_id": "machine", "rel_path": "goal/receipts/task-r1.md", "record_type": "receipt", "content": "done"}) + "\n")
+    audit = mod.watermark_and_shard_audit(root, core_sources=mod.CORE_SOURCES)
+    assert not any(item["kind"] == "watermark_regression_or_missing" for item in audit["anomalies"])
+    assert audit["sources"]["gtt_ledger"]["relevant_record_count"] == 1
+    assert audit["sources"]["gtt_receipt"]["relevant_record_count"] == 1
+    assert audit["sources"]["claude_jsonl"]["relevant_record_count"] == 1
+    assert audit["sources"]["copilot_cli"]["relevant_record_count"] == 1
+
+
+def test_loop6a_dismissed_missing_state_and_corrupt_history_preserve_source(tmp_path: Path) -> None:
+    mod = _load_self_heal_module()
+    root = tmp_path / "aidata"
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    ledger_bytes = json.dumps({"topics": {"topic-dismissed": {"learning_state": "dismissed", "revision": 2, "aliases": ["legacy-topic"]}}}, ensure_ascii=False).encode()
+    (vault / "topic-ledger.json").write_bytes(ledger_bytes)
+    proposals = root / "L5_apps/digest/state/proposals.jsonl"
+    proposals.parent.mkdir(parents=True)
+    proposals.write_text("{malformed historical line}\n" + json.dumps({"id": "p1", "ref": "learning-topic://legacy-topic", "learning_state": "proposed", "status": "pending", "revision": 2}) + "\n")
+    audit = mod.cross_file_state_audit(root, vault_dir=vault)
+    assert audit["drifted_topics"]
+    result = mod._default_reconcile_learning_drift(root, vault_dir=vault, drifted_topics=audit["drifted_topics"])
+    assert any(item["ok"] for item in result)
+    assert (vault / "topic-ledger.json").read_bytes() == ledger_bytes
+    state = json.loads((root / "L5_apps/digest/state/learning-topics-state.json").read_text())
+    assert state["topics"]["topic-dismissed"]["learning_state"] == "dismissed"
+    proposal = json.loads(proposals.read_text().splitlines()[-1])
+    assert proposal["status"] == "dismissed"
+    assert proposal["learning_state"] == "dismissed"
+    assert proposal["exploration_authorized"] is False
+    assert "{malformed historical line}" in proposals.read_text()
+    second = mod.cross_file_state_audit(root, vault_dir=vault)
+    assert not any(item["kind"] == "learning_topic_state_drift" for item in second["anomalies"])
+
+
+def test_loop6a_normalize_rc0_stderr_error_blocks_merge(tmp_path: Path) -> None:
+    mod = _load_self_heal_module()
+    root = tmp_path / "aidata"
+    root.mkdir()
+    (root / "cli.py").write_text(
+        "import pathlib, sys\n"
+        "pathlib.Path('calls.log').open('a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1] == 'normalize': print('  [normalize] raven ERROR: adapter failed', file=sys.stderr)\n"
+    )
+    actions = mod._default_normalize_and_merge_healer(root, ["raven"], need_merge=True)
+    assert actions[0]["ok"] is False
+    assert actions[-1]["error"] == "normalize_failed_no_merge"
+    assert not (root / "calls.log").read_text().endswith("merge\n") if (root / "calls.log").exists() else True
+
+
+def test_loop6a_jev_low_probability_is_always_false() -> None:
+    mod = _load_self_heal_module()
+    collected = {"delta_count": 1, "severity": "high", "residual_anomalies": [{"kind": "x", "severity": "high"}]}
+    result = mod.evaluate_jev_decision(
+        collected,
+        jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.12}, "delivery_route": {"choice": "dual_zone_issue"}, "delivery_route_match": {"noul": 0.99}}},
+    )
+    assert result["actionable"] is False
+    assert result["route"] == "ignore"
+
+
+def test_loop6a_pipeline_unchanged_watermark_skips_jev_and_delivery(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_self_heal_module()
+    state_file = tmp_path / "watermarks.json"
+    state_file.write_text(json.dumps({mod.LOOP_ID: {"watermark": "loop-telemetry-aidata-self-heal:stable"}}))
+    collected = {"has_delta": True, "watermark": "loop-telemetry-aidata-self-heal:stable", "healed_items": [], "residual_unhealable_items": [{"kind": "gap", "severity": "high"}]}
+    monkeypatch.setattr(mod, "inspect_and_self_heal", lambda **_: collected)
+    called = {"jev": 0, "delivery": 0}
+    result = mod.run_loop_pipeline(state_path=state_file, jev_fn=lambda **_: called.__setitem__("jev", 1), runner=lambda *args, **kwargs: called.__setitem__("delivery", 1))
+    assert result["status"] == "SKIPPED_NO_DELTA"
+    assert called == {"jev": 0, "delivery": 0}
+
+
+def test_loop6a_strict_verifier_rejects_path_cli_and_non_chinese_upper_zone() -> None:
+    mod = _load_self_heal_module()
+    text = "<!-- multica-cursor:loop-telemetry-aidata-self-heal-2026-11-19 -->\n\n**一句话结论**：检查\n\n- [ ] 1. python3 /Users/private/path\n\n" + mod._DETAILS_OPEN + "\n<pre>{}</pre>\n</details>\n"
+    result = mod.verify_dual_zone_markdown(text)
+    codes = {item["code"] for item in result["violations"]}
+    assert {"human-zone-cli-command", "human-zone-path"} <= codes
