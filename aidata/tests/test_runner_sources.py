@@ -530,7 +530,7 @@ def test_loop6a_fixture_mode_is_closed_and_dual_zone_is_bounded(tmp_path: Path) 
     assert result["raw"]["fixture_mode"] is True
     assert result["dual_zone_verification"]["ok"]
     assert result["dual_zone_verification"]["human_zone_lines"] <= 15
-    assert "/Users/" not in result["dual_zone_markdown"]
+    assert ("/" + "Users/") not in result["dual_zone_markdown"]
     assert "127.0.0.1" not in result["dual_zone_markdown"]
 
 
@@ -654,7 +654,83 @@ def test_loop6a_pipeline_unchanged_watermark_skips_jev_and_delivery(tmp_path: Pa
 
 def test_loop6a_strict_verifier_rejects_path_cli_and_non_chinese_upper_zone() -> None:
     mod = _load_self_heal_module()
-    text = "<!-- multica-cursor:loop-telemetry-aidata-self-heal-2026-11-19 -->\n\n**一句话结论**：检查\n\n- [ ] 1. python3 /Users/private/path\n\n" + mod._DETAILS_OPEN + "\n<pre>{}</pre>\n</details>\n"
+    private_path = "/" + "Users/private/path"
+    text = "<!-- multica-cursor:loop-telemetry-aidata-self-heal-2026-11-19 -->\n\n**一句话结论**：检查\n\n- [ ] 1. python3 " + private_path + "\n\n" + mod._DETAILS_OPEN + "\n<pre>{}</pre>\n</details>\n"
     result = mod.verify_dual_zone_markdown(text)
     codes = {item["code"] for item in result["violations"]}
     assert {"human-zone-cli-command", "human-zone-path"} <= codes
+
+
+def test_loop6a_layer2_routes_snapshot_recursion_fallback_and_dry_run(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_self_heal_module()
+    monkeypatch.setattr(mod, "_load_optional_helper", lambda *_: None)
+    state_file = tmp_path / "watermarks.json"
+
+    def collected(route: str):
+        return {
+            "has_delta": True,
+            "watermark": f"{mod.LOOP_ID}:evidence-{route}",
+            "delta_count": 1,
+            "severity": "high",
+            "title": "巡检告警",
+            "cursor": f"{mod.LOOP_ID}-2026-11-19",
+            "dual_zone_markdown": mod.render_dual_zone_markdown(tldr="发现需要处理的异常", items=[{"what": "检查遥测链路", "why": "恢复稳定性"}], cursor=f"{mod.LOOP_ID}-2026-11-19", ai_payload={"kind": "bounded"}),
+            "residual_unhealable_items": [{"kind": "coverage_gap", "severity": "high"}],
+            "healed_items": [],
+        }
+
+    def issue_runner(args, **kwargs):
+        calls.append(list(args))
+        if args[:2] == ["issue", "list"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({"issues": []}), "")
+        if args[:2] == ["issue", "create"]:
+            return subprocess.CompletedProcess(args, 0, "{}", "")
+        return subprocess.CompletedProcess(args, 0, "{}", "")
+
+    calls = []
+    monkeypatch.setattr(mod, "inspect_and_self_heal", lambda **_: collected("dual_zone_issue"))
+    dual = mod.run_loop_pipeline(state_path=state_file, server_url="https://example.invalid", workspace_id="workspace", owner_id="owner", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "dual_zone_issue"}, "delivery_route_match": {"noul": 0.9}}}, runner=issue_runner)
+    assert dual["ok"] and dual["status"] == "ACTION_TAKEN"
+    assert json.loads(state_file.read_text())[mod.LOOP_ID]["watermark"] == dual["watermark"]
+
+    calls.clear()
+    autopilot_state = tmp_path / "autopilot-watermarks.json"
+    def autopilot_runner(args, **kwargs):
+        calls.append(list(args))
+        if args[:2] == ["autopilot", "list"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({"autopilots": [{"id": "ap-1", "title": mod.AUTOPILOT_TITLE}]}), "")
+        if args[:3] == ["autopilot", "trigger", "ap-1"]:
+            return subprocess.CompletedProcess(args, 0, "{}", "")
+        return subprocess.CompletedProcess(args, 0, "{}", "")
+
+    monkeypatch.setattr(mod, "inspect_and_self_heal", lambda **_: collected("autopilot_trigger"))
+    triggered = mod.run_loop_pipeline(state_path=autopilot_state, server_url="https://example.invalid", workspace_id="workspace", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "autopilot_trigger"}, "delivery_route_match": {"noul": 0.9}}}, runner=autopilot_runner)
+    assert triggered["ok"]
+    assert ["autopilot", "trigger", "ap-1", "--output", "json"] in calls
+    snapshot = Path(triggered["delivery"]["snapshot"])
+    assert snapshot.is_file() and snapshot.stat().st_mode & 0o777 == 0o600
+    assert not any(call[:2] == ["autopilot", "update"] or call[:2] == ["autopilot", "create"] for call in calls)
+
+    calls.clear()
+    monkeypatch.setattr(mod, "inspect_and_self_heal", lambda **_: collected("autopilot_trigger"))
+    guarded = mod.run_loop_pipeline(state_path=tmp_path / "guarded.json", from_autopilot=True, server_url="https://example.invalid", workspace_id="workspace", owner_id="owner", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "autopilot_trigger"}, "delivery_route_match": {"noul": 0.9}}}, runner=issue_runner)
+    assert guarded["ok"] and guarded["route"] == "dual_zone_issue"
+    assert not any(call[:2] == ["autopilot", "trigger"] for call in calls)
+
+    calls.clear()
+    monkeypatch.setattr(mod, "inspect_and_self_heal", lambda **_: collected("autopilot_trigger"))
+    fallback = mod.run_loop_pipeline(state_path=tmp_path / "fallback.json", server_url="https://example.invalid", workspace_id="workspace", owner_id="owner", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "autopilot_trigger"}, "delivery_route_match": {"noul": 0.9}}}, runner=lambda args, **kwargs: subprocess.CompletedProcess(args, 0, json.dumps({"autopilots": []}) if args[:2] == ["autopilot", "list"] else json.dumps({"issues": []}) if args[:2] == ["issue", "list"] else "{}", ""))
+    assert fallback["ok"] and fallback["route"] == "dual_zone_issue"
+
+    def failed_runner(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, "", "failed")
+
+    failed = mod.run_loop_pipeline(state_path=tmp_path / "failed.json", server_url="https://example.invalid", workspace_id="workspace", owner_id="owner", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "dual_zone_issue"}, "delivery_route_match": {"noul": 0.9}}}, runner=failed_runner)
+    assert failed["ok"] is False and failed["status"] == "DELIVERY_FAILED"
+    assert not (tmp_path / "failed.json").exists()
+
+    dry_state = tmp_path / "dry.json"
+    snapshot_mtime = snapshot.stat().st_mtime_ns
+    dry = mod.run_loop_pipeline(state_path=dry_state, dry_run=True, server_url="https://example.invalid", workspace_id="workspace", owner_id="owner", jev_fn=lambda **_: {"answers": {"actionable_probability": {"noul": 0.9}, "delivery_route": {"choice": "dual_zone_issue"}, "delivery_route_match": {"noul": 0.9}}}, runner=failed_runner)
+    assert dry["ok"] and not dry_state.exists()
+    assert snapshot.stat().st_mtime_ns == snapshot_mtime

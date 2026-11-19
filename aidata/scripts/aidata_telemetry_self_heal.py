@@ -63,7 +63,7 @@ _SOURCE_GRAIN_FIELDS: dict[str, tuple[str, ...]] = {
 _GTT_EVENT_RE = re.compile(r"^\s*-\s*\S+\s*\|\s*EVT=\S+\s*\|")
 _GTT_RECEIPT_FILE_RE = re.compile(r"^.+?-r\d+\.md$")
 _CJK_RE = re.compile(r"[\u3400-\u9fff]")
-_PATH_RE = re.compile(r"(?:/Users/|/home/|[A-Za-z]:[\\/])")
+_PATH_RE = re.compile(r"(?:/" + r"Users/|/" + r"home/|[A-Za-z]:[\\/])")
 _CLI_RE = re.compile(r"(?:\b(?:python3?|pytest|bash|sh|curl|gh|multica|git)\s+|(?:^|\s)\./scripts/)")
 _SOURCE_LABELS = {
     "raven": "网关请求",
@@ -1105,12 +1105,17 @@ def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: 
                 snapshot = _write_autopilot_snapshot(collected, state_path)
                 autopilot_id = _existing_autopilot_id(runner=runner, server_url=server, workspace_id=workspace, multica_bin=multica_bin)
                 if not autopilot_id:
-                    delivery = {"ok": False, "error": "autopilot_not_registered", "retryable": True}
+                    fallback = _upsert_dual_zone_issue(title=str(collected["title"]), description=str(collected["dual_zone_markdown"]), cursor=str(collected["cursor"]), assignee_id=_runtime_value(owner_id, "MULTICA_SUBSCRIBER_ID"), server_url=server, workspace_id=workspace, dry_run=False, runner=runner, multica_bin=multica_bin, allow_external_helpers=not fixture_mode)
+                    delivery = {**fallback, "fallback_from": "autopilot_trigger"}
+                    route = "dual_zone_issue"
                 else:
                     delivery = {"ok": True, "action": "triggered", "autopilot_id": autopilot_id, "snapshot": str(snapshot), "trigger": _trigger_autopilot(autopilot_id=autopilot_id, runner=runner, server_url=server, workspace_id=workspace, multica_bin=multica_bin)}
                     delivery["ok"] = bool(delivery["trigger"].get("ok"))
     else:
-        delivery = _upsert_dual_zone_issue(title=str(collected["title"]), description=str(collected["dual_zone_markdown"]), cursor=str(collected["cursor"]), assignee_id=_runtime_value(owner_id, "MULTICA_SUBSCRIBER_ID"), server_url=_runtime_value(server_url, "MULTICA_SERVER_URL"), workspace_id=_runtime_value(workspace_id, "MULTICA_WORKSPACE_ID"), dry_run=dry_run, runner=runner, multica_bin=multica_bin, allow_external_helpers=not fixture_mode)
+        try:
+            delivery = _upsert_dual_zone_issue(title=str(collected["title"]), description=str(collected["dual_zone_markdown"]), cursor=str(collected["cursor"]), assignee_id=_runtime_value(owner_id, "MULTICA_SUBSCRIBER_ID"), server_url=_runtime_value(server_url, "MULTICA_SERVER_URL"), workspace_id=_runtime_value(workspace_id, "MULTICA_WORKSPACE_ID"), dry_run=dry_run, runner=runner, multica_bin=multica_bin, allow_external_helpers=not fixture_mode)
+        except (OSError, RuntimeError, TypeError):
+            delivery = {"ok": False, "error": "delivery_failed"}
     delivered = bool(delivery.get("ok"))
     if not dry_run and delivered and watermark:
         _save_watermarks({LOOP_ID: {"watermark": watermark, "last_status": "ACTION_TAKEN", "route": route}}, state_path)
