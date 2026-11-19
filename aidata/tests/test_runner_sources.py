@@ -17,6 +17,7 @@ import re
 import shlex
 import subprocess
 import sys
+from datetime import timezone
 from pathlib import Path
 from typing import Optional
 
@@ -108,7 +109,7 @@ def _run_job_wrapper(
     fixture_body: str,
     *,
     exit_code: int = 0,
-    state_path: Optional[Path] = None,
+    state_path: Optional[Path] = None,  # noqa: UP045 - Python 3.9 gate
 ):
     script = Path(__file__).resolve().parent.parent / "scripts" / script_name
     fixture = tmp_path / "fixture.py"
@@ -126,7 +127,7 @@ def _run_job_wrapper(
         env["DIGEST_VAULT_SCRIPT"] = str(fixture)
     else:
         env["LINEAR_BOT_BRIDGE_SCRIPT"] = str(fixture)
-    proc = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=30)
+    proc = subprocess.run(["bash", str(script)], check=False, env=env, capture_output=True, text=True, timeout=30)
     payload = json.loads(state.read_text(encoding="utf-8")) if state.is_file() else None
     return proc, payload
 
@@ -173,7 +174,7 @@ def _run_teams_digest_wrapper(
         "CALLS_FILE": str(calls_file),
         "PATH": "/usr/bin:/bin",
     }
-    proc = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=30)
+    proc = subprocess.run(["bash", str(script)], check=False, env=env, capture_output=True, text=True, timeout=30)
     payload = json.loads(state.read_text(encoding="utf-8")) if state.is_file() else None
     calls = calls_file.read_text(encoding="utf-8").splitlines() if calls_file.is_file() else []
     return proc, payload, calls
@@ -377,3 +378,164 @@ def test_export_work_teams_digest_script_redacts_and_writes_jsonl(tmp_path: Path
     assert "ghp_1234567890" not in record["summary"]
     assert "abcdefghijkl1234567890" not in record["summary"]
 
+
+
+
+
+def _load_self_heal_module():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "aidata_telemetry_self_heal.py"
+    spec = importlib.util.spec_from_file_location("aidata_telemetry_self_heal", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _telemetry_fixture(tmp_path: Path):
+    mod = _load_self_heal_module()
+    root = tmp_path / "aidata"
+    shared = tmp_path / "shared"
+    vault = tmp_path / "vault"
+    raw = root / "L1_collect" / "raw" / "raven"
+    raw.mkdir(parents=True)
+    (root / "state.json").write_text(json.dumps({"raven": 1795020000000}))
+    (raw / "2026-11-19.jsonl").write_text(
+        json.dumps({"id": "request-1", "timestamp": 1795020000000, "model": "model-a", "input_tokens": 10, "output_tokens": 5}) + "\n"
+    )
+    (vault).mkdir()
+    (vault / "topic-ledger.json").write_text(json.dumps({"topics": [{"topic_key": "topic-a", "learning_state": "learned", "revision": 4}]}))
+    state_dir = root / "L5_apps" / "digest" / "state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "learning-topics-state.json").write_text(json.dumps({"topics": {"topic-a": {"topic_key": "topic-a", "learning_state": "proposed", "revision": 1}}}))
+    (state_dir / "proposals.jsonl").write_text(json.dumps({"id": "learning-topic-topic-a", "topic_key": "topic-a", "status": "pending", "learning_state": "proposed", "revision": 1}) + "\n")
+    (root.parent / "Apps" / "AIDashApp" / "Sources" / "Telemetry").mkdir(parents=True)
+    (root.parent / "Apps" / "AIDashApp" / "Sources" / "Telemetry" / "AIDashTelemetryCoordinator.swift").write_text("briefing_viewed aidash.performance.ready_scene establishedEnabled")
+    (root / "adapters").mkdir()
+    (root / "adapters" / "product_blob.py").write_text("AZURE_CORE_COLLECT_TELEMETRY = 'false'\ndef _preflight(): pass\n")
+    for rel in ("sdks/swift", "sdks/web", "sdks/python", "docs/architecture"):
+        (shared / rel).mkdir(parents=True)
+    (shared / "docs/architecture/tech-context.md").write_text("contract")
+    return mod, root, shared, vault
+
+
+def _healer_that_builds_tables(root: Path):
+    def healer(aidata_home, sources, *, need_merge):
+        clean = aidata_home / "L2_normalize" / "clean"
+        clean.mkdir(parents=True, exist_ok=True)
+        db = clean / "raven.db"
+        with __import__("sqlite3").connect(db) as conn:
+            conn.execute("CREATE TABLE req (request_id TEXT PRIMARY KEY, ts INTEGER, cost_usd REAL)")
+            conn.execute("INSERT INTO req VALUES ('request-1', 1795020000000, 0.1)")
+        warehouse = aidata_home / "L3_merge" / "warehouse.db"
+        warehouse.parent.mkdir(parents=True, exist_ok=True)
+        with __import__("sqlite3").connect(warehouse) as conn:
+            conn.execute("CREATE TABLE fact_request (request_id TEXT, ts INTEGER, cst_day TEXT, cost_usd REAL)")
+            conn.execute("INSERT INTO fact_request VALUES ('request-1', 1795020000000, '2026-11-19', 0.1)")
+        return [{"action": "normalize_source", "source": "raven", "ok": True}, {"action": "merge_warehouse", "ok": True}]
+    return healer
+
+
+def test_loop6a_heals_with_injected_real_commands_and_is_idempotent(tmp_path: Path) -> None:
+    from datetime import datetime
+
+    mod, root, shared, vault = _telemetry_fixture(tmp_path)
+    first = mod.inspect_and_self_heal(
+        aidata_home=root,
+        shared_telemetry_dir=shared,
+        vault_dir=vault,
+        core_sources=("raven",),
+        now=datetime(2026, 11, 19, 12, tzinfo=timezone.utc),  # noqa: UP017 - Python 3.9 gate
+        dry_run=True,
+    )
+    assert first["has_delta"]
+    assert not (root / "L2_normalize").exists()
+    healed = mod.inspect_and_self_heal(
+        aidata_home=root,
+        shared_telemetry_dir=shared,
+        vault_dir=vault,
+        core_sources=("raven",),
+        normalize_merge_healer=_healer_that_builds_tables(root),
+        now=datetime(2026, 11, 19, 12, tzinfo=timezone.utc),  # noqa: UP017 - Python 3.9 gate
+    )
+    assert healed["status"] == "HEALED_LOCALLY_NO_ALERT"
+    assert healed["residual_unhealable_items"] == []
+    state = json.loads((root / "L5_apps/digest/state/learning-topics-state.json").read_text())
+    assert state["topics"]["topic-a"]["learning_state"] == "learned"
+    proposal = json.loads((root / "L5_apps/digest/state/proposals.jsonl").read_text().splitlines()[-1])
+    assert proposal["status"] == "approved"
+    again = mod.inspect_and_self_heal(aidata_home=root, shared_telemetry_dir=shared, vault_dir=vault, core_sources=("raven",), now=datetime(2026, 11, 19, 12, tzinfo=timezone.utc))  # noqa: UP017 - Python 3.9 gate
+    assert again["status"] == "SKIPPED_NO_DELTA"
+    assert (vault / "topic-ledger.json").read_text().count("topic-a") == 1
+
+
+def test_loop6a_failed_normalize_is_residual_and_never_fabricates_rows(tmp_path: Path) -> None:
+    mod, root, shared, vault = _telemetry_fixture(tmp_path)
+    result = mod.inspect_and_self_heal(
+        aidata_home=root,
+        shared_telemetry_dir=shared,
+        vault_dir=vault,
+        core_sources=("raven",),
+        normalize_merge_healer=lambda *_args, **_kwargs: [{"action": "normalize_source", "source": "raven", "ok": False}],
+    )
+    assert result["has_delta"]
+    assert any(item["kind"] == "self_heal_failed" for item in result["residual_anomalies"])
+    assert not (root / "L2_normalize").exists()
+
+
+def test_loop6a_streams_all_shards_and_respects_source_grain(tmp_path: Path) -> None:
+    mod = _load_self_heal_module()
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    lines = [{"id": f"request-{i}", "timestamp": 1795020000000} for i in range(5001)]
+    lines.append({"id": "request-0", "timestamp": 1795020000000})
+    (raw / "2026-11-19.jsonl").write_text("\n".join(json.dumps(item) for item in lines) + "\n")
+    report = mod._scan_raw_shards(raw, pk_fields=("id",))
+    assert report["relevant_record_count"] == 5002
+    assert report["duplicate_pk_count"] == 0
+    later = raw / "2026-11-20.jsonl"
+    later.write_text(json.dumps({"id": "request-5001", "timestamp": 1795020000000}) + "\n")
+    report = mod._scan_raw_shards(raw, pk_fields=("id",))
+    assert report["duplicate_pk_count"] == 0
+    copilot = tmp_path / "copilot_cli"
+    copilot.mkdir()
+    (copilot / "2026-11-20.jsonl").write_text(json.dumps({"event_id": "tool-only"}) + "\n")
+    assert mod._scan_raw_shards(copilot, pk_fields=("event_id",))["relevant_record_count"] == 0
+
+
+def test_loop6a_jev_boundaries_and_missing_match_do_not_suppress(tmp_path: Path) -> None:
+    mod, root, shared, vault = _telemetry_fixture(tmp_path)
+    collected = mod.inspect_and_self_heal(aidata_home=root, shared_telemetry_dir=shared, vault_dir=vault, core_sources=("raven",), dry_run=True)
+    def decision(prob, route, match):
+        return {"answers": {"actionable_probability": {"noul": prob}, "delivery_route": {"choice": route}, "delivery_route_match": {"noul": match}}}
+    assert mod.evaluate_jev_decision(collected, jev_fn=lambda **_: decision(0.70, "ignore", 0.50))["actionable"] is False
+    assert mod.evaluate_jev_decision(collected, jev_fn=lambda **_: decision(0.70, "ignore", None))["actionable"] is True
+    assert mod.evaluate_jev_decision(collected, jev_fn=lambda **_: decision(0.71, "autopilot_trigger", 0.90))["route"] == "autopilot_trigger"
+    assert mod.evaluate_jev_decision(collected, jev_fn=lambda **_: None)["actionable"] is True
+
+
+def test_loop6a_fixture_mode_is_closed_and_dual_zone_is_bounded(tmp_path: Path) -> None:
+    mod = _load_self_heal_module()
+    fixture = {"aidata_home": str(tmp_path / "aidata"), "shared_telemetry_dir": str(tmp_path / "shared"), "vault_dir": str(tmp_path / "vault")}
+    result = mod.inspect_and_self_heal(fixture_json=fixture, dry_run=True, core_sources=("raven",))
+    assert result["raw"]["fixture_mode"] is True
+    assert result["dual_zone_verification"]["ok"]
+    assert result["dual_zone_verification"]["human_zone_lines"] <= 15
+    assert "/Users/" not in result["dual_zone_markdown"]
+    assert "127.0.0.1" not in result["dual_zone_markdown"]
+
+
+def test_loop6a_autopilot_reconciles_schedule_with_trigger_update() -> None:
+    mod = _load_self_heal_module()
+    calls = []
+    def runner(args, **kwargs):
+        calls.append(list(args))
+        if args[:2] == ["autopilot", "list"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({"autopilots": [{"id": "ap-1", "title": mod.AUTOPILOT_TITLE}]}), "")
+        if args[:2] == ["autopilot", "trigger-list"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({"triggers": [{"id": "tr-1", "kind": "schedule", "cron": "0 0 * * *", "timezone": "UTC", "enabled": False}]}), "")
+        return subprocess.CompletedProcess(args, 0, "{}", "")
+    result = mod.sync_autopilot(server_url="https://example.invalid", workspace_id="workspace", agent_id="agent", subscriber_id="owner", runner=runner)
+    assert result["ok"]
+    assert any(call[:3] == ["autopilot", "trigger-update", "ap-1"] and "--enabled=true" in call for call in calls)
