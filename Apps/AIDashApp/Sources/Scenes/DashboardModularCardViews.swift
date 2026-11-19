@@ -662,4 +662,602 @@ public struct CLICostQuotaCardView: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+public enum AgentEfficiencyWorkloadMetric: String, CaseIterable, Identifiable {
+    case runs
+    case tokens
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .runs:
+            return DashboardL10n.tr("dashboard.agent_efficiency.metric_runs", "Task Runs")
+        case .tokens:
+            return DashboardL10n.tr("dashboard.agent_efficiency.metric_tokens", "Token Share")
+        }
+    }
+}
+
+public struct AgentEfficiencyChartsCardView: View {
+    public let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
+    @State private var workloadMetric: AgentEfficiencyWorkloadMetric = .runs
+    @Environment(\.locale) private var locale
+
+    public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?) {
+        self.summary = summary
+    }
+
+    private var workbench: AgentEfficiencyWorkbenchSnapshot? {
+        summary?.agentEfficiency
+    }
+
+    public var body: some View {
+        SolidModularCardContainer(
+            title: DashboardL10n.tr(
+                "dashboard.agent_efficiency.title",
+                "Agent Role Division & Multi-Round Collaboration"
+            ),
+            subtitle: subtitleText,
+            symbolName: "chart.xyaxis.line"
+        ) {
+            coverageBadge
+        } content: {
+            if let snapshot = workbench, snapshot.sampleSize > 0 {
+                VStack(alignment: .leading, spacing: 14) {
+                    kpiSummaryStrip(snapshot)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 14) {
+                            roleDivisionPanel(snapshot)
+                            reviewRoundPanel(snapshot)
+                        }
+                        .frame(minWidth: 760)
+                        VStack(alignment: .leading, spacing: 14) {
+                            roleDivisionPanel(snapshot)
+                            reviewRoundPanel(snapshot)
+                        }
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 14) {
+                            stageDurationPanel(snapshot)
+                            dailyThroughputPanel(snapshot)
+                        }
+                        .frame(minWidth: 760)
+                        VStack(alignment: .leading, spacing: 14) {
+                            stageDurationPanel(snapshot)
+                            dailyThroughputPanel(snapshot)
+                        }
+                    }
+                }
+            } else {
+                emptyStatePanel
+            }
+        }
+        .accessibilityIdentifier("dashboard.agentEfficiencyChartsCard")
+    }
+
+    private var subtitleText: String {
+        guard let snapshot = workbench, snapshot.sampleSize > 0 else {
+            return DashboardL10n.tr(
+                "dashboard.agent_efficiency.subtitle_empty",
+                "Read-only personal workflow telemetry · awaiting observed receipts"
+            )
+        }
+        let asOf = snapshot.sourceAsOf ?? snapshot.windowEnd ?? "—"
+        return DashboardL10n.format(
+            "dashboard.agent_efficiency.subtitle_format",
+            "Window %@ · Updated %@ · %lld observed runs",
+            snapshot.windowCST,
+            asOf,
+            snapshot.sampleSize
+        )
+    }
+
+    @ViewBuilder
+    private var coverageBadge: some View {
+        let status = workbench?.coverageStatus ?? "missing"
+        let health: DashboardSemanticHealth = {
+            switch status {
+            case "healthy": return .healthy
+            case "partial": return .warning
+            case "error": return .critical
+            default: return .neutral
+            }
+        }()
+        let tint = DashboardSemanticColorPalette.color(for: health)
+        HStack(spacing: 5) {
+            Image(systemName: health.symbolName)
+                .font(.caption2)
+            Text(coverageLabel(for: status))
+                .font(.caption.weight(.semibold))
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(tint.opacity(0.14), in: Capsule())
+        .foregroundStyle(tint)
+    }
+
+    private func coverageLabel(for status: String) -> String {
+        switch status {
+        case "healthy":
+            return DashboardL10n.tr("dashboard.agent_efficiency.coverage_healthy", "Observed")
+        case "partial":
+            return DashboardL10n.tr("dashboard.agent_efficiency.coverage_partial", "Partial")
+        case "error":
+            return DashboardL10n.tr("dashboard.agent_efficiency.coverage_error", "Degraded")
+        default:
+            return DashboardL10n.tr("dashboard.agent_efficiency.coverage_unknown", "No Sample")
+        }
+    }
+
+    private var emptyStatePanel: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.empty_title",
+                    "No Agent Collaboration Observations Yet"
+                ))
+                .font(.subheadline.weight(.semibold))
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.empty_desc",
+                    "Run the daily aidata digest pipeline to populate role division, review rounds, stage duration, and daily throughput."
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private func kpiSummaryStrip(_ snapshot: AgentEfficiencyWorkbenchSnapshot) -> some View {
+        let round = snapshot.roundSummary
+        let passRateText = round.r1PassRate.map { "\(Int(($0 * 100).rounded()))%" } ?? "—"
+        let passHealth: DashboardSemanticHealth = {
+            guard let rate = round.r1PassRate else { return .neutral }
+            if rate >= 0.70 { return .healthy }
+            if rate >= 0.50 { return .warning }
+            return .critical
+        }()
+        let multiRoundTotal = round.r2Count + round.r3PlusCount
+        let multiHealth: DashboardSemanticHealth = round.r3PlusCount > 10 ? .warning : .healthy
+        let medText = formatDuration(round.medianDurationSec)
+        let p90Text = formatDuration(round.p90DurationSec)
+        let steeringPct = round.steeringTokenShare.map { Int(($0 * 100).rounded()) }
+        let execPct = steeringPct.map { max(0, 100 - $0) }
+        let tokenSplitValue = steeringPct.map { "\($0)% / \(execPct ?? 0)%" } ?? "—"
+
+        return LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(minimum: 195), spacing: 10), count: 4),
+            spacing: 10
+        ) {
+            kpiTile(
+                title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_first_pass", "First-Pass Review Rate"),
+                value: passRateText,
+                detail: DashboardL10n.format(
+                    "dashboard.agent_efficiency.kpi_first_pass_detail_format",
+                    "%lld of %lld evaluated tasks",
+                    round.r1Count,
+                    round.evaluatedTasks
+                ),
+                symbol: "checkmark.seal.fill",
+                health: passHealth
+            )
+            kpiTile(
+                title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_multi_round", "Multi-Round Rework Tasks"),
+                value: "\(multiRoundTotal)",
+                detail: DashboardL10n.format(
+                    "dashboard.agent_efficiency.kpi_multi_round_detail_format",
+                    "r2: %lld · r3+: %lld",
+                    round.r2Count,
+                    round.r3PlusCount
+                ),
+                symbol: "arrow.triangle.2.circlepath",
+                health: multiHealth
+            )
+            kpiTile(
+                title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_stage_duration", "Stage Duration (Median / P90)"),
+                value: "\(medText) / \(p90Text)",
+                detail: round.ttftP90Sec.map {
+                    DashboardL10n.format(
+                        "dashboard.agent_efficiency.kpi_ttft_detail_format",
+                        "Gateway P90 TTFT %.1fs",
+                        $0
+                    )
+                } ?? DashboardL10n.tr(
+                    "dashboard.agent_efficiency.kpi_duration_detail_default",
+                    "Dispatch to completion span"
+                ),
+                symbol: "timer",
+                health: .neutral
+            )
+            kpiTile(
+                title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_token_split", "Coordination vs Execution"),
+                value: tokenSplitValue,
+                detail: round.cacheHitRate.map {
+                    DashboardL10n.format(
+                        "dashboard.agent_efficiency.kpi_cache_detail_format",
+                        "KV Cache Hit %lld%%",
+                        Int(($0 * 100).rounded())
+                    )
+                } ?? DashboardL10n.tr(
+                    "dashboard.agent_efficiency.kpi_token_split_detail_default",
+                    "Lead vs implementation token share"
+                ),
+                symbol: "chart.pie.fill",
+                health: .healthy
+            )
+        }
+    }
+
+    private func kpiTile(
+        title: String,
+        value: String,
+        detail: String,
+        symbol: String,
+        health: DashboardSemanticHealth
+    ) -> some View {
+        let tint = DashboardSemanticColorPalette.color(for: health)
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .top, spacing: 6) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Image(systemName: symbol)
+                    .font(.caption)
+                    .foregroundStyle(tint)
+            }
+            Text(value)
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Text(detail)
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private func roleDivisionPanel(_ snapshot: AgentEfficiencyWorkbenchSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(DashboardL10n.tr(
+                        "dashboard.agent_efficiency.chart_role_title",
+                        "Role Division & Workload Split"
+                    ))
+                    .font(.subheadline.weight(.bold))
+                    Spacer(minLength: 4)
+                    Picker(
+                        DashboardL10n.tr("dashboard.agent_efficiency.metric_picker", "Metric"),
+                        selection: $workloadMetric
+                    ) {
+                        ForEach(AgentEfficiencyWorkloadMetric.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.chart_role_subtitle",
+                    "Task executions and token share across coordination and leaf roles"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Chart(snapshot.roles) { role in
+                let label = localizedRoleTitle(role)
+                let val: Double = workloadMetric == .runs
+                    ? Double(role.runsCount)
+                    : role.tokenSharePct
+                BarMark(
+                    x: .value(workloadMetric.title, val),
+                    y: .value("Role", label)
+                )
+                .foregroundStyle(roleTint(for: role.roleKey))
+                .cornerRadius(4)
+                .annotation(position: .trailing, alignment: .leading) {
+                    Text(
+                        workloadMetric == .runs
+                            ? "\(role.runsCount)"
+                            : String(format: "%.1f%%", role.tokenSharePct)
+                    )
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .frame(minHeight: 210)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private struct RoundBarSegment: Identifiable {
+        let id: String
+        let roleLabel: String
+        let tierTitle: String
+        let count: Int
+        let color: Color
+    }
+
+    private func reviewRoundPanel(_ snapshot: AgentEfficiencyWorkbenchSnapshot) -> some View {
+        let r1Title = DashboardL10n.tr("dashboard.agent_efficiency.round_r1", "r1 First-Pass")
+        let r2Title = DashboardL10n.tr("dashboard.agent_efficiency.round_r2", "r2 Second-Round")
+        let r3Title = DashboardL10n.tr("dashboard.agent_efficiency.round_r3_plus", "r3+ Multi-Round")
+        let activeRoles = snapshot.roles.filter { ($0.r1Count + $0.r2Count + $0.r3PlusCount) > 0 }
+        let segments: [RoundBarSegment] = activeRoles.flatMap { role in
+            let label = localizedRoleTitle(role)
+            return [
+                RoundBarSegment(id: "\(role.roleKey)-r1", roleLabel: label, tierTitle: r1Title, count: role.r1Count, color: .green),
+                RoundBarSegment(id: "\(role.roleKey)-r2", roleLabel: label, tierTitle: r2Title, count: role.r2Count, color: .orange),
+                RoundBarSegment(id: "\(role.roleKey)-r3", roleLabel: label, tierTitle: r3Title, count: role.r3PlusCount, color: .red),
+            ]
+        }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.chart_rounds_title",
+                    "Review Convergence & Round Distribution"
+                ))
+                .font(.subheadline.weight(.bold))
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.chart_rounds_subtitle",
+                    "First-pass completion (r1) vs second-round (r2) and multi-round rework (r3+)"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Chart(segments) { seg in
+                BarMark(
+                    x: .value("Tasks", seg.count),
+                    y: .value("Role", seg.roleLabel)
+                )
+                .foregroundStyle(by: .value("Round", seg.tierTitle))
+            }
+            .chartForegroundStyleScale([
+                r1Title: Color.green,
+                r2Title: Color.orange,
+                r3Title: Color.red,
+            ])
+            .chartLegend(position: .bottom, alignment: .leading)
+            .frame(minHeight: 210)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private struct DurationBarItem: Identifiable {
+        let id: String
+        let roleLabel: String
+        let percentileTitle: String
+        let minutes: Double
+    }
+
+    private func stageDurationPanel(_ snapshot: AgentEfficiencyWorkbenchSnapshot) -> some View {
+        let medTitle = DashboardL10n.tr("dashboard.agent_efficiency.duration_median", "Median (min)")
+        let p90Title = DashboardL10n.tr("dashboard.agent_efficiency.duration_p90", "P90 Tail (min)")
+        let rolesWithDur = snapshot.roles.filter { ($0.medianDurationSec ?? 0) > 0 || ($0.p90DurationSec ?? 0) > 0 }
+        let items: [DurationBarItem] = rolesWithDur.flatMap { role in
+            let label = localizedRoleTitle(role)
+            let medMin = max((role.medianDurationSec ?? 0) / 60.0, 0.05)
+            let p90Min = max((role.p90DurationSec ?? 0) / 60.0, medMin)
+            return [
+                DurationBarItem(id: "\(role.roleKey)-med", roleLabel: label, percentileTitle: medTitle, minutes: medMin),
+                DurationBarItem(id: "\(role.roleKey)-p90", roleLabel: label, percentileTitle: p90Title, minutes: p90Min),
+            ]
+        }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.chart_duration_title",
+                    "Stage Duration Median vs P90"
+                ))
+                .font(.subheadline.weight(.bold))
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.chart_duration_subtitle",
+                    "Stage turnaround time in minutes exposing long-tail bottlenecks"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if items.isEmpty {
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.duration_empty",
+                    "No paired task dispatch-to-completion timestamps in current window."
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 190, alignment: .center)
+            } else {
+                Chart(items) { item in
+                    BarMark(
+                        x: .value("Minutes", item.minutes),
+                        y: .value("Role", item.roleLabel)
+                    )
+                    .position(by: .value("Percentile", item.percentileTitle))
+                    .foregroundStyle(by: .value("Percentile", item.percentileTitle))
+                    .cornerRadius(3)
+                }
+                .chartXScale(type: .symmetricLog(slopeAtZero: 0.5))
+                .chartForegroundStyleScale([
+                    medTitle: Color.accentColor,
+                    p90Title: Color.orange,
+                ])
+                .chartLegend(position: .bottom, alignment: .leading)
+                .frame(minHeight: 210)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private func dailyThroughputPanel(_ snapshot: AgentEfficiencyWorkbenchSnapshot) -> some View {
+        let tasksTitle = DashboardL10n.tr("dashboard.agent_efficiency.daily_tasks", "Completed Tasks")
+        let goalsTitle = DashboardL10n.tr("dashboard.agent_efficiency.daily_goals", "Completed Goals")
+
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(DashboardL10n.tr(
+                        "dashboard.agent_efficiency.chart_daily_title",
+                        "Daily Goal Throughput & Token Trend"
+                    ))
+                    .font(.subheadline.weight(.bold))
+                    Spacer(minLength: 4)
+                    let totalTok = snapshot.dailySeries.reduce(UInt64(0)) { $0 + $1.totalTokens }
+                    if totalTok > 0 {
+                        Text("14d \(DashboardTokenFormatter.compact(totalTok)) tok")
+                            .font(.caption2.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.chart_daily_subtitle",
+                    "14-day completed tasks, goals, and daily token volume"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if snapshot.dailySeries.isEmpty {
+                Text(DashboardL10n.tr(
+                    "dashboard.agent_efficiency.daily_empty",
+                    "No daily series recorded yet."
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 190, alignment: .center)
+            } else {
+                Chart {
+                    ForEach(snapshot.dailySeries) { pt in
+                        BarMark(
+                            x: .value("Day", pt.shortDayLabel),
+                            y: .value(tasksTitle, pt.tasksCompleted)
+                        )
+                        .foregroundStyle(by: .value("Metric", tasksTitle))
+                        .cornerRadius(3)
+
+                        LineMark(
+                            x: .value("Day", pt.shortDayLabel),
+                            y: .value(goalsTitle, pt.goalsCompleted)
+                        )
+                        .foregroundStyle(by: .value("Metric", goalsTitle))
+                        .lineStyle(StrokeStyle(lineWidth: 2.0))
+                        .symbol(Circle())
+                    }
+                }
+                .chartForegroundStyleScale([
+                    tasksTitle: Color.accentColor.opacity(0.78),
+                    goalsTitle: Color.green,
+                ])
+                .chartLegend(position: .bottom, alignment: .leading)
+                .frame(minHeight: 210)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private func localizedRoleTitle(_ role: AgentRoleEfficiencyRow) -> String {
+        AgentEfficiencyFormatting.localizedRoleTitle(role, locale: locale)
+    }
+
+    private func roleTint(for key: String) -> Color {
+        AgentEfficiencyFormatting.roleTint(for: key)
+    }
+
+    private func formatDuration(_ seconds: Double?) -> String {
+        AgentEfficiencyFormatting.formatDuration(seconds)
+    }
+}
+
+private enum AgentEfficiencyFormatting {
+    static func localizedRoleTitle(_ role: AgentRoleEfficiencyRow, locale: Locale) -> String {
+        switch role.roleKey {
+        case "m3": return DashboardL10n.tr("dashboard.agent_efficiency.role.top_coordinator", "Top-Level Coordinator")
+        case "m2": return DashboardL10n.tr("dashboard.agent_efficiency.role.topic_dispatcher", "Topic Dispatcher")
+        case "m1": return DashboardL10n.tr("dashboard.agent_efficiency.role.goal_lead", "Goal Lead (TL)")
+        case "designer": return DashboardL10n.tr("dashboard.agent_efficiency.role.designer", "Visual Design (Designer)")
+        case "writer": return DashboardL10n.tr("dashboard.agent_efficiency.role.writer", "Code Implementation (Writer)")
+        case "reviewer": return DashboardL10n.tr("dashboard.agent_efficiency.role.reviewer", "Independent Review (Reviewer)")
+        case "explorer": return DashboardL10n.tr("dashboard.agent_efficiency.role.explorer", "Code Exploration (Explorer)")
+        case "pr_monitor": return DashboardL10n.tr("dashboard.agent_efficiency.role.pr_monitor", "Delivery Monitor (PR Monitor)")
+        default:
+            let isZh = locale.language.languageCode?.identifier.hasPrefix("zh") == true
+            return isZh ? role.roleLabel : (role.roleLabelEn ?? role.roleLabel)
+        }
+    }
+
+    static func roleTint(for key: String) -> Color {
+        switch key {
+        case "m3", "m2", "m1": return .indigo
+        case "designer": return .purple
+        case "writer": return .accentColor
+        case "reviewer": return .teal
+        case "explorer": return .cyan
+        case "pr_monitor": return .orange
+        default: return .secondary
+        }
+    }
+
+    static func formatDuration(_ seconds: Double?) -> String {
+        guard let seconds, seconds > 0 else { return "—" }
+        if seconds < 60 { return String(format: "%.0fs", seconds) }
+        if seconds < 3600 { return String(format: "%.1fm", seconds / 60.0) }
+        return String(format: "%.1fh", seconds / 3600.0)
+    }
+}
 #endif

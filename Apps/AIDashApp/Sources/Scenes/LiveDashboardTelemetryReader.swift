@@ -5,6 +5,317 @@ import Foundation
 import SQLite3
 import AIDashCore
 
+public struct AgentRoleEfficiencyRow: Codable, Sendable, Equatable, Identifiable {
+    public let roleKey: String
+    public let roleLabel: String
+    public let roleLabelEn: String?
+    public let runsCount: Int
+    public let goalsCount: Int
+    public let tasksCount: Int
+    public let r1Count: Int
+    public let r2Count: Int
+    public let r3PlusCount: Int
+    public let r1PassRate: Double?
+    public let medianDurationSec: Double?
+    public let p90DurationSec: Double?
+    public let estimatedTokens: UInt64
+    public let tokenSharePct: Double
+
+    public var id: String { roleKey }
+
+    enum CodingKeys: String, CodingKey {
+        case roleKey = "role_key"
+        case roleLabel = "role_label"
+        case roleLabelEn = "role_label_en"
+        case runsCount = "runs_count"
+        case goalsCount = "goals_count"
+        case tasksCount = "tasks_count"
+        case r1Count = "r1_count"
+        case r2Count = "r2_count"
+        case r3PlusCount = "r3_plus_count"
+        case r1PassRate = "r1_pass_rate"
+        case medianDurationSec = "median_duration_sec"
+        case p90DurationSec = "p90_duration_sec"
+        case estimatedTokens = "estimated_tokens"
+        case tokenSharePct = "token_share_pct"
+    }
+
+    public init(
+        roleKey: String,
+        roleLabel: String,
+        roleLabelEn: String? = nil,
+        runsCount: Int = 0,
+        goalsCount: Int = 0,
+        tasksCount: Int = 0,
+        r1Count: Int = 0,
+        r2Count: Int = 0,
+        r3PlusCount: Int = 0,
+        r1PassRate: Double? = nil,
+        medianDurationSec: Double? = nil,
+        p90DurationSec: Double? = nil,
+        estimatedTokens: UInt64 = 0,
+        tokenSharePct: Double = 0
+    ) {
+        self.roleKey = roleKey
+        self.roleLabel = roleLabel
+        self.roleLabelEn = roleLabelEn
+        self.runsCount = runsCount
+        self.goalsCount = goalsCount
+        self.tasksCount = tasksCount
+        self.r1Count = r1Count
+        self.r2Count = r2Count
+        self.r3PlusCount = r3PlusCount
+        self.r1PassRate = r1PassRate
+        self.medianDurationSec = medianDurationSec
+        self.p90DurationSec = p90DurationSec
+        self.estimatedTokens = estimatedTokens
+        self.tokenSharePct = tokenSharePct
+    }
+}
+
+public struct AgentDailyEfficiencyPoint: Codable, Sendable, Equatable, Identifiable {
+    public let day: String
+    public let goalsCompleted: Int
+    public let tasksCompleted: Int
+    public let r1Count: Int
+    public let r2Count: Int
+    public let r3PlusCount: Int
+    public let r1PassRate: Double?
+    public let medianDurationSec: Double?
+    public let p90DurationSec: Double?
+    public let blockedEvents: Int
+    public let steeringTokens: UInt64
+    public let codingTokens: UInt64
+    public let totalTokens: UInt64
+
+    public var id: String { day }
+
+    public var shortDayLabel: String {
+        day.count >= 10 ? String(day.suffix(5)) : day
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case day
+        case cstDay = "cst_day"
+        case goalsCompleted = "goals_completed"
+        case tasksCompleted = "tasks_completed"
+        case r1Count = "r1_count"
+        case r2Count = "r2_count"
+        case r3PlusCount = "r3_plus_count"
+        case r1PassRate = "r1_pass_rate"
+        case medianDurationSec = "median_duration_sec"
+        case p90DurationSec = "p90_duration_sec"
+        case blockedEvents = "blocked_events"
+        case steeringTokens = "steering_tokens"
+        case codingTokens = "coding_tokens"
+        case totalTokens = "total_tokens"
+    }
+
+    public init(
+        day: String,
+        goalsCompleted: Int = 0,
+        tasksCompleted: Int = 0,
+        r1Count: Int = 0,
+        r2Count: Int = 0,
+        r3PlusCount: Int = 0,
+        r1PassRate: Double? = nil,
+        medianDurationSec: Double? = nil,
+        p90DurationSec: Double? = nil,
+        blockedEvents: Int = 0,
+        steeringTokens: UInt64 = 0,
+        codingTokens: UInt64 = 0,
+        totalTokens: UInt64 = 0
+    ) {
+        self.day = day
+        self.goalsCompleted = goalsCompleted
+        self.tasksCompleted = tasksCompleted
+        self.r1Count = r1Count
+        self.r2Count = r2Count
+        self.r3PlusCount = r3PlusCount
+        self.r1PassRate = r1PassRate
+        self.medianDurationSec = medianDurationSec
+        self.p90DurationSec = p90DurationSec
+        self.blockedEvents = blockedEvents
+        self.steeringTokens = steeringTokens
+        self.codingTokens = codingTokens
+        self.totalTokens = totalTokens
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let resolvedDay = (try? container.decode(String.self, forKey: .day))
+            ?? (try? container.decode(String.self, forKey: .cstDay))
+            ?? ""
+        self.day = resolvedDay
+        self.goalsCompleted = (try? container.decode(Int.self, forKey: .goalsCompleted)) ?? 0
+        self.tasksCompleted = (try? container.decode(Int.self, forKey: .tasksCompleted)) ?? 0
+        self.r1Count = (try? container.decode(Int.self, forKey: .r1Count)) ?? 0
+        self.r2Count = (try? container.decode(Int.self, forKey: .r2Count)) ?? 0
+        self.r3PlusCount = (try? container.decode(Int.self, forKey: .r3PlusCount)) ?? 0
+        self.r1PassRate = try? container.decodeIfPresent(Double.self, forKey: .r1PassRate)
+        self.medianDurationSec = try? container.decodeIfPresent(Double.self, forKey: .medianDurationSec)
+        self.p90DurationSec = try? container.decodeIfPresent(Double.self, forKey: .p90DurationSec)
+        self.blockedEvents = (try? container.decode(Int.self, forKey: .blockedEvents)) ?? 0
+        self.steeringTokens = (try? container.decode(UInt64.self, forKey: .steeringTokens)) ?? 0
+        self.codingTokens = (try? container.decode(UInt64.self, forKey: .codingTokens)) ?? 0
+        self.totalTokens = (try? container.decode(UInt64.self, forKey: .totalTokens)) ?? 0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(day, forKey: .day)
+        try container.encode(goalsCompleted, forKey: .goalsCompleted)
+        try container.encode(tasksCompleted, forKey: .tasksCompleted)
+        try container.encode(r1Count, forKey: .r1Count)
+        try container.encode(r2Count, forKey: .r2Count)
+        try container.encode(r3PlusCount, forKey: .r3PlusCount)
+        try container.encodeIfPresent(r1PassRate, forKey: .r1PassRate)
+        try container.encodeIfPresent(medianDurationSec, forKey: .medianDurationSec)
+        try container.encodeIfPresent(p90DurationSec, forKey: .p90DurationSec)
+        try container.encode(blockedEvents, forKey: .blockedEvents)
+        try container.encode(steeringTokens, forKey: .steeringTokens)
+        try container.encode(codingTokens, forKey: .codingTokens)
+        try container.encode(totalTokens, forKey: .totalTokens)
+    }
+}
+
+public struct AgentRoundDistributionSummary: Codable, Sendable, Equatable {
+    public let r1Count: Int
+    public let r2Count: Int
+    public let r3PlusCount: Int
+    public let evaluatedTasks: Int
+    public let r1PassRate: Double?
+    public let medianDurationSec: Double?
+    public let p90DurationSec: Double?
+    public let steeringTokenShare: Double?
+    public let ttftP90Sec: Double?
+    public let cacheHitRate: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case r1Count = "r1_count"
+        case r2Count = "r2_count"
+        case r3PlusCount = "r3_plus_count"
+        case evaluatedTasks = "evaluated_tasks"
+        case r1PassRate = "r1_pass_rate"
+        case medianDurationSec = "median_duration_sec"
+        case p90DurationSec = "p90_duration_sec"
+        case steeringTokenShare = "steering_token_share"
+        case ttftP90Sec = "ttft_p90_sec"
+        case cacheHitRate = "cache_hit_rate"
+    }
+
+    public init(
+        r1Count: Int = 0,
+        r2Count: Int = 0,
+        r3PlusCount: Int = 0,
+        evaluatedTasks: Int = 0,
+        r1PassRate: Double? = nil,
+        medianDurationSec: Double? = nil,
+        p90DurationSec: Double? = nil,
+        steeringTokenShare: Double? = nil,
+        ttftP90Sec: Double? = nil,
+        cacheHitRate: Double? = nil
+    ) {
+        self.r1Count = r1Count
+        self.r2Count = r2Count
+        self.r3PlusCount = r3PlusCount
+        self.evaluatedTasks = evaluatedTasks
+        self.r1PassRate = r1PassRate
+        self.medianDurationSec = medianDurationSec
+        self.p90DurationSec = p90DurationSec
+        self.steeringTokenShare = steeringTokenShare
+        self.ttftP90Sec = ttftP90Sec
+        self.cacheHitRate = cacheHitRate
+    }
+}
+
+public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
+    public let schemaVersion: Int
+    public let windowCST: String
+    public let windowStart: String?
+    public let windowEnd: String?
+    public let sourceAsOf: String?
+    public let sampleSize: Int
+    public let coverageStatus: String
+    public let roles: [AgentRoleEfficiencyRow]
+    public let roundSummary: AgentRoundDistributionSummary
+    public let dailySeries: [AgentDailyEfficiencyPoint]
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case windowCST = "window_cst"
+        case windowStart = "window_start"
+        case windowEnd = "window_end"
+        case sourceAsOf = "source_as_of"
+        case sampleSize = "sample_size"
+        case coverageStatus = "coverage_status"
+        case roles
+        case roleBreakdown = "role_breakdown"
+        case roundSummary = "round_summary"
+        case roundDistribution = "round_distribution"
+        case dailySeries = "daily_series"
+        case dailyTrend = "daily_trend"
+    }
+
+    public init(
+        schemaVersion: Int = 1,
+        windowCST: String = "14d",
+        windowStart: String? = nil,
+        windowEnd: String? = nil,
+        sourceAsOf: String? = nil,
+        sampleSize: Int = 0,
+        coverageStatus: String = "unknown",
+        roles: [AgentRoleEfficiencyRow] = [],
+        roundSummary: AgentRoundDistributionSummary = AgentRoundDistributionSummary(),
+        dailySeries: [AgentDailyEfficiencyPoint] = []
+    ) {
+        self.schemaVersion = schemaVersion
+        self.windowCST = windowCST
+        self.windowStart = windowStart
+        self.windowEnd = windowEnd
+        self.sourceAsOf = sourceAsOf
+        self.sampleSize = sampleSize
+        self.coverageStatus = coverageStatus
+        self.roles = roles
+        self.roundSummary = roundSummary
+        self.dailySeries = dailySeries
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = (try? container.decode(Int.self, forKey: .schemaVersion)) ?? 1
+        self.windowCST = (try? container.decode(String.self, forKey: .windowCST)) ?? "14d"
+        self.windowStart = try? container.decodeIfPresent(String.self, forKey: .windowStart)
+        self.windowEnd = try? container.decodeIfPresent(String.self, forKey: .windowEnd)
+        self.sourceAsOf = try? container.decodeIfPresent(String.self, forKey: .sourceAsOf)
+        self.sampleSize = (try? container.decode(Int.self, forKey: .sampleSize)) ?? 0
+        self.coverageStatus = (try? container.decode(String.self, forKey: .coverageStatus)) ?? "unknown"
+        self.roles = (try? container.decode([AgentRoleEfficiencyRow].self, forKey: .roles))
+            ?? (try? container.decode([AgentRoleEfficiencyRow].self, forKey: .roleBreakdown))
+            ?? []
+        self.roundSummary = (try? container.decode(AgentRoundDistributionSummary.self, forKey: .roundSummary))
+            ?? (try? container.decode(AgentRoundDistributionSummary.self, forKey: .roundDistribution))
+            ?? AgentRoundDistributionSummary()
+        self.dailySeries = (try? container.decode([AgentDailyEfficiencyPoint].self, forKey: .dailySeries))
+            ?? (try? container.decode([AgentDailyEfficiencyPoint].self, forKey: .dailyTrend))
+            ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(windowCST, forKey: .windowCST)
+        try container.encodeIfPresent(windowStart, forKey: .windowStart)
+        try container.encodeIfPresent(windowEnd, forKey: .windowEnd)
+        try container.encodeIfPresent(sourceAsOf, forKey: .sourceAsOf)
+        try container.encode(sampleSize, forKey: .sampleSize)
+        try container.encode(coverageStatus, forKey: .coverageStatus)
+        try container.encode(roles, forKey: .roles)
+        try container.encode(roundSummary, forKey: .roundSummary)
+        try container.encode(dailySeries, forKey: .dailySeries)
+    }
+}
+
 public struct RealQuotaSnapshot: Sendable, Equatable {
     public let claudeSevenDayUsedFraction: Double?
     public let claudeFiveHourUsedFraction: Double?
@@ -1860,6 +2171,7 @@ extension LiveDashboardTelemetryReader {
         public var cacheHitRate: Double = 0
         public var steeringTokenShare: Double = 0
         public var skillsROI: SkillsRoiSnapshot?
+        public var agentEfficiency: AgentEfficiencyWorkbenchSnapshot?
     }
 
     public static func loadLiveEfficiencySummary(homeURL: URL? = nil) -> LiveEfficiencySummary? {
@@ -1868,17 +2180,25 @@ extension LiveDashboardTelemetryReader {
         let whURL = home.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
         let magpieURL = home.appendingPathComponent(".config/magpie/usage.jsonl")
         let skillsURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
-        let cacheKey = "\(fileCacheSignature(for: whURL))|\(fileCacheSignature(for: magpieURL))|\(fileCacheSignature(for: skillsURL))"
+        let agentEffURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/agent-efficiency.json")
+        let cacheKey = "\(fileCacheSignature(for: whURL))|\(fileCacheSignature(for: magpieURL))|\(fileCacheSignature(for: skillsURL))|\(fileCacheSignature(for: agentEffURL))"
         if cachedLiveEfficiencyKey == cacheKey, let cached = cachedLiveEfficiencySummary {
             return cached
         }
         var summary = LiveEfficiencySummary()
-        populateWarehouseReviewSummary(&summary, whURL: whURL)
+        summary.agentEfficiency = loadAgentEfficiencySnapshot(homeURL: home)
         populateMagpieEfficiencySummary(&summary, magpieURL: magpieURL)
+        populateWarehouseReviewSummary(&summary, whURL: whURL)
         summary.skillsROI = loadSkillsRoiSnapshot(homeURL: home)
         cachedLiveEfficiencyKey = cacheKey
         cachedLiveEfficiencySummary = summary
         return summary
+    }
+
+    public static func loadAgentEfficiencySnapshot(homeURL: URL) -> AgentEfficiencyWorkbenchSnapshot? {
+        let url = homeURL.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/agent-efficiency.json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(AgentEfficiencyWorkbenchSnapshot.self, from: data)
     }
 
     private static func loadSkillsRoiSnapshot(homeURL: URL) -> SkillsRoiSnapshot? {
@@ -1896,14 +2216,179 @@ extension LiveDashboardTelemetryReader {
               FROM fact_gtt_task_run WHERE role_name IN ('reviewer', 'code_reviewer', 'planner_reviewer') GROUP BY goal_id, task_id);
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+            defer { sqlite3_finalize(stmt) }
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                let total = Int(max(sqlite3_column_int64(stmt, 0), 0))
+                let failed = Int(max(sqlite3_column_int64(stmt, 1), 0))
+                summary.reviewedTasksCount = total
+                summary.round3PlusCount = Int(max(sqlite3_column_int64(stmt, 2), 0))
+                if total > 0 { summary.r1ReviewFailRate = Double(failed) / Double(total) }
+            }
+        }
+        if summary.agentEfficiency == nil {
+            summary.agentEfficiency = buildFallbackAgentEfficiency(db: db, summary: summary)
+        }
+    }
+
+    private static func buildFallbackAgentEfficiency(
+        db: OpaquePointer,
+        summary: LiveEfficiencySummary
+    ) -> AgentEfficiencyWorkbenchSnapshot? {
+        let byRole = queryFallbackRoleRows(db: db)
+        let dailyPoints = queryFallbackDailyPoints(db: db)
+        guard !byRole.isEmpty || !dailyPoints.isEmpty else { return nil }
+        let orderedKeys = ["m3", "m2", "m1", "designer", "writer", "reviewer", "explorer", "pr_monitor"]
+        let roles = orderedKeys.map { key in
+            byRole[key] ?? AgentRoleEfficiencyRow(
+                roleKey: key,
+                roleLabel: defaultRoleLabelZh(for: key),
+                roleLabelEn: defaultRoleLabelEn(for: key)
+            )
+        }
+        let execRoles = roles.filter { ["writer", "reviewer", "designer"].contains($0.roleKey) }
+        let r1Sum = execRoles.reduce(0) { $0 + $1.r1Count }
+        let r2Sum = execRoles.reduce(0) { $0 + $1.r2Count }
+        let r3Sum = execRoles.reduce(0) { $0 + $1.r3PlusCount }
+        let evalTotal = r1Sum + r2Sum + r3Sum
+        let fallbackPass = summary.reviewedTasksCount > 0 ? max(0, 1.0 - summary.r1ReviewFailRate) : nil
+        let roundSummary = AgentRoundDistributionSummary(
+            r1Count: r1Sum,
+            r2Count: r2Sum,
+            r3PlusCount: r3Sum,
+            evaluatedTasks: evalTotal,
+            r1PassRate: evalTotal > 0 ? Double(r1Sum) / Double(evalTotal) : fallbackPass,
+            steeringTokenShare: summary.steeringTokenShare > 0 ? summary.steeringTokenShare : nil,
+            ttftP90Sec: summary.p90TTFTSeconds > 0 ? summary.p90TTFTSeconds : nil,
+            cacheHitRate: summary.cacheHitRate > 0 ? summary.cacheHitRate : nil
+        )
+        let sampleSize = max(
+            roles.reduce(0) { $0 + $1.runsCount },
+            dailyPoints.reduce(0) { $0 + $1.tasksCompleted }
+        )
+        return AgentEfficiencyWorkbenchSnapshot(
+            schemaVersion: 1,
+            windowCST: "14d",
+            windowStart: dailyPoints.first?.day,
+            windowEnd: dailyPoints.last?.day,
+            sourceAsOf: dailyPoints.last?.day,
+            sampleSize: sampleSize,
+            coverageStatus: sampleSize > 0 ? "partial" : "unknown",
+            roles: roles,
+            roundSummary: roundSummary,
+            dailySeries: dailyPoints
+        )
+    }
+
+    private static func queryFallbackRoleRows(db: OpaquePointer) -> [String: AgentRoleEfficiencyRow] {
+        let roleSQL = """
+        SELECT
+            CASE
+                WHEN lower(role_name) IN ('m3', 'm3_assistant') THEN 'm3'
+                WHEN lower(role_name) IN ('m2', 'm2_dispatcher', 'dispatcher') THEN 'm2'
+                WHEN lower(role_name) LIKE '%steering%' OR lower(role_name) IN ('m1', 'planner', 'team_lead') THEN 'm1'
+                WHEN lower(role_name) LIKE '%designer%' THEN 'designer'
+                WHEN lower(role_name) LIKE '%reviewer%' THEN 'reviewer'
+                WHEN lower(role_name) LIKE '%explorer%' THEN 'explorer'
+                WHEN lower(role_name) LIKE '%pr_monitor%' OR lower(role_name) LIKE '%pr monitor%' OR lower(role_name) = 'prmon' THEN 'pr_monitor'
+                ELSE 'writer'
+            END AS rkey,
+            COUNT(*), COUNT(DISTINCT goal_uid), COUNT(DISTINCT goal_uid || ':' || task_id),
+            SUM(CASE WHEN round_no IN (1, 10) AND COALESCE(UPPER(v5_verdict), '') != 'FAIL' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN round_no = 2 OR (round_no = 1 AND COALESCE(UPPER(v5_verdict), '') = 'FAIL') THEN 1 ELSE 0 END),
+            SUM(CASE WHEN round_no >= 3 AND round_no != 10 THEN 1 ELSE 0 END)
+        FROM fact_gtt_task_run GROUP BY rkey;
+        """
+        var byRole: [String: AgentRoleEfficiencyRow] = [:]
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, roleSQL, -1, &stmt, nil) == SQLITE_OK, let stmt else { return byRole }
         defer { sqlite3_finalize(stmt) }
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return }
-        let total = Int(max(sqlite3_column_int64(stmt, 0), 0))
-        let failed = Int(max(sqlite3_column_int64(stmt, 1), 0))
-        summary.reviewedTasksCount = total
-        summary.round3PlusCount = Int(max(sqlite3_column_int64(stmt, 2), 0))
-        if total > 0 { summary.r1ReviewFailRate = Double(failed) / Double(total) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let keyPtr = sqlite3_column_text(stmt, 0) else { continue }
+            let key = String(cString: keyPtr)
+            let runs = Int(max(sqlite3_column_int64(stmt, 1), 0))
+            let goals = Int(max(sqlite3_column_int64(stmt, 2), 0))
+            let tasks = Int(max(sqlite3_column_int64(stmt, 3), 0))
+            let r1 = Int(max(sqlite3_column_int64(stmt, 4), 0))
+            let r2 = Int(max(sqlite3_column_int64(stmt, 5), 0))
+            let r3p = Int(max(sqlite3_column_int64(stmt, 6), 0))
+            let evalTotal = r1 + r2 + r3p
+            byRole[key] = AgentRoleEfficiencyRow(
+                roleKey: key,
+                roleLabel: defaultRoleLabelZh(for: key),
+                roleLabelEn: defaultRoleLabelEn(for: key),
+                runsCount: runs,
+                goalsCount: goals,
+                tasksCount: tasks,
+                r1Count: r1,
+                r2Count: r2,
+                r3PlusCount: r3p,
+                r1PassRate: evalTotal > 0 ? Double(r1) / Double(evalTotal) : nil
+            )
+        }
+        return byRole
+    }
+
+    private static func queryFallbackDailyPoints(db: OpaquePointer) -> [AgentDailyEfficiencyPoint] {
+        let dailySQL = """
+        SELECT cst_day,
+               COUNT(DISTINCT CASE WHEN evt_type IN ('GOAL_DONE', 'PR_MERGED') THEN goal_uid END),
+               COUNT(DISTINCT CASE WHEN evt_type IN ('DONE', 'TASK_DONE', 'REVIEW_PASS') AND task_id IS NOT NULL THEN goal_uid || ':' || task_id END),
+               SUM(CASE WHEN evt_type IN ('TASK_BLOCKED', 'INPUT_BLOCKED', 'NEED_GO', 'REVIEW_FAIL') THEN 1 ELSE 0 END)
+        FROM fact_gtt_event WHERE cst_day IS NOT NULL
+        GROUP BY cst_day ORDER BY cst_day DESC LIMIT 14;
+        """
+        var dailyPoints: [AgentDailyEfficiencyPoint] = []
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, dailySQL, -1, &stmt, nil) == SQLITE_OK, let stmt else { return dailyPoints }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let dayPtr = sqlite3_column_text(stmt, 0) else { continue }
+            let day = String(cString: dayPtr)
+            let goals = Int(max(sqlite3_column_int64(stmt, 1), 0))
+            let tasks = Int(max(sqlite3_column_int64(stmt, 2), 0))
+            let blocked = Int(max(sqlite3_column_int64(stmt, 3), 0))
+            dailyPoints.append(
+                AgentDailyEfficiencyPoint(
+                    day: day,
+                    goalsCompleted: goals,
+                    tasksCompleted: tasks,
+                    r1Count: tasks,
+                    r1PassRate: tasks > 0 ? 1.0 : nil,
+                    blockedEvents: blocked
+                )
+            )
+        }
+        dailyPoints.reverse()
+        return dailyPoints
+    }
+
+    private static func defaultRoleLabelZh(for key: String) -> String {
+        switch key {
+        case "m3": return "总控协调"
+        case "m2": return "话题编排"
+        case "m1": return "Goal 主控 (TL)"
+        case "designer": return "视觉设计 (Designer)"
+        case "writer": return "编码实现 (Writer)"
+        case "reviewer": return "独立审查 (Reviewer)"
+        case "explorer": return "代码探查 (Explorer)"
+        case "pr_monitor": return "交付监控 (PR Monitor)"
+        default: return key
+        }
+    }
+
+    private static func defaultRoleLabelEn(for key: String) -> String {
+        switch key {
+        case "m3": return "Top-Level Coordinator"
+        case "m2": return "Topic Dispatcher"
+        case "m1": return "Goal Lead (TL)"
+        case "designer": return "Visual Design (Designer)"
+        case "writer": return "Code Implementation (Writer)"
+        case "reviewer": return "Independent Review (Reviewer)"
+        case "explorer": return "Code Exploration (Explorer)"
+        case "pr_monitor": return "Delivery Monitor (PR Monitor)"
+        default: return key
+        }
     }
 
     private static func populateMagpieEfficiencySummary(_ summary: inout LiveEfficiencySummary, magpieURL: URL) {

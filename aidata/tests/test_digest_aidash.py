@@ -248,3 +248,110 @@ def test_relationship_falls_back_to_ci_scatter():
     container = aidash._relationship_container("1105", rework, retro)
     assert container is not None
     assert container.cards[0].id == aidash._kuid("1105", 52)
+
+
+@pytest.mark.unit
+def test_agent_efficiency_snapshot_writes_atomic_contract_and_merges_magpie(tmp_path):
+    import json
+
+    from L5_apps.digest import agent_efficiency_snapshot as aes
+
+    magpie_file = tmp_path / "usage.jsonl"
+    magpie_file.write_text(
+        "\n".join([
+            json.dumps({
+                "t": "2026-11-18T10:00:00+08:00",
+                "req": "group/steering",
+                "served": "gemini-4-argon",
+                "in": 2000,
+                "out": 500,
+                "cache_read": 8000,
+                "cache_write": 0,
+                "ttft_ms": 1800,
+            }),
+            json.dumps({
+                "t": "2026-11-18T11:00:00+08:00",
+                "req": "group/coding",
+                "served": "gpt-5.6-luna",
+                "in": 3000,
+                "out": 1500,
+                "cache_read": 15000,
+                "cache_write": 0,
+                "ttft_ms": 4200,
+            }),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    role_cols = [
+        "role_key", "role_label", "runs_count", "goals_count", "tasks_count",
+        "r1_count", "r2_count", "r3_plus_count", "r1_pass_rate",
+        "median_duration_sec", "p90_duration_sec", "estimated_tokens", "token_share_pct",
+    ]
+    role_rows = [
+        ("m3", "总控协调", 2, 1, 2, 2, 0, 0, 1.0, 0.8, 1.5, 500, 1.0),
+        ("m2", "话题编排", 4, 2, 3, 3, 0, 0, 1.0, 6.2, 14.0, 2000, 4.0),
+        ("m1", "Goal 主控 (TL)", 8, 3, 6, 6, 0, 0, 1.0, 1200.0, 2800.0, 0, 0.0),
+        ("designer", "视觉设计 (Designer)", 2, 1, 2, 2, 0, 0, 1.0, 420.0, 600.0, 4000, 8.0),
+        ("writer", "编码实现 (Writer)", 12, 3, 8, 6, 1, 1, 0.75, 1600.0, 3200.0, 18000, 36.0),
+        ("reviewer", "独立审查 (Reviewer)", 10, 3, 8, 5, 2, 1, 0.625, 900.0, 1800.0, 22000, 44.0),
+        ("explorer", "代码探查 (Explorer)", 3, 2, 3, 3, 0, 0, 1.0, 240.0, 480.0, 1500, 3.0),
+        ("pr_monitor", "交付监控 (PR Monitor)", 5, 3, 4, 3, 1, 0, 0.75, 600.0, 1500.0, 2000, 4.0),
+    ]
+    daily_cols = [
+        "cst_day", "goals_completed", "tasks_completed",
+        "r1_count", "r2_count", "r3_plus_count", "r1_pass_rate",
+        "median_duration_sec", "p90_duration_sec", "blocked_events",
+        "steering_tokens", "coding_tokens", "total_tokens",
+    ]
+    daily_rows = [
+        ("2026-11-17", 2, 5, 4, 1, 0, 0.8, 1100.0, 2400.0, 0, 4000, 18000, 22000),
+        ("2026-11-18", 3, 7, 5, 1, 1, 0.7143, 1400.0, 3100.0, 2, 10500, 19500, 30000),
+    ]
+
+    def fake_runner(name, params=None):
+        if name == aes.ROLE_QUERY:
+            return role_rows, role_cols
+        if name == aes.DAILY_QUERY:
+            return daily_rows, daily_cols
+        raise AssertionError(f"unexpected query {name}")
+
+    out_path = tmp_path / "jobs" / "aidata-digest" / "agent-efficiency.json"
+    payload = aes.write_snapshot(out_path, magpie_path=magpie_file, query_runner=fake_runner)
+    assert out_path.is_file()
+    persisted = json.loads(out_path.read_text(encoding="utf-8"))
+    assert persisted == payload
+    assert payload["contract"] == "aidash-agent-efficiency/v1"
+    assert payload["schema_version"] == 1
+    assert payload["coverage_status"] == "healthy"
+    assert payload["window_start"] == "2026-11-17"
+    assert payload["window_end"] == "2026-11-18"
+    assert payload["source_as_of"] == "2026-11-18"
+    assert len(payload["roles"]) == 8
+    m1_row = next(r for r in payload["roles"] if r["role_key"] == "m1")
+    assert m1_row["estimated_tokens"] == 10500  # merged from magpie group/steering
+    assert payload["round_summary"]["r1_count"] == 13
+    assert payload["round_summary"]["r2_count"] == 3
+    assert payload["round_summary"]["r3_plus_count"] == 2
+    assert payload["round_summary"]["ttft_p90_sec"] == 4.2
+    assert len(payload["daily_series"]) == 2
+
+
+@pytest.mark.unit
+def test_agent_efficiency_snapshot_degrades_cleanly_when_queries_fail(tmp_path):
+    from L5_apps.digest import agent_efficiency_snapshot as aes
+
+    def failing_runner(_name, _params=None):
+        raise FileNotFoundError("warehouse missing")
+
+    out_path = tmp_path / "agent-efficiency.json"
+    payload = aes.write_snapshot(
+        out_path,
+        magpie_path=tmp_path / "missing-usage.jsonl",
+        query_runner=failing_runner,
+    )
+    assert out_path.is_file()
+    assert payload["coverage_status"] == "missing"
+    assert payload["sample_size"] == 0
+    assert payload["errors"]
+
