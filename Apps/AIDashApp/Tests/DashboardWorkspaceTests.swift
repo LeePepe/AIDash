@@ -1000,13 +1000,19 @@ struct DashboardWorkspaceTests {
 
     @Test("PreviewHost exports representative dark and light ImageRenderer states")
     func previewHostExportsRepresentativeStates() throws {
-        let outputPath = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"]
+        let explicitPath = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"]
             ?? ProcessInfo.processInfo.environment["TEST_RUNNER_AIDASH_TK3_SCREENSHOT_DIR"]
-            ?? "/Volumes/SSD/Development/handoff/aidash-2tab-observatory-demo/receipts/screenshots"
-        let output = URL(fileURLWithPath: outputPath, isDirectory: true)
+        let isTemporaryOutput = (explicitPath == nil)
+        let output = explicitPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory
+                .appendingPathComponent("aidash-previewhost-renders-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if isTemporaryOutput {
+                try? FileManager.default.removeItem(at: output)
+            }
+        }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let sample = AIDashPreviewSampleData.fallback()
-        let receiptURL = FileManager.default.temporaryDirectory.appendingPathComponent("preview-render-\(UUID().uuidString).json")
         let views: [(String, AnyView)] = [
             ("tab1-v01", AnyView(Tab1QuotasAndAgentEfficiencySections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
             ("tab1-v10", AnyView(Tab1QuotasAndAgentEfficiencySections.v10(data: sample, globalExpandAll: true, speed: .quarter))),
@@ -1025,10 +1031,11 @@ struct DashboardWorkspaceTests {
                 let tiff = try #require(image.tiffRepresentation)
                 let png = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
                 let suffix = scheme == .dark ? "dark" : "light"
-                try png.write(to: output.appendingPathComponent("preview-\(name)-\(suffix).png"))
+                let fileURL = output.appendingPathComponent("preview-\(name)-\(suffix).png")
+                try png.write(to: fileURL)
+                #expect(FileManager.default.fileExists(atPath: fileURL.path))
             }
         }
-        try? FileManager.default.removeItem(at: receiptURL)
     }
 
     @Test("HerdrSocketClient resolves project folders accurately and communicates over Unix domain socket")

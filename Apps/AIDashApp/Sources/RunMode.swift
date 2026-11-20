@@ -35,12 +35,14 @@ enum RunMode: Equatable {
     static func decide(env: [String: String], args: [String] = []) -> RunMode {
         #if os(macOS)
         if env[LaunchdAgentInstaller.agentEnvVar] == "1" { return .agent }
+        #endif
+        if env["XCTestConfigurationFilePath"] != nil
+            || env["XCTestBundlePath"] != nil { return .testHost }
+        #if os(macOS)
         if args.contains("--preview-host") || env["AIDASH_PREVIEW_HOST"] == "1" {
             return .previewHost
         }
         #endif
-        if env["XCTestConfigurationFilePath"] != nil
-            || env["XCTestBundlePath"] != nil { return .testHost }
         return .gui
     }
 

@@ -118,9 +118,13 @@ public struct PreviewSelectionReceipt: Codable, Equatable, Sendable {
 
 @MainActor
 public final class PreviewSelectionReceiptWriter: ObservableObject {
-    public static let fallbackPath = URL(
-        fileURLWithPath: "/Volumes/SSD/Development/handoff/aidash-2tab-observatory-demo/receipts/preview-selection.json"
-    )
+    public static var fallbackPath: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base
+            .appendingPathComponent("AIDash", isDirectory: true)
+            .appendingPathComponent("preview-selection.json")
+    }
 
     public let path: URL
     @Published public private(set) var receipt: PreviewSelectionReceipt

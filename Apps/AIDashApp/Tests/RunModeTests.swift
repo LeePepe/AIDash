@@ -28,6 +28,7 @@ struct RunModeTests {
     func previewHostSelectsPreviewMode() {
         #expect(RunMode.decide(env: [:], args: ["AIDash", "--preview-host"]) == .previewHost)
         #expect(RunMode.decide(env: ["AIDASH_PREVIEW_HOST": "1"]) == .previewHost)
+        #expect(RunMode.decide(env: ["XCTestConfigurationFilePath": "/tmp/x", "AIDASH_PREVIEW_HOST": "1"], args: ["AIDash", "--preview-host"]) == .testHost)
         #expect(RunMode.previewHost.loaderStrategy == .none)
         #expect(RunMode.previewHost.showsAppChrome)
     }
