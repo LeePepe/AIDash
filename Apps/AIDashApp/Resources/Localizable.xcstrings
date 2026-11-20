@@ -6003,13 +6003,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quotas & Agent Efficiency"
+            "value": "Agent Overview & Trends"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "额度、成本与模型胜率"
+            "value": "Agent 总看板"
           }
         }
       }
@@ -6021,13 +6021,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Skills Arsenal Inspector"
+            "value": "Skills Inventory & Trends"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Skills 军火库透视台"
+            "value": "Skills 基本盘与趋势"
           }
         }
       }

@@ -481,10 +481,9 @@ public struct SkillsRoiDiagnosticsCardView: View {
         let embeddedPreview = relativePath == detail.skillMdPath
             ? detail.docPreview
             : detail.references.first(where: { $0.relPath == relativePath })?.docPreview
-        let content = LiveDashboardTelemetryReader.loadSkillDocumentPreview(
-            skillDir: detail.skillDir,
+        let content = Self.resolveSkillPreviewContent(
+            detail: detail,
             relativePath: relativePath,
-            skillSlug: detail.skill,
             embeddedPreview: embeddedPreview,
             homeURL: previewHomeURL
         )
@@ -515,6 +514,27 @@ public struct SkillsRoiDiagnosticsCardView: View {
         .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
         .captureDashboardGeometry(id: "inspector-doc-preview", role: "skillsPreviewBox")
+    }
+
+    public static func resolveSkillPreviewContent(
+        detail: SkillInspectorDetail,
+        relativePath: String,
+        embeddedPreview: String? = nil,
+        homeURL: URL? = nil
+    ) -> String? {
+        if detail.skillDir.contains("/Mobile Documents/com~apple~CloudDocs")
+            || relativePath.contains("/Mobile Documents/com~apple~CloudDocs") {
+            let fallback = (embeddedPreview ?? detail.docPreview)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return fallback.isEmpty ? nil : fallback
+        }
+        return LiveDashboardTelemetryReader.loadSkillDocumentPreview(
+            skillDir: detail.skillDir,
+            relativePath: relativePath,
+            skillSlug: detail.skill,
+            embeddedPreview: embeddedPreview,
+            homeURL: homeURL
+        )
     }
 
     private func inspectorScriptsLedgerSection(_ detail: SkillInspectorDetail) -> some View {
