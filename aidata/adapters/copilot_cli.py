@@ -255,6 +255,9 @@ def collect(*, now: datetime | None = None) -> int:
     per session/turn, not one count per repeated marker or body/file population.
     Re-scan mutable rows so later skill-context/file metadata is not missed.
     """
+    from adapters import cloud_sync
+
+    cloud_sync.pull_icloud_telemetry_shards()
     if not COPILOT_SESSION_DB.exists():
         return 0
     today = (now or datetime.now(timezone.utc)).date()  # noqa: UP017 - hook Python 3.9
