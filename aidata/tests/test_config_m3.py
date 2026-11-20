@@ -157,3 +157,24 @@ def test_unpriced_models_include_gateway_models():
         "gemini-4-carbon",
         "microsoft-decision-1",
     } <= set(config.UNPRICED_MODELS)
+
+
+@pytest.mark.unit
+def test_raw_source_lock_serializes_concurrent_writes_and_times_out_when_held(tmp_path, monkeypatch):
+    import fcntl
+
+    import rawio
+
+    monkeypatch.setattr(rawio, "raw_source_dir", lambda source: tmp_path / source)
+    assert rawio.write_raw("fixture_src", [{"id": "r1"}], shard_date="2026-11-20") == 1
+    source_dir = tmp_path / "fixture_src"
+    assert (source_dir / ".source.lock").is_file()
+
+    with (source_dir / ".source.lock").open("a+", encoding="utf-8") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with pytest.raises(TimeoutError), rawio.raw_source_lock(source_dir, timeout=0.05):
+                pass
+        finally:
+            fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+

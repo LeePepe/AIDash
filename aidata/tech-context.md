@@ -6,7 +6,7 @@ depends_on: []                      # 不依赖任何 Swift 层
 depended_by: []                     # 无 Swift 层依赖它;耦合点是 CLI 的 XPC 契约(数据流,非编译期依赖)
 red_lines:
   - 一律 layer-through:改卡片必须从数据真正产生的那一层往下改,禁止只补 L5 的 aidash.py 或只改渲染器(会产出无上游数据的"空心卡")
-  - L1 只追加、只读外部源:采集永不改写数据源;raw 分片 append-only 且过 redaction 红线
+  - L1 只追加、只读外部源:采集永不改写数据源;raw 分片采集时 append-only 且过 redaction 红线(仅允许自愈脚本在持有同源 `raw_source_lock` 锁时对跨分片重复主键执行原子 Last-Write-Wins 去重压缩)
   - 严禁提交数据层:L1_collect/raw、L2_normalize/clean、L3_merge/*.db、state.json 均已 gitignore
   - 严禁提交身份标识:账号 / 雇主 / workspace 标识符只放 git-ignored 的 config_local.py;config.py 里默认空字符串(本仓库是 public)
   - 降级不崩(ADR-23):任一源缺失 / 未配置 / 超时都返回 0,digest 照常产出并在 health 里标注
