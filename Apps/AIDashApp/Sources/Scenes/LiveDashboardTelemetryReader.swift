@@ -661,12 +661,24 @@ public enum LiveDashboardTelemetryReader {
 
     public typealias ScheduledJobFileReader = @MainActor (URL) -> Data?
 
+    public static func isCloudDocsPath(_ url: URL) -> Bool {
+        let path = url.path
+        return path.contains("/Mobile Documents/com~apple~CloudDocs")
+            || path.contains("/com~apple~CloudDocs")
+    }
+
     public static let productionScheduledJobFileReader: ScheduledJobFileReader = { url in
-        try? Data(contentsOf: url)
+        guard !isCloudDocsPath(url) else { return nil }
+        return try? Data(contentsOf: url)
     }
 
     public static func iCloudSyncRootURL(homeURL: URL) -> URL {
-        homeURL.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/AIDashSync", isDirectory: true)
+        if let mirrorOverride = ProcessInfo.processInfo.environment["AIDASH_ICLOUD_MIRROR_DIR"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !mirrorOverride.isEmpty {
+            return URL(fileURLWithPath: mirrorOverride, isDirectory: true)
+        }
+        return homeURL.appendingPathComponent(".aidash/icloud-mirror", isDirectory: true)
     }
 
     public static func selectFresherArtifactData(
@@ -697,8 +709,12 @@ public enum LiveDashboardTelemetryReader {
             if let localDate = timestamp(localData), let cloudDate = timestamp(cloudData), localDate != cloudDate {
                 return cloudDate > localDate ? (cloudData, iCloudURL) : (localData, localURL)
             }
-            let localMTime = (try? localURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-            let cloudMTime = (try? iCloudURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            let localMTime = isCloudDocsPath(localURL)
+                ? nil
+                : (try? localURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            let cloudMTime = isCloudDocsPath(iCloudURL)
+                ? nil
+                : (try? iCloudURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
             if let localMTime, let cloudMTime, localMTime != cloudMTime {
                 return cloudMTime > localMTime ? (cloudData, iCloudURL) : (localData, localURL)
             }
@@ -1958,7 +1974,8 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func fileCacheSignature(for fileURL: URL) -> String {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path) else {
+        guard !isCloudDocsPath(fileURL),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path) else {
             return "\(fileURL.path)-missing"
         }
         let mtime = Int((attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
@@ -2337,7 +2354,9 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func readSkillDocumentPreview(_ candidateURL: URL, resolvedHome: URL) -> String? {
+        guard !isCloudDocsPath(candidateURL) else { return nil }
         let candidate = candidateURL.standardizedFileURL.resolvingSymlinksInPath()
+        guard !isCloudDocsPath(candidate) else { return nil }
         let ext = candidate.pathExtension.lowercased()
         guard allowedSkillPreviewExtensions.contains(ext),
               isAllowedSkillDocumentURL(candidate, resolvedHome: resolvedHome) else { return nil }
@@ -2350,6 +2369,7 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func isAllowedSkillDocumentURL(_ candidateURL: URL, resolvedHome: URL) -> Bool {
+        guard !isCloudDocsPath(candidateURL) else { return false }
         let candidatePath = candidateURL.path
         let directRoots = [
             resolvedHome.appendingPathComponent("Development/user-skills/skills", isDirectory: true),

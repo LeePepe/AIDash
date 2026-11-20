@@ -57,14 +57,14 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
         case .overview:
             return DashboardL10n.tr(
                 "dashboard.section.tab1_quotas_efficiency",
-                "Quotas & Agent Efficiency"
+                "Agent 总看板"
             )
         case .scheduledPulse:
             return DashboardL10n.tr("dashboard.section.scheduled_pulse", "Scheduled Pulse")
         case .agentEfficiency:
             return DashboardL10n.tr(
                 "dashboard.section.tab2_skills_arsenal",
-                "Skills Arsenal Inspector"
+                "Skills 基本盘与趋势"
             )
         case .actionItems:
             return DashboardL10n.tr("dashboard.section.action_items", "Actionable Items")

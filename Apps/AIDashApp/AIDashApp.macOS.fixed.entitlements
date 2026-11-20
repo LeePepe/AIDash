@@ -10,6 +10,7 @@
         <string>/Development/</string>
         <string>/Development/AIDash/aidata/</string>
         <string>/Development/handoff/</string>
+        <string>/.aidash/</string>
         <string>/Library/Mobile Documents/com~apple~CloudDocs/AIDashSync/</string>
         <string>/.agents/</string>
         <string>/.copilot/</string>

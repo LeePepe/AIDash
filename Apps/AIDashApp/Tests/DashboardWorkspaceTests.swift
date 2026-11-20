@@ -929,30 +929,43 @@ struct DashboardWorkspaceTests {
         let iCloudHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("aidash-icloud-freshness-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: iCloudHome) }
+        #expect(LiveDashboardTelemetryReader.iCloudSyncRootURL(homeURL: iCloudHome).path.hasSuffix("/.aidash/icloud-mirror"))
+        #expect(!LiveDashboardTelemetryReader.iCloudSyncRootURL(homeURL: iCloudHome).path.contains("Mobile Documents/com~apple~CloudDocs"))
+
         let localJobs = iCloudHome.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
-        let cloudJobs = iCloudHome.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/AIDashSync/jobs/aidata-digest", isDirectory: true)
+        let mirrorJobs = LiveDashboardTelemetryReader.iCloudSyncRootURL(homeURL: iCloudHome)
+            .appendingPathComponent("jobs/aidata-digest", isDirectory: true)
+        let rawCloudDocsURL = iCloudHome.appendingPathComponent(
+            "Library/Mobile Documents/com~apple~CloudDocs/AIDashSync/jobs/aidata-digest/skills-roi.json"
+        )
         try FileManager.default.createDirectory(at: localJobs, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: cloudJobs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: mirrorJobs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: rawCloudDocsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         func skillsArtifact(_ timestamp: String, sampleSize: Int) throws -> Data {
             try JSONSerialization.data(withJSONObject: ["generated_at": timestamp, "sample_size": sampleSize])
         }
         let localSkillURL = localJobs.appendingPathComponent("skills-roi.json")
-        let cloudSkillURL = cloudJobs.appendingPathComponent("skills-roi.json")
+        let mirrorSkillURL = mirrorJobs.appendingPathComponent("skills-roi.json")
         try skillsArtifact("2026-11-20T05:00:00Z", sampleSize: 1).write(to: localSkillURL)
-        try skillsArtifact("2026-11-20T06:00:00Z", sampleSize: 99).write(to: cloudSkillURL)
-        let selectedSkill = try #require(LiveDashboardTelemetryReader.selectFresherArtifactData(localURL: localSkillURL, iCloudURL: cloudSkillURL))
+        try skillsArtifact("2026-11-20T06:00:00Z", sampleSize: 99).write(to: mirrorSkillURL)
+        try skillsArtifact("2026-11-20T07:00:00Z", sampleSize: 999).write(to: rawCloudDocsURL)
+        #expect(LiveDashboardTelemetryReader.productionScheduledJobFileReader(rawCloudDocsURL) == nil)
+        let selectedSkill = try #require(LiveDashboardTelemetryReader.selectFresherArtifactData(localURL: localSkillURL, iCloudURL: mirrorSkillURL))
         let selectedSkillObject = try #require(JSONSerialization.jsonObject(with: selectedSkill.data) as? [String: Any])
-        #expect(selectedSkill.url == cloudSkillURL)
+        #expect(selectedSkill.url == mirrorSkillURL)
         #expect(selectedSkillObject["sample_size"] as? Int == 99)
+
+        let cloudBlocked = try #require(LiveDashboardTelemetryReader.selectFresherArtifactData(localURL: localSkillURL, iCloudURL: rawCloudDocsURL))
+        #expect(cloudBlocked.url == localSkillURL)
 
         let agent = AgentEfficiencyWorkbenchSnapshot(sampleSize: 1, coverageStatus: "partial")
         var localAgent = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(agent)) as? [String: Any])
         localAgent["generated_at"] = "2026-11-20T05:00:00Z"
-        var cloudAgent = localAgent
-        cloudAgent["generated_at"] = "2026-11-20T06:00:00Z"
-        cloudAgent["sample_size"] = 77
+        var mirrorAgent = localAgent
+        mirrorAgent["generated_at"] = "2026-11-20T06:00:00Z"
+        mirrorAgent["sample_size"] = 77
         try JSONSerialization.data(withJSONObject: localAgent).write(to: localJobs.appendingPathComponent("agent-efficiency.json"))
-        try JSONSerialization.data(withJSONObject: cloudAgent).write(to: cloudJobs.appendingPathComponent("agent-efficiency.json"))
+        try JSONSerialization.data(withJSONObject: mirrorAgent).write(to: mirrorJobs.appendingPathComponent("agent-efficiency.json"))
         #expect(LiveDashboardTelemetryReader.loadAgentEfficiencySnapshot(homeURL: iCloudHome)?.sampleSize == 77)
 
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
@@ -975,7 +988,7 @@ struct DashboardWorkspaceTests {
         }
     }
 
-    @Test("PreviewHost exposes two tabs, twenty unique topologies, and receipt round-trip")
+    @Test("PreviewHost exposes two zero-jargon trend tabs, twenty unique topologies, isolated feedback bar, and receipt round-trip")
     func previewHostCatalogAndReceiptRoundTrip() throws {
         let tab1 = Tab1QuotasAndAgentEfficiencySections.descriptors
         let tab2 = Tab2SkillsArsenalInspectorSections.descriptors
@@ -985,6 +998,28 @@ struct DashboardWorkspaceTests {
         #expect(Set(all.map(\.id)).count == 20)
         #expect(Set(all.map(\.topologySignature)).count == 20)
         #expect(all.allSatisfy { !$0.title.isEmpty && !$0.metricTags.isEmpty })
+
+        let forbiddenJargon = [
+            "Unpracticed", "光读不练", "Layer 0", "Layer 1", "Deadwood", "Unwired",
+            "R1→R2", "exit=2", "Counter-Case", "S1_pin_drift", "S10_skill_roi_ranking",
+            "Copy Eval Command", "Copy Path"
+        ]
+        for descriptor in all {
+            let combined = ([descriptor.title] + descriptor.metricTags).joined(separator: " ")
+            for banned in forbiddenJargon {
+                #expect(!combined.localizedCaseInsensitiveContains(banned), "Forbidden jargon '\(banned)' in \(descriptor.id)")
+            }
+            #expect(
+                combined.contains("▲") || combined.contains("▼"),
+                "Expected time-trend delta indicator (▲ or ▼) in \(descriptor.id): \(combined)"
+            )
+        }
+
+        let sample = AIDashPreviewSampleData.fallback()
+        #expect(sample.skills.count == 24)
+        #expect(sample.skills.allSatisfy { !$0.trend14d.isEmpty && ($0.deltaText.contains("▲") || $0.deltaText.contains("▼")) })
+        #expect(sample.inspections.count == 7)
+        #expect(sample.repos.map(\.repoName) == ["user-skills", "AIDash", "Financial", "VitalStride"])
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("preview-selection-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
@@ -996,6 +1031,16 @@ struct DashboardWorkspaceTests {
         #expect(loaded.notesByVariant[tab1[0].id] == "keep")
         receipt.touch()
         #expect(!receipt.updatedAt.isEmpty)
+
+        let writer = PreviewSelectionReceiptWriter(path: url)
+        var summaryUpdates = 0
+        let summaryToken = writer.observeSummary { _, _ in summaryUpdates += 1 }
+        defer { writer.removeSummaryObserver(summaryToken) }
+        #expect(writer.toggleStar(tab1[1].id) == true)
+        #expect(writer.select(tab1[1].id) == tab1[1].id)
+        #expect(summaryUpdates == 2)
+        _ = PreviewVariantFeedbackBar(variantID: tab1[1].id, receiptWriter: writer).body
+        _ = PreviewSelectionSummaryPill(receiptWriter: writer).body
     }
 
     @Test("PreviewHost exports representative dark and light ImageRenderer states")
