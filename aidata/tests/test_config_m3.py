@@ -72,6 +72,30 @@ def test_hermes_state_db_path():
 
 
 @pytest.mark.unit
+def test_icloud_paths_and_resolution_are_hermetic(monkeypatch, tmp_path):
+    assert config.ICLOUD_DRIVE_ROOT == config.HOME / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+    assert config.ICLOUD_JOBS_DIR == config.AIDASH_ICLOUD_SYNC_DIR / "jobs"
+    assert config.ICLOUD_SKILLS_MIRROR_DIR == config.AIDASH_ICLOUD_SYNC_DIR / "skills-mirror"
+    assert config.ICLOUD_TELEMETRY_SHARDS_DIR == config.AIDASH_ICLOUD_SYNC_DIR / "telemetry-shards"
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_icloud_paths")
+    monkeypatch.delenv("AIDASH_ICLOUD_SYNC_DIR", raising=False)
+    assert config.resolve_icloud_sync_dir() is None
+    explicit = tmp_path / "icloud"
+    assert config.resolve_icloud_sync_dir(explicit) == explicit
+    assert config.icloud_sync_available(explicit)
+
+
+@pytest.mark.unit
+def test_icloud_environment_override_is_allowed_during_tests(monkeypatch, tmp_path):
+    configured = tmp_path / "configured-icloud"
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_icloud_environment_override")
+    monkeypatch.setenv("AIDASH_ICLOUD_SYNC_DIR", str(configured))
+    assert config.resolve_icloud_sync_dir() == configured
+    assert config.icloud_sync_available()
+
+
+@pytest.mark.unit
 def test_fresh_config_import_disables_product_blob(monkeypatch):
     fresh_config = _load_config_without_local(monkeypatch)
 
