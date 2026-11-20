@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Loop 6A deterministic telemetry/aidata audit and bounded delivery loop.
 
-This module deliberately keeps collection read-only.  Local healing is limited to
-running the repository's existing normalize/merge commands and reconciling the
-consumer-side learning state; source vault data is never written.
+This module keeps external collection read-only.  Local healing deduplicates
+cross-shard raw primary keys (Last-Write-Wins), runs the repository's existing
+normalize/merge commands, and reconciles the consumer-side learning state;
+source vault data is never written.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -64,6 +66,21 @@ _GTT_EVENT_RE = re.compile(r"^\s*-\s*\S+\s*\|\s*EVT=\S+\s*\|")
 _GTT_RECEIPT_FILE_RE = re.compile(r"^.+?-r\d+\.md$")
 _CJK_RE = re.compile(r"[\u3400-\u9fff]")
 _PATH_RE = re.compile(r"(?:/" + r"Users/|/" + r"home/|[A-Za-z]:[\\/])")
+_HOME_PATH_QUOTED_RE = re.compile(
+    r"\"(?:/" + r"Users/|/" + r"home/|[A-Za-z]:[\\/])[^\"]*\""
+    r"|'(?:/" + r"Users/|/" + r"home/|[A-Za-z]:[\\/])[^']*'"
+)
+_PATH_TOKEN_CHARS = r"[^\x00-\x1f/\s\"'`,;)|<>，。；：！？（）【】《》“”‘’]"
+_WIN_PATH_TOKEN_CHARS = r"[^\x00-\x1f\\/\s\"'`,;)|<>，。；：！？（）【】《》“”‘’]"
+_ASCII_SPACE_SEG = r"[^\x00-\x1f\x7f-\uffff\\/\s\"'`,;)|<>]"
+# Unquoted paths support full Unicode (e.g. CJK account/dir names) plus ASCII space-joined directory/account segments.
+_HOME_PATH_UNQUOTED_RE = re.compile(
+    r"(?:/" + r"Users/|/" + r"home/)"
+    + _PATH_TOKEN_CHARS + r"+(?:\s+" + _ASCII_SPACE_SEG + r"+)*(?:/" + _PATH_TOKEN_CHARS + r"+(?:\s+" + _ASCII_SPACE_SEG + r"+)*)*"
+    + r"|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]"
+    + _WIN_PATH_TOKEN_CHARS + r"+(?:\s+" + _ASCII_SPACE_SEG + r"+)*(?:[\\/]" + _WIN_PATH_TOKEN_CHARS + r"+(?:\s+" + _ASCII_SPACE_SEG + r"+)*)*"
+    + r"|[A-Za-z]:[\\/]" + _WIN_PATH_TOKEN_CHARS + r"+(?:\s+" + _ASCII_SPACE_SEG + r"+[\\/]" + _WIN_PATH_TOKEN_CHARS + r"+)*"
+)
 _CLI_RE = re.compile(r"(?:\b(?:python3?|pytest|bash|sh|curl|gh|multica|git)\s+|(?:^|\s)\./scripts/)")
 _SOURCE_LABELS = {
     "raven": "网关请求",
@@ -77,7 +94,7 @@ CANONICAL_AI_SUMMARY = "🤖 AI 执行上下文与确定性证据（人无需展
 _DETAILS_OPEN = f"<details><summary>{CANONICAL_AI_SUMMARY}</summary>"
 _CURSOR_RE = re.compile(r"<!--\s*multica-cursor\s*:\s*([^>]+?)\s*-->")
 _UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
-_SHA_RE = re.compile(r"(?<![A-Za-z0-9_-])[0-9a-f]{7,40}(?![A-Za-z0-9_-])")
+_SHA_RE = re.compile(r"(?<![A-Za-z0-9_-])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![A-Za-z0-9_-])")
 _INTERNAL_RE = re.compile(r"(?<![A-Za-z0-9_-])(?:S(?:1[0-2]|[1-9])|M[1-5]|EV-\d+|DC-\d+|H[1-5]|R10|V[1-5])(?![A-Za-z0-9_-])")
 
 
@@ -124,6 +141,8 @@ def _compute_signature(payload: Any) -> str:
 
 def _sanitize_human_text(value: Any) -> str:
     text = str(value or "")
+    text = _HOME_PATH_QUOTED_RE.sub("本地路径", text)
+    text = _HOME_PATH_UNQUOTED_RE.sub("本地路径", text)
     text = _UUID_RE.sub("实例", text)
     text = _SHA_RE.sub("快照", text)
     text = _INTERNAL_RE.sub("指标", text)
@@ -167,6 +186,27 @@ def _sidecar_lock(path: Path, *, timeout: float = 5.0) -> Iterator[None]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+@contextmanager
+def _raw_source_lock(raw_dir: Path, *, timeout: float = 30.0) -> Iterator[None]:
+    """Share the exact per-source `.source.lock` protocol with `rawio.write_raw`."""
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = raw_dir / ".source.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"raw source lock timeout for {raw_dir.name}")
+                time.sleep(0.02)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def _fixture_paths(
     fixture_json: Path | Mapping[str, Any] | None,
     aidata_home: Path | None,
@@ -201,6 +241,10 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _format_human_count(value: Any) -> str:
+    return f"{_safe_int(value):,}"
 
 
 def render_dual_zone_markdown(*, tldr: str, items: Sequence[str | Mapping[str, Any]], cursor: str, ai_payload: Mapping[str, Any] | None = None) -> str:
@@ -284,7 +328,12 @@ def _sqlite_daily_cost_days(warehouse_db: Path) -> int | None:
         return None
     try:
         with sqlite3.connect(f"file:{warehouse_db}?mode=ro", uri=True) as conn:
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(fact_request)")}
+            try:
+                cols = {row[1] for row in conn.execute("PRAGMA table_xinfo(fact_request)")}
+            except sqlite3.Error:
+                cols = set()
+            if not cols:
+                cols = {row[1] for row in conn.execute("PRAGMA table_info(fact_request)")}
             if "cst_day" not in cols:
                 return None
             # Match trend/daily-cost.sql: every non-null CST day counts, even
@@ -294,8 +343,21 @@ def _sqlite_daily_cost_days(warehouse_db: Path) -> int | None:
         return None
 
 
-def _record_pk(record: Mapping[str, Any], fields: Sequence[str]) -> tuple[str, str] | None:
+def _gtt_receipt_canonical_pk(record: Mapping[str, Any]) -> tuple[str, str] | None:
+    rel = str(record.get("rel_path") or "").strip()
+    name = Path(rel).name
+    if not _GTT_RECEIPT_FILE_RE.match(name):
+        return None
+    machine_id = str(record.get("machine_id") or "unknown").strip().lower() or "unknown"
+    return "receipt_uid", f"{machine_id}:{rel or name}"
+
+
+def _record_pk(record: Mapping[str, Any], fields: Sequence[str], *, source: str | None = None) -> tuple[str, str] | None:
+    if source == "gtt_receipt":
+        return _gtt_receipt_canonical_pk(record)
     if len(fields) == 2 and all(str(record.get(field) or "").strip() for field in fields):
+        if source == "gtt_ledger":
+            return "composite", f"{str(record[fields[0]]).strip().lower()}:{str(record[fields[1]]).strip()}"
         return "composite", ":".join(str(record[field]).strip() for field in fields)
     for field in fields:
         value = record.get(field)
@@ -333,33 +395,48 @@ def _valid_event_timestamp(value: Any) -> bool:
 
 
 def _scan_raw_shards(raw_source_dir: Path, *, pk_fields: Sequence[str]) -> dict[str, Any]:
-    result: dict[str, Any] = {"shard_count": 0, "record_count": 0, "relevant_record_count": 0, "unique_pk_count": 0, "duplicate_pk_count": 0, "latest_shard_date": None, "latest_event_date": None, "latest_mtime": None, "max_numeric_ts": None, "coverage_complete": True, "malformed_lines": 0}
+    result: dict[str, Any] = {"shard_count": 0, "record_count": 0, "relevant_record_count": 0, "unique_pk_count": 0, "duplicate_pk_count": 0, "duplicate_shards": [], "damaged_shards": [], "malformed_by_shard": {}, "unreadable_shards": {}, "latest_shard_name": None, "latest_shard_date": None, "latest_event_date": None, "latest_mtime": None, "max_numeric_ts": None, "coverage_complete": True, "malformed_lines": 0}
     if not raw_source_dir.is_dir():
         return result
     shards = sorted(p for p in raw_source_dir.glob("*.jsonl") if p.is_file())
     result["shard_count"] = len(shards)
+    if shards:
+        result["latest_shard_name"] = shards[-1].name
+    source_name = raw_source_dir.name
     seen: set[tuple[str, str]] = set()
     duplicate_keys: set[tuple[str, str]] = set()
+    duplicate_shard_names: set[str] = set()
+    damaged_shard_names: set[str] = set()
+    malformed_by_shard: dict[str, int] = {}
+    unreadable_shards: dict[str, str] = {}
     first_shard: dict[tuple[str, str], str] = {}
     for shard in shards:
+        shard_malformed = 0
         try:
             result["latest_mtime"] = max(float(result["latest_mtime"] or 0), shard.stat().st_mtime)
             if re.fullmatch(r"\d{4}-\d{2}-\d{2}", shard.stem):
                 latest = result["latest_shard_date"]
                 result["latest_shard_date"] = max(str(latest or "0000-00-00"), shard.stem)
-            with shard.open("r", encoding="utf-8", errors="replace") as stream:
-                for line in stream:
-                    line = line.strip()
-                    if not line:
+            with shard.open("rb") as stream:
+                for raw_bytes in stream:
+                    if not raw_bytes.strip():
                         continue
                     result["record_count"] += 1
+                    try:
+                        line = raw_bytes.decode("utf-8").strip()
+                    except UnicodeDecodeError:
+                        result["malformed_lines"] += 1
+                        shard_malformed += 1
+                        continue
                     try:
                         obj = json.loads(line)
                     except (TypeError, ValueError):
                         result["malformed_lines"] += 1
+                        shard_malformed += 1
                         continue
                     if not isinstance(obj, dict):
                         result["malformed_lines"] += 1
+                        shard_malformed += 1
                         continue
                     ts = obj.get("timestamp", obj.get("ts"))
                     if isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(float(ts)):
@@ -372,19 +449,31 @@ def _scan_raw_shards(raw_source_dir: Path, *, pk_fields: Sequence[str]) -> dict[
                             pass
                     elif isinstance(ts, str):
                         result["latest_event_date"] = max(str(result["latest_event_date"] or "0000-00-00"), ts[:10])
-                    pk = _record_pk(obj, pk_fields)
-                    if not _record_relevant(raw_source_dir.name, obj, pk):
+                    pk = _record_pk(obj, pk_fields, source=source_name)
+                    if not _record_relevant(source_name, obj, pk):
                         continue
                     result["relevant_record_count"] += 1
                     if pk is None:
                         continue
                     if pk in seen and first_shard.get(pk) != shard.name:
                         duplicate_keys.add(pk)
+                        if first_shard.get(pk):
+                            duplicate_shard_names.add(str(first_shard[pk]))
+                        duplicate_shard_names.add(shard.name)
                     seen.add(pk)
                     first_shard.setdefault(pk, shard.name)
-        except (OSError, UnicodeError):
+            if shard_malformed > 0:
+                malformed_by_shard[shard.name] = shard_malformed
+                damaged_shard_names.add(shard.name)
+        except (OSError, UnicodeError) as exc:
             result["coverage_complete"] = False
+            unreadable_shards[shard.name] = type(exc).__name__
+            damaged_shard_names.add(shard.name)
     result["duplicate_pk_count"] = len(duplicate_keys)
+    result["duplicate_shards"] = sorted(duplicate_shard_names)
+    result["damaged_shards"] = sorted(damaged_shard_names)
+    result["malformed_by_shard"] = malformed_by_shard
+    result["unreadable_shards"] = unreadable_shards
     result["unique_pk_count"] = len(seen)
     if result["latest_mtime"] == 0:
         result["latest_mtime"] = None
@@ -460,27 +549,42 @@ def watermark_and_shard_audit(aidata_home: Path, *, now: datetime | None = None,
     reports: dict[str, Any] = {}
     anomalies: list[dict[str, Any]] = []
     if state_error:
-        anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "corrupt_state_json", "severity": "medium", "healable": False, "detail": "水位线状态文件损坏或不可读"})
+        anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "corrupt_state_json", "table": "state.json", "severity": "medium", "healable": False, "detail": "state.json损坏或无法解析，无法校验各源采集水位"})
     for source in core_sources:
         report = _scan_raw_shards(aidata_home / "L1_collect" / "raw" / source, pk_fields=SOURCE_PRIMARY_KEYS.get(source, ("id",)))
         raw_count = int(report["relevant_record_count"])
         present, regressed, watermark_kind = _source_watermark_status(source, state.get(source), report)
         stale = raw_count > 0 and _freshness_stale(report, now, staleness_hours)
         reports[source] = {**report, "watermark_present": present, "watermark_kind": watermark_kind, "regressed_watermark": regressed, "stale_48h": stale}
+        clean_table, fact_table = CLEAN_TABLE_SPECS.get(source, (source, None))
+        table_label = fact_table or f"clean/{source}.db::{clean_table}"
+        latest_shard = str(report.get("latest_shard_name") or (f"{report['latest_shard_date']}.jsonl" if report.get("latest_shard_date") else "原始分片"))
         if report["shard_count"] == 0:
-            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "source_missing_or_empty", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}没有可核验的原始分片"})
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "source_missing_or_empty", "source": source, "table": table_label, "severity": "medium", "healable": False, "detail": f"{source} ({table_label}) 原始分片目录为空 (0 个分片)"})
         elif report["record_count"] == 0:
-            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "source_missing_or_empty", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}最新分片为空，覆盖状态未知"})
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "source_missing_or_empty", "source": source, "table": table_label, "shards": [latest_shard], "severity": "medium", "healable": False, "detail": f"{source} ({latest_shard}) 分片记录数为 0"})
         if not report["coverage_complete"] or report["malformed_lines"]:
-            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "raw_coverage_incomplete", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}原始分片存在不可读记录"})
+            damaged_shards = list(report.get("damaged_shards") or ([latest_shard] if latest_shard else []))
+            unreadable_map = dict(report.get("unreadable_shards") or {})
+            malformed_cnt = int(report["malformed_lines"])
+            shard_preview = _format_shard_ref(damaged_shards, latest_shard)
+            if unreadable_map and malformed_cnt:
+                err_desc = f"读取错误 ({','.join(sorted(set(unreadable_map.values())))}) 且含 {_format_human_count(malformed_cnt)} 行损坏JSON"
+            elif unreadable_map:
+                err_desc = f"分片无法完整读取 ({','.join(sorted(set(unreadable_map.values())))})"
+            else:
+                err_desc = f"含 {_format_human_count(malformed_cnt)} 行损坏JSON记录"
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "raw_coverage_incomplete", "source": source, "table": table_label, "shards": damaged_shards, "malformed_lines": malformed_cnt, "unreadable_shards": unreadable_map, "severity": "medium", "healable": False, "detail": f"{source} ({shard_preview}) {err_desc}"})
         if raw_count > 0 and not present:
-            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "watermark_regression_or_missing", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}水位线结构缺失或不符合来源契约"})
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "watermark_regression_or_missing", "source": source, "table": "state.json", "shards": [latest_shard], "count": raw_count, "severity": "medium", "healable": False, "detail": f"{source} (state.json) 水位缺失或契约不符 ({watermark_kind or 'missing'}, 已有 {raw_count} 条记录)"})
         if regressed:
-            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "watermark_regression_or_missing", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}水位线落后于可比较的原始证据"})
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "watermark_regression_or_missing", "source": source, "table": "state.json", "shards": [latest_shard], "count": raw_count, "severity": "medium", "healable": False, "detail": f"{source} (state.json) 水位落后于最新分片 {latest_shard} ({raw_count} 条记录)"})
         if report["duplicate_pk_count"]:
-            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "cross_shard_duplicate_pk", "source": source, "severity": "low", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}跨分片存在重复主键，原始层保持追加只读"})
+            dup_shards = list(report.get("duplicate_shards") or [])
+            shard_preview = ", ".join(dup_shards[:3]) + (" 等" if len(dup_shards) > 3 else "")
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "cross_shard_duplicate_pk", "source": source, "table": table_label, "shards": dup_shards, "duplicate_count": int(report["duplicate_pk_count"]), "severity": "low", "healable": True, "detail": f"{source} ({table_label}) 跨分片 ({shard_preview or latest_shard}) 存在 {report['duplicate_pk_count']} 条重复主键"})
         if stale:
-            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "source_stale_48h", "source": source, "severity": "medium", "healable": False, "detail": f"{_SOURCE_LABELS.get(source, source)}超过四十八小时无新分片"})
+            anomalies.append({"dimension": "watermark_and_shard_audit", "kind": "source_stale_48h", "source": source, "table": table_label, "shards": [latest_shard], "count": int(report["unique_pk_count"] or raw_count), "severity": "medium", "healable": False, "detail": f"{source} ({latest_shard}) 超过 48 小时无新分片 (共 {report['unique_pk_count'] or raw_count} 条)"})
     return {"ok": not anomalies, "sources": reports, "anomalies": anomalies}
 
 
@@ -493,9 +597,11 @@ def zero_table_and_warehouse_audit(aidata_home: Path, *, raw_audit: Mapping[str,
     direct_l3_grain = {"raven", "claude_jsonl", "gtt_receipt"}
     for source in core_sources:
         clean_table, fact_table = CLEAN_TABLE_SPECS[source]
+        clean_label = f"clean/{source}.db::{clean_table}"
         source_report = raw_sources.get(source, {})
         relevant = int(source_report.get("relevant_record_count") or 0)
         unique_count = int(source_report.get("unique_pk_count") or relevant)
+        latest_shard = str(source_report.get("latest_shard_name") or (f"{source_report['latest_shard_date']}.jsonl" if source_report.get("latest_shard_date") else ""))
         clean_rows = _sqlite_table_count(aidata_home / "L2_normalize" / "clean" / f"{source}.db", clean_table)
         fact_rows = _sqlite_table_count(warehouse, fact_table) if fact_table else None
         clean_zero = relevant > 0 and (clean_rows is None or clean_rows == 0)
@@ -504,15 +610,20 @@ def zero_table_and_warehouse_audit(aidata_home: Path, *, raw_audit: Mapping[str,
         fact_lag = source in direct_l3_grain and clean_rows is not None and fact_rows is not None and fact_rows < clean_rows
         tables[source] = {"raw_relevant_records": relevant, "raw_unique_identities": unique_count, "clean_rows": clean_rows, "fact_rows": fact_rows, "clean_zero_or_missing": clean_zero, "clean_lagging": clean_lag, "fact_zero_or_missing": fact_zero, "fact_lagging": fact_lag}
         if clean_zero or clean_lag:
-            anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "l2_clean_zero_table" if clean_zero else "l2_clean_lagging_table", "source": source, "severity": "high", "healable": True, "detail": f"{_SOURCE_LABELS.get(source, source)}原始身份数量超过清洗层可核验数量"})
+            actual_clean = int(clean_rows or 0)
+            diff_rows = max(0, unique_count - actual_clean)
+            anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "l2_clean_zero_table" if clean_zero else "l2_clean_lagging_table", "source": source, "table": clean_label, "shards": [latest_shard] if latest_shard else [], "clean_rows": clean_rows, "expected_rows": unique_count, "missing_rows": diff_rows, "severity": "high", "healable": True, "detail": f"{source} ({clean_label}) 清洗表滞后 ({actual_clean}/{unique_count} 行，差 {diff_rows} 条)"})
         if fact_zero or fact_lag:
-            anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "l3_warehouse_zero_or_lagging_table", "source": source, "severity": "high", "healable": True, "detail": f"{_SOURCE_LABELS.get(source, source)}对应事实表为空或落后于同粒度清洗表"})
+            actual_fact = int(fact_rows or 0)
+            expected_fact = int(clean_rows if clean_rows is not None else unique_count)
+            diff_fact = max(0, expected_fact - actual_fact)
+            anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "l3_warehouse_zero_or_lagging_table", "source": source, "table": fact_table or "warehouse.db", "shards": [latest_shard] if latest_shard else [], "fact_rows": fact_rows, "expected_rows": expected_fact, "missing_rows": diff_fact, "severity": "high", "healable": True, "detail": f"{source} ({fact_table}) 数仓事实表滞后 ({actual_fact}/{expected_fact} 行，差 {diff_fact} 条)"})
     raven_relevant = int((tables.get("raven") or {}).get("raw_relevant_records") or 0)
     daily_cost_days = _sqlite_daily_cost_days(warehouse)
     if raven_relevant > 0 and daily_cost_days is None:
-        anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "daily_cost_schema_unreadable", "source": "raven", "severity": "high", "healable": True, "detail": "网关请求原始记录非空但每日成本事实表不可核验"})
+        anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "daily_cost_schema_unreadable", "source": "raven", "table": "fact_request.cst_day", "count": raven_relevant, "severity": "high", "healable": True, "detail": f"raven (warehouse.db::fact_request.cst_day) 结构缺失或不可读 (原始记录 {raven_relevant} 条)"})
     elif raven_relevant > 0 and daily_cost_days == 0:
-        anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "daily_cost_zero_days", "source": "raven", "severity": "high", "healable": True, "detail": "网关请求原始记录非空但每日成本查询没有有效日期"})
+        anomalies.append({"dimension": "zero_table_and_warehouse_audit", "kind": "daily_cost_zero_days", "source": "raven", "table": "fact_request.cst_day", "count": raven_relevant, "severity": "high", "healable": True, "detail": f"raven (warehouse.db::fact_request.cst_day) 有效成本自然日为 0 天 (原始记录 {raven_relevant} 条)"})
     return {"ok": not anomalies, "tables": tables, "daily_cost_days": daily_cost_days, "anomalies": anomalies}
 
 
@@ -751,17 +862,114 @@ def _default_reconcile_learning_drift(aidata_home: Path, *, vault_dir: Path, dri
     return actions
 
 
-def _default_normalize_and_merge_healer(aidata_home: Path, sources_to_normalize: Sequence[str], *, need_merge: bool, timeout_sec: float = 30.0) -> list[dict[str, Any]]:
+def _default_deduplicate_raw_shards(aidata_home: Path, sources: Sequence[str], *, lock_timeout_sec: float = 30.0) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for source in dict.fromkeys(sources):
+        raw_dir = aidata_home / "L1_collect" / "raw" / source
+        if not raw_dir.is_dir():
+            continue
+        try:
+            with _raw_source_lock(raw_dir, timeout=lock_timeout_sec):
+                shards = sorted(p for p in raw_dir.glob("*.jsonl") if p.is_file())
+                if not shards:
+                    continue
+                pk_fields = SOURCE_PRIMARY_KEYS.get(source, ("id",))
+                last_seen: dict[tuple[str, str], tuple[str, int]] = {}
+                first_shard: dict[tuple[str, str], str] = {}
+                cross_shard_keys: set[tuple[str, str]] = set()
+                read_ok = True
+                for shard in shards:
+                    try:
+                        with shard.open("rb") as stream:
+                            for line_idx, raw_bytes in enumerate(stream):
+                                stripped_bytes = raw_bytes.strip()
+                                if not stripped_bytes:
+                                    continue
+                                try:
+                                    obj = json.loads(stripped_bytes.decode("utf-8"))
+                                except (UnicodeDecodeError, TypeError, ValueError):
+                                    continue
+                                if not isinstance(obj, dict):
+                                    continue
+                                pk = _record_pk(obj, pk_fields, source=source)
+                                if not _record_relevant(source, obj, pk) or pk is None:
+                                    continue
+                                if pk in first_shard and first_shard[pk] != shard.name:
+                                    cross_shard_keys.add(pk)
+                                first_shard.setdefault(pk, shard.name)
+                                last_seen[pk] = (shard.name, line_idx)
+                    except OSError as exc:
+                        actions.append({"action": "deduplicate_raw_shards", "source": source, "ok": False, "error": type(exc).__name__})
+                        read_ok = False
+                        break
+                if not read_ok:
+                    continue
+                if not cross_shard_keys:
+                    actions.append({"action": "deduplicate_raw_shards", "source": source, "removed_duplicates": 0, "rewritten_shards": [], "ok": True})
+                    continue
+                removed_total = 0
+                rewritten: list[str] = []
+                write_ok = True
+                for shard in shards:
+                    try:
+                        mode = shard.stat().st_mode & 0o777
+                        kept_chunks: list[bytes] = []
+                        removed_in_shard = 0
+                        with shard.open("rb") as stream:
+                            for line_idx, raw_bytes in enumerate(stream):
+                                stripped_bytes = raw_bytes.strip()
+                                if not stripped_bytes:
+                                    continue
+                                keep = True
+                                try:
+                                    obj = json.loads(stripped_bytes.decode("utf-8"))
+                                    if isinstance(obj, dict):
+                                        pk = _record_pk(obj, pk_fields, source=source)
+                                        if _record_relevant(source, obj, pk) and pk is not None and pk in cross_shard_keys and last_seen.get(pk) != (shard.name, line_idx):
+                                            keep = False
+                                except (UnicodeDecodeError, TypeError, ValueError):
+                                    keep = True
+                                if keep:
+                                    kept_chunks.append(raw_bytes if raw_bytes.endswith(b"\n") else raw_bytes + b"\n")
+                                else:
+                                    removed_in_shard += 1
+                        if removed_in_shard > 0:
+                            fd, tmp_name = tempfile.mkstemp(prefix=f".{shard.name}.", suffix=".tmp", dir=str(raw_dir))
+                            tmp_path = Path(tmp_name)
+                            try:
+                                with os.fdopen(fd, "wb") as tmp_fh:
+                                    tmp_fh.writelines(kept_chunks)
+                                    tmp_fh.flush()
+                                    os.fsync(tmp_fh.fileno())
+                                os.chmod(tmp_path, mode or 0o644)
+                                os.replace(tmp_path, shard)
+                            finally:
+                                if tmp_path.exists():
+                                    tmp_path.unlink(missing_ok=True)
+                            removed_total += removed_in_shard
+                            rewritten.append(shard.name)
+                    except OSError as exc:
+                        actions.append({"action": "deduplicate_raw_shards", "source": source, "ok": False, "error": type(exc).__name__})
+                        write_ok = False
+                        break
+                if write_ok:
+                    actions.append({"action": "deduplicate_raw_shards", "source": source, "removed_duplicates": removed_total, "rewritten_shards": rewritten, "ok": True})
+        except (OSError, TimeoutError) as exc:
+            actions.append({"action": "deduplicate_raw_shards", "source": source, "ok": False, "error": type(exc).__name__})
+    return actions
+
+
+def _default_normalize_and_merge_healer(aidata_home: Path, sources_to_normalize: Sequence[str], *, need_merge: bool, timeout_sec: float = 180.0) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     cli = aidata_home / "cli.py"
     if not cli.is_file():
         return [{"action": "normalize_source", "ok": False, "error": "cli_missing"}]
+    base_env = dict(os.environ)
+    base_env["AIDATA_HOME"] = str(aidata_home)
+    base_env["PYTHONPATH"] = str(aidata_home)
     for source in dict.fromkeys(sources_to_normalize):
-        env = dict(os.environ)
-        env["AIDATA_HOME"] = str(aidata_home)
-        env["PYTHONPATH"] = str(aidata_home)
         try:
-            proc = subprocess.run([sys.executable, str(cli), "normalize", "--source", source], cwd=str(aidata_home), env=env, capture_output=True, text=True, timeout=timeout_sec, check=False)
+            proc = subprocess.run([sys.executable, str(cli), "normalize", "--source", source], cwd=str(aidata_home), env=base_env, capture_output=True, text=True, timeout=timeout_sec, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
             actions.append({"action": "normalize_source", "source": source, "ok": False, "error": type(exc).__name__})
             continue
@@ -773,7 +981,7 @@ def _default_normalize_and_merge_healer(aidata_home: Path, sources_to_normalize:
     normalizers_ok = all(a.get("ok") for a in actions if a.get("action") == "normalize_source")
     if need_merge and normalizers_ok:
         try:
-            proc = subprocess.run([sys.executable, str(cli), "merge"], cwd=str(aidata_home), capture_output=True, text=True, timeout=timeout_sec, check=False)
+            proc = subprocess.run([sys.executable, str(cli), "merge"], cwd=str(aidata_home), env=base_env, capture_output=True, text=True, timeout=timeout_sec, check=False)
             actions.append({"action": "merge_warehouse", "ok": proc.returncode == 0, "error": None if proc.returncode == 0 else "command_failed"})
         except (OSError, subprocess.TimeoutExpired) as exc:
             actions.append({"action": "merge_warehouse", "ok": False, "error": type(exc).__name__})
@@ -790,22 +998,149 @@ def _audit_payload(audits: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _format_shard_ref(shards: Any, fallback: str = "") -> str:
+    names = [str(s).strip() for s in (shards or []) if str(s).strip()] if isinstance(shards, Sequence) and not isinstance(shards, str) else []
+    if not names:
+        return fallback
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:2])}{' 等' if len(names) > 2 else ''}"
+
+
+def _group_residuals(residuals: Sequence[Mapping[str, Any]]) -> list[tuple[tuple[str, str], dict[str, Any]]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in residuals:
+        source = str(item.get("source") or "").strip()
+        kind = str(item.get("kind") or "unknown_anomaly").strip()
+        key = (source, kind)
+        if key not in grouped:
+            entry = dict(item)
+            entry["_shards"] = list(item.get("shards") or [])
+            entry["_unreadable"] = dict(item.get("unreadable_shards") or {})
+            grouped[key] = entry
+        else:
+            existing = grouped[key]
+            for s in item.get("shards") or []:
+                if s not in existing["_shards"]:
+                    existing["_shards"].append(s)
+            if isinstance(item.get("unreadable_shards"), Mapping):
+                existing["_unreadable"].update(item["unreadable_shards"])
+            for num_key in ("duplicate_count", "missing_rows", "malformed_lines", "count", "expected_rows"):
+                if item.get(num_key) is not None:
+                    existing[num_key] = max(_safe_int(existing.get(num_key)), _safe_int(item.get(num_key)))
+    return list(grouped.items())
+
+
+def _describe_residual_group(source: str, kind: str, item: Mapping[str, Any]) -> tuple[str, str, str]:
+    clean_table, fact_table = CLEAN_TABLE_SPECS.get(source, (source or "state", None))
+    table_name = str(item.get("table") or fact_table or (f"clean/{source}.db::{clean_table}" if source else "数仓状态"))
+    shard_ref = _format_shard_ref(item.get("_shards") or item.get("shards"))
+    detail = str(item.get("detail") or "").strip()
+    if kind == "cross_shard_duplicate_pk":
+        dup_str = _format_human_count(item.get("duplicate_count"))
+        shard_part = f" {shard_ref}" if shard_ref else ""
+        what = f"修复 {source or '数仓'} ({table_name}) 跨分片{shard_part} 共 {dup_str} 条重复主键"
+        why = "自动去重重写未生效或分片只读，需排查原始分片写入权限"
+        brief = f"{source or '数仓'}/{table_name} ({shard_ref or '跨分片'} 重复主键 {dup_str} 条)"
+    elif kind in {"l2_clean_zero_table", "l2_clean_lagging_table"}:
+        clean_rows = _safe_int(item.get("clean_rows"))
+        expected_rows = _safe_int(item.get("expected_rows"))
+        diff_rows = _safe_int(item.get("missing_rows"), max(0, expected_rows - clean_rows))
+        clean_str, exp_str, diff_str = _format_human_count(clean_rows), _format_human_count(expected_rows), _format_human_count(diff_rows)
+        shard_part = f"，最新分片 {shard_ref}" if shard_ref else ""
+        what = f"修复 {source or '数仓'} ({table_name}) 清洗表滞后 ({clean_str}/{exp_str} 行{shard_part})"
+        why = f"重跑清洗归并后仍差 {diff_str} 条记录，需排查适配器主键过滤规则"
+        brief = f"{source or '数仓'}/{table_name} ({shard_ref + ' ' if shard_ref else ''}滞后差 {diff_str} 条)"
+    elif kind == "l3_warehouse_zero_or_lagging_table":
+        fact_rows = _safe_int(item.get("fact_rows"))
+        expected_rows = _safe_int(item.get("expected_rows"))
+        diff_rows = _safe_int(item.get("missing_rows"), max(0, expected_rows - fact_rows))
+        fact_str, exp_str, diff_str = _format_human_count(fact_rows), _format_human_count(expected_rows), _format_human_count(diff_rows)
+        shard_part = f"，最新分片 {shard_ref}" if shard_ref else ""
+        what = f"修复 {source or '数仓'} (warehouse.db::{table_name}) 事实表滞后 ({fact_str}/{exp_str} 行{shard_part})"
+        why = f"重跑数仓合并后仍差 {diff_str} 条记录，需排查合并映射或库锁占用"
+        brief = f"{source or '数仓'}/{table_name} ({shard_ref + ' ' if shard_ref else ''}事实表差 {diff_str} 条)"
+    elif kind in {"daily_cost_schema_unreadable", "daily_cost_zero_days"}:
+        raw_str = _format_human_count(item.get("count"))
+        what = f"修复 {source or 'raven'} (warehouse.db::fact_request.cst_day) 成本自然日不可用 (原始 {raw_str} 条)"
+        why = "重跑数仓合并后生成列仍缺失或有效自然日为 0，需核对 schema/warehouse.sql"
+        brief = f"{source or 'raven'}/fact_request.cst_day (成本日不可读，原始 {raw_str} 条)"
+    elif kind == "source_stale_48h":
+        cnt_str = _format_human_count(item.get("count"))
+        what = f"排查 {source or '上游源'} ({shard_ref or table_name}) 超过 48 小时无新分片 (共 {cnt_str} 条)"
+        why = "上游会话日志未产生新记录或定时采集器水位停滞"
+        brief = f"{source or '上游源'}/{shard_ref or table_name} (超 48h 无新分片，共 {cnt_str} 条)"
+    elif kind == "watermark_regression_or_missing":
+        cnt_str = _format_human_count(item.get("count"))
+        what = f"修复 {source or '上游源'} (state.json vs {shard_ref or table_name}) 水位缺失或倒退 ({cnt_str} 条)"
+        why = "state.json 水位字段缺失或落后于最新分片时间戳"
+        brief = f"{source or '上游源'}/state.json (水位倒退或缺失，{cnt_str} 条)"
+    elif kind == "source_missing_or_empty":
+        what = f"补齐 {source or '上游源'} ({shard_ref or table_name}) 缺失或空原始分片 (0 条记录)"
+        why = "L1 原始目录无有效分片文件，采集器未产出数据"
+        brief = f"{source or '上游源'}/{shard_ref or table_name} (0 条原始分片)"
+    elif kind == "raw_coverage_incomplete":
+        bad = _safe_int(item.get("malformed_lines"))
+        bad_str = _format_human_count(bad)
+        unreadable = dict(item.get("_unreadable") or item.get("unreadable_shards") or {})
+        err_types = ",".join(sorted({str(v) for v in unreadable.values() if v}))
+        if unreadable and bad > 0:
+            what = f"修复 {source or '上游源'} ({shard_ref or table_name}) 读取异常 ({err_types}) 及 {bad_str} 行损坏记录"
+            why = f"分片 {shard_ref or '文件'} 存在权限或I/O异常 ({err_types}) 且含格式损坏行"
+            brief = f"{source or '上游源'}/{shard_ref or table_name} ({err_types} 及 {bad_str} 行损坏)"
+        elif unreadable:
+            what = f"修复 {source or '上游源'} ({shard_ref or table_name}) 原始分片不可读 ({err_types})"
+            why = f"分片 {shard_ref or '文件'} 打开或读取失败 ({err_types})，需核对文件权限或磁盘状态"
+            brief = f"{source or '上游源'}/{shard_ref or table_name} (读取失败 {err_types})"
+        else:
+            what = f"修复 {source or '上游源'} ({shard_ref or table_name}) 原始分片 {bad_str} 行损坏记录"
+            why = f"分片 {shard_ref or 'JSONL'} 存在截断或非法 JSON 行导致覆盖不完整"
+            brief = f"{source or '上游源'}/{shard_ref or table_name} ({bad_str} 行损坏JSON)"
+    elif kind == "corrupt_state_json":
+        what = "修复数仓采集状态文件 state.json 解析失败"
+        why = "state.json 内容损坏无法解析为 JSON 对象，采集水位失联"
+        brief = "state.json (JSON 损坏无法解析)"
+    elif kind in {"corrupt_topic_ledger", "corrupt_learning_state", "corrupt_proposals_history", "learning_topic_state_drift"}:
+        target_file = {"corrupt_topic_ledger": "topic-ledger.json", "corrupt_learning_state": "learning-topics-state.json", "corrupt_proposals_history": "proposals.jsonl"}.get(kind, "learning-topics-state.json / proposals.jsonl")
+        what = f"修复学习状态文件 ({target_file}) 异常 ({kind})"
+        why = detail or "跨文件台账同步失败或 JSON 结构损坏，保留原文件待人工核查"
+        brief = f"{target_file} ({kind})"
+    elif kind == "self_heal_failed":
+        failed_action = str(item.get("action") or "local_heal")
+        err_reason = str(item.get("error") or "command_failed")
+        target = f"{source}/{table_name}" if source else table_name
+        what = f"排查 {target} 自动自愈动作 ({failed_action}) 执行失败"
+        why = f"本地自愈返回错误 ({err_reason})，未自动消除数仓漂移"
+        brief = f"{target} ({failed_action} 失败: {err_reason})"
+    else:
+        target = f"{source} ({table_name})" if source else table_name
+        what = f"排查 {target} 硬故障 ({kind})"
+        why = detail or "自动自愈无法消除该项异常，需查看下方证据载荷"
+        brief = f"{source or table_name} ({kind})"
+    return what, why, brief
+
+
 def _build_human_action_items(residuals: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
-    for item in residuals[:6]:
-        source = _SOURCE_LABELS.get(str(item.get("source") or ""), "遥测链路")
-        kind = str(item.get("kind") or "")
-        if "stale" in kind or "watermark" in kind:
-            why = "恢复上游采集连续性"
-        elif "coverage" in kind or "contract" in kind or "guard" in kind:
-            why = "补齐跨端契约与隐私守卫"
-        else:
-            why = "核对数仓或消费端状态"
-        items.append({"what": f"检查{source}异常", "why": why})
+    for (source, kind), item in _group_residuals(residuals)[:6]:
+        what, why, _ = _describe_residual_group(source, kind, item)
+        items.append({"what": what, "why": why})
     return items
 
 
-def inspect_and_self_heal(*, aidata_home: Path | None = None, shared_telemetry_dir: Path | None = None, vault_dir: Path | None = None, fixture_json: Path | Mapping[str, Any] | None = None, target_date: date | None = None, now: datetime | None = None, auto_heal: bool = True, dry_run: bool = False, core_sources: Sequence[str] = CORE_SOURCES, normalize_merge_healer: Callable[..., list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+def _build_residual_summary(residuals: Sequence[Mapping[str, Any]], healed_count: int) -> str:
+    grouped = _group_residuals(residuals)
+    healed_str = _format_human_count(healed_count)
+    if not grouped:
+        if healed_count:
+            return f"数仓四维巡检通过：自动自愈 {healed_str} 项可恢复漂移，剩余 0 项异常。"
+        return "数仓四维巡检通过：0 项异常，全部表与分片状态一致。"
+    briefs = [_describe_residual_group(src, kind, entry)[2] for (src, kind), entry in grouped]
+    preview = "；".join(briefs[:2]) + (" 等" if len(briefs) > 2 else "")
+    return f"数仓巡检自动自愈 {healed_str} 项；剩余 {_format_human_count(len(grouped))} 项硬故障待处理（{preview}）。"
+
+
+def inspect_and_self_heal(*, aidata_home: Path | None = None, shared_telemetry_dir: Path | None = None, vault_dir: Path | None = None, fixture_json: Path | Mapping[str, Any] | None = None, target_date: date | None = None, now: datetime | None = None, auto_heal: bool = True, dry_run: bool = False, core_sources: Sequence[str] = CORE_SOURCES, normalize_merge_healer: Callable[..., list[dict[str, Any]]] | None = None, shard_deduplicator: Callable[[Path, Sequence[str]], list[dict[str, Any]]] | None = None) -> dict[str, Any]:
     resolved_aidata, resolved_shared, resolved_vault, fixture, fixture_mode = _fixture_paths(fixture_json, aidata_home, shared_telemetry_dir, vault_dir)
     now = now or datetime.now(CST)
     target_date = target_date or now.astimezone(CST).date()
@@ -817,8 +1152,19 @@ def inspect_and_self_heal(*, aidata_home: Path | None = None, shared_telemetry_d
     healed: list[dict[str, Any]] = []
     attempted: list[dict[str, Any]] = []
     if auto_heal and not dry_run:
-        sources: list[str] = []
-        need_merge = False
+        dup_sources: list[str] = []
+        for anomaly in audits["watermark_and_shard_audit"]["anomalies"]:
+            if anomaly.get("kind") == "cross_shard_duplicate_pk" and anomaly.get("healable"):
+                src = str(anomaly.get("source") or "")
+                if src and src not in dup_sources:
+                    dup_sources.append(src)
+        sources: list[str] = list(dup_sources)
+        need_merge = bool(dup_sources)
+        if dup_sources:
+            dedup_fn = shard_deduplicator or _default_deduplicate_raw_shards
+            dedup_actions = dedup_fn(resolved_aidata, dup_sources)
+            attempted.extend(dedup_actions)
+            healed.extend(item for item in dedup_actions if item.get("ok") is True)
         for anomaly in audits["zero_table_and_warehouse_audit"]["anomalies"]:
             if anomaly.get("healable"):
                 source = str(anomaly.get("source") or "")
@@ -827,8 +1173,9 @@ def inspect_and_self_heal(*, aidata_home: Path | None = None, shared_telemetry_d
                 need_merge = True
         if sources or need_merge:
             fn = normalize_merge_healer or _default_normalize_and_merge_healer
-            attempted.extend(fn(resolved_aidata, sources, need_merge=need_merge))
-            healed.extend(item for item in attempted if item.get("ok") is True)
+            nm_actions = fn(resolved_aidata, sources, need_merge=need_merge)
+            attempted.extend(nm_actions)
+            healed.extend(item for item in nm_actions if item.get("ok") is True)
         if audits["cross_file_state_audit"].get("drifted_topics"):
             reconcile_actions = _default_reconcile_learning_drift(resolved_aidata, vault_dir=resolved_vault, drifted_topics=audits["cross_file_state_audit"]["drifted_topics"])
             attempted.extend(reconcile_actions)
@@ -841,24 +1188,28 @@ def inspect_and_self_heal(*, aidata_home: Path | None = None, shared_telemetry_d
     residuals = [dict(anomaly) for audit in audits.values() for anomaly in audit.get("anomalies", [])]
     for injected in fixture.get("injected_anomalies", []) if isinstance(fixture.get("injected_anomalies"), list) else []:
         if isinstance(injected, Mapping):
-            residuals.append({"dimension": "fixture", "kind": str(injected.get("kind") or "fixture_residual"), "severity": str(injected.get("severity") or "medium"), "healable": False, "detail": "离线夹具注入的残余证据"})
+            residuals.append({"dimension": "fixture", "kind": str(injected.get("kind") or "fixture_residual"), "source": str(injected.get("source") or ""), "table": str(injected.get("table") or "fixture"), "severity": str(injected.get("severity") or "medium"), "healable": False, "detail": str(injected.get("detail") or "离线夹具注入的残余证据")})
     # Failed actions are explicit residuals even if a fixture runner altered nothing observable.
-    residuals.extend({"dimension": "self_heal_apply", "kind": "self_heal_failed", "severity": "high", "healable": False, "detail": "本地自愈命令失败，未声明已修复"} for action in attempted if action.get("ok") is False)
+    for action in attempted:
+        if action.get("ok") is False:
+            act_src = str(action.get("source") or "")
+            clean_tbl, fact_tbl = CLEAN_TABLE_SPECS.get(act_src, (act_src or "warehouse.db", None))
+            residuals.append({"dimension": "self_heal_apply", "kind": "self_heal_failed", "source": act_src, "table": fact_tbl or f"clean/{act_src}.db::{clean_tbl}" if act_src else "warehouse.db", "action": str(action.get("action") or "local_heal"), "error": str(action.get("error") or "command_failed"), "severity": "high", "healable": False, "detail": f"本地自愈动作 {action.get('action')} 失败 ({action.get('error') or 'command_failed'})"})
     signature_items = sorted((str(item.get("dimension")), str(item.get("kind")), str(item.get("source") or ""), str(item.get("table") or ""), str(item.get("severity") or "")) for item in residuals)
     signature = _compute_signature(signature_items)
     has_delta = bool(residuals)
     severity = "high" if any(item.get("severity") == "high" for item in residuals) else ("medium" if any(item.get("severity") == "medium" for item in residuals) else "low")
     watermark = f"{LOOP_ID}:{signature}"
-    summary = f"完成四维遥测与数仓巡检，{len(healed)}项本地动作已核验；剩余{len(residuals)}项需要处理。"
+    summary = _build_residual_summary(residuals, len(healed))
     items = _build_human_action_items(residuals)
     if not items and healed:
-        items = [{"what": "复核本次数仓与遥测自愈结果", "why": "本地可修复漂移已恢复一致"}]
+        items = [{"what": f"复核本次自动自愈结果（已完成 {len(healed)} 项分片去重或表归并）", "why": "全部可恢复数仓漂移已自动闭环，无需人工操作"}]
     payload = {"loop_id": LOOP_ID, "watermark": watermark, "delta_count": len(residuals), "severity": severity, "healed_count": len(healed), "audits": _audit_payload(audits)}
     cursor = f"{LOOP_ID}-{target_date.isoformat()}"
     markdown = render_dual_zone_markdown(tldr=summary, items=items, cursor=cursor, ai_payload=payload)
     verification = verify_dual_zone_markdown(markdown)
-    status = "RESIDUAL_ANOMALIES_FOUND" if has_delta else ("HEALED_LOCALLY_NO_ALERT" if healed else "SKIPPED_NO_DELTA")
-    return {"ok": True, "loop_id": LOOP_ID, "date": target_date.isoformat(), "status": status, "token_cost": 0, "has_delta": has_delta, "delta_count": len(residuals), "severity": severity, "watermark": watermark, "cursor": cursor, "title": ISSUE_TITLE_TEMPLATE.format(date=target_date.isoformat()), "summary": summary, "items": items, "dual_zone_markdown": markdown, "dual_zone_verification": verification, "healed_items": healed, "healed_actions": healed, "residual_unhealable_items": residuals, "residual_anomalies": residuals, "audits": audits, "raw": {"daily_cost_days": audits["zero_table_and_warehouse_audit"].get("daily_cost_days"), "fixture_mode": fixture_mode}}
+    status = "RESIDUAL_ANOMALIES_FOUND" if has_delta else "SKIPPED_NO_DELTA"
+    return {"ok": True, "loop_id": LOOP_ID, "date": target_date.isoformat(), "status": status, "token_cost": 0, "has_delta": has_delta, "delta_count": len(residuals), "healed_count": len(healed), "severity": severity, "watermark": watermark, "cursor": cursor, "title": ISSUE_TITLE_TEMPLATE.format(date=target_date.isoformat()), "summary": summary, "items": items, "dual_zone_markdown": markdown, "dual_zone_verification": verification, "healed_items": healed, "healed_actions": healed, "residual_unhealable_items": residuals, "residual_anomalies": residuals, "audits": audits, "raw": {"daily_cost_days": audits["zero_table_and_warehouse_audit"].get("daily_cost_days"), "fixture_mode": fixture_mode}}
 
 
 def _extract_prob(value: Any, field: str) -> float | None:
@@ -1099,16 +1450,19 @@ def _write_autopilot_snapshot(collected: Mapping[str, Any], state_path: Path | N
     return target
 
 
-def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: Path | None = None, vault_dir: Path | None = None, fixture_json: Path | Mapping[str, Any] | None = None, target_date: date | None = None, now: datetime | None = None, state_path: Path | None = None, auto_heal: bool = True, dry_run: bool = False, force: bool = False, mock_jev_json: Any = None, server_url: str | None = None, workspace_id: str | None = None, owner_id: str | None = None, jev_fn: Callable[..., Mapping[str, Any] | None] | None = None, runner: Callable[..., subprocess.CompletedProcess[str]] = _default_multica_runner, multica_bin: str | None = None, normalize_merge_healer: Callable[..., list[dict[str, Any]]] | None = None, from_autopilot: bool = False) -> dict[str, Any]:
-    collected = inspect_and_self_heal(aidata_home=aidata_home, shared_telemetry_dir=shared_telemetry_dir, vault_dir=vault_dir, fixture_json=fixture_json, target_date=target_date, now=now, auto_heal=auto_heal, dry_run=dry_run, normalize_merge_healer=normalize_merge_healer)
+def run_loop_pipeline(*, aidata_home: Path | None = None, shared_telemetry_dir: Path | None = None, vault_dir: Path | None = None, fixture_json: Path | Mapping[str, Any] | None = None, target_date: date | None = None, now: datetime | None = None, state_path: Path | None = None, auto_heal: bool = True, dry_run: bool = False, force: bool = False, mock_jev_json: Any = None, server_url: str | None = None, workspace_id: str | None = None, owner_id: str | None = None, core_sources: Sequence[str] = CORE_SOURCES, jev_fn: Callable[..., Mapping[str, Any] | None] | None = None, runner: Callable[..., subprocess.CompletedProcess[str]] = _default_multica_runner, multica_bin: str | None = None, normalize_merge_healer: Callable[..., list[dict[str, Any]]] | None = None, shard_deduplicator: Callable[[Path, Sequence[str]], list[dict[str, Any]]] | None = None, from_autopilot: bool = False) -> dict[str, Any]:
+    collected = inspect_and_self_heal(aidata_home=aidata_home, shared_telemetry_dir=shared_telemetry_dir, vault_dir=vault_dir, fixture_json=fixture_json, target_date=target_date, now=now, auto_heal=auto_heal, dry_run=dry_run, core_sources=core_sources, normalize_merge_healer=normalize_merge_healer, shard_deduplicator=shard_deduplicator)
     previous = _load_watermarks(state_path).get(LOOP_ID, {})
     previous_watermark = str(previous.get("watermark") or "") if isinstance(previous, Mapping) else ""
     pending_watermark = str(previous.get("pending_autopilot_watermark") or "") if isinstance(previous, Mapping) else ""
     in_autopilot = bool(from_autopilot or os.environ.get("MULTICA_FROM_AUTOPILOT") == "1")
     watermark = str(collected.get("watermark") or "")
     has_unconsumed_handoff = in_autopilot and bool(watermark and pending_watermark == watermark)
-    if not force and (not collected["has_delta"] or (watermark == previous_watermark and not has_unconsumed_handoff)):
-        return {"ok": True, "loop_id": LOOP_ID, "status": "SKIPPED_NO_DELTA" if not collected.get("healed_items") else "HEALED_LOCALLY_NO_ALERT", "layer_reached": 0, "token_cost": 0, "watermark": watermark, "previous_watermark": previous_watermark, "healed_items": collected.get("healed_items", []), "residual_unhealable_items": collected.get("residual_unhealable_items", [])}
+    healed_list = list(collected.get("healed_items") or [])
+    if not collected["has_delta"]:
+        return {"ok": True, "loop_id": LOOP_ID, "status": "SKIPPED_NO_DELTA", "layer_reached": 0, "token_cost": 0, "has_delta": False, "delta_count": 0, "healed_count": len(healed_list), "watermark": watermark, "previous_watermark": previous_watermark, "healed_items": healed_list, "residual_unhealable_items": []}
+    if not force and watermark == previous_watermark and not has_unconsumed_handoff:
+        return {"ok": True, "loop_id": LOOP_ID, "status": "SKIPPED_NO_DELTA", "layer_reached": 0, "token_cost": 0, "has_delta": bool(collected.get("has_delta")), "delta_count": int(collected.get("delta_count") or 0), "healed_count": len(healed_list), "watermark": watermark, "previous_watermark": previous_watermark, "healed_items": healed_list, "residual_unhealable_items": collected.get("residual_unhealable_items", [])}
     fixture_mode = fixture_json is not None
     effective_jev_fn = jev_fn or ((lambda **_: None) if fixture_mode and mock_jev_json is None else None)
     verdict = evaluate_jev_decision(collected, mock_jev_json=mock_jev_json, jev_fn=effective_jev_fn)
@@ -1200,7 +1554,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if ns.subcommand == "run":
                 result = run_loop_pipeline(aidata_home=ns.aidata_home, shared_telemetry_dir=ns.shared_telemetry_dir, vault_dir=ns.vault_dir, fixture_json=ns.fixture_json, target_date=target, auto_heal=not ns.no_heal, dry_run=ns.dry_run, force=ns.force, mock_jev_json=ns.mock_jev_json, state_path=ns.state_file, server_url=ns.server_url, workspace_id=ns.workspace_id, owner_id=ns.owner_id, from_autopilot=ns.from_autopilot)
             else:
-                result = inspect_and_self_heal(aidata_home=ns.aidata_home, shared_telemetry_dir=ns.shared_telemetry_dir, vault_dir=ns.vault_dir, fixture_json=ns.fixture_json, target_date=target, auto_heal=not ns.no_heal and ns.subcommand == "self-heal", dry_run=ns.dry_run)
+                result = inspect_and_self_heal(aidata_home=ns.aidata_home, shared_telemetry_dir=ns.shared_telemetry_dir, vault_dir=ns.vault_dir, fixture_json=ns.fixture_json, target_date=target, auto_heal=not ns.no_heal, dry_run=ns.dry_run)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
     except (OSError, ValueError, RuntimeError, TimeoutError) as exc:

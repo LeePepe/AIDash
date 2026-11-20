@@ -15,7 +15,7 @@
     "SCHEDULED_SOURCES preserves the current ordered unique runner set without activating unimplemented sources.",
     "requirements.lock contains the complete Python 3.13 runtime closure with one exact portable package==version line per package.",
     "Missing sources and configuration degrade to a no-op rather than crashing.",
-    "Raw and clean I/O preserves redaction and append-only guarantees."
+    "Raw and clean I/O preserves redaction, append-only collection, and per-source lock coordination (`raw_source_lock`) across appends and Last-Write-Wins duplicate-key compaction."
   ],
   "gates": [
     {"id": "pytest-local", "kind": "test", "mode": "local", "command": ["/usr/bin/python3", "-m", "pytest", "{test_paths}", "-q"]},
