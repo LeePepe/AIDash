@@ -16,10 +16,12 @@ import json
 import os
 import tempfile
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import serve
+from config import resolve_icloud_sync_dir
 
 
 def _l4_role_query() -> str:
@@ -341,6 +343,8 @@ def build_agent_efficiency_snapshot(
     payload: dict[str, Any] = {
         "contract": "aidash-agent-efficiency/v1",
         "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc)
+        .isoformat(timespec="seconds").replace("+00:00", "Z"),
         "window_cst": "14d",
         "window_start": window_start,
         "window_end": window_end,
@@ -359,12 +363,42 @@ def build_agent_efficiency_snapshot(
     return payload
 
 
+def _mirror_to_icloud(payload: dict[str, Any], filename: str, sync_dir: Path | None) -> None:
+    resolved = resolve_icloud_sync_dir(sync_dir)
+    if resolved is None:
+        return
+    destination_dir = resolved / "jobs" / "aidata-digest"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / filename
+    tmp: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=destination_dir,
+            prefix=f".{filename}.", delete=False,
+        ) as handle:
+            tmp = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp.replace(destination)
+        directory = os.open(destination_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
 def write_snapshot(
     output: Path = _DEFAULT_OUTPUT,
     *,
     until_day: str | None = None,
     magpie_path: Path | None = _DEFAULT_MAGPIE_USAGE,
     query_runner: Callable[..., tuple[list[tuple[Any, ...]], list[str]]] | None = None,
+    icloud_sync_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Run L4 queries, merge optional Magpie usage, and atomically write snapshot JSON."""
     runner = query_runner or serve.run_query
@@ -418,6 +452,7 @@ def write_snapshot(
     finally:
         if tmp is not None:
             tmp.unlink(missing_ok=True)
+    _mirror_to_icloud(payload, output.name, icloud_sync_dir)
     return payload
 
 
