@@ -929,6 +929,35 @@ struct DashboardWorkspaceTests {
         #expect(eff1.steeringTokenShare > 0.9)
         #expect(eff1.p90TTFTSeconds > 0.4)
 
+        let iCloudHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-icloud-freshness-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: iCloudHome) }
+        let localJobs = iCloudHome.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        let cloudJobs = iCloudHome.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/AIDashSync/jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: localJobs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cloudJobs, withIntermediateDirectories: true)
+        func skillsArtifact(_ timestamp: String, sampleSize: Int) throws -> Data {
+            try JSONSerialization.data(withJSONObject: ["generated_at": timestamp, "sample_size": sampleSize])
+        }
+        let localSkillURL = localJobs.appendingPathComponent("skills-roi.json")
+        let cloudSkillURL = cloudJobs.appendingPathComponent("skills-roi.json")
+        try skillsArtifact("2026-11-20T05:00:00Z", sampleSize: 1).write(to: localSkillURL)
+        try skillsArtifact("2026-11-20T06:00:00Z", sampleSize: 99).write(to: cloudSkillURL)
+        let selectedSkill = try #require(LiveDashboardTelemetryReader.selectFresherArtifactData(localURL: localSkillURL, iCloudURL: cloudSkillURL))
+        let selectedSkillObject = try #require(JSONSerialization.jsonObject(with: selectedSkill.data) as? [String: Any])
+        #expect(selectedSkill.url == cloudSkillURL)
+        #expect(selectedSkillObject["sample_size"] as? Int == 99)
+
+        let agent = AgentEfficiencyWorkbenchSnapshot(sampleSize: 1, coverageStatus: "partial")
+        var localAgent = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(agent)) as? [String: Any])
+        localAgent["generated_at"] = "2026-11-20T05:00:00Z"
+        var cloudAgent = localAgent
+        cloudAgent["generated_at"] = "2026-11-20T06:00:00Z"
+        cloudAgent["sample_size"] = 77
+        try JSONSerialization.data(withJSONObject: localAgent).write(to: localJobs.appendingPathComponent("agent-efficiency.json"))
+        try JSONSerialization.data(withJSONObject: cloudAgent).write(to: cloudJobs.appendingPathComponent("agent-efficiency.json"))
+        #expect(LiveDashboardTelemetryReader.loadAgentEfficiencySnapshot(homeURL: iCloudHome)?.sampleSize == 77)
+
         let store = DashboardWorkspaceStore(snapshot: sampleSnapshot())
         #expect(store.liveEfficiencySummary == nil)
         #expect(store.effectiveKPIMetrics.count == 4)

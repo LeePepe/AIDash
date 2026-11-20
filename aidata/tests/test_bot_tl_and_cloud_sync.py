@@ -111,6 +111,33 @@ def test_cloud_sync_blob_parts_and_hash_suffix():
 
 
 @pytest.mark.unit
+def test_icloud_telemetry_shards_export_and_pull_across_hosts(monkeypatch, tmp_path, watermarks):
+    sync_dir = tmp_path / "icloud"
+    raw_dir = tmp_path / "raw"
+    gtt_dir = tmp_path / "gtt"
+    monkeypatch.setattr(cloud_sync, "RAW_DIR", raw_dir)
+    monkeypatch.setattr(cloud_sync, "GTT_XFER_DIR", gtt_dir)
+    monkeypatch.setattr(cloud_sync.socket, "gethostname", lambda: "macbook-pro")
+    (raw_dir / "claude_jsonl").mkdir(parents=True)
+    (raw_dir / "gtt_ledger").mkdir(parents=True)
+    (raw_dir / "claude_jsonl" / "2026-11-20.jsonl").write_text('{"turn_uuid":"t1"}\n', encoding="utf-8")
+    (raw_dir / "gtt_ledger" / "2026-11-20.jsonl").write_text('{"event":"done"}\n', encoding="utf-8")
+    (raw_dir / "claude_jsonl" / "icloud-old.jsonl").write_text("must not re-export\n", encoding="utf-8")
+
+    assert cloud_sync.export_local_telemetry_shards(sync_dir=sync_dir, sources=("claude_jsonl", "gtt_ledger")) == 2
+    assert cloud_sync.export_local_telemetry_shards(sync_dir=sync_dir, sources=("claude_jsonl", "gtt_ledger")) == 0
+    assert (sync_dir / "telemetry-shards/macbook-pro/claude_jsonl/2026-11-20.jsonl").is_file()
+
+    monkeypatch.setattr(cloud_sync, "RAW_DIR", tmp_path / "local-raw")
+    monkeypatch.setattr(cloud_sync, "GTT_XFER_DIR", tmp_path / "local-gtt")
+    monkeypatch.setattr(cloud_sync.socket, "gethostname", lambda: "leedemac-mini")
+    assert cloud_sync.pull_icloud_telemetry_shards(sync_dir=sync_dir) == 2
+    assert (tmp_path / "local-raw/claude_jsonl/icloud-macbook-pro-2026-11-20.jsonl").read_text(encoding="utf-8") == '{"turn_uuid":"t1"}\n'
+    assert (tmp_path / "local-gtt/icloud/macbook-pro/gtt_ledger-2026-11-20.jsonl").is_file()
+    assert cloud_sync.pull_icloud_telemetry_shards(sync_dir=sync_dir) == 0
+
+
+@pytest.mark.unit
 def test_remote_records_scans_tgz_jsonl(monkeypatch, tmp_path):
     bundle = tmp_path / "bundle.tgz"
     payload = b'{"collector":"prmon","record_type":"prmon_heartbeat","payload":{"generated_at":"2026-10-28T01:00:00+08:00"}}\n'

@@ -318,12 +318,21 @@ def test_agent_efficiency_snapshot_writes_atomic_contract_and_merges_magpie(tmp_
         raise AssertionError(f"unexpected query {name}")
 
     out_path = tmp_path / "jobs" / "aidata-digest" / "agent-efficiency.json"
-    payload = aes.write_snapshot(out_path, magpie_path=magpie_file, query_runner=fake_runner)
+    icloud_dir = tmp_path / "icloud"
+    payload = aes.write_snapshot(
+        out_path, magpie_path=magpie_file, query_runner=fake_runner,
+        icloud_sync_dir=icloud_dir,
+    )
     assert out_path.is_file()
+    assert (icloud_dir / "jobs" / "aidata-digest" / "agent-efficiency.json").is_file()
     persisted = json.loads(out_path.read_text(encoding="utf-8"))
     assert persisted == payload
     assert payload["contract"] == "aidash-agent-efficiency/v1"
     assert payload["schema_version"] == 1
+    assert payload["generated_at"].endswith("Z")
+    assert __import__("json").loads(
+        (icloud_dir / "jobs" / "aidata-digest" / "agent-efficiency.json").read_text(encoding="utf-8")
+    ) == payload
     assert payload["coverage_status"] == "healthy"
     assert payload["window_start"] == "2026-11-17"
     assert payload["window_end"] == "2026-11-18"
@@ -375,6 +384,7 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
             "sample_size": 2,
             "coverage_status": "healthy",
             "skill": "team-lead",
+            "doc_preview": "# Team Lead\n\nPreview",
             "scope": "global",
             "repo": "user-skills",
             "skill_dir": "~/Development/user-skills/skills/team-lead",
@@ -388,6 +398,7 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
             "references": [
                 {
                     "rel_path": "references/playbook.md",
+                    "doc_preview": "# Playbook\n\nReference preview",
                     "line_count": 140,
                     "tokens_est": 1600,
                     "hits_30d": 2,
@@ -421,6 +432,7 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps(enriched), encoding="utf-8")
     output_path = tmp_path / "skills-roi.json"
+    icloud_dir = tmp_path / "icloud"
 
     snapshot = write_snapshot(
         output_path,
@@ -429,12 +441,21 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
             [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1)],
             ["day", "source", "skill", "n", "sessions"],
         ),
+        icloud_sync_dir=icloud_dir,
     )
     assert snapshot["coverage_status"] == "healthy"
+    assert snapshot["generated_at"].endswith("Z")
     assert "errors" not in snapshot
     assert snapshot["skill_details"] == skill_details
+    assert snapshot["skill_details"][0]["doc_preview"] == "# Team Lead\n\nPreview"
+    assert snapshot["skill_details"][0]["references"][0]["doc_preview"] == "# Playbook\n\nReference preview"
     assert snapshot["diagnostics"]["skill_details"] == skill_details
-    assert json.loads(output_path.read_text(encoding="utf-8"))["skill_details"] == skill_details
+    persisted = json.loads(output_path.read_text(encoding="utf-8"))
+    assert persisted["skill_details"] == skill_details
+    mirrored = json.loads(
+        (icloud_dir / "jobs" / "aidata-digest" / "skills-roi.json").read_text(encoding="utf-8")
+    )
+    assert mirrored == persisted
 
     # Missing required fields on skill_details flags degraded error status without dropping diagnostics
     malformed = {**base_report, "skill_details": [{"skill": "broken-only"}]}

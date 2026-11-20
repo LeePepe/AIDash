@@ -25,7 +25,31 @@ TODAY="$(TZ=Asia/Shanghai date +%Y-%m-%d)"
 JOB_STATE_FILE="${AIDASH_JOB_STATE_FILE:-$HOME/Library/Application Support/AIDash/jobs/aidata-digest/state.json}"
 JOB_OUTPUT_DIR="${AIDASH_JOB_OUTPUT_DIR:-$(dirname "$JOB_STATE_FILE")}"
 SKILLS_ROI_FILE="$JOB_OUTPUT_DIR/skills-roi.json"
+AGENT_EFFICIENCY_FILE="$JOB_OUTPUT_DIR/agent-efficiency.json"
 CHAIN_START_TS="$(date +%s)"
+
+sync_job_artifacts() {
+  local job_output_dir="$1" state_file="$2" job_id="$3"
+  local cloud_docs="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
+  local sync_root="${AIDASH_ICLOUD_SYNC_DIR:-$cloud_docs/AIDashSync}"
+  if [ -z "${AIDASH_ICLOUD_SYNC_DIR:-}" ] && [ ! -d "$cloud_docs" ]; then
+    return 0
+  fi
+  local target_dir="$sync_root/jobs/$job_id"
+  mkdir -p "$target_dir" || return 1
+  local name source tmp
+  for name in state.json actions.jsonl skills-roi.json agent-efficiency.json; do
+    source="$job_output_dir/$name"
+    [ "$name" = "state.json" ] && source="$state_file"
+    [ -f "$source" ] || continue
+    tmp="$(mktemp "$target_dir/.${name}.XXXXXX")" || return 1
+    if ! cp "$source" "$tmp"; then
+      rm -f "$tmp"
+      return 1
+    fi
+    mv -f "$tmp" "$target_dir/$name" || return 1
+  done
+}
 
 echo "[aidata-digest] $(date) — chain start (report_date=$TODAY)"
 
@@ -60,6 +84,9 @@ for src in $SOURCES; do
     fi
   fi
 done
+if ! python3 -c "from adapters.cloud_sync import export_local_telemetry_shards; export_local_telemetry_shards()"; then
+  echo "[aidata-digest]   ! iCloud telemetry export warning"
+fi
 STAGE1_DUR=$(( $(date +%s) - STAGE1_START ))
 STAGE1_STATUS=$([ "$COLLECT_FAIL" -eq 0 ] && echo "ok" || echo "warning")
 STAGE1_RC=$([ "$COLLECT_FAIL" -eq 0 ] && echo 0 || echo 1)
@@ -98,6 +125,8 @@ if ! python3 -m L5_apps.digest.skills_roi_snapshot --report "$ROI_REPORT" --outp
   echo "[aidata-digest]   ! skills-roi snapshot failed"
   STAGE3_RC=1
 fi
+python3 -m L5_apps.digest.agent_efficiency_snapshot --output "$AGENT_EFFICIENCY_FILE" \
+  || echo "[aidata-digest]   ! agent-efficiency snapshot warning"
 STAGE3_DUR=$(( $(date +%s) - STAGE3_START ))
 STAGE3_STATUS=$([ "$STAGE3_RC" -eq 0 ] && echo "ok" || echo "warning")
 
@@ -248,6 +277,9 @@ tmp = state_path.with_suffix(".json.tmp")
 tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 tmp.replace(state_path)
 PYEOF
+if ! sync_job_artifacts "$JOB_OUTPUT_DIR" "$JOB_STATE_FILE" "aidata-digest"; then
+  echo "[aidata-digest]   ! iCloud job artifact mirror warning"
+fi
 
 echo "[aidata-digest] $(date) — chain done (rc=$FINAL_RC, duration=${TOTAL_DUR}s)"
 exit "$FINAL_RC"

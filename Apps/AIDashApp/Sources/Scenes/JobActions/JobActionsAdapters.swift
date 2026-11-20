@@ -11,14 +11,23 @@ enum JobActionsSources {
     static let maximumRetainedActions = 512
     typealias ReadFile = (URL, Int) throws -> Data
 
-    static func load(home: URL, jobs: [ScheduledJobDefinition], include: (JobActionsAction) -> Bool = { _ in true }, read: ReadFile) -> JobActionsSourceSnapshot {
+    static func load(home: URL, jobs: [ScheduledJobDefinition], include: (JobActionsAction) -> Bool = { _ in true }, read: @escaping ReadFile) -> JobActionsSourceSnapshot {
         let root = home.appendingPathComponent("Library/Application Support/AIDash/jobs", isDirectory: true)
         var actions: [JobActionsAction] = []
         var diagnostics: [JobActionsDiagnostic] = []
         for job in jobs {
             do {
                 let url = root.appendingPathComponent(job.id.rawValue).appendingPathComponent("actions.jsonl")
-                let data = try read(url, maximumFileBytes + 1)
+                let iCloudURL = LiveDashboardTelemetryReader.iCloudSyncRootURL(homeURL: home)
+                    .appendingPathComponent("jobs").appendingPathComponent(job.id.rawValue)
+                    .appendingPathComponent("actions.jsonl")
+                guard let data = LiveDashboardTelemetryReader.selectFresherArtifactData(
+                    localURL: url,
+                    iCloudURL: iCloudURL,
+                    fileReader: { candidate in try? read(candidate, maximumFileBytes + 1) }
+                )?.data else {
+                    throw CocoaError(.fileReadNoSuchFile)
+                }
                 guard data.count <= maximumFileBytes else {
                     diagnostics.append(.init(code: "source-oversized", jobID: job.id.rawValue))
                     continue

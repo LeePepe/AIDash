@@ -13,11 +13,12 @@ import json
 import os
 import tempfile
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import serve
+from config import resolve_icloud_sync_dir
 from timeutil import CST
 
 _SECTION_TYPES = {
@@ -94,6 +95,8 @@ def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, error
         problems.append("healthy producer has no observed sample/freshness/window")
     payload = {
         "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc)
+        .isoformat(timespec="seconds").replace("+00:00", "Z"),
         **{key: report.get(key) for key in _META},
         "window_cst": report.get("window_cst") or "unknown",
         "sample_size": sample,
@@ -125,10 +128,40 @@ def _daily_window(start: str, end: str) -> dict[str, str]:
     return {"day_from": lower.date().isoformat(), "day_to": upper.date().isoformat()}
 
 
+def _mirror_to_icloud(payload: dict[str, Any], filename: str, sync_dir: Path | None) -> None:
+    resolved = resolve_icloud_sync_dir(sync_dir)
+    if resolved is None:
+        return
+    destination_dir = resolved / "jobs" / "aidata-digest"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / filename
+    tmp: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=destination_dir,
+            prefix=f".{filename}.", delete=False,
+        ) as handle:
+            tmp = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp.replace(destination)
+        directory = os.open(destination_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
 def write_snapshot(
     output: Path, report_path: Path, *,
     query_runner: Callable[..., tuple[list, list[str]]] | None = None,
     producer_exit_code: int = 0,
+    icloud_sync_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Capture the real report and query grain, then atomically replace output."""
     errors: list[str] = [f"retro producer exited {producer_exit_code}"] if producer_exit_code else []
@@ -184,6 +217,7 @@ def write_snapshot(
     finally:
         if tmp is not None:
             tmp.unlink(missing_ok=True)
+    _mirror_to_icloud(payload, output.name, icloud_sync_dir)
     return payload
 
 

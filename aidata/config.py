@@ -28,6 +28,34 @@ STATE_FILE = AIDATA_HOME / "state.json"
 # across machines but grounded in the real paths found during design.
 # ---------------------------------------------------------------------------
 HOME = Path(os.path.expanduser("~"))
+ICLOUD_DRIVE_ROOT = HOME / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+AIDASH_ICLOUD_SYNC_DIR = Path(
+    os.environ.get("AIDASH_ICLOUD_SYNC_DIR", str(ICLOUD_DRIVE_ROOT / "AIDashSync"))
+).expanduser()
+ICLOUD_JOBS_DIR = AIDASH_ICLOUD_SYNC_DIR / "jobs"
+ICLOUD_SKILLS_MIRROR_DIR = AIDASH_ICLOUD_SYNC_DIR / "skills-mirror"
+ICLOUD_TELEMETRY_SHARDS_DIR = AIDASH_ICLOUD_SYNC_DIR / "telemetry-shards"
+
+
+def resolve_icloud_sync_dir(explicit: Path | None = None) -> Path | None:
+    """Resolve an iCloud sync directory without touching a test host's iCloud."""
+    if explicit is not None:
+        return Path(explicit).expanduser()
+    configured = os.environ.get("AIDASH_ICLOUD_SYNC_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    if not ICLOUD_DRIVE_ROOT.exists():
+        return None
+    return AIDASH_ICLOUD_SYNC_DIR
+
+
+def icloud_sync_available(sync_dir: Path | None = None) -> bool:
+    """Return whether iCloud sync is enabled for this process."""
+    return resolve_icloud_sync_dir(sync_dir) is not None
+
+
 GTT_HANDOFF_ROOTS = (
     HOME / "Development" / "handoff",
     HOME / "Development" / "handoffs",

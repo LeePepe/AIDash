@@ -77,6 +77,7 @@ def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None, 
     env = {
         **os.environ, "HOME": str(home), "AIDATA_HOME": str(root),
         "AIDASH_JOB_STATE_FILE": str(state), "AIDASH_JOB_OUTPUT_DIR": str(state.parent),
+        "AIDASH_ICLOUD_SYNC_DIR": str(tmp_path / "icloud"),
         "RETRO_ENGINE": str(engine), "DIGEST_VAULT_SCRIPT": str(vault),
         "FIXTURE_REPORT": str(report_file), "FIXTURE_PRODUCER_EXIT": str(producer_exit_code),
         "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
@@ -100,6 +101,10 @@ def test_digest_runner_exports_real_full_report_and_disjoint_daily_grains(tmp_pa
     assert state["schedulerField"] == "preserve-me"
     assert state["stages"][2]["status"] == "ok"
     assert state["stages"][2]["sourceAsOf"] == report["source_as_of"]
+    cloud_job_dir = tmp_path / "icloud" / "jobs" / "aidata-digest"
+    assert json.loads((cloud_job_dir / "state.json").read_text()) == state
+    assert json.loads((cloud_job_dir / "skills-roi.json").read_text()) == snapshot
+    assert (cloud_job_dir / "agent-efficiency.json").is_file()
     assert not list(job_dir.glob(".skills-roi-report.*"))
 
 
@@ -119,6 +124,7 @@ def _run_job_wrapper(
         **os.environ,
         "HOME": str(tmp_path / "home"),
         "AIDASH_JOB_STATE_FILE": str(state),
+        "AIDASH_ICLOUD_SYNC_DIR": str(tmp_path / "icloud"),
         "PATH": "/usr/bin:/bin",
         "FIXTURE_EXIT": str(exit_code),
         "CALLS_FILE": str(tmp_path / "calls.txt"),
