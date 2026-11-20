@@ -70,7 +70,6 @@ extension View {
 public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Identifiable {
     case trends
     case rankings
-    case actionItems
     case skills
 
     public var id: String { rawValue }
@@ -79,7 +78,6 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
         switch self {
         case .trends: return DashboardL10n.tr("dashboard.lens.trends", "Token Trends")
         case .rankings: return DashboardL10n.tr("dashboard.lens.rankings", "M2 / M1 Ranking")
-        case .actionItems: return DashboardL10n.tr("dashboard.lens.actions", "Actionable Items")
         case .skills: return DashboardL10n.tr("dashboard.lens.skills_roi", "Skills ROI")
         }
     }
@@ -88,7 +86,6 @@ public enum OverviewWorkbenchLens: String, CaseIterable, Sendable, Equatable, Id
         switch self {
         case .trends: return "chart.bar.xaxis"
         case .rankings: return "tablecells"
-        case .actionItems: return "checklist"
         case .skills: return "sparkles.square.filled.on.square"
         }
     }
@@ -1514,6 +1511,7 @@ public struct AIDashMacWorkspaceView: View {
     @State private var store: DashboardWorkspaceStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
     @State private var activeOverviewLens: OverviewWorkbenchLens = .trends
+    @State private var showPreviewHostGallery = false
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1556,13 +1554,30 @@ public struct AIDashMacWorkspaceView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    if case let .populated(snapshot) = store.systemState {
-                        rightToolbarCluster(snapshot: snapshot)
-                    } else {
-                        rightToolbarCluster(snapshot: nil)
+                    HStack(spacing: 8) {
+                        Button {
+                            showPreviewHostGallery = true
+                        } label: {
+                            Label(
+                                DashboardL10n.tr("dashboard.preview_host.open", "2×10 PreviewHost"),
+                                systemImage: "square.grid.2x2"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("toolbar.previewHost")
+                        if case let .populated(snapshot) = store.systemState {
+                            rightToolbarCluster(snapshot: snapshot)
+                        } else {
+                            rightToolbarCluster(snapshot: nil)
+                        }
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showPreviewHostGallery) {
+            AIDashTwoTabPreviewHostBoard()
+                .frame(minWidth: 1180, minHeight: 760)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1747,11 +1762,9 @@ public struct AIDashMacWorkspaceView: View {
     private func workspaceDetailContent(snapshot: MenuBarSystemSnapshot) -> some View {
         switch store.selectedSection {
         case .overview:
-            // Axis Y Cap: Strictly 3 Visual Container Groups (Overview -> Zoom & Filter -> Details-on-Demand Lens)
             KPISummaryCardView(metrics: store.effectiveKPIMetrics) { metricID in
                 switch metricID {
                 case "kpi-invocations", "kpi-efficiency": activeOverviewLens = .rankings
-                case "kpi-actions": activeOverviewLens = .actionItems
                 default: activeOverviewLens = .trends
                 }
             }
@@ -1762,11 +1775,6 @@ public struct AIDashMacWorkspaceView: View {
                 selectedCategory: store.selectedChartCategory,
                 onSelectCategory: { store.toggleChartCategory($0) }
             )
-            overviewWorkbenchLensSection
-        case .scheduledPulse:
-            ScheduledPulsePageView(store: store)
-        case .agentEfficiency:
-            KPISummaryCardView(metrics: store.effectiveKPIMetrics)
             AgentEfficiencyChartsCardView(summary: store.liveEfficiencySummary)
             TrendChartCardView(
                 points: store.filteredTrendPoints,
@@ -1775,10 +1783,16 @@ public struct AIDashMacWorkspaceView: View {
                 onClearSelection: { store.clearChartSelection() }
             )
             RankingTableCardView(store: store)
+        case .scheduledPulse:
+            SystemTelemetryStripView(snapshot: snapshot)
+        case .agentEfficiency:
             SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary)
         case .actionItems:
-            KPISummaryCardView(metrics: store.effectiveKPIMetrics)
-            ActionItemsCardView(store: store, onToggleDone: onToggleDone)
+            ContentUnavailableView(
+                DashboardL10n.tr("dashboard.section.retired.title", "Workspace moved"),
+                systemImage: "arrow.right.circle",
+                description: Text(DashboardL10n.tr("dashboard.section.retired.subtitle", "This surface is now managed from the two observatory tabs."))
+            )
         case .systemAndCosts:
             SystemTelemetryStripView(snapshot: snapshot)
             CLICostQuotaCardView(
@@ -1835,8 +1849,6 @@ public struct AIDashMacWorkspaceView: View {
                     AgentEfficiencyChartsCardView(summary: store.liveEfficiencySummary)
                     RankingTableCardView(store: store)
                 }
-            case .actionItems:
-                ActionItemsCardView(store: store, onToggleDone: onToggleDone)
             case .skills:
                 SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary)
             }
@@ -1844,10 +1856,7 @@ public struct AIDashMacWorkspaceView: View {
     }
 
     private func lensTitleWithBadge(_ lens: OverviewWorkbenchLens) -> String {
-        if lens == .actionItems && store.pendingActionCount > 0 {
-            return "\(lens.title) (\(store.pendingActionCount))"
-        }
-        return lens.title
+        lens.title
     }
 }
 #endif

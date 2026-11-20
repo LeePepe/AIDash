@@ -716,7 +716,7 @@ struct DashboardWorkspaceTests {
         LiveDashboardTelemetryReader.appendCindyRankingRows(&cindyRows, cindyDirURL: tempDir, safeDate: todayStr)
         #expect(cindyRows.contains(where: { $0.agentName == "M2 · Cindy Desktop" && $0.modelName == "gemini-4-argon" }))
         #expect(cindyRows.contains(where: { $0.agentName == "M2 · Cindy Bot (mimo)" && $0.modelName == "gpt-6.1-sol" }))
-        #expect(OverviewWorkbenchLens.allCases.count == 4)
+        #expect(OverviewWorkbenchLens.allCases == [.trends, .rankings, .skills])
         #expect(!OverviewWorkbenchLens.trends.title.isEmpty)
         #expect(OverviewWorkbenchLens.rankings.symbolName == "tablecells")
         _ = DashboardSettingsPageView(store: store, prefs: prefs).body
@@ -874,10 +874,7 @@ struct DashboardWorkspaceTests {
     func terminalLoginSidebarFooterAndTelemetryTailCache() throws {
         #expect(DashboardWorkspaceSection.primaryNavigationSections == [
             .overview,
-            .scheduledPulse,
-            .agentEfficiency,
-            .actionItems,
-            .systemAndCosts
+            .agentEfficiency
         ])
         #expect(!DashboardWorkspaceSection.primaryNavigationSections.contains(.settings))
         #expect(DashboardWorkspaceSection.allCases.contains(.settings))
@@ -975,6 +972,69 @@ struct DashboardWorkspaceTests {
             #expect(store.canSelectNextDate)
             store.selectToday()
             #expect(store.selectedDateString == originalDate)
+        }
+    }
+
+    @Test("PreviewHost exposes two tabs, twenty unique topologies, and receipt round-trip")
+    func previewHostCatalogAndReceiptRoundTrip() throws {
+        let tab1 = Tab1QuotasAndAgentEfficiencySections.descriptors
+        let tab2 = Tab2SkillsArsenalInspectorSections.descriptors
+        let all = tab1 + tab2
+        #expect(tab1.count == 10)
+        #expect(tab2.count == 10)
+        #expect(Set(all.map(\.id)).count == 20)
+        #expect(Set(all.map(\.topologySignature)).count == 20)
+        #expect(all.allSatisfy { !$0.title.isEmpty && !$0.metricTags.isEmpty })
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("preview-selection-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        var receipt = PreviewSelectionReceipt(selectedVariantID: tab1[0].id, starredVariantIDs: [tab2[0].id], notesByVariant: [tab1[0].id: "keep"])
+        PreviewSelectionReceiptWriter.write(receipt, to: url)
+        let loaded = PreviewSelectionReceiptWriter.read(from: url)
+        #expect(loaded.selectedVariantID == tab1[0].id)
+        #expect(loaded.starredVariantIDs == [tab2[0].id])
+        #expect(loaded.notesByVariant[tab1[0].id] == "keep")
+        receipt.touch()
+        #expect(!receipt.updatedAt.isEmpty)
+    }
+
+    @Test("PreviewHost exports representative dark and light ImageRenderer states")
+    func previewHostExportsRepresentativeStates() throws {
+        let explicitPath = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_AIDASH_TK3_SCREENSHOT_DIR"]
+        let isTemporaryOutput = (explicitPath == nil)
+        let output = explicitPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory
+                .appendingPathComponent("aidash-previewhost-renders-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if isTemporaryOutput {
+                try? FileManager.default.removeItem(at: output)
+            }
+        }
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let sample = AIDashPreviewSampleData.fallback()
+        let views: [(String, AnyView)] = [
+            ("tab1-v01", AnyView(Tab1QuotasAndAgentEfficiencySections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
+            ("tab1-v10", AnyView(Tab1QuotasAndAgentEfficiencySections.v10(data: sample, globalExpandAll: true, speed: .quarter))),
+            ("tab2-v01", AnyView(Tab2SkillsArsenalInspectorSections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
+            ("tab2-v10", AnyView(Tab2SkillsArsenalInspectorSections.v10(data: sample, globalExpandAll: true, speed: .quarter)))
+        ]
+        for (name, view) in views {
+            for scheme in [ColorScheme.dark, ColorScheme.light] {
+                let renderer = ImageRenderer(content: view
+                    .frame(width: 760, alignment: .topLeading)
+                    .padding(16)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .environment(\.colorScheme, scheme))
+                renderer.scale = 2
+                let image = try #require(renderer.nsImage)
+                let tiff = try #require(image.tiffRepresentation)
+                let png = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+                let suffix = scheme == .dark ? "dark" : "light"
+                let fileURL = output.appendingPathComponent("preview-\(name)-\(suffix).png")
+                try png.write(to: fileURL)
+                #expect(FileManager.default.fileExists(atPath: fileURL.path))
+            }
         }
     }
 
