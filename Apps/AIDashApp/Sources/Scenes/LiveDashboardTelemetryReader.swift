@@ -665,6 +665,47 @@ public enum LiveDashboardTelemetryReader {
         try? Data(contentsOf: url)
     }
 
+    public static func iCloudSyncRootURL(homeURL: URL) -> URL {
+        homeURL.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/AIDashSync", isDirectory: true)
+    }
+
+    public static func selectFresherArtifactData(
+        localURL: URL,
+        iCloudURL: URL,
+        fileReader: ScheduledJobFileReader? = nil
+    ) -> (data: Data, url: URL)? {
+        let read = fileReader ?? productionScheduledJobFileReader
+        let local = read(localURL)
+        let cloud = read(iCloudURL)
+        switch (local, cloud) {
+        case (nil, nil): return nil
+        case (let data?, nil): return (data, localURL)
+        case (nil, let data?): return (data, iCloudURL)
+        case (let localData?, let cloudData?):
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let standardFormatter = ISO8601DateFormatter()
+            standardFormatter.formatOptions = [.withInternetDateTime]
+            func timestamp(_ data: Data) -> Date? {
+                guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+                for key in ["generated_at", "updatedAt", "lastRunAt", "source_as_of"] {
+                    guard let value = object[key] as? String else { continue }
+                    if let date = formatter.date(from: value) ?? standardFormatter.date(from: value) { return date }
+                }
+                return nil
+            }
+            if let localDate = timestamp(localData), let cloudDate = timestamp(cloudData), localDate != cloudDate {
+                return cloudDate > localDate ? (cloudData, iCloudURL) : (localData, localURL)
+            }
+            let localMTime = (try? localURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            let cloudMTime = (try? iCloudURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            if let localMTime, let cloudMTime, localMTime != cloudMTime {
+                return cloudMTime > localMTime ? (cloudData, iCloudURL) : (localData, localURL)
+            }
+            return (localData, localURL)
+        }
+    }
+
     public static func loadScheduledJobFrameworkSnapshot(
         now: Date = Date(),
         fileReader: ScheduledJobFileReader? = nil,
@@ -705,16 +746,20 @@ public enum LiveDashboardTelemetryReader {
             )
         }
         let root = resolvedHome.appendingPathComponent("Library/Application Support/AIDash/jobs", isDirectory: true)
+        let iCloudRoot = iCloudSyncRootURL(homeURL: resolvedHome).appendingPathComponent("jobs", isDirectory: true)
         let entries = (registry ?? ScheduledPulseRegistry.jobs).map { definition in
             let directory = root.appendingPathComponent(definition.id.rawValue, isDirectory: true)
+            let iCloudDirectory = iCloudRoot.appendingPathComponent(definition.id.rawValue, isDirectory: true)
             let state = readState(
                 from: directory.appendingPathComponent("state.json"),
+                iCloudURL: iCloudDirectory.appendingPathComponent("state.json"),
                 definition: definition,
                 decoder: decoder,
                 read: read
             )
             let actions = readActions(
                 from: directory.appendingPathComponent("actions.jsonl"),
+                iCloudURL: iCloudDirectory.appendingPathComponent("actions.jsonl"),
                 definition: definition,
                 decoder: decoder,
                 read: read
@@ -731,11 +776,12 @@ public enum LiveDashboardTelemetryReader {
 
     private static func readState(
         from url: URL,
+        iCloudURL: URL,
         definition: ScheduledJobDefinition,
         decoder: JSONDecoder,
-        read: ScheduledJobFileReader
+        read: @escaping ScheduledJobFileReader
     ) -> ScheduledJobState? {
-        guard let data = read(url),
+        guard let data = selectFresherArtifactData(localURL: url, iCloudURL: iCloudURL, fileReader: read)?.data,
               let state = try? decoder.decode(ScheduledJobState.self, from: data),
               state.id == definition.id else { return nil }
         return state
@@ -743,13 +789,14 @@ public enum LiveDashboardTelemetryReader {
 
     private static func readActions(
         from url: URL,
+        iCloudURL: URL,
         definition: ScheduledJobDefinition,
         decoder: JSONDecoder,
-        read: ScheduledJobFileReader
+        read: @escaping ScheduledJobFileReader
     ) -> [ScheduledJobAction] {
-        guard let data = read(url),
+        guard let data = selectFresherArtifactData(localURL: url, iCloudURL: iCloudURL, fileReader: read)?.data,
               let text = String(data: data, encoding: .utf8) else { return [] }
-        return text.split(whereSeparator: \.isNewline).compactMap { line in
+        return text.split(whereSeparator: { $0.isNewline }).compactMap { line in
             let lineData = Data(line.utf8)
             if let wireAction = try? decoder.decode(JobActionsAction.self, from: lineData),
                wireAction.jobID == definition.id.rawValue {
@@ -2181,7 +2228,10 @@ extension LiveDashboardTelemetryReader {
         let magpieURL = home.appendingPathComponent(".config/magpie/usage.jsonl")
         let skillsURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
         let agentEffURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/agent-efficiency.json")
-        let cacheKey = "\(fileCacheSignature(for: whURL))|\(fileCacheSignature(for: magpieURL))|\(fileCacheSignature(for: skillsURL))|\(fileCacheSignature(for: agentEffURL))"
+        let iCloudJobs = iCloudSyncRootURL(homeURL: home).appendingPathComponent("jobs/aidata-digest", isDirectory: true)
+        let iCloudSkillsURL = iCloudJobs.appendingPathComponent("skills-roi.json")
+        let iCloudAgentEffURL = iCloudJobs.appendingPathComponent("agent-efficiency.json")
+        let cacheKey = "\(fileCacheSignature(for: whURL))|\(fileCacheSignature(for: magpieURL))|\(fileCacheSignature(for: skillsURL))|\(fileCacheSignature(for: agentEffURL))|\(fileCacheSignature(for: iCloudSkillsURL))|\(fileCacheSignature(for: iCloudAgentEffURL))"
         if cachedLiveEfficiencyKey == cacheKey, let cached = cachedLiveEfficiencySummary {
             return cached
         }
@@ -2197,13 +2247,15 @@ extension LiveDashboardTelemetryReader {
 
     public static func loadAgentEfficiencySnapshot(homeURL: URL) -> AgentEfficiencyWorkbenchSnapshot? {
         let url = homeURL.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/agent-efficiency.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        let iCloudURL = iCloudSyncRootURL(homeURL: homeURL).appendingPathComponent("jobs/aidata-digest/agent-efficiency.json")
+        guard let data = selectFresherArtifactData(localURL: url, iCloudURL: iCloudURL)?.data else { return nil }
         return try? JSONDecoder().decode(AgentEfficiencyWorkbenchSnapshot.self, from: data)
     }
 
-    private static func loadSkillsRoiSnapshot(homeURL: URL) -> SkillsRoiSnapshot? {
+    public static func loadSkillsRoiSnapshot(homeURL: URL) -> SkillsRoiSnapshot? {
         let url = homeURL.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        let iCloudURL = iCloudSyncRootURL(homeURL: homeURL).appendingPathComponent("jobs/aidata-digest/skills-roi.json")
+        guard let data = selectFresherArtifactData(localURL: url, iCloudURL: iCloudURL)?.data else { return nil }
         return try? JSONDecoder().decode(SkillsRoiReport.self, from: data)
     }
 
@@ -2215,12 +2267,15 @@ extension LiveDashboardTelemetryReader {
     public static func loadSkillDocumentPreview(
         skillDir: String,
         relativePath: String,
+        skillSlug: String? = nil,
+        embeddedPreview: String? = nil,
         homeURL: URL? = nil
     ) -> String? {
         guard isLiveEnvironment || homeURL != nil else { return nil }
         let trimmedSkillDir = skillDir.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedRelative = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSkillDir.isEmpty, !trimmedRelative.isEmpty, !trimmedRelative.hasPrefix("/") else {
+        guard !trimmedSkillDir.isEmpty, !trimmedRelative.isEmpty,
+              !trimmedRelative.hasPrefix("/"), !trimmedRelative.contains("\\") else {
             return nil
         }
         let relSegments = trimmedRelative.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
@@ -2243,22 +2298,48 @@ extension LiveDashboardTelemetryReader {
             return nil
         }
 
-        let candidateURL = baseSkillURL
-            .appendingPathComponent(trimmedRelative, isDirectory: false)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
+        let trimmedSlug = skillSlug?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let slug = (trimmedSlug?.isEmpty == false ? trimmedSlug : nil) ?? baseSkillURL.lastPathComponent
+        guard !slug.isEmpty, !slug.contains("/"), !slug.contains("\\"), slug != ".", slug != ".." else {
+            return nil
+        }
+        let repoCandidates = (try? FileManager.default.contentsOfDirectory(
+            at: resolvedHome.appendingPathComponent("Development", isDirectory: true),
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ))?.filter { url in
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }.flatMap { repo in
+            [
+                repo.appendingPathComponent(".agents/skills/\(slug)/\(trimmedRelative)"),
+                repo.appendingPathComponent(".claude/skills/\(slug)/\(trimmedRelative)"),
+            ]
+        } ?? []
+        let candidates = [
+            resolvedHome.appendingPathComponent(".agents/skills/\(slug)/\(trimmedRelative)"),
+            resolvedHome.appendingPathComponent(".claude/skills/\(slug)/\(trimmedRelative)"),
+            baseSkillURL.appendingPathComponent(trimmedRelative, isDirectory: false),
+            resolvedHome.appendingPathComponent("Development/user-skills/skills/\(slug)/\(trimmedRelative)"),
+        ] + repoCandidates + [
+            iCloudSyncRootURL(homeURL: resolvedHome).appendingPathComponent("skills-mirror/\(slug)/\(trimmedRelative)"),
+        ]
+        for candidate in candidates {
+            if let content = readSkillDocumentPreview(candidate, resolvedHome: resolvedHome) {
+                return content
+            }
+        }
+        let embedded = embeddedPreview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return embedded.isEmpty ? nil : embedded
+    }
 
-        let ext = candidateURL.pathExtension.lowercased()
+    private static func readSkillDocumentPreview(_ candidateURL: URL, resolvedHome: URL) -> String? {
+        let candidate = candidateURL.standardizedFileURL.resolvingSymlinksInPath()
+        let ext = candidate.pathExtension.lowercased()
         guard allowedSkillPreviewExtensions.contains(ext),
-              isAllowedSkillDocumentURL(candidateURL, resolvedHome: resolvedHome) else {
-            return nil
-        }
-
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: candidateURL.path),
+              isAllowedSkillDocumentURL(candidate, resolvedHome: resolvedHome) else { return nil }
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: candidate.path),
               attributes[.type] as? FileAttributeType == .typeRegular,
-              let handle = try? FileHandle(forReadingFrom: candidateURL) else {
-            return nil
-        }
+              let handle = try? FileHandle(forReadingFrom: candidate) else { return nil }
         defer { try? handle.close() }
         guard let data = try? handle.read(upToCount: maxSkillPreviewBytes) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -2269,7 +2350,8 @@ extension LiveDashboardTelemetryReader {
         let directRoots = [
             resolvedHome.appendingPathComponent("Development/user-skills/skills", isDirectory: true),
             resolvedHome.appendingPathComponent(".agents/skills", isDirectory: true),
-            resolvedHome.appendingPathComponent(".claude/skills", isDirectory: true)
+            resolvedHome.appendingPathComponent(".claude/skills", isDirectory: true),
+            iCloudSyncRootURL(homeURL: resolvedHome).appendingPathComponent("skills-mirror", isDirectory: true)
         ]
         for root in directRoots {
             let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path

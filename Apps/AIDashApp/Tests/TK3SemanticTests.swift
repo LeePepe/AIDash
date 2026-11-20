@@ -604,6 +604,31 @@ struct TK3SemanticTests {
         #expect(!maliciousCmd.contains("\n"))
     }
 
+    @Test("loadSkillDocumentPreview falls back from agent skills to user-skills, iCloud, and embedded previews")
+    func skillDocumentPreviewFallbackTiers() throws {
+        let home = try TK3Fixtures.home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let relative = "references/playbook.md"
+        let agentURL = home.appendingPathComponent(".agents/skills/team-lead/\(relative)")
+        let userSkillsURL = home.appendingPathComponent("Development/user-skills/skills/team-lead/\(relative)")
+        let cloudURL = home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/AIDashSync/skills-mirror/team-lead/\(relative)")
+        for url in [agentURL, userSkillsURL, cloudURL] {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        }
+        try Data("Tier 1".utf8).write(to: agentURL)
+        try Data("Tier 2".utf8).write(to: userSkillsURL)
+        try Data("Tier 3".utf8).write(to: cloudURL)
+
+        let missingSkillDir = "~/Development/missing/skills/team-lead"
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: missingSkillDir, relativePath: relative, skillSlug: "team-lead", embeddedPreview: "Tier 4", homeURL: home) == "Tier 1")
+        try FileManager.default.removeItem(at: agentURL)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: missingSkillDir, relativePath: relative, skillSlug: "team-lead", embeddedPreview: "Tier 4", homeURL: home) == "Tier 2")
+        try FileManager.default.removeItem(at: userSkillsURL)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: missingSkillDir, relativePath: relative, skillSlug: "team-lead", embeddedPreview: "Tier 4", homeURL: home) == "Tier 3")
+        try FileManager.default.removeItem(at: cloudURL)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: missingSkillDir, relativePath: relative, skillSlug: "team-lead", embeddedPreview: "Tier 4", homeURL: home) == "Tier 4")
+    }
+
     @Test("Rendered SkillsRoiDiagnosticsCardView contains zero bare S1-S12 academic codes and renders inline preview")
     func zeroBareAcademicCodesAndInlinePreviewRender() throws {
         let home = try TK3Fixtures.home()

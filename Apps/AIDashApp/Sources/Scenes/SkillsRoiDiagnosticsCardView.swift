@@ -452,9 +452,14 @@ public struct SkillsRoiDiagnosticsCardView: View {
     }
 
     private func inlineDocumentPreviewBox(detail: SkillInspectorDetail, relativePath: String) -> some View {
+        let embeddedPreview = relativePath == detail.skillMdPath
+            ? detail.docPreview
+            : detail.references.first(where: { $0.relPath == relativePath })?.docPreview
         let content = LiveDashboardTelemetryReader.loadSkillDocumentPreview(
             skillDir: detail.skillDir,
             relativePath: relativePath,
+            skillSlug: detail.skill,
+            embeddedPreview: embeddedPreview,
             homeURL: previewHomeURL
         )
         return VStack(alignment: .leading, spacing: 6) {
@@ -1035,17 +1040,18 @@ public struct SkillsDailyObservation: Decodable, Sendable, Equatable {
 }
 
 public struct SkillReferenceDetail: Decodable, Sendable, Equatable, Identifiable {
-    public let relPath: String, lineCount: Int, tokensEst: Int, hits30d: Int?, sessions30d: Int?, isUnhit: Bool
+    public let relPath: String, docPreview: String?, lineCount: Int, tokensEst: Int, hits30d: Int?, sessions30d: Int?, isUnhit: Bool
     public var id: String { relPath }
 
-    public init(relPath: String, lineCount: Int = 0, tokensEst: Int = 0, hits30d: Int? = nil, sessions30d: Int? = nil, isUnhit: Bool = false) {
-        self.relPath = relPath; self.lineCount = lineCount; self.tokensEst = tokensEst
+    public init(relPath: String, docPreview: String? = nil, lineCount: Int = 0, tokensEst: Int = 0, hits30d: Int? = nil, sessions30d: Int? = nil, isUnhit: Bool = false) {
+        self.relPath = relPath; self.docPreview = docPreview; self.lineCount = lineCount; self.tokensEst = tokensEst
         self.hits30d = hits30d; self.sessions30d = sessions30d; self.isUnhit = isUnhit
     }
 
     public init(from decoder: Decoder) throws {
         let f = try SkillsFields(decoder)
         relPath = try f.container.decode(String.self, forKey: .init("rel_path"))
+        docPreview = try f.value("doc_preview")
         lineCount = try f.value("line_count") ?? 0
         tokensEst = try f.value("tokens_est") ?? 0
         hits30d = try f.value("hits_30d")
@@ -1095,7 +1101,7 @@ public struct SkillEvalCaseDetail: Decodable, Sendable, Equatable, Identifiable 
 
 public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable {
     public let metadata: SkillsObservationMetadata
-    public let skill: String, scope: String, repo: String, skillDir: String, skillMdPath: String
+    public let skill: String, docPreview: String?, scope: String, repo: String, skillDir: String, skillMdPath: String
     public let skillMdLines: Int, frontmatterTokensEst: Int, bodyTokensEst: Int
     public let loads7d: Int, loads30d: Int, emptyLoadRate: Double?, roiScore: Double?, r1PassRate: Double?
     public let avgContextTokens: Double?, kvCacheHitPct: Double?, editChurn: Int, retryChurn: Int
@@ -1105,7 +1111,7 @@ public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable
     public var id: String { skill }
 
     public init(
-        metadata: SkillsObservationMetadata, skill: String, scope: String = "global", repo: String = "user-skills",
+        metadata: SkillsObservationMetadata, skill: String, docPreview: String? = nil, scope: String = "global", repo: String = "user-skills",
         skillDir: String, skillMdPath: String = "SKILL.md", skillMdLines: Int = 0, frontmatterTokensEst: Int = 0, bodyTokensEst: Int = 0,
         loads7d: Int = 0, loads30d: Int = 0, emptyLoadRate: Double? = nil, roiScore: Double? = nil, r1PassRate: Double? = nil,
         avgContextTokens: Double? = nil, kvCacheHitPct: Double? = nil, editChurn: Int = 0, retryChurn: Int = 0,
@@ -1113,7 +1119,7 @@ public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable
         statusLabel: String = "active", sourceBreakdown: [String: Int] = [:],
         references: [SkillReferenceDetail] = [], scripts: [SkillScriptDetail] = [], evalCases: [SkillEvalCaseDetail] = []
     ) {
-        self.metadata = metadata; self.skill = skill; self.scope = scope; self.repo = repo
+        self.metadata = metadata; self.skill = skill; self.docPreview = docPreview; self.scope = scope; self.repo = repo
         self.skillDir = skillDir; self.skillMdPath = skillMdPath; self.skillMdLines = skillMdLines
         self.frontmatterTokensEst = frontmatterTokensEst; self.bodyTokensEst = bodyTokensEst
         self.loads7d = loads7d; self.loads30d = loads30d; self.emptyLoadRate = emptyLoadRate
@@ -1128,6 +1134,7 @@ public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable
     public init(from decoder: Decoder) throws {
         let f = try SkillsFields(decoder); metadata = f.metadata
         skill = try f.container.decode(String.self, forKey: .init("skill"))
+        docPreview = try f.value("doc_preview")
         scope = try f.value("scope") ?? "global"
         repo = try f.value("repo") ?? (scope == "repo_bound" ? "repo" : "user-skills")
         skillDir = try f.value("skill_dir") ?? "~/Development/user-skills/skills/\(skill)"
