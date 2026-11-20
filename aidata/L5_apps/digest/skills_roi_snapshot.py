@@ -64,6 +64,44 @@ def _validate_optional_metric_sections(report: dict[str, Any], problems: list[st
                         problems.append(
                             f"optional metric section skill_details[{index}].{list_key} must be a list"
                         )
+                if "is_ghost" in item and not isinstance(item.get("is_ghost"), bool):
+                    problems.append(
+                        f"optional metric section skill_details[{index}].is_ghost must be a bool"
+                    )
+                for num_key in (
+                    "bundle_kb",
+                    "refs_kb",
+                    "refs_tokens_est",
+                    "unpracticed_rate",
+                    "unhit_refs_count",
+                    "unhit_refs_ratio",
+                ):
+                    val = item.get(num_key)
+                    if val is not None and (isinstance(val, bool) or not isinstance(val, (int, float))):
+                        problems.append(
+                            f"optional metric section skill_details[{index}].{num_key} must be numeric or null"
+                        )
+                for sc_idx, sc_item in enumerate(item.get("scripts") or []):
+                    if not isinstance(sc_item, dict):
+                        continue
+                    rel_sc = str(sc_item.get("rel_path") or "")
+                    if (
+                        "__pycache__" in rel_sc
+                        or rel_sc.endswith((".pyc", "/__init__.py"))
+                        or "/data/" in rel_sc
+                    ):
+                        problems.append(
+                            f"optional metric section skill_details[{index}].scripts[{sc_idx}] contains invalid script path: {rel_sc}"
+                        )
+                for ev_idx, ev_item in enumerate(item.get("eval_cases") or []):
+                    if not isinstance(ev_item, dict):
+                        continue
+                    ev_id = str(ev_item.get("id") or "").strip()
+                    ev_title = str(ev_item.get("title") or "").strip()
+                    if ev_id and ev_title == ev_id:
+                        problems.append(
+                            f"optional metric section skill_details[{index}].eval_cases[{ev_idx}] must have human-readable title != id ({ev_id})"
+                        )
 
 
 
@@ -95,7 +133,7 @@ def build_snapshot(report: dict[str, Any], daily: list[dict[str, Any]], *, error
         problems.append("healthy producer has no observed sample/freshness/window")
     payload = {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc)
+        "generated_at": datetime.now(timezone.utc)  # noqa: UP017 - hook Python 3.9
         .isoformat(timespec="seconds").replace("+00:00", "Z"),
         **{key: report.get(key) for key in _META},
         "window_cst": report.get("window_cst") or "unknown",

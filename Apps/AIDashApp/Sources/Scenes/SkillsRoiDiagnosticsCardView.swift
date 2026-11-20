@@ -146,7 +146,8 @@ public struct SkillsRoiDiagnosticsCardView: View {
         filter: SkillInspectorFilter = .all
     ) -> SkillInspectorDetail? {
         let filtered = report.skillDetails.filter { filter.matches($0) }
-        let pool = filtered.isEmpty ? report.skillDetails : filtered
+        let nonGhostFallback = report.skillDetails.filter { !$0.isGhost }
+        let pool = !filtered.isEmpty ? filtered : (!nonGhostFallback.isEmpty ? nonGhostFallback : report.skillDetails)
         return pool.first { $0.skill == selectedSkill } ?? pool.first
     }
 
@@ -251,6 +252,13 @@ public struct SkillsRoiDiagnosticsCardView: View {
                         .foregroundStyle(theme.neutrals.text(.meta))
                         .layoutPriority(1)
                 }
+                HStack(spacing: 6) {
+                    Text(primaryRowMetricsSubtitle(item))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(theme.neutrals.text(.meta))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
@@ -263,6 +271,18 @@ public struct SkillsRoiDiagnosticsCardView: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .captureDashboardGeometry(id: "primary-skill-\(item.skill)", role: "skillsPrimaryRow")
+    }
+
+    private func primaryRowMetricsSubtitle(_ item: SkillInspectorDetail) -> String {
+        var segments: [String] = []
+        if let kb = item.bundleKb {
+            segments.append("\(formatDecimal(kb, digits: 1)) KB")
+        }
+        segments.append("\(skillsText("r1_short", "Pass")) \(formatRatio(item.r1PassRate))")
+        if !item.scripts.isEmpty {
+            segments.append("\(skillsText("unpracticed", "Unpracticed")) \(formatRatio(item.unpracticedRate))")
+        }
+        return segments.joined(separator: " · ")
     }
 
     private func scopeBadge(_ item: SkillInspectorDetail) -> some View {
@@ -278,6 +298,9 @@ public struct SkillsRoiDiagnosticsCardView: View {
 
     private func statusBadge(_ item: SkillInspectorDetail) -> some View {
         let (label, fg, bg): (String, Color, Color) = {
+            if item.isGhost || item.statusLabel == "ghost" {
+                return (skillsText("health_ghost", "Archived Ghost"), theme.neutrals.text(.meta), theme.neutrals.card)
+            }
             if item.loads30d == 0 || item.statusLabel == "zombie_30d" {
                 return (skillsText("health_zombie", "30d Idle"), theme.neutrals.text(.meta), theme.neutrals.card)
             }
@@ -349,16 +372,19 @@ public struct SkillsRoiDiagnosticsCardView: View {
             DashboardResponsiveGrid(wideColumns: 3, compactColumns: 2, spacing: 8) {
                 skillsOverviewPane(0, title: skillsText("header_calls_channels", "Calls & Channels")) {
                     metricPair(skillsText("loads_7d_30d", "7d / 30d"), "\(detail.loads7d) / \(detail.loads30d)")
+                    metricPair(skillsText("unpracticed_rate", "Unpracticed rate"), formatRatio(detail.unpracticedRate))
                     metricPair(skillsText("empty_load_rate", "Empty-load rate"), formatRatio(detail.emptyLoadRate))
                     metricPair(skillsText("channels_summary", "Channels (30d)"), channelSummary(detail.sourceBreakdown))
                 }
                 skillsOverviewPane(1, title: skillsText("header_roi_context", "ROI & Context")) {
                     metricPair(skillsText("roi_score", "ROI"), formatDecimal(detail.roiScore, digits: 2))
                     metricPair(skillsText("r1_pass_rate", "R1 pass rate"), formatRatio(detail.r1PassRate))
+                    metricPair(skillsText("bundle_size", "Bundle size"), formatBundleSize(detail))
                     metricPair(skillsText("avg_context_tokens", "Average context tokens"), formatTokens(detail.avgContextTokens))
                     metricPair(skillsText("kv_cache", "KV Cache"), detail.kvCacheHitPct.map { $0.formatted(.number.precision(.fractionLength(0...1))) + "%" } ?? unknown)
                 }
                 skillsOverviewPane(2, title: skillsText("header_churn_escapes", "Churn & Gate Signals")) {
+                    metricPair(skillsText("unhit_refs", "0-Hit references"), formatUnhitReferences(detail))
                     metricPair(skillsText("churn", "Edit / retry churn"), "\(detail.editChurn) / \(detail.retryChurn)")
                     metricPair(skillsText("interceptions_30d", "Gate interceptions"), "\(detail.evalInterceptions)")
                     metricPair(skillsText("escape_attribution", "IMPL_BUG / SPEC_GAP"), "\(detail.implBugEscapes) / \(detail.specGapEscapes)")
@@ -604,6 +630,20 @@ public struct SkillsRoiDiagnosticsCardView: View {
     private func formatTokens(_ value: Double?) -> String {
         guard let value else { return unknown }
         return value.formatted(.number.precision(.fractionLength(0...0))) + " tok"
+    }
+
+    private func formatBundleSize(_ detail: SkillInspectorDetail) -> String {
+        let estTokens = Double(detail.frontmatterTokensEst + detail.bodyTokensEst + (detail.refsTokensEst ?? detail.references.reduce(0) { $0 + $1.tokensEst }))
+        guard let kb = detail.bundleKb else {
+            return estTokens > 0 ? "~\(formatTokens(estTokens))" : unknown
+        }
+        return "\(formatDecimal(kb, digits: 1)) KB (~\(formatTokens(estTokens)))"
+    }
+
+    private func formatUnhitReferences(_ detail: SkillInspectorDetail) -> String {
+        guard !detail.references.isEmpty else { return "0 / 0" }
+        let ratioLabel = formatRatio(detail.unhitRefsRatio ?? (Double(detail.unhitRefsCount) / Double(detail.references.count)))
+        return "\(detail.unhitRefsCount) / \(detail.references.count) (\(ratioLabel))"
     }
 
     private func copyToPasteboard(_ string: String) {
@@ -1103,7 +1143,9 @@ public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable
     public let metadata: SkillsObservationMetadata
     public let skill: String, docPreview: String?, scope: String, repo: String, skillDir: String, skillMdPath: String
     public let skillMdLines: Int, frontmatterTokensEst: Int, bodyTokensEst: Int
-    public let loads7d: Int, loads30d: Int, emptyLoadRate: Double?, roiScore: Double?, r1PassRate: Double?
+    public let bundleKb: Double?, refsKb: Double?, refsTokensEst: Int?
+    public let loads7d: Int, loads30d: Int, emptyLoadRate: Double?, unpracticedRate: Double?, roiScore: Double?, r1PassRate: Double?
+    public let unhitRefsCount: Int, unhitRefsRatio: Double?, isGhost: Bool
     public let avgContextTokens: Double?, kvCacheHitPct: Double?, editChurn: Int, retryChurn: Int
     public let implBugEscapes: Int, specGapEscapes: Int, evalInterceptions: Int, evalEscapes: Int
     public let statusLabel: String, sourceBreakdown: [String: Int]
@@ -1113,17 +1155,25 @@ public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable
     public init(
         metadata: SkillsObservationMetadata, skill: String, docPreview: String? = nil, scope: String = "global", repo: String = "user-skills",
         skillDir: String, skillMdPath: String = "SKILL.md", skillMdLines: Int = 0, frontmatterTokensEst: Int = 0, bodyTokensEst: Int = 0,
-        loads7d: Int = 0, loads30d: Int = 0, emptyLoadRate: Double? = nil, roiScore: Double? = nil, r1PassRate: Double? = nil,
+        bundleKb: Double? = nil, refsKb: Double? = nil, refsTokensEst: Int? = nil,
+        loads7d: Int = 0, loads30d: Int = 0, emptyLoadRate: Double? = nil, unpracticedRate: Double? = nil, roiScore: Double? = nil, r1PassRate: Double? = nil,
+        unhitRefsCount: Int? = nil, unhitRefsRatio: Double? = nil, isGhost: Bool? = nil,
         avgContextTokens: Double? = nil, kvCacheHitPct: Double? = nil, editChurn: Int = 0, retryChurn: Int = 0,
         implBugEscapes: Int = 0, specGapEscapes: Int = 0, evalInterceptions: Int = 0, evalEscapes: Int = 0,
         statusLabel: String = "active", sourceBreakdown: [String: Int] = [:],
         references: [SkillReferenceDetail] = [], scripts: [SkillScriptDetail] = [], evalCases: [SkillEvalCaseDetail] = []
     ) {
+        let computedUnhit = unhitRefsCount ?? references.filter(\.isUnhit).count
+        let computedRatio = unhitRefsRatio ?? (references.isEmpty ? nil : Double(computedUnhit) / Double(references.count))
         self.metadata = metadata; self.skill = skill; self.docPreview = docPreview; self.scope = scope; self.repo = repo
         self.skillDir = skillDir; self.skillMdPath = skillMdPath; self.skillMdLines = skillMdLines
         self.frontmatterTokensEst = frontmatterTokensEst; self.bodyTokensEst = bodyTokensEst
+        self.bundleKb = bundleKb; self.refsKb = refsKb; self.refsTokensEst = refsTokensEst
         self.loads7d = loads7d; self.loads30d = loads30d; self.emptyLoadRate = emptyLoadRate
-        self.roiScore = roiScore; self.r1PassRate = r1PassRate; self.avgContextTokens = avgContextTokens
+        self.unpracticedRate = unpracticedRate; self.roiScore = roiScore; self.r1PassRate = r1PassRate
+        self.unhitRefsCount = computedUnhit; self.unhitRefsRatio = computedRatio
+        self.isGhost = isGhost ?? (statusLabel == "ghost")
+        self.avgContextTokens = avgContextTokens
         self.kvCacheHitPct = kvCacheHitPct; self.editChurn = editChurn; self.retryChurn = retryChurn
         self.implBugEscapes = implBugEscapes; self.specGapEscapes = specGapEscapes
         self.evalInterceptions = evalInterceptions; self.evalEscapes = evalEscapes
@@ -1142,9 +1192,13 @@ public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable
         skillMdLines = try f.value("skill_md_lines") ?? 0
         frontmatterTokensEst = try f.value("frontmatter_tokens_est") ?? 0
         bodyTokensEst = try f.value("body_tokens_est") ?? 0
+        bundleKb = try f.value("bundle_kb")
+        refsKb = try f.value("refs_kb")
+        refsTokensEst = try f.value("refs_tokens_est")
         loads7d = try f.value("loads_7d") ?? 0
         loads30d = try f.value("loads_30d") ?? 0
         emptyLoadRate = try f.value("empty_load_rate")
+        unpracticedRate = try f.value("unpracticed_rate")
         roiScore = try f.value("roi_score")
         r1PassRate = try f.value("r1_pass_rate")
         avgContextTokens = try f.value("avg_context_tokens")
@@ -1155,16 +1209,22 @@ public struct SkillInspectorDetail: Decodable, Sendable, Equatable, Identifiable
         specGapEscapes = try f.value("spec_gap_escapes") ?? 0
         evalInterceptions = try f.value("eval_interceptions") ?? 0
         evalEscapes = try f.value("eval_escapes") ?? 0
-        statusLabel = try f.value("status_label") ?? (loads30d == 0 ? "zombie_30d" : "active")
+        let decodedStatus: String = try f.value("status_label") ?? (loads30d == 0 ? "zombie_30d" : "active")
+        statusLabel = decodedStatus
+        isGhost = try f.value("is_ghost") ?? (decodedStatus == "ghost")
         sourceBreakdown = try f.value("source_breakdown") ?? [:]
-        references = try f.value("references") ?? []
+        let decodedRefs: [SkillReferenceDetail] = try f.value("references") ?? []
+        references = decodedRefs
+        let fallbackUnhit = decodedRefs.filter(\.isUnhit).count
+        unhitRefsCount = try f.value("unhit_refs_count") ?? fallbackUnhit
+        unhitRefsRatio = try f.value("unhit_refs_ratio") ?? (decodedRefs.isEmpty ? nil : Double(fallbackUnhit) / Double(decodedRefs.count))
         scripts = try f.value("scripts") ?? []
         evalCases = try f.value("eval_cases") ?? []
     }
 }
 
 public enum SkillInspectorFilter: String, CaseIterable, Identifiable, Sendable {
-    case all, active, needsOptimization, idle30d, repoBound
+    case all, active, needsOptimization, idle30d, repoBound, archivedGhosts
     public var id: String { rawValue }
     var title: String {
         switch self {
@@ -1173,16 +1233,23 @@ public enum SkillInspectorFilter: String, CaseIterable, Identifiable, Sendable {
         case .needsOptimization: return skillsText("filter_needs_opt", "Needs Optimization")
         case .idle30d: return skillsText("filter_idle_30d", "30d Idle")
         case .repoBound: return skillsText("filter_repo_bound", "Repo-Bound")
+        case .archivedGhosts: return skillsText("filter_ghosts", "Archived Ghosts")
         }
     }
     public func matches(_ detail: SkillInspectorDetail) -> Bool {
         switch self {
-        case .all: return true
-        case .active: return detail.loads30d > 0 && detail.statusLabel != "needs_optimization"
+        case .all:
+            return !detail.isGhost
+        case .active:
+            return !detail.isGhost && detail.loads30d > 0 && detail.statusLabel != "needs_optimization"
         case .needsOptimization:
-            return detail.statusLabel == "needs_optimization" || detail.implBugEscapes > 0 || detail.specGapEscapes > 0 || detail.editChurn >= 4
-        case .idle30d: return detail.loads30d == 0 || detail.statusLabel == "zombie_30d"
-        case .repoBound: return detail.scope == "repo_bound"
+            return !detail.isGhost && (detail.statusLabel == "needs_optimization" || detail.implBugEscapes > 0 || detail.specGapEscapes > 0 || detail.editChurn >= 4)
+        case .idle30d:
+            return !detail.isGhost && (detail.loads30d == 0 || detail.statusLabel == "zombie_30d")
+        case .repoBound:
+            return !detail.isGhost && detail.scope == "repo_bound"
+        case .archivedGhosts:
+            return detail.isGhost
         }
     }
 }

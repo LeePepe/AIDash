@@ -2259,6 +2259,10 @@ extension LiveDashboardTelemetryReader {
         return try? JSONDecoder().decode(SkillsRoiReport.self, from: data)
     }
 
+    public static func managedSkillDetails(in report: SkillsRoiReport) -> [SkillInspectorDetail] {
+        report.skillDetails.filter { !$0.isGhost }
+    }
+
     private static let allowedSkillPreviewExtensions: Set<String> = [
         "md", "json", "yaml", "yml", "py", "sh", "ts"
     ]

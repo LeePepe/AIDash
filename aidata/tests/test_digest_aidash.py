@@ -384,6 +384,7 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
             "sample_size": 2,
             "coverage_status": "healthy",
             "skill": "team-lead",
+            "is_ghost": False,
             "doc_preview": "# Team Lead\n\nPreview",
             "scope": "global",
             "repo": "user-skills",
@@ -392,8 +393,17 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
             "skill_md_lines": 124,
             "frontmatter_tokens_est": 48,
             "body_tokens_est": 1820,
+            "bundle_kb": 18.4,
+            "refs_kb": 6.4,
+            "refs_tokens_est": 1600,
             "loads_7d": 2,
             "loads_30d": 2,
+            "unpracticed_rate": 0.0,
+            "unhit_refs_count": 0,
+            "unhit_refs_ratio": 0.0,
+            "roi_score": 0.42,
+            "r1_pass_rate": 0.85,
+            "avg_context_tokens": 24800,
             "status_label": "active",
             "references": [
                 {
@@ -426,7 +436,40 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
                     "escapes_30d": 0,
                 }
             ],
-        }
+        },
+        {
+            "window_cst": "30d",
+            "window_start": "2026-10-13T00:00:00+08:00",
+            "window_end": "2026-11-12T00:00:00+08:00",
+            "source_as_of": "2026-11-11T14:00:00+08:00",
+            "sample_size": 1,
+            "coverage_status": "healthy",
+            "skill": "legacy-deleted-ghost",
+            "is_ghost": True,
+            "doc_preview": "",
+            "scope": "global",
+            "repo": "user-skills",
+            "skill_dir": "~/Development/user-skills/skills/legacy-deleted-ghost",
+            "skill_md_path": "SKILL.md",
+            "skill_md_lines": 0,
+            "frontmatter_tokens_est": 1,
+            "body_tokens_est": 1,
+            "bundle_kb": 0.0,
+            "refs_kb": 0.0,
+            "refs_tokens_est": 0,
+            "loads_7d": 0,
+            "loads_30d": 1,
+            "unpracticed_rate": 0.0,
+            "unhit_refs_count": 0,
+            "unhit_refs_ratio": 0.0,
+            "roi_score": 0.18,
+            "r1_pass_rate": 1.0,
+            "avg_context_tokens": 1202,
+            "status_label": "ghost",
+            "references": [],
+            "scripts": [],
+            "eval_cases": [],
+        },
     ]
     enriched = {**base_report, "skill_details": skill_details}
     report_path = tmp_path / "report.json"
@@ -448,6 +491,18 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
     assert "errors" not in snapshot
     assert snapshot["skill_details"] == skill_details
     assert snapshot["skill_details"][0]["doc_preview"] == "# Team Lead\n\nPreview"
+    assert snapshot["skill_details"][0]["bundle_kb"] == 18.4
+    assert snapshot["skill_details"][0]["refs_kb"] == 6.4
+    assert snapshot["skill_details"][0]["refs_tokens_est"] == 1600
+    assert snapshot["skill_details"][0]["unpracticed_rate"] == 0.0
+    assert snapshot["skill_details"][0]["unhit_refs_count"] == 0
+    assert snapshot["skill_details"][0]["unhit_refs_ratio"] == 0.0
+    assert snapshot["skill_details"][0]["is_ghost"] is False
+    assert snapshot["skill_details"][0]["roi_score"] == 0.42
+    assert snapshot["skill_details"][0]["r1_pass_rate"] == 0.85
+    assert snapshot["skill_details"][0]["avg_context_tokens"] == 24800
+    assert snapshot["skill_details"][1]["is_ghost"] is True
+    assert snapshot["skill_details"][1]["status_label"] == "ghost"
     assert snapshot["skill_details"][0]["references"][0]["doc_preview"] == "# Playbook\n\nReference preview"
     assert snapshot["diagnostics"]["skill_details"] == skill_details
     persisted = json.loads(output_path.read_text(encoding="utf-8"))
@@ -462,6 +517,22 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
     bad_snapshot = build_snapshot(malformed, [])
     assert bad_snapshot["coverage_status"] == "error"
     assert any("skill_details[0] missing" in err for err in bad_snapshot.get("errors", []))
+
+    # Unfiltered __pycache__ script or bare EV-013 == title is flagged by contract validator
+    polluted = {
+        **base_report,
+        "skill_details": [
+            {
+                **skill_details[0],
+                "scripts": [{"rel_path": "scripts/__pycache__", "calls_30d": 1}],
+                "eval_cases": [{"id": "EV-013", "title": "EV-013"}],
+            }
+        ],
+    }
+    polluted_snapshot = build_snapshot(polluted, [])
+    assert polluted_snapshot["coverage_status"] == "error"
+    assert any("invalid script path" in err for err in polluted_snapshot.get("errors", []))
+    assert any("human-readable title != id" in err for err in polluted_snapshot.get("errors", []))
 
 
 # ---------------------------------------------------------------------------

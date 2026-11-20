@@ -316,6 +316,7 @@ enum TK3Fixtures {
         "sample_size": 12,
         "coverage_status": "healthy",
         "skill": "team-lead",
+        "is_ghost": false,
         "scope": "global",
         "repo": "user-skills",
         "skill_dir": "~/Development/user-skills/skills/team-lead",
@@ -323,9 +324,15 @@ enum TK3Fixtures {
         "skill_md_lines": 124,
         "frontmatter_tokens_est": 52,
         "body_tokens_est": 1840,
+        "bundle_kb": 18.4,
+        "refs_kb": 9.1,
+        "refs_tokens_est": 2260,
         "loads_7d": 12,
         "loads_30d": 38,
         "empty_load_rate": 0.15,
+        "unpracticed_rate": 0.5,
+        "unhit_refs_count": 1,
+        "unhit_refs_ratio": 0.5,
         "roi_score": 1.4,
         "r1_pass_rate": 0.75,
         "avg_context_tokens": 22000,
@@ -429,6 +436,49 @@ enum TK3Fixtures {
         "eval_escapes": 0,
         "status_label": "zombie_30d",
         "source_breakdown": {},
+        "references": [],
+        "scripts": [],
+        "eval_cases": []
+      },
+      {
+        "window_cst": "30d",
+        "window_start": "2026-10-13T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 2,
+        "coverage_status": "healthy",
+        "skill": "legacy-deleted-ghost",
+        "is_ghost": true,
+        "scope": "global",
+        "repo": "user-skills",
+        "skill_dir": "~/Development/user-skills/skills/legacy-deleted-ghost",
+        "skill_md_path": "SKILL.md",
+        "skill_md_lines": 0,
+        "frontmatter_tokens_est": 1,
+        "body_tokens_est": 1,
+        "bundle_kb": 0.0,
+        "refs_kb": 0.0,
+        "refs_tokens_est": 0,
+        "loads_7d": 0,
+        "loads_30d": 2,
+        "empty_load_rate": 0.5,
+        "unpracticed_rate": 0.0,
+        "unhit_refs_count": 0,
+        "unhit_refs_ratio": 0.0,
+        "roi_score": 0.18,
+        "r1_pass_rate": 1.0,
+        "avg_context_tokens": 1202,
+        "kv_cache_hit_pct": 75.0,
+        "edit_churn": 0,
+        "retry_churn": 0,
+        "impl_bug_escapes": 0,
+        "spec_gap_escapes": 0,
+        "eval_interceptions": 0,
+        "eval_escapes": 0,
+        "status_label": "ghost",
+        "source_breakdown": {
+          "copilot": 2
+        },
         "references": [],
         "scripts": [],
         "eval_cases": []
@@ -657,6 +707,27 @@ struct TK3SemanticTests {
 
         // 2. Verify rendered 4-in-1 Skill Inspector sub-tabs + inline preview geometry & accessibility tree
         let report = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.data("skills-roi-dense.json"))
+        let teamLeadDetail = try #require(report.skillDetails.first { $0.skill == "team-lead" })
+        #expect(teamLeadDetail.bundleKb == 18.4)
+        #expect(teamLeadDetail.refsKb == 9.1)
+        #expect(teamLeadDetail.refsTokensEst == 2260)
+        #expect(teamLeadDetail.unpracticedRate == 0.5)
+        #expect(teamLeadDetail.unhitRefsCount == 1)
+        #expect(teamLeadDetail.unhitRefsRatio == 0.5)
+        #expect(!teamLeadDetail.isGhost)
+
+        let ghostDetail = try #require(report.skillDetails.first { $0.skill == "legacy-deleted-ghost" })
+        #expect(ghostDetail.isGhost)
+        #expect(!SkillInspectorFilter.all.matches(ghostDetail))
+        #expect(!SkillInspectorFilter.active.matches(ghostDetail))
+        #expect(!SkillInspectorFilter.needsOptimization.matches(ghostDetail))
+        #expect(!SkillInspectorFilter.idle30d.matches(ghostDetail))
+        #expect(!SkillInspectorFilter.repoBound.matches(ghostDetail))
+        #expect(SkillInspectorFilter.archivedGhosts.matches(ghostDetail))
+        #expect(SkillInspectorFilter.all.matches(teamLeadDetail))
+        #expect(!SkillInspectorFilter.archivedGhosts.matches(teamLeadDetail))
+        #expect(LiveDashboardTelemetryReader.managedSkillDetails(in: report).map(\.skill) == ["team-lead", "aidash-content"])
+
         let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
 
         for lens in SkillsRoiLens.allCases {

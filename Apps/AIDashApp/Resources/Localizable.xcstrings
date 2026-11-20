@@ -6240,6 +6240,23 @@
         }
       }
     },
+    "dashboard.skills_roi.bundle_size": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bundle size"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "包体积"
+          }
+        }
+      }
+    },
     "dashboard.skills_roi.burn_title": {
       "extractionState": "manual",
       "localizations": {
@@ -7022,6 +7039,23 @@
         }
       }
     },
+    "dashboard.skills_roi.filter_ghosts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archived Ghosts"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "归档幽灵"
+          }
+        }
+      }
+    },
     "dashboard.skills_roi.filter_idle_30d": {
       "extractionState": "manual",
       "localizations": {
@@ -7205,6 +7239,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "综合效率与上下文"
+          }
+        }
+      }
+    },
+    "dashboard.skills_roi.health_ghost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archived Ghost"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "历史归档"
           }
         }
       }
@@ -7821,6 +7872,23 @@
         }
       }
     },
+    "dashboard.skills_roi.r1_short": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First-pass"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一次通过"
+          }
+        }
+      }
+    },
     "dashboard.skills_roi.read_only": {
       "extractionState": "manual",
       "localizations": {
@@ -8412,6 +8480,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "脚本\n触达"
+          }
+        }
+      }
+    },
+    "dashboard.skills_roi.unhit_refs": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0-Hit references"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0-Hit 僵尸引用"
           }
         }
       }
