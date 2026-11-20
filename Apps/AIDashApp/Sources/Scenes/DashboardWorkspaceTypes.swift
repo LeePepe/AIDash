@@ -47,7 +47,7 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
     case settings
 
     public static var primaryNavigationSections: [DashboardWorkspaceSection] {
-        [.overview, .scheduledPulse, .agentEfficiency, .actionItems, .systemAndCosts]
+        [.overview, .agentEfficiency]
     }
 
     public var id: String { rawValue }
@@ -55,11 +55,17 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
     public var title: String {
         switch self {
         case .overview:
-            return DashboardL10n.tr("dashboard.section.overview", "Overview")
+            return DashboardL10n.tr(
+                "dashboard.section.tab1_quotas_efficiency",
+                "Quotas & Agent Efficiency"
+            )
         case .scheduledPulse:
             return DashboardL10n.tr("dashboard.section.scheduled_pulse", "Scheduled Pulse")
         case .agentEfficiency:
-            return DashboardL10n.tr("dashboard.section.agent_efficiency", "Agent Efficiency")
+            return DashboardL10n.tr(
+                "dashboard.section.tab2_skills_arsenal",
+                "Skills Arsenal Inspector"
+            )
         case .actionItems:
             return DashboardL10n.tr("dashboard.section.action_items", "Actionable Items")
         case .systemAndCosts:
@@ -71,9 +77,9 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
 
     public var symbolName: String {
         switch self {
-        case .overview: return "square.grid.2x2"
+        case .overview: return "gauge.with.dots.needle.67percent"
         case .scheduledPulse: return "clock.badge.checkmark"
-        case .agentEfficiency: return "waveform.path.ecg"
+        case .agentEfficiency: return "sparkles.rectangle.stack"
         case .actionItems: return "checklist"
         case .systemAndCosts: return "creditcard.and.123"
         case .settings: return "gearshape"

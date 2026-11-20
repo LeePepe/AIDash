@@ -14,14 +14,16 @@ enum RunMode: Equatable {
     case gui
     case agent
     case testHost
+    case previewHost
 
     var isAgent: Bool { self == .agent }
+    var isPreviewHost: Bool { self == .previewHost }
 
     /// Whether this process should install the status bar item and render the
     /// main briefing window content.
     var showsAppChrome: Bool {
         switch self {
-        case .gui, .agent:
+        case .gui, .agent, .previewHost:
             return true
         case .testHost:
             return false
@@ -30,9 +32,12 @@ enum RunMode: Equatable {
 
     /// Pure decision from the environment — unit-testable without launching.
     /// Agent takes precedence (a launchd spawn is never a test host).
-    static func decide(env: [String: String]) -> RunMode {
+    static func decide(env: [String: String], args: [String] = []) -> RunMode {
         #if os(macOS)
         if env[LaunchdAgentInstaller.agentEnvVar] == "1" { return .agent }
+        if args.contains("--preview-host") || env["AIDASH_PREVIEW_HOST"] == "1" {
+            return .previewHost
+        }
         #endif
         if env["XCTestConfigurationFilePath"] != nil
             || env["XCTestBundlePath"] != nil { return .testHost }
@@ -54,7 +59,7 @@ enum RunMode: Equatable {
         switch self {
         case .agent: return .agent
         case .gui: return .gui
-        case .testHost: return .none
+        case .testHost, .previewHost: return .none
         }
     }
 }

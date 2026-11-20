@@ -1,6 +1,24 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "briefing.scene.error.retry": {
+      "comment": "Retry button shown when BriefingWindowScene fails to initialize its store.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
+    },
     "briefing.scene.error.status": {
       "comment": "Status shown when the BriefingWindowScene cannot initialize its CloudKit store.",
       "extractionState": "manual",
@@ -5974,6 +5992,60 @@
           "stringUnit": {
             "state": "translated",
             "value": "Agent 效能"
+          }
+        }
+      }
+    },
+    "dashboard.section.tab1_quotas_efficiency": {
+      "comment": "Two-tab observatory Tab 1 title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quotas & Agent Efficiency"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度、成本与模型胜率"
+          }
+        }
+      }
+    },
+    "dashboard.section.tab2_skills_arsenal": {
+      "comment": "Two-tab observatory Tab 2 title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skills Arsenal Inspector"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skills 军火库透视台"
+          }
+        }
+      }
+    },
+    "dashboard.preview_host.open": {
+      "comment": "Toolbar entry for the native 2 by 10 PreviewHost gallery.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2×10 PreviewHost"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2×10 PreviewHost"
           }
         }
       }
