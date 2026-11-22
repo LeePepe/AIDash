@@ -104,18 +104,26 @@ STAGE2_STATUS=$([ "$STAGE2_RC" -eq 0 ] && echo "ok" || echo "failed")
 # Stage 3: Compute M1-M5 Agent Efficiency, S1-S12 Skill ROI, and L4 Retro Signals
 STAGE3_START="$(date +%s)"
 STAGE3_RC=0
+STAGE3_STEP_TIMEOUT="${STAGE3_STEP_TIMEOUT:-180}"
 RETRO_ENGINE="${RETRO_ENGINE:-$HOME/Development/user-skills/skills/retro-loop/scripts/retro_story_engine.py}"
+run_stage3_step() {
+  if [ -n "$_TIMEOUT_BIN" ]; then
+    "$_TIMEOUT_BIN" "$STAGE3_STEP_TIMEOUT" "$@"
+  else
+    "$@"
+  fi
+}
 mkdir -p "$JOB_OUTPUT_DIR"
 ROI_REPORT="$(mktemp "$JOB_OUTPUT_DIR/.skills-roi-report.XXXXXX")" || exit 1
 ROI_RC=1
 trap 'rm -f "$ROI_REPORT"' EXIT
 if [ -f "$RETRO_ENGINE" ]; then
-  python3 "$RETRO_ENGINE" agent-efficiency --auto-propose >/dev/null \
+  run_stage3_step python3 "$RETRO_ENGINE" agent-efficiency --auto-propose >/dev/null \
     || { echo "[aidata-digest]   ! agent-efficiency auto-propose warning"; STAGE3_RC=1; }
   ROI_RC=0
-  python3 "$RETRO_ENGINE" skill-roi --auto-propose >"$ROI_REPORT" \
+  run_stage3_step python3 "$RETRO_ENGINE" skill-roi --auto-propose >"$ROI_REPORT" \
     || { ROI_RC=$?; echo "[aidata-digest]   ! skill-roi auto-propose warning"; STAGE3_RC=1; }
-  python3 "$RETRO_ENGINE" discover >/dev/null \
+  run_stage3_step python3 "$RETRO_ENGINE" discover >/dev/null \
     || { echo "[aidata-digest]   ! retro discover warning"; STAGE3_RC=1; }
 else
   echo "[aidata-digest]   ! retro engine missing"

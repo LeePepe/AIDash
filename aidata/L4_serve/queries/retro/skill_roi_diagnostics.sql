@@ -6,9 +6,60 @@ WITH anchor AS (
                     (SELECT MAX(cst_day) FROM fact_gtt_task_run),
                     date('now', '+8 hours')) AS max_day
 ),
+valid_skills(skill) AS (
+    VALUES
+        ('aidash-content'),
+        ('aidash-metrics'),
+        ('asset-screener'),
+        ('code-review'),
+        ('codebase-design'),
+        ('customize-cloud-agent'),
+        ('deep-research'),
+        ('design-studio'),
+        ('financial-advisor'),
+        ('financial-data-toolkit'),
+        ('financial-preferences'),
+        ('github-pr-media'),
+        ('howto'),
+        ('ios-architecture-testing'),
+        ('ios-concurrency-swiftui'),
+        ('ios-debugging-performance'),
+        ('issue-brief'),
+        ('knowledge-digest'),
+        ('layered-data-warehouse'),
+        ('linear-board'),
+        ('loki-telemetry-integration'),
+        ('m2-dispatcher'),
+        ('my-designer'),
+        ('nas-smart-home'),
+        ('personal-m2-assistant'),
+        ('portfolio-advisor'),
+        ('pr-stack'),
+        ('repo-kit'),
+        ('retro-loop'),
+        ('save-tool'),
+        ('skill-contract'),
+        ('skill-retro'),
+        ('speckit-agent-context-update'),
+        ('speckit-analyze'),
+        ('speckit-checklist'),
+        ('speckit-clarify'),
+        ('speckit-constitution'),
+        ('speckit-converge'),
+        ('speckit-implement'),
+        ('speckit-plan'),
+        ('speckit-specify'),
+        ('speckit-tasks'),
+        ('speckit-taskstoissues'),
+        ('story-craft'),
+        ('team-lead'),
+        ('unmeasured'),
+        ('workflow-hub'),
+        ('xcode-cli')
+),
 turn_skills_raw AS (
     SELECT turn_uuid, session_id, cst_day,
-           CASE WHEN attribution_skill = 'goal-target-task' THEN 'team-lead' ELSE attribution_skill END AS skill,
+           CASE WHEN attribution_skill IN ('goal-target-task', 'goal-task') THEN 'team-lead' ELSE attribution_skill END AS skill,
            COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_read, 0) AS tokens,
            CASE WHEN tool_calls LIKE '%"Bash"%' OR tool_calls LIKE '%"execute_code"%' OR tool_calls LIKE '%"terminal"%' THEN 1 ELSE 0 END AS has_script_exec,
            CASE WHEN tool_calls IS NULL THEN 0 ELSE
@@ -23,7 +74,7 @@ turn_skills_raw AS (
     WHERE attribution_skill IS NOT NULL AND attribution_skill != ''
     UNION
     SELECT t.turn_uuid, t.session_id, t.cst_day,
-           CASE WHEN json_each.value = 'goal-target-task' THEN 'team-lead' ELSE CAST(json_each.value AS TEXT) END AS skill,
+           CASE WHEN json_each.value IN ('goal-target-task', 'goal-task') THEN 'team-lead' ELSE CAST(json_each.value AS TEXT) END AS skill,
            COALESCE(t.input_tokens, 0) + COALESCE(t.output_tokens, 0) + COALESCE(t.cache_read, 0) AS tokens,
            CASE WHEN t.tool_calls LIKE '%"Bash"%' OR t.tool_calls LIKE '%"execute_code"%' OR t.tool_calls LIKE '%"terminal"%' THEN 1 ELSE 0 END AS has_script_exec,
            CASE WHEN t.tool_calls IS NULL THEN 0 ELSE
@@ -46,15 +97,19 @@ session_skill_base AS (
            SUM(ts.file_edit_calls) AS file_edit_calls
     FROM turn_skills_raw ts CROSS JOIN anchor
     WHERE ts.skill IS NOT NULL AND ts.skill != ''
+      AND lower(ts.skill) IN (SELECT skill FROM valid_skills)
     GROUP BY ts.skill, ts.session_id
 ),
 session_skills AS (
     SELECT DISTINCT session_id, skill FROM session_skill_base
 ),
 reference_events AS (
-    SELECT session_id, skill, reference_path, byte_len
+    SELECT session_id,
+           CASE WHEN skill IN ('goal-target-task', 'goal-task') THEN 'team-lead' ELSE skill END AS skill,
+           reference_path, byte_len
     FROM reference_hits
     WHERE reference_path IS NOT NULL AND skill IS NOT NULL
+      AND lower(CASE WHEN skill IN ('goal-target-task', 'goal-task') THEN 'team-lead' ELSE skill END) IN (SELECT skill FROM valid_skills)
     UNION ALL
     SELECT h.session_id, s.skill, h.reference_path, h.byte_len
     FROM reference_hits h
@@ -68,9 +123,12 @@ reference_rollup AS (
     GROUP BY session_id, skill
 ),
 script_events AS (
-    SELECT session_id, skill, script_path, exit_code, duration_ms
+    SELECT session_id,
+           CASE WHEN skill IN ('goal-target-task', 'goal-task') THEN 'team-lead' ELSE skill END AS skill,
+           script_path, exit_code, duration_ms
     FROM script_call
     WHERE script_path IS NOT NULL AND skill IS NOT NULL
+      AND lower(CASE WHEN skill IN ('goal-target-task', 'goal-task') THEN 'team-lead' ELSE skill END) IN (SELECT skill FROM valid_skills)
     UNION ALL
     SELECT c.session_id, s.skill, c.script_path, c.exit_code, c.duration_ms
     FROM script_call c
@@ -145,12 +203,13 @@ review_source AS (
     WHERE role_name IN ('reviewer', 'code_reviewer', 'planner_reviewer')
 ),
 review_explicit AS (
-    SELECT CASE WHEN json_each.value = 'goal-target-task' THEN 'team-lead' ELSE CAST(json_each.value AS TEXT) END AS skill,
+    SELECT CASE WHEN json_each.value IN ('goal-target-task', 'goal-task') THEN 'team-lead' ELSE CAST(json_each.value AS TEXT) END AS skill,
            round_no, UPPER(COALESCE(v5_verdict, '')) AS v5_verdict, LOWER(COALESCE(status, '')) AS status
     FROM review_source, json_each(
         CASE WHEN json_valid(skills_used) AND json_type(skills_used) = 'array'
              AND json_array_length(skills_used) > 0 THEN skills_used ELSE '[]' END
     )
+    WHERE lower(CASE WHEN json_each.value IN ('goal-target-task', 'goal-task') THEN 'team-lead' ELSE CAST(json_each.value AS TEXT) END) IN (SELECT skill FROM valid_skills)
 ),
 review_fallback AS (
     SELECT CASE
@@ -192,12 +251,16 @@ eval_agg AS (
     FROM eval_effect GROUP BY skill
 ),
 all_skills AS (
-    SELECT skill FROM usage_agg
-    UNION SELECT skill FROM review_agg
-    UNION SELECT skill FROM eval_agg
-    UNION SELECT skill FROM reference_rollup
-    UNION SELECT skill FROM script_session_rollup
-    UNION SELECT skill FROM script_skill_stats
+    SELECT skill FROM (
+        SELECT skill FROM usage_agg
+        UNION SELECT skill FROM review_agg
+        UNION SELECT skill FROM eval_agg
+        UNION SELECT skill FROM reference_rollup
+        UNION SELECT skill FROM script_session_rollup
+        UNION SELECT skill FROM script_skill_stats
+    )
+    WHERE skill IS NOT NULL AND skill != ''
+      AND lower(skill) IN (SELECT skill FROM valid_skills)
 )
 SELECT s.skill,
        COALESCE(u.loads_7d, 0) AS loads_7d,

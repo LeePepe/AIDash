@@ -16,16 +16,19 @@ and `project_id` (often NULL → downstream degrades to per-workspace).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import sys
 from typing import Any
 
-from config import MULTICA_WORKSPACES, MULTICA_UPDATED_WINDOW_DAYS
-from adapters._multica import multica_bin, run_json
+from config import MULTICA_CONFIG, MULTICA_WORKSPACES, MULTICA_UPDATED_WINDOW_DAYS
+from adapters._multica import multica_bin, resolve_multica_workspaces, run_json
 from rawio import write_raw, read_raw
 from cleanio import write_clean
 from state import get_watermark, set_watermark
 
 SOURCE = "multica_issue"
 _PAGE = 100  # server hard-caps --limit at 100
+_DEFAULT_MULTICA_CONFIG = MULTICA_CONFIG
 
 
 def _multica_bin() -> str | None:
@@ -82,17 +85,23 @@ def _fresh_for_workspace(issues: list[dict[str, Any]], watermark: str | None,
 
 
 def collect(now: datetime | None = None) -> int:
-    """Window-read both workspaces; append fresh edits; advance per-ws watermark."""
+    """Window-read configured workspaces; append fresh edits; advance per-ws watermark."""
     if not _multica_bin():
         return 0  # degrade (ADR-23): no CLI → nothing to collect, never raise
     now = now or datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=MULTICA_UPDATED_WINDOW_DAYS)).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
     total = 0
-    for ws_id, _name in MULTICA_WORKSPACES:
+    cfg_override: Path | None = MULTICA_CONFIG if MULTICA_CONFIG != _DEFAULT_MULTICA_CONFIG else None
+    workspaces = resolve_multica_workspaces(MULTICA_WORKSPACES, config_path=cfg_override)
+    for ws_id, _name in workspaces:
         key = f"{SOURCE}:{ws_id}"
         watermark = get_watermark(key)
-        issues = _list_workspace_issues(ws_id)
+        try:
+            issues = _list_workspace_issues(ws_id)
+        except RuntimeError as exc:
+            print(f"[multica_issue] skipping workspace {ws_id}: {exc}", file=sys.stderr)
+            continue
         fresh = _fresh_for_workspace(issues, watermark, cutoff)
         if not fresh:
             continue

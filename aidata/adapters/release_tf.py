@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess  # nosec B404 - fixed read-only commands
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,8 +14,11 @@ from typing import Any
 from cleanio import write_clean
 from config import GITHUB_CI_REPOS, HOME
 from rawio import read_raw, write_raw_snapshot
+from state import get_watermark, set_watermark
 
 SOURCE = "release_tf"
+RELEASE_TF_BUDGET_SEC = float(os.environ.get("RELEASE_TF_BUDGET_SEC", "60"))
+_PER_PAGE = 25
 _REPOS = tuple(repo for repo in GITHUB_CI_REPOS
                if repo.split("/", 1)[-1] in {"VitalStride", "VoxPocket", "AIDash", "demoUI"}
                or repo.split("/", 1)[-1].startswith("shared-"))
@@ -25,7 +30,7 @@ def _gh_api(path: str) -> Any:
         return None
     try:
         proc = subprocess.run(["gh", "api", path], capture_output=True, text=True,
-                              timeout=60, check=False)
+                              timeout=15, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:
@@ -168,19 +173,49 @@ def _evidence_runs() -> list[dict[str, Any]]:
 
 
 def collect() -> int:
-    records: list[dict[str, Any]] = []
+    deadline = time.monotonic() + max(1.0, float(RELEASE_TF_BUDGET_SEC))
+    prior_by_uid: dict[str, dict[str, Any]] = {}
+    for rec in read_raw(SOURCE):
+        uid = rec.get("delivery_uid")
+        if isinstance(uid, str) and uid:
+            prior_by_uid[uid] = rec
+    raw_wm = get_watermark(SOURCE)
+    repo_watermarks: dict[str, int] = dict(raw_wm) if isinstance(raw_wm, dict) else {}
+    next_watermarks: dict[str, int] = dict(repo_watermarks)
+
+    records_by_uid: dict[str, dict[str, Any]] = dict(prior_by_uid)
     for repo in _REPOS:
-        payload = _gh_api(f"repos/{repo}/actions/runs?per_page=100")
+        if time.monotonic() >= deadline:
+            break
+        payload = _gh_api(f"repos/{repo}/actions/runs?per_page={_PER_PAGE}")
         runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
+        max_run_id = int(repo_watermarks.get(repo, 0) or 0)
+        marker_info: tuple[str | None, str | None] | None = None
         for run in runs:
+            if time.monotonic() >= deadline:
+                break
+            if not isinstance(run, dict) or run.get("id") is None:
+                continue
+            run_id = int(run["id"])
+            uid = f"{repo}:{run_id}"
             name = str(run.get("name") or "")
             path = str(run.get("path") or "")
             if not any(token in f"{name} {path}".lower() for token in ("testflight", "release", "04")):
                 continue
-            marker_name, marker_sha = _marker(repo)
+            status = str(run.get("status") or "").lower()
+            if (
+                run_id <= int(repo_watermarks.get(repo, 0) or 0)
+                and uid in prior_by_uid
+                and status == "completed"
+            ):
+                records_by_uid[uid] = prior_by_uid[uid]
+                continue
+            if marker_info is None:
+                marker_info = _marker(repo)
+            marker_name, marker_sha = marker_info
             conclusion = run.get("conclusion")
             duration = _seconds(run.get("run_started_at"), run.get("updated_at"))
-            steps = _job_steps(repo, int(run["id"]))
+            steps = _job_steps(repo, run_id)
             outcome, upload_conclusion, advanced, failure_stage = _release_classification(
                 steps, run, marker_sha
             )
@@ -188,10 +223,10 @@ def collect() -> int:
                 outcome = "noop_skipped"
                 advanced = 0
                 failure_stage = None
-            records.append({
-                "delivery_uid": f"{repo}:{run.get('id')}",
+            records_by_uid[uid] = {
+                "delivery_uid": uid,
                 "repo_key": repo,
-                "run_id": run.get("id"),
+                "run_id": run_id,
                 "workflow_name": name or "unknown",
                 "trigger_event": run.get("event"),
                 "target_platform": "macos" if (
@@ -222,10 +257,20 @@ def collect() -> int:
                 "started_at": run.get("run_started_at") or run.get("created_at") or "",
                 "completed_at": run.get("updated_at"),
                 "failure_stage": failure_stage,
-            })
+            }
+            if status == "completed" and run_id > max_run_id:
+                max_run_id = run_id
+        if max_run_id > int(repo_watermarks.get(repo, 0) or 0):
+            next_watermarks[repo] = max_run_id
+    records = list(records_by_uid.values())
     if not records:
         records = _evidence_runs()
-    return write_raw_snapshot(SOURCE, records) if records else 0
+    if not records:
+        return 0
+    written = write_raw_snapshot(SOURCE, records)
+    if next_watermarks != repo_watermarks:
+        set_watermark(SOURCE, next_watermarks)
+    return written
 
 
 _DDL = """CREATE TABLE delivery (
