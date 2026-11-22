@@ -8,7 +8,7 @@ loud, actionable line when a source degraded, so a silently-incomplete digest
 import pytest
 
 from L5_apps.digest.sources import SourceHealth
-from L5_apps.digest.freshness import degraded_sources, format_alarm
+from L5_apps.digest.freshness import alarm_if_degraded, degraded_sources, format_alarm
 
 
 class _FakeSource:
@@ -60,3 +60,36 @@ def test_format_alarm_mentions_each_degraded_source_and_date():
 @pytest.mark.unit
 def test_format_alarm_empty_when_none():
     assert format_alarm([], "2026-07-21") == ""
+
+
+@pytest.mark.unit
+def test_alarm_if_degraded_writes_cron_error_log_without_osascript(monkeypatch, tmp_path):
+    import subprocess
+    called = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: called.append(a))
+    log_path = tmp_path / "cron-errors.log"
+    msg = alarm_if_degraded(
+        _FakeSources(multica="error", radar="stale"),
+        "2026-07-21",
+        log_path=log_path,
+    )
+    assert "2026-07-21" in msg
+    logged = log_path.read_text(encoding="utf-8")
+    assert "multica=error" in logged and "github_repo=stale" in logged
+    assert called == []
+
+
+@pytest.mark.unit
+def test_alarm_if_degraded_invokes_injected_notifier_when_provided(tmp_path):
+    notes: list[tuple[str, str]] = []
+    log_path = tmp_path / "cron-errors.log"
+    msg = alarm_if_degraded(
+        _FakeSources(multica="error"),
+        "2026-07-21",
+        log_path=log_path,
+        notifier=lambda title, body: notes.append((title, body)),
+    )
+    assert msg
+    assert len(notes) == 1
+    assert "multica=error" in notes[0][1]
+

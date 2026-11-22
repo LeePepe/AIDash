@@ -252,13 +252,12 @@ def write_digest(report_date: str, use_llm: bool = False,
     sources = _fetch_sources(report_date)  # fetch once; shared by render + push
 
     # Integrity gate (D): if any headline source degraded (stale watermark,
-    # skipped collection, query error), append a loud line to cron-errors.log +
-    # notify — so a silently-incomplete digest (0 issue / 0 PR / stale radar) is
-    # noticed the same day. Never blocks generation (ADR-16 必成 sink).
+    # skipped collection, query error), append a loud line to cron-errors.log
+    # for Multica Autopilot Health Watchdog (`e9c25327`) — never desktop popups.
+    # Never blocks generation (ADR-16 必成 sink).
     try:
-        from L5_apps.digest.aidash import _default_notifier
         from L5_apps.digest.freshness import alarm_if_degraded
-        alarm_if_degraded(sources, report_date, notifier=_default_notifier)
+        alarm_if_degraded(sources, report_date)
     except Exception as exc:  # noqa: BLE001 - monitoring must never break digest
         log.warning("freshness gate errored (non-fatal): %s", exc)
 

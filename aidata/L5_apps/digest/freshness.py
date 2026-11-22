@@ -8,18 +8,19 @@ nobody notices for days.
 
 This gate never blocks generation. After sources are fetched, it collects every
 source whose `SourceHealth.state` is not "ok" and, if any, appends ONE loud line
-to the shared cron-errors.log (the same log the snapshot cron uses) plus a
-best-effort desktop notification — so an incomplete digest is visible the same
-day and can be re-run.
+to the shared cron-errors.log (the same log the snapshot cron uses, monitored by
+Multica Autopilot Health Watchdog `e9c25327`) without triggering desktop popups.
 
 Kept dependency-light and pure (`degraded_sources` / `format_alarm`) so it is
-hermetically testable; the effectful `alarm_if_degraded` wires the log + notify.
+hermetically testable; the effectful `alarm_if_degraded` wires the log + optional
+injected notifier callback.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Callable
 
 # The health-bearing DigestSources fields we gate on. Attribute name → the
 # human label used in the alarm. Only sources whose staleness materially
@@ -64,9 +65,11 @@ def format_alarm(degraded: list, report_date: str) -> str:
 
 def alarm_if_degraded(sources, report_date: str,
                       *, log_path: Path | None = None,
-                      notifier=None) -> str:
-    """Write a loud line + notify when any gated source degraded. Best-effort.
+                      notifier: Callable[[str, str], None] | None = None) -> str:
+    """Write a loud line to cron-errors.log when any gated source degraded. Best-effort.
 
+    Never triggers desktop notifications by default (`notifier` defaults to None);
+    Multica Autopilot Health Watchdog (`e9c25327`) consumes `cron-errors.log`.
     Never raises (a monitoring hiccup must not break the digest) and never
     blocks generation — returns the alarm string (or "" if all healthy) so
     callers/tests can observe what fired.

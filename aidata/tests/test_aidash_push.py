@@ -327,48 +327,37 @@ def test_real_push_smoke():
     assert isinstance(res, PushResult)
 
 
-# --- root-cause hardening (2026-07-18): loud desktop notify + patient XPC gate -
+# --- silent no-op default notifier + patient XPC gate -----------------------
 @pytest.mark.unit
-def test_default_notifier_shells_osascript(monkeypatch):
-    """The notifier posts a desktop notification via osascript."""
+def test_default_notifier_is_silent_noop_never_shells_osascript(monkeypatch):
+    """_default_notifier is a pure no-op and never invokes subprocess.run / osascript."""
     from L5_apps.digest import aidash
-    captured = {}
+    called = []
 
-    def _fake_run(argv, **kw):
-        captured["argv"] = argv
-        class _P:
-            returncode = 0
-        return _P()
+    def _forbidden_run(*a, **kw):
+        called.append((a, kw))
+        raise AssertionError("subprocess.run must never be called by _default_notifier")
 
-    monkeypatch.setattr(aidash.subprocess, "run", _fake_run)
-    aidash._default_notifier("T", "hello")
-    assert captured["argv"][0] == "osascript"
-    assert any("display notification" in a for a in captured["argv"])
-    assert any("hello" in a for a in captured["argv"])
+    monkeypatch.setattr(aidash.subprocess, "run", _forbidden_run)
+    assert aidash._default_notifier("T", "hello") is None
+    assert aidash._default_notifier('ti"tle', 'a "quoted" bit') is None
+    assert called == []
 
 
 @pytest.mark.unit
-def test_default_notifier_never_raises(monkeypatch):
-    """A missing/failed osascript (non-macOS, sandbox) must be swallowed."""
+def test_record_push_failure_logs_without_osascript_by_default(monkeypatch, tmp_path):
+    """Default failure recording writes push-errors.log and never shells out."""
     from L5_apps.digest import aidash
-
-    def _boom(*a, **kw):
-        raise OSError("osascript not found")
-
-    monkeypatch.setattr(aidash.subprocess, "run", _boom)
-    aidash._default_notifier("T", "m")  # must not raise
-
-
-@pytest.mark.unit
-def test_default_notifier_escapes_quotes(monkeypatch):
-    """Double-quotes in the message must be escaped so the AppleScript is valid."""
-    from L5_apps.digest import aidash
-    captured = {}
-    monkeypatch.setattr(aidash.subprocess, "run",
-                        lambda argv, **kw: captured.setdefault("argv", argv))
-    aidash._default_notifier('ti"tle', 'a "quoted" bit')
-    script = captured["argv"][-1]
-    assert '\\"quoted\\"' in script  # inner quotes escaped, not raw
+    called = []
+    monkeypatch.setattr(aidash.subprocess, "run", lambda *a, **kw: called.append(a))
+    log_path = tmp_path / "push-errors.log"
+    aidash._record_push_failure(
+        "XPC not reachable",
+        now=lambda: "2026-07-18T04:00:00Z",
+        log_path=log_path,
+    )
+    assert log_path.read_text(encoding="utf-8").count("XPC not reachable") == 1
+    assert called == []
 
 
 @pytest.mark.unit
