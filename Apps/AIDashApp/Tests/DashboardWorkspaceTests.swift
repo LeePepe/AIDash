@@ -1962,6 +1962,12 @@ struct DashboardWorkspaceTests {
             #expect(bareAcademicRegex.firstMatch(in: text, range: range) == nil)
         }
 
+        // Verify that when skill_version_evolution is absent in older fixtures, versionEvolution stays empty (no fabricated v1@head / improved / P50 metrics)
+        let canonical = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.canonical())
+        #expect(canonical.versionEvolution.isEmpty)
+        #expect(canonical.skillRetro == nil)
+        #expect(canonical.resolvedSkillRetro.proposals.isEmpty)
+
         // 5. Export 4 states x 2 appearances PNGs when AIDASH_WORKBENCH_V2_SCREENSHOT_DIR is set
         let env = ProcessInfo.processInfo.environment
         if let shotDirPath = [

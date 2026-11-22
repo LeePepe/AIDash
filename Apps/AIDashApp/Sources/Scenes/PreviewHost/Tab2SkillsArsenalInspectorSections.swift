@@ -346,7 +346,7 @@ private struct PreviewSkillsInventorySection: View {
                             .font(.caption2.monospaced())
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("exit=2 路障率 ▼ · 一次通过 \(before)% → \(after)% ▲ · P50 \(String(format: "%.1f", minBefore))s → \(String(format: "%.1f", minAfter))s ▼")
+                        Text("exit=2 路障率 ▼ · 一次通过 \(before)% → \(after)% ▲ · 耗时 \(String(format: "%.1f", minBefore))m → \(String(format: "%.1f", minAfter))m ▼")
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.green)
                     }

@@ -2272,20 +2272,8 @@ extension LiveDashboardTelemetryReader {
     public static func loadSkillsRoiSnapshot(homeURL: URL) -> SkillsRoiSnapshot? {
         let url = homeURL.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
         let iCloudURL = iCloudSyncRootURL(homeURL: homeURL).appendingPathComponent("jobs/aidata-digest/skills-roi.json")
-        let decoder = JSONDecoder()
-        if let localData = productionScheduledJobFileReader(url),
-           let localReport = try? decoder.decode(SkillsRoiReport.self, from: localData),
-           let cloudData = productionScheduledJobFileReader(iCloudURL),
-           let cloudReport = try? decoder.decode(SkillsRoiReport.self, from: cloudData) {
-            if !localReport.skillDetails.isEmpty && cloudReport.skillDetails.isEmpty {
-                return localReport
-            }
-            if !cloudReport.skillDetails.isEmpty && localReport.skillDetails.isEmpty {
-                return cloudReport
-            }
-        }
         guard let data = selectFresherArtifactData(localURL: url, iCloudURL: iCloudURL)?.data else { return nil }
-        return try? decoder.decode(SkillsRoiReport.self, from: data)
+        return try? JSONDecoder().decode(SkillsRoiReport.self, from: data)
     }
 
     public static func managedSkillDetails(in report: SkillsRoiReport) -> [SkillInspectorDetail] {

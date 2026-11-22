@@ -2338,57 +2338,9 @@ public struct SkillsRoiReport: Decodable, Sendable, Equatable {
         skillDetails = !filteredTopDetails.isEmpty ? filteredTopDetails : diag.resolvedSkillDetails
         let topLevelEvo: [SkillVersionEvolutionRow]? = try f.value("skill_version_evolution")
         let filteredTopEvo = (topLevelEvo ?? []).filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
-        let resolvedEvo = !filteredTopEvo.isEmpty ? filteredTopEvo : diag.versionEvolution
-        if !resolvedEvo.isEmpty {
-            versionEvolution = resolvedEvo
-        } else {
-            versionEvolution = Self.synthesizeVersionEvolution(from: skillDetails, fallbackMetadata: metadata)
-        }
+        versionEvolution = !filteredTopEvo.isEmpty ? filteredTopEvo : diag.versionEvolution
         skillRetro = (try? f.value("skill_retro", as: SkillRetroFourLayerSummary.self)) ?? diag.skillRetro
         errors = try f.value("errors") ?? []
-    }
-
-    private static func synthesizeVersionEvolution(
-        from details: [SkillInspectorDetail],
-        fallbackMetadata: SkillsObservationMetadata
-    ) -> [SkillVersionEvolutionRow] {
-        details.filter { !$0.isGhost && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }.map { item in
-            let scriptCalls = item.scripts.compactMap(\.calls30d).reduce(0, +)
-            let p50 = item.scripts.compactMap(\.p95Ms).min()
-            let uptake = item.unpracticedRate.map { max(0.0, min(1.0, 1.0 - $0)) }
-            let current = SkillVersionMetricsSnapshot(
-                skillVersion: "v1@head",
-                semver: "1.0.0",
-                combinedVersion: "1.0.0+v1@head",
-                commitCount: 1,
-                subtreeSha: "head",
-                sessions: item.loads30d,
-                invocations: item.loads30d,
-                scriptCallCount: scriptCalls,
-                exit2Count: 0,
-                exit1Count: 0,
-                postFixErrors: 0,
-                exit2ErrorRate: scriptCalls > 0 ? 0.0 : nil,
-                brokenDrawerCount: item.unhitRefsCount,
-                scriptP50Ms: p50,
-                uptakeRate: uptake,
-                r1Total: item.r1PassRate != nil ? max(1, item.loads7d) : 0,
-                r1Pass: item.r1PassRate.map { Int((Double(max(1, item.loads7d)) * $0).rounded()) } ?? 0,
-                r1PassRate: item.r1PassRate
-            )
-            let status = item.loads30d >= 5 ? "improved" : (item.loads30d > 0 ? "observing" : "baseline")
-            return SkillVersionEvolutionRow(
-                metadata: item.metadata.inheriting(fallbackMetadata),
-                skill: item.skill,
-                semver: "1.0.0",
-                skillVersion: "v1@head",
-                combinedVersion: "1.0.0+v1@head",
-                subtreeSha: "head",
-                commitCount: 1,
-                status: status,
-                currentVersion: current
-            )
-        }
     }
 }
 
