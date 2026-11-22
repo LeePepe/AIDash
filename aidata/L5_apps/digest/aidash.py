@@ -2267,36 +2267,25 @@ def ensure_xpc_ready(bin_path: str, *, probe: Probe = _default_probe,
 
 
 def _default_notifier(title: str, message: str) -> None:
-    """Post a macOS desktop notification via osascript. Best-effort, never raises.
+    """Silent no-op notifier (never invokes osascript desktop popups).
 
-    This is the fix for the silent-failure blind spot: the 04:00 cron push often
-    fails (XPC listener dead after an `open`-launched app — the SMAppService
-    registration weakness), and until now that only landed in a log file nobody
-    watches, so the dashboard could sit stale for days unnoticed. A desktop
-    notification surfaces the failure the same day. A missing/failed osascript
-    (non-macOS, sandbox) is swallowed — notification is a nicety, not a gate.
+    Failures are persisted to `.aidash-state/aidash-push-errors.log` (and
+    `.aidash-state/cron-errors.log`) and monitored by the Multica Autopilot
+    Health Watchdog (`e9c25327`) rather than interrupting the Owner with macOS
+    desktop notification popups.
     """
-    # Escape double-quotes for the AppleScript string literals.
-    safe_msg = message.replace('"', '\\"')
-    safe_title = title.replace('"', '\\"')
-    script = f'display notification "{safe_msg}" with title "{safe_title}"'
-    try:
-        subprocess.run(["osascript", "-e", script],  # nosec B603 B607
-                       capture_output=True, timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):  # pragma: no cover - best-effort
-        pass
+    _ = (title, message)
 
 
 def _record_push_failure(reason: str,
                          now: Callable[[], str] = None,
                          log_path: Path | None = None,
                          notifier: Callable[[str, str], None] = None) -> None:
-    """Append to the push-error log AND post a desktop notification (loud fail).
+    """Append to the push-error log and invoke an optional injected notifier.
 
-    Two-channel loudness (both best-effort, non-fatal): the log line is the
-    durable record; the notification pulls attention the same day so a stale
-    AIDash mirror is noticed within hours, not days. Neither channel failing
-    raises from the push boundary.
+    File-level observability (`.aidash-state/aidash-push-errors.log`) is the
+    durable record consumed by the Multica Autopilot Health Watchdog (`e9c25327`);
+    `_default_notifier` is a pure no-op so no macOS desktop popup is shown.
     """
     try:
         stamp = (now or _utc_now)()
@@ -2306,8 +2295,8 @@ def _record_push_failure(reason: str,
             fh.write(f"{stamp} — AIDash push did not land: {reason}\n")
     except OSError as exc:  # pragma: no cover - log-of-last-resort
         log.warning("could not write push-error log: %s", exc)
-    # Desktop notification — separate try so a log failure doesn't skip it and
-    # vice versa. Injected notifier defaults to the real osascript one.
+    # Optional notifier callback — separate try so a log failure doesn't skip it
+    # and vice versa. Defaults to the silent no-op `_default_notifier`.
     try:
         (notifier or _default_notifier)(
             "AIDash 日报未推送",
