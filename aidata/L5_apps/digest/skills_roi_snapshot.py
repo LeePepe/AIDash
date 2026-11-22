@@ -214,9 +214,12 @@ def _synthesize_skill_retro_summary(
     version_evolution: Sequence[Mapping[str, Any]] | None = None,
     *,
     prior_skill_retro: Mapping[str, Any] | None = None,
+    use_prior_fallback: bool = False,
 ) -> dict[str, Any]:
     """Ensure standardized 4-layer `skill_retro` health object (`summary`, `layer0..layer3`, `proposals`)."""
-    existing = report.get("skill_retro") if isinstance(report.get("skill_retro"), Mapping) else prior_skill_retro
+    existing = report.get("skill_retro") if isinstance(report.get("skill_retro"), Mapping) else (
+        prior_skill_retro if use_prior_fallback else None
+    )
     if isinstance(existing, Mapping) and all(
         isinstance(existing.get(k), Mapping)
         for k in (
@@ -1883,10 +1886,12 @@ def build_snapshot(
         payload["skill_version_evolution"] = []
 
     prior_retro = (prior_snapshot or {}).get("skill_retro") if isinstance(prior_snapshot, Mapping) else None
+    use_prior_fallback = bool(problems) or report.get("ok") is not True
     payload["skill_retro"] = _synthesize_skill_retro_summary(
         report,
         payload["skill_version_evolution"],
         prior_skill_retro=prior_retro if isinstance(prior_retro, Mapping) else None,
+        use_prior_fallback=use_prior_fallback,
     )
     if problems:
         payload["errors"] = problems

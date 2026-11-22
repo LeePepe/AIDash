@@ -1616,6 +1616,30 @@ def test_pseudo_skills_filtered_and_skill_retro_4layer_fallback(tmp_path, monkey
     assert isinstance(fallback_snap["skill_retro"], dict)
     assert "layer0_direction_and_triggers" in fallback_snap["skill_retro"]
 
+    # Subsequent healthy refresh recomputes skill_retro from new report rather than keeping stale prior skill_retro
+    refreshed_report = {
+        **base_report,
+        "source_as_of": "2026-11-22T20:00:00+08:00",
+        "S10_skill_roi_ranking": [
+            {
+                **base_report["S10_skill_roi_ranking"][0],
+                "empty_load_sessions": 12,
+            }
+        ],
+    }
+    refreshed_file = tmp_path / "refreshed-report.json"
+    refreshed_file.write_text(json.dumps(refreshed_report), encoding="utf-8")
+    refreshed_snap = write_snapshot(
+        out_file,
+        refreshed_file,
+        query_runner=lambda name, params: (
+            [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1)],
+            ["day", "source", "skill", "n", "sessions"],
+        ),
+    )
+    assert refreshed_snap["skill_retro"]["source_as_of"] == "2026-11-22T20:00:00+08:00"
+    assert refreshed_snap["skill_retro"]["summary"]["zero_action_load_skills"] == 1
+
     # 3. Verify bot_tl file_stats cache skips unchanged files and release_tf watermark skips completed runs
     goal_dir = tmp_path / "handoff" / "goal-a"
     goal_dir.mkdir(parents=True)
@@ -1629,13 +1653,34 @@ def test_pseudo_skills_filtered_and_skill_retro_4layer_fallback(tmp_path, monkey
     second_local = bot_tl._local_records(file_stats=fstats, new_file_stats={})
     assert second_local == []
 
-    wm_store: dict[str, object] = {"release_tf": {"LeePepe/AIDash": 500}}
+    wm_store: dict[str, object] = {
+        "release_tf": {
+            "LeePepe/AIDash": 500,
+            "completed_runs": {"LeePepe/AIDash:500": "completed:1:success"},
+        }
+    }
     api_calls: list[str] = []
     monkeypatch.setattr(release_tf, "_REPOS", ("LeePepe/AIDash",))
     monkeypatch.setattr(
         release_tf,
         "read_raw",
-        lambda _s: [{"delivery_uid": "LeePepe/AIDash:500", "repo_key": "LeePepe/AIDash", "run_id": 500}],
+        lambda _s: [
+            {
+                "delivery_uid": "LeePepe/AIDash:500",
+                "repo_key": "LeePepe/AIDash",
+                "run_id": 500,
+                "status": "completed",
+                "run_attempt": 1,
+            },
+            {
+                "delivery_uid": "LeePepe/AIDash:490",
+                "repo_key": "LeePepe/AIDash",
+                "run_id": 490,
+                "status": "in_progress",
+                "run_attempt": 1,
+                "delivery_outcome": "failed_signing_or_upload",
+            },
+        ],
     )
     monkeypatch.setattr(release_tf, "get_watermark", lambda k: wm_store.get(k))
     monkeypatch.setattr(release_tf, "set_watermark", lambda k, v: wm_store.__setitem__(k, v))
@@ -1645,11 +1690,23 @@ def test_pseudo_skills_filtered_and_skill_retro_4layer_fallback(tmp_path, monkey
         "_gh_api",
         lambda path: (
             api_calls.append(path)
-            or {"workflow_runs": [{"id": 500, "name": "TestFlight", "path": "release.yml", "status": "completed"}]}
+            or (
+                {
+                    "workflow_runs": [
+                        {"id": 500, "name": "TestFlight", "path": "release.yml", "status": "completed", "conclusion": "success", "run_attempt": 1},
+                        {"id": 490, "name": "TestFlight", "path": "release.yml", "status": "completed", "conclusion": "success", "run_attempt": 1},
+                    ]
+                }
+                if "jobs" not in path
+                else {"jobs": [{"steps": [{"name": "Archive", "conclusion": "success"}, {"name": "Upload to TestFlight", "conclusion": "success"}, {"name": "Move last-released tag", "conclusion": "success"}]}]}
+            )
         ),
     )
-    assert release_tf.collect() == 1
-    assert api_calls == ["repos/LeePepe/AIDash/actions/runs?per_page=25"]
+    assert release_tf.collect() == 2
+    assert api_calls == [
+        "repos/LeePepe/AIDash/actions/runs?per_page=25",
+        "repos/LeePepe/AIDash/actions/runs/490/jobs?per_page=100",
+    ]
 
 
 

@@ -180,8 +180,14 @@ def collect() -> int:
         if isinstance(uid, str) and uid:
             prior_by_uid[uid] = rec
     raw_wm = get_watermark(SOURCE)
-    repo_watermarks: dict[str, int] = dict(raw_wm) if isinstance(raw_wm, dict) else {}
-    next_watermarks: dict[str, int] = dict(repo_watermarks)
+    repo_watermarks: dict[str, Any] = dict(raw_wm) if isinstance(raw_wm, dict) else {}
+    completed_runs: dict[str, str] = (
+        dict(repo_watermarks["completed_runs"])
+        if isinstance(repo_watermarks.get("completed_runs"), dict)
+        else {}
+    )
+    next_watermarks: dict[str, Any] = dict(repo_watermarks)
+    next_completed_runs: dict[str, str] = dict(completed_runs)
 
     records_by_uid: dict[str, dict[str, Any]] = dict(prior_by_uid)
     for repo in _REPOS:
@@ -189,7 +195,8 @@ def collect() -> int:
             break
         payload = _gh_api(f"repos/{repo}/actions/runs?per_page={_PER_PAGE}")
         runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
-        max_run_id = int(repo_watermarks.get(repo, 0) or 0)
+        prev_repo_wm = repo_watermarks.get(repo, 0)
+        max_run_id = int(prev_repo_wm if isinstance(prev_repo_wm, int) else 0)
         marker_info: tuple[str | None, str | None] | None = None
         for run in runs:
             if time.monotonic() >= deadline:
@@ -203,12 +210,26 @@ def collect() -> int:
             if not any(token in f"{name} {path}".lower() for token in ("testflight", "release", "04")):
                 continue
             status = str(run.get("status") or "").lower()
-            if (
-                run_id <= int(repo_watermarks.get(repo, 0) or 0)
-                and uid in prior_by_uid
-                and status == "completed"
-            ):
-                records_by_uid[uid] = prior_by_uid[uid]
+            attempt = int(run.get("run_attempt") or 1)
+            run_state_sig = f"completed:{attempt}:{run.get('conclusion') or ''}"
+            prior_rec = prior_by_uid.get(uid)
+            prior_was_completed = (
+                isinstance(prior_rec, dict)
+                and (
+                    completed_runs.get(uid) == run_state_sig
+                    or (
+                        uid not in completed_runs
+                        and run_id <= max_run_id
+                        and str(prior_rec.get("status") or "completed").lower() == "completed"
+                        and int(prior_rec.get("run_attempt") or 1) == attempt
+                    )
+                )
+            )
+            if status == "completed" and prior_was_completed and prior_rec is not None:
+                records_by_uid[uid] = prior_rec
+                next_completed_runs[uid] = run_state_sig
+                if run_id > max_run_id:
+                    max_run_id = run_id
                 continue
             if marker_info is None:
                 marker_info = _marker(repo)
@@ -227,6 +248,8 @@ def collect() -> int:
                 "delivery_uid": uid,
                 "repo_key": repo,
                 "run_id": run_id,
+                "status": status or "unknown",
+                "run_attempt": attempt,
                 "workflow_name": name or "unknown",
                 "trigger_event": run.get("event"),
                 "target_platform": "macos" if (
@@ -258,10 +281,16 @@ def collect() -> int:
                 "completed_at": run.get("updated_at"),
                 "failure_stage": failure_stage,
             }
-            if status == "completed" and run_id > max_run_id:
-                max_run_id = run_id
-        if max_run_id > int(repo_watermarks.get(repo, 0) or 0):
+            if status == "completed":
+                next_completed_runs[uid] = run_state_sig
+                if run_id > max_run_id:
+                    max_run_id = run_id
+            else:
+                next_completed_runs.pop(uid, None)
+        if max_run_id > int(prev_repo_wm if isinstance(prev_repo_wm, int) else 0):
             next_watermarks[repo] = max_run_id
+    if next_completed_runs:
+        next_watermarks["completed_runs"] = next_completed_runs
     records = list(records_by_uid.values())
     if not records:
         records = _evidence_runs()

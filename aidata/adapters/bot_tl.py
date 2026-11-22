@@ -112,13 +112,6 @@ def _local_records(
                 ("pr-watch-state.json", "pr_watch_state"),
             ):
                 target = goal / name
-                stat_key = _safe(str(target))
-                sig = _file_stat_sig(target)
-                if sig is None:
-                    continue
-                updated_stats[stat_key] = sig
-                if file_stats is not None and cached_stats.get(stat_key) == sig:
-                    continue
                 record = _file_record(target, kind)
                 if record:
                     record["goal_id"] = goal.name
@@ -128,13 +121,14 @@ def _local_records(
             ledger_sig = _file_stat_sig(ledger)
             if ledger_sig is None:
                 continue
-            updated_stats[ledger_key] = ledger_sig
             if file_stats is not None and cached_stats.get(ledger_key) == ledger_sig:
+                updated_stats[ledger_key] = ledger_sig
                 continue
             try:
                 text = ledger.read_text(encoding="utf-8")
-            except OSError:
-                text = ""
+            except (OSError, UnicodeDecodeError):
+                continue
+            updated_stats[ledger_key] = ledger_sig
             for line in text.splitlines():
                 match = _EVENT.match(line)
                 if match:
@@ -255,8 +249,8 @@ def _remote_records(
         sig = _file_stat_sig(path)
         if sig is None:
             continue
-        updated_stats[stat_key] = sig
         if file_stats is not None and cached_stats.get(stat_key) == sig:
+            updated_stats[stat_key] = sig
             continue
         try:
             if path.suffix == ".tgz":
@@ -273,6 +267,7 @@ def _remote_records(
                     add_line(line)
         except (OSError, UnicodeDecodeError, tarfile.TarError):
             continue
+        updated_stats[stat_key] = sig
     return records
 
 
