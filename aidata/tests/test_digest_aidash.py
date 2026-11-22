@@ -535,6 +535,368 @@ def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
     assert any("human-readable title != id" in err for err in polluted_snapshot.get("errors", []))
 
 
+@pytest.mark.unit
+def test_skill_version_evolution_attribution_deltas_and_status_classification(tmp_path):
+    import json
+    import os
+    import sqlite3
+    import subprocess
+    from pathlib import Path
+
+    from L5_apps.digest.skills_roi_snapshot import (
+        build_snapshot,
+        classify_skill_version_evolution,
+        compute_skill_version_evolution,
+        match_skill_version_for_event,
+        resolve_skill_version_history,
+        write_snapshot,
+    )
+
+    skills_repo = tmp_path / "user-skills"
+    skills_dir = skills_repo / "skills"
+    skills_dir.mkdir(parents=True)
+
+    clean_env = {
+        **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        "GIT_AUTHOR_NAME": "Test Bot",
+        "GIT_AUTHOR_EMAIL": "bot@example.com",
+        "GIT_COMMITTER_NAME": "Test Bot",
+        "GIT_COMMITTER_EMAIL": "bot@example.com",
+    }
+    subprocess.run(["git", "init"], cwd=skills_repo, env=clean_env, check=True, capture_output=True)
+
+    def _commit_skill(
+        name: str,
+        semver: str,
+        commit_iso: str,
+        *,
+        broken_drawer: bool = False,
+        note: str = "init",
+    ) -> None:
+        pkg = skills_dir / name
+        (pkg / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+        (pkg / "references").mkdir(parents=True, exist_ok=True)
+        (pkg / "scripts").mkdir(parents=True, exist_ok=True)
+        (pkg / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": name, "version": semver, "description": f"{name} plugin"}),
+            encoding="utf-8",
+        )
+        broken_link_md = "\nSee [missing](references/missing-drawer.md)\n" if broken_drawer else "\nSee [guide](references/guide.md)\n"
+        (pkg / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {name} skill\n---\n# {name}\n{note}\n{broken_link_md}",
+            encoding="utf-8",
+        )
+        (pkg / "references" / "guide.md").write_text(f"# Guide for {name}\n{note}\n", encoding="utf-8")
+        (pkg / "scripts" / "tool.py").write_text(f"#!/usr/bin/env python3\n# {note}\nprint('ok')\n", encoding="utf-8")
+        subprocess.run(["git", "add", f"skills/{name}"], cwd=skills_repo, env=clean_env, check=True, capture_output=True)
+        commit_env = {**clean_env, "GIT_AUTHOR_DATE": commit_iso, "GIT_COMMITTER_DATE": commit_iso}
+        subprocess.run(
+            ["git", "commit", "-m", f"feat({name}): {note}"],
+            cwd=skills_repo,
+            env=commit_env,
+            check=True,
+            capture_output=True,
+        )
+
+    # 1. alpha-skill: v1 (2026-11-05) -> v2 (2026-11-10) -> improved
+    _commit_skill("alpha-skill", "1.0.0", "2026-11-05T10:00:00+08:00", broken_drawer=True, note="v1 initial with roadblock")
+    _commit_skill("alpha-skill", "1.1.0", "2026-11-10T10:00:00+08:00", broken_drawer=False, note="v2 soften CLI roadblock and fix drawer")
+
+    # 2. beta-skill: v1 (2026-11-05) -> v2 (2026-11-10) -> regressed (exit=2 rebounded in v2)
+    _commit_skill("beta-skill", "1.0.0", "2026-11-05T12:00:00+08:00", note="v1 stable")
+    _commit_skill("beta-skill", "1.2.0", "2026-11-10T12:00:00+08:00", note="v2 introduced CLI exit=2 regression")
+
+    # 3. gamma-skill: v1 (2026-11-05) -> v2 (2026-11-11) -> observing (< 5 invocations in v2)
+    _commit_skill("gamma-skill", "1.0.0", "2026-11-05T14:00:00+08:00", note="v1 initial")
+    _commit_skill("gamma-skill", "2.0.0", "2026-11-11T08:00:00+08:00", note="v2 just released")
+
+    # 4. delta-skill: single commit v1 -> baseline
+    _commit_skill("delta-skill", "1.0.0", "2026-11-06T09:00:00+08:00", note="v1 baseline only")
+
+    histories = resolve_skill_version_history(skills_repo)
+    assert set(histories) == {"alpha-skill", "beta-skill", "gamma-skill", "delta-skill"}
+    assert len(histories["alpha-skill"]) == 2
+    alpha_v1 = histories["alpha-skill"][0]
+    alpha_v2 = histories["alpha-skill"][1]
+    assert alpha_v1["semver"] == "1.0.0"
+    assert alpha_v1["skill_version"].startswith("v1@")
+    assert alpha_v1["combined_version"] == f"1.0.0+{alpha_v1['skill_version']}"
+    assert alpha_v2["semver"] == "1.1.0"
+    assert alpha_v2["skill_version"].startswith("v2@")
+    assert alpha_v2["combined_version"] == f"1.1.0+{alpha_v2['skill_version']}"
+    assert alpha_v1["t_end"] == alpha_v2["t_start"]
+
+    # Explicit version match vs timestamp fallback
+    matched_explicit = match_skill_version_for_event(
+        "alpha-skill",
+        histories["alpha-skill"],
+        explicit_skill_version=alpha_v1["skill_version"],
+        event_ts="2026-11-11T10:00:00+08:00",
+    )
+    assert matched_explicit is not None
+    assert matched_explicit["skill_version"] == alpha_v1["skill_version"]
+
+    matched_ts_v1 = match_skill_version_for_event(
+        "alpha-skill",
+        histories["alpha-skill"],
+        event_ts="2026-11-08T10:00:00+08:00",
+    )
+    assert matched_ts_v1 is not None
+    assert matched_ts_v1["skill_version"] == alpha_v1["skill_version"]
+
+    matched_ts_v2 = match_skill_version_for_event(
+        "alpha-skill",
+        histories["alpha-skill"],
+        event_ts="2026-11-10T15:00:00+08:00",
+    )
+    assert matched_ts_v2 is not None
+    assert matched_ts_v2["skill_version"] == alpha_v2["skill_version"]
+
+    # Build usage.jsonl + warehouse.db telemetry covering Before (v1) and After (v2)
+    usage_jsonl = tmp_path / "usage.jsonl"
+    usage_events = []
+
+    # alpha-skill v1 (Before): 6 sessions, 4 script calls (2 exit=2, P50=450ms), uptake=0.5
+    for idx in range(6):
+        usage_events.append({
+            "kind": "skill_turn",
+            "session_id": f"alpha-v1-s{idx}",
+            "turn_id": f"t-{idx}",
+            "ts": f"2026-11-07T1{idx}:00:00+08:00",
+            "skill": "alpha-skill",
+            "skill_version": alpha_v1["skill_version"],
+            "uptake_rate": 0.5,
+        })
+    for idx, (ec, dur) in enumerate([(2, 420), (2, 450), (0, 480), (0, 500)]):
+        usage_events.append({
+            "kind": "script_call",
+            "call_uid": f"alpha-v1-sc{idx}",
+            "session_id": f"alpha-v1-s{idx}",
+            "ts": f"2026-11-07T1{idx}:05:00+08:00",
+            "skill": "alpha-skill",
+            "script_path": "skills/alpha-skill/scripts/tool.py",
+            "exit_code": ec,
+            "duration_ms": dur,
+        })
+
+    # alpha-skill v2 (After): 6 sessions, 5 script calls (0 exit=2, P50=120ms), reference hit, uptake=0.95
+    for idx in range(6):
+        usage_events.append({
+            "kind": "skill_turn",
+            "session_id": f"alpha-v2-s{idx}",
+            "turn_id": f"t2-{idx}",
+            "ts": f"2026-11-10T1{idx}:30:00+08:00",
+            "skill": "alpha-skill",
+            "uptake_rate": 0.95,
+        })
+    usage_events.append({
+        "kind": "reference_hit",
+        "hit_uid": "alpha-v2-ref0",
+        "session_id": "alpha-v2-s0",
+        "ts": "2026-11-10T11:31:00+08:00",
+        "skill": "alpha-skill",
+        "reference_path": "skills/alpha-skill/references/guide.md",
+        "byte_len": 256,
+    })
+    for idx, dur in enumerate([100, 110, 120, 130, 140]):
+        usage_events.append({
+            "kind": "script_call",
+            "call_uid": f"alpha-v2-sc{idx}",
+            "session_id": f"alpha-v2-s{idx}",
+            "ts": f"2026-11-10T1{idx}:35:00+08:00",
+            "skill": "alpha-skill",
+            "script_path": "skills/alpha-skill/scripts/tool.py",
+            "exit_code": 0,
+            "duration_ms": dur,
+        })
+
+    # beta-skill v1 (Before): 5 sessions, 0 exit=2 -> v2 (After): 5 sessions, 2 exit=2 roadblocks (regressed)
+    for idx in range(5):
+        usage_events.append({
+            "kind": "skill_turn",
+            "session_id": f"beta-v1-s{idx}",
+            "turn_id": f"bt1-{idx}",
+            "ts": f"2026-11-08T1{idx}:00:00+08:00",
+            "skill": "beta-skill",
+        })
+        usage_events.append({
+            "kind": "script_call",
+            "call_uid": f"beta-v1-sc{idx}",
+            "session_id": f"beta-v1-s{idx}",
+            "ts": f"2026-11-08T1{idx}:05:00+08:00",
+            "skill": "beta-skill",
+            "script_path": "skills/beta-skill/scripts/tool.py",
+            "exit_code": 0,
+            "duration_ms": 150,
+        })
+    for idx in range(5):
+        usage_events.append({
+            "kind": "skill_turn",
+            "session_id": f"beta-v2-s{idx}",
+            "turn_id": f"bt2-{idx}",
+            "ts": f"2026-11-11T0{idx}:00:00+08:00",
+            "skill": "beta-skill",
+        })
+        usage_events.append({
+            "kind": "script_call",
+            "call_uid": f"beta-v2-sc{idx}",
+            "session_id": f"beta-v2-s{idx}",
+            "ts": f"2026-11-11T0{idx}:05:00+08:00",
+            "skill": "beta-skill",
+            "script_path": "skills/beta-skill/scripts/tool.py",
+            "exit_code": 2 if idx < 2 else 0,
+            "duration_ms": 200,
+        })
+
+    # gamma-skill v1 (Before): 6 sessions -> v2 (After): only 2 sessions (< 5 threshold -> observing)
+    for idx in range(6):
+        usage_events.append({
+            "kind": "skill_turn",
+            "session_id": f"gamma-v1-s{idx}",
+            "turn_id": f"gm1-{idx}",
+            "ts": f"2026-11-07T0{idx}:00:00+08:00",
+            "skill": "gamma-skill",
+        })
+    for idx in range(2):
+        usage_events.append({
+            "kind": "skill_turn",
+            "session_id": f"gamma-v2-s{idx}",
+            "turn_id": f"gm2-{idx}",
+            "ts": f"2026-11-11T1{idx}:00:00+08:00",
+            "skill": "gamma-skill",
+        })
+
+    # delta-skill v1 (Baseline): 3 sessions, single version
+    for idx in range(3):
+        usage_events.append({
+            "kind": "skill_turn",
+            "session_id": f"delta-v1-s{idx}",
+            "turn_id": f"dl1-{idx}",
+            "ts": f"2026-11-09T1{idx}:00:00+08:00",
+            "skill": "delta-skill",
+        })
+
+    usage_jsonl.write_text("\n".join(json.dumps(e) for e in usage_events) + "\n", encoding="utf-8")
+
+    # Build hermetic warehouse.db with R1 review verdicts across Before and After timestamps
+    warehouse_db = tmp_path / "warehouse.db"
+    with sqlite3.connect(warehouse_db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE fact_gtt_task_run (
+                receipt_uid TEXT PRIMARY KEY,
+                goal_id TEXT,
+                role_name TEXT,
+                round_no INTEGER,
+                v5_verdict TEXT,
+                status TEXT,
+                completed_at TEXT,
+                cst_day TEXT,
+                skills_used TEXT
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT INTO fact_gtt_task_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("r1-alpha-v1-1", "g1", "reviewer", 1, "FAIL", "failed", "2026-11-07T18:00:00+08:00", "2026-11-07", '["alpha-skill"]'),
+                ("r1-alpha-v1-2", "g2", "reviewer", 1, "PASS", "completed", "2026-11-08T18:00:00+08:00", "2026-11-08", '["alpha-skill"]'),
+                ("r1-alpha-v2-1", "g3", "reviewer", 1, "PASS", "completed", "2026-11-10T20:00:00+08:00", "2026-11-10", '["alpha-skill"]'),
+                ("r1-alpha-v2-2", "g4", "reviewer", 1, "PASS", "completed", "2026-11-11T12:00:00+08:00", "2026-11-11", '["alpha-skill"]'),
+            ],
+        )
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    base_report = json.loads(fixture.read_text(encoding="utf-8"))
+    evo_rows = compute_skill_version_evolution(
+        base_report,
+        skills_repo=skills_repo,
+        usage_jsonl=usage_jsonl,
+        warehouse_db=warehouse_db,
+    )
+    by_skill = {row["skill"]: row for row in evo_rows}
+    assert set(by_skill) == {"alpha-skill", "beta-skill", "gamma-skill", "delta-skill"}
+
+    alpha_row = by_skill["alpha-skill"]
+    assert alpha_row["status"] == "improved"
+    assert alpha_row["status_label"] == "✅ 有效演进"
+    assert alpha_row["semver"] == "1.1.0"
+    assert alpha_row["combined_version"] == f"1.1.0+{alpha_v2['skill_version']}"
+    assert alpha_row["before_version"]["skill_version"] == alpha_v1["skill_version"]
+    assert alpha_row["before_version"]["exit2_error_rate"] == 0.5
+    assert alpha_row["before_version"]["script_p50_ms"] == 450.0
+    assert alpha_row["before_version"]["r1_pass_rate"] == 0.5
+    assert alpha_row["current_version"]["skill_version"] == alpha_v2["skill_version"]
+    assert alpha_row["current_version"]["exit2_error_rate"] == 0.0
+    assert alpha_row["current_version"]["post_fix_errors"] == 0
+    assert alpha_row["current_version"]["broken_drawer_count"] == 0
+    assert alpha_row["current_version"]["script_p50_ms"] == 120.0
+    assert alpha_row["current_version"]["uptake_rate"] == 0.95
+    assert alpha_row["current_version"]["r1_pass_rate"] == 1.0
+    assert alpha_row["delta"]["exit2_error_rate_delta"] == -0.5
+    assert alpha_row["delta"]["script_p50_ms_delta"] == -330.0
+    assert alpha_row["delta"]["uptake_rate_delta"] == 0.45
+    assert alpha_row["delta"]["r1_pass_rate_delta"] == 0.5
+    assert "exit2_error_rate" in alpha_row["delta"]["improved_dimensions"]
+    assert "script_p50_ms" in alpha_row["delta"]["improved_dimensions"]
+
+    beta_row = by_skill["beta-skill"]
+    assert beta_row["status"] == "regressed"
+    assert beta_row["status_label"] == "⚠️ 退化告警"
+    assert beta_row["current_version"]["exit2_count"] == 2
+    assert beta_row["current_version"]["exit2_error_rate"] == 0.4
+    assert beta_row["delta"]["exit2_count_delta"] == 2
+
+    gamma_row = by_skill["gamma-skill"]
+    assert gamma_row["status"] == "observing"
+    assert gamma_row["status_label"] == "⏳ 样本积累中"
+    assert gamma_row["current_version"]["sessions"] == 2
+
+    delta_row = by_skill["delta-skill"]
+    assert delta_row["status"] == "baseline"
+    assert delta_row["status_label"] == "🕰️ 基准版本"
+    assert delta_row["before_version"] is None
+
+    # Verify write_snapshot exports skill_version_evolution at root and under diagnostics
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(base_report), encoding="utf-8")
+    output_path = tmp_path / "skills-roi.json"
+    snapshot = write_snapshot(
+        output_path,
+        report_path,
+        query_runner=lambda name, params: (
+            [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1)],
+            ["day", "source", "skill", "n", "sessions"],
+        ),
+        skills_repo=skills_repo,
+        usage_jsonl=usage_jsonl,
+        warehouse_db=warehouse_db,
+    )
+    assert snapshot["coverage_status"] == "healthy"
+    assert "errors" not in snapshot
+    assert isinstance(snapshot["skill_version_evolution"], list)
+    assert len(snapshot["skill_version_evolution"]) == 4
+    assert snapshot["diagnostics"]["skill_version_evolution"] == snapshot["skill_version_evolution"]
+
+    # Direct classify_skill_version_evolution edge cases (R1 regression vs broken drawer regression)
+    st_r1_reg, d_r1_reg = classify_skill_version_evolution(
+        {"sessions": 6, "exit2_count": 0, "exit2_error_rate": 0.0, "broken_drawer_count": 0, "script_p50_ms": 100.0, "uptake_rate": 0.9, "r1_pass_rate": 1.0},
+        {"sessions": 6, "exit2_count": 0, "exit2_error_rate": 0.0, "broken_drawer_count": 0, "script_p50_ms": 100.0, "uptake_rate": 0.9, "r1_pass_rate": 0.5},
+    )
+    assert st_r1_reg == "regressed"
+    assert "r1_pass_rate" in d_r1_reg["regressed_dimensions"]
+
+    # Verify validation of invalid skill_version_evolution entries
+    invalid_evo_report = {
+        **base_report,
+        "skill_version_evolution": [{"skill": "broken", "semver": "1.0.0", "skill_version": "v1@abc", "status": "invalid_state", "current_version": {}}],
+    }
+    bad_snap = build_snapshot(invalid_evo_report, [])
+    assert bad_snap["coverage_status"] == "error"
+    assert any("skill_version_evolution[0].status invalid" in err for err in bad_snap.get("errors", []))
+
+
+
 # ---------------------------------------------------------------------------
 # Loop 6B (`loop-apple-crash-metrickit`): Apple Crash & MetricKit Quality Loop
 # ---------------------------------------------------------------------------
