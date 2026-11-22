@@ -10,11 +10,12 @@ private func skillsText(_ key: String, _ fallback: String) -> String {
 }
 
 public enum SkillsRoiLens: String, CaseIterable, Identifiable {
-    case usage, disclosure, context
+    case usage, evolution, disclosure, context
     public var id: String { rawValue }
     var title: String {
         switch self {
         case .usage: return skillsText("usage", "Usage")
+        case .evolution: return skillsText("evolution_lens", "版本演进与复盘")
         case .disclosure: return skillsText("disclosure", "Disclosure / Escapes")
         case .context: return skillsText("context", "Context")
         }
@@ -84,6 +85,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
                     }
                     switch lens {
                     case .usage: usage(roi)
+                    case .evolution: evolutionWorkbench(roi)
                     case .disclosure: disclosure(roi.diagnostics)
                     case .context: context(roi.diagnostics)
                     }
@@ -160,18 +162,363 @@ public struct SkillsRoiDiagnosticsCardView: View {
             if let active = roi.diagnostics.usage {
                 Text(activeSummary(active)).font(.caption).foregroundStyle(theme.neutrals.text(.body))
             }
+            fourLayerPulseStrip(roi.resolvedSkillRetro)
+            versionEvolutionTableSection(roi: roi, selectedSkill: activeDetail?.skill)
+            retroProposalsSection(roi.resolvedSkillRetro)
             filterPillsBar(allDetails: allDetails)
             if allDetails.isEmpty {
                 missingPopulation
             } else {
                 SkillsPrimaryDetailSplitLayout {
                     primarySkillListPane(filtered: filtered, selected: activeDetail?.skill)
-                    inspectorDetailPane(detail: activeDetail, diagnostics: roi.diagnostics)
+                    inspectorDetailPane(detail: activeDetail, roi: roi)
                 }
                 .captureDashboardGeometry(id: "skills-primary-detail", role: "skillsWorkbench")
             }
             dailyObservations(roi.skillsDaily)
         }
+    }
+
+    private func evolutionWorkbench(_ roi: SkillsRoiReport) -> some View {
+        let activeDetail = Self.activeSkillDetail(in: roi, selectedSkill: selectedSkill, filter: inspectorFilter)
+        return VStack(alignment: .leading, spacing: Space.gap) {
+            fourLayerPulseStrip(roi.resolvedSkillRetro)
+            versionEvolutionTableSection(roi: roi, selectedSkill: activeDetail?.skill)
+            retroProposalsSection(roi.resolvedSkillRetro)
+            if let activeDetail {
+                inspectorDetailPane(detail: activeDetail, roi: roi)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fourLayerPulseStrip(_ retro: SkillRetroFourLayerSummary) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(skillsText("four_layer_pulse_title", "L0–L3 四层自演进健康度脉冲条")).font(.subheadline.weight(.semibold))
+                Spacer(minLength: 4)
+                Text(retro.slowFlywheelReady
+                     ? skillsText("flywheel_slow_ready", "慢飞轮就绪 · 样本 \(retro.sampleSize)")
+                     : skillsText("flywheel_fast_scoped", "快飞轮收敛中 · 样本 \(retro.sampleSize)"))
+                    .font(.caption2.monospacedDigit())
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .foregroundStyle(retro.slowFlywheelReady ? theme.successOnSubtle : theme.primary.onPrimarySubtle)
+                    .background((retro.slowFlywheelReady ? theme.success : theme.primary.primary).opacity(0.14), in: Capsule())
+            }
+            DashboardResponsiveGrid(wideColumns: 4, compactColumns: 2, spacing: 8) {
+                retroPulseTile(
+                    id: "l0-direction",
+                    layerTag: "L0",
+                    title: skillsText("pulse_l0_title", "L0 触发与方向"),
+                    headline: "漏触发 \(retro.triggerMissSkills) · 零动作 \(retro.zeroActionLoadSkills)",
+                    subtitle: "方向漂移 \(retro.directionalDrifts) 次",
+                    isWarning: retro.triggerMissSkills > 0 || retro.directionalDrifts > 0
+                )
+                retroPulseTile(
+                    id: "l1-drawers",
+                    layerTag: "L1",
+                    title: skillsText("pulse_l1_title", "L1 知识抽屉代谢"),
+                    headline: "未接线 \(retro.unwiredDrawersCount) · 30d 死木 \(retro.trueDeadwoodDrawersCount)",
+                    subtitle: "按需渐进披露与断连巡检",
+                    isWarning: retro.unwiredDrawersCount > 0 || retro.trueDeadwoodDrawersCount > 0
+                )
+                retroPulseTile(
+                    id: "l2-scripts",
+                    layerTag: "L2",
+                    title: skillsText("pulse_l2_title", "L2 脚本路障与耗时"),
+                    headline: "真拦截 \(retro.trueCatcherScriptsCount) · 路障 \(retro.rigidRoadblockScriptsCount)",
+                    subtitle: "exit=2 参数撞墙 \(retro.exit2RoadblockTotalCount) 次 · 慢脚本 \(retro.latencySinkScriptsCount)",
+                    isWarning: retro.rigidRoadblockScriptsCount > 0 || retro.exit2RoadblockTotalCount > 0
+                )
+                retroPulseTile(
+                    id: "l3-wild-eval",
+                    layerTag: "L3",
+                    title: skillsText("pulse_l3_title", "L3 野生模式与评测"),
+                    headline: "高频探针 \(retro.wildPatternsCount) · 提案 \(retro.proposals.count)",
+                    subtitle: retro.slowFlywheelReady ? "3 层评测门禁已激活" : "快飞轮局部防呆收敛",
+                    isWarning: !retro.proposals.isEmpty
+                )
+            }
+        }
+        .padding(10)
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .captureDashboardGeometry(id: "skills-four-layer-pulse", role: "skillsRetroPulse")
+    }
+
+    private func retroPulseTile(
+        id: String,
+        layerTag: String,
+        title: String,
+        headline: String,
+        subtitle: String,
+        isWarning: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(layerTag)
+                    .font(.caption2.monospaced().weight(.bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .foregroundStyle(isWarning ? theme.warningOnSubtle : theme.successOnSubtle)
+                    .background((isWarning ? theme.warning : theme.success).opacity(0.16), in: Capsule())
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            Text(headline)
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(theme.neutrals.text(.heading))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(subtitle)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(theme.neutrals.text(.meta))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .captureDashboardGeometry(id: "skills-pulse-\(id)", role: "skillsRetroPulseTile")
+    }
+
+    @ViewBuilder
+    private func versionEvolutionTableSection(roi: SkillsRoiReport, selectedSkill: String?) -> some View {
+        let rows = roi.versionEvolution
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(skillsText("version_evolution_title", "单技能 vN-1 → vN 演进成效对比表")).font(.subheadline.weight(.semibold))
+                Spacer(minLength: 4)
+                Text(skillsText("version_evolution_subtitle", "参数路障率 (exit=2) · 断链抽屉 · 脚本 P50 耗时 · 规则吸收 / 一次通过率"))
+                    .font(.caption2)
+                    .foregroundStyle(theme.neutrals.text(.meta))
+                    .lineLimit(1)
+            }
+            if rows.isEmpty {
+                Text(skillsText("version_evolution_empty", "暂无单技能版本演进对比样本"))
+                    .font(.caption)
+                    .foregroundStyle(theme.neutrals.text(.meta))
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(rows.prefix(12)) { row in
+                        versionEvolutionRowView(row, isSelected: row.skill == selectedSkill)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .captureDashboardGeometry(id: "skills-version-evolution-table", role: "skillsEvolutionTable")
+    }
+
+    private func versionEvolutionRowView(_ row: SkillVersionEvolutionRow, isSelected: Bool) -> some View {
+        Button {
+            selectedSkill = row.skill
+            inspectorFilter = .all
+            previewRelativePath = nil
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.skill)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.neutrals.text(.heading))
+                        .lineLimit(1)
+                    Text(row.versionTransitionLabel)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(theme.neutrals.text(.meta))
+                        .lineLimit(1)
+                    evolutionStatusBadge(row)
+                    Spacer(minLength: 4)
+                    Text("会话 \(row.beforeVersion?.sessions ?? 0) → \(row.currentVersion.sessions)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(theme.neutrals.text(.meta))
+                        .layoutPriority(1)
+                }
+                DashboardResponsiveGrid(wideColumns: 4, compactColumns: 2, spacing: 6) {
+                    evolutionMetricCell(
+                        label: skillsText("evo_col_exit2", "参数路障 (exit=2)"),
+                        value: Self.formatVersionComparison(
+                            before: row.beforeVersion?.exit2ErrorRate,
+                            current: row.currentVersion.exit2ErrorRate,
+                            delta: row.delta.exit2ErrorRateDelta,
+                            isRate: true,
+                            lowerIsBetter: true
+                        )
+                    )
+                    evolutionMetricCell(
+                        label: skillsText("evo_col_drawers", "断链抽屉数"),
+                        value: Self.formatCountComparison(
+                            before: row.beforeVersion?.brokenDrawerCount,
+                            current: row.currentVersion.brokenDrawerCount,
+                            delta: row.delta.brokenDrawerDelta
+                        )
+                    )
+                    evolutionMetricCell(
+                        label: skillsText("evo_col_p50", "脚本 P50 耗时"),
+                        value: Self.formatLatencyComparison(
+                            beforeMs: row.beforeVersion?.scriptP50Ms,
+                            currentMs: row.currentVersion.scriptP50Ms,
+                            deltaMs: row.delta.scriptP50MsDelta
+                        )
+                    )
+                    evolutionMetricCell(
+                        label: skillsText("evo_col_uptake_r1", "规则吸收 / 一次通过"),
+                        value: Self.formatUptakeAndR1Comparison(row: row)
+                    )
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? theme.primary.primary.opacity(0.14) : theme.neutrals.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? theme.primary.primary.opacity(0.55) : theme.neutrals.border.opacity(0.45), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .captureDashboardGeometry(id: "skills-evo-row-\(row.skill)", role: "skillsEvolutionRow")
+    }
+
+    private func evolutionMetricCell(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(label).font(.caption2).foregroundStyle(theme.neutrals.text(.meta)).lineLimit(1)
+            Spacer(minLength: 4)
+            Text(value).font(.caption2.monospacedDigit().weight(.medium)).foregroundStyle(theme.neutrals.text(.heading)).lineLimit(1).layoutPriority(1)
+        }
+    }
+
+    private func evolutionStatusBadge(_ row: SkillVersionEvolutionRow) -> some View {
+        let (fg, bg): (Color, Color) = {
+            switch row.status {
+            case "improved": return (theme.successOnSubtle, theme.success.opacity(0.15))
+            case "regressed": return (theme.dangerOnSubtle, theme.danger.opacity(0.15))
+            case "observing": return (theme.warningOnSubtle, theme.warning.opacity(0.15))
+            default: return (theme.neutrals.text(.meta), theme.neutrals.inner)
+            }
+        }()
+        return Text(row.resolvedStatusLabel)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .foregroundStyle(fg)
+            .background(bg, in: Capsule())
+    }
+
+    @ViewBuilder
+    private func retroProposalsSection(_ retro: SkillRetroFourLayerSummary) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(skillsText("retro_proposals_title", "今日高信号待演进提案卡")).font(.subheadline.weight(.semibold))
+                Spacer(minLength: 4)
+                Text("\(retro.proposals.count) 项待办")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(theme.neutrals.text(.meta))
+            }
+            if retro.proposals.isEmpty {
+                Text(skillsText("retro_proposals_empty", "当前周期无高信号待演进提案 · 各技能运行平稳"))
+                    .font(.caption)
+                    .foregroundStyle(theme.neutrals.text(.meta))
+            } else {
+                ForEach(retro.proposals.prefix(6)) { proposal in
+                    retroProposalCardRow(proposal)
+                }
+            }
+        }
+        .padding(10)
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .captureDashboardGeometry(id: "skills-retro-proposals", role: "skillsRetroProposals")
+    }
+
+    private func retroProposalCardRow(_ proposal: SkillRetroProposalItem) -> some View {
+        let cmd = proposal.primaryRemediationCommand
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("[\(proposal.layer)]")
+                    .font(.caption2.monospaced().weight(.bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .foregroundStyle(theme.primary.onPrimarySubtle)
+                    .background(theme.primary.primary.opacity(0.14), in: Capsule())
+                Text(proposal.priority)
+                    .font(.caption2.monospaced().weight(.bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .foregroundStyle(proposal.priority == "P0" || proposal.priority == "P1" ? theme.warningOnSubtle : theme.neutrals.text(.meta))
+                    .background((proposal.priority == "P0" || proposal.priority == "P1" ? theme.warning : theme.neutrals.border).opacity(0.16), in: Capsule())
+                Button {
+                    selectedSkill = proposal.skill
+                    inspectorFilter = .all
+                } label: {
+                    Text("\(proposal.skill) — \(proposal.displayTitle)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.neutrals.text(.heading))
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 6)
+                Button(skillsText("copy_remediation_cmd", "复制演进命令")) {
+                    copyToPasteboard(cmd)
+                }
+                .buttonStyle(.bordered).controlSize(.mini)
+                .frame(minWidth: 28, minHeight: 24)
+                .captureDashboardGeometry(id: "proposal-copy-\(proposal.id)", role: "button")
+            }
+            Text(proposal.displayReason)
+                .font(.caption2)
+                .foregroundStyle(theme.neutrals.text(.body))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .captureDashboardGeometry(id: "skills-proposal-\(proposal.id)", role: "skillsProposalRow")
+    }
+
+    public static func formatVersionComparison(
+        before: Double?,
+        current: Double?,
+        delta: Double?,
+        isRate: Bool = true,
+        lowerIsBetter: Bool = false
+    ) -> String {
+        func fmt(_ v: Double?) -> String {
+            guard let v else { return "—" }
+            if isRate {
+                return (v * 100).formatted(.number.precision(.fractionLength(0...1))) + "%"
+            }
+            return v.formatted(.number.precision(.fractionLength(0...1)))
+        }
+        let arrow: String = {
+            guard let d = delta, abs(d) > 0.0001 else { return "" }
+            let improved = lowerIsBetter ? (d < 0) : (d > 0)
+            return improved ? " ▼" : " ▲"
+        }()
+        return "\(fmt(before)) → \(fmt(current))\(arrow)"
+    }
+
+    public static func formatCountComparison(before: Int?, current: Int, delta: Int?) -> String {
+        let befText = before.map(String.init) ?? "—"
+        let suffix: String = {
+            guard let d = delta, d != 0 else { return "" }
+            return d < 0 ? " (\(d))" : " (+\(d))"
+        }()
+        return "\(befText) → \(current)\(suffix)"
+    }
+
+    public static func formatLatencyComparison(beforeMs: Double?, currentMs: Double?, deltaMs: Double?) -> String {
+        func fmt(_ ms: Double?) -> String {
+            guard let ms else { return "—" }
+            if ms >= 1000 {
+                return (ms / 1000.0).formatted(.number.precision(.fractionLength(0...1))) + "s"
+            }
+            return ms.formatted(.number.precision(.fractionLength(0...0))) + "ms"
+        }
+        let suffix: String = {
+            guard let d = deltaMs, abs(d) >= 1 else { return "" }
+            return d < 0 ? " ▼" : " ▲"
+        }()
+        return "\(fmt(beforeMs)) → \(fmt(currentMs))\(suffix)"
+    }
+
+    public static func formatUptakeAndR1Comparison(row: SkillVersionEvolutionRow) -> String {
+        let uptakeCur = row.currentVersion.uptakeRate.map { ($0 * 100).formatted(.number.precision(.fractionLength(0...0))) + "%" } ?? "—"
+        let r1Bef = row.beforeVersion?.r1PassRate.map { ($0 * 100).formatted(.number.precision(.fractionLength(0...0))) + "%" } ?? "—"
+        let r1Cur = row.currentVersion.r1PassRate.map { ($0 * 100).formatted(.number.precision(.fractionLength(0...0))) + "%" } ?? "—"
+        return "吸收 \(uptakeCur) · R1 \(r1Bef)→\(r1Cur)"
     }
 
     private func filterPillsBar(allDetails: [SkillInspectorDetail]) -> some View {
@@ -313,15 +660,18 @@ public struct SkillsRoiDiagnosticsCardView: View {
             .foregroundStyle(fg).background(bg, in: Capsule())
     }
 
-    private func inspectorDetailPane(detail: SkillInspectorDetail?, diagnostics: SkillsRoiDiagnostics) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func inspectorDetailPane(detail: SkillInspectorDetail?, roi: SkillsRoiReport) -> some View {
+        let diagnostics = roi.diagnostics
+        let evoRow = roi.versionEvolution.first { $0.skill == detail?.skill }
+        return VStack(alignment: .leading, spacing: 12) {
             if let detail {
-                inspectorHeaderCard(detail, diagnostics: diagnostics)
-                inspectorSubTabBar(detail)
+                inspectorHeaderCard(detail, diagnostics: diagnostics, evolutionRow: evoRow)
+                inspectorSubTabBar(detail, evolutionRow: evoRow)
                 switch inspectorSubTab {
                 case .definition: inspectorDefinitionTreeSection(detail)
                 case .scripts: inspectorScriptsLedgerSection(detail)
                 case .evals: inspectorEvalCasesSection(detail)
+                case .evolution: inspectorVersionEvolutionSection(detail: detail, evolutionRow: evoRow)
                 }
             } else {
                 missingPopulation
@@ -334,7 +684,11 @@ public struct SkillsRoiDiagnosticsCardView: View {
         .captureDashboardGeometry(id: "skills-inspector-detail", role: "skillsInspectorPane")
     }
 
-    private func inspectorHeaderCard(_ detail: SkillInspectorDetail, diagnostics: SkillsRoiDiagnostics) -> some View {
+    private func inspectorHeaderCard(
+        _ detail: SkillInspectorDetail,
+        diagnostics: SkillsRoiDiagnostics,
+        evolutionRow: SkillVersionEvolutionRow? = nil
+    ) -> some View {
         let diagRow = diagnostics.usageRows.first { $0.skill == detail.skill }
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
@@ -343,6 +697,9 @@ public struct SkillsRoiDiagnosticsCardView: View {
                         Text(detail.skill).font(.headline)
                         scopeBadge(detail)
                         statusBadge(detail)
+                        if let evolutionRow {
+                            evolutionStatusBadge(evolutionRow)
+                        }
                     }
                     Text(diagRow?.diagnosis ?? detail.skillDir)
                         .font(.caption)
@@ -369,6 +726,9 @@ public struct SkillsRoiDiagnosticsCardView: View {
             if let feedback = copiedFeedback {
                 Text(feedback).font(.caption2).foregroundStyle(theme.successOnSubtle)
             }
+            if let evolutionRow {
+                inspectorVersionEvolutionBanner(evolutionRow)
+            }
             DashboardResponsiveGrid(wideColumns: 3, compactColumns: 2, spacing: 8) {
                 skillsOverviewPane(0, title: skillsText("header_calls_channels", "Calls & Channels")) {
                     metricPair(skillsText("loads_7d_30d", "7d / 30d"), "\(detail.loads7d) / \(detail.loads30d)")
@@ -393,7 +753,58 @@ public struct SkillsRoiDiagnosticsCardView: View {
         }
     }
 
-    private func inspectorSubTabBar(_ detail: SkillInspectorDetail) -> some View {
+    private func inspectorVersionEvolutionBanner(_ row: SkillVersionEvolutionRow) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(skillsText("inspector_evo_banner_title", "单技能版本演进对比"))
+                    .font(.caption.weight(.semibold))
+                Text(row.versionTransitionLabel)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(theme.neutrals.text(.meta))
+                Spacer(minLength: 4)
+                Text("升级后参数撞墙 \(row.delta.postFixErrors) 次")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(row.delta.postFixErrors > 0 ? theme.dangerOnSubtle : theme.successOnSubtle)
+            }
+            DashboardResponsiveGrid(wideColumns: 4, compactColumns: 2, spacing: 6) {
+                evolutionMetricCell(
+                    label: "参数路障率",
+                    value: Self.formatVersionComparison(
+                        before: row.beforeVersion?.exit2ErrorRate,
+                        current: row.currentVersion.exit2ErrorRate,
+                        delta: row.delta.exit2ErrorRateDelta,
+                        isRate: true,
+                        lowerIsBetter: true
+                    )
+                )
+                evolutionMetricCell(
+                    label: "断链抽屉",
+                    value: Self.formatCountComparison(
+                        before: row.beforeVersion?.brokenDrawerCount,
+                        current: row.currentVersion.brokenDrawerCount,
+                        delta: row.delta.brokenDrawerDelta
+                    )
+                )
+                evolutionMetricCell(
+                    label: "脚本 P50 耗时",
+                    value: Self.formatLatencyComparison(
+                        beforeMs: row.beforeVersion?.scriptP50Ms,
+                        currentMs: row.currentVersion.scriptP50Ms,
+                        deltaMs: row.delta.scriptP50MsDelta
+                    )
+                )
+                evolutionMetricCell(
+                    label: "吸收 / 一次通过",
+                    value: Self.formatUptakeAndR1Comparison(row: row)
+                )
+            }
+        }
+        .padding(8)
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .captureDashboardGeometry(id: "inspector-evo-banner-\(row.skill)", role: "skillsInspectorEvolutionCard")
+    }
+
+    private func inspectorSubTabBar(_ detail: SkillInspectorDetail, evolutionRow: SkillVersionEvolutionRow?) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(SkillInspectorSubTab.allCases) { tab in
@@ -402,6 +813,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
                         case .definition: return "\(detail.references.count + 1)"
                         case .scripts: return "\(detail.scripts.count)"
                         case .evals: return "\(detail.evalCases.count)"
+                        case .evolution: return "\(evolutionRow?.versions.count ?? (evolutionRow != nil ? 1 : 0))"
                         }
                     }()
                     Button("\(tab.title) (\(badge))") { inspectorSubTab = tab }
@@ -411,6 +823,36 @@ public struct SkillsRoiDiagnosticsCardView: View {
                         .accessibilityAddTraits(inspectorSubTab == tab ? .isSelected : [])
                         .captureDashboardGeometry(id: "inspector-tab-\(tab.id)", role: "button")
                 }
+            }
+        }
+    }
+
+    private func inspectorVersionEvolutionSection(
+        detail: SkillInspectorDetail,
+        evolutionRow: SkillVersionEvolutionRow?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(skillsText("inspector_evo_section_title", "历史版本链与 vN-1 → vN 归因明细")).font(.subheadline.weight(.semibold))
+            if let row = evolutionRow {
+                ForEach(row.versions.isEmpty ? [row.currentVersion] : row.versions) { ver in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(ver.combinedVersion)
+                            .font(.caption.monospaced().weight(.semibold))
+                            .foregroundStyle(theme.neutrals.text(.heading))
+                        Spacer(minLength: 4)
+                        Text("会话 \(ver.sessions) · 脚本 \(ver.scriptCallCount) · exit=2 \(ver.exit2Count) · 断链 \(ver.brokenDrawerCount) · P50 \(Self.formatLatencyComparison(beforeMs: nil, currentMs: ver.scriptP50Ms, deltaMs: nil).replacingOccurrences(of: "— → ", with: ""))")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(theme.neutrals.text(.meta))
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .captureDashboardGeometry(id: "inspector-ver-\(detail.skill)-\(ver.skillVersion)", role: "skillsVersionHistoryRow")
+                }
+            } else {
+                Text(skillsText("no_evolution_history", "当前技能暂无历史版本对比快照"))
+                    .font(.caption)
+                    .foregroundStyle(theme.neutrals.text(.body))
             }
         }
     }
@@ -1275,16 +1717,460 @@ public enum SkillInspectorFilter: String, CaseIterable, Identifiable, Sendable {
 }
 
 public enum SkillInspectorSubTab: String, CaseIterable, Identifiable, Sendable {
-    case definition, scripts, evals
+    case definition, scripts, evals, evolution
     public var id: String { rawValue }
     var title: String {
         switch self {
         case .definition: return skillsText("tab_definition", "Definition & References")
         case .scripts: return skillsText("tab_scripts", "Script Ledger")
         case .evals: return skillsText("tab_evals", "Eval & Interceptions")
+        case .evolution: return skillsText("tab_evolution", "版本演进对比")
         }
     }
 }
+
+public enum SkillsPseudoSkillGuard {
+    public static let forbiddenSlugs: Set<String> = [
+        "tests", "leepepe", "pull", "main", "scripts", "skills",
+        "head", "origin", "pr", "issue", "issues", "master", "refs", "tags"
+    ]
+
+    public static func isPseudoSkill(_ raw: String) -> Bool {
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !cleaned.isEmpty else { return true }
+        return forbiddenSlugs.contains(cleaned)
+    }
+
+    public static func scrubAcademicCodes(_ raw: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"\bS(?:1[0-2]|[1-9])\b"#) else { return raw }
+        let range = NSRange(raw.startIndex..<raw.endIndex, in: raw)
+        return regex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+public struct SkillVersionMetricsSnapshot: Decodable, Sendable, Equatable, Identifiable {
+    public let skillVersion: String
+    public let semver: String
+    public let combinedVersion: String
+    public let commitCount: Int
+    public let subtreeSha: String
+    public let sessions: Int
+    public let invocations: Int
+    public let scriptCallCount: Int
+    public let exit2Count: Int
+    public let exit1Count: Int
+    public let postFixErrors: Int
+    public let exit2ErrorRate: Double?
+    public let brokenDrawerCount: Int
+    public let scriptP50Ms: Double?
+    public let uptakeRate: Double?
+    public let r1Total: Int
+    public let r1Pass: Int
+    public let r1PassRate: Double?
+
+    public var id: String { combinedVersion }
+
+    public init(
+        skillVersion: String,
+        semver: String = "1.0.0",
+        combinedVersion: String? = nil,
+        commitCount: Int = 1,
+        subtreeSha: String = "",
+        sessions: Int = 0,
+        invocations: Int = 0,
+        scriptCallCount: Int = 0,
+        exit2Count: Int = 0,
+        exit1Count: Int = 0,
+        postFixErrors: Int? = nil,
+        exit2ErrorRate: Double? = nil,
+        brokenDrawerCount: Int = 0,
+        scriptP50Ms: Double? = nil,
+        uptakeRate: Double? = nil,
+        r1Total: Int = 0,
+        r1Pass: Int = 0,
+        r1PassRate: Double? = nil
+    ) {
+        self.skillVersion = skillVersion
+        self.semver = semver
+        self.combinedVersion = combinedVersion ?? "\(semver)+\(skillVersion)"
+        self.commitCount = commitCount
+        self.subtreeSha = subtreeSha
+        self.sessions = sessions
+        self.invocations = invocations
+        self.scriptCallCount = scriptCallCount
+        self.exit2Count = exit2Count
+        self.exit1Count = exit1Count
+        self.postFixErrors = postFixErrors ?? exit2Count
+        self.exit2ErrorRate = exit2ErrorRate
+        self.brokenDrawerCount = brokenDrawerCount
+        self.scriptP50Ms = scriptP50Ms
+        self.uptakeRate = uptakeRate
+        self.r1Total = r1Total
+        self.r1Pass = r1Pass
+        self.r1PassRate = r1PassRate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder)
+        let sv = try f.value("skill_version", as: String.self) ?? "v1@head"
+        let sem = try f.value("semver", as: String.self) ?? (try f.value("plugin_version", as: String.self)) ?? "1.0.0"
+        skillVersion = sv
+        semver = sem
+        combinedVersion = try f.value("combined_version", as: String.self) ?? "\(sem)+\(sv)"
+        commitCount = try f.value("commit_count", as: Int.self) ?? 1
+        subtreeSha = try f.value("subtree_sha", as: String.self) ?? ""
+        sessions = try f.value("sessions", as: Int.self) ?? 0
+        invocations = try f.value("invocations", as: Int.self) ?? sessions
+        scriptCallCount = try f.value("script_call_count", as: Int.self) ?? 0
+        let e2 = try f.value("exit2_count", as: Int.self) ?? 0
+        exit2Count = e2
+        exit1Count = try f.value("exit1_count", as: Int.self) ?? 0
+        postFixErrors = try f.value("post_fix_errors", as: Int.self) ?? e2
+        exit2ErrorRate = try f.value("exit2_error_rate", as: Double.self)
+        brokenDrawerCount = try f.value("broken_drawer_count", as: Int.self) ?? 0
+        scriptP50Ms = try f.value("script_p50_ms", as: Double.self)
+        uptakeRate = try f.value("uptake_rate", as: Double.self)
+        let rt = try f.value("r1_total", as: Int.self) ?? 0
+        let rp = try f.value("r1_pass", as: Int.self) ?? 0
+        r1Total = rt
+        r1Pass = rp
+        r1PassRate = try f.value("r1_pass_rate", as: Double.self) ?? (rt > 0 ? Double(rp) / Double(rt) : nil)
+    }
+}
+
+public struct SkillVersionDeltaSummary: Decodable, Sendable, Equatable {
+    public let exit2ErrorRateDelta: Double?
+    public let exit2CountDelta: Int?
+    public let brokenDrawerDelta: Int?
+    public let scriptP50MsDelta: Double?
+    public let uptakeRateDelta: Double?
+    public let r1PassRateDelta: Double?
+    public let postFixErrors: Int
+    public let improvedDimensions: [String]
+    public let regressedDimensions: [String]
+
+    public init(
+        exit2ErrorRateDelta: Double? = nil,
+        exit2CountDelta: Int? = nil,
+        brokenDrawerDelta: Int? = nil,
+        scriptP50MsDelta: Double? = nil,
+        uptakeRateDelta: Double? = nil,
+        r1PassRateDelta: Double? = nil,
+        postFixErrors: Int = 0,
+        improvedDimensions: [String] = [],
+        regressedDimensions: [String] = []
+    ) {
+        self.exit2ErrorRateDelta = exit2ErrorRateDelta
+        self.exit2CountDelta = exit2CountDelta
+        self.brokenDrawerDelta = brokenDrawerDelta
+        self.scriptP50MsDelta = scriptP50MsDelta
+        self.uptakeRateDelta = uptakeRateDelta
+        self.r1PassRateDelta = r1PassRateDelta
+        self.postFixErrors = postFixErrors
+        self.improvedDimensions = improvedDimensions
+        self.regressedDimensions = regressedDimensions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder)
+        exit2ErrorRateDelta = try f.value("exit2_error_rate_delta", as: Double.self)
+        exit2CountDelta = try f.value("exit2_count_delta", as: Int.self)
+        brokenDrawerDelta = try f.value("broken_drawer_delta", as: Int.self)
+        scriptP50MsDelta = try f.value("script_p50_ms_delta", as: Double.self)
+        uptakeRateDelta = try f.value("uptake_rate_delta", as: Double.self)
+        r1PassRateDelta = try f.value("r1_pass_rate_delta", as: Double.self)
+        postFixErrors = try f.value("post_fix_errors", as: Int.self) ?? 0
+        improvedDimensions = try f.value("improved_dimensions", as: [String].self) ?? []
+        regressedDimensions = try f.value("regressed_dimensions", as: [String].self) ?? []
+    }
+}
+
+public struct SkillVersionEvolutionRow: Decodable, Sendable, Equatable, Identifiable {
+    public let metadata: SkillsObservationMetadata
+    public let skill: String
+    public let semver: String
+    public let skillVersion: String
+    public let combinedVersion: String
+    public let subtreeSha: String
+    public let commitCount: Int
+    public let status: String
+    public let statusLabel: String
+    public let beforeVersion: SkillVersionMetricsSnapshot?
+    public let currentVersion: SkillVersionMetricsSnapshot
+    public let delta: SkillVersionDeltaSummary
+    public let versions: [SkillVersionMetricsSnapshot]
+
+    public var id: String { skill }
+
+    public var resolvedStatusLabel: String {
+        if !statusLabel.isEmpty {
+            return SkillsPseudoSkillGuard.scrubAcademicCodes(statusLabel)
+        }
+        switch status {
+        case "improved": return "✅ 有效演进"
+        case "regressed": return "⚠️ 退化告警"
+        case "observing": return "⏳ 样本积累中"
+        default: return "🕰️ 基准版本"
+        }
+    }
+
+    public var versionTransitionLabel: String {
+        if let beforeVersion {
+            return "\(beforeVersion.skillVersion) → \(combinedVersion)"
+        }
+        return combinedVersion
+    }
+
+    public init(
+        metadata: SkillsObservationMetadata,
+        skill: String,
+        semver: String = "1.0.0",
+        skillVersion: String = "v1@head",
+        combinedVersion: String? = nil,
+        subtreeSha: String = "",
+        commitCount: Int = 1,
+        status: String = "baseline",
+        statusLabel: String = "",
+        beforeVersion: SkillVersionMetricsSnapshot? = nil,
+        currentVersion: SkillVersionMetricsSnapshot,
+        delta: SkillVersionDeltaSummary = SkillVersionDeltaSummary(),
+        versions: [SkillVersionMetricsSnapshot] = []
+    ) {
+        self.metadata = metadata
+        self.skill = skill
+        self.semver = semver
+        self.skillVersion = skillVersion
+        self.combinedVersion = combinedVersion ?? "\(semver)+\(skillVersion)"
+        self.subtreeSha = subtreeSha
+        self.commitCount = commitCount
+        self.status = status
+        self.statusLabel = statusLabel
+        self.beforeVersion = beforeVersion
+        self.currentVersion = currentVersion
+        self.delta = delta
+        self.versions = versions.isEmpty ? ([beforeVersion, currentVersion].compactMap { $0 }) : versions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder)
+        metadata = f.metadata
+        skill = try f.container.decode(String.self, forKey: .init("skill"))
+        let cur = try f.value("current_version", as: SkillVersionMetricsSnapshot.self)
+            ?? SkillVersionMetricsSnapshot(skillVersion: (try? f.value("skill_version", as: String.self)) ?? "v1@head")
+        currentVersion = cur
+        let sem = try f.value("semver", as: String.self) ?? cur.semver
+        let sv = try f.value("skill_version", as: String.self) ?? cur.skillVersion
+        semver = sem
+        skillVersion = sv
+        combinedVersion = try f.value("combined_version", as: String.self) ?? "\(sem)+\(sv)"
+        subtreeSha = try f.value("subtree_sha", as: String.self) ?? cur.subtreeSha
+        commitCount = try f.value("commit_count", as: Int.self) ?? cur.commitCount
+        status = try f.value("status", as: String.self) ?? "baseline"
+        statusLabel = try f.value("status_label", as: String.self) ?? ""
+        beforeVersion = try f.value("before_version", as: SkillVersionMetricsSnapshot.self)
+        delta = try f.value("delta", as: SkillVersionDeltaSummary.self) ?? SkillVersionDeltaSummary(postFixErrors: cur.postFixErrors)
+        let decodedVersions = try f.value("versions", as: [SkillVersionMetricsSnapshot].self) ?? []
+        versions = decodedVersions.isEmpty ? ([beforeVersion, cur].compactMap { $0 }) : decodedVersions
+    }
+}
+
+public struct SkillRetroProposalItem: Decodable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let skill: String
+    public let layer: String
+    public let category: String
+    public let priority: String
+    public let title: String
+    public let plainReason: String
+    public let action: String?
+    public let humanWhat: String?
+    public let humanWhy: String?
+    public let remediationCommands: [String]
+
+    public var displayTitle: String {
+        let raw = (humanWhat?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? title
+        let stripped = raw.replacingOccurrences(of: #"(?i)\[Skill Retro\s+L[0-3]\]\s*"#, with: "", options: .regularExpression)
+        return SkillsPseudoSkillGuard.scrubAcademicCodes(stripped)
+    }
+
+    public var displayReason: String {
+        let raw = (humanWhy?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (!plainReason.isEmpty ? plainReason : (action ?? title))
+        return SkillsPseudoSkillGuard.scrubAcademicCodes(raw)
+    }
+
+    public var primaryRemediationCommand: String {
+        if let first = remediationCommands.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return first
+        }
+        return SkillsRoiDiagnosticsCardView.evalCommandString(forSkill: skill)
+    }
+
+    public init(
+        id: String,
+        skill: String,
+        layer: String = "L0",
+        category: String = "",
+        priority: String = "P2",
+        title: String,
+        plainReason: String = "",
+        action: String? = nil,
+        humanWhat: String? = nil,
+        humanWhy: String? = nil,
+        remediationCommands: [String] = []
+    ) {
+        self.id = id
+        self.skill = skill
+        self.layer = layer
+        self.category = category
+        self.priority = priority
+        self.title = title
+        self.plainReason = plainReason
+        self.action = action
+        self.humanWhat = humanWhat
+        self.humanWhy = humanWhy
+        self.remediationCommands = remediationCommands
+    }
+
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder)
+        let sk = (try? f.value("skill", as: String.self)) ?? "team-lead"
+        let ly = (try? f.value("layer", as: String.self)) ?? "L0"
+        let cat = (try? f.value("category", as: String.self)) ?? ""
+        id = (try? f.value("id", as: String.self)) ?? "skill-retro-\(ly.lowercased())-\(sk)"
+        skill = sk
+        layer = ly
+        category = cat
+        priority = (try? f.value("priority", as: String.self)) ?? "P2"
+        let t = (try? f.value("title", as: String.self)) ?? sk
+        title = t
+        plainReason = (try? f.value("plain_reason", as: String.self)) ?? ""
+        action = try? f.value("action", as: String.self)
+        humanWhat = try? f.value("human_what", as: String.self)
+        humanWhy = try? f.value("human_why", as: String.self)
+        remediationCommands = (try? f.value("remediation_commands", as: [String].self)) ?? []
+    }
+}
+
+public struct SkillRetroFourLayerSummary: Decodable, Sendable, Equatable {
+    public let sampleSize: Int
+    public let slowFlywheelReady: Bool
+    public let triggerMissSkills: Int
+    public let zeroActionLoadSkills: Int
+    public let directionalDrifts: Int
+    public let unwiredDrawersCount: Int
+    public let trueDeadwoodDrawersCount: Int
+    public let trueCatcherScriptsCount: Int
+    public let ceremonialScriptsCount: Int
+    public let rigidRoadblockScriptsCount: Int
+    public let exit2RoadblockTotalCount: Int
+    public let latencySinkScriptsCount: Int
+    public let wildPatternsCount: Int
+    public let proposals: [SkillRetroProposalItem]
+
+    private struct RoadblockEntry: Decodable {
+        let exit2Count: Int?
+        enum CodingKeys: String, CodingKey { case exit2Count = "exit_2_count" }
+    }
+
+    private struct Layer2Section: Decodable {
+        let rigidRoadblocks: [RoadblockEntry]?
+        enum CodingKeys: String, CodingKey { case rigidRoadblocks = "rigid_roadblocks" }
+    }
+
+    private struct SummaryNested: Decodable {
+        let triggerMissSkills: Int?
+        let zeroActionLoadSkills: Int?
+        let directionalDrifts: Int?
+        let unwiredDrawersCount: Int?
+        let trueDeadwoodDrawersCount: Int?
+        let trueCatcherScriptsCount: Int?
+        let ceremonialScriptsCount: Int?
+        let rigidRoadblockScriptsCount: Int?
+        let exit2RoadblockTotalCount: Int?
+        let latencySinkScriptsCount: Int?
+        let wildPatternsCount: Int?
+        let slowFlywheelReady: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case triggerMissSkills = "trigger_miss_skills"
+            case zeroActionLoadSkills = "zero_action_load_skills"
+            case directionalDrifts = "directional_drifts"
+            case unwiredDrawersCount = "unwired_drawers_count"
+            case trueDeadwoodDrawersCount = "true_deadwood_drawers_count"
+            case trueCatcherScriptsCount = "true_catcher_scripts_count"
+            case ceremonialScriptsCount = "ceremonial_scripts_count"
+            case rigidRoadblockScriptsCount = "rigid_roadblock_scripts_count"
+            case exit2RoadblockTotalCount = "exit2_roadblock_total_count"
+            case latencySinkScriptsCount = "latency_sink_scripts_count"
+            case wildPatternsCount = "wild_patterns_count"
+            case slowFlywheelReady = "slow_flywheel_ready"
+        }
+    }
+
+    public init(
+        sampleSize: Int = 0,
+        slowFlywheelReady: Bool = false,
+        triggerMissSkills: Int = 0,
+        zeroActionLoadSkills: Int = 0,
+        directionalDrifts: Int = 0,
+        unwiredDrawersCount: Int = 0,
+        trueDeadwoodDrawersCount: Int = 0,
+        trueCatcherScriptsCount: Int = 0,
+        ceremonialScriptsCount: Int = 0,
+        rigidRoadblockScriptsCount: Int = 0,
+        exit2RoadblockTotalCount: Int? = nil,
+        latencySinkScriptsCount: Int = 0,
+        wildPatternsCount: Int = 0,
+        proposals: [SkillRetroProposalItem] = []
+    ) {
+        self.sampleSize = sampleSize
+        self.slowFlywheelReady = slowFlywheelReady
+        self.triggerMissSkills = triggerMissSkills
+        self.zeroActionLoadSkills = zeroActionLoadSkills
+        self.directionalDrifts = directionalDrifts
+        self.unwiredDrawersCount = unwiredDrawersCount
+        self.trueDeadwoodDrawersCount = trueDeadwoodDrawersCount
+        self.trueCatcherScriptsCount = trueCatcherScriptsCount
+        self.ceremonialScriptsCount = ceremonialScriptsCount
+        self.rigidRoadblockScriptsCount = rigidRoadblockScriptsCount
+        self.exit2RoadblockTotalCount = exit2RoadblockTotalCount ?? rigidRoadblockScriptsCount
+        self.latencySinkScriptsCount = latencySinkScriptsCount
+        self.wildPatternsCount = wildPatternsCount
+        self.proposals = proposals.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let f = try SkillsFields(decoder)
+        let nested = try? f.value("summary", as: SummaryNested.self)
+        let l2 = try? f.value("layer2_script_efficacy_and_speed", as: Layer2Section.self)
+        let roadblockExit2Sum = l2?.rigidRoadblocks?.compactMap(\.exit2Count).reduce(0, +)
+
+        sampleSize = (try? f.value("sample_size", as: Int.self)) ?? f.metadata.sample ?? 0
+        slowFlywheelReady = (try? f.value("slow_flywheel_ready", as: Bool.self)) ?? nested?.slowFlywheelReady ?? (sampleSize >= 50)
+        triggerMissSkills = (try? f.value("trigger_miss_skills", as: Int.self)) ?? nested?.triggerMissSkills ?? 0
+        zeroActionLoadSkills = (try? f.value("zero_action_load_skills", as: Int.self)) ?? nested?.zeroActionLoadSkills ?? 0
+        directionalDrifts = (try? f.value("directional_drifts", as: Int.self)) ?? nested?.directionalDrifts ?? 0
+        unwiredDrawersCount = (try? f.value("unwired_drawers_count", as: Int.self)) ?? nested?.unwiredDrawersCount ?? 0
+        trueDeadwoodDrawersCount = (try? f.value("true_deadwood_drawers_count", as: Int.self)) ?? nested?.trueDeadwoodDrawersCount ?? 0
+        trueCatcherScriptsCount = (try? f.value("true_catcher_scripts_count", as: Int.self)) ?? nested?.trueCatcherScriptsCount ?? 0
+        ceremonialScriptsCount = (try? f.value("ceremonial_scripts_count", as: Int.self)) ?? nested?.ceremonialScriptsCount ?? 0
+        let rbScripts = (try? f.value("rigid_roadblock_scripts_count", as: Int.self)) ?? nested?.rigidRoadblockScriptsCount ?? (l2?.rigidRoadblocks?.count ?? 0)
+        rigidRoadblockScriptsCount = rbScripts
+        exit2RoadblockTotalCount = (try? f.value("exit2_roadblock_total_count", as: Int.self))
+            ?? nested?.exit2RoadblockTotalCount
+            ?? roadblockExit2Sum
+            ?? rbScripts
+        latencySinkScriptsCount = (try? f.value("latency_sink_scripts_count", as: Int.self)) ?? nested?.latencySinkScriptsCount ?? 0
+        wildPatternsCount = (try? f.value("wild_patterns_count", as: Int.self)) ?? nested?.wildPatternsCount ?? 0
+        let decodedProposals = (try? f.value("proposals", as: [SkillRetroProposalItem].self)) ?? []
+        proposals = decodedProposals.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+    }
+}
+
+public typealias SkillRetroWorkbenchSummary = SkillRetroFourLayerSummary
 
 struct SkillsPrimaryDetailSplitLayout: Layout {
     var primaryFraction: CGFloat = 0.34, minPrimaryWidth: CGFloat = 240, maxPrimaryWidth: CGFloat = 340, spacing: CGFloat = Space.gap
@@ -1333,22 +2219,39 @@ public struct SkillsRoiDiagnostics: Decodable, Sendable, Equatable {
     public let pins: SkillsPinHealth?, gates: SkillsGateHealth?, audit: SkillsAuditHealth?, usage: SkillsUsagePopulation?
     public let scripts: [SkillsUsageRow], disclosure: [SkillsDisclosureRow], churn: [SkillsChurnRow], escapes: [SkillsEscapeRow], ranking: [SkillsUsageRow], context: SkillsContextHealth?, tools: [SkillsToolBurnRow]
     public let skillDetails: [SkillInspectorDetail]
+    public let versionEvolution: [SkillVersionEvolutionRow]
+    public let skillRetro: SkillRetroFourLayerSummary?
     public init(from decoder: Decoder) throws {
         let f = try SkillsFields(decoder); metadata = f.metadata
         pins = try f.value("S1_pin_drift"); gates = try f.value("S2_gate_catch"); audit = try f.value("S3_skill_health"); usage = try f.value("S4_usage_and_r1")
-        scripts = try f.value("S6_load_vs_script") ?? []; disclosure = try f.value("S7_disclosure_funnel") ?? []; churn = try f.value("S8_post_skill_churn") ?? []
-        escapes = try f.value("S9_escape_attribution") ?? []; ranking = try f.value("S10_skill_roi_ranking") ?? []; context = try f.value("S11_context_composition"); tools = try f.value("S12_tool_context_burn") ?? []
-        skillDetails = try f.value("skill_details") ?? []
+        let rawScripts: [SkillsUsageRow] = try f.value("S6_load_vs_script") ?? []
+        let rawDisclosure: [SkillsDisclosureRow] = try f.value("S7_disclosure_funnel") ?? []
+        let rawChurn: [SkillsChurnRow] = try f.value("S8_post_skill_churn") ?? []
+        let rawEscapes: [SkillsEscapeRow] = try f.value("S9_escape_attribution") ?? []
+        let rawRanking: [SkillsUsageRow] = try f.value("S10_skill_roi_ranking") ?? []
+        scripts = rawScripts.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        disclosure = rawDisclosure.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        churn = rawChurn.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        escapes = rawEscapes.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        ranking = rawRanking.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        context = try f.value("S11_context_composition"); tools = try f.value("S12_tool_context_burn") ?? []
+        let rawDetails: [SkillInspectorDetail] = try f.value("skill_details") ?? []
+        skillDetails = rawDetails.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        let rawEvo: [SkillVersionEvolutionRow] = try f.value("skill_version_evolution") ?? []
+        versionEvolution = rawEvo.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        skillRetro = try? f.value("skill_retro", as: SkillRetroFourLayerSummary.self)
     }
     public var usageRows: [SkillsUsageRow] {
-        let ranked = ranking.isEmpty ? (usage?.top ?? []) : ranking, names = Set(ranked.map(\.skill))
+        let topFiltered = (usage?.top ?? []).filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        let ranked = ranking.isEmpty ? topFiltered : ranking
+        let names = Set(ranked.map(\.skill))
         return ranked + scripts.filter { !names.contains($0.skill) }
     }
     public var resolvedSkillDetails: [SkillInspectorDetail] {
         if !skillDetails.isEmpty { return skillDetails }
         var synthesized: [SkillInspectorDetail] = []
         var seen: Set<String> = []
-        for row in usageRows {
+        for row in usageRows where !SkillsPseudoSkillGuard.isPseudoSkill(row.skill) {
             seen.insert(row.skill)
             let disc = disclosure.first { $0.skill == row.skill }
             let ch = churn.first { $0.skill == row.skill }
@@ -1371,7 +2274,7 @@ public struct SkillsRoiDiagnostics: Decodable, Sendable, Equatable {
                 implBugEscapes: implEsc, specGapEscapes: specEsc, statusLabel: status, scripts: fallbackScripts
             ))
         }
-        for idleSkill in (usage?.idle ?? []) where !seen.contains(idleSkill) {
+        for idleSkill in (usage?.idle ?? []) where !seen.contains(idleSkill) && !SkillsPseudoSkillGuard.isPseudoSkill(idleSkill) {
             seen.insert(idleSkill)
             synthesized.append(SkillInspectorDetail(
                 metadata: usage?.metadata ?? metadata, skill: idleSkill, scope: "global", repo: "user-skills",
@@ -1383,15 +2286,109 @@ public struct SkillsRoiDiagnostics: Decodable, Sendable, Equatable {
 }
 
 public struct SkillsRoiReport: Decodable, Sendable, Equatable {
-    public let metadata: SkillsObservationMetadata, diagnostics: SkillsRoiDiagnostics, skillsDaily: [SkillsDailyObservation], skillDetails: [SkillInspectorDetail], errors: [String]
+    public let metadata: SkillsObservationMetadata
+    public let diagnostics: SkillsRoiDiagnostics
+    public let skillsDaily: [SkillsDailyObservation]
+    public let skillDetails: [SkillInspectorDetail]
+    public let versionEvolution: [SkillVersionEvolutionRow]
+    public let skillRetro: SkillRetroFourLayerSummary?
+    public let errors: [String]
+
+    public var resolvedSkillRetro: SkillRetroFourLayerSummary {
+        if let skillRetro { return skillRetro }
+        let nonGhost = skillDetails.filter { !$0.isGhost }
+        let zeroActionCount = nonGhost.filter { ($0.emptyLoadRate ?? 0) >= 0.3 }.count
+        let deadwoodCount = nonGhost.reduce(0) { $0 + $1.unhitRefsCount }
+        let unwiredCount = versionEvolution.reduce(0) { $0 + $1.currentVersion.brokenDrawerCount }
+        let catcherCount = nonGhost.reduce(0) { acc, item in
+            acc + item.scripts.filter { ($0.calls30d ?? 0) > 0 && !$0.isUnpracticed }.count
+        }
+        let roadblockScriptsCount = versionEvolution.filter { $0.currentVersion.exit2Count > 0 }.count
+        let exit2Total = versionEvolution.reduce(0) { $0 + $1.currentVersion.exit2Count }
+        let slowScriptsCount = nonGhost.reduce(0) { acc, item in
+            acc + item.scripts.filter { ($0.p95Ms ?? 0) >= 10_000 }.count
+        }
+        let sample = metadata.sample ?? diagnostics.metadata.sample ?? 0
+        return SkillRetroFourLayerSummary(
+            sampleSize: sample,
+            slowFlywheelReady: sample >= 50,
+            triggerMissSkills: 0,
+            zeroActionLoadSkills: zeroActionCount,
+            directionalDrifts: nonGhost.reduce(0) { $0 + $1.specGapEscapes },
+            unwiredDrawersCount: unwiredCount,
+            trueDeadwoodDrawersCount: deadwoodCount,
+            trueCatcherScriptsCount: catcherCount,
+            ceremonialScriptsCount: 0,
+            rigidRoadblockScriptsCount: roadblockScriptsCount,
+            exit2RoadblockTotalCount: exit2Total,
+            latencySinkScriptsCount: slowScriptsCount,
+            wildPatternsCount: 0,
+            proposals: []
+        )
+    }
+
     public init(from decoder: Decoder) throws {
         let f = try SkillsFields(decoder); metadata = f.metadata
         let diag = try f.value("diagnostics") ?? SkillsRoiDiagnostics(from: decoder)
         diagnostics = diag
-        skillsDaily = try f.value("skills_daily") ?? []
+        let rawDaily: [SkillsDailyObservation] = try f.value("skills_daily") ?? []
+        skillsDaily = rawDaily.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
         let topLevelDetails: [SkillInspectorDetail]? = try f.value("skill_details")
-        skillDetails = (topLevelDetails?.isEmpty == false) ? (topLevelDetails ?? []) : diag.resolvedSkillDetails
+        let filteredTopDetails = (topLevelDetails ?? []).filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        skillDetails = !filteredTopDetails.isEmpty ? filteredTopDetails : diag.resolvedSkillDetails
+        let topLevelEvo: [SkillVersionEvolutionRow]? = try f.value("skill_version_evolution")
+        let filteredTopEvo = (topLevelEvo ?? []).filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        let resolvedEvo = !filteredTopEvo.isEmpty ? filteredTopEvo : diag.versionEvolution
+        if !resolvedEvo.isEmpty {
+            versionEvolution = resolvedEvo
+        } else {
+            versionEvolution = Self.synthesizeVersionEvolution(from: skillDetails, fallbackMetadata: metadata)
+        }
+        skillRetro = (try? f.value("skill_retro", as: SkillRetroFourLayerSummary.self)) ?? diag.skillRetro
         errors = try f.value("errors") ?? []
+    }
+
+    private static func synthesizeVersionEvolution(
+        from details: [SkillInspectorDetail],
+        fallbackMetadata: SkillsObservationMetadata
+    ) -> [SkillVersionEvolutionRow] {
+        details.filter { !$0.isGhost && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }.map { item in
+            let scriptCalls = item.scripts.compactMap(\.calls30d).reduce(0, +)
+            let p50 = item.scripts.compactMap(\.p95Ms).min()
+            let uptake = item.unpracticedRate.map { max(0.0, min(1.0, 1.0 - $0)) }
+            let current = SkillVersionMetricsSnapshot(
+                skillVersion: "v1@head",
+                semver: "1.0.0",
+                combinedVersion: "1.0.0+v1@head",
+                commitCount: 1,
+                subtreeSha: "head",
+                sessions: item.loads30d,
+                invocations: item.loads30d,
+                scriptCallCount: scriptCalls,
+                exit2Count: 0,
+                exit1Count: 0,
+                postFixErrors: 0,
+                exit2ErrorRate: scriptCalls > 0 ? 0.0 : nil,
+                brokenDrawerCount: item.unhitRefsCount,
+                scriptP50Ms: p50,
+                uptakeRate: uptake,
+                r1Total: item.r1PassRate != nil ? max(1, item.loads7d) : 0,
+                r1Pass: item.r1PassRate.map { Int((Double(max(1, item.loads7d)) * $0).rounded()) } ?? 0,
+                r1PassRate: item.r1PassRate
+            )
+            let status = item.loads30d >= 5 ? "improved" : (item.loads30d > 0 ? "observing" : "baseline")
+            return SkillVersionEvolutionRow(
+                metadata: item.metadata.inheriting(fallbackMetadata),
+                skill: item.skill,
+                semver: "1.0.0",
+                skillVersion: "v1@head",
+                combinedVersion: "1.0.0+v1@head",
+                subtreeSha: "head",
+                commitCount: 1,
+                status: status,
+                currentVersion: current
+            )
+        }
     }
 }
 
@@ -1410,4 +2407,9 @@ extension SkillReferenceDetail: SkillsObjectPopulation {}
 extension SkillScriptDetail: SkillsObjectPopulation {}
 extension SkillEvalCaseDetail: SkillsObjectPopulation {}
 extension SkillInspectorDetail: SkillsObjectPopulation {}
+extension SkillVersionMetricsSnapshot: SkillsObjectPopulation {}
+extension SkillVersionDeltaSummary: SkillsObjectPopulation {}
+extension SkillVersionEvolutionRow: SkillsObjectPopulation {}
+extension SkillRetroProposalItem: SkillsObjectPopulation {}
+extension SkillRetroFourLayerSummary: SkillsObjectPopulation {}
 #endif

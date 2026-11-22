@@ -330,8 +330,9 @@ private struct PreviewSkillsInventorySection: View {
         let upgraded = data.skills.filter { $0.beforeOptSuccessRate != nil }
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                PreviewPill("后台自动复盘近期已升级 \(upgraded.count) 个主力 Skill ▲", tint: .green)
+                PreviewPill("单技能 vN-1 → vN 自动复盘已升级 \(upgraded.count) 个主力 Skill ▲", tint: .green)
                 Spacer()
+                PreviewPill("L0–L3 四层脉冲正常", tint: .blue)
             }
             ForEach(upgraded) { skill in
                 let before = Int((skill.beforeOptSuccessRate ?? 0.72) * 100)
@@ -341,8 +342,11 @@ private struct PreviewSkillsInventorySection: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(skill.name).font(.caption.weight(.semibold))
+                        Text("vN-1 → vN · ✅ 有效演进")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
                         Spacer()
-                        Text("成功率 \(before)% → \(after)% ▲ · 耗时 \(String(format: "%.1f", minBefore))m → \(String(format: "%.1f", minAfter))m ▼")
+                        Text("exit=2 路障率 ▼ · 一次通过 \(before)% → \(after)% ▲ · P50 \(String(format: "%.1f", minBefore))s → \(String(format: "%.1f", minAfter))s ▼")
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.green)
                     }
