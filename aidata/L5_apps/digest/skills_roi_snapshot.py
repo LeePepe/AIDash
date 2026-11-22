@@ -162,6 +162,52 @@ def _normalize_rel_script(raw_path: Any) -> str:
     return f"scripts/{cleaned.lstrip('/')}"
 
 
+def _analyze_skill_corpus_drawers(
+    l0_text: str,
+    ref_texts: Mapping[str, str],
+    script_texts: Sequence[str],
+    *,
+    broken_symlinks: int = 0,
+    existing_paths: set[str] | None = None,
+) -> dict[str, Any]:
+    drawers = sorted(ref_texts.keys())
+    known_paths = set(existing_paths or drawers)
+    broken_links = int(broken_symlinks)
+    for match in re.finditer(r"\((?:\./)?(references/[^)#\s]+)", l0_text):
+        target_rel = match.group(1).strip()
+        if target_rel not in known_paths:
+            broken_links += 1
+
+    static_unreferenced: set[str] = set()
+    script_linked: set[str] = set()
+    l0_linked: set[str] = set()
+    scripts_joined = "\n".join(script_texts)
+    for rel in drawers:
+        short_name = Path(rel).name
+        if rel in l0_text or short_name in l0_text:
+            l0_linked.add(rel)
+        if rel in scripts_joined or short_name in scripts_joined:
+            script_linked.add(rel)
+        other_refs = "\n".join(txt for k, txt in ref_texts.items() if k != rel)
+        if (
+            rel not in l0_text
+            and short_name not in l0_text
+            and rel not in scripts_joined
+            and short_name not in scripts_joined
+            and rel not in other_refs
+            and short_name not in other_refs
+        ):
+            static_unreferenced.add(rel)
+
+    return {
+        "drawers": drawers,
+        "broken_links": broken_links,
+        "static_unreferenced": static_unreferenced,
+        "l0_linked": l0_linked,
+        "script_linked": script_linked,
+    }
+
+
 def _discover_skill_drawers_and_links(pkg_dir: Path) -> dict[str, Any]:
     """Inspect SKILL.md, references/, and scripts/ to identify drawers and broken/unreferenced links."""
     refs_dir = pkg_dir / "references"
@@ -182,48 +228,83 @@ def _discover_skill_drawers_and_links(pkg_dir: Path) -> dict[str, Any]:
                     script_texts.append(sp.read_text(encoding="utf-8", errors="ignore"))
 
     ref_texts: dict[str, str] = {}
-    drawers: list[str] = []
-    broken_links = 0
+    existing_paths: set[str] = set()
+    broken_symlinks = 0
     if refs_dir.is_dir():
         for rp in sorted(refs_dir.rglob("*")):
             if rp.is_symlink() and not rp.exists():
-                broken_links += 1
+                broken_symlinks += 1
                 continue
             if not rp.is_file() or rp.name.startswith(".") or "__pycache__" in rp.parts:
                 continue
             rel = f"references/{rp.relative_to(refs_dir).as_posix()}"
-            drawers.append(rel)
+            existing_paths.add(rel)
             if rp.suffix.lower() in {".md", ".json", ".yaml", ".yml"}:
                 with contextlib.suppress(OSError):
                     ref_texts[rel] = rp.read_text(encoding="utf-8", errors="ignore")
+            else:
+                ref_texts[rel] = ""
 
-    # Check markdown links in SKILL.md pointing to missing references/ files
-    for match in re.finditer(r"\((?:\./)?(references/[^)#\s]+)", l0_text):
-        target_rel = match.group(1).strip()
-        if not (pkg_dir / target_rel).exists():
-            broken_links += 1
+    return _analyze_skill_corpus_drawers(
+        l0_text,
+        ref_texts,
+        script_texts,
+        broken_symlinks=broken_symlinks,
+        existing_paths=existing_paths,
+    )
 
-    static_unreferenced: set[str] = set()
-    script_linked: set[str] = set()
-    l0_linked: set[str] = set()
-    scripts_joined = "\n".join(script_texts)
-    for rel in drawers:
-        short_name = Path(rel).name
-        if rel in l0_text or short_name in l0_text:
-            l0_linked.add(rel)
-        if rel in scripts_joined or short_name in scripts_joined:
-            script_linked.add(rel)
-        other_refs = "\n".join(txt for k, txt in ref_texts.items() if k != rel)
-        if rel not in l0_text and short_name not in l0_text and rel not in scripts_joined and short_name not in scripts_joined and rel not in other_refs and short_name not in other_refs:
-            static_unreferenced.add(rel)
 
-    return {
-        "drawers": drawers,
-        "broken_links": broken_links,
-        "static_unreferenced": static_unreferenced,
-        "l0_linked": l0_linked,
-        "script_linked": script_linked,
-    }
+def _discover_skill_drawers_at_commit(git_root: Path, commit_sha: str, skill_name: str, fallback_meta: dict[str, Any]) -> dict[str, Any]:
+    """Inspect historical skill tree at `commit_sha` to compute accurate historical broken/unreferenced drawers."""
+    clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    rel_skill = f"skills/{skill_name}"
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        ls_proc = subprocess.run(
+            ["git", "--no-optional-locks", "ls-tree", "-r", "--name-only", f"{commit_sha}:{rel_skill}"],
+            cwd=git_root,
+            env=clean_env,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+        if ls_proc.returncode != 0:
+            return fallback_meta
+        rel_files = [line.strip() for line in ls_proc.stdout.splitlines() if line.strip()]
+        existing_paths = {p for p in rel_files if p.startswith("references/")}
+
+        def _git_show_text(rel_p: str) -> str:
+            res = subprocess.run(
+                ["git", "--no-optional-locks", "show", f"{commit_sha}:{rel_skill}/{rel_p}"],
+                cwd=git_root,
+                env=clean_env,
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+                check=False,
+            )
+            return res.stdout if res.returncode == 0 else ""
+
+        l0_text = _git_show_text("SKILL.md") if "SKILL.md" in rel_files else ""
+        ref_texts: dict[str, str] = {}
+        script_texts: list[str] = []
+        for p in rel_files:
+            if p.startswith("references/") and not Path(p).name.startswith(".") and "__pycache__" not in p:
+                if Path(p).suffix.lower() in {".md", ".json", ".yaml", ".yml"}:
+                    ref_texts[p] = _git_show_text(p)
+                else:
+                    ref_texts[p] = ""
+            elif p.startswith("scripts/") and Path(p).suffix.lower() in {".py", ".sh"} and "__pycache__" not in p:
+                script_texts.append(_git_show_text(p))
+
+        return _analyze_skill_corpus_drawers(
+            l0_text,
+            ref_texts,
+            script_texts,
+            broken_symlinks=0,
+            existing_paths=existing_paths,
+        )
+    return fallback_meta
 
 
 def resolve_skill_version_history(
@@ -343,8 +424,10 @@ def resolve_skill_version_history(
             next_iso = commits[idx + 1][2] if idx + 1 < total_commits else None
             if git_root is not None and idx == total_commits - 2:
                 semver_val = _read_plugin_semver_at_commit(git_root, c_sha, sk_name, head_semver)
+                ver_drawer_meta = _discover_skill_drawers_at_commit(git_root, c_sha, sk_name, drawer_meta)
             else:
                 semver_val = head_semver
+                ver_drawer_meta = drawer_meta
             skill_ver = f"v{ver_num}@{sub_sha}"
             entries.append(
                 {
@@ -362,7 +445,7 @@ def resolve_skill_version_history(
                     "t_end": next_iso,
                     "t_start_epoch": c_epoch,
                     "t_end_epoch": next_epoch,
-                    "_drawer_meta": drawer_meta,
+                    "_drawer_meta": ver_drawer_meta,
                 }
             )
         histories[sk_name] = entries
@@ -931,39 +1014,14 @@ def _collect_telemetry_into_version_buckets(
                                 if passed:
                                     bkt["r1_pass"] += 1
 
-    # 5. Enrich current version bucket from producer report (`S10_skill_roi_ranking` / `skill_details`) when telemetry files were not provided
-    if isinstance(report, Mapping):
-        for s10_row in report.get("S10_skill_roi_ranking") or []:
-            if not isinstance(s10_row, Mapping):
-                continue
-            sk = _norm_skill_name(s10_row.get("skill"))
-            if sk not in histories or not histories[sk]:
-                continue
-            head_ver = str(histories[sk][-1]["skill_version"])
-            head_bkt = buckets[sk][head_ver]
-            total_inv_across_versions = sum(b["invocations"] for b in buckets[sk].values())
-            if total_inv_across_versions == 0:
-                loads_val = int(s10_row.get("loads_7d") or s10_row.get("loads_30d") or 0)
-                if loads_val > 0:
-                    head_bkt["invocations"] = loads_val
-                    for i in range(loads_val):
-                        head_bkt["sessions"].add(f"report:{sk}:{i}")
-            total_r1_across_versions = sum(b["r1_total"] for b in buckets[sk].values())
-            if total_r1_across_versions == 0 and int(s10_row.get("r1_total") or 0) > 0:
-                r1_t = int(s10_row["r1_total"])
-                r1_rate = s10_row.get("r1_pass_rate")
-                head_bkt["r1_total"] = r1_t
-                if isinstance(r1_rate, (int, float)) and not isinstance(r1_rate, bool):
-                    head_bkt["r1_pass"] = round(float(r1_rate) * r1_t)
-
     return buckets
 
 
 def _summarize_version_bucket(bucket: Mapping[str, Any]) -> dict[str, Any]:
     meta = bucket["meta"]
     drawer_meta = meta.get("_drawer_meta") or {}
-    sessions_cnt = max(len(bucket["sessions"]), int(bucket["invocations"]))
-    invocations_cnt = max(int(bucket["invocations"]), len(bucket["sessions"]))
+    sessions_cnt = len(bucket["sessions"])
+    invocations_cnt = int(bucket["invocations"]) if int(bucket["invocations"]) > 0 else sessions_cnt
     sc_calls = int(bucket["script_calls"])
     exit2_cnt = int(bucket["exit2_count"])
     exit1_cnt = int(bucket["exit1_count"])
@@ -1036,7 +1094,7 @@ def classify_skill_version_evolution(
     min_sessions: int = 5,
 ) -> tuple[str, dict[str, Any]]:
     """Deterministically classify `vN-1 -> vN` version evolution status (`improved` / `regressed` / `observing` / `baseline`)."""
-    cur_sessions = max(int(current_metrics.get("sessions") or 0), int(current_metrics.get("invocations") or 0))
+    cur_sessions = int(current_metrics.get("sessions") or 0)
     cur_exit2_cnt = int(current_metrics.get("exit2_count") or 0)
     cur_post_errors = int(
         current_metrics.get("post_fix_errors")
@@ -1132,7 +1190,7 @@ def classify_skill_version_evolution(
         "regressed_dimensions": regressed_dims,
     }
 
-    # Regressed check takes priority even on small post-fix sample if errors rebounded or R1 regressed
+    # Immediate regression check (post_fix_errors > 0, exit=2 rebound, R1 pass rate regression, or broken drawers)
     has_r1_regression = r1_delta is not None and r1_delta < 0
     has_broken_regression = broken_delta > 0
     if cur_post_errors > 0 or cur_exit2_cnt > 0 or has_r1_regression or has_broken_regression:
@@ -1140,6 +1198,9 @@ def classify_skill_version_evolution(
 
     if cur_sessions < min_sessions:
         return "observing", delta_summary
+
+    if regressed_dims:
+        return "regressed", delta_summary
 
     if improved_dims or (cur_post_errors == 0 and cur_broken == 0):
         return "improved", delta_summary
@@ -1192,7 +1253,6 @@ def compute_skill_version_evolution(
     default_window_cst = str(rep.get("window_cst") or "30d")
     default_window_start = rep.get("window_start") or (win_start.isoformat() if win_start else "1970-01-01T00:00:00+08:00")
     default_window_end = rep.get("window_end") or (win_end.isoformat() if win_end else datetime.now(CST).isoformat(timespec="seconds"))
-    default_source_as_of = rep.get("source_as_of") or default_window_end
 
     rows: list[dict[str, Any]] = []
     for sk_name, ver_entries in sorted(histories.items()):
@@ -1266,9 +1326,11 @@ def compute_skill_version_evolution(
             + (int(before_ver_obj["sessions"]) if before_ver_obj is not None else 0)
             + int(current_ver_obj["script_call_count"])
             + (int(before_ver_obj["script_call_count"]) if before_ver_obj is not None else 0)
+            + int(current_ver_obj["r1_total"])
+            + (int(before_ver_obj["r1_total"]) if before_ver_obj is not None else 0)
         )
-        latest_stamp = max(observed_stamps).date().isoformat() if observed_stamps else default_source_as_of
-        cov_status = "healthy" if total_samples > 0 else (str(rep.get("coverage_status") or "healthy") if rep.get("coverage_status") in _COVERAGE else "unknown")
+        latest_stamp = max(observed_stamps).date().isoformat() if observed_stamps else None
+        cov_status = "healthy" if total_samples > 0 and latest_stamp is not None else "unknown"
 
         rows.append(
             {
@@ -1276,7 +1338,7 @@ def compute_skill_version_evolution(
                 "window_start": current_ver_obj.get("t_start") or default_window_start,
                 "window_end": default_window_end,
                 "source_as_of": latest_stamp,
-                "sample_size": max(1, total_samples) if cov_status == "healthy" else total_samples,
+                "sample_size": total_samples,
                 "coverage_status": cov_status,
                 "estimated": False,
                 "skill": sk_name,

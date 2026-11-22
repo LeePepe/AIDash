@@ -613,8 +613,11 @@ def test_skill_version_evolution_attribution_deltas_and_status_classification(tm
     # 4. delta-skill: single commit v1 -> baseline
     _commit_skill("delta-skill", "1.0.0", "2026-11-06T09:00:00+08:00", note="v1 baseline only")
 
+    # 5. epsilon-skill: zero telemetry samples -> sample_size=0, coverage_status="unknown", source_as_of=None
+    _commit_skill("epsilon-skill", "1.0.0", "2026-11-06T11:00:00+08:00", note="v1 no telemetry")
+
     histories = resolve_skill_version_history(skills_repo)
-    assert set(histories) == {"alpha-skill", "beta-skill", "gamma-skill", "delta-skill"}
+    assert set(histories) == {"alpha-skill", "beta-skill", "gamma-skill", "delta-skill", "epsilon-skill"}
     assert len(histories["alpha-skill"]) == 2
     alpha_v1 = histories["alpha-skill"][0]
     alpha_v2 = histories["alpha-skill"][1]
@@ -815,7 +818,7 @@ def test_skill_version_evolution_attribution_deltas_and_status_classification(tm
         warehouse_db=warehouse_db,
     )
     by_skill = {row["skill"]: row for row in evo_rows}
-    assert set(by_skill) == {"alpha-skill", "beta-skill", "gamma-skill", "delta-skill"}
+    assert set(by_skill) == {"alpha-skill", "beta-skill", "gamma-skill", "delta-skill", "epsilon-skill"}
 
     alpha_row = by_skill["alpha-skill"]
     assert alpha_row["status"] == "improved"
@@ -824,6 +827,7 @@ def test_skill_version_evolution_attribution_deltas_and_status_classification(tm
     assert alpha_row["combined_version"] == f"1.1.0+{alpha_v2['skill_version']}"
     assert alpha_row["before_version"]["skill_version"] == alpha_v1["skill_version"]
     assert alpha_row["before_version"]["exit2_error_rate"] == 0.5
+    assert alpha_row["before_version"]["broken_drawer_count"] == 2
     assert alpha_row["before_version"]["script_p50_ms"] == 450.0
     assert alpha_row["before_version"]["r1_pass_rate"] == 0.5
     assert alpha_row["current_version"]["skill_version"] == alpha_v2["skill_version"]
@@ -834,10 +838,12 @@ def test_skill_version_evolution_attribution_deltas_and_status_classification(tm
     assert alpha_row["current_version"]["uptake_rate"] == 0.95
     assert alpha_row["current_version"]["r1_pass_rate"] == 1.0
     assert alpha_row["delta"]["exit2_error_rate_delta"] == -0.5
+    assert alpha_row["delta"]["broken_drawer_delta"] == -2
     assert alpha_row["delta"]["script_p50_ms_delta"] == -330.0
     assert alpha_row["delta"]["uptake_rate_delta"] == 0.45
     assert alpha_row["delta"]["r1_pass_rate_delta"] == 0.5
     assert "exit2_error_rate" in alpha_row["delta"]["improved_dimensions"]
+    assert "broken_drawer_count" in alpha_row["delta"]["improved_dimensions"]
     assert "script_p50_ms" in alpha_row["delta"]["improved_dimensions"]
 
     beta_row = by_skill["beta-skill"]
@@ -856,6 +862,14 @@ def test_skill_version_evolution_attribution_deltas_and_status_classification(tm
     assert delta_row["status"] == "baseline"
     assert delta_row["status_label"] == "🕰️ 基准版本"
     assert delta_row["before_version"] is None
+    assert delta_row["sample_size"] == 3
+    assert delta_row["coverage_status"] == "healthy"
+
+    epsilon_row = by_skill["epsilon-skill"]
+    assert epsilon_row["status"] == "baseline"
+    assert epsilon_row["sample_size"] == 0
+    assert epsilon_row["coverage_status"] == "unknown"
+    assert epsilon_row["source_as_of"] is None
 
     # Verify write_snapshot exports skill_version_evolution at root and under diagnostics
     report_path = tmp_path / "report.json"
@@ -875,16 +889,30 @@ def test_skill_version_evolution_attribution_deltas_and_status_classification(tm
     assert snapshot["coverage_status"] == "healthy"
     assert "errors" not in snapshot
     assert isinstance(snapshot["skill_version_evolution"], list)
-    assert len(snapshot["skill_version_evolution"]) == 4
+    assert len(snapshot["skill_version_evolution"]) == 5
     assert snapshot["diagnostics"]["skill_version_evolution"] == snapshot["skill_version_evolution"]
 
-    # Direct classify_skill_version_evolution edge cases (R1 regression vs broken drawer regression)
+    # Direct classify_skill_version_evolution edge cases (R1 regression, latency regression, uptake regression)
     st_r1_reg, d_r1_reg = classify_skill_version_evolution(
         {"sessions": 6, "exit2_count": 0, "exit2_error_rate": 0.0, "broken_drawer_count": 0, "script_p50_ms": 100.0, "uptake_rate": 0.9, "r1_pass_rate": 1.0},
         {"sessions": 6, "exit2_count": 0, "exit2_error_rate": 0.0, "broken_drawer_count": 0, "script_p50_ms": 100.0, "uptake_rate": 0.9, "r1_pass_rate": 0.5},
     )
     assert st_r1_reg == "regressed"
     assert "r1_pass_rate" in d_r1_reg["regressed_dimensions"]
+
+    st_lat_reg, d_lat_reg = classify_skill_version_evolution(
+        {"sessions": 6, "exit2_count": 0, "exit2_error_rate": 0.0, "broken_drawer_count": 0, "script_p50_ms": 200.0, "uptake_rate": 0.9, "r1_pass_rate": 1.0},
+        {"sessions": 6, "exit2_count": 0, "exit2_error_rate": 0.0, "broken_drawer_count": 0, "script_p50_ms": 950.0, "uptake_rate": 0.9, "r1_pass_rate": 1.0},
+    )
+    assert st_lat_reg == "regressed"
+    assert "script_p50_ms" in d_lat_reg["regressed_dimensions"]
+
+    st_up_reg, d_up_reg = classify_skill_version_evolution(
+        {"sessions": 6, "exit2_count": 0, "exit2_error_rate": 0.0, "broken_drawer_count": 0, "script_p50_ms": 200.0, "uptake_rate": 0.9, "r1_pass_rate": 1.0},
+        {"sessions": 6, "exit2_count": 0, "exit2_error_rate": 0.0, "broken_drawer_count": 0, "script_p50_ms": 180.0, "uptake_rate": 0.6, "r1_pass_rate": 1.0},
+    )
+    assert st_up_reg == "regressed"
+    assert "uptake_rate" in d_up_reg["regressed_dimensions"]
 
     # Verify validation of invalid skill_version_evolution entries
     invalid_evo_report = {
