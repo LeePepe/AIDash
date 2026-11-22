@@ -75,7 +75,7 @@ def test_verify_changed_and_all_in_hermetic_git_repo(tmp_path: Path):
     (repo / "scripts" / "context" / "layers").write_text(
         f"#!/bin/sh\n"
         f"if [ \"${{1:-}}\" = \"--all\" ]; then\n"
-        f"  printf 'RepoInfra\\n'\n"
+        f"  printf 'RepoInfra\\nDesignKit\\nAIDashCore\\nAidataL5\\n'\n"
         f"  exit 0\n"
         f"fi\n"
         f"cat > '{records}/layers_stdin.log'\n"
@@ -130,4 +130,10 @@ def test_verify_changed_and_all_in_hermetic_git_repo(tmp_path: Path):
         check=True,
     )
     assert "[verify] ok: all" in res_all.stdout
-    assert "RepoInfra --mode local" in (records / "run.log").read_text(encoding="utf-8")
+    run_lines = (records / "run.log").read_text(encoding="utf-8").splitlines()
+    assert run_lines == [
+        "RepoInfra --mode local",
+        "DesignKit --mode local",
+        "AIDashCore --mode local",
+        "AidataL5 --mode local",
+    ]

@@ -132,11 +132,7 @@ fi
 
 if [ "$MODE" = "all" ]; then
     all_layers="$(scripts/context/layers --all)"
-    if printf '%s\n' "$all_layers" | grep -qx "RepoInfra"; then
-        run_layers_batch "RepoInfra"
-    else
-        run_layers_batch "$all_layers"
-    fi
+    run_layers_batch "$all_layers"
     if [ -d "aidata/tests" ]; then
         echo "[verify] running aidata pytest suite..."
         if [ -x "/usr/bin/python3" ] && /usr/bin/python3 -c "import pytest" >/dev/null 2>&1; then
@@ -148,10 +144,6 @@ if [ "$MODE" = "all" ]; then
             echo "[verify] running ruff check aidata..."
             ruff check --select E4,E7,E9,F aidata
         fi
-    fi
-    if [ "${VERIFY_FULL_XCODE:-0}" = "1" ]; then
-        swift_layers="$(printf '%s\n' "$all_layers" | grep -E '^(DesignKit|AIDashCore|AIDashUI|AIDashApp)$' || true)"
-        run_layers_batch "$swift_layers"
     fi
     echo "[verify] ok: all"
     exit 0
