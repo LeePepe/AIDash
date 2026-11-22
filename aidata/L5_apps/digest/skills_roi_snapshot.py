@@ -48,6 +48,65 @@ _DEFAULT_USAGE_JSONL = Path.home() / ".local" / "share" / "skill-telemetry" / "u
 _SKILL_Version_FINGERPRINT_RE = re.compile(
     r"^(?:(?P<semver>[0-9A-Za-z._-]+)\+)?v(?P<commit_count>\d+)@(?P<subtree_sha>[0-9a-fA-F]{4,40})$"
 )
+_PSEUDO_SKILL_DENYLIST = frozenset({
+    "tests", "test", "leepepe", "pull", "main", "scripts", "skills", "head",
+    "origin", "pr", "issue", "issues", "sources", "verify", "user-skills",
+    "context", "ssd", "dark", "memory", "group", "workflows", "vitalstride",
+    "aidash", "reviewing", "v1", "shared-ci", "financial", "resources",
+    "architecture", "shared-design-system", "app", "rgb", "lee", "audit",
+    "components", "error", "ci", "evidence", "models", "designkit", "empty",
+    "p1", "api", "screenshots", "ios", "activeworkout", "strata", "loading",
+})
+_CANONICAL_SKILL_ALLOWLIST = frozenset({
+    "aidash-content",
+    "aidash-metrics",
+    "asset-screener",
+    "code-review",
+    "codebase-design",
+    "customize-cloud-agent",
+    "deep-research",
+    "design-studio",
+    "financial-advisor",
+    "financial-data-toolkit",
+    "financial-preferences",
+    "github-pr-media",
+    "howto",
+    "ios-architecture-testing",
+    "ios-concurrency-swiftui",
+    "ios-debugging-performance",
+    "issue-brief",
+    "knowledge-digest",
+    "layered-data-warehouse",
+    "linear-board",
+    "loki-telemetry-integration",
+    "m2-dispatcher",
+    "my-designer",
+    "nas-smart-home",
+    "personal-m2-assistant",
+    "portfolio-advisor",
+    "pr-stack",
+    "repo-kit",
+    "retro-loop",
+    "save-tool",
+    "skill-contract",
+    "skill-retro",
+    "speckit-agent-context-update",
+    "speckit-analyze",
+    "speckit-checklist",
+    "speckit-clarify",
+    "speckit-constitution",
+    "speckit-converge",
+    "speckit-implement",
+    "speckit-plan",
+    "speckit-specify",
+    "speckit-tasks",
+    "speckit-taskstoissues",
+    "story-craft",
+    "team-lead",
+    "unmeasured",
+    "workflow-hub",
+    "xcode-cli",
+})
 
 
 def _norm_skill_name(name: Any) -> str:
@@ -55,6 +114,265 @@ def _norm_skill_name(name: Any) -> str:
     if raw in {"goal-target-task", "goal-task"}:
         return "team-lead"
     return raw
+
+
+def _discover_registered_skill_set(skills_repo: Path | None = None) -> set[str]:
+    known: set[str] = set(_CANONICAL_SKILL_ALLOWLIST)
+    roots: list[Path] = []
+    if skills_repo is not None:
+        r_path = Path(skills_repo)
+        roots.extend([r_path / "skills", r_path])
+    elif not os.environ.get("PYTEST_CURRENT_TEST"):
+        roots.extend([
+            _DEFAULT_SKILLS_REPO / "skills",
+            config.AIDATA_HOME.parent / ".agents" / "skills",
+            config.AIDATA_HOME.parent / ".claude" / "skills",
+        ])
+    for root in roots:
+        if not root.is_dir():
+            continue
+        with contextlib.suppress(OSError):
+            for child in root.iterdir():
+                if child.is_dir() and (child / "SKILL.md").is_file():
+                    known.add(_norm_skill_name(child.name).lower())
+    return known
+
+
+def _is_valid_registered_skill(
+    name: Any,
+    *,
+    skills_repo: Path | None = None,
+    extra_known: set[str] | None = None,
+) -> bool:
+    norm = _norm_skill_name(name).lower()
+    if not norm or norm in _PSEUDO_SKILL_DENYLIST:
+        return False
+    known = _discover_registered_skill_set(skills_repo)
+    if extra_known:
+        known = known | {s.lower() for s in extra_known if s}
+    if norm in known:
+        return True
+    if skills_repo is not None and norm.endswith("-skill"):
+        return True
+    return False
+
+
+def _filter_pseudo_skills_from_report(
+    report: dict[str, Any],
+    *,
+    skills_repo: Path | None = None,
+) -> None:
+    if not isinstance(report, dict) or not report:
+        return
+
+    def _keep_registered(item: Any) -> bool:
+        if not isinstance(item, Mapping):
+            return True
+        return _is_valid_registered_skill(item.get("skill"), skills_repo=skills_repo)
+
+    def _keep_detail(item: Any) -> bool:
+        if not isinstance(item, Mapping):
+            return True
+        sk_raw = item.get("skill")
+        if _is_valid_registered_skill(sk_raw, skills_repo=skills_repo):
+            return True
+        if item.get("is_ghost") is True:
+            sk_g = _norm_skill_name(sk_raw).lower()
+            return bool(sk_g == "legacy-deleted-ghost")
+        return False
+
+    for section_key in (
+        "S6_load_vs_script",
+        "S7_disclosure_funnel",
+        "S8_post_skill_churn",
+        "S9_escape_attribution",
+        "S10_skill_roi_ranking",
+        "skill_version_evolution",
+    ):
+        sec_val = report.get(section_key)
+        if isinstance(sec_val, list):
+            report[section_key] = [row for row in sec_val if _keep_registered(row)]
+
+    if isinstance(report.get("skill_details"), list):
+        report["skill_details"] = [row for row in report["skill_details"] if _keep_detail(row)]
+
+    s4 = report.get("S4_usage_and_r1")
+    if isinstance(s4, dict):
+        if isinstance(s4.get("top_used_skills"), list):
+            s4["top_used_skills"] = [row for row in s4["top_used_skills"] if _keep_registered(row)]
+        if isinstance(s4.get("idle_skills_30d"), list):
+            s4["idle_skills_30d"] = [
+                sk for sk in s4["idle_skills_30d"]
+                if _is_valid_registered_skill(sk, skills_repo=skills_repo)
+            ]
+        if isinstance(report.get("S10_skill_roi_ranking"), list):
+            s4["active_skills_count"] = len(report["S10_skill_roi_ranking"])
+
+
+def _synthesize_skill_retro_summary(
+    report: Mapping[str, Any],
+    version_evolution: Sequence[Mapping[str, Any]] | None = None,
+    *,
+    prior_skill_retro: Mapping[str, Any] | None = None,
+    use_prior_fallback: bool = False,
+) -> dict[str, Any]:
+    """Ensure standardized 4-layer `skill_retro` health object (`summary`, `layer0..layer3`, `proposals`)."""
+    existing = report.get("skill_retro") if isinstance(report.get("skill_retro"), Mapping) else (
+        prior_skill_retro if use_prior_fallback else None
+    )
+    if isinstance(existing, Mapping) and all(
+        isinstance(existing.get(k), Mapping)
+        for k in (
+            "summary",
+            "layer0_direction_and_triggers",
+            "layer1_drawer_metabolism",
+            "layer2_script_efficacy_and_speed",
+            "layer3_wild_patterns_and_eval",
+        )
+    ):
+        synthesized = dict(existing)
+        synthesized.setdefault("proposals", list(existing.get("proposals") or report.get("low_roi_proposals") or []))
+        return synthesized
+
+    evo_list = list(version_evolution or report.get("skill_version_evolution") or [])
+    details_list = [d for d in (report.get("skill_details") or []) if isinstance(d, Mapping)]
+    s10_list = [r for r in (report.get("S10_skill_roi_ranking") or []) if isinstance(r, Mapping)]
+    proposals_list = list(report.get("low_roi_proposals") or report.get("recommendations") or [])
+
+    zero_action_loads = [
+        {"skill": str(r.get("skill")), "empty_load_sessions": int(r.get("empty_load_sessions") or 0)}
+        for r in s10_list
+        if int(r.get("empty_load_sessions") or 0) > 0
+    ]
+    healthy_convergences = [
+        {"skill": str(r.get("skill")), "r1_pass_rate": r.get("r1_pass_rate")}
+        for r in s10_list
+        if isinstance(r.get("r1_pass_rate"), (int, float)) and float(r["r1_pass_rate"]) >= 0.8
+    ]
+    directional_drifts = [
+        {"skill": str(r.get("skill")), "diagnosis": str(r.get("diagnosis") or "")}
+        for r in s10_list
+        if r.get("diagnostic_status") in {"high_repair_loop", "warn"}
+    ]
+
+    hot_drawers: list[dict[str, Any]] = []
+    deadwood_drawers: list[dict[str, Any]] = []
+    true_catchers: list[dict[str, Any]] = []
+    ceremonial_scripts: list[dict[str, Any]] = []
+    rigid_roadblocks: list[dict[str, Any]] = []
+    latency_sinks: list[dict[str, Any]] = []
+
+    for det in details_list:
+        sk = str(det.get("skill") or "")
+        for ref in det.get("references") or []:
+            if not isinstance(ref, Mapping):
+                continue
+            hits = int(ref.get("hits_30d") or 0)
+            entry_ref = {"skill": sk, "rel_path": str(ref.get("rel_path") or ""), "hits_30d": hits}
+            if hits >= 3:
+                hot_drawers.append(entry_ref)
+            elif ref.get("is_unhit"):
+                deadwood_drawers.append(entry_ref)
+        for sc in det.get("scripts") or []:
+            if not isinstance(sc, Mapping):
+                continue
+            calls = int(sc.get("calls_30d") or 0)
+            sr = sc.get("success_rate")
+            p95 = sc.get("p95_ms")
+            entry_sc = {
+                "skill": sk,
+                "rel_path": str(sc.get("rel_path") or ""),
+                "calls_30d": calls,
+                "success_rate": sr,
+                "p95_ms": p95,
+            }
+            if calls > 0 and isinstance(sr, (int, float)):
+                if 0.0 < float(sr) < 1.0:
+                    true_catchers.append(entry_sc)
+                elif float(sr) == 1.0 and calls >= 5:
+                    ceremonial_scripts.append(entry_sc)
+                elif float(sr) == 0.0:
+                    rigid_roadblocks.append(entry_sc)
+            if isinstance(p95, (int, float)) and float(p95) >= 5000.0:
+                latency_sinks.append(entry_sc)
+
+    for evo in evo_list:
+        if not isinstance(evo, Mapping):
+            continue
+        cur_v = evo.get("current_version")
+        if isinstance(cur_v, Mapping) and int(cur_v.get("exit2_count") or 0) > 0:
+            rigid_roadblocks.append({
+                "skill": str(evo.get("skill") or ""),
+                "skill_version": str(evo.get("skill_version") or ""),
+                "exit2_count": int(cur_v.get("exit2_count") or 0),
+            })
+
+    layer0 = {
+        "trigger_misses": [],
+        "zero_action_loads": zero_action_loads,
+        "healthy_r1_to_r2_convergences": healthy_convergences,
+        "healthy_convergence_count": len(healthy_convergences),
+        "directional_drifts": directional_drifts,
+        "directional_drift_count": len(directional_drifts),
+    }
+    layer1 = {
+        "hot_drawers": hot_drawers,
+        "on_demand_correction_drawers": [],
+        "unwired_disconnected_drawers": [],
+        "true_zero_hit_deadwood": deadwood_drawers,
+        "dormant_scenario_drawers_count": len(deadwood_drawers),
+    }
+    layer2 = {
+        "true_catchers": true_catchers,
+        "ceremonial_rubber_stamps": ceremonial_scripts,
+        "rigid_roadblocks": rigid_roadblocks,
+        "latency_sinks": latency_sinks,
+    }
+    layer3 = {
+        "wild_patterns": [],
+        "taste_and_eval_diversity": {
+            "eval_case_total": int((report.get("S3_skill_health") or {}).get("eval_case_total") or 0)
+            if isinstance(report.get("S3_skill_health"), Mapping)
+            else 0,
+        },
+        "dual_flywheel_guard": {"slow_flywheel_ready": True},
+    }
+    summary = {
+        "trigger_miss_skills": 0,
+        "zero_action_load_skills": len(zero_action_loads),
+        "healthy_r1_r2_convergences": len(healthy_convergences),
+        "directional_drifts": len(directional_drifts),
+        "hot_drawers_count": len(hot_drawers),
+        "on_demand_drawers_count": 0,
+        "unwired_drawers_count": 0,
+        "true_deadwood_drawers_count": len(deadwood_drawers),
+        "true_catcher_scripts_count": len(true_catchers),
+        "ceremonial_scripts_count": len(ceremonial_scripts),
+        "rigid_roadblock_scripts_count": len(rigid_roadblocks),
+        "latency_sink_scripts_count": len(latency_sinks),
+        "wild_patterns_count": 0,
+        "high_signal_proposals_count": len(proposals_list),
+        "observation_pool_count": 0,
+        "slow_flywheel_ready": True,
+    }
+    return {
+        "ok": bool(report.get("ok")),
+        "schema": "aidash-skill-retro/v1",
+        "query_id": "retro/skill_roi_diagnostics",
+        "status": "ACTIONABLE" if proposals_list else "HEALTHY_NO_ISSUES",
+        "window_cst": report.get("window_cst") or "30d",
+        "window_start": report.get("window_start"),
+        "window_end": report.get("window_end"),
+        "source_as_of": report.get("source_as_of"),
+        "sample_size": int(report.get("sample_size") or 0),
+        "coverage_status": report.get("coverage_status") or "unknown",
+        "summary": summary,
+        "layer0_direction_and_triggers": layer0,
+        "layer1_drawer_metabolism": layer1,
+        "layer2_script_efficacy_and_speed": layer2,
+        "layer3_wild_patterns_and_eval": layer3,
+        "proposals": proposals_list,
+    }
 
 
 def _parse_iso_timestamp(value: Any) -> datetime | None:
@@ -1474,10 +1792,12 @@ def build_snapshot(
     warehouse_db: Path | None = None,
     clean_dir: Path | None = None,
     raw_dir: Path | None = None,
+    prior_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate producer shape while preserving its values, nulls and estimates."""
     problems = list(errors or [])
     _validate_optional_metric_sections(report, problems)
+    _filter_pseudo_skills_from_report(report, skills_repo=skills_repo)
     if any(field not in report for field in _META):
         problems.append("missing root observation metadata")
     for key, kind in _SECTION_TYPES.items():
@@ -1513,43 +1833,66 @@ def build_snapshot(
     }
     if isinstance(report.get("skill_details"), list):
         payload["skill_details"] = report["skill_details"]
+    elif isinstance((prior_snapshot or {}).get("skill_details"), list):
+        fallback_details = [
+            row for row in (prior_snapshot or {})["skill_details"]
+            if isinstance(row, Mapping) and _is_valid_registered_skill(row.get("skill"), skills_repo=skills_repo)
+        ]
+        payload["skill_details"] = fallback_details
+    else:
+        payload["skill_details"] = []
+
+    has_explicit_evo_sources = any(
+        x is not None for x in (skills_repo, usage_jsonl, warehouse_db, clean_dir, raw_dir)
+    )
+    eff_skills_repo = skills_repo
+    if eff_skills_repo is None and not os.environ.get("PYTEST_CURRENT_TEST"):
+        candidate_repo = Path(os.environ.get("USER_SKILLS_REPO", str(_DEFAULT_SKILLS_REPO))).expanduser()
+        if candidate_repo.is_dir():
+            eff_skills_repo = candidate_repo
+    eff_usage = usage_jsonl
+    if eff_usage is None and not os.environ.get("PYTEST_CURRENT_TEST") and _DEFAULT_USAGE_JSONL.is_file():
+        eff_usage = _DEFAULT_USAGE_JSONL
+    eff_wh = warehouse_db
+    if eff_wh is None and not os.environ.get("PYTEST_CURRENT_TEST") and config.WAREHOUSE_DB.is_file():
+        eff_wh = config.WAREHOUSE_DB
+    eff_clean = clean_dir
+    if eff_clean is None and not os.environ.get("PYTEST_CURRENT_TEST") and config.CLEAN_DIR.is_dir():
+        eff_clean = config.CLEAN_DIR
+    eff_raw = raw_dir
+    if eff_raw is None and not os.environ.get("PYTEST_CURRENT_TEST") and config.RAW_DIR.is_dir():
+        eff_raw = config.RAW_DIR
+
     if isinstance(report.get("skill_version_evolution"), list):
         payload["skill_version_evolution"] = report["skill_version_evolution"]
-    elif report.get("ok") is True and "skill_version_evolution" not in report:
-        has_explicit_evo_sources = any(
-            x is not None for x in (skills_repo, usage_jsonl, warehouse_db, clean_dir, raw_dir)
+    elif has_explicit_evo_sources or eff_skills_repo is not None:
+        computed_evo = compute_skill_version_evolution(
+            report,
+            skills_repo=eff_skills_repo,
+            usage_jsonl=eff_usage,
+            warehouse_db=eff_wh,
+            clean_dir=eff_clean,
+            raw_dir=eff_raw,
         )
-        eff_skills_repo = skills_repo
-        if eff_skills_repo is None and not os.environ.get("PYTEST_CURRENT_TEST"):
-            candidate_repo = Path(os.environ.get("USER_SKILLS_REPO", str(_DEFAULT_SKILLS_REPO))).expanduser()
-            if candidate_repo.is_dir():
-                eff_skills_repo = candidate_repo
-        eff_usage = usage_jsonl
-        if eff_usage is None and not os.environ.get("PYTEST_CURRENT_TEST") and _DEFAULT_USAGE_JSONL.is_file():
-            eff_usage = _DEFAULT_USAGE_JSONL
-        eff_wh = warehouse_db
-        if eff_wh is None and not os.environ.get("PYTEST_CURRENT_TEST") and config.WAREHOUSE_DB.is_file():
-            eff_wh = config.WAREHOUSE_DB
-        eff_clean = clean_dir
-        if eff_clean is None and not os.environ.get("PYTEST_CURRENT_TEST") and config.CLEAN_DIR.is_dir():
-            eff_clean = config.CLEAN_DIR
-        eff_raw = raw_dir
-        if eff_raw is None and not os.environ.get("PYTEST_CURRENT_TEST") and config.RAW_DIR.is_dir():
-            eff_raw = config.RAW_DIR
-        if has_explicit_evo_sources or eff_skills_repo is not None:
-            computed_evo = compute_skill_version_evolution(
-                report,
-                skills_repo=eff_skills_repo,
-                usage_jsonl=eff_usage,
-                warehouse_db=eff_wh,
-                clean_dir=eff_clean,
-                raw_dir=eff_raw,
-            )
-            payload["skill_version_evolution"] = computed_evo
-            if has_explicit_evo_sources:
-                report["skill_version_evolution"] = computed_evo
-        else:
-            payload["skill_version_evolution"] = []
+        payload["skill_version_evolution"] = computed_evo
+        if has_explicit_evo_sources and report:
+            report["skill_version_evolution"] = computed_evo
+    elif isinstance((prior_snapshot or {}).get("skill_version_evolution"), list):
+        payload["skill_version_evolution"] = [
+            row for row in (prior_snapshot or {})["skill_version_evolution"]
+            if isinstance(row, Mapping) and _is_valid_registered_skill(row.get("skill"), skills_repo=skills_repo)
+        ]
+    else:
+        payload["skill_version_evolution"] = []
+
+    prior_retro = (prior_snapshot or {}).get("skill_retro") if isinstance(prior_snapshot, Mapping) else None
+    use_prior_fallback = bool(problems) or report.get("ok") is not True
+    payload["skill_retro"] = _synthesize_skill_retro_summary(
+        report,
+        payload["skill_version_evolution"],
+        prior_skill_retro=prior_retro if isinstance(prior_retro, Mapping) else None,
+        use_prior_fallback=use_prior_fallback,
+    )
     if problems:
         payload["errors"] = problems
     return payload
@@ -1614,6 +1957,14 @@ def write_snapshot(
 ) -> dict[str, Any]:
     """Capture the real report and query grain, then atomically replace output."""
     errors: list[str] = [f"retro producer exited {producer_exit_code}"] if producer_exit_code else []
+    prior_snapshot: dict[str, Any] = {}
+    for candidate in (output, (resolve_icloud_sync_dir(icloud_sync_dir) / "jobs" / "aidata-digest" / output.name) if resolve_icloud_sync_dir(icloud_sync_dir) is not None else None):
+        if candidate is not None and candidate.is_file():
+            with contextlib.suppress(OSError, ValueError, TypeError):
+                loaded_prior = json.loads(candidate.read_text(encoding="utf-8"))
+                if isinstance(loaded_prior, dict) and loaded_prior:
+                    prior_snapshot = loaded_prior
+                    break
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
         if not isinstance(report, dict):
@@ -1621,6 +1972,10 @@ def write_snapshot(
     except (OSError, ValueError, TypeError) as exc:
         report = {}
         errors.append(f"retro producer report unavailable: {type(exc).__name__}")
+    report_was_empty = not report
+    if report_was_empty and isinstance(prior_snapshot.get("diagnostics"), dict) and prior_snapshot["diagnostics"]:
+        report = dict(prior_snapshot["diagnostics"])
+        report_was_empty = False
     daily: list[dict[str, Any]] = []
     # Only query the producer's explicit observed window. No all-time data
     # labelled 7d, and no generated-at timestamp substituted for source freshness.
@@ -1634,6 +1989,8 @@ def write_snapshot(
                 if len(values) != len(columns):
                     raise ValueError("skills/daily row does not match columns")
                 row = dict(zip(columns, values))
+                if not _is_valid_registered_skill(row.get("skill"), skills_repo=skills_repo):
+                    continue
                 n = row["n"]
                 if not isinstance(n, int) or isinstance(n, bool) or n < 0:
                     raise ValueError("skills/daily count is not an observed nonnegative integer")
@@ -1654,8 +2011,9 @@ def write_snapshot(
         warehouse_db=warehouse_db,
         clean_dir=clean_dir,
         raw_dir=raw_dir,
+        prior_snapshot=prior_snapshot,
     )
-    if not report:
+    if report_was_empty:
         payload["coverage_status"] = "missing"
     output.parent.mkdir(parents=True, exist_ok=True)
     tmp: Path | None = None

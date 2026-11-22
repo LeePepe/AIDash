@@ -1500,3 +1500,213 @@ def test_crash_export_redacts_secrets_and_keeps_source_paths_basename_only(crash
     assert "Refresh.swift:42" in serialized
 
 
+@pytest.mark.unit
+def test_pseudo_skills_filtered_and_skill_retro_4layer_fallback(tmp_path, monkeypatch):
+    import json
+    import sqlite3
+    from pathlib import Path
+
+    from adapters import bot_tl, release_tf
+    from L5_apps.digest.skills_roi_snapshot import write_snapshot
+
+    # 1. Verify SQL filters out pseudo-skill tokens ('tests', 'leepepe', 'pull', 'main')
+    sql_path = Path(__file__).resolve().parent.parent / "L4_serve" / "queries" / "retro" / "skill_roi_diagnostics.sql"
+    sql_text = sql_path.read_text(encoding="utf-8")
+    wh = tmp_path / "wh_filter.db"
+    with sqlite3.connect(wh) as conn:
+        conn.execute(
+            "CREATE TABLE fact_turn (turn_uuid TEXT, session_id TEXT, cst_day TEXT, attribution_skill TEXT, "
+            "skill_names TEXT, tool_calls TEXT, input_tokens INTEGER, output_tokens INTEGER, cache_read INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE fact_gtt_task_run (goal_id TEXT, task_id TEXT, role_name TEXT, "
+            "round_no INTEGER, v5_verdict TEXT, status TEXT, cst_day TEXT, skills_used TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE fact_gtt_event (goal_id TEXT, evt_type TEXT, note_preview TEXT, cst_day TEXT, "
+            "eval_case TEXT, interception INTEGER, \"escape\" INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE reference_hits (hit_uid TEXT, source TEXT, session_id TEXT, turn_uuid TEXT, "
+            "skill TEXT, reference_path TEXT, byte_len INTEGER, ts TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE script_call (call_uid TEXT, source TEXT, session_id TEXT, turn_uuid TEXT, "
+            "skill TEXT, script_path TEXT, exit_code INTEGER, duration_ms INTEGER, ts TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO fact_turn VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("u1", "s1", "2026-11-22", "team-lead", '["team-lead", "tests", "leepepe", "pull", "main"]', '["Bash"]', 1000, 200, 100),
+                ("u2", "s2", "2026-11-22", "tests", '["tests"]', '["Read"]', 500, 100, 0),
+                ("u3", "s3", "2026-11-22", "leepepe", '["pull"]', '["Read"]', 500, 100, 0),
+            ],
+        )
+        rows = conn.execute(sql_text).fetchall()
+    returned_skills = {r[0] for r in rows}
+    assert "team-lead" in returned_skills
+    assert returned_skills.isdisjoint({"tests", "leepepe", "pull", "main"})
+
+    # 2. Verify skills_roi_snapshot filters pseudo-skills, emits skill_retro 4-layer health, and falls back when report is empty
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    base_report = json.loads(fixture.read_text(encoding="utf-8"))
+    polluted_report = {
+        **base_report,
+        "S10_skill_roi_ranking": [
+            *base_report["S10_skill_roi_ranking"],
+            {
+                **base_report["S10_skill_roi_ranking"][0],
+                "skill": "tests",
+            },
+            {
+                **base_report["S10_skill_roi_ranking"][0],
+                "skill": "leepepe",
+            },
+            {
+                **base_report["S10_skill_roi_ranking"][0],
+                "skill": "pull",
+            },
+        ],
+    }
+    report_file = tmp_path / "polluted-report.json"
+    report_file.write_text(json.dumps(polluted_report), encoding="utf-8")
+    out_file = tmp_path / "skills-roi.json"
+
+    snap = write_snapshot(
+        out_file,
+        report_file,
+        query_runner=lambda name, params: (
+            [
+                ("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1),
+                ("2026-11-11", "copilot_cli_skill", "tests", 9, 1),
+            ],
+            ["day", "source", "skill", "n", "sessions"],
+        ),
+    )
+    s10_skills = {r["skill"] for r in snap["diagnostics"]["S10_skill_roi_ranking"]}
+    daily_skills = {r["skill"] for r in snap["skills_daily"]}
+    assert s10_skills == {"team-lead"}
+    assert daily_skills == {"team-lead"}
+    assert isinstance(snap.get("skill_retro"), dict)
+    for k in (
+        "summary",
+        "layer0_direction_and_triggers",
+        "layer1_drawer_metabolism",
+        "layer2_script_efficacy_and_speed",
+        "layer3_wild_patterns_and_eval",
+        "proposals",
+    ):
+        assert k in snap["skill_retro"]
+
+    # Simulate Stage 3 timeout leaving an empty report file: fallback preserves prior diagnostics & 4-layer skill_retro
+    empty_report = tmp_path / "empty-report.json"
+    empty_report.write_text("", encoding="utf-8")
+    fallback_snap = write_snapshot(
+        out_file,
+        empty_report,
+        producer_exit_code=124,
+        query_runner=lambda name, params: (
+            [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1)],
+            ["day", "source", "skill", "n", "sessions"],
+        ),
+    )
+    assert fallback_snap["coverage_status"] == "error"
+    assert any("124" in err for err in fallback_snap["errors"])
+    assert fallback_snap["diagnostics"]["S10_skill_roi_ranking"][0]["skill"] == "team-lead"
+    assert isinstance(fallback_snap["skill_retro"], dict)
+    assert "layer0_direction_and_triggers" in fallback_snap["skill_retro"]
+
+    # Subsequent healthy refresh recomputes skill_retro from new report rather than keeping stale prior skill_retro
+    refreshed_report = {
+        **base_report,
+        "source_as_of": "2026-11-22T20:00:00+08:00",
+        "S10_skill_roi_ranking": [
+            {
+                **base_report["S10_skill_roi_ranking"][0],
+                "empty_load_sessions": 12,
+            }
+        ],
+    }
+    refreshed_file = tmp_path / "refreshed-report.json"
+    refreshed_file.write_text(json.dumps(refreshed_report), encoding="utf-8")
+    refreshed_snap = write_snapshot(
+        out_file,
+        refreshed_file,
+        query_runner=lambda name, params: (
+            [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1)],
+            ["day", "source", "skill", "n", "sessions"],
+        ),
+    )
+    assert refreshed_snap["skill_retro"]["source_as_of"] == "2026-11-22T20:00:00+08:00"
+    assert refreshed_snap["skill_retro"]["summary"]["zero_action_load_skills"] == 1
+
+    # 3. Verify bot_tl file_stats cache skips unchanged files and release_tf watermark skips completed runs
+    goal_dir = tmp_path / "handoff" / "goal-a"
+    goal_dir.mkdir(parents=True)
+    ledger = goal_dir / "ledger.md"
+    ledger.write_text("- 2026-11-22T10:00:00+08:00 | EVT=SPAWN_TL | id=B1 | note=init\n", encoding="utf-8")
+    monkeypatch.setattr(bot_tl, "GTT_HANDOFF_ROOTS", (tmp_path / "handoff",))
+    monkeypatch.setattr(bot_tl, "CLAUDE_QUOTA_CACHE", tmp_path / "no-quota.json")
+    fstats: dict[str, str] = {}
+    first_local = bot_tl._local_records(file_stats={}, new_file_stats=fstats)
+    assert len(first_local) == 1
+    second_local = bot_tl._local_records(file_stats=fstats, new_file_stats={})
+    assert second_local == []
+
+    wm_store: dict[str, object] = {
+        "release_tf": {
+            "LeePepe/AIDash": 500,
+            "completed_runs": {"LeePepe/AIDash:500": "completed:1:success"},
+        }
+    }
+    api_calls: list[str] = []
+    monkeypatch.setattr(release_tf, "_REPOS", ("LeePepe/AIDash",))
+    monkeypatch.setattr(
+        release_tf,
+        "read_raw",
+        lambda _s: [
+            {
+                "delivery_uid": "LeePepe/AIDash:500",
+                "repo_key": "LeePepe/AIDash",
+                "run_id": 500,
+                "status": "completed",
+                "run_attempt": 1,
+            },
+            {
+                "delivery_uid": "LeePepe/AIDash:490",
+                "repo_key": "LeePepe/AIDash",
+                "run_id": 490,
+                "status": "in_progress",
+                "run_attempt": 1,
+                "delivery_outcome": "failed_signing_or_upload",
+            },
+        ],
+    )
+    monkeypatch.setattr(release_tf, "get_watermark", lambda k: wm_store.get(k))
+    monkeypatch.setattr(release_tf, "set_watermark", lambda k, v: wm_store.__setitem__(k, v))
+    monkeypatch.setattr(release_tf, "write_raw_snapshot", lambda _s, recs: len(recs))
+    monkeypatch.setattr(
+        release_tf,
+        "_gh_api",
+        lambda path: (
+            api_calls.append(path)
+            or (
+                {
+                    "workflow_runs": [
+                        {"id": 500, "name": "TestFlight", "path": "release.yml", "status": "completed", "conclusion": "success", "run_attempt": 1},
+                        {"id": 490, "name": "TestFlight", "path": "release.yml", "status": "completed", "conclusion": "success", "run_attempt": 1},
+                    ]
+                }
+                if "jobs" not in path
+                else {"jobs": [{"steps": [{"name": "Archive", "conclusion": "success"}, {"name": "Upload to TestFlight", "conclusion": "success"}, {"name": "Move last-released tag", "conclusion": "success"}]}]}
+            )
+        ),
+    )
+    assert release_tf.collect() == 2
+    assert api_calls == [
+        "repos/LeePepe/AIDash/actions/runs?per_page=25",
+        "repos/LeePepe/AIDash/actions/runs/490/jobs?per_page=100",
+    ]
+
+
+

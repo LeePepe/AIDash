@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess  # nosec B404 - fixed read-only commands
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,8 +14,11 @@ from typing import Any
 from cleanio import write_clean
 from config import GITHUB_CI_REPOS, HOME
 from rawio import read_raw, write_raw_snapshot
+from state import get_watermark, set_watermark
 
 SOURCE = "release_tf"
+RELEASE_TF_BUDGET_SEC = float(os.environ.get("RELEASE_TF_BUDGET_SEC", "60"))
+_PER_PAGE = 25
 _REPOS = tuple(repo for repo in GITHUB_CI_REPOS
                if repo.split("/", 1)[-1] in {"VitalStride", "VoxPocket", "AIDash", "demoUI"}
                or repo.split("/", 1)[-1].startswith("shared-"))
@@ -25,7 +30,7 @@ def _gh_api(path: str) -> Any:
         return None
     try:
         proc = subprocess.run(["gh", "api", path], capture_output=True, text=True,
-                              timeout=60, check=False)
+                              timeout=15, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:
@@ -168,19 +173,70 @@ def _evidence_runs() -> list[dict[str, Any]]:
 
 
 def collect() -> int:
-    records: list[dict[str, Any]] = []
+    deadline = time.monotonic() + max(1.0, float(RELEASE_TF_BUDGET_SEC))
+    prior_by_uid: dict[str, dict[str, Any]] = {}
+    for rec in read_raw(SOURCE):
+        uid = rec.get("delivery_uid")
+        if isinstance(uid, str) and uid:
+            prior_by_uid[uid] = rec
+    raw_wm = get_watermark(SOURCE)
+    repo_watermarks: dict[str, Any] = dict(raw_wm) if isinstance(raw_wm, dict) else {}
+    completed_runs: dict[str, str] = (
+        dict(repo_watermarks["completed_runs"])
+        if isinstance(repo_watermarks.get("completed_runs"), dict)
+        else {}
+    )
+    next_watermarks: dict[str, Any] = dict(repo_watermarks)
+    next_completed_runs: dict[str, str] = dict(completed_runs)
+
+    records_by_uid: dict[str, dict[str, Any]] = dict(prior_by_uid)
     for repo in _REPOS:
-        payload = _gh_api(f"repos/{repo}/actions/runs?per_page=100")
+        if time.monotonic() >= deadline:
+            break
+        payload = _gh_api(f"repos/{repo}/actions/runs?per_page={_PER_PAGE}")
         runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
+        prev_repo_wm = repo_watermarks.get(repo, 0)
+        max_run_id = int(prev_repo_wm if isinstance(prev_repo_wm, int) else 0)
+        marker_info: tuple[str | None, str | None] | None = None
         for run in runs:
+            if time.monotonic() >= deadline:
+                break
+            if not isinstance(run, dict) or run.get("id") is None:
+                continue
+            run_id = int(run["id"])
+            uid = f"{repo}:{run_id}"
             name = str(run.get("name") or "")
             path = str(run.get("path") or "")
             if not any(token in f"{name} {path}".lower() for token in ("testflight", "release", "04")):
                 continue
-            marker_name, marker_sha = _marker(repo)
+            status = str(run.get("status") or "").lower()
+            attempt = int(run.get("run_attempt") or 1)
+            run_state_sig = f"completed:{attempt}:{run.get('conclusion') or ''}"
+            prior_rec = prior_by_uid.get(uid)
+            prior_was_completed = (
+                isinstance(prior_rec, dict)
+                and (
+                    completed_runs.get(uid) == run_state_sig
+                    or (
+                        uid not in completed_runs
+                        and run_id <= max_run_id
+                        and str(prior_rec.get("status") or "completed").lower() == "completed"
+                        and int(prior_rec.get("run_attempt") or 1) == attempt
+                    )
+                )
+            )
+            if status == "completed" and prior_was_completed and prior_rec is not None:
+                records_by_uid[uid] = prior_rec
+                next_completed_runs[uid] = run_state_sig
+                if run_id > max_run_id:
+                    max_run_id = run_id
+                continue
+            if marker_info is None:
+                marker_info = _marker(repo)
+            marker_name, marker_sha = marker_info
             conclusion = run.get("conclusion")
             duration = _seconds(run.get("run_started_at"), run.get("updated_at"))
-            steps = _job_steps(repo, int(run["id"]))
+            steps = _job_steps(repo, run_id)
             outcome, upload_conclusion, advanced, failure_stage = _release_classification(
                 steps, run, marker_sha
             )
@@ -188,10 +244,12 @@ def collect() -> int:
                 outcome = "noop_skipped"
                 advanced = 0
                 failure_stage = None
-            records.append({
-                "delivery_uid": f"{repo}:{run.get('id')}",
+            records_by_uid[uid] = {
+                "delivery_uid": uid,
                 "repo_key": repo,
-                "run_id": run.get("id"),
+                "run_id": run_id,
+                "status": status or "unknown",
+                "run_attempt": attempt,
                 "workflow_name": name or "unknown",
                 "trigger_event": run.get("event"),
                 "target_platform": "macos" if (
@@ -222,10 +280,26 @@ def collect() -> int:
                 "started_at": run.get("run_started_at") or run.get("created_at") or "",
                 "completed_at": run.get("updated_at"),
                 "failure_stage": failure_stage,
-            })
+            }
+            if status == "completed":
+                next_completed_runs[uid] = run_state_sig
+                if run_id > max_run_id:
+                    max_run_id = run_id
+            else:
+                next_completed_runs.pop(uid, None)
+        if max_run_id > int(prev_repo_wm if isinstance(prev_repo_wm, int) else 0):
+            next_watermarks[repo] = max_run_id
+    if next_completed_runs:
+        next_watermarks["completed_runs"] = next_completed_runs
+    records = list(records_by_uid.values())
     if not records:
         records = _evidence_runs()
-    return write_raw_snapshot(SOURCE, records) if records else 0
+    if not records:
+        return 0
+    written = write_raw_snapshot(SOURCE, records)
+    if next_watermarks != repo_watermarks:
+        set_watermark(SOURCE, next_watermarks)
+    return written
 
 
 _DDL = """CREATE TABLE delivery (

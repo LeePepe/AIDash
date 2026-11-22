@@ -131,3 +131,55 @@ def test_collect_degrades_to_zero_without_cli(monkeypatch):
         lambda ws: called.__setitem__("n", called["n"] + 1) or [])
     assert mi.collect(now=NOW) == 0
     assert called["n"] == 0  # short-circuited before enumerating workspaces
+
+
+@pytest.mark.unit
+def test_collect_skips_unauthorized_workspace_and_reads_config_fallback(monkeypatch, tmp_path):
+    """Unauthorized workspace raises RuntimeError -> skipped gracefully; ~/.multica/config.json active workspace is included."""
+    import json
+
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(
+        json.dumps({"workspace_id": "6f6b9a0b-4375-4ebc-a997-ff0c99b2645c", "server_url": "http://localhost:13000"}),
+        encoding="utf-8",
+    )
+    active_issues = [
+        {
+            "id": "tia-24",
+            "number": 24,
+            "identifier": "TIA-24",
+            "title": "[AIDash 日报 & Retro] 2026-11-22",
+            "status": "todo",
+            "priority": "high",
+            "created_at": "2026-07-11T10:00:00Z",
+            "updated_at": "2026-07-11T10:00:00Z",
+            "project_id": None,
+            "workspace_id": "6f6b9a0b-4375-4ebc-a997-ff0c99b2645c",
+        }
+    ]
+    store: dict[str, str] = {}
+    written: list[dict] = []
+
+    def fake_list(ws_id: str) -> list[dict]:
+        if ws_id == "ws-unauthorized":
+            raise RuntimeError("multica issue list: 403 Forbidden (not a workspace member)")
+        if ws_id == "6f6b9a0b-4375-4ebc-a997-ff0c99b2645c":
+            return active_issues
+        return MY_ISSUES
+
+    monkeypatch.setattr(mi, "_multica_bin", lambda: "/usr/bin/multica")
+    monkeypatch.setattr(mi, "_list_workspace_issues", fake_list)
+    monkeypatch.setattr(mi, "write_raw", lambda src, recs: (written.extend(recs) or len(recs)))
+    monkeypatch.setattr(mi, "get_watermark", lambda k: store.get(k))
+    monkeypatch.setattr(mi, "set_watermark", lambda k, v: store.__setitem__(k, v))
+    monkeypatch.setattr(mi, "MULTICA_CONFIG", cfg_file)
+    monkeypatch.setattr(mi, "MULTICA_WORKSPACES", (("ws-unauthorized", "StaleWS"), ("ws-my", "my")))
+
+    n = mi.collect(now=NOW)
+    ids = {r["id"] for r in written}
+    assert "tia-24" in ids
+    assert "u-new" in ids
+    assert "multica_issue:ws-unauthorized" not in store
+    assert store["multica_issue:6f6b9a0b-4375-4ebc-a997-ff0c99b2645c"] == "2026-07-11T10:00:00Z"
+    assert n == 4
+
