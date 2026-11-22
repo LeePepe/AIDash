@@ -16,7 +16,7 @@ PRE_PUSH_HOOK = ROOT / "scripts/hooks/pre-push"
 def _isolated_git_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in list(env):
-        if key.startswith("GIT_"):
+        if key.startswith(("GIT_", "VERIFY_")):
             env.pop(key, None)
     return env
 

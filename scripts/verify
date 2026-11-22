@@ -152,6 +152,7 @@ fi
 # Default: --changed mode
 if [ -n "${VERIFY_LAYERS:-}" ]; then
     layers="$VERIFY_LAYERS"
+    unset VERIFY_LAYERS
 else
     changed_files="$(detect_changed_files)"
     if [ -z "$changed_files" ]; then
