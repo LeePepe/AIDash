@@ -1585,5 +1585,430 @@ struct DashboardWorkspaceTests {
             }
         }
     }
+
+    @Test("SkillsRoiReport decodes skill_version_evolution and skill_retro, filters pseudo-skills, and renders 3 plain-language workbench sections with zero S1..S12 codes")
+    func skillsWorkbenchV2DecodesFiltersPseudoSkillsAndRendersThreePlainSections() throws {
+        let payloadJSON = """
+        {
+          "schema_version": 1,
+          "window_cst": "30d",
+          "window_start": "2026-10-24T00:00:00+08:00",
+          "window_end": "2026-11-23T00:00:00+08:00",
+          "source_as_of": "2026-11-22T19:00:00+08:00",
+          "sample_size": 1868,
+          "coverage_status": "healthy",
+          "diagnostics": {
+            "window_cst": "30d",
+            "window_start": "2026-10-24T00:00:00+08:00",
+            "window_end": "2026-11-23T00:00:00+08:00",
+            "source_as_of": "2026-11-22T19:00:00+08:00",
+            "sample_size": 1868,
+            "coverage_status": "healthy",
+            "S4_usage_and_r1": {
+              "window_cst": "30d",
+              "sample_size": 1868,
+              "coverage_status": "healthy",
+              "active_skills_count": 2,
+              "idle_skills_30d": ["skills", "asset-screener"],
+              "top_used_skills": [
+                {"skill": "team-lead", "loads_7d": 42, "loads_30d": 168, "roi_score": 1.62, "r1_total": 24, "r1_pass_rate": 0.92},
+                {"skill": "tests", "loads_7d": 5, "loads_30d": 12, "roi_score": 0.4},
+                {"skill": "leepepe", "loads_7d": 2, "loads_30d": 4, "roi_score": 0.2}
+              ]
+            },
+            "S10_skill_roi_ranking": [
+              {"skill": "team-lead", "loads_7d": 42, "loads_30d": 168, "roi_score": 1.62, "r1_total": 24, "r1_pass_rate": 0.92},
+              {"skill": "my-designer", "loads_7d": 28, "loads_30d": 96, "roi_score": 1.48, "r1_total": 16, "r1_pass_rate": 0.88},
+              {"skill": "pull", "loads_7d": 3, "loads_30d": 9, "roi_score": 0.1},
+              {"skill": "main", "loads_7d": 1, "loads_30d": 2, "roi_score": 0.1}
+            ]
+          },
+          "skill_details": [
+            {
+              "window_cst": "30d",
+              "sample_size": 168,
+              "coverage_status": "healthy",
+              "skill": "team-lead",
+              "scope": "global",
+              "repo": "user-skills",
+              "skill_dir": "~/Development/user-skills/skills/team-lead",
+              "skill_md_path": "SKILL.md",
+              "skill_md_lines": 120,
+              "frontmatter_tokens_est": 50,
+              "body_tokens_est": 1800,
+              "bundle_kb": 18.2,
+              "loads_7d": 42,
+              "loads_30d": 168,
+              "roi_score": 1.62,
+              "r1_pass_rate": 0.92,
+              "status_label": "active",
+              "references": [
+                {"rel_path": "references/ledger.md", "line_count": 90, "tokens_est": 1200, "hits_30d": 35, "is_unhit": false}
+              ],
+              "scripts": [
+                {"rel_path": "scripts/goal-queue.py", "calls_30d": 95, "success_rate": 0.98, "p95_ms": 240.0, "is_unpracticed": false}
+              ],
+              "eval_cases": [
+                {"id": "EV-001", "title": "feedback_guard pre-review-check subcommand", "kind": "cli", "status": "active", "interceptions_30d": 6, "escapes_30d": 0}
+              ]
+            },
+            {
+              "window_cst": "30d",
+              "sample_size": 96,
+              "coverage_status": "healthy",
+              "skill": "my-designer",
+              "scope": "global",
+              "repo": "user-skills",
+              "skill_dir": "~/Development/user-skills/skills/my-designer",
+              "skill_md_path": "SKILL.md",
+              "loads_7d": 28,
+              "loads_30d": 96,
+              "roi_score": 1.48,
+              "r1_pass_rate": 0.88,
+              "status_label": "active",
+              "references": [],
+              "scripts": [],
+              "eval_cases": []
+            },
+            {
+              "skill": "tests",
+              "scope": "global",
+              "repo": "user-skills",
+              "skill_dir": "~/Development/user-skills/skills/tests",
+              "loads_7d": 5,
+              "loads_30d": 12
+            },
+            {
+              "skill": "scripts",
+              "scope": "global",
+              "repo": "user-skills",
+              "skill_dir": "~/Development/user-skills/skills/scripts",
+              "loads_7d": 2,
+              "loads_30d": 6
+            }
+          ],
+          "skill_version_evolution": [
+            {
+              "window_cst": "30d",
+              "sample_size": 168,
+              "coverage_status": "healthy",
+              "skill": "team-lead",
+              "semver": "1.4.0",
+              "skill_version": "v58@a1b2c3d",
+              "combined_version": "1.4.0+v58@a1b2c3d",
+              "subtree_sha": "a1b2c3d",
+              "commit_count": 58,
+              "status": "improved",
+              "status_label": "✅ 有效演进",
+              "before_version": {
+                "skill_version": "v57@6be2fb5",
+                "semver": "1.3.0",
+                "combined_version": "1.3.0+v57@6be2fb5",
+                "commit_count": 57,
+                "subtree_sha": "6be2fb5",
+                "sessions": 64,
+                "invocations": 64,
+                "script_call_count": 120,
+                "exit2_count": 12,
+                "exit1_count": 4,
+                "post_fix_errors": 12,
+                "exit2_error_rate": 0.1,
+                "broken_drawer_count": 2,
+                "script_p50_ms": 620.0,
+                "uptake_rate": 0.78,
+                "r1_total": 12,
+                "r1_pass": 9,
+                "r1_pass_rate": 0.75
+              },
+              "current_version": {
+                "skill_version": "v58@a1b2c3d",
+                "semver": "1.4.0",
+                "combined_version": "1.4.0+v58@a1b2c3d",
+                "commit_count": 58,
+                "subtree_sha": "a1b2c3d",
+                "sessions": 104,
+                "invocations": 104,
+                "script_call_count": 180,
+                "exit2_count": 0,
+                "exit1_count": 2,
+                "post_fix_errors": 0,
+                "exit2_error_rate": 0.0,
+                "broken_drawer_count": 0,
+                "script_p50_ms": 240.0,
+                "uptake_rate": 0.95,
+                "r1_total": 24,
+                "r1_pass": 22,
+                "r1_pass_rate": 0.9167
+              },
+              "delta": {
+                "exit2_error_rate_delta": -0.1,
+                "exit2_count_delta": -12,
+                "broken_drawer_delta": -2,
+                "script_p50_ms_delta": -380.0,
+                "uptake_rate_delta": 0.17,
+                "r1_pass_rate_delta": 0.1667,
+                "post_fix_errors": 0,
+                "improved_dimensions": ["exit2_error_rate", "broken_drawer_count", "script_p50_ms", "uptake_rate", "r1_pass_rate"],
+                "regressed_dimensions": []
+              },
+              "versions": [
+                {
+                  "skill_version": "v57@6be2fb5",
+                  "semver": "1.3.0",
+                  "combined_version": "1.3.0+v57@6be2fb5",
+                  "commit_count": 57,
+                  "subtree_sha": "6be2fb5",
+                  "sessions": 64,
+                  "invocations": 64,
+                  "script_call_count": 120,
+                  "exit2_count": 12,
+                  "exit1_count": 4,
+                  "post_fix_errors": 12,
+                  "exit2_error_rate": 0.1,
+                  "broken_drawer_count": 2,
+                  "script_p50_ms": 620.0,
+                  "uptake_rate": 0.78,
+                  "r1_total": 12,
+                  "r1_pass": 9,
+                  "r1_pass_rate": 0.75
+                },
+                {
+                  "skill_version": "v58@a1b2c3d",
+                  "semver": "1.4.0",
+                  "combined_version": "1.4.0+v58@a1b2c3d",
+                  "commit_count": 58,
+                  "subtree_sha": "a1b2c3d",
+                  "sessions": 104,
+                  "invocations": 104,
+                  "script_call_count": 180,
+                  "exit2_count": 0,
+                  "exit1_count": 2,
+                  "post_fix_errors": 0,
+                  "exit2_error_rate": 0.0,
+                  "broken_drawer_count": 0,
+                  "script_p50_ms": 240.0,
+                  "uptake_rate": 0.95,
+                  "r1_total": 24,
+                  "r1_pass": 22,
+                  "r1_pass_rate": 0.9167
+                }
+              ]
+            },
+            {
+              "skill": "leepepe",
+              "semver": "1.0.0",
+              "skill_version": "v1@bad",
+              "status": "baseline",
+              "current_version": {"skill_version": "v1@bad", "sessions": 1}
+            }
+          ],
+          "skill_retro": {
+            "sample_size": 1868,
+            "slow_flywheel_ready": true,
+            "summary": {
+              "trigger_miss_skills": 4,
+              "zero_action_load_skills": 5,
+              "directional_drifts": 25,
+              "unwired_drawers_count": 1,
+              "true_deadwood_drawers_count": 3,
+              "true_catcher_scripts_count": 41,
+              "ceremonial_scripts_count": 22,
+              "rigid_roadblock_scripts_count": 17,
+              "latency_sink_scripts_count": 13,
+              "wild_patterns_count": 5,
+              "slow_flywheel_ready": true
+            },
+            "layer2_script_efficacy_and_speed": {
+              "rigid_roadblocks": [
+                {"skill": "team-lead", "script": "scripts/ci-monitor.py", "exit_2_count": 112},
+                {"skill": "linear-board", "script": "scripts/linear-sync.py", "exit_2_count": 17}
+              ]
+            },
+            "proposals": [
+              {
+                "id": "skill-retro-l2-roadblock-team-lead-ci-monitor-py",
+                "skill": "team-lead",
+                "layer": "L2",
+                "category": "rigid_roadblock",
+                "priority": "P1",
+                "title": "[Skill Retro L2] 柔化 `team-lead/ci-monitor.py` 参数路障（`exit=2` 触发 112 次）",
+                "plain_reason": "`team-lead` 的脚本 `ci-monitor.py` 发生 112 次参数报错（exit=2），需补充兼容参数别名",
+                "human_what": "柔化 team-lead/ci-monitor.py 参数路障",
+                "human_why": "发生 112 次 exit=2 参数报错，需补充兼容参数别名与报错自引导",
+                "remediation_commands": [
+                  "python3 skills/skill-retro/scripts/skill_retro.py emit-briefs --skill team-lead --emit-briefs ~/Development/handoff/skill-retro-team-lead --json"
+                ]
+              },
+              {
+                "id": "skill-retro-pseudo-tests",
+                "skill": "tests",
+                "layer": "L0",
+                "priority": "P3",
+                "title": "Should be filtered out"
+              }
+            ]
+          },
+          "skills_daily": [
+            {"day": "2026-11-22", "source": "copilot-tool", "skill": "team-lead", "n": 18, "sessions": 9},
+            {"day": "2026-11-22", "source": "copilot-tool", "skill": "pull", "n": 2, "sessions": 1}
+          ]
+        }
+        """
+
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(payloadJSON.utf8))
+
+        // 1. Verify pseudo-skills (`tests`, `leepepe`, `pull`, `main`, `scripts`, `skills`) are completely filtered
+        for token in ["tests", "leepepe", "pull", "main", "scripts", "skills"] {
+            #expect(SkillsPseudoSkillGuard.isPseudoSkill(token))
+            #expect(!report.skillDetails.contains { $0.skill == token })
+            #expect(!report.diagnostics.usageRows.contains { $0.skill == token })
+            #expect(!report.versionEvolution.contains { $0.skill == token })
+            #expect(!report.skillsDaily.contains { $0.skill == token })
+            #expect(!report.resolvedSkillRetro.proposals.contains { $0.skill == token })
+        }
+        #expect(report.skillDetails.map(\.skill) == ["team-lead", "my-designer"])
+        #expect(report.versionEvolution.map(\.skill) == ["team-lead"])
+
+        // 2. Verify skill_version_evolution decoding and formatting helpers
+        let evo = try #require(report.versionEvolution.first)
+        #expect(evo.semver == "1.4.0")
+        #expect(evo.skillVersion == "v58@a1b2c3d")
+        #expect(evo.combinedVersion == "1.4.0+v58@a1b2c3d")
+        #expect(evo.status == "improved")
+        #expect(evo.resolvedStatusLabel == "✅ 有效演进")
+        #expect(evo.versionTransitionLabel == "v57@6be2fb5 → 1.4.0+v58@a1b2c3d")
+        #expect(evo.beforeVersion?.exit2Count == 12)
+        #expect(evo.currentVersion.exit2Count == 0)
+        #expect(evo.delta.exit2CountDelta == -12)
+        #expect(evo.delta.brokenDrawerDelta == -2)
+        #expect(evo.versions.count == 2)
+        #expect(SkillsRoiDiagnosticsCardView.formatVersionComparison(
+            before: evo.beforeVersion?.exit2ErrorRate,
+            current: evo.currentVersion.exit2ErrorRate,
+            delta: evo.delta.exit2ErrorRateDelta,
+            isRate: true,
+            lowerIsBetter: true
+        ) == "10% → 0% ▼")
+        #expect(SkillsRoiDiagnosticsCardView.formatCountComparison(
+            before: evo.beforeVersion?.brokenDrawerCount,
+            current: evo.currentVersion.brokenDrawerCount,
+            delta: evo.delta.brokenDrawerDelta
+        ) == "2 → 0 (-2)")
+        #expect(SkillsRoiDiagnosticsCardView.formatLatencyComparison(
+            beforeMs: evo.beforeVersion?.scriptP50Ms,
+            currentMs: evo.currentVersion.scriptP50Ms,
+            deltaMs: evo.delta.scriptP50MsDelta
+        ) == "620ms → 240ms ▼")
+        #expect(SkillsRoiDiagnosticsCardView.formatUptakeAndR1Comparison(row: evo).contains("吸收 95%"))
+
+        // 3. Verify skill_retro 4-layer health summary & proposal decoding
+        let retro = report.resolvedSkillRetro
+        #expect(retro.sampleSize == 1868)
+        #expect(retro.slowFlywheelReady == true)
+        #expect(retro.triggerMissSkills == 4)
+        #expect(retro.zeroActionLoadSkills == 5)
+        #expect(retro.directionalDrifts == 25)
+        #expect(retro.unwiredDrawersCount == 1)
+        #expect(retro.trueDeadwoodDrawersCount == 3)
+        #expect(retro.trueCatcherScriptsCount == 41)
+        #expect(retro.rigidRoadblockScriptsCount == 17)
+        #expect(retro.exit2RoadblockTotalCount == 129)
+        #expect(retro.latencySinkScriptsCount == 13)
+        #expect(retro.wildPatternsCount == 5)
+        #expect(retro.proposals.count == 1)
+        let prop = try #require(retro.proposals.first)
+        #expect(prop.layer == "L2")
+        #expect(prop.priority == "P1")
+        #expect(prop.displayTitle == "柔化 team-lead/ci-monitor.py 参数路障")
+        #expect(prop.primaryRemediationCommand.contains("skill_retro.py emit-briefs --skill team-lead"))
+
+        // 4. Verify rendering of the 3 workbench sections + inspector evolution sub-tab and zero bare S1..S12 codes
+        let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
+        let recorder = DashboardGeometryRecorder()
+        let workbenchView = SkillsRoiDiagnosticsCardView(
+            summary: summary,
+            initialLens: .usage,
+            initialSelectedSkill: "team-lead",
+            initialSubTab: .evolution
+        )
+        .frame(width: 1120)
+        .padding(16)
+        .background(Color(nsColor: .underPageBackgroundColor))
+        .environment(\.colorScheme, .dark)
+        .environment(\.theme, Theme(isDark: true))
+        .environment(\.dashboardGeometryRecorder, recorder)
+        .coordinateSpace(name: "tk3-geometry")
+
+        let bmp = try toolbarHeaderBitmap(for: workbenchView, scheme: .dark)
+        #expect(bmp.pixelsWide >= 1000)
+        #expect(bmp.pixelsHigh >= 300)
+
+        let recordedIDs = Set(recorder.samples.map(\.id))
+        #expect(recordedIDs.contains("skills-four-layer-pulse"))
+        #expect(recordedIDs.contains("skills-pulse-l0-direction"))
+        #expect(recordedIDs.contains("skills-pulse-l1-drawers"))
+        #expect(recordedIDs.contains("skills-pulse-l2-scripts"))
+        #expect(recordedIDs.contains("skills-pulse-l3-wild-eval"))
+        #expect(recordedIDs.contains("skills-version-evolution-table"))
+        #expect(recordedIDs.contains("skills-evo-row-team-lead"))
+        #expect(recordedIDs.contains("skills-retro-proposals"))
+        #expect(recordedIDs.contains("skills-proposal-skill-retro-l2-roadblock-team-lead-ci-monitor-py"))
+        #expect(recordedIDs.contains("inspector-evo-banner-team-lead"))
+        #expect(recordedIDs.contains("inspector-ver-team-lead-v58@a1b2c3d"))
+
+        let bareAcademicRegex = try NSRegularExpression(pattern: #"\bS(?:[1-9]|1[0-2])\b"#)
+        for text in [prop.displayTitle, prop.displayReason, evo.resolvedStatusLabel] {
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            #expect(bareAcademicRegex.firstMatch(in: text, range: range) == nil)
+        }
+
+        // Verify that when skill_version_evolution is absent in older fixtures, versionEvolution stays empty (no fabricated v1@head / improved / P50 metrics)
+        let canonical = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.canonical())
+        #expect(canonical.versionEvolution.isEmpty)
+        #expect(canonical.skillRetro == nil)
+        #expect(canonical.resolvedSkillRetro.proposals.isEmpty)
+
+        // 5. Export 4 states x 2 appearances PNGs when AIDASH_WORKBENCH_V2_SCREENSHOT_DIR is set
+        let env = ProcessInfo.processInfo.environment
+        if let shotDirPath = [
+            env["AIDASH_WORKBENCH_V2_SCREENSHOT_DIR"],
+            env["TEST_RUNNER_AIDASH_WORKBENCH_V2_SCREENSHOT_DIR"]
+        ].compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) }).first(where: { !$0.isEmpty }) {
+            let shotDir = URL(fileURLWithPath: shotDirPath, isDirectory: true)
+            try FileManager.default.createDirectory(at: shotDir, withIntermediateDirectories: true)
+
+            let partialJSON = payloadJSON.replacingOccurrences(of: "\"coverage_status\": \"healthy\"", with: "\"coverage_status\": \"partial\"")
+            let degradedJSON = payloadJSON.replacingOccurrences(of: "\"coverage_status\": \"healthy\"", with: "\"coverage_status\": \"error\"")
+            let partialReport = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(partialJSON.utf8))
+            let degradedReport = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(degradedJSON.utf8))
+
+            let states: [(String, LiveDashboardTelemetryReader.LiveEfficiencySummary?)] = [
+                ("populated", summary),
+                ("partial", .init(skillsROI: partialReport)),
+                ("degraded", .init(skillsROI: degradedReport)),
+                ("empty", nil)
+            ]
+            for (stateName, stateSummary) in states {
+                for scheme in [ColorScheme.light, ColorScheme.dark] {
+                    let appearance = scheme == .dark ? "dark" : "light"
+                    let v = SkillsRoiDiagnosticsCardView(
+                        summary: stateSummary,
+                        initialLens: .usage,
+                        initialSelectedSkill: "team-lead",
+                        initialSubTab: .evolution
+                    )
+                    .frame(width: 1120)
+                    .padding(16)
+                    .background(Color(nsColor: .underPageBackgroundColor))
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.theme, Theme(isDark: scheme == .dark))
+                    let stateBmp = try toolbarHeaderBitmap(for: v, scheme: scheme)
+                    if let png = stateBmp.representation(using: .png, properties: [:]) {
+                        try png.write(to: shotDir.appendingPathComponent("skills-workbench-v2-\(stateName)-\(appearance).png"))
+                    }
+                }
+            }
+        }
+    }
 }
 #endif

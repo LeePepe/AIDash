@@ -2277,7 +2277,7 @@ extension LiveDashboardTelemetryReader {
     }
 
     public static func managedSkillDetails(in report: SkillsRoiReport) -> [SkillInspectorDetail] {
-        report.skillDetails.filter { !$0.isGhost }
+        report.skillDetails.filter { !$0.isGhost && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
     }
 
     private static let allowedSkillPreviewExtensions: Set<String> = [
