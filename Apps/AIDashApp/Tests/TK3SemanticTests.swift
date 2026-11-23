@@ -925,14 +925,25 @@ struct TK3SnapshotRenderTests {
                     try render(ActionItemsCardView(store: store), name: "actionable-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                     try render(ScheduledPulsePageView(store: store, registerJobs: {}), name: "pulse-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                     try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary), name: "skills-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
-                    if state == "populated" {
-                        for lens in [SkillsRoiLens.usage, .evolution, .flywheel] {
-                            try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialLens: lens), name: "skills-\(lens.rawValue)-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                    if state != "empty" {
+                        for lens in SkillsRoiLens.allCases {
+                            try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialLens: lens), name: "skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                            if state != "empty" {
+                                #expect(geometrySamples.contains { $0.id.contains("skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)/skills-row-") }, "Expected nonempty \(lens.rawValue) rows for \(state)")
+                            }
                         }
                         for subTab in [SkillInspectorSubTab.definition] {
                             try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialSubTab: subTab), name: "skills-tab-\(subTab.rawValue)-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                         }
-                        try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, showDailyPopulations: true), name: "skills-daily-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                        try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, showDailyPopulations: true), name: "skills-daily-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                    }
+                    if state == "empty" {
+                        for lens in SkillsRoiLens.allCases {
+                            try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialLens: lens), name: "skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                            if state != "empty" {
+                                #expect(geometrySamples.contains { $0.id.contains("skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)/skills-row-") }, "Expected nonempty \(lens.rawValue) rows for \(state)")
+                            }
+                        }
                     }
                 }
             }
@@ -1178,7 +1189,7 @@ struct TK3SnapshotRenderTests {
     }
 
     private func makeSkillsSummary(state: String) throws -> LiveDashboardTelemetryReader.LiveEfficiencySummary {
-        if state == "populated" {
+        if state != "empty" {
             let dense = try #require(JSONSerialization.jsonObject(with: TK3Fixtures.data("skills-roi-dense.json")) as? [String: Any])
             var enriched = dense
             enriched["skill_version_evolution"] = [
@@ -1186,6 +1197,8 @@ struct TK3SnapshotRenderTests {
                 ["window_cst": "30d", "sample_size": 12, "coverage_status": "healthy", "skill": "nas-smart-home", "skill_version": "v3@fixture", "combined_version": "1.0.0+v3@fixture", "status": "observing", "before_version": ["skill_version": "v2@fixture", "sessions": 12, "exit2_count": 0], "current_version": ["skill_version": "v3@fixture", "sessions": 0, "exit2_count": 0]]
             ]
             enriched["skill_retro"] = ["sample_size": 42, "slow_flywheel_ready": true, "layer2_script_efficacy_and_speed": ["watermarked_resolved_roadblocks": [["skill": "team-lead", "script": "ci-monitor.py", "skill_version": "v58", "pre_fix_count": 4, "post_fix_count": 0, "total_exit_2_count": 4]]], "proposals": [["skill": "team-lead", "title": "Queued optimization", "priority": "P1"]]]
+            enriched["coverage_status"] = state == "error" ? "error" : (state == "loading" ? "partial" : "healthy")
+            enriched["errors"] = state == "error" ? ["producer unavailable"] : []
             let report = try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: enriched))
             #expect(report.resolvedSkillRetro.watermarkedResolvedRoadblocks.map(\.skill) == ["team-lead"])
             #expect(report.resolvedSkillRetro.proposals.map(\.skill) == ["team-lead"])
