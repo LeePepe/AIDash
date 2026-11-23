@@ -1185,8 +1185,12 @@ struct TK3SnapshotRenderTests {
                 ["window_cst": "30d", "sample_size": 42, "coverage_status": "healthy", "skill": "team-lead", "skill_version": "v58@fixture", "combined_version": "1.4.0+v58@fixture", "status": "improved", "before_version": ["skill_version": "v57@fixture", "sessions": 30, "exit2_count": 4, "r1_total": 20, "r1_pass": 16], "current_version": ["skill_version": "v58@fixture", "sessions": 42, "exit2_count": 1, "r1_total": 24, "r1_pass": 22]],
                 ["window_cst": "30d", "sample_size": 12, "coverage_status": "healthy", "skill": "nas-smart-home", "skill_version": "v3@fixture", "combined_version": "1.0.0+v3@fixture", "status": "observing", "before_version": ["skill_version": "v2@fixture", "sessions": 12, "exit2_count": 0], "current_version": ["skill_version": "v3@fixture", "sessions": 0, "exit2_count": 0]]
             ]
-            enriched["skill_retro"] = ["sample_size": 42, "slow_flywheel_ready": true, "watermarked_resolved_roadblocks": [["skill": "team-lead", "script": "ci-monitor.py", "skill_version": "v58", "pre_fix_count": 4, "post_fix_count": 0, "total_exit_2_count": 4]], "proposals": [["skill": "team-lead", "title": "Queued optimization", "priority": "P1"]]]
-            return .init(skillsROI: try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: enriched)))
+            enriched["skill_retro"] = ["sample_size": 42, "slow_flywheel_ready": true, "layer2_script_efficacy_and_speed": ["watermarked_resolved_roadblocks": [["skill": "team-lead", "script": "ci-monitor.py", "skill_version": "v58", "pre_fix_count": 4, "post_fix_count": 0, "total_exit_2_count": 4]]], "proposals": [["skill": "team-lead", "title": "Queued optimization", "priority": "P1"]]]
+            let report = try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: enriched))
+            #expect(report.resolvedSkillRetro.watermarkedResolvedRoadblocks.map(\.skill) == ["team-lead"])
+            #expect(report.resolvedSkillRetro.proposals.map(\.skill) == ["team-lead"])
+            #expect(Set(report.resolvedSkillRetro.watermarkedResolvedRoadblocks.map(\.skill)).intersection(report.resolvedSkillRetro.proposals.map(\.skill)).contains("team-lead"))
+            return .init(skillsROI: report)
         }
         let coverage = state == "empty" ? "missing" : (state == "error" ? "error" : "partial")
         let object: [String: Any] = ["schema_version": 1, "window_cst": "7d", "source_as_of": NSNull(), "sample_size": 0,
