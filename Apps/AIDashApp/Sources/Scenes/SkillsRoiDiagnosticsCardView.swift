@@ -153,30 +153,35 @@
         private func vitals(_ report: SkillsRoiReport) -> some View {
             let managed = managedDetails(report).filter { !$0.isGhost }
             let usage = report.diagnostics.usageRows
-            let total = managed.isEmpty ? (report.diagnostics.audit?.total.value ?? usage.count) : managed.count
-            let healthy = managed.isEmpty ? (report.diagnostics.audit?.passed.value ?? 0) : managed.filter { $0.statusLabel != "needs_optimization" && !Set(report.versionEvolution.filter { $0.status == "regressed" }.map(\.skill)).contains($0.skill) }.count
+            let reportCurrent = Self.currentObservationAvailable(metadata: report.metadata, reportCoverage: report.metadata.coverage)
+            let managedCurrent = reportCurrent && managed.allSatisfy { $0.metadata.hasSamples && $0.metadata.coverage != "error" }
+            let usageCurrent = reportCurrent && usage.allSatisfy { $0.metadata.hasSamples && $0.loads7d.metadata.hasSamples && $0.loads30d.metadata.hasSamples }
+            let current = managed.isEmpty ? usageCurrent : managedCurrent
+            let total: Int? = current ? (managed.isEmpty ? report.diagnostics.audit.flatMap { $0.metadata.hasSamples ? $0.total.value : nil } ?? usage.count : managed.count) : nil
+            let regressed = Set(report.versionEvolution.filter { $0.status == "regressed" }.map(\.skill))
+            let healthy: Int? = current ? (managed.isEmpty ? report.diagnostics.audit.flatMap { $0.metadata.hasSamples ? $0.passed.value : nil } : managed.filter { $0.statusLabel != "needs_optimization" && !regressed.contains($0.skill) }.count) : nil
             let improved = report.versionEvolution.filter { $0.status == "improved" }.count
-            let regressed = report.versionEvolution.filter { $0.status == "regressed" }.count
-            let calls = managed.isEmpty ? usage.reduce(0) { $0 + ($1.loads7d.value ?? 0) } : managed.reduce(0) { $0 + $1.loads7d }
-            let month = managed.isEmpty ? usage.reduce(0) { $0 + ($1.loads30d.value ?? 0) } : managed.reduce(0) { $0 + $1.loads30d }
-            let active = managed.filter { $0.loads30d > 0 }.count
-            let idle = managed.filter { $0.loads30d == 0 }.count
-            let direction = month == 0 ? "→" : (Double(calls) > Double(month) / 4 * 1.05 ? "↑" : (Double(calls) < Double(month) / 4 * 0.95 ? "↓" : "→"))
+            let regressedCount = report.versionEvolution.filter { $0.status == "regressed" }.count
+            let calls: Int? = current ? (managed.isEmpty ? usage.reduce(0) { $0 + ($1.loads7d.value ?? 0) } : managed.reduce(0) { $0 + $1.loads7d }) : nil
+            let month: Int? = current ? (managed.isEmpty ? usage.reduce(0) { $0 + ($1.loads30d.value ?? 0) } : managed.reduce(0) { $0 + $1.loads30d }) : nil
+            let active = managedCurrent ? managed.filter { $0.loads30d > 0 }.count : nil
+            let idle = managedCurrent ? managed.filter { $0.loads30d == 0 }.count : nil
+            let direction: String? = calls.flatMap { callsValue in month.map { monthValue in guard monthValue > 0 else { return "→" }; return Double(callsValue) > Double(monthValue) / 4 * 1.05 ? "↑" : (Double(callsValue) < Double(monthValue) / 4 * 0.95 ? "↓" : "→") } }
             let retro = report.resolvedSkillRetro
             return VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(total == 0 ? "—" : "\(healthy) / \(total)").font(.system(size: 28, weight: .bold, design: .monospaced)).accessibilityIdentifier("skills-vital-healthy")
+                    Text(healthy.flatMap { healthyValue in total.map { totalValue in "\(healthyValue) / \(totalValue)" } } ?? "—").font(.system(size: 28, weight: .bold, design: .monospaced)).accessibilityIdentifier("skills-vital-healthy")
                     Spacer()
-                    Text(improved + regressed == 0 ? skillsText("active", "Active") + " \(active) · " + skillsText("idle", "Idle") + " \(idle)" : "↑\(improved) " + skillsText("improved", "Improved") + " · ↓\(regressed) " + skillsText("regressed", "Regressed")).font(.caption).foregroundStyle(.secondary)
+                    Text(improved + regressedCount == 0 ? (active.flatMap { activeValue in idle.map { idleValue in skillsText("active", "Active") + " \(activeValue) · " + skillsText("idle", "Idle") + " \(idleValue)" } } ?? "—") : "↑\(improved) " + skillsText("improved", "Improved") + " · ↓\(regressedCount) " + skillsText("regressed", "Regressed")).font(.caption).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 16) {
-                    vital("pass_rate", passRateSummary(report, managed: managed), "skills-vital-pass-rate")
-                    vital("calls_7d", "\(calls) \(direction)", "skills-vital-calls-7d", detail: skillsText("calls_30d", "Last 30 days") + " \(month)")
+                    vital("pass_rate", passRateSummary(report, managed: managedCurrent ? managed : []), "skills-vital-pass-rate")
+                    vital("calls_7d", calls.map { "\($0) \(direction ?? "—")" } ?? "—", "skills-vital-calls-7d", detail: month.map { skillsText("calls_30d", "Last 30 days") + " \($0)" })
                     vital(
                         "flywheel",
                         skillsText("cured", "Cured") + " \(retro.watermarkedResolvedRoadblocks.count) · " + skillsText("optimizing", "Optimizing") + " \(retro.proposals.count)",
                         "skills-vital-flywheel",
-                        detail: skillsText("flywheel_cadence", "Flywheel cadence") + ": " + (retro.slowFlywheelReady ? skillsText("slow_ready", "Slow flywheel ready") : skillsText("fast_converging", "Fast flywheel converging")) + " · " + skillsText("evals", "Evaluations") + " \(report.diagnostics.audit?.evals.value ?? 0)"
+                        detail: skillsText("flywheel_cadence", "Flywheel cadence") + ": " + (retro.slowFlywheelReady ? skillsText("slow_ready", "Slow flywheel ready") : skillsText("fast_converging", "Fast flywheel converging")) + " · " + skillsText("evals", "Evaluations") + " " + (report.diagnostics.audit.flatMap { $0.metadata.hasSamples ? $0.evals.value : nil }.map(String.init) ?? "—")
                     )
                 }.captureDashboardGeometry(id: "skills-p0-vitals", role: "vitals")
             }.padding(16).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
@@ -188,14 +193,17 @@
                 Text(detail).font(.caption2).foregroundStyle(.secondary)
             }
         }.accessibilityIdentifier(id) }
-        private func passRateSummary(_ report: SkillsRoiReport, managed: [SkillInspectorDetail]) -> String { let current = overallPassValue(report, managed: managed)
-            guard let current else {
-                return "—"
+        private func passRateSummary(_ report: SkillsRoiReport, managed: [SkillInspectorDetail]) -> String {
+            guard let current = overallPassValue(report, managed: managed) else { return "—" }
+            let paired = report.versionEvolution.compactMap { row -> (Double, Double)? in
+                guard let before = row.beforeVersion, before.r1Total > 0, row.currentVersion.r1Total > 0 else { return nil }
+                return (Double(before.r1Pass) / Double(before.r1Total), Double(row.currentVersion.r1Pass) / Double(row.currentVersion.r1Total))
             }
-            let before = report.versionEvolution.compactMap { $0.beforeVersion }.filter { $0.r1Total > 0 }
-            let beforeRate = before.isEmpty ? nil : Double(before.reduce(0) { $0 + $1.r1Pass }) / Double(before.reduce(0) { $0 + $1.r1Total })
-            let delta = beforeRate.map { current - $0 }
-            return delta.map { Self.percentText(current) + " " + Self.deltaText($0) } ?? Self.percentText(current)
+            guard !paired.isEmpty else { return Self.percentText(current) }
+            let beforeTotal = paired.reduce(0.0) { $0 + $1.0 }
+            let currentTotal = paired.reduce(0.0) { $0 + $1.1 }
+            let delta = currentTotal / Double(paired.count) - beforeTotal / Double(paired.count)
+            return Self.percentText(current) + " " + Self.deltaText(delta)
         }
 
         private func overallPassValue(_ report: SkillsRoiReport, managed: [SkillInspectorDetail]) -> Double? { let evo = report.versionEvolution.filter { $0.currentVersion.r1Total > 0 }
@@ -421,6 +429,10 @@
         public static func cleanVersionLabel(_ raw: String) -> String { raw.split(separator: "→", omittingEmptySubsequences: false).map { part in let text = part.trimmingCharacters(in: .whitespaces); let v = text.split(separator: "@").first.map(String.init) ?? text; if let range = v.range(of: "+v") { return String(v[v.index(after: range.lowerBound)...]).split(separator: "@").first.map(String.init) ?? v }; return v }.joined(separator: " → ") }
         public static func activeSkillRow(in diagnostics: SkillsRoiDiagnostics, selectedSkill: String?) -> SkillsUsageRow? { diagnostics.usageRows.first { $0.skill == selectedSkill } ?? diagnostics.usageRows.first }
         public static func activeSkillDetail(in report: SkillsRoiReport, selectedSkill: String?, filter: SkillInspectorFilter = .all) -> SkillInspectorDetail? { let pool = (report.skillDetails.isEmpty ? report.diagnostics.resolvedSkillDetails : report.skillDetails).filter { filter.matches($0) }; return pool.first { $0.skill == selectedSkill } ?? pool.first }
+        public static func currentObservationAvailable(metadata: SkillsObservationMetadata, reportCoverage: String?) -> Bool {
+            metadata.hasSamples && metadata.coverage != "error" && reportCoverage != "error"
+        }
+
         public static func r1PassRate(for snapshot: SkillVersionMetricsSnapshot) -> Double? {
             validPassRate(snapshot.r1Total > 0 ? Double(snapshot.r1Pass) / Double(snapshot.r1Total) : snapshot.r1PassRate)
         }

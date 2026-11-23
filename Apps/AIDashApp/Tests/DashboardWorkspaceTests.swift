@@ -2048,6 +2048,10 @@ struct DashboardWorkspaceTests {
         #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: outOfRange) == nil)
         let nonFinite = SkillVersionMetricsSnapshot(skillVersion: "v1", r1PassRate: .infinity)
         #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: nonFinite) == nil)
+        let missingMetadata = try JSONDecoder().decode(SkillsObservationMetadata.self, from: Data("{}".utf8))
+        #expect(!SkillsRoiDiagnosticsCardView.currentObservationAvailable(metadata: missingMetadata, reportCoverage: "healthy"))
+        let errorMetadata = try JSONDecoder().decode(SkillsObservationMetadata.self, from: Data("{\"sample_size\": 4, \"coverage_status\": \"error\"}".utf8))
+        #expect(!SkillsRoiDiagnosticsCardView.currentObservationAvailable(metadata: errorMetadata, reportCoverage: "error"))
 
         // 3. Verify skill_retro 4-layer health summary & proposal decoding
         let retro = report.resolvedSkillRetro
