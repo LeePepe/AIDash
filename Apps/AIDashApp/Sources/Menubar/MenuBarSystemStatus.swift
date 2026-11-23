@@ -648,7 +648,7 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         case .codex:
             queryPairs = [
                 Self.tokenQueryPair(table: "fact_request", timePredicate: "date(ts / 1000, 'unixepoch', 'localtime') = '\(targetDate)'", clientPredicate: "client IN ('codex-tui', 'codex_exec')", fallbackTable: "fact_request", fallbackClientPredicate: "client IN ('codex-tui', 'codex_exec')", cacheWriteColumn: "cache_write"),
-                Self.tokenQueryPair(table: "req", timePredicate: "date(timestamp / 1000, 'unixepoch', 'localtime') = '\(targetDate)'", fallbackTable: "req", cacheWriteColumn: "cache_write")
+                Self.tokenQueryPair(table: "req", timePredicate: "date(ts / 1000, 'unixepoch', 'localtime') = '\(targetDate)'", fallbackTable: "req", cacheWriteColumn: "cache_write")
             ]
         case .copilot:
             let uncached = "MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_write_tokens, 0))"

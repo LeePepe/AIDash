@@ -153,6 +153,28 @@ struct PewTokenAlignmentTests {
         #expect(claude.interactionCount == 1)
         #expect(MenuBarController.cliTokenSummary(cli: .claude, usage: result.usage).contains("30"))
         #expect(!MenuBarController.cliTokenSummary(cli: .claude, usage: result.usage).contains("3,000"))
+
+        let reqDatabase = try SQLiteFixture(schema: """
+        CREATE TABLE req (
+            ts INTEGER, input_tokens INTEGER, output_tokens INTEGER,
+            cache_read INTEGER, cache_write INTEGER
+        );
+        """)
+        defer { reqDatabase.remove() }
+        try reqDatabase.execute("""
+        INSERT INTO req VALUES (\(try Self.epochMilliseconds("2026-11-22T18:30:00Z")), 10, 20, 3, 4);
+        INSERT INTO req VALUES (\(try Self.epochMilliseconds("2026-11-21T18:30:00Z")), 1000, 2000, 3000, 4000);
+        """)
+        let codexProvider = LiveMenuBarSystemStatusProvider(
+            tokenDatabasePaths: CLITokenDatabasePaths(codex: [reqDatabase.url]),
+            referenceDate: referenceDate,
+            ssdMountPath: "/does-not-exist/SSD"
+        )
+        let codex = try #require(codexProvider.captureTokenStatus().usage.items.first(where: { $0.cli == .codex }))
+        #expect(codex.inputTokens == 10)
+        #expect(codex.outputTokens == 20)
+        #expect(codex.cacheTokens == 7)
+        #expect(codex.interactionCount == 1)
     }
 
     private static func epochMilliseconds(_ raw: String) throws -> Int64 {
