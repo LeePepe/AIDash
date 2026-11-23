@@ -730,59 +730,19 @@ struct TK3SemanticTests {
         #expect(!SkillInspectorFilter.needsOptimization.matches(ghostDetail))
         #expect(!SkillInspectorFilter.idle30d.matches(ghostDetail))
         #expect(!SkillInspectorFilter.repoBound.matches(ghostDetail))
-        #expect(SkillInspectorFilter.archivedGhosts.matches(ghostDetail))
         #expect(SkillInspectorFilter.all.matches(teamLeadDetail))
-        #expect(!SkillInspectorFilter.archivedGhosts.matches(teamLeadDetail))
         #expect(LiveDashboardTelemetryReader.managedSkillDetails(in: report).map(\.skill) == ["team-lead", "aidash-content"])
 
         let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
 
         for lens in SkillsRoiLens.allCases {
-            for subTab in [SkillInspectorSubTab.evolution] {
-                let recorder = DashboardGeometryRecorder()
-                let view = SkillsRoiDiagnosticsCardView(
-                    summary: summary,
-                    initialLens: lens,
-                    initialSelectedSkill: "team-lead",
-                    initialSubTab: subTab,
-                    initialPreviewRelativePath: subTab == .definition ? "SKILL.md" : nil,
-                    previewHomeURL: home
-                )
-                .frame(width: 1080, alignment: .topLeading)
-                .padding(16)
-                .fixedSize(horizontal: false, vertical: true)
-                .environment(\.colorScheme, .dark)
-                .environment(\.theme, Theme(isDark: true))
-                .environment(\.dashboardGeometryRecorder, recorder)
-                .coordinateSpace(name: "tk3-geometry")
-
-                let renderer = ImageRenderer(content: view)
-                renderer.scale = 1
-                let image = try #require(renderer.nsImage)
-                #expect(image.size.width > 0 && image.size.height > 0)
-
-                let hostingView = NSHostingView(rootView: AnyView(view))
-                hostingView.frame = NSRect(x: 0, y: 0, width: 1080, height: 960)
-                hostingView.layoutSubtreeIfNeeded()
-                for text in collectAccessibilityStrings(from: hostingView) {
-                    let range = NSRange(text.startIndex..<text.endIndex, in: text)
-                    #expect(bareAcademicRegex.firstMatch(in: text, range: range) == nil, "Found bare academic code in rendered UI: \(text)")
-                }
-
-                let ids = Set(recorder.samples.map(\.id))
-                if lens == .usage && subTab == .definition {
-                    #expect(ids.contains("inspector-doc-preview"))
-                    #expect(ids.contains("inspector-doc-preview-content:SKILL.md"))
-                }
-                if lens == .usage && subTab == .scripts {
-                    #expect(ids.contains("usage-team-lead-sc-calls-scripts/goal-queue.py"))
-                    #expect(ids.contains("usage-team-lead-sc-p95-scripts/goal-queue.py"))
-                }
-                if lens == .usage && subTab == .evals {
-                    #expect(ids.contains("inspector-eval-EV-001"))
-                    #expect(ids.contains("inspector-eval-DC-001"))
-                }
-            }
+            let recorder = DashboardGeometryRecorder()
+            let view = SkillsRoiDiagnosticsCardView(summary: summary, initialLens: lens)
+                .frame(width: 1080).environment(\.colorScheme, .dark).environment(\.theme, Theme(isDark: true)).environment(\.dashboardGeometryRecorder, recorder)
+            let hostingView = NSHostingView(rootView: AnyView(view)); hostingView.frame = NSRect(x: 0, y: 0, width: 1080, height: 960); hostingView.layoutSubtreeIfNeeded()
+            let strings = collectAccessibilityStrings(from: hostingView).joined(separator: " ")
+            #expect(!strings.contains("python3")); #expect(!strings.contains("session_id")); #expect(!strings.contains("SKILL.md")); #expect(!strings.contains("inspector")); #expect(!strings.contains("L0")); #expect(!strings.contains("L1")); #expect(!strings.contains("L2")); #expect(!strings.contains("L3"))
+            let ids = Set(recorder.samples.map(\.id)); #expect(!ids.contains("skills-four-layer-pulse")); #expect(!ids.contains("skills-inspector-detail")); #expect(!ids.contains("inspector-file-skill-md")); #expect(!ids.contains("skills-primary-detail"))
         }
     }
 
