@@ -2114,10 +2114,16 @@ struct DashboardWorkspaceTests {
 
         // The three lenses share one stage and never render the obsolete workbench.
         for lens in SkillsRoiLens.allCases {
+            let lensRecorder = DashboardGeometryRecorder()
             let view = SkillsRoiDiagnosticsCardView(summary: summary, initialLens: lens)
                 .frame(width: 1120).environment(\.theme, Theme(isDark: true))
-                .environment(\.dashboardGeometryRecorder, recorder)
+                .environment(\.dashboardGeometryRecorder, lensRecorder)
             _ = try toolbarHeaderBitmap(for: view, scheme: .dark)
+            let lensIDs = Set(lensRecorder.samples.map(\.id))
+            #expect(!lensIDs.contains("skills-four-layer-pulse"))
+            #expect(!lensIDs.contains("skills-inspector-detail"))
+            #expect(!lensIDs.contains("inspector-file-skill-md"))
+            #expect(!lensIDs.contains("skills-primary-detail"))
         }
 
         let bareAcademicRegex = try NSRegularExpression(pattern: #"\bS(?:[1-9]|1[0-2])\b"#)

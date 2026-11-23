@@ -6182,13 +6182,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Active skills"
+            "value": "Active"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "活跃 Skills"
+            "value": "活跃"
           }
         }
       }
@@ -7015,7 +7015,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Evals"
+            "value": "Evaluations"
           }
         },
         "zh-Hans": {
@@ -12282,13 +12282,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Improved / regressed"
+            "value": "Trend"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "变好 / 退化"
+            "value": "趋势"
           }
         }
       }
@@ -12340,6 +12340,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "飞轮节律"
+          }
+        }
+      }
+    },
+    "dashboard.skills_roi.evolution_lens": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version progress"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本进步"
+          }
+        }
+      }
+    },
+    "dashboard.skills_roi.slow_ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slow flywheel ready"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "慢飞轮就绪"
+          }
+        }
+      }
+    },
+    "dashboard.skills_roi.fast_converging": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast flywheel converging"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快飞轮收敛中"
           }
         }
       }
