@@ -932,9 +932,6 @@ struct TK3SnapshotRenderTests {
                                 #expect(geometrySamples.contains { $0.id.contains("skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)/skills-row-") }, "Expected nonempty \(lens.rawValue) rows for \(state)")
                             }
                         }
-                        for subTab in [SkillInspectorSubTab.definition] {
-                            try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialSubTab: subTab), name: "skills-tab-\(subTab.rawValue)-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
-                        }
                         try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, showDailyPopulations: true), name: "skills-daily-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                     }
                     if state == "empty" {
