@@ -110,7 +110,7 @@ public struct SkillsRoiDiagnosticsCardView: View {
                 }
             }
         }
-        .frame(minHeight: details.isEmpty && evolution.isEmpty ? 44 : CGFloat(max(details.count, evolution.count) * 58 + 28))
+        .fixedSize(horizontal: false, vertical: true)
     }
     private func compactRow(_ detail: SkillInspectorDetail, evolution: SkillVersionEvolutionRow?, flywheel: Bool) -> some View {
 // swiftlint:disable:next line_length
