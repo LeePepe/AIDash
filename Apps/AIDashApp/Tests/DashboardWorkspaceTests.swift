@@ -1795,6 +1795,39 @@ struct DashboardWorkspaceTests {
               ]
             },
             {
+              "window_cst": "30d",
+              "sample_size": 12,
+              "coverage_status": "healthy",
+              "skill": "nas-smart-home",
+              "semver": "1.0.0",
+              "skill_version": "v3@0000001",
+              "combined_version": "1.0.0+v3@0000001",
+              "status": "observing",
+              "status_label": "⏳ 样本积累中",
+              "before_version": {
+                "skill_version": "v2@0000000",
+                "semver": "1.0.0",
+                "sessions": 12,
+                "exit2_count": 0,
+                "broken_drawer_count": 0
+              },
+              "current_version": {
+                "skill_version": "v3@0000001",
+                "semver": "1.0.0",
+                "sessions": 0,
+                "exit2_count": 0,
+                "broken_drawer_count": 0
+              },
+              "delta": {
+                "exit2_error_rate_delta": 0.0,
+                "exit2_count_delta": 0,
+                "broken_drawer_delta": 0,
+                "post_fix_errors": 0,
+                "improved_dimensions": [],
+                "regressed_dimensions": []
+              }
+            },
+            {
               "skill": "leepepe",
               "semver": "1.0.0",
               "skill_version": "v1@bad",
@@ -1818,10 +1851,115 @@ struct DashboardWorkspaceTests {
               "wild_patterns_count": 5,
               "slow_flywheel_ready": true
             },
+            "cross_repo_gate_health": {
+              "repos_scanned": 16,
+              "healthy_repos_count": 5,
+              "drifted_repos_count": 11,
+              "average_gate_health_score": 68.5,
+              "total_findings": 32
+            },
+            "layer0_direction_and_triggers": {
+              "trigger_misses": [
+                {
+                  "skill": "my-designer",
+                  "missed_sessions": 223,
+                  "domain_sessions": 581,
+                  "miss_rate": 0.3838,
+                  "samples": [
+                    {
+                      "session_id": "04b1852a-2d6",
+                      "evidence_files": ["Apps/AIDashApp/Sources/Scenes/SkillsRoiDiagnosticsCardView.swift"]
+                    }
+                  ]
+                }
+              ],
+              "zero_action_loads": [
+                {
+                  "skill": "team-lead",
+                  "loads": 441,
+                  "zero_action_sessions": 7,
+                  "zero_action_rate": 0.0159
+                }
+              ],
+              "directional_drifts": [
+                {
+                  "goal_id": "aidash-ops-ui-demo",
+                  "task_id": "R7",
+                  "event": "CHANGE_REQUEST",
+                  "skills": []
+                }
+              ],
+              "directional_drift_count": 25
+            },
+            "layer1_drawer_metabolism": {
+              "hot_drawers": [
+                {
+                  "skill": "code-review",
+                  "drawer": "references/output-contract.md",
+                  "hits": 285,
+                  "hit_sessions": 285,
+                  "scenario_sessions": 388,
+                  "scenario_hit_rate": 0.7345,
+                  "line_count": 68,
+                  "tokens_est": 631,
+                  "classification": "hot_drawer",
+                  "evolution_action": "Sink repeated command/checklist lines into deterministic script."
+                }
+              ],
+              "on_demand_correction_drawers": [
+                {
+                  "skill": "code-review",
+                  "drawer": "references/reviewer-prompts.md",
+                  "hits": 199,
+                  "hit_sessions": 199,
+                  "scenario_sessions": 388,
+                  "scenario_hit_rate": 0.5129,
+                  "line_count": 58,
+                  "tokens_est": 879,
+                  "classification": "on_demand_correction_drawer",
+                  "evolution_action": "Healthy runtime progressive disclosure."
+                }
+              ],
+              "true_zero_hit_deadwood": [
+                {
+                  "skill": "m2-dispatcher",
+                  "drawer": "references/runtime-profiles.yaml",
+                  "hits": 0,
+                  "hit_sessions": 0,
+                  "scenario_sessions": 82,
+                  "scenario_hit_rate": 0.0,
+                  "line_count": 218,
+                  "tokens_est": 8428,
+                  "classification": "true_zero_hit_deadwood",
+                  "evolution_action": "Scenario occurred 82x with 0 reads — candidate for archive/merge."
+                }
+              ]
+            },
             "layer2_script_efficacy_and_speed": {
               "rigid_roadblocks": [
-                {"skill": "team-lead", "script": "scripts/ci-monitor.py", "exit_2_count": 112},
-                {"skill": "linear-board", "script": "scripts/linear-sync.py", "exit_2_count": 17}
+                {"skill": "team-lead", "script": "scripts/ci-monitor.py", "skill_version": "v58@cca4f3d", "total_exit_2_count": 116, "pre_fix_count": 4, "post_fix_count": 112, "failing_command_samples": ["skills/team-lead/scripts/ci-monitor.py"]},
+                {"skill": "linear-board", "script": "scripts/linear-sync.py", "total_exit_2_count": 17, "post_fix_count": 17}
+              ],
+              "watermarked_resolved_roadblocks": [
+                {"skill": "linear-board", "script": "scripts/linear-sync.py", "skill_version": "v49@2a7ca3a", "total_exit_2_count": 25, "pre_fix_count": 25, "post_fix_count": 0},
+                {"skill": "skill-contract", "script": "scripts/skill_contract.py", "skill_version": "v15@3b4499b", "total_exit_2_count": 11, "pre_fix_count": 11, "post_fix_count": 0}
+              ],
+              "ceremonial_rubber_stamps": [
+                {"skill": "my-designer", "script": "scripts/design_catalog.py", "calls": 25, "co_occurring_skill_escapes": 45, "p50_ms": 212.0}
+              ],
+              "latency_sinks": [
+                {"skill": "team-lead", "script": "scripts/herdr-dispatch.sh", "calls": 1990, "primary_bottleneck": "external_wait", "p50_ms": 6862.0, "p95_ms": 74592.0}
+              ]
+            },
+            "layer3_wild_patterns_and_eval": {
+              "wild_patterns": [
+                {
+                  "pattern_signature": "python3 -c [json:json]",
+                  "occurrences": 12,
+                  "session_count": 4,
+                  "candidate_skill": "aidash-content",
+                  "examples": ["python3 -c 'import json'"]
+                }
               ]
             },
             "proposals": [
@@ -1831,10 +1969,13 @@ struct DashboardWorkspaceTests {
                 "layer": "L2",
                 "category": "rigid_roadblock",
                 "priority": "P1",
+                "rule_id": "RG-001",
                 "title": "[Skill Retro L2] 柔化 `team-lead/ci-monitor.py` 参数路障（`exit=2` 触发 112 次）",
                 "plain_reason": "`team-lead` 的脚本 `ci-monitor.py` 发生 112 次参数报错（exit=2），需补充兼容参数别名",
+                "action": "Add compatible CLI flag aliases to ci-monitor.py",
                 "human_what": "柔化 team-lead/ci-monitor.py 参数路障",
                 "human_why": "发生 112 次 exit=2 参数报错，需补充兼容参数别名与报错自引导",
+                "affected_repos": ["AIDash", "VitalStride"],
                 "remediation_commands": [
                   "python3 skills/skill-retro/scripts/skill_retro.py emit-briefs --skill team-lead --emit-briefs ~/Development/handoff/skill-retro-team-lead --json"
                 ]
@@ -1867,7 +2008,20 @@ struct DashboardWorkspaceTests {
             #expect(!report.resolvedSkillRetro.proposals.contains { $0.skill == token })
         }
         #expect(report.skillDetails.map(\.skill) == ["team-lead", "my-designer"])
-        #expect(report.versionEvolution.map(\.skill) == ["team-lead"])
+        #expect(report.versionEvolution.map(\.skill) == ["team-lead", "nas-smart-home"])
+
+        // Verify default .meaningful filter hides 0->0 observing noise rows ("nas-smart-home") while .all reveals all
+        let meaningfulRows = SkillsRoiDiagnosticsCardView.filterEvolutionRows(
+            report.versionEvolution,
+            filter: .meaningful,
+            watermarkedSkills: Set(report.resolvedSkillRetro.watermarkedResolvedRoadblocks.map(\.skill))
+        )
+        #expect(meaningfulRows.map(\.skill) == ["team-lead"])
+        let allEvoRows = SkillsRoiDiagnosticsCardView.filterEvolutionRows(
+            report.versionEvolution,
+            filter: .all
+        )
+        #expect(allEvoRows.map(\.skill) == ["team-lead", "nas-smart-home"])
 
         // 2. Verify skill_version_evolution decoding and formatting helpers
         let evo = try #require(report.versionEvolution.first)
@@ -1915,20 +2069,42 @@ struct DashboardWorkspaceTests {
         #expect(retro.exit2RoadblockTotalCount == 129)
         #expect(retro.latencySinkScriptsCount == 13)
         #expect(retro.wildPatternsCount == 5)
+        #expect(retro.triggerMisses.count == 1)
+        #expect(retro.triggerMisses.first?.skill == "my-designer")
+        #expect(retro.triggerMisses.first?.missedSessions == 223)
+        #expect(retro.triggerMisses.first?.samples.first?.sessionId == "04b1852a-2d6")
+        #expect(retro.zeroActionLoads.count == 1)
+        #expect(retro.hotDrawers.count == 1)
+        #expect(retro.onDemandDrawers.count == 1)
+        #expect(retro.trueZeroHitDeadwood.count == 1)
+        #expect(retro.rigidRoadblocks.first?.totalExit2Count == 116)
+        #expect(retro.rigidRoadblocks.first?.preFixCount == 4)
+        #expect(retro.rigidRoadblocks.first?.postFixCount == 112)
+        #expect(retro.watermarkedResolvedRoadblocks.count == 2)
+        #expect(retro.watermarkedResolvedRoadblocks.first?.preFixCount == 25)
+        #expect(retro.watermarkedResolvedRoadblocks.first?.postFixCount == 0)
+        #expect(retro.ceremonialRubberStamps.count == 1)
+        #expect(retro.latencySinks.count == 1)
+        #expect(retro.crossRepoGateHealth?.reposScanned == 16)
+        #expect(retro.crossRepoGateHealth?.driftedReposCount == 11)
+        #expect(retro.wildPatterns.count == 1)
         #expect(retro.proposals.count == 1)
         let prop = try #require(retro.proposals.first)
         #expect(prop.layer == "L2")
         #expect(prop.priority == "P1")
+        #expect(prop.ruleId == "RG-001")
+        #expect(prop.affectedRepos == ["AIDash", "VitalStride"])
         #expect(prop.displayTitle == "柔化 team-lead/ci-monitor.py 参数路障")
         #expect(prop.primaryRemediationCommand.contains("skill_retro.py emit-briefs --skill team-lead"))
 
-        // 4. Verify rendering of the 3 workbench sections + inspector evolution sub-tab and zero bare S1..S12 codes
+        // 4. Verify rendering of the 5-level progressive disclosure workbench + inspector evolution sub-tab and zero bare S1..S12 codes
         let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
         let recorder = DashboardGeometryRecorder()
         let workbenchView = SkillsRoiDiagnosticsCardView(
             summary: summary,
-            initialLens: .usage,
+            initialLens: .evolution,
             initialSelectedSkill: "team-lead",
+            initialSelectedPillar: .l2,
             initialSubTab: .evolution
         )
         .frame(width: 1120)
@@ -1944,17 +2120,46 @@ struct DashboardWorkspaceTests {
         #expect(bmp.pixelsHigh >= 300)
 
         let recordedIDs = Set(recorder.samples.map(\.id))
+        #expect(recordedIDs.contains("skills-level1-macro-bar"))
+        #expect(recordedIDs.contains("skills-macro-cured-badge"))
+        #expect(recordedIDs.contains("skills-macro-proposals-badge"))
         #expect(recordedIDs.contains("skills-four-layer-pulse"))
         #expect(recordedIDs.contains("skills-pulse-l0-direction"))
         #expect(recordedIDs.contains("skills-pulse-l1-drawers"))
         #expect(recordedIDs.contains("skills-pulse-l2-scripts"))
         #expect(recordedIDs.contains("skills-pulse-l3-wild-eval"))
+        #expect(recordedIDs.contains("skills-level3-pillar-l2"))
+        #expect(recordedIDs.contains("skills-l2-cross-repo-gate"))
         #expect(recordedIDs.contains("skills-version-evolution-table"))
         #expect(recordedIDs.contains("skills-evo-row-team-lead"))
+        #expect(!recordedIDs.contains("skills-evo-row-nas-smart-home"))
         #expect(recordedIDs.contains("skills-retro-proposals"))
         #expect(recordedIDs.contains("skills-proposal-skill-retro-l2-roadblock-team-lead-ci-monitor-py"))
         #expect(recordedIDs.contains("inspector-evo-banner-team-lead"))
         #expect(recordedIDs.contains("inspector-ver-team-lead-v58@a1b2c3d"))
+        #expect(recordedIDs.contains("inspector-collapse"))
+
+        // Verify .usage lens de-duplicates the full versionEvolutionTableSection + retroProposalsSection stack
+        let usageRecorder = DashboardGeometryRecorder()
+        let usageView = SkillsRoiDiagnosticsCardView(
+            summary: summary,
+            initialLens: .usage,
+            initialSelectedSkill: "team-lead",
+            initialSubTab: .definition
+        )
+        .frame(width: 1120)
+        .padding(16)
+        .background(Color(nsColor: .underPageBackgroundColor))
+        .environment(\.colorScheme, .dark)
+        .environment(\.theme, Theme(isDark: true))
+        .environment(\.dashboardGeometryRecorder, usageRecorder)
+        .coordinateSpace(name: "tk3-geometry")
+        _ = try toolbarHeaderBitmap(for: usageView, scheme: .dark)
+        let usageIDs = Set(usageRecorder.samples.map(\.id))
+        #expect(usageIDs.contains("skills-four-layer-pulse"))
+        #expect(usageIDs.contains("skills-primary-detail"))
+        #expect(!usageIDs.contains("skills-version-evolution-table"))
+        #expect(!usageIDs.contains("skills-retro-proposals"))
 
         let bareAcademicRegex = try NSRegularExpression(pattern: #"\bS(?:[1-9]|1[0-2])\b"#)
         for text in [prop.displayTitle, prop.displayReason, evo.resolvedStatusLabel] {
