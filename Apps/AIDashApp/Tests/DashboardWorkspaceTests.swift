@@ -2044,6 +2044,10 @@ struct DashboardWorkspaceTests {
         #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: fallback) == 0.8)
         let missing = SkillVersionMetricsSnapshot(skillVersion: "v1", exit2ErrorRate: 0.9)
         #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: missing) == nil)
+        let outOfRange = SkillVersionMetricsSnapshot(skillVersion: "v1", r1PassRate: 1e100)
+        #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: outOfRange) == nil)
+        let nonFinite = SkillVersionMetricsSnapshot(skillVersion: "v1", r1PassRate: .infinity)
+        #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: nonFinite) == nil)
 
         // 3. Verify skill_retro 4-layer health summary & proposal decoding
         let retro = report.resolvedSkillRetro

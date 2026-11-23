@@ -195,7 +195,7 @@
             let before = report.versionEvolution.compactMap { $0.beforeVersion }.filter { $0.r1Total > 0 }
             let beforeRate = before.isEmpty ? nil : Double(before.reduce(0) { $0 + $1.r1Pass }) / Double(before.reduce(0) { $0 + $1.r1Total })
             let delta = beforeRate.map { current - $0 }
-            return delta.map { "\(Int(current * 100))% \($0 >= 0 ? "+" : "")\(Int($0 * 100))pp" } ?? "\(Int(current * 100))%"
+            return delta.map { Self.percentText(current) + " " + Self.deltaText($0) } ?? Self.percentText(current)
         }
 
         private func overallPassValue(_ report: SkillsRoiReport, managed: [SkillInspectorDetail]) -> Double? { let evo = report.versionEvolution.filter { $0.currentVersion.r1Total > 0 }
@@ -203,7 +203,7 @@
                 let total = evo.reduce(0) { $0 + $1.currentVersion.r1Total }
                 return total == 0 ? nil : Double(evo.reduce(0) { $0 + $1.currentVersion.r1Pass }) / Double(total)
             }
-            let values = managed.compactMap(\.r1PassRate)
+            let values = managed.compactMap(\.r1PassRate).compactMap(Self.validPassRate)
             return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
         }
 
@@ -216,7 +216,7 @@
             guard let current else {
                 return "—"
             }
-            return "\(Int(current * 100))%"
+            return Self.percentText(current)
         }
 
         @ViewBuilder private func stage(_ report: SkillsRoiReport) -> some View {
@@ -373,15 +373,39 @@
         rateCell(evolutionRate(row, before: false), before: evolutionRate(row, before: true)).captureDashboardGeometry(id: "skills-row-\(row.skill)-pass", role: "cell")
         Text(evolutionStatus(row.status)).font(.caption).lineLimit(2).minimumScaleFactor(0.85).captureDashboardGeometry(id: "skills-row-\(row.skill)-status", role: "cell").padding(.horizontal, 8).padding(.vertical, 4).background(.secondary.opacity(0.14), in: Capsule()).frame(width: 132, alignment: .trailing)
         }.padding(.vertical, 8).accessibilityIdentifier("skills-row-\(row.skill)") }
-        private func rateCell(_ current: Double?, before: Double?) -> some View { HStack(spacing: 6) { VStack(alignment: .trailing, spacing: 1) { Text(current.map { "\(Int($0 * 100))%" } ?? "—").font(.caption.monospacedDigit())
-            if let current, let before { let delta = Int((current - before) * 100)
-                Text("\(delta >= 0 ? "+" : "")\(delta)pp").font(.caption2.monospacedDigit()).foregroundStyle(delta >= 0 ? .secondary : .secondary)
-            }
-        }.frame(width: 116, alignment: .trailing)
-        VStack(spacing: 2) { bar(before ?? current, .secondary)
-            bar(current, .accentColor)
-        }.frame(width: 48)
-        }.frame(width: 176, alignment: .trailing) }
+        private func rateCell(_ current: Double?, before: Double?) -> some View {
+            let safeCurrent = Self.validPassRate(current)
+            let safeBefore = Self.validPassRate(before)
+            return HStack(spacing: 6) {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(Self.percentText(safeCurrent)).font(.caption.monospacedDigit())
+                    if let safeCurrent, let safeBefore {
+                        Text(Self.deltaText(safeCurrent - safeBefore)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }.frame(width: 116, alignment: .trailing)
+                VStack(spacing: 2) {
+                    bar(safeBefore ?? safeCurrent, .secondary)
+                    bar(safeCurrent, .accentColor)
+                }.frame(width: 48)
+            }.frame(width: 176, alignment: .trailing)
+        }
+
+        private static func validPassRate(_ value: Double?) -> Double? {
+            guard let value, value.isFinite, (0 ... 1).contains(value) else { return nil }
+            return value
+        }
+
+        private static func percentText(_ value: Double?) -> String {
+            guard let value = validPassRate(value) else { return "—" }
+            return "\(Int(value * 100))%"
+        }
+
+        private static func deltaText(_ value: Double) -> String {
+            guard value.isFinite, abs(value) <= 1 else { return "—" }
+            let points = Int(value * 100)
+            return "\(points >= 0 ? "+" : "")\(points)pp"
+        }
+
         private func bar(_ value: Double?, _ color: Color) -> some View { GeometryReader { proxy in RoundedRectangle(cornerRadius: 2).fill(color.opacity(0.55)).frame(width: max(0, min(proxy.size.width, proxy.size.width * (value ?? 0))), height: 3) }.frame(width: 48, height: 3) }
         private func statusText(_ raw: String) -> String {
             switch raw {
@@ -398,7 +422,7 @@
         public static func activeSkillRow(in diagnostics: SkillsRoiDiagnostics, selectedSkill: String?) -> SkillsUsageRow? { diagnostics.usageRows.first { $0.skill == selectedSkill } ?? diagnostics.usageRows.first }
         public static func activeSkillDetail(in report: SkillsRoiReport, selectedSkill: String?, filter: SkillInspectorFilter = .all) -> SkillInspectorDetail? { let pool = (report.skillDetails.isEmpty ? report.diagnostics.resolvedSkillDetails : report.skillDetails).filter { filter.matches($0) }; return pool.first { $0.skill == selectedSkill } ?? pool.first }
         public static func r1PassRate(for snapshot: SkillVersionMetricsSnapshot) -> Double? {
-            snapshot.r1Total > 0 ? Double(snapshot.r1Pass) / Double(snapshot.r1Total) : snapshot.r1PassRate
+            validPassRate(snapshot.r1Total > 0 ? Double(snapshot.r1Pass) / Double(snapshot.r1Total) : snapshot.r1PassRate)
         }
 
         private static func evolutionRateValue(_ row: SkillVersionEvolutionRow, before: Bool) -> Double? {
