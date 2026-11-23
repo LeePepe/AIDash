@@ -1316,6 +1316,11 @@ struct TK3SnapshotRenderTests {
         let png = try #require(rep.representation(using: .png, properties: [:]))
         try png.write(to: output.appendingPathComponent("\(name).png"))
         let samples = recorder.samples
+        let canvasWidth = width + 40
+        let canvasHeight = CGFloat(rep.pixelsHigh) / 2
+        for sample in samples where name.hasPrefix("skills-") {
+            #expect(sample.x >= 0 && sample.y >= 0 && sample.x + sample.width <= canvasWidth + 1 && sample.y + sample.height <= canvasHeight + 1, "Out-of-bounds Skills geometry: \(name)/\(sample.id)")
+        }
         if name.hasPrefix("skills-") {
             let hostingView = NSHostingView(rootView: AnyView(host))
             hostingView.frame = NSRect(x: 0, y: 0, width: width + 40, height: 1400)
