@@ -2038,6 +2038,12 @@ struct DashboardWorkspaceTests {
         #expect(evo.versions.count == 2)
         #expect(SkillsRoiDiagnosticsCardView.cleanVersionLabel("1.4.0+v58@a1b2c3d") == "v58")
         #expect(SkillsRoiDiagnosticsCardView.cleanVersionLabel("v57@6be2fb5 → 1.4.0+v58@a1b2c3d") == "v57 → v58")
+        let sampled = SkillVersionMetricsSnapshot(skillVersion: "v1", exit2ErrorRate: 0.9, r1Total: 4, r1Pass: 3, r1PassRate: 0.1)
+        #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: sampled) == 0.75)
+        let fallback = SkillVersionMetricsSnapshot(skillVersion: "v1", exit2ErrorRate: 0.9, r1PassRate: 0.8)
+        #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: fallback) == 0.8)
+        let missing = SkillVersionMetricsSnapshot(skillVersion: "v1", exit2ErrorRate: 0.9)
+        #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: missing) == nil)
 
         // 3. Verify skill_retro 4-layer health summary & proposal decoding
         let retro = report.resolvedSkillRetro
