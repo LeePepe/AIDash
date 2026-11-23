@@ -558,11 +558,12 @@ public enum LiveDashboardTelemetryReader {
 
     public static func loadLiveDataset(
         forDate dateString: String,
-        fallbackUsage: CLITokenUsageSnapshot
+        fallbackUsage: CLITokenUsageSnapshot,
+        timeZone: TimeZone = .current
     ) -> (entries: [CLICostQuotaEntry], rankings: [AgentRankingRow], trends: [TrendDataPoint])? {
         guard isLiveEnvironment else { return nil }
         let home = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
-        return loadDataset(forDate: dateString, homeURL: home, fallbackUsage: fallbackUsage)
+        return loadDataset(forDate: dateString, homeURL: home, fallbackUsage: fallbackUsage, timeZone: timeZone)
     }
 
     public typealias ScheduledPulseLaunchctl = @MainActor ([String]) -> LaunchdAgentInstaller.LaunchctlResult
@@ -891,7 +892,8 @@ public enum LiveDashboardTelemetryReader {
         homeURL: URL,
         fallbackUsage: CLITokenUsageSnapshot,
         includeSystemBinaries: Bool = isLiveEnvironment,
-        now: Date = Date()
+        now: Date = Date(),
+        timeZone: TimeZone = .current
     ) -> (entries: [CLICostQuotaEntry], rankings: [AgentRankingRow], trends: [TrendDataPoint])? {
         let ravenURL = homeURL.appendingPathComponent("Library/Application Support/raven/raven.db")
         let copilotURL = homeURL.appendingPathComponent(".copilot/session-store.db")
@@ -908,14 +910,14 @@ public enum LiveDashboardTelemetryReader {
             now: now
         )
 
-        let codexStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "codex", dateString: dateString)
-        let copilotSessionStats = queryCopilotSessionStats(dbURL: copilotURL, dateString: dateString)
-        let copilotRavenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "magpie", dateString: dateString)
-        let claudeRavenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "claude", dateString: dateString)
-        let claudeWarehouseStats = queryWarehouseClaudeStats(dbURL: warehouseURL, dateString: dateString)
-        let kimiStats = queryKimiStats(homeURL: homeURL, dateString: dateString)
-        let grokStats = queryGrokStats(homeURL: homeURL, ravenURL: ravenURL, dateString: dateString)
-        let deepseekStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "deepseek", dateString: dateString)
+        let codexStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "codex", dateString: dateString, timeZone: timeZone)
+        let copilotSessionStats = queryCopilotSessionStats(dbURL: copilotURL, dateString: dateString, timeZone: timeZone)
+        let copilotRavenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "magpie", dateString: dateString, timeZone: timeZone)
+        let claudeRavenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "claude", dateString: dateString, timeZone: timeZone)
+        let claudeWarehouseStats = queryWarehouseClaudeStats(dbURL: warehouseURL, dateString: dateString, timeZone: timeZone)
+        let kimiStats = queryKimiStats(homeURL: homeURL, dateString: dateString, timeZone: timeZone)
+        let grokStats = queryGrokStats(homeURL: homeURL, ravenURL: ravenURL, dateString: dateString, timeZone: timeZone)
+        let deepseekStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "deepseek", dateString: dateString, timeZone: timeZone)
 
         let hasAnyDatabase = FileManager.default.fileExists(atPath: ravenURL.path)
             || FileManager.default.fileExists(atPath: copilotURL.path)
@@ -939,11 +941,11 @@ public enum LiveDashboardTelemetryReader {
             grokStats: grokStats,
             deepseekStats: deepseekStats
         )
-        let rankings = queryRealRankings(ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString, fallbackEntries: entries)
+        let rankings = queryRealRankings(ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString, fallbackEntries: entries, timeZone: timeZone)
         let trends = querySevenDayTrends(
             ravenURL: ravenURL, copilotURL: copilotURL, dateString: dateString,
             kimiDailyBuckets: kimiStats.dailyBuckets, grokDailyBuckets: grokStats.dailyBuckets,
-            fallbackEntries: entries
+            fallbackEntries: entries, timeZone: timeZone
         )
         return (entries, rankings, trends)
     }
@@ -1451,6 +1453,33 @@ extension LiveDashboardTelemetryReader {
         return std.date(from: raw)
     }
 
+    internal static func localDateString(from raw: String, timeZone: TimeZone = .current) -> String? {
+        guard let date = parseISO8601Date(raw) else { return nil }
+        return localDateString(from: date, timeZone: timeZone)
+    }
+
+    internal static func localDateString(from date: Date, timeZone: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    internal static func sqliteTimeZoneModifier(for dateString: String, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        let referenceDate = formatter.date(from: dateString) ?? Date()
+        let seconds = timeZone.secondsFromGMT(for: referenceDate)
+        let sign = seconds >= 0 ? "+" : "-"
+        let absolute = abs(seconds)
+        return String(format: "%@%02d:%02d", sign, absolute / 3600, (absolute % 3600) / 60)
+    }
+
     private static func windowUsedFraction(in windows: [[String: Any]], matching substring: String?) -> Double? {
         for win in windows {
             let name = (win["name"] as? String) ?? ""
@@ -1554,50 +1583,63 @@ extension LiveDashboardTelemetryReader {
         )
     }
 
-    static func queryRavenCLIStats(dbURL: URL, clientPrefix: String, dateString: String) -> CLIWindowStats {
+    static func queryRavenCLIStats(dbURL: URL, clientPrefix: String, dateString: String, timeZone: TimeZone = .current) -> CLIWindowStats {
         let safeDate = sanitizeSQLToken(dateString)
         let safePrefix = sanitizeSQLToken(clientPrefix)
+        let offset = sqliteTimeZoneModifier(for: safeDate, timeZone: timeZone)
+        let localTimestamp = "date(timestamp/1000, 'unixepoch', '\(offset)')"
         let sql = """
         SELECT
-            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
-            SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-            SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-            GROUP_CONCAT(DISTINCT CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' AND resolved_model != '' THEN resolved_model ELSE NULL END)
-        FROM requests WHERE client_name LIKE '\(safePrefix)%' AND timestamp >= (strftime('%s', '\(safeDate)', '-7 days') * 1000);
+            SUM(CASE WHEN \(localTimestamp) = '\(safeDate)' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
+            GROUP_CONCAT(DISTINCT CASE WHEN \(localTimestamp) = '\(safeDate)' AND resolved_model != '' THEN resolved_model ELSE NULL END)
+        FROM requests WHERE client_name LIKE '\(safePrefix)%'
+          AND \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)';
         """
         return executeWindowStatsQuery(dbURL: dbURL, sql: sql)
     }
 
-    static func queryCopilotSessionStats(dbURL: URL, dateString: String) -> CLIWindowStats {
+    static func queryCopilotSessionStats(dbURL: URL, dateString: String, timeZone: TimeZone = .current) -> CLIWindowStats {
         let safeDate = sanitizeSQLToken(dateString)
+        let offset = sqliteTimeZoneModifier(for: safeDate, timeZone: timeZone)
+        let localCreatedAt = "date(created_at, '\(offset)')"
+        let uncached = "MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_write_tokens, 0))"
         let sql = """
         SELECT
-            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
-            SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-            SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-            GROUP_CONCAT(DISTINCT CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' AND model != '' THEN model ELSE NULL END)
-        FROM assistant_usage_events WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-7 days');
+            SUM(CASE WHEN \(localCreatedAt) = '\(safeDate)' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN \(localCreatedAt) = '\(safeDate)' THEN \(uncached) ELSE 0 END),
+            SUM(CASE WHEN \(localCreatedAt) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localCreatedAt) = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localCreatedAt) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN \(uncached) ELSE 0 END),
+            SUM(CASE WHEN \(localCreatedAt) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localCreatedAt) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
+            GROUP_CONCAT(DISTINCT CASE WHEN \(localCreatedAt) = '\(safeDate)' AND model != '' THEN model ELSE NULL END)
+        FROM assistant_usage_events
+        WHERE \(localCreatedAt) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)';
         """
         return executeWindowStatsQuery(dbURL: dbURL, sql: sql)
     }
 
-    static func queryWarehouseClaudeStats(dbURL: URL, dateString: String) -> CLIWindowStats {
+    static func queryWarehouseClaudeStats(dbURL: URL, dateString: String, timeZone: TimeZone = .current) -> CLIWindowStats {
         let safeDate = sanitizeSQLToken(dateString)
+        let offset = sqliteTimeZoneModifier(for: safeDate, timeZone: timeZone)
+        let localTimestamp = "date(ts, '\(offset)')"
         let sql = """
         SELECT
-            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(cache_read,0)+COALESCE(cache_creation,0) ELSE 0 END),
-            SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-            SUM(COALESCE(cache_read,0)+COALESCE(cache_creation,0))
-        FROM fact_turn WHERE substr(ts, 1, 10) >= date('\(safeDate)', '-7 days');
+            SUM(CASE WHEN \(localTimestamp) = '\(safeDate)' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) = '\(safeDate)' THEN COALESCE(cache_read,0)+COALESCE(cache_creation,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(cache_read,0)+COALESCE(cache_creation,0) ELSE 0 END)
+        FROM fact_turn
+        WHERE \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)';
         """
         return executeWindowStatsQuery(dbURL: dbURL, sql: sql, hasModelsColumn: false, defaultModels: "claude-opus / sonnet")
     }
@@ -1622,14 +1664,14 @@ extension LiveDashboardTelemetryReader {
     private static var cachedKimiKey: String?
     private static var cachedKimiStats: KimiTelemetryStats?
 
-    public static func queryKimiStats(homeURL: URL, dateString: String) -> KimiTelemetryStats {
+    public static func queryKimiStats(homeURL: URL, dateString: String, timeZone: TimeZone = .current) -> KimiTelemetryStats {
         let kimiRoot = homeURL.appendingPathComponent(".kimi-code")
         let indexURL = kimiRoot.appendingPathComponent("session_index.jsonl")
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: indexURL.path),
               let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 else {
             return KimiTelemetryStats()
         }
-        let cacheKey = "\(homeURL.path)-\(dateString)-\(Int(mtime))"
+        let cacheKey = "\(homeURL.path)-\(dateString)-\(timeZone.identifier)-\(Int(mtime))"
         if cachedKimiKey == cacheKey, let cached = cachedKimiStats {
             return cached
         }
@@ -1639,7 +1681,7 @@ extension LiveDashboardTelemetryReader {
         let fmt = DateFormatter()
         fmt.calendar = Calendar(identifier: .gregorian)
         fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.timeZone = TimeZone.current
+        fmt.timeZone = timeZone
         fmt.dateFormat = "yyyy-MM-dd"
         let hrFmt = DateFormatter()
         hrFmt.calendar = fmt.calendar
@@ -1736,8 +1778,8 @@ extension LiveDashboardTelemetryReader {
         var dailyBuckets: [String: DailyTokenBucket] = [:]
     }
 
-    static func queryGrokStats(homeURL: URL, ravenURL: URL, dateString: String) -> GrokTelemetryStats {
-        let ravenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "grok", dateString: dateString)
+    static func queryGrokStats(homeURL: URL, ravenURL: URL, dateString: String, timeZone: TimeZone = .current) -> GrokTelemetryStats {
+        let ravenStats = queryRavenCLIStats(dbURL: ravenURL, clientPrefix: "grok", dateString: dateString, timeZone: timeZone)
         var stats = GrokTelemetryStats(
             dayActiveTokens: ravenStats.dayIn + ravenStats.dayOut,
             dayCacheTokens: ravenStats.dayCache,
@@ -1756,7 +1798,7 @@ extension LiveDashboardTelemetryReader {
         let fmt = DateFormatter()
         fmt.calendar = Calendar(identifier: .gregorian)
         fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.timeZone = TimeZone.current
+        fmt.timeZone = timeZone
         fmt.dateFormat = "yyyy-MM-dd"
         let hrFmt = DateFormatter()
         hrFmt.calendar = fmt.calendar
@@ -1811,13 +1853,14 @@ extension LiveDashboardTelemetryReader {
         ravenURL: URL, copilotURL: URL, dateString: String,
         kimiDailyBuckets: [String: (tokens: UInt64, runs: Int)] = [:],
         grokDailyBuckets: [String: DailyTokenBucket] = [:],
-        fallbackEntries: [CLICostQuotaEntry]
+        fallbackEntries: [CLICostQuotaEntry],
+        timeZone: TimeZone = .current
     ) -> [TrendDataPoint] {
         let safeDate = sanitizeSQLToken(dateString)
         let hrFmt = DateFormatter()
         hrFmt.calendar = Calendar(identifier: .gregorian)
         hrFmt.locale = Locale(identifier: "en_US_POSIX")
-        hrFmt.timeZone = TimeZone.current
+        hrFmt.timeZone = timeZone
         hrFmt.dateFormat = "yyyy-MM-dd HH:mm"
 
         var bucketMap: [String: [DashboardCLIFilter: DailyTokenBucket]] = [:]
@@ -1828,8 +1871,8 @@ extension LiveDashboardTelemetryReader {
         for (hrKey, stat) in grokDailyBuckets where stat.total > 0 {
             bucketMap[hrKey, default: [:]][.grok] = stat
         }
-        populateRavenTrendBuckets(&bucketMap, ravenURL: ravenURL, safeDate: safeDate)
-        populateCopilotTrendBuckets(&bucketMap, copilotURL: copilotURL, safeDate: safeDate)
+        populateRavenTrendBuckets(&bucketMap, ravenURL: ravenURL, safeDate: safeDate, timeZone: timeZone)
+        populateCopilotTrendBuckets(&bucketMap, copilotURL: copilotURL, safeDate: safeDate, timeZone: timeZone)
 
         var points: [TrendDataPoint] = []
         for hrKey in bucketMap.keys.sorted() {
@@ -1852,12 +1895,14 @@ extension LiveDashboardTelemetryReader {
 
     private static func populateRavenTrendBuckets(
         _ bucketMap: inout [String: [DashboardCLIFilter: DailyTokenBucket]],
-        ravenURL: URL, safeDate: String
+        ravenURL: URL, safeDate: String, timeZone: TimeZone
     ) {
         guard let db = openReadOnlySQLite(path: ravenURL.path) else { return }
         defer { sqlite3_close(db) }
+        let offset = sqliteTimeZoneModifier(for: safeDate, timeZone: timeZone)
+        let localTimestamp = "date(timestamp/1000, 'unixepoch', '\(offset)')"
         let sql = """
-        SELECT strftime('%Y-%m-%d %H:00', timestamp/1000, 'unixepoch', 'localtime') as hr,
+        SELECT strftime('%Y-%m-%d %H:00', timestamp/1000, 'unixepoch', '\(offset)') as hr,
                CASE WHEN client_name LIKE 'codex%' THEN 'codex'
                     WHEN client_name LIKE 'claude%' THEN 'claude'
                     WHEN client_name LIKE 'grok%' THEN 'grok'
@@ -1866,8 +1911,7 @@ extension LiveDashboardTelemetryReader {
                SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
         FROM requests
-        WHERE timestamp >= (strftime('%s', '\(safeDate)', '-6 days') * 1000)
-          AND date(timestamp/1000, 'unixepoch', 'localtime') <= '\(safeDate)'
+        WHERE \(localTimestamp) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)'
         GROUP BY hr, cli_kind;
         """
         var stmt: OpaquePointer?
@@ -1890,17 +1934,19 @@ extension LiveDashboardTelemetryReader {
 
     private static func populateCopilotTrendBuckets(
         _ bucketMap: inout [String: [DashboardCLIFilter: DailyTokenBucket]],
-        copilotURL: URL, safeDate: String
+        copilotURL: URL, safeDate: String, timeZone: TimeZone
     ) {
         guard let db = openReadOnlySQLite(path: copilotURL.path) else { return }
         defer { sqlite3_close(db) }
+        let offset = sqliteTimeZoneModifier(for: safeDate, timeZone: timeZone)
+        let localCreatedAt = "date(created_at, '\(offset)')"
+        let uncached = "MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_write_tokens, 0))"
         let sql = """
-        SELECT strftime('%Y-%m-%d %H:00', created_at, 'localtime') as hr,
-               SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+        SELECT strftime('%Y-%m-%d %H:00', created_at, '\(offset)') as hr,
+               SUM(\(uncached)), SUM(COALESCE(output_tokens,0)),
                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
         FROM assistant_usage_events
-        WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-6 days')
-          AND substr(created_at, 1, 10) <= '\(safeDate)'
+        WHERE \(localCreatedAt) BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)'
         GROUP BY hr;
         """
         var stmt: OpaquePointer?
@@ -1921,7 +1967,7 @@ extension LiveDashboardTelemetryReader {
     }
 
     static func queryRealRankings(
-        ravenURL: URL, copilotURL: URL, dateString: String, fallbackEntries: [CLICostQuotaEntry]
+        ravenURL: URL, copilotURL: URL, dateString: String, fallbackEntries: [CLICostQuotaEntry], timeZone: TimeZone = .current
     ) -> [AgentRankingRow] {
         var rows: [AgentRankingRow] = []
         let safeDate = sanitizeSQLToken(dateString)
@@ -1932,10 +1978,10 @@ extension LiveDashboardTelemetryReader {
             .deletingLastPathComponent()
         let magpieUsageURL = homeURL.appendingPathComponent(".config/magpie/usage.jsonl")
         let cindyDirURL = homeURL.appendingPathComponent("Library/Application Support/CindyGlobal")
-        appendMagpieRoleRankingRows(&rows, magpieURL: magpieUsageURL, datePrefix: safeDate)
-        appendCopilotSessionRankingRows(&rows, copilotURL: copilotURL, safeDate: safeDate)
+        appendMagpieRoleRankingRows(&rows, magpieURL: magpieUsageURL, datePrefix: safeDate, timeZone: timeZone)
+        appendCopilotSessionRankingRows(&rows, copilotURL: copilotURL, safeDate: safeDate, timeZone: timeZone)
         appendCindyRankingRows(&rows, cindyDirURL: cindyDirURL, safeDate: safeDate)
-        appendRavenRankingRows(&rows, ravenURL: ravenURL, safeDate: safeDate)
+        appendRavenRankingRows(&rows, ravenURL: ravenURL, safeDate: safeDate, timeZone: timeZone)
         appendFallbackChannelRows(&rows, fallbackEntries: fallbackEntries)
         rows.sort { $0.totalTokens != $1.totalTokens ? $0.totalTokens > $1.totalTokens : $0.runs > $1.runs }
         return rows.isEmpty ? DashboardWorkspaceStore.deriveRankingRows(from: fallbackEntries) : Array(rows.prefix(12))
@@ -1984,9 +2030,9 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func appendMagpieRoleRankingRows(
-        _ rows: inout [AgentRankingRow], magpieURL: URL, datePrefix: String
+        _ rows: inout [AgentRankingRow], magpieURL: URL, datePrefix: String, timeZone: TimeZone
     ) {
-        let cacheKey = "\(fileCacheSignature(for: magpieURL))-\(datePrefix)"
+        let cacheKey = "\(fileCacheSignature(for: magpieURL))-\(datePrefix)-\(timeZone.identifier)"
         if cachedMagpieRankingKey == cacheKey, let cached = cachedMagpieRankingRows {
             rows.append(contentsOf: cached)
             return
@@ -1994,10 +2040,11 @@ extension LiveDashboardTelemetryReader {
         let text = readTailLines(of: magpieURL)
         guard !text.isEmpty else { return }
         var map: [String: RoleModelStat] = [:]
-        for line in text.split(separator: "\n") where line.contains(datePrefix) {
+        for line in text.split(separator: "\n") {
             guard let data = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let ts = obj["t"] as? String, ts.hasPrefix(datePrefix) else { continue }
+                  let ts = obj["t"] as? String,
+                  localDateString(from: ts, timeZone: timeZone) == datePrefix else { continue }
             let req = (obj["req"] as? String) ?? ""
             let model = (obj["served"] as? String) ?? (obj["model"] as? String) ?? ""
             let agent = (obj["agent"] as? String) ?? "copilot"
@@ -2044,10 +2091,12 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func appendRavenRankingRows(
-        _ rows: inout [AgentRankingRow], ravenURL: URL, safeDate: String
+        _ rows: inout [AgentRankingRow], ravenURL: URL, safeDate: String, timeZone: TimeZone
     ) {
         guard let db = openReadOnlySQLite(path: ravenURL.path) else { return }
         defer { sqlite3_close(db) }
+        let offset = sqliteTimeZoneModifier(for: safeDate, timeZone: timeZone)
+        let localTimestamp = "date(timestamp/1000, 'unixepoch', '\(offset)')"
         let sql = """
         SELECT
             CASE WHEN client_name LIKE 'codex_exec%' THEN 'M1 · Writer (codex_exec)'
@@ -2064,7 +2113,7 @@ extension LiveDashboardTelemetryReader {
             AVG(latency_ms) / 1000.0,
             1.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
         FROM requests
-        WHERE date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)'
+        WHERE \(localTimestamp) = '\(safeDate)'
           AND client_name NOT LIKE 'magpie%'
           AND COALESCE(NULLIF(resolved_model, ''), NULLIF(model, ''), '') NOT LIKE 'group/%'
         GROUP BY role_group, effective_model
@@ -2108,10 +2157,12 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func appendCopilotSessionRankingRows(
-        _ rows: inout [AgentRankingRow], copilotURL: URL, safeDate: String
+        _ rows: inout [AgentRankingRow], copilotURL: URL, safeDate: String, timeZone: TimeZone
     ) {
         guard let db = openReadOnlySQLite(path: copilotURL.path) else { return }
         defer { sqlite3_close(db) }
+        let offset = sqliteTimeZoneModifier(for: safeDate, timeZone: timeZone)
+        let localCreatedAt = "date(e.created_at, '\(offset)')"
         let sql = """
         SELECT
             CASE WHEN s.summary LIKE 'Load /team-lead%' THEN 'M1 · Steering (TL)'
@@ -2121,13 +2172,14 @@ extension LiveDashboardTelemetryReader {
                  ELSE 'M2 · Terminal CLI' END as role_group,
             COALESCE(NULLIF(e.copilot_usage_model, ''), NULLIF(e.model, ''), 'default') as effective_model,
             COUNT(*) as runs,
-            SUM(COALESCE(e.input_tokens,0)+COALESCE(e.output_tokens,0)+COALESCE(e.cache_read_tokens,0)+COALESCE(e.cache_write_tokens,0)) as total_tok,
+            SUM(MAX(0, COALESCE(e.input_tokens,0)-COALESCE(e.cache_read_tokens,0)-COALESCE(e.cache_write_tokens,0))
+                + COALESCE(e.output_tokens,0) + COALESCE(e.cache_read_tokens,0) + COALESCE(e.cache_write_tokens,0)) as total_tok,
             AVG(COALESCE(e.duration_ms, 8500)) / 1000.0,
             1.0 * SUM(CASE WHEN COALESCE(e.finish_reason, '') != 'error' THEN 1 ELSE 0 END) / COUNT(*),
             COUNT(DISTINCT e.session_id || '-' || COALESCE(e.turn_index, 0)) as turns
         FROM assistant_usage_events e
         LEFT JOIN sessions s ON e.session_id = s.id
-        WHERE substr(e.created_at, 1, 10) = '\(safeDate)'
+        WHERE \(localCreatedAt) = '\(safeDate)'
           AND COALESCE(NULLIF(e.copilot_usage_model, ''), NULLIF(e.model, ''), '') NOT LIKE 'group/%'
         GROUP BY role_group, effective_model
         HAVING total_tok > 0
