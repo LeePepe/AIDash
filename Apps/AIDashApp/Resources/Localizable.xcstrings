@@ -12496,6 +12496,23 @@
           }
         }
       }
+    },
+    "dashboard.skills_roi.cured_and_optimizing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cured + optimizing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已治愈 + 优化中"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
