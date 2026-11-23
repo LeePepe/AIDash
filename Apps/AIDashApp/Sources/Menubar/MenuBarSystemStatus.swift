@@ -352,6 +352,7 @@ public protocol MenuBarSystemStatusProviding {
 public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding {
     private let tokenDatabasePaths: CLITokenDatabasePaths
     private let referenceDate: Date?
+    private let timeZone: TimeZone
     private let ssdMountPath: String
     private var previousCPUTicks: [UInt64]?
     private var cpuUsageHistory: [Double] = []
@@ -361,10 +362,12 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     public init(
         tokenDatabasePaths: CLITokenDatabasePaths? = nil,
         referenceDate: Date? = nil,
+        timeZone: TimeZone = .current,
         ssdMountPath: String = "/Volumes/SSD"
     ) {
         self.tokenDatabasePaths = tokenDatabasePaths ?? Self.defaultTokenDatabasePaths()
         self.referenceDate = referenceDate
+        self.timeZone = timeZone
         self.ssdMountPath = ssdMountPath
     }
     public func captureStatusState() -> MenuBarStatusViewState {
@@ -636,24 +639,25 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
     }
 
     private func readTokenUsage(cli: AgentCLIKind, paths: [URL], referenceDate: Date?) -> CLITokenUsageItem {
-        let targetDate = Self.localDateString(from: referenceDate ?? Date())
+        let targetDate = LiveDashboardTelemetryReader.localDateString(from: referenceDate ?? Date(), timeZone: timeZone)
+        let offset = LiveDashboardTelemetryReader.sqliteTimeZoneModifier(for: targetDate, timeZone: timeZone)
         let queryPairs: [(filtered: String, fallback: String)]
         switch cli {
         case .claude:
             queryPairs = [
-                Self.tokenQueryPair(table: "fact_turn", timePredicate: "date(ts, 'localtime') = '\(targetDate)'", fallbackTable: "fact_turn", cacheWriteColumn: "cache_creation"),
-                Self.tokenQueryPair(table: "turn", timePredicate: "date(ts, 'localtime') = '\(targetDate)'", fallbackTable: "turn", cacheWriteColumn: "cache_creation"),
-                Self.tokenQueryPair(table: "turn", timePredicate: "date(created_at, 'localtime') = '\(targetDate)'", fallbackTable: "turn", cacheWriteColumn: "cache_creation")
+                Self.tokenQueryPair(table: "fact_turn", timePredicate: "date(ts, '\(offset)') = '\(targetDate)'", fallbackTable: "fact_turn", cacheWriteColumn: "cache_creation"),
+                Self.tokenQueryPair(table: "turn", timePredicate: "date(ts, '\(offset)') = '\(targetDate)'", fallbackTable: "turn", cacheWriteColumn: "cache_creation"),
+                Self.tokenQueryPair(table: "turn", timePredicate: "date(created_at, '\(offset)') = '\(targetDate)'", fallbackTable: "turn", cacheWriteColumn: "cache_creation")
             ]
         case .codex:
             queryPairs = [
-                Self.tokenQueryPair(table: "fact_request", timePredicate: "date(ts / 1000, 'unixepoch', 'localtime') = '\(targetDate)'", clientPredicate: "client IN ('codex-tui', 'codex_exec')", fallbackTable: "fact_request", fallbackClientPredicate: "client IN ('codex-tui', 'codex_exec')", cacheWriteColumn: "cache_write"),
-                Self.tokenQueryPair(table: "req", timePredicate: "date(ts / 1000, 'unixepoch', 'localtime') = '\(targetDate)'", fallbackTable: "req", cacheWriteColumn: "cache_write")
+                Self.tokenQueryPair(table: "fact_request", timePredicate: "date(ts / 1000, 'unixepoch', '\(offset)') = '\(targetDate)'", clientPredicate: "client IN ('codex-tui', 'codex_exec')", fallbackTable: "fact_request", fallbackClientPredicate: "client IN ('codex-tui', 'codex_exec')", cacheWriteColumn: "cache_write"),
+                Self.tokenQueryPair(table: "req", timePredicate: "date(ts / 1000, 'unixepoch', '\(offset)') = '\(targetDate)'", fallbackTable: "req", cacheWriteColumn: "cache_write")
             ]
         case .copilot:
             let uncached = "MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_write_tokens, 0))"
             queryPairs = [(
-                "SELECT COALESCE(SUM(\(uncached)),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) + COALESCE(SUM(cache_write_tokens),0), COUNT(*) FROM assistant_usage_events WHERE date(created_at, 'localtime') = '\(targetDate)';",
+                "SELECT COALESCE(SUM(\(uncached)),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) + COALESCE(SUM(cache_write_tokens),0), COUNT(*) FROM assistant_usage_events WHERE date(created_at, '\(offset)') = '\(targetDate)';",
                 "SELECT COALESCE(SUM(\(uncached)),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) + COALESCE(SUM(cache_write_tokens),0), COUNT(*) FROM assistant_usage_events;"
             )]
         case .kimi, .grok, .deepseek:
@@ -661,7 +665,14 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         }
         for path in paths {
             for pair in queryPairs {
-                if let values = readSQLite(path: path.path, query: pair.filtered) ?? readSQLite(path: path.path, query: pair.fallback) {
+                if let values = readSQLite(path: path.path, query: pair.filtered) {
+                    return CLITokenUsageItem(cli: cli, inputTokens: values.0, outputTokens: values.1, cacheTokens: values.2, isAvailable: true, interactionCount: values.3)
+                }
+            }
+        }
+        for path in paths {
+            for pair in queryPairs {
+                if let values = readSQLite(path: path.path, query: pair.fallback) {
                     return CLITokenUsageItem(cli: cli, inputTokens: values.0, outputTokens: values.1, cacheTokens: values.2, isAvailable: true, interactionCount: values.3)
                 }
             }

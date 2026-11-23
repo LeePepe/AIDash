@@ -11,6 +11,8 @@ import Testing
 @Suite("Pew token alignment")
 @MainActor
 struct PewTokenAlignmentTests {
+    private static let cst = TimeZone(secondsFromGMT: 8 * 60 * 60) ?? .current
+
     @Test("Copilot inclusive input is de-duplicated and underflow is clamped")
     func copilotInclusiveInputNormalization() throws {
         let database = try SQLiteFixture(schema: """
@@ -28,7 +30,8 @@ struct PewTokenAlignmentTests {
 
         let stats = LiveDashboardTelemetryReader.queryCopilotSessionStats(
             dbURL: database.url,
-            dateString: "2026-11-23"
+            dateString: "2026-11-23",
+            timeZone: Self.cst
         )
 
         #expect(stats.dayRuns == 2)
@@ -68,7 +71,8 @@ struct PewTokenAlignmentTests {
         let stats = LiveDashboardTelemetryReader.queryRavenCLIStats(
             dbURL: database.url,
             clientPrefix: "codex",
-            dateString: "2026-11-23"
+            dateString: "2026-11-23",
+            timeZone: Self.cst
         )
 
         #expect(stats.dayRuns == 1)
@@ -82,7 +86,7 @@ struct PewTokenAlignmentTests {
 
     @Test("UTC Copilot timestamps bucket into the local CST day")
     func copilotUsesLocalDateForUTCISOString() throws {
-        #expect(LiveDashboardTelemetryReader.localDateString(from: "2026-11-22T18:30:00Z") == "2026-11-23")
+        #expect(LiveDashboardTelemetryReader.localDateString(from: "2026-11-22T18:30:00Z", timeZone: Self.cst) == "2026-11-23")
         let database = try SQLiteFixture(schema: """
         CREATE TABLE assistant_usage_events (
             input_tokens INTEGER, output_tokens INTEGER,
@@ -93,7 +97,7 @@ struct PewTokenAlignmentTests {
         """)
         defer { database.remove() }
 
-        let stats = LiveDashboardTelemetryReader.queryCopilotSessionStats(dbURL: database.url, dateString: "2026-11-23")
+        let stats = LiveDashboardTelemetryReader.queryCopilotSessionStats(dbURL: database.url, dateString: "2026-11-23", timeZone: Self.cst)
         #expect(stats.dayRuns == 1)
         #expect(stats.dayIn == 70)
         #expect(stats.dayOut == 20)
@@ -113,7 +117,7 @@ struct PewTokenAlignmentTests {
         """)
         defer { database.remove() }
 
-        let stats = LiveDashboardTelemetryReader.queryWarehouseClaudeStats(dbURL: database.url, dateString: "2026-11-23")
+        let stats = LiveDashboardTelemetryReader.queryWarehouseClaudeStats(dbURL: database.url, dateString: "2026-11-23", timeZone: Self.cst)
         #expect(stats.weekIn == 300)
         #expect(stats.weekOut == 50)
         #expect(stats.weekCache == 18)
@@ -135,12 +139,13 @@ struct PewTokenAlignmentTests {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
+        formatter.timeZone = Self.cst
         formatter.dateFormat = "yyyy-MM-dd"
         let referenceDate = try #require(formatter.date(from: "2026-11-23"))
         let provider = LiveMenuBarSystemStatusProvider(
             tokenDatabasePaths: CLITokenDatabasePaths(claude: [database.url]),
             referenceDate: referenceDate,
+            timeZone: Self.cst,
             ssdMountPath: "/does-not-exist/SSD"
         )
 
@@ -168,6 +173,7 @@ struct PewTokenAlignmentTests {
         let codexProvider = LiveMenuBarSystemStatusProvider(
             tokenDatabasePaths: CLITokenDatabasePaths(codex: [reqDatabase.url]),
             referenceDate: referenceDate,
+            timeZone: Self.cst,
             ssdMountPath: "/does-not-exist/SSD"
         )
         let codex = try #require(codexProvider.captureTokenStatus().usage.items.first(where: { $0.cli == .codex }))
@@ -175,6 +181,32 @@ struct PewTokenAlignmentTests {
         #expect(codex.outputTokens == 20)
         #expect(codex.cacheTokens == 7)
         #expect(codex.interactionCount == 1)
+
+        let mixedDatabase = try SQLiteFixture(schema: """
+        CREATE TABLE fact_turn (
+            input_tokens INTEGER, output_tokens INTEGER,
+            cache_read INTEGER, cache_creation INTEGER
+        );
+        CREATE TABLE turn (
+            created_at TEXT, input_tokens INTEGER, output_tokens INTEGER,
+            cache_read INTEGER, cache_creation INTEGER
+        );
+        INSERT INTO fact_turn VALUES (9000, 9000, 9000, 9000);
+        INSERT INTO turn VALUES ('2026-11-22T18:30:00Z', 11, 22, 3, 4);
+        INSERT INTO turn VALUES ('2026-11-21T18:30:00Z', 1000, 2000, 3000, 4000);
+        """)
+        defer { mixedDatabase.remove() }
+        let mixedProvider = LiveMenuBarSystemStatusProvider(
+            tokenDatabasePaths: CLITokenDatabasePaths(claude: [mixedDatabase.url]),
+            referenceDate: referenceDate,
+            timeZone: Self.cst,
+            ssdMountPath: "/does-not-exist/SSD"
+        )
+        let mixedClaude = try #require(mixedProvider.captureTokenStatus().usage.items.first(where: { $0.cli == .claude }))
+        #expect(mixedClaude.inputTokens == 11)
+        #expect(mixedClaude.outputTokens == 22)
+        #expect(mixedClaude.cacheTokens == 7)
+        #expect(mixedClaude.interactionCount == 1)
     }
 
     private static func epochMilliseconds(_ raw: String) throws -> Int64 {
