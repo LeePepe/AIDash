@@ -646,12 +646,6 @@ struct TK3SemanticTests {
         #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "/etc", relativePath: "passwd", homeURL: home) == nil)
         #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "~/Development/user-skills/skills/team-lead", relativePath: "references/escape.md", homeURL: home) == nil)
 
-        // Shell-safe quoting for Copy Eval Command against malicious skill names
-        let safeCmd = SkillsRoiDiagnosticsCardView.evalCommandString(forSkill: "team-lead")
-        #expect(safeCmd == "python3 ~/Development/user-skills/skills/skill-contract/scripts/skill_contract.py eval --skill 'team-lead' --strict")
-        let maliciousCmd = SkillsRoiDiagnosticsCardView.evalCommandString(forSkill: "bad'; $(touch /tmp/pwn);\necho 'x")
-        #expect(maliciousCmd == "python3 ~/Development/user-skills/skills/skill-contract/scripts/skill_contract.py eval --skill 'bad'\\''; $(touch /tmp/pwn); echo '\\''x' --strict")
-        #expect(!maliciousCmd.contains("\n"))
     }
 
     @Test("loadSkillDocumentPreview falls back from agent skills to user-skills, local icloud-mirror, and embedded previews while skipping CloudDocs")
@@ -690,7 +684,6 @@ struct TK3SemanticTests {
             docPreview: "Embedded Safe Preview",
             skillDir: blockedCloudDocsURL.deletingLastPathComponent().path
         )
-        #expect(SkillsRoiDiagnosticsCardView.resolveSkillPreviewContent(detail: cloudDetail, relativePath: "SKILL.md", embeddedPreview: "Embedded Safe Preview", homeURL: home) == "Embedded Safe Preview")
     }
 
     @Test("Rendered SkillsRoiDiagnosticsCardView contains zero bare S1-S12 academic codes and renders inline preview")
@@ -745,7 +738,7 @@ struct TK3SemanticTests {
         let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
 
         for lens in SkillsRoiLens.allCases {
-            for subTab in SkillInspectorSubTab.allCases {
+            for subTab in [SkillInspectorSubTab.evolution] {
                 let recorder = DashboardGeometryRecorder()
                 let view = SkillsRoiDiagnosticsCardView(
                     summary: summary,
@@ -978,10 +971,10 @@ struct TK3SnapshotRenderTests {
                     try render(ScheduledPulsePageView(store: store, registerJobs: {}), name: "pulse-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                     try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary), name: "skills-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                     if state == "populated" {
-                        for lens in [SkillsRoiLens.disclosure, .context] {
+                        for lens in [SkillsRoiLens.usage, .evolution, .flywheel] {
                             try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialLens: lens), name: "skills-\(lens.rawValue)-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                         }
-                        for subTab in [SkillInspectorSubTab.scripts, .evals] {
+                        for subTab in [SkillInspectorSubTab.definition] {
                             try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialSubTab: subTab), name: "skills-tab-\(subTab.rawValue)-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                         }
                         try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, showDailyPopulations: true), name: "skills-daily-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
@@ -1348,31 +1341,16 @@ struct TK3SnapshotRenderTests {
             #expect(samples.filter { $0.role == "button" && $0.id.hasPrefix("pulse-tab-") }.count == 2)
         }
         if name.hasPrefix("skills-populated") {
-            let primaryPane = try #require(samples.first { $0.id == "skills-primary-list" })
-            let detailPane = try #require(samples.first { $0.id == "skills-inspector-detail" })
-            if width >= 960 {
-                #expect(detailPane.x > primaryPane.x + primaryPane.width - 1)
-                #expect(abs(detailPane.y - primaryPane.y) < 2)
-            } else {
-                #expect(detailPane.y > primaryPane.y + primaryPane.height - 1)
-            }
-            #expect(samples.contains { $0.id == "inspector-file-skill-md" })
+            #expect(samples.contains { $0.id == "skills-p0-vitals" })
+            #expect(samples.contains { $0.id == "skills-status-stage" })
+            #expect(!samples.contains { $0.id == "skills-inspector-detail" })
+            #expect(!samples.contains { $0.id == "inspector-file-skill-md" })
         }
         if name.hasPrefix("skills-tab-scripts-populated") {
-            for (headerID, cellID) in [
-                ("script-calls", "usage-team-lead-sc-calls-scripts/goal-queue.py"),
-                ("script-success", "usage-team-lead-sc-succ-scripts/goal-queue.py"),
-                ("script-p95", "usage-team-lead-sc-p95-scripts/goal-queue.py")
-            ] {
-                let header = try #require(samples.first { $0.id == "usage-header-\(headerID)" })
-                let cell = try #require(samples.first { $0.id == cellID })
-                #expect(abs(header.x - cell.x) < 1)
-                #expect(abs(header.width - cell.width) < 1)
-            }
+            #expect(!samples.contains { $0.id.contains("script-") })
         }
         if name.hasPrefix("skills-tab-evals-populated") {
-            #expect(samples.contains { $0.id == "inspector-eval-EV-001" })
-            #expect(samples.contains { $0.id == "inspector-eval-DC-001" })
+            #expect(!samples.contains { $0.id.contains("inspector-eval") })
         }
         #expect(samples.filter { $0.role == "button" }.allSatisfy { $0.width >= 28 && $0.height >= 28 })
         geometrySamples.append(contentsOf: samples.map { DashboardGeometrySample(id: "\(name)/\($0.id)", role: $0.role, frame: CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)) })

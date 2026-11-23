@@ -2120,46 +2120,21 @@ struct DashboardWorkspaceTests {
         #expect(bmp.pixelsHigh >= 300)
 
         let recordedIDs = Set(recorder.samples.map(\.id))
-        #expect(recordedIDs.contains("skills-level1-macro-bar"))
-        #expect(recordedIDs.contains("skills-macro-cured-badge"))
-        #expect(recordedIDs.contains("skills-macro-proposals-badge"))
-        #expect(recordedIDs.contains("skills-four-layer-pulse"))
-        #expect(recordedIDs.contains("skills-pulse-l0-direction"))
-        #expect(recordedIDs.contains("skills-pulse-l1-drawers"))
-        #expect(recordedIDs.contains("skills-pulse-l2-scripts"))
-        #expect(recordedIDs.contains("skills-pulse-l3-wild-eval"))
-        #expect(recordedIDs.contains("skills-level3-pillar-l2"))
-        #expect(recordedIDs.contains("skills-l2-cross-repo-gate"))
-        #expect(recordedIDs.contains("skills-version-evolution-table"))
-        #expect(recordedIDs.contains("skills-evo-row-team-lead"))
-        #expect(!recordedIDs.contains("skills-evo-row-nas-smart-home"))
-        #expect(recordedIDs.contains("skills-retro-proposals"))
-        #expect(recordedIDs.contains("skills-proposal-skill-retro-l2-roadblock-team-lead-ci-monitor-py"))
-        #expect(recordedIDs.contains("inspector-evo-banner-team-lead"))
-        #expect(recordedIDs.contains("inspector-ver-team-lead-v58@a1b2c3d"))
-        #expect(recordedIDs.contains("inspector-collapse"))
+        #expect(recordedIDs.contains("skills-p0-vitals"))
+        #expect(recordedIDs.contains("skills-table-header"))
+        #expect(recordedIDs.contains("skills-status-stage"))
+        #expect(!recordedIDs.contains("skills-four-layer-pulse"))
+        #expect(!recordedIDs.contains("skills-inspector-detail"))
+        #expect(!recordedIDs.contains("skills-primary-detail"))
+        #expect(!recordedIDs.contains("inspector-collapse"))
 
-        // Verify .usage lens de-duplicates the full versionEvolutionTableSection + retroProposalsSection stack
-        let usageRecorder = DashboardGeometryRecorder()
-        let usageView = SkillsRoiDiagnosticsCardView(
-            summary: summary,
-            initialLens: .usage,
-            initialSelectedSkill: "team-lead",
-            initialSubTab: .definition
-        )
-        .frame(width: 1120)
-        .padding(16)
-        .background(Color(nsColor: .underPageBackgroundColor))
-        .environment(\.colorScheme, .dark)
-        .environment(\.theme, Theme(isDark: true))
-        .environment(\.dashboardGeometryRecorder, usageRecorder)
-        .coordinateSpace(name: "tk3-geometry")
-        _ = try toolbarHeaderBitmap(for: usageView, scheme: .dark)
-        let usageIDs = Set(usageRecorder.samples.map(\.id))
-        #expect(usageIDs.contains("skills-four-layer-pulse"))
-        #expect(usageIDs.contains("skills-primary-detail"))
-        #expect(!usageIDs.contains("skills-version-evolution-table"))
-        #expect(!usageIDs.contains("skills-retro-proposals"))
+        // The three lenses share one stage and never render the obsolete workbench.
+        for lens in SkillsRoiLens.allCases {
+            let view = SkillsRoiDiagnosticsCardView(summary: summary, initialLens: lens)
+                .frame(width: 1120).environment(\.theme, Theme(isDark: true))
+                .environment(\.dashboardGeometryRecorder, recorder)
+            _ = try toolbarHeaderBitmap(for: view, scheme: .dark)
+        }
 
         let bareAcademicRegex = try NSRegularExpression(pattern: #"\bS(?:[1-9]|1[0-2])\b"#)
         for text in [prop.displayTitle, prop.displayReason, evo.resolvedStatusLabel] {
