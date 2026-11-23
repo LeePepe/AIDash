@@ -168,11 +168,21 @@
             let idle = managedCurrent ? managed.filter { $0.loads30d == 0 }.count : nil
             let direction: String? = calls.flatMap { callsValue in month.map { monthValue in guard monthValue > 0 else { return "→" }; return Double(callsValue) > Double(monthValue) / 4 * 1.05 ? "↑" : (Double(callsValue) < Double(monthValue) / 4 * 0.95 ? "↓" : "→") } }
             let retro = report.resolvedSkillRetro
+            let trendSummary: String
+            if improved + regressedCount == 0 {
+                if let active, let idle {
+                    trendSummary = skillsText("active", "Active") + " \(active) · " + skillsText("idle", "Idle") + " \(idle)"
+                } else {
+                    trendSummary = "—"
+                }
+            } else {
+                trendSummary = "↑\(improved) " + skillsText("improved", "Improved") + " · ↓\(regressedCount) " + skillsText("regressed", "Regressed")
+            }
             return VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(healthy.flatMap { healthyValue in total.map { totalValue in "\(healthyValue) / \(totalValue)" } } ?? "—").font(.system(size: 28, weight: .bold, design: .monospaced)).accessibilityIdentifier("skills-vital-healthy")
                     Spacer()
-                    Text(improved + regressedCount == 0 ? (active.flatMap { activeValue in idle.map { idleValue in skillsText("active", "Active") + " \(activeValue) · " + skillsText("idle", "Idle") + " \(idleValue)" } } ?? "—") : "↑\(improved) " + skillsText("improved", "Improved") + " · ↓\(regressedCount) " + skillsText("regressed", "Regressed")).font(.caption).foregroundStyle(.secondary)
+                    Text(trendSummary).font(.caption).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 16) {
                     vital("pass_rate", passRateSummary(report, managed: managedCurrent ? managed : []), "skills-vital-pass-rate")
