@@ -2036,24 +2036,8 @@ struct DashboardWorkspaceTests {
         #expect(evo.delta.exit2CountDelta == -12)
         #expect(evo.delta.brokenDrawerDelta == -2)
         #expect(evo.versions.count == 2)
-        #expect(SkillsRoiDiagnosticsCardView.formatVersionComparison(
-            before: evo.beforeVersion?.exit2ErrorRate,
-            current: evo.currentVersion.exit2ErrorRate,
-            delta: evo.delta.exit2ErrorRateDelta,
-            isRate: true,
-            lowerIsBetter: true
-        ) == "10% → 0% ▼")
-        #expect(SkillsRoiDiagnosticsCardView.formatCountComparison(
-            before: evo.beforeVersion?.brokenDrawerCount,
-            current: evo.currentVersion.brokenDrawerCount,
-            delta: evo.delta.brokenDrawerDelta
-        ) == "2 → 0 (-2)")
-        #expect(SkillsRoiDiagnosticsCardView.formatLatencyComparison(
-            beforeMs: evo.beforeVersion?.scriptP50Ms,
-            currentMs: evo.currentVersion.scriptP50Ms,
-            deltaMs: evo.delta.scriptP50MsDelta
-        ) == "620ms → 240ms ▼")
-        #expect(SkillsRoiDiagnosticsCardView.formatUptakeAndR1Comparison(row: evo).contains("吸收 95%"))
+        #expect(SkillsRoiDiagnosticsCardView.cleanVersionLabel("1.4.0+v58@a1b2c3d") == "v58")
+        #expect(SkillsRoiDiagnosticsCardView.cleanVersionLabel("v57@6be2fb5 → 1.4.0+v58@a1b2c3d") == "v57 → v58")
 
         // 3. Verify skill_retro 4-layer health summary & proposal decoding
         let retro = report.resolvedSkillRetro

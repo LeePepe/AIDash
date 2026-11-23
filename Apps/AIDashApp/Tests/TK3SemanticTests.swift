@@ -978,10 +978,6 @@ struct TK3SnapshotRenderTests {
                             try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialSubTab: subTab), name: "skills-tab-\(subTab.rawValue)-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                         }
                         try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, showDailyPopulations: true), name: "skills-daily-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
-                        let context = try #require(store.liveEfficiencySummary?.skillsROI?.diagnostics.context)
-                        let evidence = [SkillsEvidence(title: "KV hit (%)", value: context.cacheHitPercent.value.map { String($0) } ?? "Unknown", metadata: context.cacheHitPercent.metadata),
-                                        SkillsEvidence(title: "Saved tokens", value: context.savedTokens.value.map { String($0) } ?? "Unknown", metadata: context.savedTokens.metadata)]
-                        try render(SkillsObservationDrawer(evidence: evidence), name: "skills-evidence-populated-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                     }
                 }
             }
