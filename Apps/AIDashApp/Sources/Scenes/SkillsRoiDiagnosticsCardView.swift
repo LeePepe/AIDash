@@ -108,8 +108,6 @@ public struct SkillsRoiDiagnosticsCardView: View {
                     else { ForEach(evolution) { evoRow($0, flywheel: flywheel) } }
                 }
             }
-            .captureDashboardGeometry(id: "skills-table-header", role: "header")
-            .captureDashboardGeometry(id: "skills-status-stage", role: "stage")
         }
         .frame(minHeight: details.isEmpty && evolution.isEmpty ? 44 : CGFloat(max(details.count, evolution.count) * 58 + 28))
     }

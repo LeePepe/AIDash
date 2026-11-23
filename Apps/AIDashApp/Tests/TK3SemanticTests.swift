@@ -1323,7 +1323,8 @@ struct TK3SnapshotRenderTests {
         }
         if name.hasPrefix("skills-populated") {
             #expect(samples.contains { $0.id == "skills-p0-vitals" })
-            #expect(samples.contains { $0.id == "skills-status-stage" })
+            #expect(!samples.contains { $0.id == "skills-table-header" })
+            #expect(!samples.contains { $0.id == "skills-status-stage" })
             #expect(!samples.contains { $0.id == "skills-inspector-detail" })
             #expect(!samples.contains { $0.id == "inspector-file-skill-md" })
         }

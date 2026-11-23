@@ -2105,8 +2105,8 @@ struct DashboardWorkspaceTests {
 
         let recordedIDs = Set(recorder.samples.map(\.id))
         #expect(recordedIDs.contains("skills-p0-vitals"))
-        #expect(recordedIDs.contains("skills-table-header"))
-        #expect(recordedIDs.contains("skills-status-stage"))
+        #expect(!recordedIDs.contains("skills-table-header"))
+        #expect(!recordedIDs.contains("skills-status-stage"))
         #expect(!recordedIDs.contains("skills-four-layer-pulse"))
         #expect(!recordedIDs.contains("skills-inspector-detail"))
         #expect(!recordedIDs.contains("skills-primary-detail"))
