@@ -12,6 +12,17 @@ import DesignKit
 @testable import AIDashApp
 #endif
 
+private func collectAccessibilityStrings(from element: Any) -> [String] {
+    var result: [String] = []
+    if let ax = element as? any NSAccessibilityProtocol {
+        if let label = ax.accessibilityLabel(), !label.isEmpty { result.append(label) }
+        if let value = ax.accessibilityValue() as? String, !value.isEmpty { result.append(value) }
+        for child in ax.accessibilityChildren() ?? [] { result.append(contentsOf: collectAccessibilityStrings(from: child)) }
+    }
+    if let view = element as? NSView { for subview in view.subviews { result.append(contentsOf: collectAccessibilityStrings(from: subview)) } }
+    return result
+}
+
 @MainActor
 enum TK3Fixtures {
     static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -746,22 +757,6 @@ struct TK3SemanticTests {
         }
     }
 
-    private func collectAccessibilityStrings(from element: Any) -> [String] {
-        var result: [String] = []
-        if let ax = element as? any NSAccessibilityProtocol {
-            if let label = ax.accessibilityLabel(), !label.isEmpty { result.append(label) }
-            if let strVal = ax.accessibilityValue() as? String, !strVal.isEmpty { result.append(strVal) }
-            for child in ax.accessibilityChildren() ?? [] {
-                result.append(contentsOf: collectAccessibilityStrings(from: child))
-            }
-        }
-        if let view = element as? NSView {
-            for sub in view.subviews {
-                result.append(contentsOf: collectAccessibilityStrings(from: sub))
-            }
-        }
-        return result
-    }
 
     @Test("Explicit stage states override stale exits, absent stages remain unknown, and receipts do not require launchd")
     func pulseStates() throws {
@@ -1272,6 +1267,23 @@ struct TK3SnapshotRenderTests {
         return store
     }
 
+    private func collectAccessibilityStrings(from element: Any) -> [String] {
+        var result: [String] = []
+        if let ax = element as? any NSAccessibilityProtocol {
+            if let label = ax.accessibilityLabel(), !label.isEmpty { result.append(label) }
+            if let strVal = ax.accessibilityValue() as? String, !strVal.isEmpty { result.append(strVal) }
+            for child in ax.accessibilityChildren() ?? [] {
+                result.append(contentsOf: collectAccessibilityStrings(from: child))
+            }
+        }
+        if let view = element as? NSView {
+            for sub in view.subviews {
+                result.append(contentsOf: collectAccessibilityStrings(from: sub))
+            }
+        }
+        return result
+    }
+
     private func render<V: View>(_ view: V, name: String, width: CGFloat, scheme: ColorScheme, output: URL, geometrySamples: inout [DashboardGeometrySample]) throws {
         let recorder = DashboardGeometryRecorder()
         let host = view.frame(width: width, alignment: .topLeading).padding(20).fixedSize(horizontal: false, vertical: true).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme).environment(\.theme, Theme(isDark: scheme == .dark)).environment(\.dashboardGeometryRecorder, recorder).coordinateSpace(name: "tk3-geometry")
@@ -1283,6 +1295,19 @@ struct TK3SnapshotRenderTests {
         let png = try #require(rep.representation(using: .png, properties: [:]))
         try png.write(to: output.appendingPathComponent("\(name).png"))
         let samples = recorder.samples
+        if name.hasPrefix("skills-") {
+            let hostingView = NSHostingView(rootView: AnyView(host))
+            hostingView.frame = NSRect(x: 0, y: 0, width: width + 40, height: 1400)
+            hostingView.layoutSubtreeIfNeeded()
+            let accessibilityText = collectAccessibilityStrings(from: hostingView).joined(separator: " ")
+            for forbidden in ["python3", "skill_contract.py", "skill_retro.py", "session_id", "SKILL.md", "inspector", "L0", "L1", "L2", "L3"] {
+                #expect(!accessibilityText.localizedCaseInsensitiveContains(forbidden), "Forbidden debug text: \\(forbidden)")
+            }
+            let ids = Set(samples.map(\.id))
+            for forbiddenID in ["skills-four-layer-pulse", "skills-inspector-detail", "skills-primary-detail", "inspector-file-skill-md", "inspector-collapse"] {
+                #expect(!ids.contains(forbiddenID), "Forbidden debug identifier: \\(forbiddenID)")
+            }
+        }
         if name.hasPrefix("actionable-") {
             let tiles = samples.filter { $0.role == "domainTile" }
             #expect(tiles.count == 4)

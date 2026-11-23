@@ -12479,6 +12479,23 @@
           }
         }
       }
+    },
+    "dashboard.skills_roi.filter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "筛选"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
