@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import AppKit
 import SwiftUI
 
@@ -372,14 +373,15 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         } else {
             panelItem?.view = view
         }
-        item.button?.toolTip = summaryText
         if case let .populated(snapshot) = statusState {
-            let entries = DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage)
+            let telemetry = menuBarTelemetry(for: snapshot)
+            item.button?.toolTip = summaryText
             item.button?.title = MenuBarDisplayPreferences.shared.badgeMetric.formattedStatusBarTitle(
-                snapshot: snapshot,
-                entries: entries
+                snapshot: snapshot.updatingTokenUsage(telemetry.usage, capturedAt: snapshot.tokenCapturedAt),
+                entries: telemetry.entries
             )
         } else {
+            item.button?.toolTip = Self.unavailableSummary
             item.button?.title = ""
         }
         let targetMenu = item.menu ?? backingMenu
@@ -392,14 +394,15 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         guard case let .populated(snapshot) = statusState else {
             return Self.unavailableSummary
         }
+        let usage = menuBarTelemetry(for: snapshot).usage
         return [
             Self.cpuSummary(snapshot.cpu),
             Self.memorySummary(snapshot.memory),
             Self.storageSummary(snapshot.storage),
-            Self.tokenSummary(snapshot.tokenUsage),
-            Self.cliTokenSummary(cli: .claude, usage: snapshot.tokenUsage),
-            Self.cliTokenSummary(cli: .codex, usage: snapshot.tokenUsage),
-            Self.cliTokenSummary(cli: .copilot, usage: snapshot.tokenUsage),
+            Self.tokenSummary(usage),
+            Self.cliTokenSummary(cli: .claude, usage: usage),
+            Self.cliTokenSummary(cli: .codex, usage: usage),
+            Self.cliTokenSummary(cli: .copilot, usage: usage),
             Self.networkSummary(snapshot.network)
         ].joined(separator: ", ")
     }
@@ -408,16 +411,42 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         guard case let .populated(snapshot) = statusState else {
             return Array(repeating: Self.unavailableSummary, count: 8)
         }
+        let usage = menuBarTelemetry(for: snapshot).usage
         return [
             Self.cpuSummary(snapshot.cpu),
             Self.memorySummary(snapshot.memory),
             Self.storageSummary(snapshot.storage),
-            Self.tokenSummary(snapshot.tokenUsage),
-            Self.cliTokenSummary(cli: .claude, usage: snapshot.tokenUsage),
-            Self.cliTokenSummary(cli: .codex, usage: snapshot.tokenUsage),
-            Self.cliTokenSummary(cli: .copilot, usage: snapshot.tokenUsage),
+            Self.tokenSummary(usage),
+            Self.cliTokenSummary(cli: .claude, usage: usage),
+            Self.cliTokenSummary(cli: .codex, usage: usage),
+            Self.cliTokenSummary(cli: .copilot, usage: usage),
             Self.networkSummary(snapshot.network)
         ]
+    }
+
+    private func menuBarTelemetry(for snapshot: MenuBarSystemSnapshot) -> (usage: CLITokenUsageSnapshot, entries: [CLICostQuotaEntry]) {
+        let targetDate = DashboardWorkspaceStore.todayDateString()
+        guard let live = LiveDashboardTelemetryReader.loadLiveDataset(forDate: targetDate, fallbackUsage: snapshot.tokenUsage) else {
+            return (snapshot.tokenUsage, DashboardWorkspaceStore.deriveCLIEntries(from: snapshot.tokenUsage, forDate: targetDate))
+        }
+        let entriesByCLI = Dictionary(uniqueKeysWithValues: live.entries.map { ($0.cliFilter.rawValue, $0) })
+        let items = AgentCLIKind.allCases.map { cli -> CLITokenUsageItem in
+            guard let entry = entriesByCLI[cli.rawValue] else {
+                return CLITokenUsageItem(cli: cli, inputTokens: 0, outputTokens: 0, cacheTokens: 0, isAvailable: false)
+            }
+            return CLITokenUsageItem(
+                cli: cli,
+                inputTokens: entry.activeTokens,
+                outputTokens: 0,
+                cacheTokens: entry.cacheTokens,
+                isAvailable: entry.isAvailable,
+                interactionCount: entry.interactionCount
+            )
+        }
+        return (
+            CLITokenUsageSnapshot(items: items, claudeWeeklyRemainingPercent: snapshot.tokenUsage.claudeWeeklyRemainingPercent),
+            live.entries
+        )
     }
 
     @objc private func openBriefing() {

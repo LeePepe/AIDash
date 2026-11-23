@@ -1451,6 +1451,16 @@ extension LiveDashboardTelemetryReader {
         return std.date(from: raw)
     }
 
+    internal static func localDateString(from raw: String) -> String? {
+        guard let date = parseISO8601Date(raw) else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
     private static func windowUsedFraction(in windows: [[String: Any]], matching substring: String?) -> Double? {
         for win in windows {
             let name = (win["name"] as? String) ?? ""
@@ -1563,26 +1573,31 @@ extension LiveDashboardTelemetryReader {
             SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
             SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
             SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
-            SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-            SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
+            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
             GROUP_CONCAT(DISTINCT CASE WHEN date(timestamp/1000, 'unixepoch', 'localtime') = '\(safeDate)' AND resolved_model != '' THEN resolved_model ELSE NULL END)
-        FROM requests WHERE client_name LIKE '\(safePrefix)%' AND timestamp >= (strftime('%s', '\(safeDate)', '-7 days') * 1000);
+        FROM requests WHERE client_name LIKE '\(safePrefix)%'
+          AND date(timestamp/1000, 'unixepoch', 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)';
         """
         return executeWindowStatsQuery(dbURL: dbURL, sql: sql)
     }
 
     static func queryCopilotSessionStats(dbURL: URL, dateString: String) -> CLIWindowStats {
         let safeDate = sanitizeSQLToken(dateString)
+        let uncached = "MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_write_tokens, 0))"
         let sql = """
         SELECT
-            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
-            SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-            SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)),
-            GROUP_CONCAT(DISTINCT CASE WHEN substr(created_at, 1, 10) = '\(safeDate)' AND model != '' THEN model ELSE NULL END)
-        FROM assistant_usage_events WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-7 days');
+            SUM(CASE WHEN date(created_at, 'localtime') = '\(safeDate)' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN date(created_at, 'localtime') = '\(safeDate)' THEN \(uncached) ELSE 0 END),
+            SUM(CASE WHEN date(created_at, 'localtime') = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(created_at, 'localtime') = '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(created_at, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN \(uncached) ELSE 0 END),
+            SUM(CASE WHEN date(created_at, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(created_at, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0) ELSE 0 END),
+            GROUP_CONCAT(DISTINCT CASE WHEN date(created_at, 'localtime') = '\(safeDate)' AND model != '' THEN model ELSE NULL END)
+        FROM assistant_usage_events
+        WHERE date(created_at, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)';
         """
         return executeWindowStatsQuery(dbURL: dbURL, sql: sql)
     }
@@ -1591,13 +1606,15 @@ extension LiveDashboardTelemetryReader {
         let safeDate = sanitizeSQLToken(dateString)
         let sql = """
         SELECT
-            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
-            SUM(CASE WHEN substr(ts, 1, 10) = '\(safeDate)' THEN COALESCE(cache_read,0)+COALESCE(cache_creation,0) ELSE 0 END),
-            SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
-            SUM(COALESCE(cache_read,0)+COALESCE(cache_creation,0))
-        FROM fact_turn WHERE substr(ts, 1, 10) >= date('\(safeDate)', '-7 days');
+            SUM(CASE WHEN date(ts, 'localtime') = '\(safeDate)' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN date(ts, 'localtime') = '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(ts, 'localtime') = '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(ts, 'localtime') = '\(safeDate)' THEN COALESCE(cache_read,0)+COALESCE(cache_creation,0) ELSE 0 END),
+            SUM(CASE WHEN date(ts, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(input_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(ts, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(output_tokens,0) ELSE 0 END),
+            SUM(CASE WHEN date(ts, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)' THEN COALESCE(cache_read,0)+COALESCE(cache_creation,0) ELSE 0 END)
+        FROM fact_turn
+        WHERE date(ts, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)';
         """
         return executeWindowStatsQuery(dbURL: dbURL, sql: sql, hasModelsColumn: false, defaultModels: "claude-opus / sonnet")
     }
@@ -1866,8 +1883,7 @@ extension LiveDashboardTelemetryReader {
                SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
         FROM requests
-        WHERE timestamp >= (strftime('%s', '\(safeDate)', '-6 days') * 1000)
-          AND date(timestamp/1000, 'unixepoch', 'localtime') <= '\(safeDate)'
+        WHERE date(timestamp/1000, 'unixepoch', 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)'
         GROUP BY hr, cli_kind;
         """
         var stmt: OpaquePointer?
@@ -1894,13 +1910,13 @@ extension LiveDashboardTelemetryReader {
     ) {
         guard let db = openReadOnlySQLite(path: copilotURL.path) else { return }
         defer { sqlite3_close(db) }
+        let uncached = "MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_write_tokens, 0))"
         let sql = """
         SELECT strftime('%Y-%m-%d %H:00', created_at, 'localtime') as hr,
-               SUM(COALESCE(input_tokens,0)), SUM(COALESCE(output_tokens,0)),
+               SUM(\(uncached)), SUM(COALESCE(output_tokens,0)),
                SUM(COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)), COUNT(*)
         FROM assistant_usage_events
-        WHERE substr(created_at, 1, 10) >= date('\(safeDate)', '-6 days')
-          AND substr(created_at, 1, 10) <= '\(safeDate)'
+        WHERE date(created_at, 'localtime') BETWEEN date('\(safeDate)', '-6 days') AND '\(safeDate)'
         GROUP BY hr;
         """
         var stmt: OpaquePointer?
@@ -1994,10 +2010,11 @@ extension LiveDashboardTelemetryReader {
         let text = readTailLines(of: magpieURL)
         guard !text.isEmpty else { return }
         var map: [String: RoleModelStat] = [:]
-        for line in text.split(separator: "\n") where line.contains(datePrefix) {
+        for line in text.split(separator: "\n") {
             guard let data = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let ts = obj["t"] as? String, ts.hasPrefix(datePrefix) else { continue }
+                  let ts = obj["t"] as? String,
+                  localDateString(from: ts) == datePrefix else { continue }
             let req = (obj["req"] as? String) ?? ""
             let model = (obj["served"] as? String) ?? (obj["model"] as? String) ?? ""
             let agent = (obj["agent"] as? String) ?? "copilot"
@@ -2121,13 +2138,14 @@ extension LiveDashboardTelemetryReader {
                  ELSE 'M2 · Terminal CLI' END as role_group,
             COALESCE(NULLIF(e.copilot_usage_model, ''), NULLIF(e.model, ''), 'default') as effective_model,
             COUNT(*) as runs,
-            SUM(COALESCE(e.input_tokens,0)+COALESCE(e.output_tokens,0)+COALESCE(e.cache_read_tokens,0)+COALESCE(e.cache_write_tokens,0)) as total_tok,
+            SUM(MAX(0, COALESCE(e.input_tokens,0)-COALESCE(e.cache_read_tokens,0)-COALESCE(e.cache_write_tokens,0))
+                + COALESCE(e.output_tokens,0) + COALESCE(e.cache_read_tokens,0) + COALESCE(e.cache_write_tokens,0)) as total_tok,
             AVG(COALESCE(e.duration_ms, 8500)) / 1000.0,
             1.0 * SUM(CASE WHEN COALESCE(e.finish_reason, '') != 'error' THEN 1 ELSE 0 END) / COUNT(*),
             COUNT(DISTINCT e.session_id || '-' || COALESCE(e.turn_index, 0)) as turns
         FROM assistant_usage_events e
         LEFT JOIN sessions s ON e.session_id = s.id
-        WHERE substr(e.created_at, 1, 10) = '\(safeDate)'
+        WHERE date(e.created_at, 'localtime') = '\(safeDate)'
           AND COALESCE(NULLIF(e.copilot_usage_model, ''), NULLIF(e.model, ''), '') NOT LIKE 'group/%'
         GROUP BY role_group, effective_model
         HAVING total_tok > 0

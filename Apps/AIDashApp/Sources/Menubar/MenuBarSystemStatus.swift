@@ -351,14 +351,20 @@ public protocol MenuBarSystemStatusProviding {
 @MainActor
 public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding {
     private let tokenDatabasePaths: CLITokenDatabasePaths
+    private let referenceDate: Date?
     private let ssdMountPath: String
     private var previousCPUTicks: [UInt64]?
     private var cpuUsageHistory: [Double] = []
     private var previousNetworkSample: (rx: UInt64, tx: UInt64, at: Date)?
     private var networkThroughputHistory: [Double] = []
 
-    public init(tokenDatabasePaths: CLITokenDatabasePaths? = nil, ssdMountPath: String = "/Volumes/SSD") {
+    public init(
+        tokenDatabasePaths: CLITokenDatabasePaths? = nil,
+        referenceDate: Date? = nil,
+        ssdMountPath: String = "/Volumes/SSD"
+    ) {
         self.tokenDatabasePaths = tokenDatabasePaths ?? Self.defaultTokenDatabasePaths()
+        self.referenceDate = referenceDate
         self.ssdMountPath = ssdMountPath
     }
     public func captureStatusState() -> MenuBarStatusViewState {
@@ -371,7 +377,7 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         return ComputerStatusSnapshot(capturedAt: now, machine: captureMachine(), cpu: captureCPU(), memory: captureMemory(), network: captureNetwork(), storage: captureStorage())
     }
     public func captureTokenStatus() -> (usage: CLITokenUsageSnapshot, capturedAt: Date) {
-        (captureTokenUsage(), Date())
+        (captureTokenUsage(referenceDate: referenceDate), Date())
     }
 
     // swiftlint:disable large_tuple
@@ -613,31 +619,80 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
         return StorageVolumeSnapshot(id: id, name: name, mountPoint: mountPoint, isMounted: true, isExternalSSD: isExternalSSD, usedBytes: total > available ? total - available : 0, availableBytes: available, totalBytes: total)
     }
     private func fileSystemID(for path: String) -> (Int32, Int32)? { var info = statfs(); guard path.withCString({ statfs($0, &info) == 0 }) else { return nil }; return (info.f_fsid.val.0, info.f_fsid.val.1) }
-    private func captureTokenUsage() -> CLITokenUsageSnapshot {
+    private func captureTokenUsage(referenceDate: Date?) -> CLITokenUsageSnapshot {
         let items = AgentCLIKind.allCases.map { cli in
             switch cli {
             case .claude:
-                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.claude)
+                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.claude, referenceDate: referenceDate)
             case .codex:
-                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.codex)
+                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.codex, referenceDate: referenceDate)
             case .copilot:
-                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.copilot)
+                return readTokenUsage(cli: cli, paths: tokenDatabasePaths.copilot, referenceDate: referenceDate)
             case .kimi, .grok, .deepseek:
-                return readTokenUsage(cli: cli, paths: [])
+                return readTokenUsage(cli: cli, paths: [], referenceDate: referenceDate)
             }
         }
         return CLITokenUsageSnapshot(items: items, claudeWeeklyRemainingPercent: readQuota())
     }
-    private func readTokenUsage(cli: AgentCLIKind, paths: [URL]) -> CLITokenUsageItem {
-        let queries: [String]
+
+    private func readTokenUsage(cli: AgentCLIKind, paths: [URL], referenceDate: Date?) -> CLITokenUsageItem {
+        let targetDate = Self.localDateString(from: referenceDate ?? Date())
+        let queryPairs: [(filtered: String, fallback: String)]
         switch cli {
-        case .claude: queries = ["SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_creation),0), COUNT(*) FROM fact_turn;", "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_creation),0), COUNT(*) FROM turn;"]
-        case .codex: queries = ["SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_write),0), COUNT(*) FROM fact_request WHERE client IN ('codex-tui', 'codex_exec');", "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_write),0), COUNT(*) FROM req;"]
-        case .copilot: queries = ["SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) + COALESCE(SUM(cache_write_tokens),0), COUNT(*) FROM assistant_usage_events;"]
-        case .kimi, .grok, .deepseek: queries = []
+        case .claude:
+            queryPairs = [
+                Self.tokenQueryPair(table: "fact_turn", timePredicate: "date(ts, 'localtime') = '\(targetDate)'", fallbackTable: "fact_turn", cacheWriteColumn: "cache_creation"),
+                Self.tokenQueryPair(table: "turn", timePredicate: "date(ts, 'localtime') = '\(targetDate)'", fallbackTable: "turn", cacheWriteColumn: "cache_creation"),
+                Self.tokenQueryPair(table: "turn", timePredicate: "date(created_at, 'localtime') = '\(targetDate)'", fallbackTable: "turn", cacheWriteColumn: "cache_creation")
+            ]
+        case .codex:
+            queryPairs = [
+                Self.tokenQueryPair(table: "fact_request", timePredicate: "date(ts / 1000, 'unixepoch', 'localtime') = '\(targetDate)'", clientPredicate: "client IN ('codex-tui', 'codex_exec')", fallbackTable: "fact_request", fallbackClientPredicate: "client IN ('codex-tui', 'codex_exec')", cacheWriteColumn: "cache_write"),
+                Self.tokenQueryPair(table: "req", timePredicate: "date(timestamp / 1000, 'unixepoch', 'localtime') = '\(targetDate)'", fallbackTable: "req", cacheWriteColumn: "cache_write")
+            ]
+        case .copilot:
+            let uncached = "MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_write_tokens, 0))"
+            queryPairs = [(
+                "SELECT COALESCE(SUM(\(uncached)),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) + COALESCE(SUM(cache_write_tokens),0), COUNT(*) FROM assistant_usage_events WHERE date(created_at, 'localtime') = '\(targetDate)';",
+                "SELECT COALESCE(SUM(\(uncached)),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) + COALESCE(SUM(cache_write_tokens),0), COUNT(*) FROM assistant_usage_events;"
+            )]
+        case .kimi, .grok, .deepseek:
+            queryPairs = []
         }
-        for path in paths { for query in queries { if let values = readSQLite(path: path.path, query: query) { return CLITokenUsageItem(cli: cli, inputTokens: values.0, outputTokens: values.1, cacheTokens: values.2, isAvailable: true, interactionCount: values.3) } } }
+        for path in paths {
+            for pair in queryPairs {
+                if let values = readSQLite(path: path.path, query: pair.filtered) ?? readSQLite(path: path.path, query: pair.fallback) {
+                    return CLITokenUsageItem(cli: cli, inputTokens: values.0, outputTokens: values.1, cacheTokens: values.2, isAvailable: true, interactionCount: values.3)
+                }
+            }
+        }
         return CLITokenUsageItem(cli: cli, inputTokens: 0, outputTokens: 0, cacheTokens: 0, isAvailable: false)
+    }
+
+    private static func localDateString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private static func tokenQueryPair(
+        table: String,
+        timePredicate: String,
+        clientPredicate: String? = nil,
+        fallbackTable: String,
+        fallbackClientPredicate: String? = nil,
+        cacheWriteColumn: String
+    ) -> (filtered: String, fallback: String) {
+        let projection = "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(\(cacheWriteColumn)),0), COUNT(*)"
+        let filteredWhere = [timePredicate, clientPredicate].compactMap { $0 }.joined(separator: " AND ")
+        let fallbackWhere = fallbackClientPredicate.map { " WHERE \($0)" } ?? ""
+        return (
+            "\(projection) FROM \(table) WHERE \(filteredWhere);",
+            "\(projection) FROM \(fallbackTable)\(fallbackWhere);"
+        )
     }
     // swiftlint:disable large_tuple
     private func readSQLite(path: String, query: String) -> (UInt64, UInt64, UInt64, UInt64)? {
