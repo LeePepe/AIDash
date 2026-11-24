@@ -445,8 +445,9 @@
                 }
                 HStack(spacing: 10) {
                     compactMetric("\(detail.loads7d)", skillsText("calls_7d", "调用"))
-                    if let p95 = detail.scripts.compactMap(\.p95Ms).min() {
-                        compactMetric("\(Int(p95))ms", skillsText("script", "脚本"))
+                    if let p95 = detail.scripts.compactMap(\.p95Ms).min(),
+                       let formattedP95 = Self.formattedScriptMilliseconds(p95) {
+                        compactMetric(formattedP95, skillsText("script", "脚本"))
                     }
                     if let rate = Self.validPassRate(detail.r1PassRate) {
                         compactMetric("\(Int(rate * 100))%", skillsText("quality", "质量"))
@@ -517,7 +518,7 @@
                                 HStack {
                                     compactMetric("\(script.calls30d ?? 0)", skillsText("calls_30d", "30天调用"))
                                     compactMetric(script.successRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("success", "成功率"))
-                                    compactMetric(script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知"), skillsText("p95", "P95"))
+                                    compactMetric(Self.formattedScriptMilliseconds(script.p95Ms) ?? skillsText("unknown", "未知"), skillsText("p95", "P95"))
                                 }
                             }
                             .captureDashboardGeometry(id: "skills-row-\(skill)-script", role: "cell")
@@ -695,6 +696,13 @@
             medianValue(scripts.compactMap(\.p95Ms))
         }
 
+        public static func formattedScriptMilliseconds(_ value: Double?) -> String? {
+            guard let value, value.isFinite, value >= 0 else { return nil }
+            let rounded = value.rounded(.towardZero)
+            guard rounded < Double(Int.max) else { return nil }
+            return "\(Int(rounded))ms"
+        }
+
         public static func aggregateScriptMedian(_ scripts: [SkillScriptDetail]) -> Double? {
             let p50 = scripts.compactMap(\.p50Ms)
             return medianValue(p50.isEmpty ? scripts.compactMap(\.p95Ms) : p50)
@@ -731,18 +739,25 @@
 
         public static func emptyInvocationCount(_ rows: [SkillQualityBehaviorRow]?) -> Int? {
             guard let rows, !rows.isEmpty else { return nil }
-            return rows.reduce(0) { total, row in
+            var total = 0
+            var hasObservation = false
+            for row in rows {
                 if let explicit = row.emptyInvocationCount {
-                    return total + max(0, explicit)
+                    hasObservation = true
+                    total += max(0, explicit)
+                    continue
                 }
                 if let observed = row.observedInvocations, let eligible = row.eligibleInvocations {
-                    return total + max(0, observed - eligible)
+                    hasObservation = true
+                    total += max(0, observed - eligible)
+                    continue
                 }
                 if let observed = row.observedInvocations, let rate = row.emptyInvocationRate, rate.isFinite, (0 ... 1).contains(rate) {
-                    return total + Int((Double(observed) * rate).rounded())
+                    hasObservation = true
+                    total += Int((Double(observed) * rate).rounded())
                 }
-                return total
             }
+            return hasObservation ? total : nil
         }
 
         public static func monthlyAdoptionComparison(details: [SkillInspectorDetail]) -> String? {
@@ -1683,7 +1698,7 @@
             }
 
             private var latencyText: String {
-                script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")
+                SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(script.p95Ms) ?? skillsText("unknown", "未知")
             }
 
             var body: some View {
@@ -1705,7 +1720,7 @@
                             let behavior = report?.qualityBehavior?.first(where: { $0.skill == detail.skill })
                             HStack {
                                 healthMetric("\(detail.loads30d)", skillsText("calls_30d", "30天调用"))
-                                healthMetric(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(detail.scripts).map { "\(Int($0))ms" } ?? skillsText("unknown", "未知"), skillsText("script_median", "脚本中位"))
+                                healthMetric(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(detail.scripts)) ?? skillsText("unknown", "未知"), skillsText("script_median", "脚本中位"))
                                 healthMetric(behavior?.firstPassSatisfactionRate.map { "\(Int($0 * 100))%" } ?? detail.r1PassRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("first_pass", "一次满意"))
                                 healthMetric(behavior?.normalizedEditChurn.map { String(format: "%.2f", $0) } ?? (detail.editChurn > 0 ? String(format: "%.2f", Double(detail.editChurn)) : skillsText("unknown", "未知")), skillsText("normalized_churn", "归一化擦写"))
                             }
