@@ -41,9 +41,10 @@ include a `mode=ro&immutable=1` URI fallback.
 Skills ROI is an App-owned read-only typed projection (`SkillsRoiReport`) of the
 canonical diagnostic populations. Scalar and `.value` observations retain
 metric/population freshness, nulls and estimates; daily source populations are
-not summed. `SkillsRoiDiagnosticsCardView` is a pure status-and-health card: a
-P0 vitals band, one segmented Usage/Evolution/Flywheel stage, and aligned status
-rows with before/current micro-bars. It never renders diagnostic workbenches,
-source previews, commands, session samples, or root-cause panels. Responsive
-geometry is proposal-driven and Decodable report models remain backward
-compatible with existing fixtures.
+not summed. Optional `quality_behavior` and `quality_judge` fields decode
+additively and remain nil for older payloads. `SkillsRoiDiagnosticsCardView`
+renders a proposal-driven 4-column macro vitals band, a 4-object segmented
+stage with 2-column Bento cards, and a single-skill 4-in-1 health sheet opened
+on demand. It never renders diagnostic workbenches, source previews, commands,
+session samples, or root-cause panels. Responsive geometry is proposal-driven
+and Decodable report models remain backward compatible with existing fixtures.

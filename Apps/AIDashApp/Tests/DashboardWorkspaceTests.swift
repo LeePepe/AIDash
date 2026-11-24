@@ -2126,6 +2126,7 @@ struct DashboardWorkspaceTests {
 
         let recordedIDs = Set(recorder.samples.map(\.id))
         #expect(recordedIDs.contains("skills-p0-vitals"))
+        #expect(recorder.samples.filter { $0.role == "vital" }.count == 4)
         #expect(recorder.samples.filter { $0.role == "segmented" }.count == 1)
         #expect(!recordedIDs.contains("skills-table-header"))
         #expect(!recordedIDs.contains("skills-status-stage"))
@@ -2202,6 +2203,51 @@ struct DashboardWorkspaceTests {
                 }
             }
         }
+    }
+
+    @Test("Skills quality fields decode additively and preserve missing values")
+    func skillsQualityContractDecoding() throws {
+        let payload = """
+        {
+          "metadata": {"sample_size": 4, "coverage_status": "healthy"},
+          "diagnostics": {},
+          "quality_behavior": [{
+            "skill": "team-lead",
+            "observed_invocations": 12,
+            "first_pass_satisfaction_rate": 0.75,
+            "active_duration_median_sec": 144.0
+          }],
+          "quality_judge": {
+            "eligible_skill_count": 2,
+            "judged_skill_count": 1,
+            "coverage_pct": 0.5,
+            "skills": [{
+              "skill": "team-lead",
+              "sampled": 4,
+              "judged": 3,
+              "score_mean": 4.5
+            }]
+          }
+        }
+        """
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(payload.utf8))
+        let behavior = try #require(report.qualityBehavior?.first)
+        #expect(behavior.skill == "team-lead")
+        #expect(behavior.observedInvocations == 12)
+        #expect(behavior.firstPassSatisfactionRate == 0.75)
+        #expect(behavior.activeDurationMedianSec == 144)
+        #expect(behavior.correctionCount == nil)
+        let judge = try #require(report.qualityJudge)
+        #expect(judge.eligibleSkillCount == 2)
+        #expect(judge.judgedSkillCount == 1)
+        #expect(judge.skills.first?.scoreMean == 4.5)
+
+        let legacy = try JSONDecoder().decode(
+            SkillsRoiReport.self,
+            from: Data(#"{"metadata":{},"diagnostics":{}}"#.utf8)
+        )
+        #expect(legacy.qualityBehavior == nil)
+        #expect(legacy.qualityJudge == nil)
     }
 }
 #endif
