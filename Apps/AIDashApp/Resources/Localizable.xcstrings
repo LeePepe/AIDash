@@ -13719,6 +13719,13 @@
           "en": {"stringUnit": {"state": "translated", "value": "normalized edit churn"}},
           "zh-Hans": {"stringUnit": {"state": "translated", "value": "归一化擦写"}}
         }
+      },
+      "dashboard.skills_roi.raw_edit_churn": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "raw edit churn"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "原始擦写"}}
+        }
       }
   },
   "version": "1.0"

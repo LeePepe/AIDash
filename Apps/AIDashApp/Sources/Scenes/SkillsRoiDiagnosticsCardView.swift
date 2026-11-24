@@ -365,8 +365,8 @@
                     + " · \(skillsText("documentation_words", "说明文档")) \(documentationWords.map(String.init) ?? skillsText("unknown", "未知"))"
                 tint = theme.classificationTint(.relationship)
             case .quality:
-                value = satisfaction.map { "\(Int($0 * 100))%" }
-                    ?? (aggregatesAvailable ? Self.weightedFallbackPassRate(report: report, details: details) : nil).map { "\(Int($0 * 100))%" }
+                value = Self.optionalPercentText(satisfaction)
+                    ?? (aggregatesAvailable ? Self.optionalPercentText(Self.weightedFallbackPassRate(report: report, details: details)) : nil)
                     ?? skillsText("unknown", "未知")
                 subtitle = "\(skillsText("no_error_rate", "无错率")) \(Self.percentText(noError))"
                     + " · \(skillsText("judge_mean", "抽检均分")) \(judgeMean.map { String(format: "%.1f", $0) } ?? skillsText("unknown", "未知"))"
@@ -446,12 +446,11 @@
                 }
                 HStack(spacing: 10) {
                     compactMetric("\(detail.loads7d)", skillsText("calls_7d", "调用"))
-                    if let p95 = detail.scripts.compactMap(\.p95Ms).min(),
-                       let formattedP95 = Self.formattedScriptMilliseconds(p95) {
-                        compactMetric(formattedP95, skillsText("script", "脚本"))
+                    if let p95Text = Self.millisecondsText(detail.scripts.compactMap(\.p95Ms).min()) {
+                        compactMetric(p95Text, skillsText("script", "脚本"))
                     }
-                    if let rate = Self.validPassRate(detail.r1PassRate) {
-                        compactMetric("\(Int(rate * 100))%", skillsText("quality", "质量"))
+                    if let rateText = Self.optionalPercentText(detail.r1PassRate) {
+                        compactMetric(rateText, skillsText("quality", "质量"))
                     }
                     if detail.editChurn > 0 {
                         compactMetric("\(detail.editChurn)", skillsText("changes", "变动"))
@@ -515,11 +514,14 @@
                     } else {
                         ForEach(Array(scripts.enumerated()), id: \.offset) { _, item in
                             let (skill, script) = item
-                            detailCard(title: script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath, subtitle: skill) {
+                            let scriptTitle = script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath
+                            let successMetric = Self.optionalPercentText(script.successRate) ?? skillsText("unknown", "未知")
+                            let latencyMetric = Self.millisecondsText(script.p95Ms) ?? skillsText("unknown", "未知")
+                            detailCard(title: scriptTitle, subtitle: skill) {
                                 HStack {
                                     compactMetric("\(script.calls30d ?? 0)", skillsText("calls_30d", "30天调用"))
-                                    compactMetric(script.successRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("success", "成功率"))
-                                    compactMetric(Self.formattedScriptMilliseconds(script.p95Ms) ?? skillsText("unknown", "未知"), skillsText("p95", "P95"))
+                                    compactMetric(successMetric, skillsText("success", "成功率"))
+                                    compactMetric(latencyMetric, skillsText("p95", "P95"))
                                 }
                             }
                             .captureDashboardGeometry(id: "skills-row-\(skill)-script", role: "cell")
@@ -582,7 +584,7 @@
                                 HStack {
                                     compactMetric("\(row.judged ?? 0)", skillsText("judged", "抽检"))
                                     compactMetric(row.scoreMean.map { String(format: "%.1f", $0) } ?? skillsText("unknown", "未知"), skillsText("score", "评分"))
-                                    compactMetric(row.coveragePct.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("coverage", "覆盖"))
+                                    compactMetric(Self.optionalPercentText(row.coveragePct) ?? skillsText("unknown", "未知"), skillsText("coverage", "覆盖"))
                                 }
                             }
                             .captureDashboardGeometry(id: "skills-row-\(row.skill)-quality", role: "cell")
@@ -694,7 +696,8 @@
         }
 
         public static func aggregateScriptP95(_ scripts: [SkillScriptDetail]) -> Double? {
-            medianValue(scripts.compactMap(\.p95Ms))
+            let valid = scripts.compactMap(\.p95Ms).filter { safeNonNegativeInt($0) != nil }
+            return medianValue(valid)
         }
 
         public static func formattedScriptMilliseconds(_ value: Double?) -> String? {
@@ -705,15 +708,16 @@
         }
 
         public static func aggregateScriptMedian(_ scripts: [SkillScriptDetail]) -> Double? {
-            let p50 = scripts.compactMap(\.p50Ms)
-            return medianValue(p50.isEmpty ? scripts.compactMap(\.p95Ms) : p50)
+            let p50 = scripts.compactMap(\.p50Ms).filter { safeNonNegativeInt($0) != nil }
+            let p95 = scripts.compactMap(\.p95Ms).filter { safeNonNegativeInt($0) != nil }
+            return medianValue(p50.isEmpty ? p95 : p50)
         }
 
         public static func aggregateDocumentationWords(_ details: [SkillInspectorDetail]) -> Int? {
             guard !details.isEmpty else { return nil }
             let totalWords = details.reduce(0) { partial, detail in partial + detail.bodyTokensEst }
             let averageWords = Double(totalWords) / Double(details.count)
-            return Int(averageWords.rounded())
+            return safeNonNegativeInt(averageWords)
         }
 
         public static func aggregateObservationsAvailable(in report: SkillsRoiReport) -> Bool {
@@ -746,16 +750,16 @@
                 if let explicit = row.emptyInvocationCount {
                     hasObservation = true
                     total += max(0, explicit)
-                    continue
-                }
-                if let observed = row.observedInvocations, let eligible = row.eligibleInvocations {
+                } else if let observed = row.observedInvocations, let eligible = row.eligibleInvocations {
                     hasObservation = true
                     total += max(0, observed - eligible)
-                    continue
-                }
-                if let observed = row.observedInvocations, let rate = row.emptyInvocationRate, rate.isFinite, (0 ... 1).contains(rate) {
+                } else if let observed = row.observedInvocations,
+                          let rate = row.emptyInvocationRate,
+                          rate.isFinite,
+                          (0 ... 1).contains(rate),
+                          let derived = safeNonNegativeInt((Double(observed) * rate).rounded()) {
                     hasObservation = true
-                    total += Int((Double(observed) * rate).rounded())
+                    total += derived
                 }
             }
             return hasObservation ? total : nil
@@ -892,7 +896,7 @@
             } ?? "→"
             let highPassCount = managedCurrent ? managed.filter { (Self.validPassRate($0.r1PassRate) ?? 0) >= 0.80 }.count : 0
             let cacheHit = report.diagnostics.context?.cacheHitPercent.value ?? managed.compactMap(\.kvCacheHitPct).first
-            let cacheSummary = cacheHit.map { "\(Int($0.rounded()))%" } ?? "—"
+            let cacheSummary = Self.optionalPercentText(cacheHit) ?? "—"
             let retro = report.resolvedSkillRetro
             let curedItems = Self.curedRoadblocks(in: report)
             let sampleSize = retro.sampleSize > 0 ? retro.sampleSize : (report.metadata.sample ?? 0)
@@ -1612,6 +1616,24 @@
             return value
         }
 
+        public static func safeNonNegativeInt(_ value: Double?) -> Int? {
+            guard let value, value.isFinite else { return nil }
+            let rounded = value.rounded()
+            guard rounded >= 0, rounded < Double(Int.max) else { return nil }
+            return Int(exactly: rounded)
+        }
+
+        public static func millisecondsText(_ value: Double?) -> String? {
+            safeNonNegativeInt(value).map { "\($0)ms" }
+        }
+
+        public static func optionalPercentText(_ value: Double?) -> String? {
+            guard let raw = value, raw.isFinite else { return nil }
+            let normalized = raw > 1 && raw <= 100 ? raw / 100.0 : raw
+            guard (0 ... 1).contains(normalized) else { return nil }
+            return safeNonNegativeInt(normalized * 100).map { "\($0)%" }
+        }
+
         private static func percentText(_ value: Double?) -> String {
             guard let value = validPassRate(value) else { return "—" }
             return "\(Int(value * 100))%"
@@ -1695,11 +1717,11 @@
             }
 
             private var successText: String {
-                script.successRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知")
+                SkillsRoiDiagnosticsCardView.optionalPercentText(script.successRate) ?? skillsText("unknown", "未知")
             }
 
             private var latencyText: String {
-                SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(script.p95Ms) ?? skillsText("unknown", "未知")
+                SkillsRoiDiagnosticsCardView.millisecondsText(script.p95Ms) ?? skillsText("unknown", "未知")
             }
 
             var body: some View {
@@ -1713,25 +1735,68 @@
             }
         }
 
+        private struct ReferenceRow: View {
+            @Environment(\.theme) private var theme
+            let reference: SkillReferenceDetail
+
+            private var statusLabel: String {
+                reference.isUnhit ? skillsText("reference_unhit", "未命中") : skillsText("reference_hit_status", "已命中")
+            }
+
+            private var fileName: String {
+                reference.relPath.split(separator: "/").last.map(String.init) ?? reference.relPath
+            }
+
+            var body: some View {
+                let textValue = "\(statusLabel) · \(fileName)"
+                Text(textValue)
+                    .font(.caption2)
+                    .foregroundStyle(theme.text(.body))
+            }
+        }
+
         var body: some View {
+            let behavior = report?.qualityBehavior?.first(where: { $0.skill == detail.skill })
+            let medianText = SkillsRoiDiagnosticsCardView.millisecondsText(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(detail.scripts))
+                ?? skillsText("unknown", "未知")
+            let firstPassText = SkillsRoiDiagnosticsCardView.optionalPercentText(behavior?.firstPassSatisfactionRate)
+                ?? SkillsRoiDiagnosticsCardView.optionalPercentText(detail.r1PassRate)
+                ?? skillsText("unknown", "未知")
+            let hasNormalizedChurn = behavior?.normalizedEditChurn != nil
+            let churnValueText: String = {
+                if let normalized = behavior?.normalizedEditChurn, normalized.isFinite, normalized >= 0 {
+                    return String(format: "%.2f", normalized)
+                }
+                if detail.editChurn > 0 {
+                    return "\(detail.editChurn)"
+                }
+                return skillsText("unknown", "未知")
+            }()
+            let churnLabelText = hasNormalizedChurn || detail.editChurn <= 0
+                ? skillsText("normalized_churn", "归一化擦写")
+                : skillsText("raw_edit_churn", "原始擦写")
+
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         healthSection(skillsText("health_summary", "四维体检概览")) {
-                            let behavior = report?.qualityBehavior?.first(where: { $0.skill == detail.skill })
                             HStack {
                                 healthMetric("\(detail.loads30d)", skillsText("calls_30d", "30天调用"))
-                                healthMetric(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(detail.scripts)) ?? skillsText("unknown", "未知"), skillsText("script_median", "脚本中位"))
-                                healthMetric(behavior?.firstPassSatisfactionRate.map { "\(Int($0 * 100))%" } ?? detail.r1PassRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("first_pass", "一次满意"))
-                                healthMetric(behavior?.normalizedEditChurn.map { String(format: "%.2f", $0) } ?? (detail.editChurn > 0 ? String(format: "%.2f", Double(detail.editChurn)) : skillsText("unknown", "未知")), skillsText("normalized_churn", "归一化擦写"))
+                                healthMetric(medianText, skillsText("script_median", "脚本中位"))
+                                healthMetric(firstPassText, skillsText("first_pass", "一次满意"))
+                                healthMetric(churnValueText, churnLabelText)
                             }
                             if let behavior {
-                                Text("\(skillsText("observed", "观测调用")) \(behavior.observedInvocations ?? 0) · \(skillsText("corrections", "纠正")) \(behavior.correctionCount ?? 0) · \(skillsText("active_duration", "活跃耗时")) \(behavior.activeDurationMedianSec.map { String(format: "%.1fm", $0 / 60) } ?? skillsText("unknown", "未知"))")
+                                let durationText = behavior.activeDurationMedianSec.flatMap { $0.isFinite ? String(format: "%.1fm", $0 / 60) : nil }
+                                    ?? skillsText("unknown", "未知")
+                                let summaryLine = "\(skillsText("observed", "观测调用")) \(behavior.observedInvocations ?? 0) · \(skillsText("corrections", "纠正")) \(behavior.correctionCount ?? 0) · \(skillsText("active_duration", "活跃耗时")) \(durationText)"
+                                Text(summaryLine)
                                     .font(.caption)
                                     .foregroundStyle(theme.text(.body))
                             }
                             if let evolution = report?.versionEvolution.first(where: { $0.skill == detail.skill }) {
-                                Text(skillsText("version_comparison", "版本对比") + " " + SkillsRoiDiagnosticsCardView.formatVersionComparison(before: evolution.beforeVersion?.combinedVersion, current: evolution.combinedVersion))
+                                let versionLine = skillsText("version_comparison", "版本对比") + " " + SkillsRoiDiagnosticsCardView.formatVersionComparison(before: evolution.beforeVersion?.combinedVersion, current: evolution.combinedVersion)
+                                Text(versionLine)
                                     .font(.caption)
                                     .foregroundStyle(theme.text(.body))
                             }
@@ -1742,28 +1807,32 @@
                             }
                         }
                         healthSection(skillsText("health_documents", "说明与参考文档")) {
-                            Text("\(detail.skillMdLines) " + skillsText("lines", "行") + " · \(detail.bodyTokensEst) " + skillsText("words", "词"))
-                            Text("\(detail.references.count - detail.unhitRefsCount)/\(detail.references.count) " + skillsText("reference_hit", "参考命中") + " · \(detail.unhitRefsCount) " + skillsText("redundancy", "冗余"))
+                            let docSummary = "\(detail.skillMdLines) \(skillsText("lines", "行")) · \(detail.bodyTokensEst) \(skillsText("words", "词"))"
+                            let hitCount = detail.references.count - detail.unhitRefsCount
+                            let refSummary = "\(hitCount)/\(detail.references.count) \(skillsText("reference_hit", "参考命中")) · \(detail.unhitRefsCount) \(skillsText("redundancy", "冗余"))"
+                            Text(docSummary)
+                            Text(refSummary)
                                 .foregroundStyle(theme.text(.body))
                             ForEach(detail.references) { reference in
-                                Text((reference.isUnhit ? skillsText("reference_unhit", "未命中") : skillsText("reference_hit_status", "已命中")) + " · " + (reference.relPath.split(separator: "/").last.map(String.init) ?? reference.relPath))
-                                    .font(.caption2)
-                                    .foregroundStyle(theme.text(.body))
+                                ReferenceRow(reference: reference)
                             }
                         }
                         healthSection(skillsText("health_quality", "Eval 与优化建议")) {
-                            Text("\(detail.evalCases.count) " + skillsText("eval_cases", "条用例") + " · \(detail.evalInterceptions) " + skillsText("interceptions", "拦截") + " · \(detail.evalEscapes) " + skillsText("escapes", "漏检"))
+                            let evalSummary = "\(detail.evalCases.count) \(skillsText("eval_cases", "条用例")) · \(detail.evalInterceptions) \(skillsText("interceptions", "拦截")) · \(detail.evalEscapes) \(skillsText("escapes", "漏检"))"
+                            Text(evalSummary)
                                 .foregroundStyle(theme.text(.body))
                             ForEach(detail.evalCases) { evalCase in
-                                Text("\(evalCase.title) · \(evalCase.status) · \(evalCase.interceptions30d)/\(evalCase.escapes30d)")
+                                let caseLine = "\(evalCase.title) · \(evalCase.status) · \(evalCase.interceptions30d)/\(evalCase.escapes30d)"
+                                Text(caseLine)
                                     .font(.caption)
                                     .foregroundStyle(theme.text(.body))
                             }
                             Text(optimizationGuidance(detail: detail))
                                 .foregroundStyle(theme.text(.body))
                             if let judge = report?.qualityJudge?.skills.first(where: { $0.skill == detail.skill }),
-                               let score = judge.scoreMean {
-                                Text(skillsText("score", "评分") + " \(String(format: "%.1f", score))")
+                               let score = judge.scoreMean, score.isFinite {
+                                let scoreLine = "\(skillsText("score", "评分")) \(String(format: "%.1f", score))"
+                                Text(scoreLine)
                                     .foregroundStyle(theme.text(.body))
                             }
                         }
