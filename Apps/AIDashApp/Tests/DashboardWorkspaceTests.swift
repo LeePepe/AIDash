@@ -2296,6 +2296,7 @@ struct DashboardWorkspaceTests {
         ]
         let extremeScript = try JSONDecoder().decode(SkillScriptDetail.self, from: Data(#"{"rel_path":"extreme.py","p95_ms":1e20}"#.utf8))
         #expect(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(extremeScript.p95Ms) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(SkillsRoiDiagnosticsCardView.aggregateScriptMedian([extremeScript])) == nil)
         #expect(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(scripts[0].p95Ms) == "120ms")
         #expect(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(scripts) == 111)
         #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .all).count == 3)

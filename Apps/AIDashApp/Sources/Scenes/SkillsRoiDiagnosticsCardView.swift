@@ -349,6 +349,7 @@
             let value: String
             let subtitle: String
             let tint: Color
+            let formattedScriptMedian = Self.formattedScriptMilliseconds(scriptMedian)
             switch dimension {
             case .adoption:
                 value = active.map { "\($0.active) / \($0.total)" } ?? skillsText("unknown", "未知")
@@ -359,8 +360,8 @@
                     + " · \(skillsText("empty_invocations", "空唤起")) \(empty.map(String.init) ?? skillsText("unknown", "未知"))"
                 tint = theme.primary.primary
             case .efficiency:
-                value = behavior.map { String(format: "%.1fm", $0 / 60) } ?? scriptMedian.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")
-                subtitle = (scriptMedian.map { "\(skillsText("script_median", "脚本中位")) \(Int($0))ms" } ?? skillsText("no_duration", "暂无耗时数据"))
+                value = behavior.map { String(format: "%.1fm", $0 / 60) } ?? formattedScriptMedian ?? skillsText("unknown", "未知")
+                subtitle = (formattedScriptMedian.map { "\(skillsText("script_median", "脚本中位")) \($0)" } ?? skillsText("no_duration", "暂无耗时数据"))
                     + " · \(skillsText("documentation_words", "说明文档")) \(documentationWords.map(String.init) ?? skillsText("unknown", "未知"))"
                 tint = theme.classificationTint(.relationship)
             case .quality:
