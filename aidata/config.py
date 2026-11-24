@@ -9,6 +9,8 @@ Immutable module-level constants — never mutated at runtime.
 from __future__ import annotations
 
 import os
+import subprocess  # nosec B404 - fixed python probe only
+import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -37,8 +39,57 @@ ICLOUD_SKILLS_MIRROR_DIR = AIDASH_ICLOUD_SYNC_DIR / "skills-mirror"
 ICLOUD_TELEMETRY_SHARDS_DIR = AIDASH_ICLOUD_SYNC_DIR / "telemetry-shards"
 
 
+_ICLOUD_PROBE_CACHE: dict[Path, bool] = {}
+_ICLOUD_PROBE_SCRIPT = """
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+root = Path(sys.argv[1])
+root.mkdir(parents=True, exist_ok=True)
+os.listdir(root)
+fd, temp_name = tempfile.mkstemp(prefix=".aidash-icloud-probe.", dir=root)
+try:
+    os.write(fd, b"ok")
+    os.fsync(fd)
+finally:
+    os.close(fd)
+temp_path = Path(temp_name)
+renamed = root / f"{temp_path.name}.renamed"
+try:
+    temp_path.replace(renamed)
+finally:
+    temp_path.unlink(missing_ok=True)
+    renamed.unlink(missing_ok=True)
+"""
+
+
+def _probe_icloud_sync_dir(path: Path, timeout_sec: float = 1.5) -> bool:
+    """Verify iCloud sync dir supports bounded read + rename without hanging."""
+    cached = _ICLOUD_PROBE_CACHE.get(path)
+    if cached is not None:
+        return cached
+    try:
+        result = subprocess.run(  # nosec B603
+            [sys.executable, "-c", _ICLOUD_PROBE_SCRIPT, str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+            timeout=timeout_sec,
+        )
+        ok = result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    _ICLOUD_PROBE_CACHE[path] = ok
+    return ok
+
+
 def resolve_icloud_sync_dir(explicit: Path | None = None) -> Path | None:
     """Resolve an iCloud sync directory without touching a test host's iCloud."""
+    if os.environ.get("AIDASH_DISABLE_ICLOUD_MIRROR") == "1":
+        return None
     if explicit is not None:
         return Path(explicit).expanduser()
     configured = os.environ.get("AIDASH_ICLOUD_SYNC_DIR")
@@ -47,6 +98,9 @@ def resolve_icloud_sync_dir(explicit: Path | None = None) -> Path | None:
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return None
     if not ICLOUD_DRIVE_ROOT.exists():
+        return None
+    probe_timeout = float(os.environ.get("AIDASH_ICLOUD_PROBE_TIMEOUT_SEC", "1.5"))
+    if not _probe_icloud_sync_dir(AIDASH_ICLOUD_SYNC_DIR, timeout_sec=probe_timeout):
         return None
     return AIDASH_ICLOUD_SYNC_DIR
 

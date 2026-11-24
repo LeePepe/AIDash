@@ -386,6 +386,88 @@ def test_agent_efficiency_snapshot_degrades_cleanly_when_queries_fail(tmp_path):
 
 
 @pytest.mark.unit
+def test_snapshots_survive_icloud_mirror_replace_failure_and_timeout(monkeypatch, tmp_path):
+    import json
+    import subprocess
+    from pathlib import Path
+
+    from L5_apps.digest import agent_efficiency_snapshot as aes
+    from L5_apps.digest import skills_roi_snapshot as srs
+
+    report_fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    report_path = tmp_path / "report.json"
+    report_path.write_text(report_fixture.read_text(encoding="utf-8"), encoding="utf-8")
+
+    icloud_dir = tmp_path / "icloud"
+    local_dir = tmp_path / "local-job"
+    skills_out = local_dir / "skills-roi.json"
+    eff_out = local_dir / "agent-efficiency.json"
+
+    real_replace = Path.replace
+
+    def fail_icloud_replace(self: Path, target: Path):
+        if str(icloud_dir) in str(target):
+            raise PermissionError("Operation not permitted on CloudDocs")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_icloud_replace)
+
+    roi_payload = srs.write_snapshot(
+        skills_out,
+        report_path,
+        query_runner=lambda name, params: (
+            [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1)],
+            ["day", "source", "skill", "n", "sessions"],
+        ),
+        icloud_sync_dir=icloud_dir,
+    )
+    assert roi_payload["coverage_status"] == "healthy"
+    assert json.loads(skills_out.read_text(encoding="utf-8")) == roi_payload
+    assert json.loads(
+        (local_dir / ".icloud-mirror-fallback-skills-roi.json").read_text(encoding="utf-8")
+    ) == roi_payload
+    assert list((icloud_dir / "jobs" / "aidata-digest").glob(".skills-roi.json.*")) == []
+
+    monkeypatch.setattr(Path, "replace", real_replace)
+    monkeypatch.setenv("AIDASH_ICLOUD_FORCE_SUBPROCESS", "1")
+    monkeypatch.setattr(
+        aes.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(cmd="mirror", timeout=0.2)
+        ),
+    )
+    eff_payload = aes.write_snapshot(
+        eff_out,
+        magpie_path=tmp_path / "missing-usage.jsonl",
+        query_runner=lambda name, params=None: (
+            [("writer", "Writer", 4, 2, 4, 3, 1, 0, 0.75, 120.0, 240.0, 5000)],
+            [
+                "role_key", "role_label", "runs_count", "goals_count", "tasks_count",
+                "r1_count", "r2_count", "r3_plus_count", "r1_pass_rate",
+                "median_duration_sec", "p90_duration_sec", "estimated_tokens",
+            ],
+        )
+        if name == aes.ROLE_QUERY
+        else (
+            [("2026-11-18", 1, 2, 2, 0, 0, 1.0, 100.0, 180.0, 0, 1000, 4000, 5000)],
+            [
+                "cst_day", "goals_completed", "tasks_completed", "r1_count",
+                "r2_count", "r3_plus_count", "r1_pass_rate", "median_duration_sec",
+                "p90_duration_sec", "blocked_events", "steering_tokens",
+                "coding_tokens", "total_tokens",
+            ],
+        ),
+        icloud_sync_dir=icloud_dir,
+    )
+    assert eff_payload["coverage_status"] == "healthy"
+    assert json.loads(eff_out.read_text(encoding="utf-8")) == eff_payload
+    assert json.loads(
+        (local_dir / ".icloud-mirror-fallback-agent-efficiency.json").read_text(encoding="utf-8")
+    ) == eff_payload
+
+
+@pytest.mark.unit
 def test_skills_roi_snapshot_preserves_and_validates_skill_details(tmp_path):
     import json
     from pathlib import Path

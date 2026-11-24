@@ -176,7 +176,7 @@ def _elapsed_ms(start: Any, end: Any) -> int | None:
 def collect() -> int:
     from adapters import cloud_sync
 
-    cloud_sync.pull_icloud_telemetry_shards()
+    cloud_sync.pull_icloud_telemetry_shards(sources=(SOURCE,))
     if not CLAUDE_PROJECTS_DIR.exists():
         return 0
     watermark = get_watermark(SOURCE) or {}

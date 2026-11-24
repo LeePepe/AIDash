@@ -265,6 +265,44 @@ def test_bot_tl_collect_ignores_mtime_and_remembers_replayed_history(monkeypatch
 
 
 @pytest.mark.unit
+def test_bot_tl_skips_remote_scan_when_icloud_mirror_disabled(monkeypatch, watermarks):
+    monkeypatch.setenv("AIDASH_DISABLE_ICLOUD_MIRROR", "1")
+    monkeypatch.setattr(bot_tl, "_local_records", lambda **_kwargs: [])
+    monkeypatch.setattr(bot_tl, "_prmon_records", lambda: ([], None))
+    monkeypatch.setattr(bot_tl, "write_raw", lambda _source, rows: len(rows))
+    monkeypatch.setattr(
+        cloud_sync,
+        "pull_remote_batches",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("remote pull")),
+    )
+    monkeypatch.setattr(
+        bot_tl,
+        "_remote_records",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("remote scan")),
+    )
+
+    assert bot_tl.collect() == 0
+
+
+@pytest.mark.unit
+def test_cloud_sync_copy_atomically_and_commands_bound_timeouts(monkeypatch, tmp_path):
+    import subprocess
+
+    source = tmp_path / "src.jsonl"
+    source.write_text('{"k":1}\n', encoding="utf-8")
+    destination = tmp_path / "dst" / "out.jsonl"
+    monkeypatch.setenv("AIDASH_ICLOUD_FORCE_SUBPROCESS", "1")
+    monkeypatch.setattr(
+        cloud_sync.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired(cmd="copy", timeout=0.1)),
+    )
+    assert cloud_sync._copy_atomically(source, destination, timeout_sec=0.1) is False
+    assert cloud_sync._run_json("az", ["storage", "blob", "list"], {}) is None
+    assert cloud_sync._download("az", {}, "blob.jsonl", destination) is False
+
+
+@pytest.mark.unit
 def test_bot_tl_redacts_local_and_remote_home_paths(monkeypatch, tmp_path):
     content = '{"detail":"/Users/example/private", "path":"/home/example/ledger.md"}'
     local = bot_tl._payload(Path("/Users/example/handoff/heartbeat.json"), "prmon_heartbeat", content)

@@ -15,7 +15,8 @@ import json
 import os
 import re
 import sqlite3
-import subprocess
+import subprocess  # nosec B404 - fixed python helper only
+import sys
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
@@ -24,7 +25,7 @@ from typing import Any
 
 import config
 import serve
-from config import resolve_icloud_sync_dir
+from config import ICLOUD_DRIVE_ROOT, resolve_icloud_sync_dir
 from L5_apps.digest.quality_snapshot import load_snapshot_from_warehouse
 from timeutil import CST
 
@@ -1924,33 +1925,119 @@ def _daily_window(start: str, end: str) -> dict[str, str]:
     return {"day_from": lower.date().isoformat(), "day_to": upper.date().isoformat()}
 
 
-def _mirror_to_icloud(payload: dict[str, Any], filename: str, sync_dir: Path | None) -> None:
+_MIRROR_SUBPROCESS_SCRIPT = """
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+dst = Path(sys.argv[1])
+dst.parent.mkdir(parents=True, exist_ok=True)
+data = sys.stdin.buffer.read()
+tmp = None
+try:
+    with tempfile.NamedTemporaryFile(mode="wb", dir=dst.parent, prefix=f".{dst.name}.", delete=False) as fh:
+        tmp = Path(fh.name)
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+    tmp.replace(dst)
+except OSError:
+    if tmp is not None:
+        tmp.unlink(missing_ok=True)
+    dst.write_bytes(data)
+finally:
+    if tmp is not None:
+        tmp.unlink(missing_ok=True)
+"""
+
+
+def _is_cloud_docs_dir(path: Path) -> bool:
+    expanded = path.expanduser()
+    try:
+        return expanded.is_relative_to(ICLOUD_DRIVE_ROOT)
+    except (OSError, ValueError):
+        return str(ICLOUD_DRIVE_ROOT) in str(expanded)
+
+
+def _write_local_mirror_fallback(raw_bytes: bytes, filename: str, fallback_dir: Path | None) -> None:
+    if fallback_dir is None:
+        return
+    with contextlib.suppress(OSError):
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        (fallback_dir / f".icloud-mirror-fallback-{filename}").write_bytes(raw_bytes)
+
+
+def _mirror_to_icloud(
+    payload: dict[str, Any],
+    filename: str,
+    sync_dir: Path | None,
+    *,
+    timeout_sec: float | None = None,
+    fallback_dir: Path | None = None,
+) -> bool:
     resolved = resolve_icloud_sync_dir(sync_dir)
     if resolved is None:
-        return
+        return False
+    raw_bytes = (json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
     destination_dir = resolved / "jobs" / "aidata-digest"
-    destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / filename
+    use_subprocess = (
+        os.environ.get("AIDASH_ICLOUD_FORCE_SUBPROCESS") == "1"
+        or _is_cloud_docs_dir(resolved)
+    )
+    if use_subprocess:
+        eff_timeout = (
+            timeout_sec
+            if timeout_sec is not None
+            else float(os.environ.get("AIDASH_ICLOUD_MIRROR_TIMEOUT_SEC", "5.0"))
+        )
+        try:
+            result = subprocess.run(  # nosec B603
+                [sys.executable, "-c", _MIRROR_SUBPROCESS_SCRIPT, str(destination)],
+                input=raw_bytes,
+                capture_output=True,
+                check=False,
+                shell=False,
+                timeout=eff_timeout,
+            )
+            if result.returncode == 0:
+                return True
+        except (OSError, TimeoutError, subprocess.SubprocessError):
+            pass
+        _write_local_mirror_fallback(raw_bytes, filename, fallback_dir)
+        return False
+
     tmp: Path | None = None
     try:
+        destination_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=destination_dir,
-            prefix=f".{filename}.", delete=False,
+            mode="wb",
+            dir=destination_dir,
+            prefix=f".{filename}.",
+            delete=False,
         ) as handle:
             tmp = Path(handle.name)
-            json.dump(payload, handle, ensure_ascii=False, indent=2, allow_nan=False)
-            handle.write("\n")
+            handle.write(raw_bytes)
             handle.flush()
-            os.fsync(handle.fileno())
+            with contextlib.suppress(OSError):
+                os.fsync(handle.fileno())
         tmp.replace(destination)
-        directory = os.open(destination_dir, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        return True
+    except (OSError, TimeoutError):
+        if tmp is not None:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+            tmp = None
+        _write_local_mirror_fallback(raw_bytes, filename, fallback_dir)
+        with contextlib.suppress(OSError):
+            destination_dir.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(raw_bytes)
+        return False
     finally:
         if tmp is not None:
-            tmp.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
 
 
 def write_snapshot(
@@ -1969,13 +2056,20 @@ def write_snapshot(
     """Capture the real report and query grain, then atomically replace output."""
     errors: list[str] = [f"retro producer exited {producer_exit_code}"] if producer_exit_code else []
     prior_snapshot: dict[str, Any] = {}
-    for candidate in (output, (resolve_icloud_sync_dir(icloud_sync_dir) / "jobs" / "aidata-digest" / output.name) if resolve_icloud_sync_dir(icloud_sync_dir) is not None else None):
-        if candidate is not None and candidate.is_file():
-            with contextlib.suppress(OSError, ValueError, TypeError):
-                loaded_prior = json.loads(candidate.read_text(encoding="utf-8"))
-                if isinstance(loaded_prior, dict) and loaded_prior:
-                    prior_snapshot = loaded_prior
-                    break
+    if output.is_file():
+        with contextlib.suppress(OSError, ValueError, TypeError):
+            loaded_prior = json.loads(output.read_text(encoding="utf-8"))
+            if isinstance(loaded_prior, dict) and loaded_prior:
+                prior_snapshot = loaded_prior
+    if not prior_snapshot:
+        resolved_icloud = resolve_icloud_sync_dir(icloud_sync_dir)
+        if resolved_icloud is not None and not _is_cloud_docs_dir(resolved_icloud):
+            candidate = resolved_icloud / "jobs" / "aidata-digest" / output.name
+            if candidate.is_file():
+                with contextlib.suppress(OSError, ValueError, TypeError):
+                    loaded_prior = json.loads(candidate.read_text(encoding="utf-8"))
+                    if isinstance(loaded_prior, dict) and loaded_prior:
+                        prior_snapshot = loaded_prior
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
         if not isinstance(report, dict):
@@ -2060,7 +2154,7 @@ def write_snapshot(
     finally:
         if tmp is not None:
             tmp.unlink(missing_ok=True)
-    _mirror_to_icloud(payload, output.name, icloud_sync_dir)
+    _mirror_to_icloud(payload, output.name, icloud_sync_dir, fallback_dir=output.parent)
     return payload
 
 

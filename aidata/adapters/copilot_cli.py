@@ -257,7 +257,7 @@ def collect(*, now: datetime | None = None) -> int:
     """
     from adapters import cloud_sync
 
-    cloud_sync.pull_icloud_telemetry_shards()
+    cloud_sync.pull_icloud_telemetry_shards(sources=(SOURCE,))
     if not COPILOT_SESSION_DB.exists():
         return 0
     today = (now or datetime.now(timezone.utc)).date()  # noqa: UP017 - hook Python 3.9

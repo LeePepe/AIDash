@@ -219,6 +219,8 @@ def _remote_records(
     new_file_stats: dict[str, str] | None = None,
     deadline: float | None = None,
 ) -> list[dict[str, Any]]:
+    if os.environ.get("AIDASH_DISABLE_ICLOUD_MIRROR") == "1":
+        return []
     records: list[dict[str, Any]] = []
     cached_stats = file_stats if isinstance(file_stats, dict) else {}
     updated_stats = new_file_stats if isinstance(new_file_stats, dict) else {}
@@ -275,7 +277,11 @@ def collect() -> int:
     from adapters import cloud_sync
 
     deadline = time.monotonic() + max(1.0, float(BOT_TL_COLLECT_BUDGET_SEC))
-    cloud_sync.pull_remote_batches()
+    if os.environ.get("AIDASH_DISABLE_ICLOUD_MIRROR") != "1":
+        try:
+            cloud_sync.pull_remote_batches(sources=(SOURCE,))
+        except TypeError:
+            cloud_sync.pull_remote_batches()
     old = get_watermark(SOURCE) or {}
     old_files = old.get("files", {}) if isinstance(old.get("files"), dict) else {}
     old_file_stats = old.get("file_stats", {}) if isinstance(old.get("file_stats"), dict) else {}
@@ -289,14 +295,17 @@ def collect() -> int:
         )
     except TypeError:
         local_recs = _local_records()
-    try:
-        remote_recs = _remote_records(
-            file_stats=old_file_stats,
-            new_file_stats=new_file_stats,
-            deadline=deadline,
-        )
-    except TypeError:
-        remote_recs = _remote_records()
+    if os.environ.get("AIDASH_DISABLE_ICLOUD_MIRROR") == "1":
+        remote_recs = []
+    else:
+        try:
+            remote_recs = _remote_records(
+                file_stats=old_file_stats,
+                new_file_stats=new_file_stats,
+                deadline=deadline,
+            )
+        except TypeError:
+            remote_recs = _remote_records()
     records = local_recs + prmon_records + remote_recs
     # Versioned state drops the old unbounded digest-in-key map. A migration
     # may replay records once; normalization uses content identities.

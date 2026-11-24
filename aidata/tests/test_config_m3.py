@@ -107,6 +107,45 @@ def test_icloud_environment_override_is_allowed_during_tests(monkeypatch, tmp_pa
 
 
 @pytest.mark.unit
+def test_icloud_disable_flag_and_bounded_probe_degrade_safely(monkeypatch, tmp_path):
+    import subprocess
+
+    explicit = tmp_path / "explicit-icloud"
+    configured = tmp_path / "configured-icloud"
+    monkeypatch.setenv("AIDASH_ICLOUD_SYNC_DIR", str(configured))
+    monkeypatch.setenv("AIDASH_DISABLE_ICLOUD_MIRROR", "1")
+    assert config.resolve_icloud_sync_dir() is None
+    assert config.resolve_icloud_sync_dir(explicit) is None
+    assert not config.icloud_sync_available(explicit)
+
+    monkeypatch.delenv("AIDASH_DISABLE_ICLOUD_MIRROR", raising=False)
+    monkeypatch.delenv("AIDASH_ICLOUD_SYNC_DIR", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    cloud_docs = tmp_path / "CloudDocs"
+    cloud_docs.mkdir()
+    sync_dir = cloud_docs / "AIDashSync"
+    monkeypatch.setattr(config, "ICLOUD_DRIVE_ROOT", cloud_docs)
+    monkeypatch.setattr(config, "AIDASH_ICLOUD_SYNC_DIR", sync_dir)
+    monkeypatch.setattr(config, "_ICLOUD_PROBE_CACHE", {})
+
+    def timeout_run(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd="probe", timeout=1.5)
+
+    monkeypatch.setattr(config.subprocess, "run", timeout_run)
+    assert config.resolve_icloud_sync_dir() is None
+    assert config._ICLOUD_PROBE_CACHE[sync_dir] is False
+
+    monkeypatch.setattr(config, "_ICLOUD_PROBE_CACHE", {})
+    monkeypatch.setattr(
+        config.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(args=["probe"], returncode=0),
+    )
+    assert config.resolve_icloud_sync_dir() == sync_dir
+    assert config._ICLOUD_PROBE_CACHE[sync_dir] is True
+
+
+@pytest.mark.unit
 def test_fresh_config_import_disables_product_blob(monkeypatch):
     fresh_config = _load_config_without_local(monkeypatch)
 
