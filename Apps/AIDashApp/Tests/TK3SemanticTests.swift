@@ -935,6 +935,27 @@ struct TK3SnapshotRenderTests {
                                 #expect(geometrySamples.contains { $0.id.contains("skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)/skills-row-") }, "Expected nonempty \(lens.rawValue) rows for \(state)")
                             }
                         }
+                        for objectLens in SkillsRoiObjectLens.allCases {
+                            try render(
+                                SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialObjectLens: objectLens),
+                                name: "skills-object-\(objectLens.rawValue)-\(state)-\(Int(width))-\(appearance)",
+                                width: width,
+                                scheme: scheme,
+                                output: output,
+                                geometrySamples: &geometrySamples
+                            )
+                            #expect(geometrySamples.contains {
+                                $0.id.contains("skills-object-\(objectLens.rawValue)-\(state)-\(Int(width))-\(appearance)/skills-row-")
+                            }, "Expected \(objectLens.rawValue) geometry for \(state)")
+                        }
+                        try render(
+                            SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialSelectedSkill: "team-lead"),
+                            name: "skills-selected-sheet-\(state)-\(Int(width))-\(appearance)",
+                            width: width,
+                            scheme: scheme,
+                            output: output,
+                            geometrySamples: &geometrySamples
+                        )
                         try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, showDailyPopulations: true), name: "skills-daily-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
                     }
                     if state == "empty" {

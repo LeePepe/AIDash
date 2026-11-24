@@ -2306,6 +2306,19 @@ struct DashboardWorkspaceTests {
         #expect(evalSummary.totalSkills == details.count)
         #expect(SkillsRoiDiagnosticsCardView.monthlyAdoptionComparison(details: details) != nil)
         #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount(rows) == 0)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateDocumentationWords(details) == 1480)
+        #expect(SkillsRoiDiagnosticsCardView.weightedFallbackPassRate(report: report, details: details) == 0.75)
+
+        var partialObject = try #require(JSONSerialization.jsonObject(with: TK3Fixtures.data("skills-roi-dense.json")) as? [String: Any])
+        partialObject["coverage_status"] = "partial"
+        let partialReport = try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: partialObject))
+        #expect(!SkillsRoiDiagnosticsCardView.aggregateObservationsAvailable(in: partialReport))
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: partialReport) == nil)
+
+        partialObject["coverage_status"] = "error"
+        let errorReport = try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: partialObject))
+        #expect(!SkillsRoiDiagnosticsCardView.aggregateObservationsAvailable(in: errorReport))
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: errorReport) == nil)
     }
 }
 #endif

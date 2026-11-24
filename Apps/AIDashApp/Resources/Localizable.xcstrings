@@ -13188,6 +13188,20 @@
           "zh-Hans": {"stringUnit": {"state": "translated", "value": "质检与演进"}}
         }
       },
+      "dashboard.skills_roi.documentation_words": {
+       "extractionState": "manual",
+       "localizations": {
+         "en": {"stringUnit": {"state": "translated", "value": "documentation words"}},
+         "zh-Hans": {"stringUnit": {"state": "translated", "value": "说明文档词数"}}
+       }
+      },
+      "dashboard.skills_roi.pending_optimization": {
+       "extractionState": "manual",
+       "localizations": {
+         "en": {"stringUnit": {"state": "translated", "value": "pending optimization"}},
+         "zh-Hans": {"stringUnit": {"state": "translated", "value": "待优化"}}
+       }
+      },
       "dashboard.skills_roi.object_lens": {
         "extractionState": "manual",
         "localizations": {
