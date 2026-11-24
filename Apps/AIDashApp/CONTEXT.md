@@ -42,8 +42,10 @@ Skills ROI is an App-owned read-only typed projection (`SkillsRoiReport`) of the
 canonical diagnostic populations. Scalar and `.value` observations retain
 metric/population freshness, nulls and estimates; daily source populations are
 not summed. `SkillsRoiDiagnosticsCardView` is a pure status-and-health card: a
-P0 vitals band, one segmented Usage/Evolution/Flywheel stage, and aligned status
-rows with before/current micro-bars. It never renders diagnostic workbenches,
-source previews, commands, session samples, or root-cause panels. Responsive
-geometry is proposal-driven and Decodable report models remain backward
-compatible with existing fixtures.
+P0 vitals band, one segmented Usage/Evolution/Flywheel stage, and compact
+proposal-driven two-column Bento cards at desktop widths. Usage cards show
+plain-language causes and omit empty review slots; evolution cards show rate,
+latency, and sample-count deltas; flywheel cards show four plain-language
+health summaries and causal actions. It never renders diagnostic workbenches,
+source previews, commands, session samples, or root-cause panels. Decodable
+report models remain backward compatible with existing fixtures.
