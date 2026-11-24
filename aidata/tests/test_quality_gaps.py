@@ -5,7 +5,7 @@ import sqlite3
 import time
 from threading import Event, Thread
 
-from L5_apps.digest.quality_snapshot import build_behavior_snapshot, build_judge_snapshot, load_snapshot_from_warehouse
+from L5_apps.digest.quality_snapshot import build_behavior_snapshot, load_snapshot_from_warehouse
 from quality_contracts import (
     ACTIVE_GAP_CAP_SEC,
     ACTIVE_SKILLS,
