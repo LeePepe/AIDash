@@ -1390,5 +1390,75 @@ struct TK3SnapshotRenderTests {
         #expect(rep.pixelsWide == Int((width + 40) * 2))
         #expect(rep.pixelsHigh > 0)
     }
+
+    @Test("renders the selected SkillHealthSheet and keeps its accessibility tree clean")
+    func rendersSelectedSkillHealthSheet() throws {
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.data("skills-roi-dense.json"))
+        let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
+        let recorder = DashboardGeometryRecorder()
+        let root = AnyView(
+            SkillsRoiDiagnosticsCardView(summary: summary, initialSelectedSkill: "team-lead")
+                .frame(width: 720, alignment: .topLeading)
+                .environment(\.colorScheme, .dark)
+                .environment(\.theme, Theme(isDark: true))
+                .environment(\.dashboardGeometryRecorder, recorder)
+                .coordinateSpace(name: "tk3-geometry")
+        )
+        let hostingView = NSHostingView(rootView: root)
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: 760, height: 900),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            window.attachedSheet?.orderOut(nil)
+            window.contentView = nil
+            window.close()
+        }
+        window.isReleasedWhenClosed = false
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = hostingView
+        hostingView.frame = NSRect(x: 0, y: 0, width: 760, height: 900)
+        NSApp.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
+        hostingView.layoutSubtreeIfNeeded()
+
+        var sheet: NSWindow?
+        for _ in 0..<20 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            if let attached = window.attachedSheet {
+                sheet = attached
+                break
+            }
+        }
+        let healthSheet = try #require(sheet, "Expected the selected skill to present SkillHealthSheet")
+        healthSheet.setContentSize(NSSize(width: 560, height: 640))
+        healthSheet.makeKeyAndOrderFront(nil)
+        healthSheet.orderFrontRegardless()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let content = try #require(healthSheet.contentView)
+        content.frame = NSRect(x: 0, y: 0, width: 560, height: 640)
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        #expect(healthSheet.frame.width >= 500)
+        #expect(healthSheet.frame.height >= 500)
+        #expect(content.frame.width >= 500)
+        #expect(content.frame.height >= 500)
+        #expect(!content.subviews.isEmpty)
+        #expect(descendantViews(of: content).contains { $0.frame.width > 0 && $0.frame.height > 0 })
+
+        let renderedSheetText = descendantViews(of: content).compactMap { view in
+            if let textField = view as? NSTextField { return textField.stringValue }
+            if let button = view as? NSButton { return button.title }
+            return nil
+        }.joined(separator: " ")
+        let sheetText = [collectAccessibilityStrings(from: healthSheet).joined(separator: " "), renderedSheetText].joined(separator: " ")
+        for forbidden in ["python3", "skill_contract.py", "skill_retro.py", "session_id", "SKILL.md", "inspector", "L0", "L1", "L2", "L3"] {
+            #expect(!sheetText.localizedCaseInsensitiveContains(forbidden), "Forbidden sheet text: \(forbidden)")
+        }
+        #expect(recorder.samples.contains { $0.id == "skills-row-team-lead" })
+    }
 }
 #endif
