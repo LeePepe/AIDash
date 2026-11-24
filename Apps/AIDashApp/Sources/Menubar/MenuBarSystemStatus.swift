@@ -677,7 +677,25 @@ public final class LiveMenuBarSystemStatusProvider: MenuBarSystemStatusProviding
                 }
             }
         }
+        for path in paths where path.lastPathComponent == "warehouse.db" {
+            if let values = readSQLite(path: path.path, query: deviceTokenUsageQuery(for: cli)) {
+                return CLITokenUsageItem(cli: cli, inputTokens: values.0, outputTokens: values.1, cacheTokens: values.2, isAvailable: true, interactionCount: values.3)
+            }
+        }
         return CLITokenUsageItem(cli: cli, inputTokens: 0, outputTokens: 0, cacheTokens: 0, isAvailable: false)
+    }
+
+    private func deviceTokenUsageQuery(for cli: AgentCLIKind) -> String {
+        let pattern: String
+        switch cli {
+        case .claude: pattern = "%claude%"
+        case .codex: pattern = "%codex%"
+        case .copilot: pattern = "%copilot%"
+        case .kimi: pattern = "%kimi%"
+        case .grok: pattern = "%grok%"
+        case .deepseek: pattern = "%deepseek%"
+        }
+        return "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0) + COALESCE(SUM(cache_write),0), COALESCE(SUM(invocations),0) FROM fact_device_token_daily WHERE device_id != '__all__' AND lower(cli) LIKE '\(pattern)' HAVING COUNT(*) > 0;"
     }
 
     private static func localDateString(from date: Date) -> String {

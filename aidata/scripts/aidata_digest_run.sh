@@ -65,7 +65,20 @@ COLLECT_OK=0
 COLLECT_FAIL=0
 PER_SOURCE_TIMEOUT="${PER_SOURCE_TIMEOUT:-300}"
 _TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
-SOURCES="raven claude_jsonl claude_prompts codex_prompts kimi_prompts multica_issue linear_issue multica_run multica_comment claude_job github_repo github_pr pr_cache ado_pr state_db hermes_tools copilot_cli hermes_messages memory_claude memory_hermes_db memory_hermes_md news aidash_events local_git browser_history gecko gtt_ledger gtt_receipt bot_tl workspace_hygiene github_ci github_ruleset release_tf mail_inbox work_teams_bridge"
+# Order matters: the GitHub sources (github_repo radar, github_pr) are fast `gh
+# api` calls but were previously LAST, so on a slow night the per-source budget
+# accumulated and they got starved (Mac asleep / earlier source hung) — leaving
+# the radar stale and PR counts empty. Move them ahead of the slow/optional
+# sources so a daily snapshot is reliably captured. github_pr is new (feeds the
+# 开了N个PR line); without it the chain never collects GitHub PRs.
+#
+# This explicit list MUST equal config.SOURCES (asserted by
+# tests/test_runner_sources.py so a newly-added source can never silently miss
+# the 04:00 cron again). Ordering: multica_* grouped, then the fast GitHub
+# snapshot, then the cheap DB/memory sources, then the slower/optional new L1
+# sources (news, aidash_events, local_git, browser_history, gecko) last so their
+# per-source budget can't starve the reliable snapshot sources.
+SOURCES="raven claude_jsonl claude_prompts codex_prompts kimi_prompts multica_issue linear_issue multica_run multica_comment claude_job github_repo github_pr pr_cache ado_pr state_db icloud_token_sync hermes_tools copilot_cli hermes_messages memory_claude memory_hermes_db memory_hermes_md news aidash_events local_git browser_history gecko gtt_ledger gtt_receipt bot_tl workspace_hygiene github_ci github_ruleset release_tf mail_inbox work_teams_bridge"
 for src in $SOURCES; do
   echo "[aidata-digest]   collect $src (budget ${PER_SOURCE_TIMEOUT}s)"
   if [ -n "$_TIMEOUT_BIN" ]; then
