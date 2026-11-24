@@ -17,13 +17,21 @@ import re
 import socket
 import sqlite3
 import subprocess  # nosec B404 - fixed executable, no shell
+import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from cleanio import write_clean
-from config import HOME, ICLOUD_TOKEN_SYNC_DIR, KIMI_SESSIONS_DIR, clean_path
+from config import (
+    HOME,
+    ICLOUD_DRIVE_ROOT,
+    ICLOUD_TOKEN_SYNC_DIR,
+    KIMI_SESSIONS_DIR,
+    clean_path,
+    resolve_icloud_sync_dir,
+)
 from rawio import read_raw, write_raw_snapshot
 
 SOURCE = "icloud_token_sync"
@@ -238,11 +246,82 @@ def _aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(grouped.values(), key=lambda row: row["record_uid"])
 
 
-def _atomic_export(rows: list[dict[str, Any]], root: Path) -> None:
+_EXPORT_SUBPROCESS_SCRIPT = """
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+target = Path(sys.argv[1])
+target_dir = target.parent
+target_dir.mkdir(parents=True, exist_ok=True)
+payload = sys.stdin.buffer.read()
+fd, temporary = tempfile.mkstemp(prefix=".token_usage.", dir=target_dir)
+try:
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, target)
+finally:
+    Path(temporary).unlink(missing_ok=True)
+"""
+
+_PULL_SUBPROCESS_SCRIPT = """
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+records = {}
+for path in sorted((root / "machines").glob("*/token_usage.jsonl")):
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict) and isinstance(value.get("record_uid"), str):
+                    prev = records.get(value["record_uid"])
+                    if prev is None or str(value.get("updated_at", "")) >= str(prev.get("updated_at", "")):
+                        records[value["record_uid"]] = value
+    except OSError:
+        continue
+sys.stdout.write(json.dumps(list(records.values()), ensure_ascii=False))
+"""
+
+
+def _is_cloud_docs_path(path: Path) -> bool:
+    expanded = path.expanduser()
+    try:
+        return expanded.is_relative_to(ICLOUD_DRIVE_ROOT)
+    except (OSError, ValueError):
+        return str(ICLOUD_DRIVE_ROOT) in str(expanded)
+
+
+def _atomic_export(rows: list[dict[str, Any]], root: Path, *, timeout_sec: float = 5.0) -> None:
     device_id, _ = _device_identity()
     target_dir = root / "machines" / device_id
-    target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / "token_usage.jsonl"
+    if _is_cloud_docs_path(root) or os.environ.get("AIDASH_ICLOUD_FORCE_SUBPROCESS") == "1":
+        raw_bytes = "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows
+        ).encode("utf-8")
+        result = subprocess.run(  # nosec B603
+            [sys.executable, "-c", _EXPORT_SUBPROCESS_SCRIPT, str(target)],
+            input=raw_bytes,
+            capture_output=True,
+            check=False,
+            shell=False,
+            timeout=timeout_sec,
+        )
+        if result.returncode != 0:
+            raise OSError(result.stderr.decode("utf-8", errors="replace").strip() or "icloud token export failed")
+        return
+
+    target_dir.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".token_usage.", dir=target_dir, text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -262,7 +341,21 @@ def _atomic_export(rows: list[dict[str, Any]], root: Path) -> None:
         raise
 
 
-def _pull(root: Path) -> list[dict[str, Any]]:
+def _pull(root: Path, *, timeout_sec: float = 5.0) -> list[dict[str, Any]]:
+    if _is_cloud_docs_path(root) or os.environ.get("AIDASH_ICLOUD_FORCE_SUBPROCESS") == "1":
+        result = subprocess.run(  # nosec B603
+            [sys.executable, "-c", _PULL_SUBPROCESS_SCRIPT, str(root)],
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+            timeout=timeout_sec,
+        )
+        if result.returncode != 0:
+            raise OSError(result.stderr.strip() or "icloud token pull failed")
+        parsed = json.loads(result.stdout or "[]")
+        return parsed if isinstance(parsed, list) else []
+
     records: dict[str, dict[str, Any]] = {}
     try:
         paths = sorted((root / "machines").glob("*/token_usage.jsonl"))
@@ -294,12 +387,22 @@ def collect() -> int:
         for source in ("raven", "claude_jsonl", "state_db", "copilot", "kimi_prompts"):
             local.extend(_clean_rows(source, device_id, alias))
         rows = _aggregate(local)
-        if rows:
-            _atomic_export(rows, root)
-        pulled = _pull(root) if root.exists() else []
-        if not pulled:
+        op_timeout = float(os.environ.get("AIDATA_ICLOUD_OP_TIMEOUT_SECONDS", "5.0"))
+        icloud_disabled = os.environ.get("AIDASH_DISABLE_ICLOUD_MIRROR") == "1"
+        if not icloud_disabled and _is_cloud_docs_path(root) and resolve_icloud_sync_dir() is None:
+            icloud_disabled = True
+        if icloud_disabled:
+            return write_raw_snapshot(SOURCE, rows) if rows else 0
+        try:
+            if rows:
+                _atomic_export(rows, root, timeout_sec=op_timeout)
+            pulled = _pull(root, timeout_sec=op_timeout) if (_is_cloud_docs_path(root) or root.exists()) else []
+        except (OSError, TimeoutError, subprocess.SubprocessError, ValueError):
+            return write_raw_snapshot(SOURCE, rows) if rows else 0
+        chosen = pulled or rows
+        if not chosen:
             return 0
-        return write_raw_snapshot(SOURCE, pulled)
+        return write_raw_snapshot(SOURCE, chosen)
     except (OSError, ValueError, sqlite3.Error):
         return 0
 

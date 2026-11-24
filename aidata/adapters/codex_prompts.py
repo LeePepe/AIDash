@@ -381,7 +381,7 @@ def collect() -> int:
     """Scan session logs from this source's own offsets. Returns records written."""
     from adapters import cloud_sync
 
-    cloud_sync.pull_icloud_telemetry_shards()
+    cloud_sync.pull_icloud_telemetry_shards(sources=(SOURCE,))
     if not CODEX_SESSIONS_DIR.exists():
         return 0
     watermark = get_watermark(SOURCE) or {}

@@ -271,8 +271,10 @@ def test_collect_exports_both_sources_and_aggregates_atomically(copilot_db, kimi
     assert target.stat().st_mode & 0o077 == 0
     assert list(target.parent.glob(".token_usage.*")) == []
     first_export = target.read_bytes()
+    snapshots.clear()
     monkeypatch.setattr(sync.os, "replace", lambda *args: (_ for _ in ()).throw(OSError("unavailable")))
-    assert sync.collect() == 0
+    assert sync.collect() == 4
+    assert snapshots == exported
     assert target.read_bytes() == first_export
     assert list(target.parent.glob(".token_usage.*")) == []
 
@@ -302,5 +304,13 @@ def test_collect_does_not_create_sync_directory_without_local_data():
 
 
 def test_collect_degrades_when_icloud_export_is_unavailable(copilot_db, monkeypatch):
-    monkeypatch.setattr(sync, "_atomic_export", lambda *args: (_ for _ in ()).throw(PermissionError()))
-    assert sync.collect() == 0
+    snapshots = []
+    monkeypatch.setattr(sync, "write_raw_snapshot", lambda source, rows: snapshots.extend(rows) or len(rows))
+    monkeypatch.setattr(sync, "_atomic_export", lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError()))
+    assert sync.collect() == 2
+    assert len(snapshots) == 2
+
+    snapshots.clear()
+    monkeypatch.setenv("AIDASH_DISABLE_ICLOUD_MIRROR", "1")
+    assert sync.collect() == 2
+    assert len(snapshots) == 2

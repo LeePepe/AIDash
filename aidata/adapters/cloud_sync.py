@@ -9,6 +9,7 @@ import re
 import shutil
 import socket
 import subprocess  # nosec B404 - fixed executable and argument vectors only
+import sys
 import tempfile
 import time
 from collections.abc import Sequence
@@ -20,6 +21,7 @@ from config import (
     AIDATA_SYNC_PREFIX,
     AIDATA_SYNC_STORAGE_ACCOUNT,
     GTT_XFER_DIR,
+    ICLOUD_DRIVE_ROOT,
     RAW_DIR,
     resolve_icloud_sync_dir,
 )
@@ -31,6 +33,7 @@ _INHERITED_ENVIRONMENT = (
     "LANG", "LC_ALL", "LC_CTYPE", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
 )
 _REFRESH_SECONDS = 60
+_CLOUD_COMMAND_TIMEOUT_SECONDS = float(os.environ.get("AIDATA_CLOUD_COMMAND_TIMEOUT_SECONDS", "30"))
 _ICLOUD_EXPORT_WATERMARK = "icloud_exported_shards_v1"
 _ICLOUD_PULL_WATERMARK = "icloud_pulled_shards_v1"
 _ICLOUD_SOURCES = (
@@ -38,6 +41,37 @@ _ICLOUD_SOURCES = (
     "gtt_ledger", "gtt_receipt", "bot_tl",
 )
 _SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_BOUNDED_COPY_SCRIPT = """
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+dst.parent.mkdir(parents=True, exist_ok=True)
+tmp = None
+try:
+    with tempfile.NamedTemporaryFile(mode="wb", dir=dst.parent, prefix=f".{dst.name}.", delete=False) as fh:
+        tmp = Path(fh.name)
+        with src.open("rb") as sfh:
+            shutil.copyfileobj(sfh, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    tmp.replace(dst)
+finally:
+    if tmp is not None:
+        tmp.unlink(missing_ok=True)
+"""
+
+
+def _is_icloud_path(path: Path) -> bool:
+    expanded = path.expanduser()
+    try:
+        return expanded.is_relative_to(ICLOUD_DRIVE_ROOT)
+    except (OSError, ValueError):
+        return str(ICLOUD_DRIVE_ROOT) in str(expanded)
 
 
 def _file_signature(path: Path) -> str | None:
@@ -51,10 +85,39 @@ def _file_signature(path: Path) -> str | None:
         return None
 
 
-def _copy_atomically(source: Path, destination: Path) -> bool:
-    destination.parent.mkdir(parents=True, exist_ok=True)
+def _copy_atomically(
+    source: Path,
+    destination: Path,
+    *,
+    timeout_sec: float | None = None,
+) -> bool:
+    use_subprocess = (
+        os.environ.get("AIDASH_ICLOUD_FORCE_SUBPROCESS") == "1"
+        or _is_icloud_path(source)
+        or _is_icloud_path(destination)
+    )
+    if use_subprocess:
+        eff_timeout = (
+            timeout_sec
+            if timeout_sec is not None
+            else float(os.environ.get("AIDATA_ICLOUD_OP_TIMEOUT_SECONDS", "5.0"))
+        )
+        try:
+            result = subprocess.run(  # nosec B603
+                [sys.executable, "-c", _BOUNDED_COPY_SCRIPT, str(source), str(destination)],
+                capture_output=True,
+                text=True,
+                check=False,
+                shell=False,
+                timeout=eff_timeout,
+            )
+            return result.returncode == 0
+        except (OSError, TimeoutError, subprocess.SubprocessError):
+            return False
+
     temp_path: Path | None = None
     try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="wb", dir=destination.parent, prefix=f".{destination.name}.", delete=False
         ) as handle:
@@ -64,13 +127,14 @@ def _copy_atomically(source: Path, destination: Path) -> bool:
             handle.flush()
             os.fsync(handle.fileno())
         temp_path.replace(destination)
-        directory = os.open(destination.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        if not _is_icloud_path(destination):
+            directory = os.open(destination.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
         return True
-    except OSError:
+    except (OSError, TimeoutError, subprocess.SubprocessError):
         return False
     finally:
         if temp_path is not None:
@@ -108,11 +172,15 @@ def export_local_telemetry_shards(
     hostname = socket.gethostname()
     if not _SAFE_COMPONENT_RE.fullmatch(hostname):
         return 0
+    budget_sec = max(0.5, float(os.environ.get("AIDATA_ICLOUD_SYNC_BUDGET_SECONDS", "10.0")))
+    deadline = time.monotonic() + budget_sec
     previous = get_watermark(_ICLOUD_EXPORT_WATERMARK)
     watermark = dict(previous) if isinstance(previous, dict) else {}
     exported = 0
     changed = False
     for source in sources:
+        if time.monotonic() >= deadline:
+            break
         if source not in _ICLOUD_SOURCES:
             continue
         source_dir = RAW_DIR / source
@@ -123,6 +191,8 @@ def export_local_telemetry_shards(
         except OSError:
             continue
         for shard in shards:
+            if time.monotonic() >= deadline:
+                break
             if shard.is_symlink() or shard.name.startswith("icloud-") or not shard.is_file():
                 continue
             signature = _file_signature(shard)
@@ -149,7 +219,11 @@ def export_local_telemetry_shards(
     return exported
 
 
-def pull_icloud_telemetry_shards(*, sync_dir: Path | None = None) -> int:
+def pull_icloud_telemetry_shards(
+    *,
+    sync_dir: Path | None = None,
+    sources: Sequence[str] = _ICLOUD_SOURCES,
+) -> int:
     """Import changed telemetry shards from other hosts into local collectors."""
     resolved_sync = resolve_icloud_sync_dir(sync_dir)
     if resolved_sync is None:
@@ -158,6 +232,9 @@ def pull_icloud_telemetry_shards(*, sync_dir: Path | None = None) -> int:
     if shard_root.is_symlink() or not shard_root.is_dir():
         return 0
     hostname = socket.gethostname()
+    budget_sec = max(0.5, float(os.environ.get("AIDATA_ICLOUD_SYNC_BUDGET_SECONDS", "10.0")))
+    deadline = time.monotonic() + budget_sec
+    selected_sources = tuple(source for source in sources if source in _ICLOUD_SOURCES)
     previous = get_watermark(_ICLOUD_PULL_WATERMARK)
     watermark = dict(previous) if isinstance(previous, dict) else {}
     imported = 0
@@ -167,12 +244,16 @@ def pull_icloud_telemetry_shards(*, sync_dir: Path | None = None) -> int:
     except OSError:
         return 0
     for host_dir in host_dirs:
+        if time.monotonic() >= deadline:
+            break
         remote_host = host_dir.name
         if remote_host == hostname or host_dir.is_symlink() or not host_dir.is_dir():
             continue
         if not _SAFE_COMPONENT_RE.fullmatch(remote_host):
             continue
-        for source in _ICLOUD_SOURCES:
+        for source in selected_sources:
+            if time.monotonic() >= deadline:
+                break
             source_dir = host_dir / source
             if source_dir.is_symlink() or not source_dir.is_dir():
                 continue
@@ -181,6 +262,8 @@ def pull_icloud_telemetry_shards(*, sync_dir: Path | None = None) -> int:
             except OSError:
                 continue
             for shard in shards:
+                if time.monotonic() >= deadline:
+                    break
                 if shard.is_symlink() or not shard.is_file() or not _SAFE_COMPONENT_RE.fullmatch(shard.name):
                     continue
                 signature = _file_signature(shard)
@@ -237,14 +320,18 @@ def _child_environment() -> dict[str, str]:
 
 
 def _run_json(executable: str, arguments: list[str], env: dict[str, str]) -> Any:
-    result = subprocess.run(  # nosec B603
-        [executable, *arguments],
-        capture_output=True,
-        text=True,
-        env=env,
-        shell=False,
-        check=False,
-    )
+    try:
+        result = subprocess.run(  # nosec B603
+            [executable, *arguments],
+            capture_output=True,
+            text=True,
+            env=env,
+            shell=False,
+            check=False,
+            timeout=_CLOUD_COMMAND_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     if result.returncode != 0:
         return None
     try:
@@ -259,24 +346,28 @@ def _download(
     blob_name: str,
     destination: Path,
 ) -> bool:
-    result = subprocess.run(  # nosec B603
-        [
-            executable, "storage", "blob", "download",
-            "--account-name", AIDATA_SYNC_STORAGE_ACCOUNT,
-            "--container-name", AIDATA_SYNC_CONTAINER,
-            "--name", blob_name,
-            "--file", str(destination),
-            "--auth-mode", "login",
-            "--overwrite", "true",
-            "--output", "none",
-            "--only-show-errors",
-        ],
-        capture_output=True,
-        text=True,
-        env=env,
-        shell=False,
-        check=False,
-    )
+    try:
+        result = subprocess.run(  # nosec B603
+            [
+                executable, "storage", "blob", "download",
+                "--account-name", AIDATA_SYNC_STORAGE_ACCOUNT,
+                "--container-name", AIDATA_SYNC_CONTAINER,
+                "--name", blob_name,
+                "--file", str(destination),
+                "--auth-mode", "login",
+                "--overwrite", "true",
+                "--output", "none",
+                "--only-show-errors",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            shell=False,
+            check=False,
+            timeout=_CLOUD_COMMAND_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0
 
 
@@ -309,9 +400,10 @@ def _blob_parts(name: str) -> tuple[str, str] | None:
     return device_id, tail
 
 
-def pull_remote_batches() -> int:
+def pull_remote_batches(*, sources: Sequence[str] | None = None) -> int:
     """Pull iCloud shards and download new Azure JSONL batches."""
-    imported = pull_icloud_telemetry_shards()
+    selected = sources if sources is not None else ("gtt_ledger", "gtt_receipt", "bot_tl")
+    imported = pull_icloud_telemetry_shards(sources=selected)
     if not AIDATA_SYNC_STORAGE_ACCOUNT:
         return imported
     env = _child_environment()
