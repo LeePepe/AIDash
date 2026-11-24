@@ -615,6 +615,11 @@ struct TK3SemanticTests {
         #expect(inspectorSelected.references.contains { $0.isUnhit && $0.hits30d == 0 })
         #expect(inspectorSelected.scripts.count == 2)
         #expect(inspectorSelected.scripts.first?.p95Ms == 145.0)
+        let fallbackScript = try #require(inspectorSelected.scripts.first { $0.relPath == "scripts/jev-compact.py" })
+        #expect(fallbackScript.calls30d == 0)
+        #expect(fallbackScript.successRate == nil)
+        #expect(fallbackScript.p95Ms == nil)
+        #expect(fallbackScript.isUnpracticed)
         #expect(inspectorSelected.evalCases.map(\.id) == ["EV-001", "DC-001"])
 
         let repoFiltered = try #require(SkillsRoiDiagnosticsCardView.activeSkillDetail(in: report, selectedSkill: nil, filter: .repoBound))
