@@ -13,7 +13,7 @@ import hashlib
 import json
 import time
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 import signal
