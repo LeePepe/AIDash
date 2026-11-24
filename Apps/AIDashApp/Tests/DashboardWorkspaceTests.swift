@@ -2040,11 +2040,26 @@ struct DashboardWorkspaceTests {
         #expect(SkillsRoiDiagnosticsCardView.cleanVersionLabel("v57@6be2fb5 → 1.4.0+v58@a1b2c3d") == "v57 → v58")
         #expect(SkillsRoiDiagnosticsCardView.cleanProposalTitle("[Skill ROI] 补齐 team-lead 的观测覆盖：") == "补齐 team-lead 的观测覆盖：")
         let mergedCounts = SkillsRoiDiagnosticsCardView.mergedPassCounts(in: report)
-        #expect(mergedCounts.highPass >= 2)
-        #expect(mergedCounts.reviewed >= 2)
-        let teamLeadDiagnosis = SkillsRoiDiagnosticsCardView.plainUsageDiagnosis(for: try #require(report.skillDetails.first { $0.skill == "team-lead" }))
-        #expect(!teamLeadDiagnosis.isEmpty)
-        #expect(SkillsRoiDiagnosticsCardView.evolutionSampleSummary(evo).contains("32"))
+        #expect(mergedCounts == (highPass: 2, reviewed: 2))
+        let teamLead = try #require(report.skillDetails.first { $0.skill == "team-lead" })
+        let metadata = try JSONDecoder().decode(SkillsObservationMetadata.self, from: Data("{\"sample_size\": 1, \"coverage_status\": \"healthy\"}".utf8))
+        let scriptErrorEvolution = SkillVersionEvolutionRow(
+            metadata: metadata,
+            skill: "team-lead",
+            currentVersion: SkillVersionMetricsSnapshot(skillVersion: "v59", sessions: 1, exit2Count: 17)
+        )
+        let teamLeadDiagnosis = SkillsRoiDiagnosticsCardView.plainUsageDiagnosis(for: teamLead, evolution: scriptErrorEvolution)
+        #expect(teamLeadDiagnosis.contains("17"))
+        #expect(SkillsRoiDiagnosticsCardView.weeklyVsMonthlyChange(calls: 42, month: 168).contains("0%"))
+        #expect(SkillsRoiDiagnosticsCardView.evolutionSampleSummary(evo).contains("104"))
+        #expect(SkillsRoiDiagnosticsCardView.evolutionSampleSummary(evo).contains("64"))
+        let proposal = SkillRetroProposalItem(
+            id: "proposal-1",
+            skill: "team-lead",
+            title: "[Skill ROI] 补齐观测覆盖",
+            humanWhy: "脚本未充分触发；修改文件反复擦写 22 次"
+        )
+        #expect(SkillsRoiDiagnosticsCardView.cleanProposalTitle(proposal.displayReason).contains("反复擦写 22 次"))
         let sampled = SkillVersionMetricsSnapshot(skillVersion: "v1", exit2ErrorRate: 0.9, r1Total: 4, r1Pass: 3, r1PassRate: 0.1)
         #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: sampled) == 0.75)
         let fallback = SkillVersionMetricsSnapshot(skillVersion: "v1", exit2ErrorRate: 0.9, r1PassRate: 0.8)

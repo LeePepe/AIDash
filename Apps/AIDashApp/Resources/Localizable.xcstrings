@@ -13159,8 +13159,7 @@
           }
         }
       }
-    }
-  },
+    },
   "dashboard.skills_roi.reviewed_skills": {
     "extractionState": "manual",
     "localizations": {
@@ -13279,6 +13278,35 @@
       "en": {"stringUnit": {"state": "translated", "value": "Still gathering samples"}},
       "zh-Hans": {"stringUnit": {"state": "translated", "value": "仍在观察中"}}
     }
+  },
+  "dashboard.skills_roi.monthly_change_prefix": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {"stringUnit": {"state": "translated", "value": "vs monthly average"}},
+      "zh-Hans": {"stringUnit": {"state": "translated", "value": "较月均"}}
+    }
+  },
+  "dashboard.skills_roi.monthly_change_unknown": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {"stringUnit": {"state": "translated", "value": "Monthly comparison unavailable"}},
+      "zh-Hans": {"stringUnit": {"state": "translated", "value": "较月均暂无变化"}}
+    }
+  },
+  "dashboard.skills_roi.evo_error_rate_format": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {"stringUnit": {"state": "translated", "value": "Error rate %.1f%%→%.1f%%"}},
+      "zh-Hans": {"stringUnit": {"state": "translated", "value": "报错率 %.1f%%→%.1f%%"}}
+    }
+  },
+  "dashboard.skills_roi.evo_p50_format": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {"stringUnit": {"state": "translated", "value": "P50 %.1fs→%.1fs"}},
+      "zh-Hans": {"stringUnit": {"state": "translated", "value": "中位耗时 %.1fs→%.1fs"}}
+    }
+  }
   },
   "version": "1.0"
 }
