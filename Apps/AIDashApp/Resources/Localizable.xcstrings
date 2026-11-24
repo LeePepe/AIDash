@@ -12373,7 +12373,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "基于当前样本"
+            "value": "慢飞轮就绪"
           }
         }
       }
@@ -12390,7 +12390,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "基于当前样本"
+            "value": "快飞轮收敛中"
           }
         }
       }
@@ -13002,7 +13002,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "唤起后是否真干活"
+            "value": "漏触发与空载收敛"
           }
         }
       }
@@ -13019,7 +13019,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "长期未读的参考文档"
+            "value": "热抽屉与零命中清理"
           }
         }
       }
@@ -13053,7 +13053,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "多仓库规范检查"
+            "value": "野生模式收编与仓库健康"
           }
         }
       }
@@ -13121,7 +13121,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "待优化"
+            "value": "慢飞轮排队中"
           }
         }
       }
@@ -13160,153 +13160,573 @@
         }
       }
     },
-  "dashboard.skills_roi.reviewed_skills": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "skills with review"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "个有评审"}}
-    }
-  },
-  "dashboard.skills_roi.pass_sample_summary": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "merged current-version review samples"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "合并当前版本评审样本"}}
-    }
-  },
-  "dashboard.skills_roi.flywheel_plain_summary": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Based on"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "基于"}}
-    }
-  },
-  "dashboard.skills_roi.sample_records": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "usage records"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "条使用记录"}}
-    }
-  },
-  "dashboard.skills_roi.calls_this_week": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "This week"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "本周"}}
-    }
-  },
-  "dashboard.skills_roi.no_review": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "No review yet"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无评审"}}
-    }
-  },
-  "dashboard.skills_roi.diagnosis_idle": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Not triggered in the last 30 days"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "近 30 天未触发"}}
-    }
-  },
-  "dashboard.skills_roi.diagnosis_script_errors": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Script errors"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "脚本报错"}}
-    }
-  },
-  "dashboard.skills_roi.diagnosis_times_suffix": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "times; investigate"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "次，建议排查"}}
-    }
-  },
-  "dashboard.skills_roi.diagnosis_low_pass": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "First-pass rate is low"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "一次做对率偏低"}}
-    }
-  },
-  "dashboard.skills_roi.diagnosis_mainstay": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Core mainstay, stable this week"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "高频主力，本周稳定运行"}}
-    }
-  },
-  "dashboard.skills_roi.diagnosis_stable": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Running steadily, no script errors"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "运行稳定，无脚本报错"}}
-    }
-  },
-  "dashboard.skills_roi.diagnosis_needs_boost": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Needs optimization; investigate the cause"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "需要优化，建议查看报错原因"}}
-    }
-  },
-  "dashboard.skills_roi.evo_error_rate": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Error rate"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "报错率"}}
-    }
-  },
-  "dashboard.skills_roi.evo_sample_summary": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "New version"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "新版"}}
-    }
-  },
-  "dashboard.skills_roi.evo_previous": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "previous"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "上版"}}
-    }
-  },
-  "dashboard.skills_roi.evo_observing": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Still gathering samples"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "仍在观察中"}}
-    }
-  },
-  "dashboard.skills_roi.monthly_change_prefix": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "vs monthly average"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "较月均"}}
-    }
-  },
-  "dashboard.skills_roi.monthly_change_unknown": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Monthly comparison unavailable"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "较月均暂无变化"}}
-    }
-  },
-  "dashboard.skills_roi.evo_error_rate_format": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "Error rate %.1f%%→%.1f%%"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "报错率 %.1f%%→%.1f%%"}}
-    }
-  },
-  "dashboard.skills_roi.evo_p50_format": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {"stringUnit": {"state": "translated", "value": "P50 %.1fs→%.1fs"}},
-      "zh-Hans": {"stringUnit": {"state": "translated", "value": "中位耗时 %.1fs→%.1fs"}}
-    }
-  }
+    "dashboard.skills_roi.reviewed_skills": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "skills with review"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "个有评审"}}
+      }
+    },
+    "dashboard.skills_roi.vital_adoption_title": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Scale & activity"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "规模与活跃"}}
+        }
+      },
+      "dashboard.skills_roi.vital_efficiency_title": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Efficiency & time"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "效率与耗时"}}
+        }
+      },
+      "dashboard.skills_roi.vital_quality_title": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Quality & stability"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "质量与稳定"}}
+        }
+      },
+      "dashboard.skills_roi.vital_evolution_title": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Checks & evolution"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "质检与演进"}}
+        }
+      },
+      "dashboard.skills_roi.documentation_words": {
+       "extractionState": "manual",
+       "localizations": {
+         "en": {"stringUnit": {"state": "translated", "value": "documentation words"}},
+         "zh-Hans": {"stringUnit": {"state": "translated", "value": "说明文档词数"}}
+       }
+      },
+      "dashboard.skills_roi.pending_optimization": {
+       "extractionState": "manual",
+       "localizations": {
+         "en": {"stringUnit": {"state": "translated", "value": "pending optimization"}},
+         "zh-Hans": {"stringUnit": {"state": "translated", "value": "待优化"}}
+       }
+      },
+      "dashboard.skills_roi.object_lens": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Object view"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "对象切面"}}
+        }
+      },
+      "dashboard.skills_roi.object_overview": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Skill overview"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "分 Skill 总览"}}
+        }
+      },
+      "dashboard.skills_roi.object_scripts": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Internal scripts"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "内部脚本"}}
+        }
+      },
+      "dashboard.skills_roi.object_documents": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Documentation"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "文档本身"}}
+        }
+      },
+      "dashboard.skills_roi.object_quality": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Checks & evals"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "质检与 Eval"}}
+        }
+      },
+      "dashboard.skills_roi.overview_header": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Skill health"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "分 Skill 健康状态"}}
+        }
+      },
+      "dashboard.skills_roi.script_median": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Script median"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "脚本中位"}}
+        }
+      },
+      "dashboard.skills_roi.no_duration": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No timing data"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无耗时数据"}}
+        }
+      },
+      "dashboard.skills_roi.judged": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Judged"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "抽检"}}
+        }
+      },
+      "dashboard.skills_roi.no_judgement": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No review data"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无抽检数据"}}
+        }
+      },
+      "dashboard.skills_roi.eval": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Eval"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "Eval"}}
+        }
+      },
+      "dashboard.skills_roi.evolution_fixed": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "fixed"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "已修"}}
+        }
+      },
+      "dashboard.skills_roi.evolution_pending": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "to improve"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "待优化"}}
+        }
+      },
+      "dashboard.skills_roi.quality": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "quality"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "质量"}}
+        }
+      },
+      "dashboard.skills_roi.changes": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "changes"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "变动"}}
+        }
+      },
+      "dashboard.skills_roi.script": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "script"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "脚本"}}
+        }
+      },
+      "dashboard.skills_roi.success": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "success"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "成功率"}}
+        }
+      },
+      "dashboard.skills_roi.document_size": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "document size"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "说明体量"}}
+        }
+      },
+      "dashboard.skills_roi.lines": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "lines"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "行"}}
+        }
+      },
+      "dashboard.skills_roi.words": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "words"}}
+          ,"zh-Hans": {"stringUnit": {"state": "translated", "value": "词"}}
+        }
+      },
+      "dashboard.skills_roi.unhit_refs": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "unread references"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "未命中参考"}}
+        }
+      },
+      "dashboard.skills_roi.no_quality_rows": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No quality details"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无质检明细"}}
+        }
+      },
+      "dashboard.skills_roi.diagnosis_quality": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Quality signals need attention"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "有质量信号需要排查"}}
+        }
+      },
+      "dashboard.skills_roi.diagnosis_slow": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Timing is worth a closer look"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "脚本耗时偏高，建议关注"}}
+        }
+      },
+      "dashboard.skills_roi.diagnosis_idle": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No calls in the last 30 days"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "近 30 天没有调用"}}
+        }
+      },
+      "dashboard.skills_roi.diagnosis_improved": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Recent changes improved stability"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "版本进步带来更稳定的结果"}}
+        }
+      },
+      "dashboard.skills_roi.diagnosis_healthy": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Current activity is stable"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "当前运行状态稳定"}}
+        }
+      },
+      "dashboard.skills_roi.health_summary": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Health summary"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "四维体检概览"}}
+        }
+      },
+      "dashboard.skills_roi.health_scripts": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Owned scripts"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "名下脚本"}}
+        }
+      },
+      "dashboard.skills_roi.health_documents": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Documentation & references"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "说明与参考文档"}}
+        }
+      },
+      "dashboard.skills_roi.health_quality": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Eval & next steps"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "Eval 与优化建议"}}
+        }
+      },
+      "dashboard.skills_roi.references": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "references"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "份参考"}}
+        }
+      },
+      "dashboard.skills_roi.eval_cases": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "cases"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "条用例"}}
+        }
+      },
+      "dashboard.skills_roi.interceptions": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "interceptions"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "拦截"}}
+        }
+      },
+      "dashboard.skills_roi.score": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "score"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "评分"}}
+        }
+      },
+      "dashboard.skills_roi.done": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Done"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "完成"}}
+        }
+      },
+      "dashboard.skills_roi.unknown": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Unknown"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "未知"}}
+        }
+      },
+      "dashboard.skills_roi.script_p95_median": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "P95 median"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "P95 中位"}}
+        }
+      },
+      "dashboard.skills_roi.p95": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "P95"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "P95"}}
+        }
+      },
+      "dashboard.skills_roi.script_filter": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Script filter"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "脚本筛选"}}
+        }
+      },
+      "dashboard.skills_roi.script_filter_all": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "All scripts"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "全部脚本"}}
+        }
+      },
+      "dashboard.skills_roi.script_filter_error": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "High error"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "高报错"}}
+        }
+      },
+      "dashboard.skills_roi.script_filter_slowest": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Slowest P95"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "最慢 P95"}}
+        }
+      },
+      "dashboard.skills_roi.script_filter_unpracticed": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Not triggered"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "未触发"}}
+        }
+      },
+      "dashboard.skills_roi.document_summary": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Documentation"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "说明文档"}}
+        }
+      },
+      "dashboard.skills_roi.references_hit": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "reference hits"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "参考命中"}}
+        }
+      },
+      "dashboard.skills_roi.redundancy": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "redundant"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "冗余"}}
+        }
+      },
+      "dashboard.skills_roi.reference_hit": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "reference hits"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "参考命中"}}
+        }
+      },
+      "dashboard.skills_roi.quality_view": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Quality view"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "质检视图"}}
+        }
+      },
+      "dashboard.skills_roi.quality_view_changes": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Version changes"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "版本变动"}}
+        }
+      },
+      "dashboard.skills_roi.quality_view_pending": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Pending & fixed"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "待优化与修复"}}
+        }
+      },
+      "dashboard.skills_roi.quality_view_coverage": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Eval coverage"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "Eval 覆盖"}}
+        }
+      },
+      "dashboard.skills_roi.pending": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Pending"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "待优化"}}
+        }
+      },
+      "dashboard.skills_roi.fixed": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Fixed"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "已修复"}}
+        }
+      },
+      "dashboard.skills_roi.no_pending": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No pending items"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无待优化项"}}
+        }
+      },
+      "dashboard.skills_roi.no_fixed": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No fixed items"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无已修复项"}}
+        }
+      },
+      "dashboard.skills_roi.observed": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "observed calls"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "观测调用"}}
+        }
+      },
+      "dashboard.skills_roi.corrections": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "corrections"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "纠正"}}
+        }
+      },
+      "dashboard.skills_roi.active_duration": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "active duration"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "活跃耗时"}}
+        }
+      },
+      "dashboard.skills_roi.version_comparison": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Version comparison"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "版本对比"}}
+        }
+      },
+      "dashboard.skills_roi.reference_unhit": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Not hit"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "未命中"}}
+        }
+      },
+      "dashboard.skills_roi.reference_hit_status": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Hit"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "已命中"}}
+        }
+      },
+      "dashboard.skills_roi.escapes": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "escapes"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "漏检"}}
+        }
+      },
+      "dashboard.skills_roi.guidance_quality": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Add the failing cases first, then review the latest quality signals."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "先补齐失败用例，再复核最近的质量信号。"}}
+        }
+      },
+      "dashboard.skills_roi.guidance_script": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Start with the scripts with the highest failure rate and add a regression case."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "优先检查失败率较高的脚本，并补一条回归用例。"}}
+        }
+      },
+      "dashboard.skills_roi.guidance_references": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Remove references that stay unused and keep the material people actually read."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "优先清理长期未命中的参考文档，保留常用内容。"}}
+        }
+      },
+      "dashboard.skills_roi.guidance_healthy": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No clear risk is visible; keep the current checking rhythm."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "当前没有明显风险，保持现有检查节奏。"}}
+        }
+      },
+      "dashboard.skills_roi.monthly_comparison": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "vs monthly avg"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "较月均"}}
+        }
+      },
+      "dashboard.skills_roi.empty_invocations": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "empty invocations"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "空唤起"}}
+        }
+      },
+      "dashboard.skills_roi.no_error_rate": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "no-error rate"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "无错率"}}
+        }
+      },
+      "dashboard.skills_roi.judge_mean": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "judge mean"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "抽检均分"}}
+        }
+      },
+      "dashboard.skills_roi.first_pass": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "first-pass satisfaction"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "一次满意"}}
+        }
+      },
+      "dashboard.skills_roi.normalized_churn": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "normalized edit churn"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "归一化擦写"}}
+        }
+      },
+      "dashboard.skills_roi.raw_edit_churn": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "raw edit churn"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "原始擦写"}}
+        }
+      }
   },
   "version": "1.0"
 }

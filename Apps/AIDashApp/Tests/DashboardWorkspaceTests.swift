@@ -2038,28 +2038,6 @@ struct DashboardWorkspaceTests {
         #expect(evo.versions.count == 2)
         #expect(SkillsRoiDiagnosticsCardView.cleanVersionLabel("1.4.0+v58@a1b2c3d") == "v58")
         #expect(SkillsRoiDiagnosticsCardView.cleanVersionLabel("v57@6be2fb5 → 1.4.0+v58@a1b2c3d") == "v57 → v58")
-        #expect(SkillsRoiDiagnosticsCardView.cleanProposalTitle("[Skill ROI] 补齐 team-lead 的观测覆盖：") == "补齐 team-lead 的观测覆盖：")
-        let mergedCounts = SkillsRoiDiagnosticsCardView.mergedPassCounts(in: report)
-        #expect(mergedCounts == (highPass: 2, reviewed: 2))
-        let teamLead = try #require(report.skillDetails.first { $0.skill == "team-lead" })
-        let metadata = try JSONDecoder().decode(SkillsObservationMetadata.self, from: Data("{\"sample_size\": 1, \"coverage_status\": \"healthy\"}".utf8))
-        let scriptErrorEvolution = SkillVersionEvolutionRow(
-            metadata: metadata,
-            skill: "team-lead",
-            currentVersion: SkillVersionMetricsSnapshot(skillVersion: "v59", sessions: 1, exit2Count: 17)
-        )
-        let teamLeadDiagnosis = SkillsRoiDiagnosticsCardView.plainUsageDiagnosis(for: teamLead, evolution: scriptErrorEvolution)
-        #expect(teamLeadDiagnosis.contains("17"))
-        #expect(SkillsRoiDiagnosticsCardView.weeklyVsMonthlyChange(calls: 42, month: 168).contains("0%"))
-        #expect(SkillsRoiDiagnosticsCardView.evolutionSampleSummary(evo).contains("104"))
-        #expect(SkillsRoiDiagnosticsCardView.evolutionSampleSummary(evo).contains("64"))
-        let proposal = SkillRetroProposalItem(
-            id: "proposal-1",
-            skill: "team-lead",
-            title: "[Skill ROI] 补齐观测覆盖",
-            humanWhy: "脚本未充分触发；修改文件反复擦写 22 次"
-        )
-        #expect(SkillsRoiDiagnosticsCardView.cleanProposalTitle(proposal.displayReason).contains("反复擦写 22 次"))
         let sampled = SkillVersionMetricsSnapshot(skillVersion: "v1", exit2ErrorRate: 0.9, r1Total: 4, r1Pass: 3, r1PassRate: 0.1)
         #expect(SkillsRoiDiagnosticsCardView.r1PassRate(for: sampled) == 0.75)
         let fallback = SkillVersionMetricsSnapshot(skillVersion: "v1", exit2ErrorRate: 0.9, r1PassRate: 0.8)
@@ -2148,6 +2126,7 @@ struct DashboardWorkspaceTests {
 
         let recordedIDs = Set(recorder.samples.map(\.id))
         #expect(recordedIDs.contains("skills-p0-vitals"))
+        #expect(recorder.samples.filter { $0.role == "vital" }.count == 4)
         #expect(recorder.samples.filter { $0.role == "segmented" }.count == 1)
         #expect(!recordedIDs.contains("skills-table-header"))
         #expect(!recordedIDs.contains("skills-status-stage"))
@@ -2224,6 +2203,149 @@ struct DashboardWorkspaceTests {
                 }
             }
         }
+    }
+
+    @Test("Skills quality fields decode additively and preserve missing values")
+    func skillsQualityContractDecoding() throws {
+        let payload = """
+        {
+          "metadata": {"sample_size": 4, "coverage_status": "healthy"},
+          "diagnostics": {},
+          "quality_behavior": [{
+            "skill": "team-lead",
+            "observed_invocations": 12,
+            "eligible_invocations": 9,
+            "empty_invocation_count": 1,
+            "first_pass_satisfaction_rate": 0.75,
+            "normalized_edit_churn": 0.42,
+            "active_duration_median_sec": 144.0
+          }],
+          "quality_judge": {
+            "eligible_skill_count": 2,
+            "judged_skill_count": 1,
+            "coverage_pct": 0.5,
+            "skills": [{
+              "skill": "team-lead",
+              "sampled": 4,
+              "judged": 3,
+              "score_mean": 4.5
+            }]
+          }
+        }
+        """
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(payload.utf8))
+        let behavior = try #require(report.qualityBehavior?.first)
+        #expect(behavior.skill == "team-lead")
+        #expect(behavior.observedInvocations == 12)
+        #expect(behavior.eligibleInvocations == 9)
+        #expect(behavior.emptyInvocationCount == 1)
+        #expect(behavior.firstPassSatisfactionRate == 0.75)
+        #expect(behavior.normalizedEditChurn == 0.42)
+        #expect(behavior.activeDurationMedianSec == 144)
+        #expect(behavior.correctionCount == nil)
+        let judge = try #require(report.qualityJudge)
+        #expect(judge.eligibleSkillCount == 2)
+        #expect(judge.judgedSkillCount == 1)
+        #expect(judge.skills.first?.scoreMean == 4.5)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateJudgeMean(judge) == 4.5)
+        #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount([behavior]) == 1)
+
+        let missingObservations = try JSONDecoder().decode(
+            SkillsRoiReport.self,
+            from: Data(#"{"metadata":{},"diagnostics":{},"quality_behavior":[{"skill":"team-lead"}]}"#.utf8)
+        )
+        #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount(missingObservations.qualityBehavior) == nil)
+
+        let extremeScript = try JSONDecoder().decode(
+            SkillScriptDetail.self,
+            from: Data(#"{"rel_path":"slow.py","p50_ms":1e20,"p95_ms":1e20,"success_rate":1e20}"#.utf8)
+        )
+        #expect(SkillsRoiDiagnosticsCardView.millisecondsText(extremeScript.p95Ms) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.optionalPercentText(extremeScript.successRate) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptP95([extremeScript]) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptMedian([extremeScript]) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.safeNonNegativeInt(Double(Int.max)) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.millisecondsText(Double(Int.max)) == nil)
+        let boundaryScript = SkillScriptDetail(relPath: "boundary.py", calls30d: 1, successRate: 1.0, p50Ms: Double(Int.max), p95Ms: Double(Int.max))
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptMedian([boundaryScript]) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.millisecondsText(145.4) == "145ms")
+        #expect(SkillsRoiDiagnosticsCardView.optionalPercentText(0.95) == "95%")
+        #expect(SkillsRoiDiagnosticsCardView.optionalPercentText(85.0) == "85%")
+
+        let legacy = try JSONDecoder().decode(
+            SkillsRoiReport.self,
+            from: Data(#"{"metadata":{},"diagnostics":{}}"#.utf8)
+        )
+        #expect(legacy.qualityBehavior == nil)
+        #expect(legacy.qualityJudge == nil)
+    }
+
+    @Test("Skills 4x4 object lenses and quality-driven aggregates stay deterministic")
+    func skillsFourByFourObjectLensAndAggregateContracts() throws {
+        let report = try JSONDecoder().decode(
+            SkillsRoiReport.self,
+            from: TK3Fixtures.data("skills-roi-dense.json")
+        )
+        #expect(SkillsRoiObjectLens.allCases.map(\.rawValue) == ["overview", "scripts", "documents", "quality"])
+        #expect(SkillsRoiDiagnosticsCardView.activeSkillDetail(in: report, selectedSkill: "team-lead")?.skill == "team-lead")
+        #expect(SkillsRoiDiagnosticsCardView.activeSkillDetail(in: report, selectedSkill: "missing", filter: .repoBound) == nil)
+
+        let details = report.skillDetails.filter { !$0.isGhost }
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptP95(details.flatMap(\.scripts)) == 145)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateNoErrorRate(report: report, details: details) != nil)
+        #expect(details.reduce(0) { $0 + $1.references.count } >= details.reduce(0) { $0 + $1.unhitRefsCount })
+        #expect(details.reduce(0) { $0 + $1.evalCases.count } == 2)
+
+        let qualityPayload = """
+        {
+          "metadata": {"sample_size": 4, "coverage_status": "healthy"},
+          "diagnostics": {},
+          "quality_behavior": [
+            {"skill": "fast", "observed_invocations": 10, "eligible_invocations": 10, "active_duration_median_sec": 60, "first_pass_satisfaction_rate": 0.8, "satisfaction_eligible_invocations": 10},
+            {"skill": "slow", "observed_invocations": 30, "eligible_invocations": 30, "active_duration_median_sec": 120, "first_pass_satisfaction_rate": 0.6, "satisfaction_eligible_invocations": 30}
+          ]
+        }
+        """
+        let qualityReport = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(qualityPayload.utf8))
+        let rows = try #require(qualityReport.qualityBehavior)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateActiveDurationMedian(rows) == 120)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateSatisfactionRate(rows) == 0.65)
+
+        let scripts = [
+            SkillScriptDetail(relPath: "fast.py", calls30d: 10, successRate: 0.98, p50Ms: 42, p95Ms: 120),
+            SkillScriptDetail(relPath: "slow.py", calls30d: 4, successRate: 0.75, p50Ms: 180, p95Ms: 500),
+            SkillScriptDetail(relPath: "idle.py", calls30d: 0, successRate: nil, p50Ms: nil, p95Ms: nil, isUnpracticed: true)
+        ]
+        let extremeScript = try JSONDecoder().decode(SkillScriptDetail.self, from: Data(#"{"rel_path":"extreme.py","p95_ms":1e20}"#.utf8))
+        #expect(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(extremeScript.p95Ms) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(scripts[0].p95Ms) == "120ms")
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(scripts) == 111)
+        #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .all).count == 3)
+        #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .highError).map(\.relPath) == ["slow.py"])
+        #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .slowestP95).map(\.relPath) == ["fast.py", "slow.py"])
+        #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .unpracticed).map(\.relPath) == ["idle.py"])
+
+        let evalSummary = SkillsRoiDiagnosticsCardView.aggregateEvalSummary(report: report, details: details)
+        #expect(evalSummary.population == 1)
+        #expect(evalSummary.totalCases == 2)
+        #expect(evalSummary.totalSkills == details.count)
+        #expect(SkillsRoiDiagnosticsCardView.monthlyAdoptionComparison(details: details) != nil)
+        #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount(rows) == 0)
+        let absentQuality = try JSONDecoder().decode(SkillQualityBehaviorRow.self, from: Data(#"{"skill":"absent"}"#.utf8))
+        #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount([absentQuality]) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateDocumentationWords(details) == 1480)
+        #expect(SkillsRoiDiagnosticsCardView.weightedFallbackPassRate(report: report, details: details) == 0.75)
+
+        var partialObject = try #require(JSONSerialization.jsonObject(with: TK3Fixtures.data("skills-roi-dense.json")) as? [String: Any])
+        partialObject["coverage_status"] = "partial"
+        let partialReport = try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: partialObject))
+        #expect(!SkillsRoiDiagnosticsCardView.aggregateObservationsAvailable(in: partialReport))
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: partialReport) == nil)
+
+        partialObject["coverage_status"] = "error"
+        let errorReport = try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: partialObject))
+        #expect(!SkillsRoiDiagnosticsCardView.aggregateObservationsAvailable(in: errorReport))
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: errorReport) == nil)
     }
 }
 #endif
