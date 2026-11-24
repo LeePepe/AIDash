@@ -1618,8 +1618,8 @@
         public static func safeNonNegativeInt(_ value: Double?) -> Int? {
             guard let value, value.isFinite else { return nil }
             let rounded = value.rounded()
-            guard rounded >= 0, rounded <= Double(Int.max) else { return nil }
-            return Int(rounded)
+            guard rounded >= 0, rounded < Double(Int.max) else { return nil }
+            return Int(exactly: rounded)
         }
 
         public static func millisecondsText(_ value: Double?) -> String? {
