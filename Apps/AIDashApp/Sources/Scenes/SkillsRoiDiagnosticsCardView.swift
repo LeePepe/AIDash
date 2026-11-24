@@ -36,7 +36,7 @@
     public enum SkillsRoiObjectLens: String, CaseIterable, Identifiable {
         case overview, scripts, documents, quality
 
-        var id: String { rawValue }
+        public var id: String { rawValue }
 
         var title: String {
             switch self {
@@ -48,10 +48,10 @@
         }
     }
 
-    private enum SkillScriptFilter: String, CaseIterable, Identifiable {
+    public enum SkillsRoiScriptFilter: String, CaseIterable, Identifiable, Sendable {
         case all, highError, slowestP95, unpracticed
 
-        var id: String { rawValue }
+        public var id: String { rawValue }
 
         var title: String {
             switch self {
@@ -72,10 +72,10 @@
         }
     }
 
-    private enum SkillQualityView: String, CaseIterable, Identifiable {
+    public enum SkillsRoiQualityView: String, CaseIterable, Identifiable, Sendable {
         case changes, pending, coverage
 
-        var id: String { rawValue }
+        public var id: String { rawValue }
 
         var title: String {
             switch self {
@@ -98,12 +98,12 @@
             }
         }
 
-        var tint: Color {
+        func tint(using theme: Theme) -> Color {
             switch self {
-            case .mainstay: .accentColor
-            case .stable: .green
-            case .needsBoost: .orange
-            case .idle30d: .secondary
+            case .mainstay: theme.primary.primary
+            case .stable: theme.success
+            case .needsBoost: theme.warning
+            case .idle30d: theme.text(.meta)
             }
         }
     }
@@ -120,11 +120,11 @@
             }
         }
 
-        var tint: Color {
+        func tint(using theme: Theme) -> Color {
             switch self {
-            case .converged, .improved: .green
-            case .attention: .orange
-            case .stable: .blue
+            case .converged, .improved: theme.success
+            case .attention: theme.warning
+            case .stable: theme.classificationTint(.metric)
             }
         }
     }
@@ -222,8 +222,8 @@
         @State private var showAllUsageSkills = false
         @State private var vitalDimension: SkillsVitalDimension = .adoption
         @State private var objectLens: SkillsRoiObjectLens
-        @State private var scriptFilter: SkillScriptFilter = .all
-        @State private var qualityView: SkillQualityView = .coverage
+        @State private var scriptFilter: SkillsRoiScriptFilter = .all
+        @State private var qualityView: SkillsRoiQualityView = .coverage
         @State private var selectedSkillDetail: SkillInspectorDetail?
         public init(
             summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?,
@@ -325,30 +325,36 @@
             let active = Self.activeVsTotalCounts(in: report)
             let details = managedDetails(report).filter { !$0.isGhost }
             let calls = details.reduce(0) { $0 + $1.loads7d }
-            let scriptMedian = Self.aggregateScriptP95(details.flatMap(\.scripts))
+            let scriptMedian = Self.aggregateScriptMedian(details.flatMap(\.scripts))
             let behavior = Self.aggregateActiveDurationMedian(report.qualityBehavior ?? [])
             let satisfaction = Self.aggregateSatisfactionRate(report.qualityBehavior ?? [])
-            let judged = report.qualityJudge?.judgedSkillCount
-            let evalCount = details.reduce(0) { $0 + $1.evalCases.count }
+            let noError = Self.aggregateNoErrorRate(report: report, details: details)
+            let judgeMean = Self.aggregateJudgeMean(report.qualityJudge)
+            let eval = Self.aggregateEvalSummary(report: report, details: details)
             let value: String
             let subtitle: String
             let tint: Color
             switch dimension {
             case .adoption:
                 value = active.map { "\($0.active) / \($0.total)" } ?? skillsText("unknown", "未知")
+                let month = Self.monthlyAdoptionComparison(details: details)
+                let empty = Self.emptyInvocationCount(report.qualityBehavior)
                 subtitle = "\(skillsText("calls_7d", "本周")) \(calls) \(skillsText("unit_times", "次"))"
-                tint = .accentColor
+                    + (month.map { " · \($0)" } ?? "")
+                    + " · \(skillsText("empty_invocations", "空唤起")) \(empty.map(String.init) ?? skillsText("unknown", "未知"))"
+                tint = theme.primary.primary
             case .efficiency:
                 value = behavior.map { String(format: "%.1fm", $0 / 60) } ?? scriptMedian.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")
-                subtitle = scriptMedian.map { "\(skillsText("script_p95_median", "P95 中位")) \(Int($0))ms" } ?? skillsText("no_duration", "暂无耗时数据")
+                subtitle = scriptMedian.map { "\(skillsText("script_median", "脚本中位")) \(Int($0))ms" } ?? skillsText("no_duration", "暂无耗时数据")
                 tint = theme.classificationTint(.relationship)
             case .quality:
                 value = satisfaction.map { "\(Int($0 * 100))%" } ?? Self.overallPassValueForReport(report).map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知")
-                subtitle = judged.map { "\(skillsText("judged", "抽检")) \($0)" } ?? skillsText("no_judgement", "暂无抽检数据")
+                subtitle = "\(skillsText("no_error_rate", "无错率")) \(Self.percentText(noError))"
+                    + " · \(skillsText("judge_mean", "抽检均分")) \(judgeMean.map { String(format: "%.1f", $0) } ?? skillsText("unknown", "未知"))"
                 tint = theme.success
             case .evolution:
-                value = "\(skillsText("eval", "Eval")) \(evalCount)/\(max(details.count, 1))"
-                subtitle = "\(skillsText("evolution_fixed", "已修")) \(Self.curedRoadblocks(in: report).count) · \(skillsText("evolution_pending", "待优化")) \(report.resolvedSkillRetro.proposals.count)"
+                value = "\(skillsText("eval", "Eval")) \(eval.population)/\(eval.totalSkills)"
+                subtitle = "\(eval.totalCases) \(skillsText("eval_cases", "条用例")) · \(skillsText("coverage", "覆盖")) \(Self.percentText(eval.coverage)) · \(skillsText("evolution_fixed", "已修")) \(Self.curedRoadblocks(in: report).count)"
                 tint = theme.warning
             }
             return VStack(alignment: .leading, spacing: 6) {
@@ -409,7 +415,7 @@
                     Text(detail.skill).font(.subheadline.weight(.semibold)).lineLimit(1)
                     Text(Self.cleanVersionLabel(evolution?.combinedVersion ?? "v1")).font(.caption2.monospaced()).foregroundStyle(.secondary)
                     Spacer()
-                    statusBadge(tier.label, tint: tier.tint)
+                    statusBadge(tier.label, tint: tier.tint(using: theme))
                 }
                 HStack(spacing: 10) {
                     compactMetric("\(detail.loads7d)", skillsText("calls_7d", "调用"))
@@ -430,9 +436,10 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(tier.tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+            .background(tier.tint(using: theme).opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
             .contentShape(RoundedRectangle(cornerRadius: 10))
             .accessibilityIdentifier("skills-row-\(detail.skill)")
+            .accessibilityElement(children: .combine)
         }
 
         private func compactMetric(_ value: String, _ label: String) -> some View {
@@ -467,7 +474,7 @@
                 : filteredScripts
             VStack(alignment: .leading, spacing: 8) {
                 Picker(skillsText("script_filter", "脚本筛选"), selection: $scriptFilter) {
-                    ForEach(SkillScriptFilter.allCases) { filter in
+                    ForEach(SkillsRoiScriptFilter.allCases) { filter in
                         Text(filter.title).tag(filter)
                     }
                 }
@@ -516,7 +523,7 @@
 
         @ViewBuilder private func qualityStage(_ report: SkillsRoiReport) -> some View {
             Picker(skillsText("quality_view", "质检视图"), selection: $qualityView) {
-                ForEach(SkillQualityView.allCases) { view in
+                ForEach(SkillsRoiQualityView.allCases) { view in
                     Text(view.title).tag(view)
                 }
             }
@@ -552,7 +559,7 @@
             DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
                 ForEach(rows) { row in
                     detailCard(title: row.skill, subtitle: Self.formatVersionComparison(before: row.beforeVersion?.combinedVersion, current: row.combinedVersion)) {
-                        Text(evolutionSignalsText(row).text).font(.caption).foregroundStyle(theme.text(.body))
+                        Text(evolutionSignalsText(row, theme: theme).text).font(.caption).foregroundStyle(theme.text(.body))
                     }
                 }
             }
@@ -584,6 +591,7 @@
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
             .background(theme.neutrals.inner.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityElement(children: .combine)
         }
 
         private func sortedDetails(_ report: SkillsRoiReport) -> [SkillInspectorDetail] {
@@ -620,6 +628,11 @@
             medianValue(scripts.compactMap(\.p95Ms))
         }
 
+        public static func aggregateScriptMedian(_ scripts: [SkillScriptDetail]) -> Double? {
+            let p50 = scripts.compactMap(\.p50Ms)
+            return medianValue(p50.isEmpty ? scripts.compactMap(\.p95Ms) : p50)
+        }
+
         public static func aggregateActiveDurationMedian(_ rows: [SkillQualityBehaviorRow]) -> Double? {
             let weighted = rows.compactMap { row -> (Double, Int)? in
                 guard let value = row.activeDurationMedianSec, value.isFinite else { return nil }
@@ -636,6 +649,79 @@
             guard !weighted.isEmpty else { return nil }
             let totalWeight = weighted.reduce(0) { $0 + $1.1 }
             return weighted.reduce(0.0) { $0 + $1.0 * Double($1.1) } / Double(totalWeight)
+        }
+
+        public static func emptyInvocationCount(_ rows: [SkillQualityBehaviorRow]?) -> Int? {
+            guard let rows, !rows.isEmpty else { return nil }
+            return rows.reduce(0) { total, row in
+                if let explicit = row.emptyInvocationCount {
+                    return total + max(0, explicit)
+                }
+                if let observed = row.observedInvocations, let eligible = row.eligibleInvocations {
+                    return total + max(0, observed - eligible)
+                }
+                if let observed = row.observedInvocations, let rate = row.emptyInvocationRate, rate.isFinite, (0 ... 1).contains(rate) {
+                    return total + Int((Double(observed) * rate).rounded())
+                }
+                return total
+            }
+        }
+
+        public static func monthlyAdoptionComparison(details: [SkillInspectorDetail]) -> String? {
+            let weekly = details.reduce(0) { $0 + $1.loads7d }
+            let monthly = details.reduce(0) { $0 + $1.loads30d }
+            guard monthly > 0 else { return nil }
+            let delta = Double(weekly) / (Double(monthly) / 4.0) - 1.0
+            guard delta.isFinite else { return nil }
+            return String(format: "%@ %+.0f%%", skillsText("monthly_comparison", "vs monthly avg"), delta * 100)
+        }
+
+        public static func aggregateNoErrorRate(report: SkillsRoiReport, details: [SkillInspectorDetail]) -> Double? {
+            let scriptCalls = details.flatMap(\.scripts).compactMap { script -> (Double, Int)? in
+                guard let rate = validPassRate(script.successRate), let calls = script.calls30d, calls > 0 else { return nil }
+                return (rate, calls)
+            }
+            if !scriptCalls.isEmpty {
+                let weight = scriptCalls.reduce(0) { $0 + $1.1 }
+                return scriptCalls.reduce(0) { $0 + $1.0 * Double($1.1) } / Double(weight)
+            }
+            let rows = report.versionEvolution.compactMap { row -> (Double, Int)? in
+                let invocations = row.currentVersion.invocations
+                guard invocations > 0, row.currentVersion.exit2Count >= 0 else { return nil }
+                return (1.0 - min(1.0, Double(row.currentVersion.exit2Count) / Double(invocations)), invocations)
+            }
+            guard !rows.isEmpty else { return nil }
+            let weight = rows.reduce(0) { $0 + $1.1 }
+            return rows.reduce(0) { $0 + $1.0 * Double($1.1) } / Double(weight)
+        }
+
+        public static func aggregateJudgeMean(_ summary: SkillQualityJudgeSummary?) -> Double? {
+            guard let summary else { return nil }
+            let rows = summary.skills.compactMap { row -> (Double, Int)? in
+                guard let score = row.scoreMean, score.isFinite, let judged = row.judged, judged > 0 else { return nil }
+                return (score, judged)
+            }
+            guard !rows.isEmpty else { return nil }
+            let weight = rows.reduce(0) { $0 + $1.1 }
+            return rows.reduce(0) { $0 + $1.0 * Double($1.1) } / Double(weight)
+        }
+
+        public static func aggregateEvalSummary(report: SkillsRoiReport, details: [SkillInspectorDetail]) -> (population: Int, totalSkills: Int, totalCases: Int, coverage: Double?) {
+            let totalSkills = details.count
+            let population = details.filter { !$0.evalCases.isEmpty }.count
+            let totalCases = details.reduce(0) { $0 + $1.evalCases.count }
+            let coverage: Double? = {
+                if let eligible = report.qualityJudge?.eligibleSkillCount, eligible > 0, let judged = report.qualityJudge?.judgedSkillCount {
+                    return min(1, max(0, Double(judged) / Double(eligible)))
+                }
+                guard totalSkills > 0 else { return nil }
+                return Double(population) / Double(totalSkills)
+            }()
+            return (population, totalSkills, totalCases, coverage)
+        }
+
+        public static func filteredScripts(_ scripts: [SkillScriptDetail], filter: SkillsRoiScriptFilter) -> [SkillScriptDetail] {
+            scripts.filter(filter.matches)
         }
 
         private static func weightedMedian(_ values: [(Double, Int)]) -> Double? {
@@ -735,7 +821,7 @@
                     title: skillsText("vital_active_title", "活跃家底"),
                     value: activeValueText,
                     subtitle: callsSubtitleText,
-                    tint: .accentColor,
+                    tint: theme.primary.primary,
                     valueID: "skills-vital-healthy",
                     subtitleID: "skills-vital-calls-7d"
                 )
@@ -743,7 +829,7 @@
                     title: skillsText("vital_pass_title", "一次通过率与质量"),
                     value: passRateSummary(report, managed: managedCurrent ? managed : []),
                     subtitle: passSubtitleText,
-                    tint: .green,
+                    tint: theme.success,
                     valueID: "skills-vital-pass-rate",
                     subtitleID: nil
                 )
@@ -751,7 +837,7 @@
                     title: skillsText("vital_flywheel_title", "自演进飞轮"),
                     value: flywheelValueText,
                     subtitle: flywheelSubtitleText,
-                    tint: .orange,
+                    tint: theme.warning,
                     valueID: "skills-vital-flywheel",
                     subtitleID: nil
                 )
@@ -927,7 +1013,7 @@
                                 .font(.caption.weight(.medium))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
-                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                                .background(theme.primary.primary.opacity(0.12), in: Capsule())
                         }
                         .buttonStyle(.plain)
                         .frame(minWidth: 28, minHeight: 28)
@@ -1003,7 +1089,7 @@
                 HStack(spacing: 6) {
                     Text("\(detail.loads7d)")
                         .font(.caption.monospacedDigit().weight(.medium))
-                    bar(detail.loads7d > 0 ? heatRatio : 0, tier.tint, width: 44)
+                    bar(detail.loads7d > 0 ? heatRatio : 0, tier.tint(using: theme), width: 44)
                 }
                 .frame(width: 124, alignment: .trailing)
                 .captureDashboardGeometry(id: "skills-row-\(detail.skill)-calls", role: "cell")
@@ -1011,12 +1097,13 @@
                 rateCell(passRate, before: beforeRate)
                     .captureDashboardGeometry(id: "skills-row-\(detail.skill)-pass", role: "cell")
 
-                statusBadge(tier.label, tint: tier.tint)
+                statusBadge(tier.label, tint: tier.tint(using: theme))
                     .captureDashboardGeometry(id: "skills-row-\(detail.skill)-status", role: "cell")
                     .frame(width: 132, alignment: .trailing)
             }
             .padding(.vertical, 7)
             .accessibilityIdentifier("skills-row-\(detail.skill)")
+            .accessibilityElement(children: .combine)
         }
 
         private func usageRowCompact(
@@ -1037,14 +1124,14 @@
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                     Spacer()
-                    statusBadge(tier.label, tint: tier.tint)
+                    statusBadge(tier.label, tint: tier.tint(using: theme))
                         .captureDashboardGeometry(id: "skills-row-\(detail.skill)-status", role: "cell")
                 }
                 HStack {
                     HStack(spacing: 6) {
                         Text("\(detail.loads7d)")
                             .font(.caption.monospacedDigit())
-                        bar(detail.loads7d > 0 ? heatRatio : 0, tier.tint, width: 44)
+                        bar(detail.loads7d > 0 ? heatRatio : 0, tier.tint(using: theme), width: 44)
                     }
                     .captureDashboardGeometry(id: "skills-row-\(detail.skill)-calls", role: "cell")
                     Spacer()
@@ -1054,6 +1141,7 @@
             }
             .padding(.vertical, 8)
             .accessibilityIdentifier("skills-row-\(detail.skill)")
+            .accessibilityElement(children: .combine)
         }
 
         private struct FlywheelDisplayEntry: Identifiable {
@@ -1105,21 +1193,21 @@
             }
         }
 
-        private func evolutionSignalsText(_ row: SkillVersionEvolutionRow) -> (text: String, tint: Color) {
+        private func evolutionSignalsText(_ row: SkillVersionEvolutionRow, theme: Theme) -> (text: String, tint: Color) {
             let beforeExit2 = row.beforeVersion?.exit2Count ?? 0
             let currentExit2 = row.currentVersion.exit2Count
             var parts: [String] = []
-            var tint: Color = .secondary
+            var tint: Color = theme.text(.body)
 
             if beforeExit2 != currentExit2 || beforeExit2 > 0 || currentExit2 > 0 {
                 let delta = currentExit2 - beforeExit2
                 let deltaStr = delta != 0 ? "(\(delta > 0 ? "+" : "")\(delta))" : ""
                 parts.append(skillsText("evo_script_errors", "报错") + " \(beforeExit2)→\(currentExit2)\(deltaStr)")
-                tint = delta < 0 ? .green : (delta > 0 ? .orange : .secondary)
+                tint = delta < 0 ? theme.success : (delta > 0 ? theme.warning : theme.text(.body))
             }
             if let bP50 = row.beforeVersion?.scriptP50Ms, let cP50 = row.currentVersion.scriptP50Ms {
                 parts.append(String(format: "P50 %.1fs→%.1fs", bP50 / 1000.0, cP50 / 1000.0))
-                if tint == .secondary && cP50 < bP50 { tint = .green }
+                if cP50 < bP50 { tint = theme.success }
             } else if let bSessions = row.beforeVersion?.sessions {
                 parts.append(skillsText("evo_sessions", "会话") + " \(bSessions)→\(row.currentVersion.sessions)")
             }
@@ -1138,7 +1226,7 @@
 
         private func evolutionRowWide(_ row: SkillVersionEvolutionRow, detail: SkillInspectorDetail?) -> some View {
             let verdict = Self.semanticEvolutionVerdict(for: row)
-            let signals = evolutionSignalsText(row)
+            let signals = evolutionSignalsText(row, theme: theme)
             let rates = resolvedEvolutionPassRate(row, detail: detail)
             return HStack(spacing: 12) {
                 HStack(spacing: 6) {
@@ -1157,7 +1245,7 @@
 
                 Text(signals.text)
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(signals.tint == .secondary ? .primary : signals.tint)
+                    .foregroundStyle(signals.tint)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                     .frame(width: 224, alignment: .trailing)
@@ -1166,17 +1254,18 @@
                 rateCell(rates.current, before: rates.before, width: 152)
                     .captureDashboardGeometry(id: "skills-row-\(row.skill)-pass", role: "cell")
 
-                statusBadge(verdict.label, tint: verdict.tint)
+                statusBadge(verdict.label, tint: verdict.tint(using: theme))
                     .captureDashboardGeometry(id: "skills-row-\(row.skill)-status", role: "cell")
                     .frame(width: 132, alignment: .trailing)
             }
             .padding(.vertical, 7)
             .accessibilityIdentifier("skills-row-\(row.skill)")
+            .accessibilityElement(children: .combine)
         }
 
         private func evolutionRowCompact(_ row: SkillVersionEvolutionRow, detail: SkillInspectorDetail?) -> some View {
             let verdict = Self.semanticEvolutionVerdict(for: row)
-            let signals = evolutionSignalsText(row)
+            let signals = evolutionSignalsText(row, theme: theme)
             let rates = resolvedEvolutionPassRate(row, detail: detail)
             return VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -1187,13 +1276,13 @@
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                     Spacer()
-                    statusBadge(verdict.label, tint: verdict.tint)
+                    statusBadge(verdict.label, tint: verdict.tint(using: theme))
                         .captureDashboardGeometry(id: "skills-row-\(row.skill)-status", role: "cell")
                 }
                 HStack {
                     Text(signals.text)
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(signals.tint == .secondary ? .primary : signals.tint)
+                        .foregroundStyle(signals.tint)
                         .lineLimit(1)
                         .captureDashboardGeometry(id: "skills-row-\(row.skill)-calls", role: "cell")
                     Spacer()
@@ -1203,6 +1292,7 @@
             }
             .padding(.vertical, 8)
             .accessibilityIdentifier("skills-row-\(row.skill)")
+            .accessibilityElement(children: .combine)
         }
 
         private func buildFlywheelEntries(_ report: SkillsRoiReport) -> [FlywheelDisplayEntry] {
@@ -1227,7 +1317,7 @@
                         metricText: skillsText("evo_script_errors", "脚本报错") + " \(item.preFixCount) → \(item.postFixCount) " + skillsText("unit_times", "次"),
                         passRate: pass,
                         statusLabel: "✅ " + skillsText("flywheel_status_cured", "已清零治愈"),
-                        tint: .green
+                        tint: theme.success
                     )
                 )
             }
@@ -1244,7 +1334,7 @@
                         metricText: skillsText("calls_7d", "7d") + " \(detail?.loads7d ?? 0) " + skillsText("unit_times", "次"),
                         passRate: pass,
                         statusLabel: "⏳ " + skillsText("flywheel_status_queued", "慢飞轮排队中"),
-                        tint: .orange
+                        tint: theme.warning
                     )
                 )
             }
@@ -1259,7 +1349,7 @@
                             metricText: skillsText("calls_7d", "7d") + " \(detail.loads7d) " + skillsText("unit_times", "次"),
                             passRate: Self.validPassRate(detail.r1PassRate),
                             statusLabel: "🔄 " + skillsText("flywheel_status_converging", "自动收敛中"),
-                            tint: .accentColor
+                            tint: theme.primary.primary
                         )
                     )
                 }
@@ -1280,25 +1370,25 @@
                         title: skillsText("pillar_trigger_title", "触发命中"),
                         value: "\(retro.triggerMissSkills) 漏 · \(retro.zeroActionLoadSkills) 空载",
                         subtitle: skillsText("pillar_trigger_sub", "漏触发与空载收敛"),
-                        tint: retro.triggerMissSkills == 0 ? .green : .orange
+                        tint: retro.triggerMissSkills == 0 ? theme.success : theme.warning
                     )
                     flywheelPillarCard(
                         title: skillsText("pillar_drawer_title", "知识库精简"),
                         value: "\(retro.hotDrawers.count) 热 · \(retro.trueDeadwoodDrawersCount) 冗余",
                         subtitle: skillsText("pillar_drawer_sub", "热抽屉与零命中清理"),
-                        tint: retro.trueDeadwoodDrawersCount <= 4 ? .green : .orange
+                        tint: retro.trueDeadwoodDrawersCount <= 4 ? theme.success : theme.warning
                     )
                     flywheelPillarCard(
                         title: skillsText("pillar_script_title", "脚本稳定度"),
                         value: "\(curedList.count) 已治愈 · \(retro.rigidRoadblockScriptsCount) 待清",
                         subtitle: skillsText("pillar_script_sub", "有效拦截与路障清零"),
-                        tint: !curedList.isEmpty ? .green : .orange
+                        tint: !curedList.isEmpty ? theme.success : theme.warning
                     )
                     flywheelPillarCard(
                         title: skillsText("pillar_gate_title", "跨仓门禁与收编"),
                         value: gateScanned > 0 ? "\(gateHealthy)/\(gateScanned) 仓健康" : "\(retro.wildPatternsCount) 待收编",
                         subtitle: skillsText("pillar_gate_sub", "野生模式收编与仓库健康"),
-                        tint: retro.wildPatternsCount == 0 ? .green : .orange
+                        tint: retro.wildPatternsCount == 0 ? theme.success : theme.warning
                     )
                 }
 
@@ -1354,7 +1444,7 @@
 
                     Text(entry.metricText)
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(entry.tint == .green ? .green : .primary)
+                        .foregroundStyle(entry.tint)
                         .frame(width: 148, alignment: .trailing)
                         .captureDashboardGeometry(id: "skills-row-\(entry.skill)-calls", role: "cell")
 
@@ -1388,6 +1478,7 @@
             }
             .padding(.vertical, 7)
             .accessibilityIdentifier("skills-row-\(entry.skill)")
+            .accessibilityElement(children: .combine)
         }
 
         private func statusBadge(_ label: String, tint: Color) -> some View {
@@ -1395,7 +1486,7 @@
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
-                .foregroundStyle(tint == .secondary ? .secondary : tint)
+                .foregroundStyle(tint)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(tint.opacity(0.14), in: Capsule())
@@ -1405,8 +1496,8 @@
             let safeCurrent = Self.validPassRate(current)
             let safeBefore = Self.validPassRate(before)
             let barTint: Color = {
-                guard let safeCurrent else { return .secondary }
-                return safeCurrent >= 0.80 ? .green : (safeCurrent >= 0.60 ? .orange : .red)
+                guard let safeCurrent else { return theme.text(.meta) }
+                return safeCurrent >= 0.80 ? theme.success : (safeCurrent >= 0.60 ? theme.warning : theme.danger)
             }()
             return HStack(spacing: 6) {
                 VStack(alignment: .trailing, spacing: 1) {
@@ -1416,7 +1507,7 @@
                     }
                 }.frame(width: max(64, width - 60), alignment: .trailing)
                 VStack(spacing: 2) {
-                    bar(safeBefore ?? safeCurrent, .secondary)
+                    bar(safeBefore ?? safeCurrent, theme.text(.meta))
                     bar(safeCurrent, barTint)
                 }.frame(width: 48)
             }.frame(width: width, alignment: .trailing)
@@ -1449,7 +1540,13 @@
 
         public static func cleanVersionLabel(_ raw: String) -> String { raw.split(separator: "→", omittingEmptySubsequences: false).map { part in let text = part.trimmingCharacters(in: .whitespaces); let v = text.split(separator: "@").first.map(String.init) ?? text; if let range = v.range(of: "+v") { return String(v[v.index(after: range.lowerBound)...]).split(separator: "@").first.map(String.init) ?? v }; return v }.joined(separator: " → ") }
         public static func activeSkillRow(in diagnostics: SkillsRoiDiagnostics, selectedSkill: String?) -> SkillsUsageRow? { diagnostics.usageRows.first { $0.skill == selectedSkill } ?? diagnostics.usageRows.first }
-        public static func activeSkillDetail(in report: SkillsRoiReport, selectedSkill: String?, filter: SkillInspectorFilter = .all) -> SkillInspectorDetail? { let pool = (report.skillDetails.isEmpty ? report.diagnostics.resolvedSkillDetails : report.skillDetails).filter { filter.matches($0) }; return pool.first { $0.skill == selectedSkill } ?? pool.first }
+        public static func activeSkillDetail(in report: SkillsRoiReport, selectedSkill: String?, filter: SkillInspectorFilter = .all) -> SkillInspectorDetail? {
+            let pool = (report.skillDetails.isEmpty ? report.diagnostics.resolvedSkillDetails : report.skillDetails).filter { filter.matches($0) }
+            if let selectedSkill {
+                return pool.first { $0.skill == selectedSkill }
+            }
+            return pool.first
+        }
         public static func currentObservationAvailable(metadata: SkillsObservationMetadata, reportCoverage: String?) -> Bool {
             metadata.hasSamples && metadata.coverage != "error" && reportCoverage != "error"
         }
@@ -1498,13 +1595,14 @@
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         healthSection(skillsText("health_summary", "四维体检概览")) {
+                            let behavior = report?.qualityBehavior?.first(where: { $0.skill == detail.skill })
                             HStack {
                                 healthMetric("\(detail.loads30d)", skillsText("calls_30d", "30天调用"))
-                                healthMetric(SkillsRoiDiagnosticsCardView.aggregateScriptP95(detail.scripts).map { "\(Int($0))ms" } ?? skillsText("unknown", "未知"), skillsText("script_p95_median", "P95 中位"))
-                                healthMetric(detail.r1PassRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("quality", "质量"))
-                                healthMetric("\(detail.editChurn)", skillsText("changes", "变动"))
+                                healthMetric(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(detail.scripts).map { "\(Int($0))ms" } ?? skillsText("unknown", "未知"), skillsText("script_median", "脚本中位"))
+                                healthMetric(behavior?.firstPassSatisfactionRate.map { "\(Int($0 * 100))%" } ?? detail.r1PassRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("first_pass", "一次满意"))
+                                healthMetric(behavior?.normalizedEditChurn.map { String(format: "%.2f", $0) } ?? (detail.editChurn > 0 ? String(format: "%.2f", Double(detail.editChurn)) : skillsText("unknown", "未知")), skillsText("normalized_churn", "归一化擦写"))
                             }
-                            if let behavior = report?.qualityBehavior?.first(where: { $0.skill == detail.skill }) {
+                            if let behavior {
                                 Text("\(skillsText("observed", "观测调用")) \(behavior.observedInvocations ?? 0) · \(skillsText("corrections", "纠正")) \(behavior.correctionCount ?? 0) · \(skillsText("active_duration", "活跃耗时")) \(behavior.activeDurationMedianSec.map { String(format: "%.1fm", $0 / 60) } ?? skillsText("unknown", "未知"))")
                                     .font(.caption)
                                     .foregroundStyle(theme.text(.body))
@@ -1629,6 +1727,7 @@
     public struct SkillQualityBehaviorRow: Decodable, Sendable, Equatable, Identifiable {
         public let skill: String
         public let registered: Bool?, observedInvocations: Int?, eligibleInvocations: Int?, eligible: Bool?
+        public let emptyInvocationCount: Int?, emptyInvocationRate: Double?
         public let correctionCount: Int?, maxTokensInvocations: Int?, satisfactionEligibleInvocations: Int?
         public let firstPassSatisfactionRate: Double?, implicitCorrectionRate: Double?, editToolCalls: Int?
         public let assistantTurnCount: Int?, normalizedEditChurn: Double?, activeDurationMedianSec: Double?
@@ -1639,6 +1738,8 @@
             case skill, registered, eligible, estimated
             case observedInvocations = "observed_invocations"
             case eligibleInvocations = "eligible_invocations"
+            case emptyInvocationCount = "empty_invocation_count"
+            case emptyInvocationRate = "empty_invocation_rate"
             case correctionCount = "correction_count"
             case maxTokensInvocations = "max_tokens_invocations"
             case satisfactionEligibleInvocations = "satisfaction_eligible_invocations"
@@ -1861,12 +1962,12 @@
     }
 
     public struct SkillScriptDetail: Decodable, Sendable, Equatable, Identifiable {
-        public let relPath: String, calls30d: Int?, successRate: Double?, p95Ms: Double?, isUnpracticed: Bool
+        public let relPath: String, calls30d: Int?, successRate: Double?, p50Ms: Double?, p95Ms: Double?, isUnpracticed: Bool
         public var id: String { relPath }
 
-        public init(relPath: String, calls30d: Int? = nil, successRate: Double? = nil, p95Ms: Double? = nil, isUnpracticed: Bool = false) {
+        public init(relPath: String, calls30d: Int? = nil, successRate: Double? = nil, p50Ms: Double? = nil, p95Ms: Double? = nil, isUnpracticed: Bool = false) {
             self.relPath = relPath; self.calls30d = calls30d; self.successRate = successRate
-            self.p95Ms = p95Ms; self.isUnpracticed = isUnpracticed
+            self.p50Ms = p50Ms; self.p95Ms = p95Ms; self.isUnpracticed = isUnpracticed
         }
 
         public init(from decoder: Decoder) throws {
@@ -1874,6 +1975,7 @@
             relPath = try f.container.decode(String.self, forKey: .init("rel_path"))
             calls30d = try f.value("calls_30d")
             successRate = try f.value("success_rate")
+            p50Ms = try f.value("p50_ms") ?? f.value("script_p50_ms")
             p95Ms = try f.value("p95_ms")
             isUnpracticed = try f.value("is_unpracticed") ?? (calls30d == 0)
         }

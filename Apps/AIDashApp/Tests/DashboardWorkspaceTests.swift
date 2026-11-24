@@ -2214,7 +2214,10 @@ struct DashboardWorkspaceTests {
           "quality_behavior": [{
             "skill": "team-lead",
             "observed_invocations": 12,
+            "eligible_invocations": 9,
+            "empty_invocation_count": 1,
             "first_pass_satisfaction_rate": 0.75,
+            "normalized_edit_churn": 0.42,
             "active_duration_median_sec": 144.0
           }],
           "quality_judge": {
@@ -2234,13 +2237,18 @@ struct DashboardWorkspaceTests {
         let behavior = try #require(report.qualityBehavior?.first)
         #expect(behavior.skill == "team-lead")
         #expect(behavior.observedInvocations == 12)
+        #expect(behavior.eligibleInvocations == 9)
+        #expect(behavior.emptyInvocationCount == 1)
         #expect(behavior.firstPassSatisfactionRate == 0.75)
+        #expect(behavior.normalizedEditChurn == 0.42)
         #expect(behavior.activeDurationMedianSec == 144)
         #expect(behavior.correctionCount == nil)
         let judge = try #require(report.qualityJudge)
         #expect(judge.eligibleSkillCount == 2)
         #expect(judge.judgedSkillCount == 1)
         #expect(judge.skills.first?.scoreMean == 4.5)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateJudgeMean(judge) == 4.5)
+        #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount([behavior]) == 1)
 
         let legacy = try JSONDecoder().decode(
             SkillsRoiReport.self,
@@ -2262,8 +2270,9 @@ struct DashboardWorkspaceTests {
 
         let details = report.skillDetails.filter { !$0.isGhost }
         #expect(SkillsRoiDiagnosticsCardView.aggregateScriptP95(details.flatMap(\.scripts)) == 145)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateNoErrorRate(report: report, details: details) != nil)
         #expect(details.reduce(0) { $0 + $1.references.count } >= details.reduce(0) { $0 + $1.unhitRefsCount })
-        #expect(details.reduce(0) { $0 + $1.evalCases.count } == 1)
+        #expect(details.reduce(0) { $0 + $1.evalCases.count } == 2)
 
         let qualityPayload = """
         {
@@ -2279,6 +2288,24 @@ struct DashboardWorkspaceTests {
         let rows = try #require(qualityReport.qualityBehavior)
         #expect(SkillsRoiDiagnosticsCardView.aggregateActiveDurationMedian(rows) == 120)
         #expect(SkillsRoiDiagnosticsCardView.aggregateSatisfactionRate(rows) == 0.65)
+
+        let scripts = [
+            SkillScriptDetail(relPath: "fast.py", calls30d: 10, successRate: 0.98, p50Ms: 42, p95Ms: 120),
+            SkillScriptDetail(relPath: "slow.py", calls30d: 4, successRate: 0.75, p50Ms: 180, p95Ms: 500),
+            SkillScriptDetail(relPath: "idle.py", calls30d: 0, successRate: nil, p50Ms: nil, p95Ms: nil, isUnpracticed: true)
+        ]
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(scripts) == 111)
+        #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .all).count == 3)
+        #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .highError).map(\.relPath) == ["slow.py"])
+        #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .slowestP95).map(\.relPath) == ["fast.py", "slow.py"])
+        #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .unpracticed).map(\.relPath) == ["idle.py"])
+
+        let evalSummary = SkillsRoiDiagnosticsCardView.aggregateEvalSummary(report: report, details: details)
+        #expect(evalSummary.population == 1)
+        #expect(evalSummary.totalCases == 2)
+        #expect(evalSummary.totalSkills == details.count)
+        #expect(SkillsRoiDiagnosticsCardView.monthlyAdoptionComparison(details: details) != nil)
+        #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount(rows) == 0)
     }
 }
 #endif

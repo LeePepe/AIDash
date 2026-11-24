@@ -13656,6 +13656,48 @@
           "en": {"stringUnit": {"state": "translated", "value": "No clear risk is visible; keep the current checking rhythm."}},
           "zh-Hans": {"stringUnit": {"state": "translated", "value": "当前没有明显风险，保持现有检查节奏。"}}
         }
+      },
+      "dashboard.skills_roi.monthly_comparison": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "vs monthly avg"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "较月均"}}
+        }
+      },
+      "dashboard.skills_roi.empty_invocations": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "empty invocations"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "空唤起"}}
+        }
+      },
+      "dashboard.skills_roi.no_error_rate": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "no-error rate"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "无错率"}}
+        }
+      },
+      "dashboard.skills_roi.judge_mean": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "judge mean"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "抽检均分"}}
+        }
+      },
+      "dashboard.skills_roi.first_pass": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "first-pass satisfaction"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "一次满意"}}
+        }
+      },
+      "dashboard.skills_roi.normalized_churn": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "normalized edit churn"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "归一化擦写"}}
+        }
       }
   },
   "version": "1.0"
