@@ -15,6 +15,7 @@ import time
 import uuid
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
+import itertools
 import multiprocessing
 import os
 import selectors
@@ -320,7 +321,7 @@ def _run_judge(
 ) -> dict[str, Any]:
     """Run or preview one bounded batch and return a redacted immutable receipt."""
     run_uid = judge_run_uid or str(uuid.uuid4())
-    selected = [dict(request) for request in requests][:max(0, max_items)]
+    selected = [dict(request) for request in itertools.islice(requests, max(0, max_items))]
     manifest = [
         {
             "sample_key": str(request.get("sample_key") or ""),
@@ -566,20 +567,33 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=str, default=None, help="JSON request manifest")
     parser.add_argument("--dry-run", action="store_true", help="emit a sample manifest without judging (default)")
-    parser.add_argument("--execute", action="store_true", help="execute with the local fake adapter")
-    parser.add_argument("--fake", action="store_true", help="use the deterministic fake adapter")
+    parser.add_argument("--execute", action="store_true", help="execute with a caller-configured real adapter")
+    parser.add_argument("--fake", action="store_true", help="run in-memory fake demo without persisting to clean DB")
     args = parser.parse_args(argv)
-    if args.dry_run and args.execute:
-        parser.error("--dry-run and --execute are mutually exclusive")
+    if args.dry_run and (args.execute or args.fake):
+        parser.error("--dry-run cannot be combined with --execute or --fake")
+    if args.execute and args.fake:
+        parser.error("--execute and --fake are mutually exclusive")
     requests: list[Mapping[str, Any]] = []
     if args.manifest:
         with open(args.manifest, encoding="utf-8") as handle:
             loaded = json.load(handle)
         if isinstance(loaded, list):
             requests = [item for item in loaded if isinstance(item, Mapping)]
-    execute = bool(args.execute or args.fake)
-    receipt = run_judge(requests, adapter=FakeJudgeAdapter() if execute else None, dry_run=not execute)
-    if execute and receipt.get("status") in {"completed", "partial"}:
+    if args.fake:
+        receipt = run_judge(
+            requests,
+            adapter=FakeJudgeAdapter(),
+            dry_run=False,
+            judge_provider="synthetic",
+            judge_model="offline-fake",
+        )
+        receipt["synthetic"] = True
+        receipt["persisted_judgements"] = 0
+        print(json.dumps(receipt, ensure_ascii=False, sort_keys=True))
+        return 0 if receipt.get("status") in {"completed", "partial"} else 1
+    receipt = run_judge(requests, adapter=None, dry_run=not args.execute)
+    if args.execute and receipt.get("status") in {"completed", "partial"}:
         try:
             receipt["persisted_judgements"] = persist_receipt(receipt)
         except Exception as exc:  # noqa: BLE001 - persistence is an explicit operator boundary

@@ -382,3 +382,28 @@ def test_judge_coverage_uses_explicit_eligible_population():
         for row in invocations
     ], now=NOW)
     assert complete["coverage_label"] == "19/19"
+
+
+def test_judge_cli_never_persists_fake_adapter_verdicts_into_clean_store(tmp_path, monkeypatch, capsys):
+    import json
+    import quality_judge
+
+    normalized = normalize_behavior_records(_records())
+    invocation = build_invocations(normalized, now=NOW)[0]
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps([build_request(invocation, prompt="p", response="r")]),
+        encoding="utf-8",
+    )
+    persisted_calls = []
+    monkeypatch.setattr(quality_judge, "persist_receipt", lambda *args, **kwargs: persisted_calls.append((args, kwargs)) or 1)
+    assert quality_judge.main(["--manifest", str(manifest_path), "--fake"]) == 0
+    fake_receipt = json.loads(capsys.readouterr().out)
+    assert fake_receipt["synthetic"] is True
+    assert fake_receipt["persisted_judgements"] == 0
+    assert persisted_calls == []
+    assert quality_judge.main(["--manifest", str(manifest_path), "--execute"]) == 1
+    exec_receipt = json.loads(capsys.readouterr().out)
+    assert exec_receipt["error_code"] == "provider_missing"
+    assert persisted_calls == []
+

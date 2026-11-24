@@ -2015,13 +2015,18 @@ def write_snapshot(
             errors.append(f"skills/daily unavailable: {type(exc).__name__}")
     # The normal daily path must carry quality sections from the warehouse;
     # explicit arguments remain available for hermetic producers/tests.
-    if not os.environ.get("PYTEST_CURRENT_TEST") and (quality_behavior is None or quality_judge is None):
-        quality_db = Path(warehouse_db) if warehouse_db is not None else config.WAREHOUSE_DB
-        quality_sections = load_snapshot_from_warehouse(quality_db)
-        if quality_behavior is None:
-            quality_behavior = quality_sections["behavior"].get("skills", [])
-        if quality_judge is None:
-            quality_judge = quality_sections["judge"]
+    if (warehouse_db is not None or not os.environ.get("PYTEST_CURRENT_TEST")) and (
+        quality_behavior is None or quality_judge is None
+    ):
+        try:
+            quality_db = Path(warehouse_db) if warehouse_db is not None else config.WAREHOUSE_DB
+            quality_sections = load_snapshot_from_warehouse(quality_db)
+            if quality_behavior is None:
+                quality_behavior = quality_sections["behavior"].get("skills", [])
+            if quality_judge is None:
+                quality_judge = quality_sections["judge"]
+        except Exception as exc:  # noqa: BLE001 - preserve snapshot write on quality read failure
+            errors.append(f"quality sections unavailable: {type(exc).__name__}")
     payload = build_snapshot(
         report,
         daily,
