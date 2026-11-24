@@ -553,8 +553,7 @@
                     bar(detail.loads7d > 0 ? heatRatio : 0, tint, width: 42)
                     Text(skillsText("calls_30d", "近30天") + " \(detail.loads30d)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    if passRate != nil { rateCell(passRate, before: beforeRate, width: 116) }
-                    else { Text(skillsText("no_review", "暂无评审")).font(.caption2).foregroundStyle(.secondary) }
+                    if passRate != nil { rateCell(passRate, before: beforeRate, width: 116) } else { Text(skillsText("no_review", "暂无评审")).font(.caption2).foregroundStyle(.secondary) }
                 }
                 Text(Self.plainUsageDiagnosis(for: detail, evolution: evolution, tier: tier))
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
