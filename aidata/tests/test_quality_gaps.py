@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import sqlite3
 import time
-from threading import Event, Thread
+from threading import Thread
 
 from L5_apps.digest.quality_snapshot import build_behavior_snapshot, load_snapshot_from_warehouse
 from quality_contracts import (
@@ -118,6 +118,20 @@ def test_invocationizer_caps_idle_gaps_and_closes_correction_window():
     assert invocation["edit_tool_calls"] == 3
     assert invocation["max_tokens"] is True
     assert CORRECTION_WINDOW_SEC == 1800
+    repaired_records = _records() + [
+        {
+            "source": "copilot_cli",
+            "session_id": "session-a",
+            "event_id": 4,
+            "timestamp": "2026-11-24T10:07:00Z",
+            "skill": "team-lead",
+            "event_type": "assistant_activity",
+            "assistant_activity": True,
+            "assistant_turn": True,
+        }
+    ]
+    repaired = build_invocations(normalize_behavior_records(repaired_records), now=NOW)[0]
+    assert repaired["correction_class"] == "negative_feedback"
 
 
 def test_quality_behavior_manual_collect_and_normalize_are_explicit(monkeypatch):
@@ -287,28 +301,25 @@ def test_timed_out_off_main_adapter_blocks_main_thread_overlap():
     normalized = normalize_behavior_records(_records())
     invocation = build_invocations(normalized, now=NOW)[0]
     request = build_request(invocation, prompt="p", response="r")
-    started = Event()
-    release = Event()
     result = {}
 
     def slow(_request):
-        started.set()
-        release.wait(1)
+        time.sleep(1.0)
         return FakeJudgeAdapter()(_request)
 
     def worker():
-        result.update(run_judge([request], adapter=slow, dry_run=False, adapter_timeout_sec=0.01))
+        result.update(run_judge([request], adapter=slow, dry_run=False, adapter_timeout_sec=0.05))
 
     thread = Thread(target=worker)
     thread.start()
-    assert started.wait(1)
-    time.sleep(0.03)
+    time.sleep(0.01)
     overlap = run_judge([request], adapter=FakeJudgeAdapter(), dry_run=False)
     assert overlap.get("error_code") == "judge_busy" or overlap.get("exclusion_reasons", {}).get("judge_busy") == 1
-    release.set()
     thread.join(timeout=2)
     assert not thread.is_alive()
     assert result["exclusion_reasons"]["timeout"] == 1
+    recovered = run_judge([request], adapter=FakeJudgeAdapter(), dry_run=False)
+    assert recovered["valid"] == 1
 
 
 def test_judge_partial_batch_counts_abstain_timeout_malformed_and_duplicate():

@@ -469,7 +469,7 @@ def build_invocations(
             if prompt.get("source") != first.get("source") or prompt.get("session_id") != first.get("session_id"):
                 continue
             prompt_ts = _timestamp(prompt.get("ts"))
-            if prompt_ts is None or not (end < prompt_ts <= observation_end):
+            if prompt_ts is None or not (start < prompt_ts <= observation_end):
                 continue
             if prompt.get("correction_class") in CORRECTION_CLASSES - {"none"}:
                 corrections.append(prompt)

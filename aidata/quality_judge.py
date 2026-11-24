@@ -14,10 +14,9 @@ import json
 import time
 import uuid
 from collections.abc import Iterable, Mapping
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
-import signal
-from threading import Lock, current_thread, main_thread
+import multiprocessing
+from threading import Lock
 from typing import Any, Protocol
 
 from quality_contracts import (
@@ -108,47 +107,51 @@ _OFF_MAIN_ADAPTER = Lock()
 
 
 def _invoke_adapter(adapter: JudgeAdapter, request: Mapping[str, Any], timeout_sec: float) -> Mapping[str, Any]:
-    """Invoke with a hard main-thread alarm; use a bounded future off-thread."""
+    """Invoke adapter in an isolated fork child so timeouts terminate execution."""
     timeout = max(0.01, float(timeout_sec))
-    if current_thread() is main_thread():
-        if not _OFF_MAIN_ADAPTER.acquire(blocking=False):
-            raise JudgeBusyError("judge_busy")
-        class _AdapterTimeout(Exception):
-            pass
-
-        def alarm_handler(_signum, _frame):
-            raise _AdapterTimeout
-
-        previous = signal.getsignal(signal.SIGALRM)
-        signal.signal(signal.SIGALRM, alarm_handler)
-        signal.setitimer(signal.ITIMER_REAL, timeout)
-        try:
-            return adapter(request)
-        except _AdapterTimeout as exc:
-            raise TimeoutError from exc
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous)
-            _OFF_MAIN_ADAPTER.release()
     if not _OFF_MAIN_ADAPTER.acquire(blocking=False):
         raise JudgeBusyError("judge_busy")
-    executor = ThreadPoolExecutor(max_workers=1)
+    isolated = dict(request)
+    ctx = multiprocessing.get_context("fork")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+
+    def _proc_target() -> None:
+        parent_conn.close()
+        try:
+            child_conn.send(("ok", adapter(isolated)))
+        except BaseException as exc:  # noqa: BLE001
+            child_conn.send(("err", type(exc).__name__, str(exc)))
+        finally:
+            isolated.clear()
+            child_conn.close()
+
+    process = ctx.Process(target=_proc_target, daemon=True)
     try:
-        future = executor.submit(adapter, request)
-    except Exception:
-        _OFF_MAIN_ADAPTER.release()
-        executor.shutdown(wait=False, cancel_futures=True)
-        raise
-    future.add_done_callback(lambda _future: _OFF_MAIN_ADAPTER.release())
-    try:
-        return future.result(timeout=timeout)
-    except FutureTimeoutError as exc:
-        future.cancel()
-        raise TimeoutError from exc
+        process.start()
+        child_conn.close()
+        if not parent_conn.poll(timeout):
+            process.terminate()
+            process.join(timeout=0.05)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=0.05)
+            raise TimeoutError
+        status, *payload = parent_conn.recv()
+        process.join(timeout=0.05)
+        if status == "ok":
+            return payload[0]
+        exc_type, message = payload
+        if exc_type == "TimeoutError":
+            raise TimeoutError(message)
+        if exc_type == "OverflowError":
+            raise OverflowError(message)
+        if exc_type == "ValueError":
+            raise ValueError(message)
+        raise RuntimeError(message)
     finally:
-        # A timed-out callable may continue; its done callback owns the
-        # single-flight release. Normal completion releases before shutdown.
-        executor.shutdown(wait=False, cancel_futures=True)
+        parent_conn.close()
+        isolated.clear()
+        _OFF_MAIN_ADAPTER.release()
 
 
 def normalize_verdict(
