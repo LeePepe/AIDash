@@ -15,6 +15,7 @@ Usage:
     ./cli.py query <name> [--param KEY=VALUE ...]
     ./cli.py query --list
     ./cli.py digest [--date YYYY-MM-DD] [--llm] [--aidash]
+    ./cli.py quality-behavior {collect|normalize}  # explicit offline opt-in
 """
 
 from __future__ import annotations
@@ -147,6 +148,19 @@ def _product_blob_failure() -> int:
     return 1
 
 
+def cmd_quality_behavior(action: str) -> int:
+    """Run the opt-in quality projection; never part of scheduled collect."""
+    adapter = importlib.import_module("adapters.quality_behavior")
+    if action == "collect":
+        count = adapter.collect()
+    elif action == "normalize":
+        count = adapter.normalize()
+    else:
+        raise ValueError("quality-behavior action must be collect or normalize")
+    print(f"quality-behavior {action}: {count} rows")
+    return 0
+
+
 def cmd_product_blob(extra_args: list[str]) -> int:
     if extra_args or not _valid_product_blob_selectors(
         PRODUCT_BLOB_CONTAINER_URL,
@@ -248,6 +262,10 @@ def cmd_digest(args: argparse.Namespace) -> int:
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "product-blob":
         return cmd_product_blob(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "quality-behavior":
+        if len(sys.argv) != 3:
+            raise SystemExit("usage: ./cli.py quality-behavior {collect|normalize}")
+        return cmd_quality_behavior(sys.argv[2])
 
     parser = argparse.ArgumentParser(prog="aidata", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)

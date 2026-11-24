@@ -464,3 +464,105 @@ CREATE TABLE IF NOT EXISTS dim_session (
     total_cost_usd  REAL,
     client          TEXT
 );
+
+-- ---------------------------------------------------------------------------
+-- Skill-quality facts. These are separate grains from fact_turn and the
+-- existing skills_daily ROI data: one registry row, one invocation episode,
+-- one correction signal, one judge verdict, and one judge batch receipt.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS dim_skill_registry (
+    skill TEXT PRIMARY KEY,
+    registry_source TEXT NOT NULL,
+    active INTEGER NOT NULL,
+    registry_version TEXT NOT NULL,
+    observed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS fact_skill_invocation (
+    invocation_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    start_ts TEXT NOT NULL,
+    end_ts TEXT NOT NULL,
+    observation_end_ts TEXT NOT NULL,
+    assistant_turn_count INTEGER NOT NULL,
+    edit_tool_calls INTEGER NOT NULL,
+    normalized_edit_churn REAL NOT NULL,
+    active_duration_sec INTEGER NOT NULL,
+    max_tokens INTEGER NOT NULL,
+    source_covered INTEGER NOT NULL,
+    prompt_linked INTEGER NOT NULL,
+    closed INTEGER NOT NULL,
+    eligible INTEGER NOT NULL,
+    invocationizer_version TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_invocation_skill_ts
+    ON fact_skill_invocation(skill, start_ts);
+CREATE INDEX IF NOT EXISTS idx_skill_invocation_eligible
+    ON fact_skill_invocation(eligible, skill);
+
+CREATE TABLE IF NOT EXISTS fact_skill_correction (
+    correction_signal_uid TEXT PRIMARY KEY,
+    invocation_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    correction_class TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    classifier_version TEXT NOT NULL,
+    text_len INTEGER NOT NULL,
+    text_sha256 TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_correction_invocation
+    ON fact_skill_correction(invocation_id, ts);
+
+CREATE TABLE IF NOT EXISTS fact_skill_judgement (
+    judgement_uid TEXT PRIMARY KEY,
+    judge_run_uid TEXT NOT NULL,
+    invocation_id TEXT NOT NULL,
+    invocation_id_hash TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    source TEXT NOT NULL,
+    sample_key TEXT NOT NULL,
+    sampled_at TEXT NOT NULL,
+    judge_provider TEXT NOT NULL,
+    judge_model TEXT NOT NULL,
+    rubric_version TEXT NOT NULL,
+    runner_version TEXT NOT NULL,
+    correctness_score REAL CHECK(correctness_score IS NULL OR correctness_score BETWEEN 0 AND 3),
+    instruction_following_score REAL CHECK(instruction_following_score IS NULL OR instruction_following_score BETWEEN 0 AND 3),
+    actionability_score REAL CHECK(actionability_score IS NULL OR actionability_score BETWEEN 0 AND 3),
+    overall_score REAL CHECK(overall_score IS NULL OR overall_score BETWEEN 1 AND 5),
+    pass_flag INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    abstained INTEGER NOT NULL,
+    reason_code TEXT NOT NULL,
+    input_sha256 TEXT NOT NULL,
+    response_sha256 TEXT NOT NULL,
+    input_len INTEGER NOT NULL,
+    response_len INTEGER NOT NULL,
+    redaction_version TEXT NOT NULL,
+    latency_ms INTEGER NOT NULL,
+    status TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_judgement_skill_sampled
+    ON fact_skill_judgement(skill, sampled_at);
+
+CREATE TABLE IF NOT EXISTS fact_quality_judge_run (
+    judge_run_uid TEXT PRIMARY KEY,
+    runner_version TEXT NOT NULL,
+    rubric_version TEXT NOT NULL,
+    judge_provider TEXT NOT NULL,
+    judge_model TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    dry_run INTEGER NOT NULL,
+    sampled INTEGER NOT NULL,
+    valid INTEGER NOT NULL,
+    abstained INTEGER NOT NULL,
+    excluded INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    exclusion_reasons TEXT
+);
