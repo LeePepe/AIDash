@@ -1670,6 +1670,33 @@
         let detail: SkillInspectorDetail
         let report: SkillsRoiReport?
 
+        private struct ScriptRow: View {
+            @Environment(\.theme) private var theme
+            let script: SkillScriptDetail
+
+            private var scriptName: String {
+                script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath
+            }
+
+            private var successText: String {
+                script.successRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知")
+            }
+
+            private var latencyText: String {
+                script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")
+            }
+
+            var body: some View {
+                HStack {
+                    Text(scriptName)
+                    Spacer()
+                    Text("\(script.calls30d ?? 0) · \(successText) · \(latencyText)")
+                        .foregroundStyle(theme.text(.body))
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+
         var body: some View {
             NavigationStack {
                 ScrollView {
@@ -1695,19 +1722,7 @@
                         }
                         healthSection(skillsText("health_scripts", "名下脚本")) {
                             ForEach(detail.scripts) { script in
-                                let scriptName = script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath
-                                let calls = script.calls30d ?? 0
-                                let successRate = script.successRate.map { Int($0 * 100) }
-                                let successText = successRate.map { "\($0)%" } ?? skillsText("unknown", "未知")
-                                let latencyText = script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")
-                                let metricText = "\(calls) · \(successText) · \(latencyText)"
-                                HStack {
-                                    Text(scriptName)
-                                    Spacer()
-                                    Text(metricText)
-                                        .foregroundStyle(theme.text(.body))
-                                }
-                                .accessibilityElement(children: .combine)
+                                ScriptRow(script: script)
                             }
                         }
                         healthSection(skillsText("health_documents", "说明与参考文档")) {
