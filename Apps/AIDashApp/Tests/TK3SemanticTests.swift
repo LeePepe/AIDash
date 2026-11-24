@@ -949,6 +949,18 @@ struct TK3SnapshotRenderTests {
             }
         }
         try #require(!geometrySamples.isEmpty)
+        for lens in SkillsRoiLens.allCases {
+            for width in [700.0, 1000.0] {
+                let cards = geometrySamples.filter {
+                    $0.role == "card" && $0.id.contains("skills-\(lens.rawValue)-populated-\(Int(width))")
+                }
+                #expect(!cards.isEmpty, "Expected \(lens.rawValue) Bento cards at \(Int(width))pt")
+                #expect(cards.allSatisfy { $0.x >= 0 && $0.x + $0.width <= width })
+                if cards.count > 1 {
+                    #expect(Set(cards.map { Int($0.x.rounded()) }).count >= 2)
+                }
+            }
+        }
         let rawNodes = geometrySamples.map { ["label": $0.id, "role": $0.role, "frame": ["x": $0.x, "y": $0.y, "width": $0.width, "height": $0.height]] }
         let rawDocument: [String: Any] = ["platform": "desktop", "viewportWidth": 1040, "children": rawNodes]
         let receipts = output.deletingLastPathComponent()
