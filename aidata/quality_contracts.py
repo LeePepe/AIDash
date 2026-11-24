@@ -576,7 +576,10 @@ def aggregate_behavior(
 ) -> list[dict[str, Any]]:
     now_stamp = _timestamp(now) or datetime.now(timezone.utc)
     start = now_stamp - timedelta(days=ROLLING_WINDOW_DAYS)
-    rows = [row for row in invocations if isinstance(row, Mapping)]
+    rows = [
+        row for row in invocations
+        if isinstance(row, Mapping) and start <= (_timestamp(row.get("start_ts")) or now_stamp) <= now_stamp
+    ]
     output: list[dict[str, Any]] = []
     for skill in ACTIVE_SKILLS:
         skill_rows = [row for row in rows if canonical_skill(row.get("skill")) == skill]

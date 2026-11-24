@@ -49,3 +49,31 @@ def test_l3_quality_merge_preserves_source_session_grain(tmp_path, monkeypatch):
         ("codex_prompts", "same-session", "team-lead", 1, 1),
         ("copilot_cli", "same-session", "team-lead", 1, 1),
     ]
+
+
+def test_l3_quality_merge_commits_before_detaching_clean_databases(tmp_path, monkeypatch):
+    clean_dir = tmp_path / "clean"
+    warehouse = tmp_path / "warehouse.db"
+    monkeypatch.setattr(merge, "WAREHOUSE_DB", warehouse)
+    monkeypatch.setattr(merge, "clean_path", lambda source: clean_dir / f"{source}.db")
+    normalize_records(
+        [
+            {
+                "source": "copilot_cli", "session_id": "s1", "event_id": "p1",
+                "timestamp": "2026-11-24T01:00:00Z", "skill": "team-lead",
+                "source_kind": "typed", "text": "run the workflow",
+            },
+            {
+                "source": "copilot_cli", "session_id": "s1", "event_id": "a1",
+                "timestamp": "2026-11-24T01:01:00Z", "skill": "team-lead",
+                "event_type": "assistant_activity", "assistant_activity": True,
+                "assistant_turn": True,
+            },
+        ],
+        db_path=clean_dir / "quality_behavior.db",
+    )
+    with sqlite3.connect(warehouse) as conn:
+        conn.executescript((merge.SCHEMA_DIR / "warehouse.sql").read_text(encoding="utf-8"))
+        counts = merge._merge_quality_facts(conn)
+    assert counts["fact_skill_invocation"] == 1
+

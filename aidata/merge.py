@@ -187,6 +187,8 @@ def _merge_quality_facts(conn: sqlite3.Connection) -> dict[str, int]:
             row["registry_version"], row["observed_at"],
         ) for row in registry],
     )
+    if conn.in_transaction:
+        conn.commit()
     counts = {"dim_skill_registry": len(registry), "fact_skill_invocation": 0,
               "fact_skill_correction": 0, "fact_skill_judgement": 0,
               "fact_quality_judge_run": 0}
@@ -245,6 +247,8 @@ def _merge_quality_facts(conn: sqlite3.Connection) -> dict[str, int]:
                 counts["fact_skill_invocation"] = len(invocations)
                 counts["fact_skill_correction"] = len(corrections)
         finally:
+            if conn.in_transaction:
+                conn.commit()
             conn.execute("DETACH DATABASE quality_behavior")
 
     judge_db = clean_path("quality_judge")
@@ -285,6 +289,8 @@ def _merge_quality_facts(conn: sqlite3.Connection) -> dict[str, int]:
                 )
                 counts["fact_quality_judge_run"] = len(rows)
         finally:
+            if conn.in_transaction:
+                conn.commit()
             conn.execute("DETACH DATABASE quality_judge")
     return counts
 
