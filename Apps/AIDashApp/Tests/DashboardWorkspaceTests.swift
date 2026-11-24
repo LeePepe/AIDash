@@ -2312,6 +2312,9 @@ struct DashboardWorkspaceTests {
             SkillScriptDetail(relPath: "slow.py", calls30d: 4, successRate: 0.75, p50Ms: 180, p95Ms: 500),
             SkillScriptDetail(relPath: "idle.py", calls30d: 0, successRate: nil, p50Ms: nil, p95Ms: nil, isUnpracticed: true)
         ]
+        let extremeScript = try JSONDecoder().decode(SkillScriptDetail.self, from: Data(#"{"rel_path":"extreme.py","p95_ms":1e20}"#.utf8))
+        #expect(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(extremeScript.p95Ms) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.formattedScriptMilliseconds(scripts[0].p95Ms) == "120ms")
         #expect(SkillsRoiDiagnosticsCardView.aggregateScriptMedian(scripts) == 111)
         #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .all).count == 3)
         #expect(SkillsRoiDiagnosticsCardView.filteredScripts(scripts, filter: .highError).map(\.relPath) == ["slow.py"])
@@ -2324,6 +2327,8 @@ struct DashboardWorkspaceTests {
         #expect(evalSummary.totalSkills == details.count)
         #expect(SkillsRoiDiagnosticsCardView.monthlyAdoptionComparison(details: details) != nil)
         #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount(rows) == 0)
+        let absentQuality = try JSONDecoder().decode(SkillQualityBehaviorRow.self, from: Data(#"{"skill":"absent"}"#.utf8))
+        #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount([absentQuality]) == nil)
         #expect(SkillsRoiDiagnosticsCardView.aggregateDocumentationWords(details) == 1480)
         #expect(SkillsRoiDiagnosticsCardView.weightedFallbackPassRate(report: report, details: details) == 0.75)
 

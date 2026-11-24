@@ -699,6 +699,13 @@
             return medianValue(valid)
         }
 
+        public static func formattedScriptMilliseconds(_ value: Double?) -> String? {
+            guard let value, value.isFinite, value >= 0 else { return nil }
+            let rounded = value.rounded(.towardZero)
+            guard rounded < Double(Int.max) else { return nil }
+            return "\(Int(rounded))ms"
+        }
+
         public static func aggregateScriptMedian(_ scripts: [SkillScriptDetail]) -> Double? {
             let p50 = scripts.compactMap(\.p50Ms).filter { safeNonNegativeInt($0) != nil }
             let p95 = scripts.compactMap(\.p95Ms).filter { safeNonNegativeInt($0) != nil }
