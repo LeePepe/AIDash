@@ -1695,10 +1695,16 @@
                         }
                         healthSection(skillsText("health_scripts", "名下脚本")) {
                             ForEach(detail.scripts) { script in
+                                let scriptName = script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath
+                                let calls = script.calls30d ?? 0
+                                let successRate = script.successRate.map { Int($0 * 100) }
+                                let successText = successRate.map { "\($0)%" } ?? skillsText("unknown", "未知")
+                                let latencyText = script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")
+                                let metricText = "\(calls) · \(successText) · \(latencyText)"
                                 HStack {
-                                    Text(script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath)
+                                    Text(scriptName)
                                     Spacer()
-                                    Text("\(script.calls30d ?? 0) · " + (script.successRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知")) + " · " + (script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")))
+                                    Text(metricText)
                                         .foregroundStyle(theme.text(.body))
                                 }
                                 .accessibilityElement(children: .combine)
