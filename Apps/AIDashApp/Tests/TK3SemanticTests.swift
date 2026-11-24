@@ -745,6 +745,8 @@ struct TK3SemanticTests {
         #expect(LiveDashboardTelemetryReader.managedSkillDetails(in: report).map(\.skill) == ["team-lead", "aidash-content"])
 
         let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: report)?.active == 1)
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: report)?.total == 2)
 
         for lens in SkillsRoiLens.allCases {
             let recorder = DashboardGeometryRecorder()
@@ -754,6 +756,7 @@ struct TK3SemanticTests {
             let strings = collectAccessibilityStrings(from: hostingView).joined(separator: " ")
             #expect(!strings.contains("python3")); #expect(!strings.contains("session_id")); #expect(!strings.contains("SKILL.md")); #expect(!strings.contains("inspector")); #expect(!strings.contains("L0")); #expect(!strings.contains("L1")); #expect(!strings.contains("L2")); #expect(!strings.contains("L3"))
             let ids = Set(recorder.samples.map(\.id)); #expect(!ids.contains("skills-four-layer-pulse")); #expect(!ids.contains("skills-inspector-detail")); #expect(!ids.contains("inspector-file-skill-md")); #expect(!ids.contains("skills-primary-detail"))
+            #expect(recorder.samples.filter { $0.role == "segmented" }.count == 1)
         }
     }
 
