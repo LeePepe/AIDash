@@ -1,9 +1,9 @@
 """Tests for the agent-proposal inbox reader (§M3, 待决策 bucket)."""
 
 import json
-import pytest
 
-from L5_apps.digest.proposals import read_pending, _coerce
+import pytest
+from L5_apps.digest.proposals import _coerce, read_pending
 
 
 def _write(tmp_path, records):
@@ -71,3 +71,12 @@ def test_coerce_normalizes_bad_priority():
 @pytest.mark.unit
 def test_coerce_rejects_non_dict():
     assert _coerce("just a string") is None
+
+
+@pytest.mark.unit
+def test_preserves_optional_knowledge_ref(tmp_path):
+    rec = dict(VALID, id="learn-wifi", ref="knowledge://wifi-invisible-light")
+    p = _write(tmp_path, [rec])
+    out = read_pending(p)
+    assert len(out) == 1
+    assert out[0].ref == "knowledge://wifi-invisible-light"

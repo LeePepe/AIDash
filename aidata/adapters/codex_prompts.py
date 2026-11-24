@@ -82,6 +82,128 @@ _FORMAT_ITEM_COMPLETED = "item_completed"
 _FORMAT_RESPONSE_ITEM = "response_item"
 _FORMAT_LEGACY = "legacy"
 _SKILL_PATH = re.compile(r"(?:^|[/\\])([^/\\\s\"'`()<>]+)/SKILL\.md(?:$|[\s\"'`()<>])")
+_METRIC_PATH = re.compile(
+    r"(?:^|[\s/\\=:\"'])skills[/\\](?P<skill>[A-Za-z0-9][A-Za-z0-9._-]{0,127})"
+    r"[/\\](?P<kind>references|scripts)[/\\](?P<rel>[^\s\"'`;|&()<>]+)"
+)
+_READ_CALL_NAMES = frozenset({"read", "view", "read_file"})
+_SHELL_CALL_NAMES = frozenset({"exec_command", "exec", "shell", "shell_command", "bash", "terminal"})
+_EXEC_SEGMENT_RE = re.compile(
+    r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:sudo\s+|env\s+|nohup\s+|time\s+)*"
+    r"(?:(?:python3?|/usr/bin/python3?|bash|sh|zsh|node|npx|ruby|perl|uv\s+run)"
+    r"(?:\s+(?!-[cm]\b)-\S+)*\s+)?"
+    r"(?P<target>[^\s\"'`;|&()<>]*skills[/\\][A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+    r"[/\\]scripts[/\\][^\s\"'`;|&()<>]+)"
+)
+_SHELL_READ_RE = re.compile(
+    r"\b(?:cat|head|tail|sed|awk|less|more|bat|jq)\b[^\n;|&]*"
+    r"(?P<target>[^\s\"'`;|&()<>]*skills[/\\][A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+    r"[/\\]references[/\\][^\s\"'`;|&()<>]+)"
+)
+
+
+def _parse_codex_output_metrics(output: str) -> tuple[int | None, int | None]:
+    exit_match = re.search(
+        r"(?:Process exited with code|Exit code:)\s+(-?\d+)", output, re.IGNORECASE
+    )
+    wall_match = re.search(r"Wall time:\s*([0-9.]+)\s*seconds", output, re.IGNORECASE)
+    exit_code = int(exit_match.group(1)) if exit_match else None
+    duration_ms = int(float(wall_match.group(1)) * 1000) if wall_match else None
+    return exit_code, duration_ms
+
+
+def _canonical_codex_target(raw_target: str, expected_kind: str) -> tuple[str, str] | None:
+    match = _METRIC_PATH.search(raw_target)
+    if not match or match.group("kind") != expected_kind:
+        return None
+    skill = match.group("skill")
+    relative = match.group("rel").lstrip("/").lstrip(chr(92)).rstrip("/").rstrip(chr(92))
+    if not relative:
+        return None
+    return skill, f"skills/{skill}/{expected_kind}/{relative}"
+
+
+def _metric_candidates(obj: dict[str, Any], meta: dict[str, Any], rel_path: str, offset: int) -> list[dict[str, Any]]:
+    payload = obj.get("payload") or {}
+    if obj.get("type") != "response_item" or payload.get("type") not in {"custom_tool_call", "function_call"}:
+        return []
+    call_name = str(payload.get("name") or "").strip().lower()
+    value = payload.get("arguments", payload.get("input"))
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            pass
+    call_key = str(payload.get("call_id") or payload.get("id") or f"{rel_path}:{offset}")
+    base_common = {"timestamp": obj.get("timestamp"), "session_id": meta.get("session_id"),
+                   "turn_uuid": call_key, "call_id": call_key, "file_id": rel_path, **meta}
+    result: list[dict[str, Any]] = []
+    if call_name in _READ_CALL_NAMES:
+        raw_path = (
+            str(value.get("file_path") or value.get("path") or "")
+            if isinstance(value, dict)
+            else str(value or "")
+        )
+        parsed = _canonical_codex_target(raw_path, "references")
+        if parsed is not None:
+            skill, canonical = parsed
+            identity = f"{rel_path}:{call_key}:0:{canonical}"
+            result.append({
+                "_kind": "reference_hit",
+                "hit_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                "skill": skill,
+                "reference_path": canonical,
+                "byte_len": len(canonical.encode()),
+                **base_common,
+            })
+        return result
+    if call_name in _SHELL_CALL_NAMES or (not call_name and payload.get("type") in {"custom_tool_call", "function_call"}):
+        cmd = (
+            str(value.get("cmd") or value.get("command") or "")
+            if isinstance(value, dict)
+            else str(value or "")
+        )
+        if not cmd:
+            return []
+        seen_refs: set[str] = set()
+        for idx, ref_match in enumerate(_SHELL_READ_RE.finditer(cmd)):
+            parsed = _canonical_codex_target(ref_match.group("target"), "references")
+            if parsed is None or parsed[1] in seen_refs:
+                continue
+            skill, canonical = parsed
+            seen_refs.add(canonical)
+            identity = f"{rel_path}:{call_key}:ref:{idx}:{canonical}"
+            result.append({
+                "_kind": "reference_hit",
+                "hit_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                "skill": skill,
+                "reference_path": canonical,
+                "byte_len": len(canonical.encode()),
+                **base_common,
+            })
+        seen_scripts: set[str] = set()
+        for idx, seg in enumerate(re.split(r"(?:&&|\|\||;|\n)", cmd)):
+            exec_match = _EXEC_SEGMENT_RE.match(seg)
+            if not exec_match:
+                continue
+            parsed = _canonical_codex_target(exec_match.group("target"), "scripts")
+            if parsed is None or parsed[1] in seen_scripts:
+                continue
+            skill, canonical = parsed
+            seen_scripts.add(canonical)
+            identity = f"{rel_path}:{call_key}:{idx}:{canonical}"
+            exit_code, duration_ms = _parse_codex_output_metrics(cmd)
+            result.append({
+                "_kind": "script_call",
+                "call_uid": hashlib.sha256(identity.encode()).hexdigest(),
+                "skill": skill,
+                "script_path": canonical,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
+                **base_common,
+            })
+    return result
+
 
 # Originators that mean a human was at the keyboard. Everything else is TIER B.
 HUMAN_ORIGINATORS = frozenset({"codex-tui", "Codex Desktop"})
@@ -257,10 +379,21 @@ def _skill_candidates(obj: dict[str, Any], meta: dict[str, Any],
 
 def collect() -> int:
     """Scan session logs from this source's own offsets. Returns records written."""
+    from adapters import cloud_sync
+
+    cloud_sync.pull_icloud_telemetry_shards()
     if not CODEX_SESSIONS_DIR.exists():
         return 0
-    offsets: dict[str, int] = dict(get_watermark(SOURCE) or {})
-    new_offsets = dict(offsets)
+    watermark = get_watermark(SOURCE) or {}
+    offsets: dict[str, int] = {
+        k: v for k, v in watermark.items() if k != "__pending_scripts__"
+    }
+    pending_scripts: dict[str, list[dict[str, Any]]] = {
+        k: [dict(item) for item in v]
+        for k, v in (watermark.get("__pending_scripts__") or {}).items()
+        if isinstance(v, list)
+    }
+    new_offsets: dict[str, Any] = dict(offsets)
     total = 0
 
     for path in CODEX_SESSIONS_DIR.glob("**/*.jsonl"):
@@ -302,6 +435,7 @@ def collect() -> int:
             continue
 
         batch: list[dict[str, Any]] = []
+        batch_scripts: dict[str, list[dict[str, Any]]] = {}
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             fh.seek(start)
             # `fh.tell()` is exact and legal here. It is NOT usable inside a
@@ -333,11 +467,47 @@ def collect() -> int:
                 if prompt is not None:
                     batch.append(prompt)
                 batch.extend(_skill_candidates(obj, meta, rel_path, current_offset))
+                metrics = _metric_candidates(obj, meta, rel_path, current_offset)
+                for item in metrics:
+                    batch.append(item)
+                    if item.get("_kind") == "script_call" and item.get("call_id"):
+                        cid = f"{rel_path}:{item['call_id']}"
+                        batch_scripts.setdefault(cid, []).append(item)
+                        pending_scripts.setdefault(cid, []).append(dict(item))
+                payload = obj.get("payload") or {}
+                if (
+                    obj.get("type") == "response_item"
+                    and payload.get("type") in {"function_call_output", "custom_tool_call_output"}
+                    and payload.get("call_id")
+                ):
+                    cid = f"{rel_path}:{payload['call_id']}"
+                    out_raw = payload.get("output")
+                    out_text = (
+                        out_raw
+                        if isinstance(out_raw, str)
+                        else json.dumps(out_raw, ensure_ascii=False)
+                        if out_raw is not None
+                        else ""
+                    )
+                    targets = batch_scripts.get(cid)
+                    if targets is None:
+                        resumed = pending_scripts.pop(cid, None)
+                        if resumed:
+                            targets = resumed
+                            batch.extend(targets)
+                    else:
+                        pending_scripts.pop(cid, None)
+                    for target in targets or ():
+                        exit_code, duration_ms = _parse_codex_output_metrics(out_text)
+                        target["exit_code"] = exit_code
+                        target["duration_ms"] = duration_ms
             new_offsets[key] = line_offset
         if batch:
             total += write_raw(SOURCE, batch)
 
-    if new_offsets != offsets:
+    if pending_scripts:
+        new_offsets["__pending_scripts__"] = pending_scripts
+    if new_offsets != watermark:
         set_watermark(SOURCE, new_offsets)
     return total
 
@@ -351,6 +521,7 @@ CREATE TABLE prompt (
     day           TEXT,
     ts            REAL,
     source_kind   TEXT,          -- 'typed' (tier A) | 'agent_authored' (tier B)
+    slash_skill   TEXT,          -- parsed command name when the prompt is a slash wrapper
     text_len      INTEGER,
     text_preview  TEXT,          -- tier A only; NULL for tier B by design
     prompt_sha    TEXT,          -- hash of the first 100 chars: the grouping key
@@ -359,8 +530,38 @@ CREATE TABLE prompt (
 )
 """
 _CLEAN_COLS = ("prompt_id", "agent", "session_id", "originator", "day", "ts",
-               "source_kind", "text_len", "text_preview", "prompt_sha",
+               "source_kind", "slash_skill", "text_len", "text_preview", "prompt_sha",
                "prefix_100", "cwd")
+
+_REF_DDL = """
+CREATE TABLE reference_hit (
+    hit_uid TEXT PRIMARY KEY, session_id TEXT, turn_uuid TEXT, skill TEXT,
+    reference_path TEXT, byte_len INTEGER, ts TEXT
+)
+"""
+_REF_COLS = ("hit_uid", "session_id", "turn_uuid", "skill", "reference_path", "byte_len", "ts")
+_SCRIPT_DDL = """
+CREATE TABLE script_call (
+    call_uid TEXT PRIMARY KEY, session_id TEXT, turn_uuid TEXT, skill TEXT,
+    script_path TEXT, exit_code INTEGER, duration_ms INTEGER, ts TEXT
+)
+"""
+_SCRIPT_COLS = ("call_uid", "session_id", "turn_uuid", "skill", "script_path", "exit_code", "duration_ms", "ts")
+
+
+def _slash_skill(text: str | None) -> str | None:
+    if not isinstance(text, str):
+        return None
+    for pattern in (
+        r"<command-name>\s*/?([A-Za-z0-9][A-Za-z0-9._-]{0,127})\s*</command-name>",
+        r"<command-message>\s*/?([A-Za-z0-9][A-Za-z0-9._-]{0,127})\s*</command-message>",
+        r"(?:^|\n)\s*/skill\s+([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?=\s|$)",
+        r"(?:^|\n)\s*/([A-Za-z][A-Za-z0-9._-]{0,127})(?=\s|$)",
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _row(rec: dict[str, Any]) -> dict[str, Any] | None:
@@ -378,6 +579,7 @@ def _row(rec: dict[str, Any]) -> dict[str, Any] | None:
         "day": _cst_day(rec.get("timestamp")),
         "ts": _iso_to_epoch(rec.get("timestamp")),
         "source_kind": source_kind,
+        "slash_skill": _slash_skill(text),
         "text_len": len(text),
         # Body kept ONLY for `typed`. Keyed off source_kind, not originator:
         # 232 of 583 interactive records are CLI-generated wrappers
@@ -447,4 +649,27 @@ def normalize() -> int:
             "INSERT OR IGNORE INTO skill_use (day, session_id, ts, call_id, skill) "
             "VALUES (:day, :session_id, :ts, :call_id, :skill)", skill_rows)
         conn.commit()
+    reference_rows: dict[str, dict[str, Any]] = {}
+    script_rows: dict[str, dict[str, Any]] = {}
+    for rec in read_raw(SOURCE):
+        if rec.get("_kind") == "reference_hit":
+            row = {"hit_uid": rec.get("hit_uid"), "session_id": rec.get("session_id"),
+                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
+                   "reference_path": rec.get("reference_path"), "byte_len": rec.get("byte_len"),
+                   "ts": rec.get("timestamp")}
+            if row["hit_uid"]:
+                reference_rows[str(row["hit_uid"])] = row
+        elif rec.get("_kind") == "script_call":
+            row = {"call_uid": rec.get("call_uid"), "session_id": rec.get("session_id"),
+                   "turn_uuid": rec.get("turn_uuid"), "skill": rec.get("skill"),
+                   "script_path": rec.get("script_path"), "exit_code": rec.get("exit_code"),
+                   "duration_ms": rec.get("duration_ms"), "ts": rec.get("timestamp")}
+            call_uid = row["call_uid"]
+            if call_uid:
+                previous = script_rows.get(str(call_uid))
+                if previous is None or any(row[field] is not None and previous[field] is None
+                                           for field in ("exit_code", "duration_ms")):
+                    script_rows[str(call_uid)] = row
+    write_clean(SOURCE, "reference_hit", _REF_DDL, list(reference_rows.values()), _REF_COLS)
+    write_clean(SOURCE, "script_call", _SCRIPT_DDL, list(script_rows.values()), _SCRIPT_COLS)
     return prompt_count

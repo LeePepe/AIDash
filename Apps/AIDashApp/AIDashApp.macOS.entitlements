@@ -25,6 +25,9 @@
 		<string>/Development/</string>
 		<string>/Development/AIDash/aidata/</string>
 		<string>/Development/handoff/</string>
+		<string>/.aidash/</string>
+		<string>/Library/Mobile Documents/com~apple~CloudDocs/AIDashSync/</string>
+		<string>/.agents/</string>
 		<string>/.copilot/</string>
 		<string>/.claude/</string>
 		<string>/.codex/</string>
@@ -43,6 +46,8 @@
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
 	<array>
 		<string>/.config/herdr/</string>
+		<string>/Library/LaunchAgents/</string>
+		<string>/Library/Application Support/AIDash/jobs/</string>
 	</array>
 	<key>com.apple.security.temporary-exception.sbpl</key>
 	<array>

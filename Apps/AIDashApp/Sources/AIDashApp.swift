@@ -24,7 +24,10 @@ struct AIDashApp: App {
         // CloudKit (SIGTRAPs headless); test-host mode must NOT install the
         // launchd job or resume the machService listener (real launchctl side
         // effects + `_xpc_api_misuse` on a machService resume inside a test proc).
-        let mode = RunMode.decide(env: ProcessInfo.processInfo.environment)
+        let mode = RunMode.decide(
+            env: ProcessInfo.processInfo.environment,
+            args: CommandLine.arguments
+        )
         self.runMode = mode
         let telemetryOrigin = ContinuousClock.now
         let telemetryNow = { telemetryOrigin.duration(to: ContinuousClock.now) }
@@ -41,19 +44,28 @@ struct AIDashApp: App {
 
         // Install status bar chrome in both GUI and launchd-brokered app modes;
         // skip only in test-host mode.
-        self.menuBarController = mode.showsAppChrome ? MenuBarController() : nil
+        self.menuBarController = mode.showsAppChrome && !mode.isPreviewHost ? MenuBarController() : nil
 
         // Install/refresh the launchd LaunchAgent so launchd brokers the mach
         // service to THIS build. Only from a real GUI launch — never the agent
         // process (it IS the spawned job) and never a test host (no real
         // launchctl side effects during `swift`/`xcodebuild test`).
-        if mode == .gui {
+        if mode == .previewHost {
+            NSApplication.shared.setActivationPolicy(.regular)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        } else if mode == .gui {
             NSApplication.shared.setActivationPolicy(.regular)
             NSApplication.shared.activate(ignoringOtherApps: true)
             let outcome = LaunchdAgentInstaller.shared.registerIfNeeded()
             if !outcome.isHealthy {
                 Self.recordLaunchAgentProblem(outcome)
             }
+        }
+        // PreviewHost is a self-contained visual instrument and must not bring
+        // up launchd pulse jobs, XPC, CloudKit, or telemetry side effects.
+        if mode.showsAppChrome && !mode.isPreviewHost {
+            let pulseOutcomes = ScheduledPulseLaunchdInstaller.shared.registerLiveJobs()
+            Self.recordScheduledPulseProblems(pulseOutcomes)
         }
 
         // Start the XPC listener IMMEDIATELY — before any store loading —
@@ -63,7 +75,7 @@ struct AIDashApp: App {
         // Store-dependent mutations return `internal.store_not_ready` until
         // the container is delivered by the loader.
         let handlers: XPCHandlers?
-        if mode == .testHost {
+        if mode == .testHost || mode.isPreviewHost {
             self.xpcListener = nil
             handlers = nil
         } else {
@@ -93,7 +105,10 @@ struct AIDashApp: App {
         }
 
         #else
-        let mode = RunMode.decide(env: ProcessInfo.processInfo.environment)
+        let mode = RunMode.decide(
+            env: ProcessInfo.processInfo.environment,
+            args: CommandLine.arguments
+        )
         let telemetryOrigin = ContinuousClock.now
         let telemetryNow = { telemetryOrigin.duration(to: ContinuousClock.now) }
         let telemetryLaunchStart = mode == .gui ? telemetryNow() : nil
@@ -121,15 +136,30 @@ struct AIDashApp: App {
         #if os(macOS)
         // Present the briefing window content in both GUI and launchd-brokered
         // app modes; only test-host mode is headless.
+        let mode = runMode
         BriefingWindowScene(
             state: bootstrap.containerState,
             headless: !runMode.showsAppChrome,
-            telemetryCoordinator: telemetryCoordinator
+            telemetryCoordinator: telemetryCoordinator,
+            previewHostMode: runMode.isPreviewHost,
+            onRetry: {
+                switch mode.loaderStrategy {
+                case .agent:
+                    bootstrap.startDetached(loader: AgentContainerLoader())
+                case .gui:
+                    bootstrap.startDetached(loader: GUIContainerLoader())
+                case .none:
+                    break
+                }
+            }
         )
         #else
         BriefingWindowScene(
             state: bootstrap.containerState,
-            telemetryCoordinator: telemetryCoordinator
+            telemetryCoordinator: telemetryCoordinator,
+            onRetry: {
+                bootstrap.startDetached(loader: GUIContainerLoader())
+            }
         )
         #endif
     }
@@ -143,8 +173,21 @@ struct AIDashApp: App {
         _ outcome: LaunchdAgentInstaller.RegistrationOutcome
     ) {
         guard case .failed(let reason) = outcome else { return }
+        appendLaunchdProblemLine("AIDash XPC LaunchAgent problem: \(reason)")
+    }
+
+    private static func recordScheduledPulseProblems(
+        _ outcomes: [ScheduledPulseLaunchdInstaller.RegistrationOutcome]
+    ) {
+        for outcome in outcomes {
+            guard let reason = outcome.failureDescription else { continue }
+            appendLaunchdProblemLine("Scheduled Pulse LaunchAgent problem: \(reason)")
+        }
+    }
+
+    private static func appendLaunchdProblemLine(_ message: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
-        let line = "\(stamp) — AIDash XPC LaunchAgent problem: \(reason)\n"
+        let line = "\(stamp) — \(message)\n"
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Development/AIDash/.aidash-state/aidash-push-errors.log")
         try? FileManager.default.createDirectory(

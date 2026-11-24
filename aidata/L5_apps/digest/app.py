@@ -49,12 +49,14 @@ from L5_apps.digest.sources import (  # noqa: F401 — fetch_ado_pr_trends re-ex
     fetch_model_tier,
     fetch_multica_completed,
     fetch_news_radar,
+    fetch_product_growth_trends,
     fetch_raven_trends,
     fetch_repo_radar,
     fetch_retro_ops_trends,
     fetch_rework_by_workspace,
     # 交叉信号 (§design 4.2): the workspace × root-cause rework matrix.
     fetch_rework_relationship,
+    fetch_skill_roi_trends,
     fetch_tool_cross,
     fetch_value_efficiency,
     fetch_work_by_project,
@@ -135,6 +137,8 @@ def _fetch_sources(report_date: str | None = None) -> DigestSources:
         # happened to run long.
         tool_cross=fetch_tool_cross(None),
         retro_ops=fetch_retro_ops_trends(),
+        product_growth=fetch_product_growth_trends(),
+        skill_roi=fetch_skill_roi_trends(),
     )
 
 
@@ -144,7 +148,7 @@ def _build_action_inbox(cost_improvement) -> list:
         from L5_apps.digest.inbox import build_inbox
         waste = getattr(cost_improvement, "downgrade_usd", None)
         return build_inbox(downgrade_usd=waste)
-    except Exception:  # degrade: an inbox failure must not break the digest
+    except Exception:  # noqa: BLE001 - degrade: an inbox failure must not break the digest
         return []
 
 
@@ -219,12 +223,15 @@ def _push_to_aidash(md: str, report_date: str,
         resolve_aidash_bin,
         save_delivery_state,
     )
+    from L5_apps.digest.inbox import export_job_actions
+
     delivery = load_delivery_state()
     briefing = build_briefing(report_date, sources, md, must_see_layer(md),
                               delivery=delivery)
     result = push_briefing(briefing, bin_path=resolve_aidash_bin(),
                            failure_sink=failure_sink)
     export_widget_briefing_snapshot(briefing, sources)
+    export_job_actions(getattr(sources, "action_inbox", None))
     try:
         save_delivery_state(result)
     except Exception:  # noqa: BLE001 - state persistence is non-fatal
@@ -245,13 +252,12 @@ def write_digest(report_date: str, use_llm: bool = False,
     sources = _fetch_sources(report_date)  # fetch once; shared by render + push
 
     # Integrity gate (D): if any headline source degraded (stale watermark,
-    # skipped collection, query error), append a loud line to cron-errors.log +
-    # notify — so a silently-incomplete digest (0 issue / 0 PR / stale radar) is
-    # noticed the same day. Never blocks generation (ADR-16 必成 sink).
+    # skipped collection, query error), append a loud line to cron-errors.log
+    # for Multica Autopilot Health Watchdog (`e9c25327`) — never desktop popups.
+    # Never blocks generation (ADR-16 必成 sink).
     try:
-        from L5_apps.digest.aidash import _default_notifier
         from L5_apps.digest.freshness import alarm_if_degraded
-        alarm_if_degraded(sources, report_date, notifier=_default_notifier)
+        alarm_if_degraded(sources, report_date)
     except Exception as exc:  # noqa: BLE001 - monitoring must never break digest
         log.warning("freshness gate errored (non-fatal): %s", exc)
 

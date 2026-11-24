@@ -1,0 +1,1470 @@
+#if os(macOS)
+import AppKit
+import Foundation
+import SwiftData
+import SwiftUI
+import Testing
+import AIDashCore
+import DesignKit
+#if AIDASHAPP_LOGIC_TESTS
+@testable import AIDashAppLogic
+#else
+@testable import AIDashApp
+#endif
+
+private func collectAccessibilityStrings(from element: Any) -> [String] {
+    var result: [String] = []
+    if let ax = element as? any NSAccessibilityProtocol {
+        if let label = ax.accessibilityLabel(), !label.isEmpty { result.append(label) }
+        if let value = ax.accessibilityValue() as? String, !value.isEmpty { result.append(value) }
+        for child in ax.accessibilityChildren() ?? [] { result.append(contentsOf: collectAccessibilityStrings(from: child)) }
+    }
+    if let view = element as? NSView { for subview in view.subviews { result.append(contentsOf: collectAccessibilityStrings(from: subview)) } }
+    return result
+}
+
+@MainActor
+enum TK3Fixtures {
+    static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    static func canonical() throws -> Data { try Data(contentsOf: root.appendingPathComponent("aidata/tests/fixtures/skills_roi_report.json")) }
+    static let producerLearningActionsJSONL = #"""
+{"id": "learning-font-fallback", "jobID": "aidata-digest", "createdAt": "2026-11-11T16:00:00Z", "title": "字体回退与禁则如何共同避免断行错误？", "description": "未覆盖缺口 · 审批仅记录意图", "descriptionMd": "未覆盖缺口 · 审批仅记录意图", "status": "triage", "source": "Learning", "domain": "decisions", "bucket": "待决策", "priority": "P1", "ref": "learning-topic://font-fallback", "url": "https://example.invalid/font-fallback", "scope": "personal", "topic_key": "font-fallback", "origin_ref": "learning-topic://font-fallback", "revision": 7, "why_now": "New coverage gap", "source_uri": "https://example.invalid/font-fallback", "coverage_refs": ["vault://typography"], "external_id": null, "evidence": "Observed mixed-script line breaks", "freshness": "7d · 2026-11-11 · 4 · healthy", "window_cst": "7d", "source_as_of": "2026-11-11", "sample_size": 4, "coverage_status": "healthy", "controls": [{"id": "decision", "kind": "singleSelect", "title": "Action", "options": ["Approve", "Snooze 7d", "Done", "Dismiss"]}, {"id": "note", "kind": "textInput", "title": "Note", "maxLength": 80}]}
+{"id": "learning-font-fallback", "jobID": "aidata-digest", "createdAt": "2026-11-11T16:00:00Z", "title": "字体回退与禁则如何共同避免断行错误？", "description": "未覆盖缺口 · 审批仅记录意图", "descriptionMd": "未覆盖缺口 · 审批仅记录意图", "status": "in_progress", "source": "Learning", "domain": "decisions", "bucket": "待决策", "priority": "P1", "ref": "learning-topic://font-fallback", "url": "https://example.invalid/font-fallback", "scope": "personal", "topic_key": "font-fallback", "origin_ref": "learning-topic://font-fallback", "revision": "8", "why_now": "New coverage gap", "source_uri": "https://example.invalid/font-fallback", "coverage_refs": ["vault://typography"], "external_id": null, "evidence": "Observed mixed-script line breaks", "freshness": "7d · 2026-11-11 · 4 · healthy", "window_cst": "7d", "source_as_of": "2026-11-11", "sample_size": 4, "coverage_status": "healthy", "controls": [{"id": "decision", "kind": "singleSelect", "title": "Action", "options": ["Approve", "Snooze 7d", "Done", "Dismiss"]}, {"id": "note", "kind": "textInput", "title": "Note", "maxLength": 80}]}
+"""#
+    static let skillsRoiDenseJSON = #"""
+{
+  "schema_version": 1,
+  "window_cst": "7d",
+  "window_start": "2026-11-05T00:00:00+08:00",
+  "window_end": "2026-11-11T23:59:59+08:00",
+  "source_as_of": "2026-11-11T14:00:00+08:00",
+  "sample_size": 4,
+  "coverage_status": "healthy",
+  "diagnostics": {
+    "ok": true,
+    "window_cst": "7d",
+    "window_start": "2026-11-05T00:00:00+08:00",
+    "window_end": "2026-11-11T23:59:59+08:00",
+    "source_as_of": "2026-11-11T14:00:00+08:00",
+    "sample_size": 4,
+    "coverage_status": "healthy",
+    "S1_pin_drift": {
+      "window_cst": "snapshot",
+      "window_start": "2026-11-10T12:00:00+08:00",
+      "window_end": "2026-11-10T12:00:00+08:00",
+      "source_as_of": "2026-11-10T12:00:00+08:00",
+      "sample_size": 1,
+      "coverage_status": "healthy",
+      "upstreams": {
+        "shared-ci": "abc123"
+      },
+      "consumers": [],
+      "outdated_pin_count": 0,
+      "all_up_to_date": true
+    },
+    "S2_gate_catch": {
+      "window_cst": "7d",
+      "window_start": "2026-11-05T00:00:00+08:00",
+      "window_end": "2026-11-11T23:59:59+08:00",
+      "source_as_of": "2026-11-11T14:00:00+08:00",
+      "sample_size": 4,
+      "coverage_status": "healthy",
+      "total_runs_7d": 4,
+      "true_positive_catches_7d": 1,
+      "config_or_rerun_noise_7d": 1,
+      "gate_catch_rate": 0.5,
+      "noise_rate": 0.25
+    },
+    "S3_skill_health": {
+      "window_cst": "snapshot",
+      "window_start": "2026-11-10T12:00:00+08:00",
+      "window_end": "2026-11-10T12:00:00+08:00",
+      "source_as_of": "2026-11-10T12:00:00+08:00",
+      "sample_size": 2,
+      "coverage_status": "healthy",
+      "total_skills": 2,
+      "audit_pass_count": 1,
+      "audit_pass_rate": 0.5,
+      "eval_case_total": 8,
+      "eval_case_weekly_delta": 1,
+      "top3_l0_watermarks": [],
+      "top3_l1_watermarks": []
+    },
+    "S4_usage_and_r1": {
+      "window_cst": "30d",
+      "window_start": "2026-10-13T00:00:00+08:00",
+      "window_end": "2026-11-11T23:59:59+08:00",
+      "source_as_of": "2026-11-11T14:00:00+08:00",
+      "sample_size": 2,
+      "coverage_status": "healthy",
+      "active_skills_count": 1,
+      "idle_skills_30d": [],
+      "top_used_skills": [
+        {
+          "window_cst": "7d",
+          "window_start": "2026-11-05T00:00:00+08:00",
+          "window_end": "2026-11-11T23:59:59+08:00",
+          "source_as_of": "2026-11-11T14:00:00+08:00",
+          "sample_size": 12,
+          "coverage_status": "healthy",
+          "estimated": true,
+          "skill": "team-lead",
+          "loads_7d": 12,
+          "loads_30d": 38,
+          "r1_total": 8,
+          "r1_pass_rate": 0.75,
+          "script_touch_rate": 0.5,
+          "unpracticed_rate": 0.5,
+          "roi_score": 1.4,
+          "diagnosis": "Script practice gap",
+          "script_execs": 19
+        }
+      ]
+    },
+    "S6_load_vs_script": [
+      {
+        "window_cst": "7d",
+        "window_start": "2026-11-05T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 12,
+        "coverage_status": "healthy",
+        "estimated": true,
+        "skill": "team-lead",
+        "loads_7d": 12,
+        "loads_30d": 38,
+        "r1_total": 8,
+        "r1_pass_rate": 0.75,
+        "script_touch_rate": 0.5,
+        "unpracticed_rate": 0.5,
+        "roi_score": 1.4,
+        "diagnosis": "Script practice gap",
+        "script_execs": 19
+      }
+    ],
+    "S7_disclosure_funnel": [
+      {
+        "window_cst": "7d",
+        "window_start": "2026-11-05T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 4,
+        "coverage_status": "healthy",
+        "estimated": true,
+        "skill": "team-lead",
+        "l0_only_rate": 0.5,
+        "l1_selective_rate": 0.35,
+        "l1_greedy_violation_rate": 0.15,
+        "avg_context_tokens": 22000
+      }
+    ],
+    "S8_post_skill_churn": [
+      {
+        "window_cst": "7d",
+        "window_start": "2026-11-05T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 4,
+        "coverage_status": "healthy",
+        "skill": "team-lead",
+        "edit_churn_count": 4,
+        "retry_commands": 2
+      }
+    ],
+    "S9_escape_attribution": [
+      {
+        "window_cst": "7d",
+        "window_start": "2026-11-05T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 4,
+        "coverage_status": "healthy",
+        "skill": "my-designer",
+        "impl_bug_escapes": 2,
+        "spec_gap_escapes": 1
+      }
+    ],
+    "S10_skill_roi_ranking": [
+      {
+        "window_cst": "7d",
+        "window_start": "2026-11-05T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 12,
+        "coverage_status": "healthy",
+        "estimated": true,
+        "skill": "team-lead",
+        "loads_7d": 12,
+        "loads_30d": 38,
+        "r1_total": 8,
+        "r1_pass_rate": 0.75,
+        "script_touch_rate": 0.5,
+        "unpracticed_rate": 0.5,
+        "roi_score": 1.4,
+        "diagnosis": "Script practice gap",
+        "script_execs": 19
+      },
+      {
+        "window_cst": "7d",
+        "window_start": "2026-11-05T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 12,
+        "coverage_status": "healthy",
+        "estimated": true,
+        "skill": "my-designer",
+        "loads_7d": 7,
+        "loads_30d": 18,
+        "r1_total": 0,
+        "r1_pass_rate": null,
+        "script_touch_rate": 0.5,
+        "unpracticed_rate": 0.5,
+        "roi_score": null,
+        "diagnosis": "Insufficient review observations",
+        "script_execs": 19
+      }
+    ],
+    "S11_context_composition": {
+      "window_cst": "7d",
+      "window_start": "2026-11-05T00:00:00+08:00",
+      "window_end": "2026-11-11T23:59:59+08:00",
+      "source_as_of": "2026-11-11T14:00:00+08:00",
+      "sample_size": 1,
+      "coverage_status": "healthy",
+      "estimated": true,
+      "estimation_method": "fixed-share allocation of observed turn tokens; no measured compression saving",
+      "slices": [
+        {
+          "window_cst": "7d",
+          "window_start": "2026-11-05T00:00:00+08:00",
+          "window_end": "2026-11-11T23:59:59+08:00",
+          "source_as_of": "2026-11-11T14:00:00+08:00",
+          "sample_size": 4,
+          "coverage_status": "healthy",
+          "estimated": true,
+          "slice_key": "System & AGENTS.md 指令链",
+          "tokens": 4000,
+          "share_pct": 20.0
+        },
+        {
+          "window_cst": "7d",
+          "window_start": "2026-11-05T00:00:00+08:00",
+          "window_end": "2026-11-11T23:59:59+08:00",
+          "source_as_of": "2026-11-11T14:00:00+08:00",
+          "sample_size": 4,
+          "coverage_status": "healthy",
+          "estimated": true,
+          "slice_key": "Skills 目录与 SKILL.md",
+          "tokens": 3000,
+          "share_pct": 15.0
+        },
+        {
+          "window_cst": "7d",
+          "window_start": "2026-11-05T00:00:00+08:00",
+          "window_end": "2026-11-11T23:59:59+08:00",
+          "source_as_of": "2026-11-11T14:00:00+08:00",
+          "sample_size": 4,
+          "coverage_status": "healthy",
+          "estimated": true,
+          "slice_key": "Tools Schema 定义",
+          "tokens": 2000,
+          "share_pct": 10.0
+        },
+        {
+          "window_cst": "7d",
+          "window_start": "2026-11-05T00:00:00+08:00",
+          "window_end": "2026-11-11T23:59:59+08:00",
+          "source_as_of": "2026-11-11T14:00:00+08:00",
+          "sample_size": 4,
+          "coverage_status": "healthy",
+          "estimated": true,
+          "slice_key": "Tool Results 结果",
+          "tokens": 6000,
+          "share_pct": 30.0
+        },
+        {
+          "window_cst": "7d",
+          "window_start": "2026-11-05T00:00:00+08:00",
+          "window_end": "2026-11-11T23:59:59+08:00",
+          "source_as_of": "2026-11-11T14:00:00+08:00",
+          "sample_size": 4,
+          "coverage_status": "healthy",
+          "estimated": true,
+          "slice_key": "User/Assistant 对话与思考链",
+          "tokens": 5000,
+          "share_pct": 25.0
+        }
+      ],
+      "total_context_tokens": 20000,
+      "kv_cache_hit_pct": 75.0,
+      "compressed_saved_tokens": null
+    },
+    "S12_tool_context_burn": [
+      {
+        "window_cst": "7d",
+        "window_start": "2026-11-05T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 1,
+        "coverage_status": "healthy",
+        "estimated": true,
+        "estimation_method": "turn context * 0.36 / tool count, not measured tool result tokens",
+        "tool_name": "view",
+        "call_count": 1,
+        "total_tokens": 12000,
+        "p95_tokens": 12000,
+        "bloated_call_count": 1,
+        "share_pct": 100.0,
+        "dominant_skill": "team-lead"
+      }
+    ],
+    "skill_details": [
+      {
+        "window_cst": "30d",
+        "window_start": "2026-10-13T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 12,
+        "coverage_status": "healthy",
+        "skill": "team-lead",
+        "is_ghost": false,
+        "scope": "global",
+        "repo": "user-skills",
+        "skill_dir": "~/Development/user-skills/skills/team-lead",
+        "skill_md_path": "SKILL.md",
+        "skill_md_lines": 124,
+        "frontmatter_tokens_est": 52,
+        "body_tokens_est": 1840,
+        "bundle_kb": 18.4,
+        "refs_kb": 9.1,
+        "refs_tokens_est": 2260,
+        "loads_7d": 12,
+        "loads_30d": 38,
+        "empty_load_rate": 0.15,
+        "unpracticed_rate": 0.5,
+        "unhit_refs_count": 1,
+        "unhit_refs_ratio": 0.5,
+        "roi_score": 1.4,
+        "r1_pass_rate": 0.75,
+        "avg_context_tokens": 22000,
+        "kv_cache_hit_pct": 75.0,
+        "edit_churn": 4,
+        "retry_churn": 2,
+        "impl_bug_escapes": 0,
+        "spec_gap_escapes": 0,
+        "eval_interceptions": 3,
+        "eval_escapes": 0,
+        "status_label": "active",
+        "source_breakdown": {
+          "claude": 16,
+          "copilot": 14,
+          "codex": 4,
+          "hermes": 1,
+          "gtt": 3
+        },
+        "references": [
+          {
+            "rel_path": "references/playbook.md",
+            "line_count": 142,
+            "tokens_est": 1620,
+            "hits_30d": 9,
+            "sessions_30d": 5,
+            "is_unhit": false
+          },
+          {
+            "rel_path": "references/eval-cases.json",
+            "line_count": 88,
+            "tokens_est": 640,
+            "hits_30d": 0,
+            "sessions_30d": 0,
+            "is_unhit": true
+          }
+        ],
+        "scripts": [
+          {
+            "rel_path": "scripts/goal-queue.py",
+            "calls_30d": 19,
+            "success_rate": 0.9474,
+            "p95_ms": 145.0,
+            "is_unpracticed": false
+          },
+          {
+            "rel_path": "scripts/jev-compact.py",
+            "calls_30d": 0,
+            "success_rate": null,
+            "p95_ms": null,
+            "is_unpracticed": true
+          }
+        ],
+        "eval_cases": [
+          {
+            "id": "EV-001",
+            "title": "feedback_guard.py exposes pre-review-check CLI subcommand",
+            "kind": "cli",
+            "assertion_summary": "python3 skills/team-lead/scripts/feedback_guard.py --help -> contains pre-review-check",
+            "status": "active",
+            "interceptions_30d": 3,
+            "escapes_30d": 0
+          },
+          {
+            "id": "DC-001",
+            "title": "Forbid nested interactive buttons",
+            "kind": "regex",
+            "assertion_summary": "Button label must not nest child Button",
+            "status": "active",
+            "interceptions_30d": 0,
+            "escapes_30d": 1
+          }
+        ]
+      },
+      {
+        "window_cst": "30d",
+        "window_start": "2026-10-13T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 4,
+        "coverage_status": "healthy",
+        "skill": "aidash-content",
+        "scope": "repo_bound",
+        "repo": "AIDash",
+        "skill_dir": "~/Development/AIDash/.agents/skills/aidash-content",
+        "skill_md_path": "SKILL.md",
+        "skill_md_lines": 96,
+        "frontmatter_tokens_est": 44,
+        "body_tokens_est": 1120,
+        "loads_7d": 0,
+        "loads_30d": 0,
+        "empty_load_rate": null,
+        "roi_score": null,
+        "r1_pass_rate": null,
+        "avg_context_tokens": null,
+        "kv_cache_hit_pct": 75.0,
+        "edit_churn": 0,
+        "retry_churn": 0,
+        "impl_bug_escapes": 0,
+        "spec_gap_escapes": 0,
+        "eval_interceptions": 0,
+        "eval_escapes": 0,
+        "status_label": "zombie_30d",
+        "source_breakdown": {},
+        "references": [],
+        "scripts": [],
+        "eval_cases": []
+      },
+      {
+        "window_cst": "30d",
+        "window_start": "2026-10-13T00:00:00+08:00",
+        "window_end": "2026-11-11T23:59:59+08:00",
+        "source_as_of": "2026-11-11T14:00:00+08:00",
+        "sample_size": 2,
+        "coverage_status": "healthy",
+        "skill": "legacy-deleted-ghost",
+        "is_ghost": true,
+        "scope": "global",
+        "repo": "user-skills",
+        "skill_dir": "~/Development/user-skills/skills/legacy-deleted-ghost",
+        "skill_md_path": "SKILL.md",
+        "skill_md_lines": 0,
+        "frontmatter_tokens_est": 1,
+        "body_tokens_est": 1,
+        "bundle_kb": 0.0,
+        "refs_kb": 0.0,
+        "refs_tokens_est": 0,
+        "loads_7d": 0,
+        "loads_30d": 2,
+        "empty_load_rate": 0.5,
+        "unpracticed_rate": 0.0,
+        "unhit_refs_count": 0,
+        "unhit_refs_ratio": 0.0,
+        "roi_score": 0.18,
+        "r1_pass_rate": 1.0,
+        "avg_context_tokens": 1202,
+        "kv_cache_hit_pct": 75.0,
+        "edit_churn": 0,
+        "retry_churn": 0,
+        "impl_bug_escapes": 0,
+        "spec_gap_escapes": 0,
+        "eval_interceptions": 0,
+        "eval_escapes": 0,
+        "status_label": "ghost",
+        "source_breakdown": {
+          "copilot": 2
+        },
+        "references": [],
+        "scripts": [],
+        "eval_cases": []
+      }
+    ],
+    "low_roi_proposals": []
+  },
+  "skills_daily": [
+    {
+      "window_cst": "1d",
+      "window_start": "2026-11-05T00:00:00+08:00",
+      "window_end": "2026-11-11T23:59:59+08:00",
+      "source_as_of": "2026-11-11T14:00:00+08:00",
+      "sample_size": 4,
+      "coverage_status": "healthy",
+      "day": "2026-11-11",
+      "source": "copilot-attribution",
+      "skill": "team-lead",
+      "n": 4,
+      "sessions": 2
+    },
+    {
+      "window_cst": "1d",
+      "window_start": "2026-11-05T00:00:00+08:00",
+      "window_end": "2026-11-11T23:59:59+08:00",
+      "source_as_of": "2026-11-11T14:00:00+08:00",
+      "sample_size": 4,
+      "coverage_status": "healthy",
+      "day": "2026-11-11",
+      "source": "copilot-tool",
+      "skill": "team-lead",
+      "n": 4,
+      "sessions": 2
+    },
+    {
+      "window_cst": "1d",
+      "window_start": "2026-11-05T00:00:00+08:00",
+      "window_end": "2026-11-11T23:59:59+08:00",
+      "source_as_of": "2026-11-11T14:00:00+08:00",
+      "sample_size": 4,
+      "coverage_status": "healthy",
+      "day": "2026-11-11",
+      "source": "claude-slash",
+      "skill": "team-lead",
+      "n": 4,
+      "sessions": 2
+    }
+  ]
+}
+"""#
+    static func data(_ name: String) throws -> Data {
+        switch name {
+        case "producer-learning-actions.jsonl": return Data(producerLearningActionsJSONL.utf8)
+        case "skills-roi-dense.json": return Data(skillsRoiDenseJSON.utf8)
+        default: return try Data(contentsOf: root.appendingPathComponent("Apps/AIDashApp/Tests/Fixtures/\(name)"))
+        }
+    }
+    static func actionLines() throws -> [Data] { try String(decoding: data("producer-learning-actions.jsonl"), as: UTF8.self).split(whereSeparator: \.isNewline).map { Data($0.utf8) } }
+    static func home() throws -> URL {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-hermetic-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        return home
+    }
+}
+
+@MainActor
+@Suite("TK3 R2 semantic regressions")
+struct TK3SemanticTests {
+    @Test("Exact tracked canonical report decodes all populations without stringifying rows or nulls")
+    func canonicalReport() throws {
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.canonical())
+        #expect(report.diagnostics.pins?.behind.value == 0)
+        #expect(report.diagnostics.pins?.metadata.sample == 1)
+        #expect(report.diagnostics.gates?.catchRate.value == 0.5)
+        #expect(report.diagnostics.audit?.evals.value == 8)
+        #expect(report.diagnostics.usage?.active.value == 1)
+        #expect(report.diagnostics.scripts.first?.touch.value == 0.5)
+        #expect(report.diagnostics.disclosure.first?.l0.value == 0.5)
+        #expect(report.diagnostics.churn.isEmpty)
+        #expect(report.diagnostics.escapes.isEmpty)
+        #expect(report.diagnostics.ranking.first?.r1Pass.value == nil)
+        #expect(report.diagnostics.ranking.first?.roi.value == nil)
+        #expect(report.diagnostics.context?.cacheHitPercent.value == 75)
+        #expect(report.diagnostics.context?.savedTokens.value == nil)
+        #expect(report.diagnostics.tools.first?.p95.value == 12000)
+        #expect(report.diagnostics.tools.first?.metadata.estimated == true)
+        #expect(report.metadata.asOf == "2026-11-11T14:00:00+08:00")
+    }
+
+    @Test("Wrapped metrics preserve their own observations, and daily populations are never merged")
+    func wrappedObservations() throws {
+        var root = try #require(JSONSerialization.jsonObject(with: TK3Fixtures.data("skills-roi-dense.json")) as? [String: Any])
+        var diagnostics = try #require(root["diagnostics"] as? [String: Any])
+        var gates = try #require(diagnostics["S2_gate_catch"] as? [String: Any])
+        gates["gate_catch_rate"] = ["value": NSNull(), "sample_size": 0, "coverage_status": "unknown", "source_as_of": "2026-11-10"]
+        diagnostics["S2_gate_catch"] = gates
+        diagnostics["S1_pin_drift"] = ["value": ["outdated_pin_count": 2, "all_up_to_date": false], "sample_size": 3, "coverage_status": "partial", "source_as_of": "2026-11-09", "window_cst": "snapshot"]
+        root["diagnostics"] = diagnostics
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: root))
+        #expect(report.diagnostics.gates?.catchRate.value == nil)
+        #expect(report.diagnostics.gates?.catchRate.metadata.sample == 0)
+        #expect(report.diagnostics.gates?.catchRate.metadata.asOf == "2026-11-10")
+        #expect(report.diagnostics.pins?.behind.value == 2)
+        #expect(report.diagnostics.pins?.behind.metadata.sample == 3)
+        #expect(report.diagnostics.context?.slices.count == 5)
+        #expect(report.diagnostics.churn.first?.edits.value == 4)
+        #expect(report.diagnostics.escapes.first?.implementation.value == 2)
+        #expect(report.skillsDaily.map(\.source) == ["copilot-attribution", "copilot-tool", "claude-slash"])
+        #expect(report.skillsDaily.map(\.count) == [4, 4, 4])
+    }
+
+    @Test("Selected Skills ROI row resolves without expanding the seven-column list")
+    func selectedSkillOverviewResolution() throws {
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.data("skills-roi-dense.json"))
+        let selected = SkillsRoiDiagnosticsCardView.activeSkillRow(in: report.diagnostics, selectedSkill: "team-lead")
+        #expect(selected?.skill == "team-lead")
+        #expect(SkillsRoiDiagnosticsCardView.activeSkillRow(in: report.diagnostics, selectedSkill: "missing")?.skill == report.diagnostics.usageRows.first?.skill)
+        #expect(report.diagnostics.usageRows.count > 0)
+
+        let inspectorSelected = try #require(SkillsRoiDiagnosticsCardView.activeSkillDetail(in: report, selectedSkill: "team-lead"))
+        #expect(inspectorSelected.scope == "global")
+        #expect(inspectorSelected.references.count == 2)
+        #expect(inspectorSelected.references.contains { $0.isUnhit && $0.hits30d == 0 })
+        #expect(inspectorSelected.scripts.count == 2)
+        #expect(inspectorSelected.scripts.first?.p95Ms == 145.0)
+        let fallbackScript = try #require(inspectorSelected.scripts.first { $0.relPath == "scripts/jev-compact.py" })
+        #expect(fallbackScript.calls30d == 0)
+        #expect(fallbackScript.successRate == nil)
+        #expect(fallbackScript.p95Ms == nil)
+        #expect(fallbackScript.isUnpracticed)
+        #expect("\(fallbackScript.calls30d ?? 0) · \(fallbackScript.successRate.map { "\(Int($0 * 100))%" } ?? "未知") · \(fallbackScript.p95Ms.map { "\(Int($0))ms" } ?? "未知")" == "0 · 未知 · 未知")
+        #expect(inspectorSelected.evalCases.map(\.id) == ["EV-001", "DC-001"])
+
+        let repoFiltered = try #require(SkillsRoiDiagnosticsCardView.activeSkillDetail(in: report, selectedSkill: nil, filter: .repoBound))
+        #expect(repoFiltered.skill == "aidash-content")
+        #expect(repoFiltered.repo == "AIDash")
+
+        // Fallback synthesis when skill_details is absent in older canonical snapshots
+        let canonical = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.canonical())
+        #expect(!canonical.skillDetails.isEmpty)
+        #expect(canonical.skillDetails.first?.skill == "team-lead")
+    }
+
+    @Test("loadSkillDocumentPreview enforces local skill whitelist and rejects path traversal")
+    func skillDocumentPreviewWhitelistSecurity() throws {
+        let home = try TK3Fixtures.home()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let globalSkillDir = home.appendingPathComponent("Development/user-skills/skills/team-lead", isDirectory: true)
+        try FileManager.default.createDirectory(at: globalSkillDir.appendingPathComponent("references", isDirectory: true), withIntermediateDirectories: true)
+        try Data("# Team Lead Contract\nSafe L0 preview.".utf8).write(to: globalSkillDir.appendingPathComponent("SKILL.md"))
+        try Data("# Playbook Drawer\nSafe L1 preview.".utf8).write(to: globalSkillDir.appendingPathComponent("references/playbook.md"))
+
+        let repoSkillDir = home.appendingPathComponent("Development/AIDash/.agents/skills/aidash-content", isDirectory: true)
+        try FileManager.default.createDirectory(at: repoSkillDir, withIntermediateDirectories: true)
+        try Data("# Repo-Bound Skill\nAllowed.".utf8).write(to: repoSkillDir.appendingPathComponent("SKILL.md"))
+
+        let outsideSecret = home.appendingPathComponent("Development/secret.md")
+        try Data("TOP_SECRET".utf8).write(to: outsideSecret)
+
+        let symlinkEscape = globalSkillDir.appendingPathComponent("references/escape.md")
+        try FileManager.default.createSymbolicLink(at: symlinkEscape, withDestinationURL: outsideSecret)
+
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "~/Development/user-skills/skills/team-lead", relativePath: "SKILL.md", homeURL: home)?.contains("Safe L0 preview.") == true)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "~/Development/user-skills/skills/team-lead", relativePath: "references/playbook.md", homeURL: home)?.contains("Safe L1 preview.") == true)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "~/Development/AIDash/.agents/skills/aidash-content", relativePath: "SKILL.md", homeURL: home)?.contains("Repo-Bound Skill") == true)
+
+        // Reject "../" traversal, outside directories, symlink escapes, and disallowed extensions
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "~/Development/user-skills/skills/team-lead", relativePath: "../../../secret.md", homeURL: home) == nil)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "~/Development", relativePath: "secret.md", homeURL: home) == nil)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "/etc", relativePath: "passwd", homeURL: home) == nil)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: "~/Development/user-skills/skills/team-lead", relativePath: "references/escape.md", homeURL: home) == nil)
+
+    }
+
+    @Test("loadSkillDocumentPreview falls back from agent skills to user-skills, local icloud-mirror, and embedded previews while skipping CloudDocs")
+    func skillDocumentPreviewFallbackTiers() throws {
+        let home = try TK3Fixtures.home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let relative = "references/playbook.md"
+        let agentURL = home.appendingPathComponent(".agents/skills/team-lead/\(relative)")
+        let userSkillsURL = home.appendingPathComponent("Development/user-skills/skills/team-lead/\(relative)")
+        let mirrorURL = LiveDashboardTelemetryReader.iCloudSyncRootURL(homeURL: home)
+            .appendingPathComponent("skills-mirror/team-lead/\(relative)")
+        let blockedCloudDocsURL = home.appendingPathComponent(
+            "Library/Mobile Documents/com~apple~CloudDocs/AIDashSync/skills-mirror/team-lead/\(relative)"
+        )
+        for url in [agentURL, userSkillsURL, mirrorURL, blockedCloudDocsURL] {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        }
+        try Data("Tier 1".utf8).write(to: agentURL)
+        try Data("Tier 2".utf8).write(to: userSkillsURL)
+        try Data("Tier 3".utf8).write(to: mirrorURL)
+        try Data("Blocked CloudDocs".utf8).write(to: blockedCloudDocsURL)
+
+        let missingSkillDir = "~/Development/missing/skills/team-lead"
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: missingSkillDir, relativePath: relative, skillSlug: "team-lead", embeddedPreview: "Tier 4", homeURL: home) == "Tier 1")
+        try FileManager.default.removeItem(at: agentURL)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: missingSkillDir, relativePath: relative, skillSlug: "team-lead", embeddedPreview: "Tier 4", homeURL: home) == "Tier 2")
+        try FileManager.default.removeItem(at: userSkillsURL)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: missingSkillDir, relativePath: relative, skillSlug: "team-lead", embeddedPreview: "Tier 4", homeURL: home) == "Tier 3")
+        try FileManager.default.removeItem(at: mirrorURL)
+        #expect(LiveDashboardTelemetryReader.loadSkillDocumentPreview(skillDir: missingSkillDir, relativePath: relative, skillSlug: "team-lead", embeddedPreview: "Tier 4", homeURL: home) == "Tier 4")
+
+        let meta = try JSONDecoder().decode(SkillsObservationMetadata.self, from: Data("{}".utf8))
+        let cloudDetail = SkillInspectorDetail(
+            metadata: meta,
+            skill: "team-lead",
+            docPreview: "Embedded Safe Preview",
+            skillDir: blockedCloudDocsURL.deletingLastPathComponent().path
+        )
+    }
+
+    @Test("Rendered SkillsRoiDiagnosticsCardView contains zero bare S1-S12 academic codes and renders inline preview")
+    func zeroBareAcademicCodesAndInlinePreviewRender() throws {
+        let home = try TK3Fixtures.home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let skillDir = home.appendingPathComponent("Development/user-skills/skills/team-lead", isDirectory: true)
+        try FileManager.default.createDirectory(at: skillDir, withIntermediateDirectories: true)
+        try Data("---\nname: team-lead\n---\n# Goal -> Task Execution Contract\nInline Markdown Preview Verified.".utf8).write(to: skillDir.appendingPathComponent("SKILL.md"))
+
+        let bareAcademicRegex = try NSRegularExpression(pattern: #"\bS(?:[1-9]|1[0-2])\b"#)
+
+        // 1. Deterministically verify Localizable.xcstrings contains zero bare S1..S12 academic codes
+        let xcURL = TK3Fixtures.root.appendingPathComponent("Apps/AIDashApp/Resources/Localizable.xcstrings")
+        let xcObj = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: xcURL)) as? [String: Any])
+        let xcStrings = try #require(xcObj["strings"] as? [String: Any])
+        for (key, entry) in xcStrings {
+            guard let dict = entry as? [String: Any],
+                  let locs = dict["localizations"] as? [String: Any] else { continue }
+            for (locale, locVal) in locs {
+                guard let locDict = locVal as? [String: Any],
+                      let unit = locDict["stringUnit"] as? [String: Any],
+                      let val = unit["value"] as? String else { continue }
+                let range = NSRange(val.startIndex..<val.endIndex, in: val)
+                #expect(bareAcademicRegex.firstMatch(in: val, range: range) == nil, "Found bare academic code in \(key) (\(locale)): \(val)")
+            }
+        }
+
+        // 2. Verify rendered 4-in-1 Skill Inspector sub-tabs + inline preview geometry & accessibility tree
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.data("skills-roi-dense.json"))
+        let teamLeadDetail = try #require(report.skillDetails.first { $0.skill == "team-lead" })
+        #expect(teamLeadDetail.bundleKb == 18.4)
+        #expect(teamLeadDetail.refsKb == 9.1)
+        #expect(teamLeadDetail.refsTokensEst == 2260)
+        #expect(teamLeadDetail.unpracticedRate == 0.5)
+        #expect(teamLeadDetail.unhitRefsCount == 1)
+        #expect(teamLeadDetail.unhitRefsRatio == 0.5)
+        #expect(!teamLeadDetail.isGhost)
+
+        let ghostDetail = try #require(report.skillDetails.first { $0.skill == "legacy-deleted-ghost" })
+        #expect(ghostDetail.isGhost)
+        #expect(!SkillInspectorFilter.all.matches(ghostDetail))
+        #expect(!SkillInspectorFilter.active.matches(ghostDetail))
+        #expect(!SkillInspectorFilter.needsOptimization.matches(ghostDetail))
+        #expect(!SkillInspectorFilter.idle30d.matches(ghostDetail))
+        #expect(!SkillInspectorFilter.repoBound.matches(ghostDetail))
+        #expect(SkillInspectorFilter.all.matches(teamLeadDetail))
+        #expect(LiveDashboardTelemetryReader.managedSkillDetails(in: report).map(\.skill) == ["team-lead", "aidash-content"])
+
+        let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: report)?.active == 1)
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: report)?.total == 2)
+
+        for lens in SkillsRoiLens.allCases {
+            let recorder = DashboardGeometryRecorder()
+            let view = SkillsRoiDiagnosticsCardView(summary: summary, initialLens: lens)
+                .frame(width: 1080).environment(\.colorScheme, .dark).environment(\.theme, Theme(isDark: true)).environment(\.dashboardGeometryRecorder, recorder)
+            let hostingView = NSHostingView(rootView: AnyView(view)); hostingView.frame = NSRect(x: 0, y: 0, width: 1080, height: 960); hostingView.layoutSubtreeIfNeeded()
+            let strings = collectAccessibilityStrings(from: hostingView).joined(separator: " ")
+            #expect(!strings.contains("python3")); #expect(!strings.contains("session_id")); #expect(!strings.contains("SKILL.md")); #expect(!strings.contains("inspector")); #expect(!strings.contains("L0")); #expect(!strings.contains("L1")); #expect(!strings.contains("L2")); #expect(!strings.contains("L3"))
+            let ids = Set(recorder.samples.map(\.id)); #expect(!ids.contains("skills-four-layer-pulse")); #expect(!ids.contains("skills-inspector-detail")); #expect(!ids.contains("inspector-file-skill-md")); #expect(!ids.contains("skills-primary-detail"))
+            #expect(recorder.samples.filter { $0.role == "segmented" }.count == 1)
+        }
+    }
+
+
+    @Test("Explicit stage states override stale exits, absent stages remain unknown, and receipts do not require launchd")
+    func pulseStates() throws {
+        for (status, exit, expected) in [("running", 1, ScheduledStageState.running), ("in_progress", 0, .running), ("failed", 0, .failed), ("warning", 0, .warning), ("passed", 1, .passed), ("unknown", 0, .unknown)] {
+            let stage = ScheduledJobStageReceipt(id: "collect", title: "Collect", status: status, exitCode: exit)
+            #expect(stage.semanticState == expected)
+            #expect(stage.isSuccess == (expected == .passed))
+        }
+        let timestampOnly = ScheduledJobStageReceipt(id: "collect", title: "Collect", sourceAsOf: "2026-11-11")
+        #expect(!timestampOnly.isKnown)
+        #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .aidataDigest, lastResult: .succeeded), launchdStatus: nil) == .noState)
+        #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .dailyLearning, lastResult: .succeeded), launchdStatus: nil) == .healthy)
+        let failedNonDigest = ScheduledJobStageReceipt(id: "run", title: "Run", status: "failed", exitCode: 1)
+        #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .linearBotBridge, lastResult: .succeeded, stages: [failedNonDigest]), launchdStatus: nil) == .failed)
+        let ids = ["collect", "normalize_merge", "retro_roi", "learning_topics", "digest_push"]
+        let passed = ids.map { ScheduledJobStageReceipt(id: $0, title: $0, status: "passed", exitCode: 0) }
+        #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .aidataDigest, lastResult: .succeeded, stages: passed), launchdStatus: nil) == .healthy)
+        let running = ScheduledJobStageReceipt(id: "collect", title: "Collect", status: "running", exitCode: 1)
+        #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .aidataDigest, lastResult: .failed, stages: [running]), launchdStatus: nil) == .running)
+        let failed = ScheduledJobStageReceipt(id: "collect", title: "Collect", status: "failed", exitCode: 0)
+        #expect(ScheduledJobFrameworkLogic.semanticState(state: .init(id: .aidataDigest, lastResult: .succeeded, stages: [failed]), launchdStatus: nil) == .failed)
+    }
+
+    @Test("Producer numeric then string revision survives real file loading, append-only receipt, refresh and Done/Dismiss")
+    func producerRevisionToUserEvent() throws {
+        let lines = try TK3Fixtures.actionLines()
+        for decision in ["Done", "Dismiss"] {
+            let home = try TK3Fixtures.home()
+            defer { try? FileManager.default.removeItem(at: home) }
+            let directory = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let actions = directory.appendingPathComponent("actions.jsonl")
+            let proposals = home.appendingPathComponent("proposals.jsonl")
+            let original = Data("fixture proposal must never be mutated\n".utf8)
+            try original.write(to: proposals)
+            try lines[0].write(to: actions)
+            let initial = try #require(LiveDashboardTelemetryReader.parseUnifiedActionItems(fromURL: actions).first)
+            #expect(initial.revision == "7")
+            let container = try ModelContainer(for: UserEventModel.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+            let writer = UserEventWriter(container: container)
+            let store = DashboardWorkspaceStore(deferInitialRefresh: true, scheduledJobExecution: { _ in Issue.record("Unexpected execution"); return false }, topicCatalog: [], sessionBindings: [:])
+            store.scheduledActionWriter = { action, responses in writer.acknowledgeScheduledJobAction(action: action, responses: responses, device: "fixture") }
+            store.submitActionItemDecision(initial, decision: "Approve")
+            let context = ModelContext(container)
+            let receipt = try #require(context.fetch(FetchDescriptor<UserEventModel>()).first)
+            let key = try #require(ScheduledJobAction.receiptKey(itemRef: receipt.itemRef, cardID: receipt.cardId))
+            #expect(key.hasSuffix("revision=7"))
+            #expect(receipt.itemRef?.contains("\"value\":\"7\"") == true)
+            try lines[1].write(to: actions)
+            let refreshed = try #require(LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: home, acknowledgedActionIDs: [key]).first)
+            #expect(refreshed.revision == "8")
+            #expect(refreshed.status == .inProgress)
+            #expect(!refreshed.isCompleted)
+            #expect(refreshed.decisionOptions.contains(decision))
+            store.submitActionItemDecision(refreshed, decision: decision)
+            let events = try ModelContext(container).fetch(FetchDescriptor<UserEventModel>())
+            #expect(events.count == 2)
+            #expect(events.allSatisfy { $0.action == .acknowledgeJobAction })
+            #expect(events.contains { $0.itemRef?.contains("\"value\":\"8\"") == true && $0.itemRef?.contains(decision) == true })
+            #expect(try Data(contentsOf: proposals) == original)
+            // Native bridge uses the same revision-scoped writer seam, not a forever job/action dedup.
+            let native = UserEventWriter(container: try ModelContainer(for: UserEventModel.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)))
+            let firstAction = try #require(JobActionsSources.decode(lines[0], jobID: "aidata-digest").first)
+            let nextAction = try #require(JobActionsSources.decode(lines[1], jobID: "aidata-digest").first)
+            let firstEvent = try native.recordReviewedJobAction(action: firstAction, responses: [.init(controlID: "decision", value: "Approve"), .init(controlID: "note", value: "")], device: "fixture")
+            let nextEvent = try native.recordReviewedJobAction(action: nextAction, responses: [.init(controlID: "decision", value: decision), .init(controlID: "note", value: "")], device: "fixture")
+            #expect(firstEvent.id != nextEvent.id)
+        }
+    }
+
+    @Test("Work exclusions precede quota and preserve personal word substrings and empty canonical sources")
+    func personalFilterAndQuota() throws {
+        let home = try TK3Fixtures.home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let directory = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("actions.jsonl")
+        let base = try #require(JSONSerialization.jsonObject(with: TK3Fixtures.actionLines()[0]) as? [String: Any])
+        var objects: [[String: Any]] = (0..<520).map { index in var a = base; a["id"] = "work-\(index)"; a["scope"] = "work"; return a }
+        let titles = ["probing", "describing", "combining", "plumbing", "shadow"]
+        for (index, title) in titles.enumerated() { var a = base; a["id"] = "personal-\(index)"; a["title"] = title; objects.append(a) }
+        for (index, marker) in ["[Bing]", "[FlightBook]", "ADO", "Teams", "mail_inbox", "work_teams_bridge"].enumerated() { var a = base; a["id"] = "excluded-\(index)"; a["title"] = marker; objects.append(a) }
+        var urlWork = base; urlWork["id"] = "ghe"; urlWork["url"] = "https://msft.ghe.com/x/y"; objects.append(urlWork)
+        var tagged = base; tagged["id"] = "tagged"; tagged["labels"] = ["work-business"]; objects.append(tagged)
+        try objects.map { try JSONSerialization.data(withJSONObject: $0) }.reduce(into: Data()) { $0.append($1); $0.append(10) }.write(to: url)
+        let loaded = LiveDashboardTelemetryReader.parseUnifiedActionItems(fromURL: url)
+        #expect(Set(loaded.map(\.title)) == Set(titles))
+        #expect(loaded.count == 5)
+        try Data().write(to: url)
+        #expect(LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: home).isEmpty)
+        let legacy = home.appendingPathComponent("Development/AIDash/aidata/L5_apps/digest/state/proposals.jsonl")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"id":"legacy-work","status":"pending","title":"Local work proposal","agent":"retro-loop","scope":"work"}"#.utf8).write(to: legacy)
+        try FileManager.default.removeItem(at: url)
+        #expect(LiveDashboardTelemetryReader.loadLiveImprovementActionItems(homeURL: home).isEmpty)
+        var malformedWork = base
+        malformedWork["scope"] = "work"
+        malformedWork["revision"] = true
+        let malformed = try JSONSerialization.data(withJSONObject: malformedWork)
+        let registry = ScheduledPulseRegistry.jobs(homeURL: home, fileExists: { _ in true }).filter { $0.id == .aidataDigest }
+        let framework = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            fileReader: { $0.lastPathComponent == "actions.jsonl" ? malformed : nil }, homeURL: home, registry: registry)
+        #expect(framework.entries.flatMap(\.actions).isEmpty)
+
+        var retroObj = base
+        retroObj["id"] = "retro-agent-efficiency-m1"
+        retroObj["ref"] = "retro://agent-efficiency-m1"
+        retroObj["source"] = "Retro"
+        retroObj["domain"] = "decisions"
+        try JSONSerialization.data(withJSONObject: retroObj).write(to: url)
+        let retroLoaded = try #require(LiveDashboardTelemetryReader.parseUnifiedActionItems(fromURL: url).first)
+        #expect(retroLoaded.isProposal)
+        #expect(retroLoaded.resolvedDomain == .decisions)
+        #expect(retroLoaded.evidence != nil)
+        #expect(retroLoaded.freshness != nil)
+    }
+}
+
+@MainActor
+@Suite("TK3 production view screenshots")
+struct TK3SnapshotRenderTests {
+    @Test("decodes the producer-shaped canonical skills-roi artifact")
+    func decodesCanonicalSkillsRoiArtifact() throws {
+        let artifact = try canonicalFixtureData()
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-skills-\(UUID().uuidString)", isDirectory: true)
+        let output = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try artifact.write(to: output.appendingPathComponent("skills-roi.json"))
+        defer { try? FileManager.default.removeItem(at: home) }
+        let summary = LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: home)
+        let roi = try #require(summary?.skillsROI)
+        #expect(roi.diagnostics.pins?.metadata.sample == 1)
+        #expect(roi.diagnostics.tools.first?.p95.value == 12000)
+        #expect(roi.diagnostics.ranking.first?.roi.value == nil)
+    }
+
+    @Test("renders Actionable, Pulse, and Skills production views across states and appearances")
+    func rendersProductionViews() throws {
+        #expect(!JobActionsSources.isProductionEnvironment)
+        #expect(!LiveDashboardTelemetryReader.isLiveEnvironment)
+        let output: URL
+        let temporary: URL?
+        let configured = ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_AIDASH_TK3_SCREENSHOT_DIR"]
+        let handoffDirectory = URL(fileURLWithPath: "/Volumes/SSD/Development/handoff/aidash-cards-redesign/receipts/phase1-swiftui/screenshots", isDirectory: true)
+        if let configured, !configured.isEmpty {
+            output = URL(fileURLWithPath: configured, isDirectory: true)
+            temporary = nil
+        } else if FileManager.default.fileExists(atPath: handoffDirectory.path) {
+            output = handoffDirectory
+            temporary = nil
+        } else {
+            let root = try TK3Fixtures.home()
+            output = root.appendingPathComponent("screenshots")
+            temporary = root
+        }
+        defer { if let temporary { try? FileManager.default.removeItem(at: temporary) } }
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let states = ["populated", "loading", "empty", "error"]
+        var geometrySamples: [DashboardGeometrySample] = []
+        for state in states {
+            let skillsSummary = try makeSkillsSummary(state: state)
+            let store = makeStore(state: state, skillsSummary: skillsSummary)
+            for width in [1000.0, 700.0] {
+                for (appearance, scheme) in [("light", ColorScheme.light), ("dark", ColorScheme.dark)] {
+                    try render(ActionItemsCardView(store: store), name: "actionable-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                    try render(ScheduledPulsePageView(store: store, registerJobs: {}), name: "pulse-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                    try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary), name: "skills-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                    if state != "empty" {
+                        for lens in SkillsRoiLens.allCases {
+                            try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialLens: lens), name: "skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                            if state != "empty" {
+                                #expect(geometrySamples.contains { $0.id.contains("skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)/skills-row-") }, "Expected nonempty \(lens.rawValue) rows for \(state)")
+                            }
+                        }
+                        for objectLens in SkillsRoiObjectLens.allCases {
+                            try render(
+                                SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialObjectLens: objectLens),
+                                name: "skills-object-\(objectLens.rawValue)-\(state)-\(Int(width))-\(appearance)",
+                                width: width,
+                                scheme: scheme,
+                                output: output,
+                                geometrySamples: &geometrySamples
+                            )
+                            #expect(geometrySamples.contains {
+                                $0.id.contains("skills-object-\(objectLens.rawValue)-\(state)-\(Int(width))-\(appearance)/skills-row-")
+                            }, "Expected \(objectLens.rawValue) geometry for \(state)")
+                        }
+                        try render(
+                            SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialSelectedSkill: "team-lead"),
+                            name: "skills-selected-sheet-\(state)-\(Int(width))-\(appearance)",
+                            width: width,
+                            scheme: scheme,
+                            output: output,
+                            geometrySamples: &geometrySamples
+                        )
+                        try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, showDailyPopulations: true), name: "skills-daily-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                    }
+                    if state == "empty" {
+                        for lens in SkillsRoiLens.allCases {
+                            try render(SkillsRoiDiagnosticsCardView(summary: store.liveEfficiencySummary, initialLens: lens), name: "skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)", width: width, scheme: scheme, output: output, geometrySamples: &geometrySamples)
+                            if state != "empty" {
+                                #expect(geometrySamples.contains { $0.id.contains("skills-\(lens.rawValue)-\(state)-\(Int(width))-\(appearance)/skills-row-") }, "Expected nonempty \(lens.rawValue) rows for \(state)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        try #require(!geometrySamples.isEmpty)
+        let rawNodes = geometrySamples.map { ["label": $0.id, "role": $0.role, "frame": ["x": $0.x, "y": $0.y, "width": $0.width, "height": $0.height]] }
+        let rawDocument: [String: Any] = ["platform": "desktop", "viewportWidth": 1040, "children": rawNodes]
+        let receipts = output.deletingLastPathComponent()
+        try JSONSerialization.data(withJSONObject: rawDocument, options: [.prettyPrinted]).write(to: receipts.appendingPathComponent("TK3-geometry-raw.json"))
+        let containerRoles: Set<String> = [
+            "pulseStageGrid", "skillsHealthGrid", "skillsWorkbench", "skillsPrimaryPane", "skillsInspectorPane",
+            "actionRow", "domainTile", "skillsDiagnosticRow"
+        ]
+        let leafNodes = geometrySamples.filter { !containerRoles.contains($0.role) }
+        func q(_ value: Double) -> Double { (value * 100).rounded() / 100 }
+        let groups = Dictionary(grouping: leafNodes, by: { $0.id.split(separator: "/", maxSplits: 1).first.map(String.init) ?? $0.id }).map { key, values in
+            ["label": key, "children": values.map { ["label": $0.id, "role": $0.role, "frame": ["x": q($0.x), "y": q($0.y), "width": q($0.width), "height": q($0.height)]] }] as [String: Any]
+        }
+        let geometryDocument: [String: Any] = ["platform": "desktop", "viewportWidth": 1040, "children": groups]
+        try JSONSerialization.data(withJSONObject: geometryDocument, options: [.prettyPrinted]).write(to: receipts.appendingPathComponent("TK3-geometry.json"))
+    }
+
+    @Test("uses a fixed desktop viewport, collision gate, and job-specific pulse stages")
+    func fixedViewportPulseLayoutAndDynamicSwitching() throws {
+        let store = makeStore(state: "populated", skillsSummary: nil)
+        let viewport = CGSize(width: 1280, height: 800)
+        let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["AIDASH_TK3_SCREENSHOT_DIR"] ?? NSTemporaryDirectory(), isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let pulseHost = makePulseHostingView(store: store, viewport: viewport, scheme: .dark)
+        let controls = visibleLeafControls(in: pulseHost.hostingView)
+        #expect(!controls.contains { $0.isNestedButton })
+        for (index, lhs) in controls.enumerated() {
+            for rhs in controls.dropFirst(index + 1) {
+                let intersection = lhs.frame.intersection(rhs.frame)
+                let area = max(0, intersection.width) * max(0, intersection.height)
+                #expect(area <= 2.0, "leaf controls overlap by \(area)pt²: \(lhs.label) / \(rhs.label)")
+            }
+        }
+        let maxY = max(controls.map(\.frame.maxY).max() ?? 0, pulseHost.hostingView.fittingSize.height)
+        #expect(maxY >= viewport.height * 0.60)
+
+        let renderer = ImageRenderer(content: AnyView(
+            ScheduledPulsePageView(store: store, registerJobs: {})
+                .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
+                .environment(\.colorScheme, .dark)
+                .environment(\.theme, Theme(isDark: true))
+        ))
+        renderer.scale = 1
+        let image = try #require(renderer.nsImage)
+        let tiff = try #require(image.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: tiff))
+        #expect(rep.pixelsWide == Int(viewport.width))
+        #expect(rep.pixelsHigh == Int(viewport.height))
+        if let png = rep.representation(using: .png, properties: [:]) {
+            try png.write(to: output.appendingPathComponent("pulse-fixed-1280x800-dark.png"))
+        }
+
+        let expectedStageLabels: [ScheduledPulseJobID: (String, String)] = [
+            .myPRSupervisor: ("PR scan", "PR 巡检"),
+            .prAutoReview: ("Queue precheck", "队列预检"),
+            .aidataDigest: ("Personal source collection", "个人源采集"),
+            .dailyLearning: ("Candidate scan", "候选扫描"),
+            .linearBotBridge: ("Message polling", "消息轮询"),
+            .teamsDigest: ("Auth Check", "身份验证")
+        ]
+        let digestLabels = Set(ScheduledPulseStageCatalog.labels(for: .aidataDigest))
+        let prDefinition = try #require(store.scheduledJobFrameworkSnapshot.entries.first(where: { $0.id == .prAutoReview })?.definition)
+        let sparseReceiptEntry = ScheduledJobFrameworkEntry(
+            definition: prDefinition,
+            state: ScheduledJobState(
+                id: .prAutoReview,
+                lastResult: .failed,
+                stages: [ScheduledJobStageReceipt(id: "dual_review", title: "dual_review", status: "failed", exitCode: 1)]
+            )
+        )
+        let sparseStages = ScheduledPulseStageCatalog.stages(for: sparseReceiptEntry)
+        #expect(sparseStages[2].semanticState == .failed)
+        #expect(sparseStages[0].semanticState == .unknown)
+        var selectedHeights: [ScheduledPulseJobID: CGFloat] = [:]
+        for jobID in ScheduledPulseJobID.allCases {
+            store.selectedFrameworkJobID = jobID
+            let view = makePulseHostingView(store: store, viewport: viewport, scheme: .dark)
+            let labels = expectedStageLabels[jobID] ?? ("", "")
+            let renderedLabels = ScheduledPulseStageCatalog.labels(for: jobID)
+            #expect(renderedLabels.count == (jobID == .teamsDigest ? 4 : 5))
+            #expect(renderedLabels.contains { $0.contains(labels.0) || $0.contains(labels.1) }, "missing stage label for \(jobID.rawValue)")
+            #expect(view.hostingView.fittingSize.height >= viewport.height * 0.60)
+            #expect(jobID.rawValue == store.selectedFrameworkJobID?.rawValue)
+            selectedHeights[jobID] = view.hostingView.fittingSize.height
+            let selectedControls = visibleLeafControls(in: view.hostingView)
+            #expect(!selectedControls.contains { $0.isNestedButton })
+            for (index, lhs) in selectedControls.enumerated() {
+                for rhs in selectedControls.dropFirst(index + 1) {
+                    let intersection = lhs.frame.intersection(rhs.frame)
+                    let area = max(0, intersection.width) * max(0, intersection.height)
+                    #expect(area <= 2.0, "selected \(jobID.rawValue) controls overlap by \(area)pt²: \(lhs.label) / \(rhs.label)")
+                }
+            }
+            if jobID == .prAutoReview {
+                #expect(!renderedLabels.contains(where: digestLabels.contains))
+            }
+        }
+        #expect(Set(selectedHeights.values.map { Int($0.rounded()) }).count == 1)
+
+        let navigationStore = makeStore(state: "error", skillsSummary: nil)
+        navigationStore.scheduledPulseTab = .needActions
+        #expect(navigationStore.scheduledPulseTab == .needActions)
+        navigationStore.scheduledPulseTab = .overview
+        #expect(navigationStore.scheduledPulseTab == .overview)
+    }
+
+    @Test("uses a full-bleed detail scroll view and centered 1680pt workspace column")
+    func workspaceWidescreenGeometry() throws {
+        let store = makeStore(state: "populated", skillsSummary: nil)
+        store.selectedSection = .scheduledPulse
+        let recorder = DashboardGeometryRecorder()
+        let viewport = CGSize(width: 2200, height: 1200)
+        let root = AnyView(
+            GeometryReader { _ in
+                AIDashMacWorkspaceView(store: store)
+            }
+            .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
+            .environment(\.colorScheme, .dark)
+            .environment(\.theme, Theme(isDark: true))
+            .environment(\.dashboardGeometryRecorder, recorder)
+            .coordinateSpace(name: "tk3-geometry")
+        )
+        let hostingView = NSHostingView(rootView: root)
+        let appearance = NSAppearance(named: .darkAqua)
+        hostingView.appearance = appearance
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: viewport.width, height: viewport.height),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = hostingView
+        window.setContentSize(viewport)
+        hostingView.frame = NSRect(origin: .zero, size: viewport)
+        hostingView.layoutSubtreeIfNeeded()
+        appearance?.performAsCurrentDrawingAppearance {
+            hostingView.displayIfNeeded()
+        }
+
+        let scroll = try #require(recorder.samples.first(where: { $0.id == "workspace-detail-scroll" }))
+        let column = try #require(recorder.samples.first(where: { $0.id == "workspace-detail-column" }))
+        #expect(scroll.width > 1900)
+        #expect(column.width >= 1600 && column.width <= 1680)
+        #expect(abs(column.width - 1640) <= 1)
+        let scrollMidX = scroll.x + scroll.width / 2
+        let columnMidX = column.x + column.width / 2
+        #expect(abs(columnMidX - scrollMidX) <= 2)
+    }
+
+    private final class PulseHost {
+        let window: NSWindow
+        let hostingView: NSHostingView<AnyView>
+
+        deinit {
+            window.contentView = nil
+            window.close()
+        }
+
+        init(window: NSWindow, hostingView: NSHostingView<AnyView>) {
+            self.window = window
+            self.hostingView = hostingView
+        }
+    }
+
+    private func makePulseHostingView(store: DashboardWorkspaceStore, viewport: CGSize, scheme: ColorScheme) -> PulseHost {
+        let root = AnyView(
+            ScheduledPulsePageView(store: store, registerJobs: {})
+                .environment(\.colorScheme, scheme)
+                .environment(\.theme, Theme(isDark: scheme == .dark))
+        )
+        let hostingView = NSHostingView(rootView: root)
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        hostingView.appearance = appearance
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: viewport.width, height: viewport.height),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = hostingView
+        window.setContentSize(viewport)
+        hostingView.frame = NSRect(origin: .zero, size: viewport)
+        hostingView.layoutSubtreeIfNeeded()
+        if let bitmap = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) {
+            appearance?.performAsCurrentDrawingAppearance {
+                hostingView.displayIfNeeded()
+                hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+            }
+        }
+        return PulseHost(window: window, hostingView: hostingView)
+    }
+
+    private struct LeafControl {
+        let label: String
+        let frame: CGRect
+        let isNestedButton: Bool
+    }
+
+    private func visibleLeafControls(in root: NSView) -> [LeafControl] {
+        let views = descendantViews(of: root)
+        return views.compactMap { view in
+            guard !view.isHidden, view.alphaValue > 0.01 else { return nil }
+            let isButton = view is NSButton
+            let isText = view is NSTextField
+            guard isButton || isText else { return nil }
+            guard !descendantViews(of: view).contains(where: { $0 is NSButton || $0 is NSTextField }) else { return nil }
+            let hasButtonAncestor = sequence(first: view.superview, next: { $0?.superview }).contains { $0 is NSButton }
+            if isText && hasButtonAncestor { return nil }
+            let frame = view.convert(view.bounds, to: root)
+            let label = (view as? NSButton)?.title ?? (view as? NSTextField)?.stringValue ?? ""
+            return LeafControl(label: label, frame: frame, isNestedButton: isButton && hasButtonAncestor)
+        }
+    }
+
+    private func descendantViews(of root: NSView) -> [NSView] {
+        root.subviews.flatMap { [$0] + descendantViews(of: $0) }
+    }
+
+    private func canonicalFixtureData() throws -> Data {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // AIDashApp
+            .deletingLastPathComponent() // Apps
+            .deletingLastPathComponent()
+        return try Data(contentsOf: repoRoot.appendingPathComponent("aidata/tests/fixtures/skills_roi_report.json"))
+    }
+
+    private func makeSkillsSummary(state: String) throws -> LiveDashboardTelemetryReader.LiveEfficiencySummary {
+        if state != "empty" {
+            let dense = try #require(JSONSerialization.jsonObject(with: TK3Fixtures.data("skills-roi-dense.json")) as? [String: Any])
+            var enriched = dense
+            enriched["skill_version_evolution"] = [
+                ["window_cst": "30d", "sample_size": 42, "coverage_status": "healthy", "skill": "team-lead", "skill_version": "v58@fixture", "combined_version": "1.4.0+v58@fixture", "status": "improved", "before_version": ["skill_version": "v57@fixture", "sessions": 30, "exit2_count": 4, "r1_total": 20, "r1_pass": 16], "current_version": ["skill_version": "v58@fixture", "sessions": 42, "exit2_count": 1, "r1_total": 24, "r1_pass": 22]],
+                ["window_cst": "30d", "sample_size": 12, "coverage_status": "healthy", "skill": "nas-smart-home", "skill_version": "v3@fixture", "combined_version": "1.0.0+v3@fixture", "status": "observing", "before_version": ["skill_version": "v2@fixture", "sessions": 12, "exit2_count": 0], "current_version": ["skill_version": "v3@fixture", "sessions": 0, "exit2_count": 0]]
+            ]
+            enriched["skill_retro"] = ["sample_size": 42, "slow_flywheel_ready": true, "layer2_script_efficacy_and_speed": ["watermarked_resolved_roadblocks": [["skill": "team-lead", "script": "ci-monitor.py", "skill_version": "v58", "pre_fix_count": 4, "post_fix_count": 0, "total_exit_2_count": 4]]], "proposals": [["skill": "team-lead", "title": "Queued optimization", "priority": "P1"]]]
+            enriched["coverage_status"] = state == "error" ? "error" : (state == "loading" ? "partial" : "healthy")
+            enriched["errors"] = state == "error" ? ["producer unavailable"] : []
+            let report = try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: enriched))
+            #expect(report.resolvedSkillRetro.watermarkedResolvedRoadblocks.map(\.skill) == ["team-lead"])
+            #expect(report.resolvedSkillRetro.proposals.map(\.skill) == ["team-lead"])
+            #expect(Set(report.resolvedSkillRetro.watermarkedResolvedRoadblocks.map(\.skill)).intersection(report.resolvedSkillRetro.proposals.map(\.skill)).contains("team-lead"))
+            return .init(skillsROI: report)
+        }
+        let coverage = state == "empty" ? "missing" : (state == "error" ? "error" : "partial")
+        let object: [String: Any] = ["schema_version": 1, "window_cst": "7d", "source_as_of": NSNull(), "sample_size": 0,
+                                     "coverage_status": coverage, "diagnostics": [:], "skills_daily": [],
+                                     "errors": state == "error" ? ["producer unavailable"] : []]
+        return .init(skillsROI: try JSONDecoder().decode(SkillsRoiReport.self, from: JSONSerialization.data(withJSONObject: object)))
+    }
+
+    private func makeCanonicalSummary() throws -> LiveDashboardTelemetryReader.LiveEfficiencySummary {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-render-skills-\(UUID().uuidString)", isDirectory: true)
+        let output = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try canonicalFixtureData().write(to: output.appendingPathComponent("skills-roi.json"))
+        defer { try? FileManager.default.removeItem(at: home) }
+        return try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: home))
+    }
+
+    private func makeStore(state: String, skillsSummary: LiveDashboardTelemetryReader.LiveEfficiencySummary?) -> DashboardWorkspaceStore {
+        let snapshot = MenuBarSystemSnapshot(
+            capturedAt: .now,
+            cpu: CPUStatusSnapshot(usage: 0.2, user: 0.1, system: 0.1, idle: 0.8, coreCount: 8, loadOneMinute: 0.2, loadFiveMinutes: 0.2, loadFifteenMinutes: 0.2),
+            memory: MemoryStatusSnapshot(usedBytes: 1, totalBytes: 2, freeBytes: 1, wiredBytes: 0, compressedBytes: 0, pressure: .normal),
+            storage: StorageStatusSnapshot(
+                systemVolume: StorageVolumeSnapshot(id: "system", name: "System", mountPoint: "/", isMounted: true, isExternalSSD: false, usedBytes: 1, availableBytes: 1, totalBytes: 2),
+                ssdVolume: StorageVolumeSnapshot(id: "ssd", name: "SSD", mountPoint: "/Volumes/SSD", isMounted: true, isExternalSSD: true, usedBytes: 1, availableBytes: 1, totalBytes: 2)
+            ),
+            tokenUsage: CLITokenUsageSnapshot(items: []),
+            attention: AttentionStatusSnapshot()
+        )
+        let controls = [ScheduledJobActionControl(id: "decision", kind: .singleSelect, title: "Action", options: ["Approve", "Snooze 7d", "Done", "Dismiss"])]
+        let item = DashboardActionItem(id: "learning-1", title: state == "error" ? "学习探索被阻塞 · 等待来源恢复" : "字体回退与禁则如何共同避免断行错误？", summary: "新覆盖缺口 · 混排字体回退与断行证据", sourceTag: "Learning", priority: .p1, status: state == "error" ? .blocked : (state == "loading" ? .inProgress : .triage), backingItemRef: "learning-topic://font-fallback", jobID: .aidataDigest, controls: controls, revision: "7", whyNow: "新缺口", sourceURI: "https://example.invalid", coverageRefs: ["vault://coverage"])
+        let domainItems = [item,
+            DashboardActionItem(id: "blocker", title: "个人 CI 门禁等待修复", summary: "收集阶段待处理", sourceTag: "GTT Blocker", status: .blocked),
+            DashboardActionItem(id: "finding", title: "Shared pins 需要同步", summary: "只读诊断 · 两个 consumer 落后", sourceTag: "CI Improve", domain: .findings),
+            DashboardActionItem(id: "planned", title: "个人学习卡片在途", summary: "已批准 · 后台探索尚未完成", sourceTag: "Linear", status: .inProgress)]
+        let jobs = ScheduledPulseRegistry.jobs(homeURL: URL(fileURLWithPath: "/tmp/tk3-render"), fileExists: { $0.hasSuffix("aidata_digest_run.sh") || $0.hasSuffix("teams_digest_run.sh") })
+        let digestStageIDs = ["collect", "normalize_merge", "retro_roi", "learning_topics", "digest_push"]
+        let teamsStageIDs = ["auth_check", "unread_sync", "jev_draft", "self_meeting_delivery"]
+        let digestStages: [ScheduledJobStageReceipt] = state == "empty" ? [] : digestStageIDs.enumerated().map { index, id in
+            let status = state == "loading" ? (index < 2 ? "passed" : (index == 2 ? "running" : "unknown")) : (state == "error" && index == 2 ? "failed" : "passed")
+            return ScheduledJobStageReceipt(id: id, title: id, status: status, exitCode: status == "unknown" ? nil : (status == "failed" ? 1 : 0), durationSec: status == "passed" ? Double(index + 1) : nil, sourceAsOf: status == "passed" ? "2026-11-11" : nil)
+        }
+        let teamsStages: [ScheduledJobStageReceipt] = state == "empty" ? [] : teamsStageIDs.enumerated().map { index, id in
+            let status = state == "error" && index == 3 ? "failed" : "passed"
+            return ScheduledJobStageReceipt(id: id, title: id, status: status, exitCode: status == "failed" ? 7 : 0, durationSec: Double(index + 1), sourceAsOf: "2026-11-11")
+        }
+        let date = Date(timeIntervalSince1970: 1794412800)
+        let frameworkEntries = jobs.map { definition -> ScheduledJobFrameworkEntry in
+            switch definition.id {
+            case .myPRSupervisor:
+                let action = ScheduledJobAction(id: "my-pr-action", jobID: .myPRSupervisor, title: "确认我的 PR 落地路径", descriptionMd: "存在一项待拍板动作。", controls: controls)
+                let receipt = ScheduledJobState(id: .myPRSupervisor, lastResult: .succeeded, lastRunAt: date, summary: "PR 巡检完成，发现一项待处理动作。", overviewMd: "## My PRs\\n- SUCCESS · queue scanned\\n- PENDING · owner decision", sourceAsOf: "2026-11-11")
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt, actions: [action])
+            case .prAutoReview:
+                let receipt = ScheduledJobState(id: .prAutoReview, lastResult: .failed, lastRunAt: date, summary: "双模审查失败；exit 1。", overviewMd: "## Watched PRs\\n- FAILURE · review worker exit 1\\n- PENDING · comment writeback", sourceAsOf: "2026-11-11")
+                let launchd = ScheduledJobStatus(definition: definition, health: .critical, lastExitCode: 1, lastRun: date)
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt, launchdStatus: launchd)
+            case .aidataDigest:
+                let receipt: ScheduledJobState? = state == "empty" ? nil : .init(
+                    id: .aidataDigest,
+                    lastResult: state == "error" ? .failed : (state == "loading" ? .running : .succeeded),
+                    lastRunAt: date,
+                    summary: state == "loading" ? "诊断阶段正在运行；后续阶段尚无回执。" : (state == "error" ? "诊断阶段明确失败；旧 exit 0 不代表通过。" : "个人源入仓，Skills 诊断与每日新题已投递。"),
+                    overviewMd: "## Daily Digest\\n- SUCCESS · personal sources collected\\n- SUCCESS · Brief delivered",
+                    stages: digestStages,
+                    sourceAsOf: state == "loading" ? nil : "2026-11-11"
+                )
+                let action = ScheduledJobAction(id: "digest-action", jobID: .aidataDigest, title: "Resolve digest failure", descriptionMd: "Failure evidence", controls: [])
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt, actions: state == "error" ? [action] : [])
+            case .dailyLearning:
+                let receipt = ScheduledJobState(id: .dailyLearning, lastResult: .succeeded, lastRunAt: date, summary: "候选主题已生成并同步到看板。", overviewMd: "## Daily Learning\\n- SUCCESS · candidates deduped\\n- SUCCESS · board synced", sourceAsOf: "2026-11-11")
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt)
+            case .linearBotBridge:
+                let receipt = ScheduledJobState(id: .linearBotBridge, lastResult: .succeeded, lastRunAt: date, summary: "消息游标已同步，桥接回执已写入。", overviewMd: "## Linear Bridge\\n- SUCCESS · messages routed\\n- SUCCESS · receipt written", sourceAsOf: "2026-11-11")
+                return ScheduledJobFrameworkEntry(definition: definition, state: receipt)
+            case .teamsDigest:
+                let receipt = ScheduledJobState(id: .teamsDigest, lastResult: state == "error" ? .failed : .succeeded, lastRunAt: date, summary: "Teams 未读扫描与 Self-Meeting 草稿投递。", overviewMd: "## Teams Drafts\\n- SUCCESS · unread sync\\n- SUCCESS · self-meeting draft", stages: teamsStages, sourceAsOf: "2026-11-11")
+                return ScheduledJobFrameworkEntry(definition: definition, state: state == "empty" ? nil : receipt)
+            }
+        }
+        let framework = ScheduledJobFrameworkSnapshot(capturedAt: date, entries: frameworkEntries)
+        let store = DashboardWorkspaceStore(snapshot: snapshot, cliEntries: [], actionItems: state == "empty" ? [] : (state == "populated" ? domainItems : [item]), rankingRows: [], scheduledPulseSnapshot: .init(capturedAt: date, jobs: []), liveEfficiencySummary: skillsSummary, scheduledJobExecution: { _ in Issue.record("Snapshot attempted execution"); return false }, topicCatalog: [], sessionBindings: [:], m2DispatchExecutor: { _, _, _ in Issue.record("Snapshot attempted dispatch"); return .init(succeeded: false, error: "fixture") })
+        store.scheduledActionWriter = { _, _ in Issue.record("Snapshot attempted receipt write"); return false }
+        store.updateScheduledJobFrameworkSnapshot(framework)
+        return store
+    }
+
+    private func collectAccessibilityStrings(from element: Any) -> [String] {
+        var result: [String] = []
+        if let ax = element as? any NSAccessibilityProtocol {
+            if let label = ax.accessibilityLabel(), !label.isEmpty { result.append(label) }
+            if let strVal = ax.accessibilityValue() as? String, !strVal.isEmpty { result.append(strVal) }
+            for child in ax.accessibilityChildren() ?? [] {
+                result.append(contentsOf: collectAccessibilityStrings(from: child))
+            }
+        }
+        if let view = element as? NSView {
+            for sub in view.subviews {
+                result.append(contentsOf: collectAccessibilityStrings(from: sub))
+            }
+        }
+        return result
+    }
+
+    private func render<V: View>(_ view: V, name: String, width: CGFloat, scheme: ColorScheme, output: URL, geometrySamples: inout [DashboardGeometrySample]) throws {
+        let recorder = DashboardGeometryRecorder()
+        let host = view.frame(width: width, alignment: .topLeading).padding(20).fixedSize(horizontal: false, vertical: true).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme).environment(\.theme, Theme(isDark: scheme == .dark)).environment(\.dashboardGeometryRecorder, recorder).coordinateSpace(name: "tk3-geometry")
+        let renderer = ImageRenderer(content: host)
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage)
+        let tiff = try #require(image.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: tiff))
+        let png = try #require(rep.representation(using: .png, properties: [:]))
+        try png.write(to: output.appendingPathComponent("\(name).png"))
+        let samples = recorder.samples
+        let canvasWidth = width + 40
+        let canvasHeight = CGFloat(rep.pixelsHigh) / 2
+        for sample in samples where name.hasPrefix("skills-") {
+            #expect(sample.x >= 0 && sample.y >= 0 && sample.x + sample.width <= canvasWidth + 1 && sample.y + sample.height <= canvasHeight + 1, "Out-of-bounds Skills geometry: \(name)/\(sample.id)")
+        }
+        if name.hasPrefix("skills-") {
+            let hostingView = NSHostingView(rootView: AnyView(host))
+            hostingView.frame = NSRect(x: 0, y: 0, width: width + 40, height: 1400)
+            hostingView.layoutSubtreeIfNeeded()
+            let accessibilityText = collectAccessibilityStrings(from: hostingView).joined(separator: " ")
+            for forbidden in ["python3", "skill_contract.py", "skill_retro.py", "session_id", "SKILL.md", "inspector", "L0", "L1", "L2", "L3"] {
+                #expect(!accessibilityText.localizedCaseInsensitiveContains(forbidden), "Forbidden debug text: \\(forbidden)")
+            }
+            let ids = Set(samples.map(\.id))
+            for forbiddenID in ["skills-four-layer-pulse", "skills-inspector-detail", "skills-primary-detail", "inspector-file-skill-md", "inspector-collapse"] {
+                #expect(!ids.contains(forbiddenID), "Forbidden debug identifier: \\(forbiddenID)")
+            }
+        }
+        if name.hasPrefix("actionable-") {
+            let tiles = samples.filter { $0.role == "domainTile" }
+            #expect(tiles.count == 4)
+            #expect(Set(tiles.map { Int($0.y.rounded()) }).count == (width == 700 ? 2 : 1))
+            #expect(Set(tiles.map { Int($0.x.rounded()) }).count == (width == 700 ? 2 : 4))
+            #expect(samples.filter { $0.role == "domainSubtitle" }.allSatisfy { $0.width >= (width == 700 ? 200 : 100) && $0.height >= 14 })
+        }
+        if name.hasPrefix("pulse-") {
+            #expect([4, 5].contains(samples.filter { $0.role == "pulseStageTile" }.count))
+            let footerIDs = ["pulse-run", "pulse-refresh", "pulse-service", "pulse-diagnostics"]
+            #expect(samples.filter { $0.role == "button" && footerIDs.contains($0.id) }.count == 4)
+            #expect(samples.filter { $0.role == "button" && $0.id.hasPrefix("pulse-tab-") }.count == 2)
+        }
+        if name.hasPrefix("skills-populated") {
+            #expect(samples.contains { $0.id == "skills-p0-vitals" })
+            #expect(samples.filter { $0.role == "vital" }.count == 4)
+            #expect(!samples.contains { $0.id == "skills-table-header" })
+            #expect(!samples.contains { $0.id == "skills-status-stage" })
+            #expect(!samples.contains { $0.id == "skills-inspector-detail" })
+            #expect(!samples.contains { $0.id == "inspector-file-skill-md" })
+        }
+        if name.hasPrefix("skills-tab-scripts-populated") {
+            #expect(!samples.contains { $0.id.contains("script-") })
+        }
+        if name.hasPrefix("skills-tab-evals-populated") {
+            #expect(!samples.contains { $0.id.contains("inspector-eval") })
+        }
+        #expect(samples.filter { $0.role == "button" }.allSatisfy { $0.width >= 28 && $0.height >= 28 })
+        geometrySamples.append(contentsOf: samples.map { DashboardGeometrySample(id: "\(name)/\($0.id)", role: $0.role, frame: CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)) })
+        #expect(rep.pixelsWide == Int((width + 40) * 2))
+        #expect(rep.pixelsHigh > 0)
+    }
+
+    @Test("renders the selected SkillHealthSheet and keeps its accessibility tree clean")
+    func rendersSelectedSkillHealthSheet() throws {
+        let report = try JSONDecoder().decode(SkillsRoiReport.self, from: TK3Fixtures.data("skills-roi-dense.json"))
+        let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
+        let recorder = DashboardGeometryRecorder()
+        let root = AnyView(
+            SkillsRoiDiagnosticsCardView(summary: summary, initialSelectedSkill: "team-lead")
+                .frame(width: 720, alignment: .topLeading)
+                .environment(\.colorScheme, .dark)
+                .environment(\.theme, Theme(isDark: true))
+                .environment(\.dashboardGeometryRecorder, recorder)
+                .coordinateSpace(name: "tk3-geometry")
+        )
+        let hostingView = NSHostingView(rootView: root)
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: 760, height: 900),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            window.attachedSheet?.orderOut(nil)
+            window.contentView = nil
+            window.close()
+        }
+        window.isReleasedWhenClosed = false
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = hostingView
+        hostingView.frame = NSRect(x: 0, y: 0, width: 760, height: 900)
+        NSApp.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
+        hostingView.layoutSubtreeIfNeeded()
+
+        var sheet: NSWindow?
+        for _ in 0..<20 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            if let attached = window.attachedSheet {
+                sheet = attached
+                break
+            }
+        }
+        let healthSheet = try #require(sheet, "Expected the selected skill to present SkillHealthSheet")
+        healthSheet.setContentSize(NSSize(width: 560, height: 640))
+        healthSheet.makeKeyAndOrderFront(nil)
+        healthSheet.orderFrontRegardless()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let content = try #require(healthSheet.contentView)
+        content.frame = NSRect(x: 0, y: 0, width: 560, height: 640)
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        #expect(healthSheet.frame.width >= 500)
+        #expect(healthSheet.frame.height >= 500)
+        #expect(content.frame.width >= 500)
+        #expect(content.frame.height >= 500)
+        #expect(!content.subviews.isEmpty)
+        #expect(descendantViews(of: content).contains { $0.frame.width > 0 && $0.frame.height > 0 })
+
+        let renderedSheetText = descendantViews(of: content).compactMap { view in
+            if let textField = view as? NSTextField { return textField.stringValue }
+            if let button = view as? NSButton { return button.title }
+            return nil
+        }.joined(separator: " ")
+        let sheetText = [collectAccessibilityStrings(from: healthSheet).joined(separator: " "), renderedSheetText].joined(separator: " ")
+        for forbidden in ["python3", "skill_contract.py", "skill_retro.py", "session_id", "SKILL.md", "inspector", "L0", "L1", "L2", "L3"] {
+            #expect(!sheetText.localizedCaseInsensitiveContains(forbidden), "Forbidden sheet text: \(forbidden)")
+        }
+        #expect(recorder.samples.contains { $0.id == "skills-row-team-lead" })
+    }
+}
+#endif

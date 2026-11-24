@@ -183,6 +183,90 @@ def test_skill_use_keeps_name_and_call_metadata_only():
 
 
 @pytest.mark.unit
+def test_metric_candidates_extract_reference_and_script():
+    meta = {"session_id": "s1"}
+    reference = cx._metric_candidates(
+        {"type": "response_item", "timestamp": "2026-08-03T04:02:00Z",
+         "payload": {"type": "custom_tool_call", "call_id": "ref-1",
+                     "input": "cat skills/demo/references/guide.md"}},
+        meta, "file.jsonl", 9,
+    )
+    script = cx._metric_candidates(
+        {"type": "response_item", "timestamp": "2026-08-03T04:02:00Z",
+         "payload": {"type": "function_call", "call_id": "script-1",
+                     "input": "bash skills/demo/scripts/check.sh"}},
+        meta, "file.jsonl", 10,
+    )
+    assert reference[0]["reference_path"] == "skills/demo/references/guide.md"
+    assert script[0]["script_path"] == "skills/demo/scripts/check.sh"
+    assert script[0]["duration_ms"] is None
+    assert script[0]["exit_code"] is None
+    # Viewing/reading a script or editing a file must never emit script_call
+    assert cx._metric_candidates(
+        {"type": "response_item", "timestamp": "2026-08-03T04:02:00Z",
+         "payload": {"type": "function_call", "call_id": "read-sc", "name": "view",
+                     "arguments": json.dumps({"path": "skills/demo/scripts/check.sh"})}},
+        meta, "file.jsonl", 11,
+    ) == []
+    assert cx._metric_candidates(
+        {"type": "response_item", "timestamp": "2026-08-03T04:02:00Z",
+         "payload": {"type": "function_call", "call_id": "cat-sc", "name": "exec_command",
+                     "arguments": json.dumps({"cmd": "sed -n '1,40p' skills/demo/scripts/check.sh"})}},
+        meta, "file.jsonl", 12,
+    ) == []
+
+
+@pytest.mark.unit
+def test_codex_collect_links_function_call_output_across_batches(monkeypatch, tmp_path):
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    rollout = sessions / "rollout-1.jsonl"
+    call_line = json.dumps({
+        "type": "response_item",
+        "timestamp": "2026-08-03T04:02:00.000Z",
+        "payload": {
+            "type": "function_call",
+            "call_id": "call-script-1",
+            "name": "exec_command",
+            "arguments": json.dumps({"cmd": "python3 skills/demo/scripts/run.py --check"}),
+        },
+    })
+    out_line = json.dumps({
+        "type": "response_item",
+        "timestamp": "2026-08-03T04:02:02.500Z",
+        "payload": {
+            "type": "function_call_output",
+            "call_id": "call-script-1",
+            "output": "Chunk ID: 1a2b3c\nWall time: 1.7500 seconds\nProcess exited with code 2\nOutput:\nfailed",
+        },
+    })
+    rollout.write_text(_meta(session="sess-cx") + "\n" + call_line + "\n", encoding="utf-8")
+    state = {}
+    raw_records = []
+    monkeypatch.setattr(cx, "CODEX_SESSIONS_DIR", sessions)
+    monkeypatch.setattr(cx, "get_watermark", lambda _s: dict(state))
+    monkeypatch.setattr(cx, "set_watermark", lambda _s, val: state.clear() or state.update(val))
+    monkeypatch.setattr(cx, "write_raw", lambda _s, recs: raw_records.extend(recs) or len(recs))
+    monkeypatch.setattr(cx, "read_raw", lambda _s: list(raw_records))
+    monkeypatch.setattr(cx, "clean_path", lambda _s: tmp_path / "codex_prompts.db")
+    import cleanio
+    monkeypatch.setattr(cleanio, "CLEAN_DIR", tmp_path)
+    monkeypatch.setattr(cleanio, "clean_path", lambda _s: tmp_path / "codex_prompts.db")
+
+    assert cx.collect() == 1
+    assert "__pending_scripts__" in state
+    with rollout.open("a", encoding="utf-8") as fh:
+        fh.write(out_line + "\n")
+    assert cx.collect() == 1
+    assert "__pending_scripts__" not in state
+    cx.normalize()
+    import sqlite3
+    with sqlite3.connect(tmp_path / "codex_prompts.db") as conn:
+        rows = conn.execute("SELECT skill, script_path, exit_code, duration_ms FROM script_call").fetchall()
+    assert rows == [("demo", "skills/demo/scripts/run.py", 2, 1750)]
+
+
+@pytest.mark.unit
 def test_session_meta_parsing_and_degradation():
     got = cx._session_meta(_meta(originator="Codex Desktop", session="s9"))
     assert got["originator"] == "Codex Desktop"

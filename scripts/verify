@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# Unified verification entrypoint for AIDash (RG-001..RG-004 compliant).
+#
+# Usage:
+#   ./scripts/verify              Incremental verification for changed paths (--changed)
+#   ./scripts/verify --changed    Incremental verification for changed paths vs VERIFY_BASE
+#   ./scripts/verify --all        Full local verification (context audit + RepoInfra + aidata + changed/all leaf gates)
+#   ./scripts/verify --layer <L>  Run local gates for a single layer
+#   ./scripts/verify --help       Show usage help
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+usage() {
+    cat <<'EOF'
+Usage: scripts/verify [--changed | --all | --layer <LAYER> | --help]
+
+Options:
+  --changed        Verify only layers touched by git diff --name-only (default)
+  --all            Verify context audit, RepoInfra, aidata test/lint gates, and leaf gates
+  --layer <LAYER>  Verify a single context layer
+  -h, --help       Show this help message
+EOF
+}
+
+MODE="changed"
+TARGET_LAYER=""
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --changed)
+            MODE="changed"
+            shift
+            ;;
+        --all)
+            MODE="all"
+            shift
+            ;;
+        --layer)
+            MODE="layer"
+            TARGET_LAYER="${2:?--layer requires a layer name}"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "[verify] unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+GATE_MODE="${VERIFY_MODE:-local}"
+
+resolve_diff_base() {
+    local candidate=""
+    local base=""
+    for candidate in "${VERIFY_BASE:-}" "origin/main" "refs/remotes/origin/main" "main" "HEAD~1"; do
+        [ -z "$candidate" ] && continue
+        if git rev-parse --verify --quiet "$candidate^{commit}" >/dev/null 2>&1; then
+            base="$(git merge-base "$candidate" HEAD 2>/dev/null || true)"
+            if [ -n "$base" ]; then
+                printf '%s\n' "$base"
+                return 0
+            fi
+        fi
+    done
+    git rev-list --max-parents=0 HEAD 2>/dev/null | head -n 1
+}
+
+detect_changed_files() {
+    local base
+    base="$(resolve_diff_base)"
+    {
+        if [ -n "$base" ]; then
+            git diff --name-only --diff-filter=ACMRD "$base..HEAD" 2>/dev/null || true
+        fi
+        git diff --name-only --diff-filter=ACMRD HEAD 2>/dev/null || true
+        git diff --cached --name-only --diff-filter=ACMRD 2>/dev/null || true
+    } | sed '/^$/d' | sort -u
+}
+
+run_layers_batch() {
+    local layers_text="$1"
+    [ -z "$layers_text" ] && return 0
+    python3 - "$GATE_MODE" "$layers_text" <<'PY'
+import concurrent.futures
+import hashlib
+import os
+import subprocess
+import sys
+
+gate_mode = sys.argv[1]
+layers = [line.strip() for line in sys.argv[2].splitlines() if line.strip()]
+if not layers:
+    raise SystemExit(0)
+
+# Content-hash watermark digest of layer list for deterministic execution trace
+_watermark_sha256 = hashlib.sha256("\n".join(layers).encode("utf-8")).hexdigest()[:12]
+max_workers = max(1, min(len(layers), int(os.environ.get("VERIFY_JOBS", "1"))))
+
+def _run_one(layer: str) -> int:
+    proc = subprocess.run(["scripts/context/run", layer, "--mode", gate_mode], check=False)
+    return proc.returncode
+
+if max_workers == 1:
+    for layer in layers:
+        rc = _run_one(layer)
+        if rc != 0:
+            raise SystemExit(rc)
+else:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for rc in pool.map(_run_one, layers):
+            if rc != 0:
+                raise SystemExit(rc)
+PY
+}
+
+echo "[verify] running scripts/context/audit..."
+scripts/context/audit >/dev/null
+
+if [ "$MODE" = "layer" ]; then
+    run_layers_batch "$TARGET_LAYER"
+    echo "[verify] ok: $TARGET_LAYER"
+    exit 0
+fi
+
+if [ "$MODE" = "all" ]; then
+    all_layers="$(scripts/context/layers --all)"
+    run_layers_batch "$all_layers"
+    if [ -d "aidata/tests" ]; then
+        echo "[verify] running aidata pytest suite..."
+        if [ -x "/usr/bin/python3" ] && /usr/bin/python3 -c "import pytest" >/dev/null 2>&1; then
+            /usr/bin/python3 -m pytest aidata/tests -q
+        else
+            python3 -m pytest aidata/tests -q
+        fi
+        if command -v ruff >/dev/null 2>&1; then
+            echo "[verify] running ruff check aidata..."
+            ruff check --select E4,E7,E9,F aidata
+        fi
+    fi
+    echo "[verify] ok: all"
+    exit 0
+fi
+
+# Default: --changed mode
+if [ -n "${VERIFY_LAYERS:-}" ]; then
+    layers="$VERIFY_LAYERS"
+    unset VERIFY_LAYERS
+else
+    changed_files="$(detect_changed_files)"
+    if [ -z "$changed_files" ]; then
+        echo "[verify] no changes detected."
+        exit 0
+    fi
+    layers="$(printf '%s\n' "$changed_files" | scripts/context/layers --stdin)"
+fi
+
+if [ -z "$layers" ]; then
+    echo "[verify] no routed leaf changes."
+    exit 0
+fi
+
+run_layers_batch "$layers"
+echo "[verify] ok: $(printf '%s' "$layers" | tr '\n' ' ')"

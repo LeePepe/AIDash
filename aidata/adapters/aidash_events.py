@@ -70,7 +70,7 @@ _TIMEOUT_S = 60
 # still back-filling anything that exists.
 _EPOCH_SINCE = "2020-01-01"
 
-_ACTIONS = ("done", "star", "undone")
+_ACTIONS = ("done", "star", "undone", "acknowledgeJobAction")
 
 
 def _aidash_bin() -> str | None:
@@ -109,6 +109,7 @@ def _run_json(args: list[str]) -> Any | None:
     try:
         proc = subprocess.run(  # nosec B603
             [binp, *args, "--json"],
+            check=False,
             capture_output=True, text=True, timeout=_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError):

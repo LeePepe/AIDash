@@ -7,9 +7,11 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess  # nosec B404 - fixed executable and argument vectors only
 import tempfile
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,10 @@ from config import (
     AIDATA_SYNC_PREFIX,
     AIDATA_SYNC_STORAGE_ACCOUNT,
     GTT_XFER_DIR,
+    RAW_DIR,
+    resolve_icloud_sync_dir,
 )
+from rawio import raw_source_lock
 from state import get_watermark, set_watermark
 
 _INHERITED_ENVIRONMENT = (
@@ -26,6 +31,195 @@ _INHERITED_ENVIRONMENT = (
     "LANG", "LC_ALL", "LC_CTYPE", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
 )
 _REFRESH_SECONDS = 60
+_ICLOUD_EXPORT_WATERMARK = "icloud_exported_shards_v1"
+_ICLOUD_PULL_WATERMARK = "icloud_pulled_shards_v1"
+_ICLOUD_SOURCES = (
+    "claude_jsonl", "codex_prompts", "copilot_cli",
+    "gtt_ledger", "gtt_receipt", "bot_tl",
+)
+_SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _file_signature(path: Path) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _copy_atomically(source: Path, destination: Path) -> bool:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=destination.parent, prefix=f".{destination.name}.", delete=False
+        ) as handle:
+            temp_path = Path(handle.name)
+            with source.open("rb") as source_handle:
+                shutil.copyfileobj(source_handle, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp_path.replace(destination)
+        directory = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        return True
+    except OSError:
+        return False
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+
+def _safe_shard_path(root: Path, *parts: str) -> Path | None:
+    if root.is_symlink():
+        return None
+    if any(not part or part in {".", ".."} or not _SAFE_COMPONENT_RE.fullmatch(part) for part in parts):
+        return None
+    candidate = root.joinpath(*parts)
+    try:
+        if not candidate.resolve().is_relative_to(root.resolve()):
+            return None
+    except OSError:
+        return None
+    parent = root
+    for part in parts[:-1]:
+        parent = parent / part
+        if parent.is_symlink():
+            return None
+    return candidate
+
+
+def export_local_telemetry_shards(
+    *,
+    sync_dir: Path | None = None,
+    sources: Sequence[str] = _ICLOUD_SOURCES,
+) -> int:
+    """Export changed local raw shards to this host's iCloud shard directory."""
+    resolved_sync = resolve_icloud_sync_dir(sync_dir)
+    if resolved_sync is None:
+        return 0
+    hostname = socket.gethostname()
+    if not _SAFE_COMPONENT_RE.fullmatch(hostname):
+        return 0
+    previous = get_watermark(_ICLOUD_EXPORT_WATERMARK)
+    watermark = dict(previous) if isinstance(previous, dict) else {}
+    exported = 0
+    changed = False
+    for source in sources:
+        if source not in _ICLOUD_SOURCES:
+            continue
+        source_dir = RAW_DIR / source
+        if source_dir.is_symlink() or not source_dir.is_dir():
+            continue
+        try:
+            shards = sorted(source_dir.glob("*.jsonl"))
+        except OSError:
+            continue
+        for shard in shards:
+            if shard.is_symlink() or shard.name.startswith("icloud-") or not shard.is_file():
+                continue
+            signature = _file_signature(shard)
+            if signature is None:
+                continue
+            destination = _safe_shard_path(
+                resolved_sync / "telemetry-shards", hostname, source, shard.name
+            )
+            if destination is None:
+                continue
+            key = f"{source}/{shard.name}"
+            if watermark.get(key) == signature and destination.is_file():
+                continue
+            if destination.is_file() and _file_signature(destination) == signature:
+                watermark[key] = signature
+                changed = True
+                continue
+            if _copy_atomically(shard, destination):
+                watermark[key] = signature
+                changed = True
+                exported += 1
+    if changed:
+        set_watermark(_ICLOUD_EXPORT_WATERMARK, watermark)
+    return exported
+
+
+def pull_icloud_telemetry_shards(*, sync_dir: Path | None = None) -> int:
+    """Import changed telemetry shards from other hosts into local collectors."""
+    resolved_sync = resolve_icloud_sync_dir(sync_dir)
+    if resolved_sync is None:
+        return 0
+    shard_root = resolved_sync / "telemetry-shards"
+    if shard_root.is_symlink() or not shard_root.is_dir():
+        return 0
+    hostname = socket.gethostname()
+    previous = get_watermark(_ICLOUD_PULL_WATERMARK)
+    watermark = dict(previous) if isinstance(previous, dict) else {}
+    imported = 0
+    changed = False
+    try:
+        host_dirs = sorted(shard_root.iterdir())
+    except OSError:
+        return 0
+    for host_dir in host_dirs:
+        remote_host = host_dir.name
+        if remote_host == hostname or host_dir.is_symlink() or not host_dir.is_dir():
+            continue
+        if not _SAFE_COMPONENT_RE.fullmatch(remote_host):
+            continue
+        for source in _ICLOUD_SOURCES:
+            source_dir = host_dir / source
+            if source_dir.is_symlink() or not source_dir.is_dir():
+                continue
+            try:
+                shards = sorted(source_dir.glob("*.jsonl"))
+            except OSError:
+                continue
+            for shard in shards:
+                if shard.is_symlink() or not shard.is_file() or not _SAFE_COMPONENT_RE.fullmatch(shard.name):
+                    continue
+                signature = _file_signature(shard)
+                if signature is None:
+                    continue
+                key = f"{remote_host}/{source}/{shard.name}"
+                if source in {"gtt_ledger", "gtt_receipt", "bot_tl"}:
+                    destination = _safe_shard_path(
+                        GTT_XFER_DIR / "icloud", remote_host, f"{source}-{shard.name}"
+                    )
+                    lock = None
+                else:
+                    destination = _safe_shard_path(
+                        RAW_DIR / source, f"icloud-{remote_host}-{shard.name}"
+                    )
+                    lock = raw_source_lock(RAW_DIR / source)
+                if destination is None:
+                    continue
+                if watermark.get(key) == signature and destination.is_file():
+                    continue
+                if destination.is_file() and _file_signature(destination) == signature:
+                    watermark[key] = signature
+                    changed = True
+                    continue
+                try:
+                    if lock is None:
+                        copied = _copy_atomically(shard, destination)
+                    else:
+                        with lock:
+                            copied = _copy_atomically(shard, destination)
+                except (OSError, TimeoutError):
+                    copied = False
+                if copied:
+                    watermark[key] = signature
+                    changed = True
+                    imported += 1
+    if changed:
+        set_watermark(_ICLOUD_PULL_WATERMARK, watermark)
+    return imported
 
 
 def _child_environment() -> dict[str, str]:
@@ -116,9 +310,10 @@ def _blob_parts(name: str) -> tuple[str, str] | None:
 
 
 def pull_remote_batches() -> int:
-    """Download new JSONL batches; an unavailable cloud is a no-op."""
+    """Pull iCloud shards and download new Azure JSONL batches."""
+    imported = pull_icloud_telemetry_shards()
     if not AIDATA_SYNC_STORAGE_ACCOUNT:
-        return 0
+        return imported
     env = _child_environment()
     executable = shutil.which("az", path=env.get("PATH"))
     if not executable:

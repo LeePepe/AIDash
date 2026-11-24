@@ -103,6 +103,44 @@ public enum MenuBarBadgeMetric: String, CaseIterable, Codable, Sendable, Equatab
     }
 }
 
+public enum TodoSyncProviderMode: String, CaseIterable, Codable, Sendable, Equatable, Identifiable {
+    case auto = "auto"
+    case localOnly = "local"
+    case linear = "linear"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .auto:
+            return DashboardL10n.tr("settings.todo_sync.mode.auto", "Auto (Linear when configured, else Local)")
+        case .localOnly:
+            return DashboardL10n.tr("settings.todo_sync.mode.local", "Standalone Local-Only Mode")
+        case .linear:
+            return DashboardL10n.tr("settings.todo_sync.mode.linear", "Linear SSOT Sync Mode")
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .auto:
+            return DashboardL10n.tr("settings.todo_sync.mode.auto_desc", "Uses Linear SSOT when linear-sync.py is installed and falls back to standalone local todos otherwise")
+        case .localOnly:
+            return DashboardL10n.tr("settings.todo_sync.mode.local_desc", "100% standalone mode with zero external Linear dependency; promoted proposals and todos stay on this Mac")
+        case .linear:
+            return DashboardL10n.tr("settings.todo_sync.mode.linear_desc", "Promotes starred proposals to Linear and bidirectionally syncs Done / Todo status with your Linear team")
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .auto: return "sparkles.rectangle.stack"
+        case .localOnly: return "internaldrive.fill"
+        case .linear: return "arrow.triangle.2.circlepath.circle.fill"
+        }
+    }
+}
+
 public extension Notification.Name {
     static let menuBarDisplayPreferencesDidChange = Notification.Name("menuBarDisplayPreferencesDidChange")
 }
@@ -117,9 +155,12 @@ public final class MenuBarDisplayPreferences {
         static let showSystemTelemetry = "aidash.menubar.show_system_telemetry"
         static let showActionItems = "aidash.menubar.show_action_items"
         static let defaultChartGranularity = "aidash.menubar.default_chart_granularity"
+        static let todoSyncProviderMode = "aidash.todo_sync.provider_mode"
+        static let todoSyncTeamKey = "aidash.todo_sync.team_key"
     }
 
     private let persistToDefaults: Bool
+    private let todoSyncConfigFileURL: URL?
 
     public var badgeMetric: MenuBarBadgeMetric {
         didSet {
@@ -149,8 +190,40 @@ public final class MenuBarDisplayPreferences {
         }
     }
 
-    public init(persistToDefaults: Bool = LiveDashboardTelemetryReader.isLiveEnvironment) {
+    public var todoSyncProviderMode: TodoSyncProviderMode {
+        didSet {
+            if persistToDefaults { UserDefaults.standard.set(todoSyncProviderMode.rawValue, forKey: Keys.todoSyncProviderMode) }
+            writeTodoSyncConfigIfNeeded()
+            NotificationCenter.default.post(name: .menuBarDisplayPreferencesDidChange, object: nil)
+        }
+    }
+
+    public var todoSyncTeamKey: String {
+        didSet {
+            let normalized = Self.normalizedTeamKey(todoSyncTeamKey)
+            if todoSyncTeamKey != normalized {
+                todoSyncTeamKey = normalized
+            }
+            if persistToDefaults { UserDefaults.standard.set(normalized, forKey: Keys.todoSyncTeamKey) }
+            writeTodoSyncConfigIfNeeded()
+            NotificationCenter.default.post(name: .menuBarDisplayPreferencesDidChange, object: nil)
+        }
+    }
+
+    public init(
+        persistToDefaults: Bool = LiveDashboardTelemetryReader.isLiveEnvironment,
+        todoSyncConfigFileURL: URL? = nil
+    ) {
         self.persistToDefaults = persistToDefaults
+        if let todoSyncConfigFileURL {
+            self.todoSyncConfigFileURL = todoSyncConfigFileURL
+        } else if persistToDefaults {
+            self.todoSyncConfigFileURL = LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
+                .appendingPathComponent(".config/aidash/todo-sync.json")
+        } else {
+            self.todoSyncConfigFileURL = nil
+        }
+
         if persistToDefaults {
             let defaults = UserDefaults.standard
             let rawMetric = defaults.string(forKey: Keys.badgeMetric) ?? ""
@@ -159,11 +232,40 @@ public final class MenuBarDisplayPreferences {
             self.showPopoverActionItems = defaults.object(forKey: Keys.showActionItems) as? Bool ?? true
             let rawGran = defaults.string(forKey: Keys.defaultChartGranularity) ?? ""
             self.defaultChartGranularity = DashboardChartTimeGranularity(rawValue: rawGran) ?? .sevenDayDaily
+            let rawSyncMode = defaults.string(forKey: Keys.todoSyncProviderMode) ?? ""
+            self.todoSyncProviderMode = TodoSyncProviderMode(rawValue: rawSyncMode) ?? .auto
+            let rawTeam = defaults.string(forKey: Keys.todoSyncTeamKey) ?? "TIA"
+            self.todoSyncTeamKey = Self.normalizedTeamKey(rawTeam)
         } else {
             self.badgeMetric = .todayTokens
             self.showPopoverSystemTelemetry = true
             self.showPopoverActionItems = true
             self.defaultChartGranularity = .sevenDayDaily
+            self.todoSyncProviderMode = .auto
+            self.todoSyncTeamKey = "TIA"
+        }
+    }
+
+    private static func normalizedTeamKey(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return trimmed.isEmpty ? "TIA" : trimmed
+    }
+
+    public func writeTodoSyncConfigIfNeeded() {
+        guard let url = todoSyncConfigFileURL else { return }
+        let payload: [String: String] = [
+            "provider": todoSyncProviderMode.rawValue,
+            "teamKey": Self.normalizedTeamKey(todoSyncTeamKey)
+        ]
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: url, options: .atomic)
+        } catch {
+            // Best-effort bridge config write; never crash UI on sandbox/disk error.
         }
     }
 }
@@ -188,6 +290,7 @@ public struct DashboardSettingsPageView: View {
         VStack(alignment: .leading, spacing: 16) {
             menuBarBadgeCard
             popoverModulesCard
+            todoSyncIntegrationCard
             telemetryPrivacyCard
         }
     }
@@ -303,6 +406,67 @@ public struct DashboardSettingsPageView: View {
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
         }
+    }
+
+    private var todoSyncIntegrationCard: some View {
+        SolidModularCardContainer(
+            title: DashboardL10n.tr("settings.todo_sync.card_title", "Todo & Issue Sync Integration"),
+            subtitle: DashboardL10n.tr("settings.todo_sync.card_subtitle", "Run AIDash 100% standalone with local todos or connect to Linear as a cross-app Single Source of Truth"),
+            symbolName: "arrow.triangle.2.circlepath"
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(TodoSyncProviderMode.allCases) { mode in
+                    todoSyncModeTile(mode)
+                }
+
+                if prefs.todoSyncProviderMode != .localOnly {
+                    HStack(spacing: 10) {
+                        Text(DashboardL10n.tr("settings.todo_sync.team_key_label", "Linear Team Key"))
+                            .font(.subheadline.weight(.medium))
+                        TextField("TIA", text: $prefs.todoSyncTeamKey)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 96)
+                        Text(DashboardL10n.tr("settings.todo_sync.team_key_hint", "Used for linear://<TEAM>-xx canonical sync refs"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.top, 4)
+                }
+            }
+        }
+    }
+
+    private func todoSyncModeTile(_ mode: TodoSyncProviderMode) -> some View {
+        let isSelected = prefs.todoSyncProviderMode == mode
+        return Button {
+            prefs.todoSyncProviderMode = mode
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    Image(systemName: mode.symbolName)
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+                    Text(mode.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                }
+                Text(mode.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Color(nsColor: .separatorColor).opacity(0.5), lineWidth: isSelected ? 1.5 : 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var telemetryPrivacyCard: some View {

@@ -1,7 +1,9 @@
-import pytest
+import sqlite3
 
+import cleanio
+import pytest
+from adapters import raven
 from adapters.raven import _cost, _load_prices
-import adapters.raven as raven
 
 
 @pytest.mark.unit
@@ -58,3 +60,57 @@ def test_normalize_preserves_cache_tokens(monkeypatch):
     assert captured["rows"][0]["cache_write"] == 13
     assert "cache_read" in captured["columns"]
     assert "cache_write" in captured["columns"]
+
+
+@pytest.mark.unit
+def test_normalize_deduplicates_duplicate_request_ids_across_shards(
+    tmp_path, monkeypatch
+):
+    raw = [
+        {
+            "id": "req-duplicate",
+            "timestamp": 1,
+            "client_name": "codex_exec/1.0",
+            "session_id": "",
+            "model": "gpt-5-mini",
+            "resolved_model": None,
+            "input_tokens": 11,
+            "output_tokens": 7,
+        },
+        {
+            "id": "req-duplicate",
+            "timestamp": 2,
+            "client_name": "codex_exec/1.0",
+            "session_id": "",
+            "model": "gpt-5-mini",
+            "resolved_model": None,
+            "input_tokens": 19,
+            "output_tokens": 13,
+        },
+        {
+            "id": "req-unique",
+            "timestamp": 3,
+            "client_name": "codex_exec/1.0",
+            "session_id": "",
+            "model": "gpt-5-mini",
+            "resolved_model": None,
+            "input_tokens": 23,
+            "output_tokens": 17,
+        },
+        {"timestamp": 4, "model": "gpt-5-mini"},
+    ]
+    monkeypatch.setattr(raven, "read_raw", lambda _source: raw)
+    monkeypatch.setattr(cleanio, "CLEAN_DIR", tmp_path)
+    monkeypatch.setattr(cleanio, "clean_path", lambda source: tmp_path / f"{source}.db")
+
+    assert raven.normalize() == 2
+
+    conn = sqlite3.connect(tmp_path / "raven.db")
+    rows = conn.execute(
+        "SELECT request_id, ts, input_tokens FROM req ORDER BY request_id"
+    ).fetchall()
+    conn.close()
+    assert rows == [
+        ("req-duplicate", 2, 19),
+        ("req-unique", 3, 23),
+    ]

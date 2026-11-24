@@ -106,6 +106,24 @@ CREATE TABLE IF NOT EXISTS fact_turn (
 CREATE INDEX IF NOT EXISTS idx_turn_session ON fact_turn(session_id);
 CREATE INDEX IF NOT EXISTS idx_turn_cst_day ON fact_turn(cst_day);
 
+-- Progressive-disclosure and script-offload facts. Each row retains the
+-- source/session/turn grain so L4 can distinguish observed reads and executions.
+CREATE TABLE IF NOT EXISTS reference_hits (
+    hit_uid TEXT PRIMARY KEY, source TEXT NOT NULL, session_id TEXT, turn_uuid TEXT,
+    skill TEXT, reference_path TEXT NOT NULL, byte_len INTEGER, ts TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_reference_hits_session_skill
+    ON reference_hits(session_id, skill);
+
+CREATE TABLE IF NOT EXISTS script_call (
+    call_uid TEXT PRIMARY KEY, source TEXT NOT NULL, session_id TEXT, turn_uuid TEXT,
+    skill TEXT, script_path TEXT NOT NULL, exit_code INTEGER, duration_ms INTEGER, ts TEXT,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_script_call_session_skill
+    ON script_call(session_id, skill);
+
 -- ---------------------------------------------------------------------------
 -- fact_issue — grain = one Multica issue. `issue_number` is the time-ordered
 -- primary axis (monotonic with created_at; sparse/non-contiguous).
@@ -350,7 +368,7 @@ CREATE TABLE IF NOT EXISTS fact_gtt_event (
     ts TEXT NOT NULL, evt_type TEXT NOT NULL, task_id TEXT, actor_from TEXT,
     actor_to TEXT, ref_artifact TEXT, head_sha TEXT, pr_number INTEGER,
     model_id TEXT, contract_sha TEXT, is_bot_bypass INTEGER, blocker_class TEXT,
-    note_preview TEXT,
+    note_preview TEXT, eval_case TEXT, interception INTEGER, "escape" INTEGER,
     cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_gtt_event_cst_day ON fact_gtt_event(cst_day);
@@ -360,7 +378,8 @@ CREATE TABLE IF NOT EXISTS fact_gtt_task_run (
     goal_id TEXT NOT NULL, task_id TEXT NOT NULL, role_name TEXT NOT NULL,
     round_no INTEGER NOT NULL, agent_name TEXT, cli_tool TEXT, model_id TEXT,
     vendor TEXT, status TEXT, v5_verdict TEXT, head_sha TEXT,
-    receipt_sha256 TEXT NOT NULL, completed_at TEXT,
+    receipt_sha256 TEXT NOT NULL, completed_at TEXT, skills_used TEXT,
+    eval_case TEXT, interception INTEGER, "escape" INTEGER,
     cst_day TEXT GENERATED ALWAYS AS (date(completed_at, '+8 hours')) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_gtt_task_run_cst_day ON fact_gtt_task_run(cst_day);
@@ -429,6 +448,23 @@ CREATE TABLE IF NOT EXISTS fact_release_delivery (
 );
 CREATE INDEX IF NOT EXISTS idx_release_delivery_cst_day ON fact_release_delivery(cst_day);
 
+CREATE TABLE IF NOT EXISTS fact_product_telemetry (
+    event_id TEXT PRIMARY KEY,
+    app_name TEXT NOT NULL,
+    app_version TEXT,
+    build_number TEXT,
+    platform TEXT,
+    event_kind TEXT NOT NULL,
+    signature TEXT,
+    stack_top_symbol TEXT,
+    metric_ms REAL,
+    occurred_at TEXT NOT NULL,
+    cst_day TEXT GENERATED ALWAYS AS (date(occurred_at, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_product_telemetry_cst_day ON fact_product_telemetry(cst_day);
+CREATE INDEX IF NOT EXISTS idx_product_telemetry_app_kind ON fact_product_telemetry(app_name, event_kind);
+
+
 -- ---------------------------------------------------------------------------
 -- dim_session — per-session rollup (populated during merge from facts).
 --
@@ -450,4 +486,106 @@ CREATE TABLE IF NOT EXISTS dim_session (
     total_tokens    INTEGER,
     total_cost_usd  REAL,
     client          TEXT
+);
+
+-- ---------------------------------------------------------------------------
+-- Skill-quality facts. These are separate grains from fact_turn and the
+-- existing skills_daily ROI data: one registry row, one invocation episode,
+-- one correction signal, one judge verdict, and one judge batch receipt.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS dim_skill_registry (
+    skill TEXT PRIMARY KEY,
+    registry_source TEXT NOT NULL,
+    active INTEGER NOT NULL,
+    registry_version TEXT NOT NULL,
+    observed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS fact_skill_invocation (
+    invocation_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    start_ts TEXT NOT NULL,
+    end_ts TEXT NOT NULL,
+    observation_end_ts TEXT NOT NULL,
+    assistant_turn_count INTEGER NOT NULL,
+    edit_tool_calls INTEGER NOT NULL,
+    normalized_edit_churn REAL NOT NULL,
+    active_duration_sec INTEGER NOT NULL,
+    max_tokens INTEGER NOT NULL,
+    source_covered INTEGER NOT NULL,
+    prompt_linked INTEGER NOT NULL,
+    closed INTEGER NOT NULL,
+    eligible INTEGER NOT NULL,
+    invocationizer_version TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_invocation_skill_ts
+    ON fact_skill_invocation(skill, start_ts);
+CREATE INDEX IF NOT EXISTS idx_skill_invocation_eligible
+    ON fact_skill_invocation(eligible, skill);
+
+CREATE TABLE IF NOT EXISTS fact_skill_correction (
+    correction_signal_uid TEXT PRIMARY KEY,
+    invocation_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    correction_class TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    classifier_version TEXT NOT NULL,
+    text_len INTEGER NOT NULL,
+    text_sha256 TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_correction_invocation
+    ON fact_skill_correction(invocation_id, ts);
+
+CREATE TABLE IF NOT EXISTS fact_skill_judgement (
+    judgement_uid TEXT PRIMARY KEY,
+    judge_run_uid TEXT NOT NULL,
+    invocation_id TEXT NOT NULL,
+    invocation_id_hash TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    source TEXT NOT NULL,
+    sample_key TEXT NOT NULL,
+    sampled_at TEXT NOT NULL,
+    judge_provider TEXT NOT NULL,
+    judge_model TEXT NOT NULL,
+    rubric_version TEXT NOT NULL,
+    runner_version TEXT NOT NULL,
+    correctness_score REAL CHECK(correctness_score IS NULL OR correctness_score BETWEEN 0 AND 3),
+    instruction_following_score REAL CHECK(instruction_following_score IS NULL OR instruction_following_score BETWEEN 0 AND 3),
+    actionability_score REAL CHECK(actionability_score IS NULL OR actionability_score BETWEEN 0 AND 3),
+    overall_score REAL CHECK(overall_score IS NULL OR overall_score BETWEEN 1 AND 5),
+    pass_flag INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    abstained INTEGER NOT NULL,
+    reason_code TEXT NOT NULL,
+    input_sha256 TEXT NOT NULL,
+    response_sha256 TEXT NOT NULL,
+    input_len INTEGER NOT NULL,
+    response_len INTEGER NOT NULL,
+    redaction_version TEXT NOT NULL,
+    latency_ms INTEGER NOT NULL,
+    status TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_judgement_skill_sampled
+    ON fact_skill_judgement(skill, sampled_at);
+
+CREATE TABLE IF NOT EXISTS fact_quality_judge_run (
+    judge_run_uid TEXT PRIMARY KEY,
+    runner_version TEXT NOT NULL,
+    rubric_version TEXT NOT NULL,
+    judge_provider TEXT NOT NULL,
+    judge_model TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    dry_run INTEGER NOT NULL,
+    sampled INTEGER NOT NULL,
+    valid INTEGER NOT NULL,
+    abstained INTEGER NOT NULL,
+    excluded INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    exclusion_reasons TEXT
 );

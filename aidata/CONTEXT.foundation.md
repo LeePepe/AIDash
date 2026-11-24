@@ -5,8 +5,8 @@
   "layer": "AidataFoundation",
   "group": "aidata",
   "parent": "aidata/CONTEXT.md",
-  "scope": ["CONTEXT.foundation.md", "README.md", "tech-context.md", "pytest.ini", "requirements.lock", "cli.py", "cleanio.py", "config.py", "config_local.example.py", "rawio.py", "redaction.py", "sqlite_ro.py", "state.py", "timeutil.py", "docs/**"],
-  "test_paths": ["tests/__init__.py", "tests/test_config_m3.py", "tests/test_config_multica.py", "tests/test_product_blob_cli.py", "tests/test_team_audit_manual_source.py", "tests/test_timeutil.py"],
+  "scope": ["CONTEXT.foundation.md", "README.md", "tech-context.md", "pytest.ini", "requirements.lock", "cli.py", "cleanio.py", "config.py", "config_local.example.py", "quality_contracts.py", "quality_judge.py", "rawio.py", "redaction.py", "sqlite_ro.py", "state.py", "timeutil.py", "docs/**"],
+  "test_paths": ["tests/__init__.py", "tests/test_config_m3.py", "tests/test_config_multica.py", "tests/test_product_blob_cli.py", "tests/test_team_audit_manual_source.py", "tests/test_timeutil.py", "tests/conftest.py"],
   "dependencies": [],
   "dependents": ["AidataL1L2", "AidataL3", "AidataL4", "AidataL5", "AidataOps"],
   "red_lines": [
@@ -15,7 +15,7 @@
     "SCHEDULED_SOURCES preserves the current ordered unique runner set without activating unimplemented sources.",
     "requirements.lock contains the complete Python 3.13 runtime closure with one exact portable package==version line per package.",
     "Missing sources and configuration degrade to a no-op rather than crashing.",
-    "Raw and clean I/O preserves redaction and append-only guarantees."
+    "Raw and clean I/O preserves redaction, append-only collection, and per-source lock coordination (`raw_source_lock`) across appends and Last-Write-Wins duplicate-key compaction."
   ],
   "gates": [
     {"id": "pytest-local", "kind": "test", "mode": "local", "command": ["/usr/bin/python3", "-m", "pytest", "{test_paths}", "-q"]},

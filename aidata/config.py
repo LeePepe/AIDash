@@ -28,6 +28,34 @@ STATE_FILE = AIDATA_HOME / "state.json"
 # across machines but grounded in the real paths found during design.
 # ---------------------------------------------------------------------------
 HOME = Path(os.path.expanduser("~"))
+ICLOUD_DRIVE_ROOT = HOME / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+AIDASH_ICLOUD_SYNC_DIR = Path(
+    os.environ.get("AIDASH_ICLOUD_SYNC_DIR", str(ICLOUD_DRIVE_ROOT / "AIDashSync"))
+).expanduser()
+ICLOUD_JOBS_DIR = AIDASH_ICLOUD_SYNC_DIR / "jobs"
+ICLOUD_SKILLS_MIRROR_DIR = AIDASH_ICLOUD_SYNC_DIR / "skills-mirror"
+ICLOUD_TELEMETRY_SHARDS_DIR = AIDASH_ICLOUD_SYNC_DIR / "telemetry-shards"
+
+
+def resolve_icloud_sync_dir(explicit: Path | None = None) -> Path | None:
+    """Resolve an iCloud sync directory without touching a test host's iCloud."""
+    if explicit is not None:
+        return Path(explicit).expanduser()
+    configured = os.environ.get("AIDASH_ICLOUD_SYNC_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    if not ICLOUD_DRIVE_ROOT.exists():
+        return None
+    return AIDASH_ICLOUD_SYNC_DIR
+
+
+def icloud_sync_available(sync_dir: Path | None = None) -> bool:
+    """Return whether iCloud sync is enabled for this process."""
+    return resolve_icloud_sync_dir(sync_dir) is not None
+
+
 GTT_HANDOFF_ROOTS = (
     HOME / "Development" / "handoff",
     HOME / "Development" / "handoffs",
@@ -138,6 +166,31 @@ GECKO_DB = HOME / "Library" / "Application Support" / "ai.hexly.gecko" / "gecko.
 # multica CLI binary (falls back to PATH lookup if this exact path is absent)
 MULTICA_BIN = "/opt/homebrew/bin/multica"
 
+# Linear sync script and team key (linear_issue source). Degrades to 0 when
+# the script or Linear credentials are absent (ADR-23).
+LINEAR_SYNC_SCRIPT = (
+    HOME / "Development" / "user-skills" / "skills" / "team-lead"
+    / "scripts" / "linear-sync.py"
+)
+LINEAR_TEAM_KEY = "TIA"
+LINEAR_UPDATED_WINDOW_DAYS = 14
+
+# Pluggable Todo/Issue Sync Provider settings (TodoSyncProvider v1):
+#   "auto"   — use Linear when linear-sync.py is available, else local-only
+#   "local"  — standalone local-only mode (persists to LOCAL_TODOS_PATH)
+#   "linear" — Linear SSOT mode via LINEAR_SYNC_SCRIPT
+TODO_SYNC_CONFIG_PATH = HOME / ".config" / "aidash" / "todo-sync.json"
+TODO_SYNC_PROVIDER = "auto"
+LOCAL_TODOS_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "local_todos.jsonl"
+
+# DSH Mechanism 4 bookmark-cursor dropbox & Mail.app ingestion (mail_inbox + work_teams_bridge).
+# Both default to ~/.aidash-state/* drop directories and degrade to 0 when empty/absent (ADR-23).
+# MAIL_INBOX_ENABLE_JXA stays False by default so scheduled runs never trigger macOS Mail.app
+# Automation TCC prompts unless opted in via config_local.py.
+MAIL_INBOX_DROP_DIR = HOME / ".aidash-state" / "mail-inbox-drop"
+MAIL_INBOX_ENABLE_JXA = False
+WORK_TEAMS_DROP_DIR = HOME / ".aidash-state" / "work-teams-drop"
+
 # Models that have NO published price, and so are deliberately measured in
 # TOKENS ONLY — `cost_usd` stays NULL for their rows, on purpose.
 #
@@ -151,7 +204,16 @@ MULTICA_BIN = "/opt/homebrew/bin/multica"
 # MISSING PRICE, never about missing usage. Keep this list narrow: a NEW
 # unpriced model SHOULD fail that gate loudly rather than quietly join the
 # exempt set. Remove a name here the moment a real price is known.
-UNPRICED_MODELS: tuple[str, ...] = ("gpt-5.6-terra", "gpt-5.6-luna")
+UNPRICED_MODELS: tuple[str, ...] = (
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+    "gpt-6-luna",
+    "gemini-4-argon",
+    "gemini-4-carbon",
+    "microsoft-decision-1",
+)
 
 # Workspaces the digest collects from (ADR-5 / EXT-2): an explicit allow-list of
 # (uuid, friendly_name); the friendly name is used verbatim in the digest's
@@ -200,6 +262,8 @@ GITHUB_PR_REPOS: tuple[str, ...] = ()
 # Repositories sampled for Actions runs, governance, and release delivery.
 # Keep the tracked default public and identity-free; a local override may
 # replace this tuple with the operator's current monitoring set.
+# Tracked defaults stay identity-free. Deployment operators may set the
+# personal allowlist in ignored config_local.py.
 GITHUB_CI_REPOS: tuple[str, ...] = ()
 
 # ---------------------------------------------------------------------------
@@ -212,6 +276,8 @@ GITHUB_CI_REPOS: tuple[str, ...] = ()
 # adapter degrades to a no-op when neither resolves (ADR-23).
 # ---------------------------------------------------------------------------
 AIDASH_BIN_FIXED = str(HOME / ".local" / "bin" / "aidash")
+COPILOT_SESSION_DB = HOME / ".copilot" / "session-store.db"
+
 AIDASH_BIN_GLOB = (
     "Library/Developer/Xcode/DerivedData/"
     "AIDash-*/Build/Products/Debug/aidash"
@@ -285,6 +351,7 @@ SOURCES = (
     "raven",
     "claude_jsonl",
     "multica_issue",
+    "linear_issue",
     "multica_run",
     "multica_comment",
     "claude_job",
@@ -292,6 +359,7 @@ SOURCES = (
     "ado_pr",
     "state_db",
     "hermes_tools",
+    "copilot_cli",
     "hermes_messages",
     "claude_prompts",
     "codex_prompts",
@@ -314,6 +382,8 @@ SOURCES = (
     "github_ci",
     "github_ruleset",
     "release_tf",
+    "mail_inbox",
+    "work_teams_bridge",
 )
 
 # Current effective 04:00 runner order. The runner will consume this canonical
@@ -325,6 +395,7 @@ SCHEDULED_SOURCES = (
     "codex_prompts",
     "kimi_prompts",
     "multica_issue",
+    "linear_issue",
     "multica_run",
     "multica_comment",
     "claude_job",
@@ -335,6 +406,7 @@ SCHEDULED_SOURCES = (
     "state_db",
     "icloud_token_sync",
     "hermes_tools",
+    "copilot_cli",
     "hermes_messages",
     "memory_claude",
     "memory_hermes_db",
@@ -351,12 +423,15 @@ SCHEDULED_SOURCES = (
     "github_ci",
     "github_ruleset",
     "release_tf",
+    "mail_inbox",
+    "work_teams_bridge",
 )
 
 MERGE_SOURCES = (
     "raven",
     "claude_jsonl",
     "multica_issue",
+    "linear_issue",
     "multica_run",
     "claude_job",
     "pr_cache",
@@ -390,6 +465,7 @@ def clean_path(source: str) -> Path:
 # is human-facing state, not telemetry. One JSON object per line; see
 # L5_apps/digest/proposals.py for the schema.
 PROPOSALS_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "proposals.jsonl"
+LEARNING_QUEUE_PATH = AIDATA_HOME / "L5_apps" / "digest" / "state" / "learning_queue.jsonl"
 
 
 # ---------------------------------------------------------------------------

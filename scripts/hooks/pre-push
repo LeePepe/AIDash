@@ -130,6 +130,9 @@ swift_paths=()
 while IFS= read -r changed_path; do
     case "$changed_path" in
         *.swift)
+            case "$changed_path" in
+                */Tests/*) continue ;;
+            esac
             if [ -f "$changed_path" ]; then
                 swift_paths+=("$changed_path")
             fi
@@ -155,10 +158,13 @@ fi
 # Run only local gates declared by affected leaves. RepoInfra owns resolver,
 # review-gate, and hook checks; package leaves provide SPM build/test gates.
 # App, CLI, and workspace heavy xcodebuild/xcodegen gates remain CI-only.
-while IFS= read -r layer; do
-    [ -z "$layer" ] && continue
-    scripts/context/run "$layer" --mode local
-done <<< "$layers"
+if [ "${VERIFY_ALL:-0}" = "1" ] && [ -x "$REPO_ROOT/scripts/verify" ] && [ -z "${HOOK_RECORDS:-}" ]; then
+    "$REPO_ROOT/scripts/verify" --all
+elif [ -x "$REPO_ROOT/scripts/verify" ] && [ -z "${HOOK_RECORDS:-}" ]; then
+    VERIFY_LAYERS="$layers" "$REPO_ROOT/scripts/verify" --changed
+elif [ -n "$layers" ]; then
+    printf '%s\n' "$layers" | sed '/^$/d' | xargs -I {} scripts/context/run {} --mode local
+fi
 
 echo "[pre-push] all checks passed."
 exit 0

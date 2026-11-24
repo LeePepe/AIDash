@@ -8,6 +8,7 @@ import os
 import re
 import socket
 import tarfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from rawio import read_raw, write_raw
 from state import get_watermark, set_watermark
 
 SOURCE = "bot_tl"
+BOT_TL_COLLECT_BUDGET_SEC = float(os.environ.get("BOT_TL_COLLECT_BUDGET_SEC", "45"))
 _REPLAY_LIMIT = 2048
 _HOME = re.compile(r"(?<![\w-])(?:/Users|/home)/[^/\s]+")
 _EVENT = re.compile(r"^\s*-\s*(?P<ts>\S+)\s*\|\s*EVT=(?P<evt>\S+)\s*\|\s*(?P<rest>.*)$")
@@ -67,6 +69,16 @@ def _payload(path: Path, record_type: str, content: str) -> dict[str, Any]:
     }
 
 
+def _file_stat_sig(path: Path) -> str | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    if not os.path.isfile(path):
+        return None
+    return f"{int(st.st_mtime_ns)}:{int(st.st_size)}"
+
+
 def _file_record(path: Path, record_type: str) -> dict[str, Any] | None:
     try:
         return _payload(path, record_type, path.read_text(encoding="utf-8"))
@@ -74,27 +86,49 @@ def _file_record(path: Path, record_type: str) -> dict[str, Any] | None:
         return None
 
 
-def _local_records() -> list[dict[str, Any]]:
+def _local_records(
+    *,
+    file_stats: dict[str, str] | None = None,
+    new_file_stats: dict[str, str] | None = None,
+    deadline: float | None = None,
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    cached_stats = file_stats if isinstance(file_stats, dict) else {}
+    updated_stats = new_file_stats if isinstance(new_file_stats, dict) else {}
     for root in GTT_HANDOFF_ROOTS:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        if str(root).startswith("/Volumes/") and not root.exists():
+            continue
         try:
             goals = [p for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")]
         except OSError:
             continue
         for goal in goals:
+            if deadline is not None and time.monotonic() >= deadline:
+                break
             for name, kind in (
                 ("pr-dag.json", "pr_dag"),
                 ("pr-watch-state.json", "pr_watch_state"),
             ):
-                record = _file_record(goal / name, kind)
+                target = goal / name
+                record = _file_record(target, kind)
                 if record:
                     record["goal_id"] = goal.name
                     records.append(record)
             ledger = goal / "ledger.md"
+            ledger_key = _safe(str(ledger))
+            ledger_sig = _file_stat_sig(ledger)
+            if ledger_sig is None:
+                continue
+            if file_stats is not None and cached_stats.get(ledger_key) == ledger_sig:
+                updated_stats[ledger_key] = ledger_sig
+                continue
             try:
                 text = ledger.read_text(encoding="utf-8")
-            except OSError:
-                text = ""
+            except (OSError, UnicodeDecodeError):
+                continue
+            updated_stats[ledger_key] = ledger_sig
             for line in text.splitlines():
                 match = _EVENT.match(line)
                 if match:
@@ -179,8 +213,17 @@ def _prmon_records() -> tuple[list[dict[str, Any]], dict[str, int] | None]:
     return records, cursor
 
 
-def _remote_records() -> list[dict[str, Any]]:
+def _remote_records(
+    *,
+    file_stats: dict[str, str] | None = None,
+    new_file_stats: dict[str, str] | None = None,
+    deadline: float | None = None,
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    cached_stats = file_stats if isinstance(file_stats, dict) else {}
+    updated_stats = new_file_stats if isinstance(new_file_stats, dict) else {}
+    if str(GTT_XFER_DIR).startswith("/Volumes/") and not GTT_XFER_DIR.exists():
+        return records
     try:
         paths = list(GTT_XFER_DIR.rglob("*.jsonl"))
         paths.extend(GTT_XFER_DIR.rglob("*.tgz"))
@@ -200,6 +243,15 @@ def _remote_records() -> list[dict[str, Any]]:
             records.append(item)
 
     for path in paths:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        stat_key = _safe(str(path))
+        sig = _file_stat_sig(path)
+        if sig is None:
+            continue
+        if file_stats is not None and cached_stats.get(stat_key) == sig:
+            updated_stats[stat_key] = sig
+            continue
         try:
             if path.suffix == ".tgz":
                 with tarfile.open(path, "r:gz") as archive:
@@ -215,19 +267,39 @@ def _remote_records() -> list[dict[str, Any]]:
                     add_line(line)
         except (OSError, UnicodeDecodeError, tarfile.TarError):
             continue
+        updated_stats[stat_key] = sig
     return records
 
 
 def collect() -> int:
     from adapters import cloud_sync
 
+    deadline = time.monotonic() + max(1.0, float(BOT_TL_COLLECT_BUDGET_SEC))
     cloud_sync.pull_remote_batches()
-    prmon_records, history_cursor = _prmon_records()
-    records = _local_records() + prmon_records + _remote_records()
     old = get_watermark(SOURCE) or {}
+    old_files = old.get("files", {}) if isinstance(old.get("files"), dict) else {}
+    old_file_stats = old.get("file_stats", {}) if isinstance(old.get("file_stats"), dict) else {}
+    new_file_stats: dict[str, str] = dict(old_file_stats)
+    prmon_records, history_cursor = _prmon_records()
+    try:
+        local_recs = _local_records(
+            file_stats=old_file_stats,
+            new_file_stats=new_file_stats,
+            deadline=deadline,
+        )
+    except TypeError:
+        local_recs = _local_records()
+    try:
+        remote_recs = _remote_records(
+            file_stats=old_file_stats,
+            new_file_stats=new_file_stats,
+            deadline=deadline,
+        )
+    except TypeError:
+        remote_recs = _remote_records()
+    records = local_recs + prmon_records + remote_recs
     # Versioned state drops the old unbounded digest-in-key map. A migration
     # may replay records once; normalization uses content identities.
-    old_files = old.get("files", {})
     replay = list(dict.fromkeys(old.get("replay", [])))[-_REPLAY_LIMIT:]
     seen = set(replay)
     files: dict[str, str] = {}
@@ -257,7 +329,10 @@ def collect() -> int:
     count = write_raw(SOURCE, changed)
     # Neither cursor may advance until raw append succeeds. A later state
     # failure can replay data, but cannot skip unwritten history.
-    set_watermark(SOURCE, {"files": files, "replay": replay[-_REPLAY_LIMIT:]})
+    watermark_payload: dict[str, Any] = {"files": files, "replay": replay[-_REPLAY_LIMIT:]}
+    if new_file_stats:
+        watermark_payload["file_stats"] = new_file_stats
+    set_watermark(SOURCE, watermark_payload)
     if history_cursor is not None:
         set_watermark("bot_tl_prmon_history", history_cursor)
     return count

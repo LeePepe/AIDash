@@ -24,6 +24,7 @@ from config import (
     clean_path,
 )
 from adapters.icloud_token_sync import local_device_id
+from quality_contracts import build_invocations, registry_rows
 
 
 def _load_prices(conn: sqlite3.Connection) -> None:
@@ -86,13 +87,20 @@ def _merge_gtt_events(conn: sqlite3.Connection) -> None:
     Legacy-only rows lack the original line: hash those stored fields instead.
     The next normalize/merge rebuild replaces that fallback with the raw hash.
     """
-    cursor = conn.execute("""
-        SELECT event_uid, goal_uid, machine_id, goal_id, line_no, event_id, ts,
-               evt_type, task_id, actor_from, actor_to, ref_artifact, head_sha,
-               pr_number, model_id, contract_sha, is_bot_bypass, blocker_class,
-               note_preview
-        FROM gl.gtt_event
-    """)
+    source_columns = {row[1] for row in conn.execute("PRAGMA gl.table_info(gtt_event)")}
+    event_columns = [
+        "event_uid", "goal_uid", "machine_id", "goal_id", "line_no", "event_id", "ts",
+        "evt_type", "task_id", "actor_from", "actor_to", "ref_artifact", "head_sha",
+        "pr_number", "model_id", "contract_sha", "is_bot_bypass", "blocker_class",
+        "note_preview", "eval_case", "interception", "escape",
+    ]
+    select_list = ", ".join(
+        f'"{column}"' if column in source_columns and column == "escape"
+        else column if column in source_columns
+        else f'NULL AS "{column}"' if column == "escape" else f"NULL AS {column}"
+        for column in event_columns
+    )
+    cursor = conn.execute(f"SELECT {select_list} FROM gl.gtt_event")
     columns = [column[0] for column in cursor.description]
     rows = [{column: values[index] for index, column in enumerate(columns)} for values in cursor]
     canonical = {}
@@ -113,7 +121,7 @@ def _merge_gtt_events(conn: sqlite3.Connection) -> None:
     # Canonical rows win over legacy aliases, including their line_no metadata.
     ordered = [row for row, _, _ in legacy]
     ordered.extend(canonical_rows)
-    names = ", ".join(columns)
+    names = ", ".join('"escape"' if column == "escape" else column for column in columns)
     placeholders = ", ".join("?" for _ in columns)
     conn.executemany(
         f"INSERT OR REPLACE INTO fact_gtt_event ({names}) VALUES ({placeholders})",
@@ -130,6 +138,162 @@ def _goal_timestamp_key(value: str | None) -> str:
         return stamp.astimezone(timezone.utc).isoformat(timespec="microseconds")  # noqa: UP017
     except (ValueError, OverflowError):
         return ""
+
+
+def _merge_skill_facts(conn: sqlite3.Connection) -> None:
+    """Merge optional per-source reference/script facts with legacy tolerance."""
+    for source in ("claude_jsonl", "copilot_cli", "codex_prompts"):
+        alias = f"m_{source}"
+        if not _attach(conn, source, alias):
+            continue
+        try:
+            if _has_table(conn, alias, "reference_hit"):
+                columns = {row[1] for row in conn.execute(f"PRAGMA {alias}.table_info(reference_hit)")}
+                path = "reference_path" if "reference_path" in columns else "file_path" if "file_path" in columns else None
+                if path:
+                    conn.execute(f"""
+                        INSERT OR REPLACE INTO reference_hits
+                          (hit_uid, source, session_id, turn_uuid, skill, reference_path, byte_len, ts)
+                        SELECT hit_uid, ?, session_id, turn_uuid, skill, {path}, byte_len, ts
+                        FROM {alias}.reference_hit WHERE {path} IS NOT NULL
+                    """, (source,))
+            if _has_table(conn, alias, "script_call"):
+                columns = {row[1] for row in conn.execute(f"PRAGMA {alias}.table_info(script_call)")}
+                required = {"script_path", "call_uid"}
+                if required.issubset(columns):
+                    selected = {
+                        name: name if name in columns else f"NULL AS {name}"
+                        for name in ("session_id", "turn_uuid", "skill", "exit_code", "duration_ms", "ts")
+                    }
+                    conn.execute(f"""
+                        INSERT OR REPLACE INTO script_call
+                          (call_uid, source, session_id, turn_uuid, skill, script_path, exit_code, duration_ms, ts)
+                        SELECT call_uid, ?, {selected['session_id']}, {selected['turn_uuid']},
+                               {selected['skill']}, script_path, {selected['exit_code']},
+                               {selected['duration_ms']}, {selected['ts']}
+                        FROM {alias}.script_call WHERE script_path IS NOT NULL
+                    """, (source,))
+        finally:
+            _detach(conn, alias)
+
+
+def _merge_quality_facts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Merge optional quality clean stores without recollecting source data."""
+    registry = registry_rows()
+    conn.executemany(
+        "INSERT OR REPLACE INTO dim_skill_registry "
+        "(skill, registry_source, active, registry_version, observed_at) VALUES (?, ?, ?, ?, ?)",
+        [(
+            row["skill"], row["registry_source"], int(row["active"]),
+            row["registry_version"], row["observed_at"],
+        ) for row in registry],
+    )
+    if conn.in_transaction:
+        conn.commit()
+    counts = {"dim_skill_registry": len(registry), "fact_skill_invocation": 0,
+              "fact_skill_correction": 0, "fact_skill_judgement": 0,
+              "fact_quality_judge_run": 0}
+    behavior_db = clean_path("quality_behavior")
+    if behavior_db.exists():
+        conn.execute("ATTACH DATABASE ? AS quality_behavior", (str(behavior_db),))
+        try:
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM quality_behavior.sqlite_master WHERE type='table'"
+            )}
+            if {"prompt_signal", "activity_event"}.issubset(tables):
+                prompt_cursor = conn.execute("SELECT * FROM quality_behavior.prompt_signal")
+                prompt_cols = [description[0] for description in prompt_cursor.description or ()]
+                prompts = [dict(zip(prompt_cols, values)) for values in prompt_cursor.fetchall()]
+                activity_cursor = conn.execute("SELECT * FROM quality_behavior.activity_event")
+                activity_cols = [description[0] for description in activity_cursor.description or ()]
+                activity = [dict(zip(activity_cols, values)) for values in activity_cursor.fetchall()]
+                invocations = build_invocations(
+                    {"prompt_signals": prompts, "activity_events": activity},
+                    now=datetime.now(timezone.utc),
+                )
+                conn.executemany(
+                    "INSERT OR REPLACE INTO fact_skill_invocation "
+                    "(invocation_id, source, session_id, skill, start_ts, end_ts, observation_end_ts, "
+                    "assistant_turn_count, edit_tool_calls, normalized_edit_churn, active_duration_sec, "
+                    "max_tokens, source_covered, prompt_linked, closed, eligible, invocationizer_version) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(
+                        row["invocation_id"], row["source"], row["session_id"], row["skill"],
+                        row["start_ts"], row["end_ts"], row["observation_end_ts"],
+                        row["assistant_turn_count"], row["edit_tool_calls"], row["normalized_edit_churn"],
+                        row["active_duration_sec"], int(row["max_tokens"]), int(row["source_covered"]),
+                        int(row["prompt_linked"]), int(row["closed"]), int(row["eligible"]),
+                        row["invocationizer_version"],
+                    ) for row in invocations],
+                )
+                prompt_by_uid = {row.get("signal_uid"): row for row in prompts}
+                corrections = []
+                for row in invocations:
+                    signal_uid = row.get("correction_signal_uid")
+                    signal = prompt_by_uid.get(signal_uid)
+                    if not signal:
+                        continue
+                    corrections.append((
+                        signal_uid, row["invocation_id"], signal.get("source"), signal.get("session_id"),
+                        signal.get("skill"), signal.get("ts"), signal.get("correction_class"),
+                        signal.get("confidence"), signal.get("classifier_version"), signal.get("text_len"),
+                        signal.get("text_sha256"),
+                    ))
+                conn.executemany(
+                    "INSERT OR REPLACE INTO fact_skill_correction "
+                    "(correction_signal_uid, invocation_id, source, session_id, skill, ts, correction_class, "
+                    "confidence, classifier_version, text_len, text_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    corrections,
+                )
+                counts["fact_skill_invocation"] = len(invocations)
+                counts["fact_skill_correction"] = len(corrections)
+        finally:
+            if conn.in_transaction:
+                conn.commit()
+            conn.execute("DETACH DATABASE quality_behavior")
+
+    judge_db = clean_path("quality_judge")
+    if judge_db.exists():
+        conn.execute("ATTACH DATABASE ? AS quality_judge", (str(judge_db),))
+        try:
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM quality_judge.sqlite_master WHERE type='table'"
+            )}
+            if "judgement" in tables:
+                columns = [row[1] for row in conn.execute("PRAGMA quality_judge.table_info(judgement)")]
+                rows = [dict(zip(columns, values)) for values in conn.execute("SELECT * FROM quality_judge.judgement")]
+                target_columns = [
+                    "judgement_uid", "judge_run_uid", "invocation_id", "invocation_id_hash", "skill", "source",
+                    "sample_key", "sampled_at", "judge_provider", "judge_model", "rubric_version",
+                    "runner_version", "correctness_score", "instruction_following_score", "actionability_score",
+                    "overall_score", "pass_flag", "confidence", "abstained", "reason_code", "input_sha256",
+                    "response_sha256", "input_len", "response_len", "redaction_version", "latency_ms", "status",
+                ]
+                conn.executemany(
+                    f"INSERT OR REPLACE INTO fact_skill_judgement ({', '.join(target_columns)}) "
+                    f"VALUES ({', '.join('?' for _ in target_columns)})",
+                    [tuple(row.get(column) for column in target_columns) for row in rows],
+                )
+                counts["fact_skill_judgement"] = len(rows)
+            if "run" in tables:
+                columns = [row[1] for row in conn.execute("PRAGMA quality_judge.table_info(run)")]
+                rows = [dict(zip(columns, values)) for values in conn.execute("SELECT * FROM quality_judge.run")]
+                target_columns = [
+                    "judge_run_uid", "runner_version", "rubric_version", "judge_provider", "judge_model",
+                    "started_at", "finished_at", "dry_run", "sampled", "valid", "abstained", "excluded",
+                    "status", "exclusion_reasons",
+                ]
+                conn.executemany(
+                    f"INSERT OR REPLACE INTO fact_quality_judge_run ({', '.join(target_columns)}) "
+                    f"VALUES ({', '.join('?' for _ in target_columns)})",
+                    [tuple(row.get(column) for column in target_columns) for row in rows],
+                )
+                counts["fact_quality_judge_run"] = len(rows)
+        finally:
+            if conn.in_transaction:
+                conn.commit()
+            conn.execute("DETACH DATABASE quality_judge")
+    return counts
 
 
 def run_merge() -> dict[str, int]:
@@ -150,6 +314,7 @@ def run_merge() -> dict[str, int]:
         counts["dim_automation_rule"] = conn.execute(
             "SELECT count(*) FROM dim_automation_rule"
         ).fetchone()[0]
+        counts.update(_merge_quality_facts(conn))
 
         # --- P0 GTT dimensions/facts ---
         if _attach(conn, "gtt_ledger", "gl"):
@@ -196,12 +361,24 @@ def run_merge() -> dict[str, int]:
                        is_escalated
                 FROM grt.model_role
             """)
-            conn.execute("""
+            receipt_columns = {row[1] for row in conn.execute("PRAGMA grt.table_info(task_run)")}
+            receipt_fields = [
+                "receipt_uid", "goal_uid", "machine_id", "goal_id", "task_id", "role_name",
+                "round_no", "agent_name", "cli_tool", "model_id", "vendor", "status",
+                "v5_verdict", "head_sha", "receipt_sha256", "completed_at", "skills_used",
+                "eval_case", "interception", "escape",
+            ]
+            receipt_select = ", ".join(
+                f'"{field}"' if field in receipt_columns and field == "escape"
+                else field if field in receipt_columns
+                else f'NULL AS "{field}"' if field == "escape" else f"NULL AS {field}"
+                for field in receipt_fields
+            )
+            receipt_names = ", ".join('"escape"' if field == "escape" else field for field in receipt_fields)
+            conn.execute(f"""
                 INSERT OR REPLACE INTO fact_gtt_task_run
-                SELECT receipt_uid, goal_uid, machine_id, goal_id, task_id, role_name,
-                       round_no, agent_name, cli_tool, model_id, vendor, status,
-                       v5_verdict, head_sha, receipt_sha256, completed_at
-                FROM grt.task_run
+                ({receipt_names})
+                SELECT {receipt_select} FROM grt.task_run
             """)
             counts["dim_model_role"] = conn.execute(
                 "SELECT count(*) FROM dim_model_role").fetchone()[0]
@@ -356,6 +533,25 @@ def run_merge() -> dict[str, int]:
                 "SELECT count(*) FROM fact_release_delivery").fetchone()[0]
             _detach(conn, "rtf")
 
+        # --- Product app telemetry facts (product_blob) ---
+        if _attach(conn, "product_blob", "ptb"):
+            if _has_table(conn, "ptb", "product_telemetry"):
+                conn.execute("""
+                    INSERT OR REPLACE INTO fact_product_telemetry
+                      (event_id, app_name, app_version, build_number, platform,
+                       event_kind, signature, stack_top_symbol, metric_ms,
+                       occurred_at)
+                    SELECT event_id, app_name, app_version, build_number, platform,
+                           event_kind, signature, stack_top_symbol, metric_ms,
+                           occurred_at
+                    FROM ptb.product_telemetry
+                """)
+            counts["fact_product_telemetry"] = conn.execute(
+                "SELECT count(*) FROM fact_product_telemetry"
+            ).fetchone()[0]
+            _detach(conn, "ptb")
+
+
         # --- fact_request (raven) ---
         if _attach(conn, "raven", "rv"):
             # Clean databases are derived artifacts and may predate the cache
@@ -463,7 +659,7 @@ def run_merge() -> dict[str, int]:
             "SELECT count(*) FROM fact_device_token_daily"
         ).fetchone()[0]
 
-        # --- fact_issue (multica_issue) ---
+        # --- fact_issue (multica_issue + linear_issue) ---
         if _attach(conn, "multica_issue", "mi"):
             conn.execute("""
                 INSERT INTO fact_issue
@@ -476,6 +672,19 @@ def run_merge() -> dict[str, int]:
             counts["fact_issue"] = conn.execute(
                 "SELECT count(*) FROM fact_issue").fetchone()[0]
             _detach(conn, "mi")
+
+        if _attach(conn, "linear_issue", "li"):
+            conn.execute("""
+                INSERT OR REPLACE INTO fact_issue
+                  (issue_id, issue_number, identifier, title, status, priority,
+                   created_at, workspace_id, updated_at, project_id)
+                SELECT issue_id, issue_number, identifier, title, status, priority,
+                       created_at, workspace_id, updated_at, project_id
+                FROM li.issue
+            """)
+            counts["fact_issue"] = conn.execute(
+                "SELECT count(*) FROM fact_issue").fetchone()[0]
+            _detach(conn, "li")
 
         # --- fact_task: multica runs + claude jobs ---
         n_task = 0
@@ -569,6 +778,14 @@ def run_merge() -> dict[str, int]:
             _detach(conn, "gp")
             counts["fact_github_pr"] = conn.execute(
                 "SELECT count(*) FROM fact_github_pr").fetchone()[0]
+
+        _merge_skill_facts(conn)
+        counts["reference_hits"] = conn.execute(
+            "SELECT count(*) FROM reference_hits"
+        ).fetchone()[0]
+        counts["script_call"] = conn.execute(
+            "SELECT count(*) FROM script_call"
+        ).fetchone()[0]
 
         # --- dim_session rollup (from fact_request, claude-cli only) ---
         conn.execute("""

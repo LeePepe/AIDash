@@ -1,4 +1,3 @@
--- aidata-tier: explore
 SELECT
     COALESCE(g.goal_id, 'unknown') AS goal_id,
     COALESCE(g.derived_actual_status, 'unknown') AS actual_status,

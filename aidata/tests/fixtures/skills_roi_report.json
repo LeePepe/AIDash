@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "window_cst": "7d", "window_start": "2026-11-05T00:00:00+08:00", "window_end": "2026-11-11T23:59:59+08:00",
+  "source_as_of": "2026-11-11T14:00:00+08:00", "sample_size": 4, "coverage_status": "healthy",
+  "S1_pin_drift": {
+    "window_cst": "snapshot", "window_start": "2026-11-10T12:00:00+08:00", "window_end": "2026-11-10T12:00:00+08:00",
+    "source_as_of": "2026-11-10T12:00:00+08:00", "sample_size": 1, "coverage_status": "healthy",
+    "upstreams": {"shared-ci": "abc123"}, "consumers": [], "outdated_pin_count": 0, "all_up_to_date": true
+  },
+  "S2_gate_catch": {
+    "window_cst": "7d", "window_start": "2026-11-05T00:00:00+08:00", "window_end": "2026-11-11T23:59:59+08:00",
+    "source_as_of": "2026-11-11T14:00:00+08:00", "sample_size": 4, "coverage_status": "healthy",
+    "total_runs_7d": 4, "true_positive_catches_7d": 1, "config_or_rerun_noise_7d": 1, "gate_catch_rate": 0.5, "noise_rate": 0.25
+  },
+  "S3_skill_health": {
+    "window_cst": "snapshot", "window_start": "2026-11-10T12:00:00+08:00", "window_end": "2026-11-10T12:00:00+08:00",
+    "source_as_of": "2026-11-10T12:00:00+08:00", "sample_size": 2, "coverage_status": "healthy",
+    "total_skills": 2, "audit_pass_count": 1, "audit_pass_rate": 0.5, "eval_case_total": 8, "eval_case_weekly_delta": 1,
+    "top3_l0_watermarks": [], "top3_l1_watermarks": []
+  },
+  "S4_usage_and_r1": {
+    "window_cst": "30d", "window_start": "2026-10-13T00:00:00+08:00", "window_end": "2026-11-11T23:59:59+08:00",
+    "source_as_of": "2026-11-11T14:00:00+08:00", "sample_size": 2, "coverage_status": "healthy",
+    "active_skills_count": 1, "idle_skills_30d": [], "top_used_skills": []
+  },
+  "S6_load_vs_script": [{
+    "window_cst": "30d", "window_start": "2026-10-13T00:00:00+08:00", "window_end": "2026-11-11T23:59:59+08:00",
+    "source_as_of": "2026-11-11T14:00:00+08:00", "sample_size": 2, "coverage_status": "healthy", "estimated": true,
+    "skill": "team-lead", "loads_30d": 2, "script_execs": 1, "script_touch_rate": 0.5, "unpracticed_rate": 0.5
+  }],
+  "S7_disclosure_funnel": [{
+    "window_cst": "30d", "window_start": "2026-10-13T00:00:00+08:00", "window_end": "2026-11-11T23:59:59+08:00",
+    "source_as_of": "2026-11-11T14:00:00+08:00", "sample_size": 2, "coverage_status": "healthy", "estimated": true,
+    "skill": "team-lead", "l0_only_rate": 0.5, "l1_selective_rate": 0.5, "l1_greedy_violation_rate": 0.0, "avg_context_tokens": null
+  }],
+  "S8_post_skill_churn": [], "S9_escape_attribution": [],
+  "S10_skill_roi_ranking": [{
+    "window_cst": "30d", "window_start": "2026-10-13T00:00:00+08:00", "window_end": "2026-11-11T23:59:59+08:00",
+    "source_as_of": "2026-11-11T14:00:00+08:00", "sample_size": 2, "coverage_status": "healthy", "estimated": true,
+    "skill": "team-lead", "loads_7d": 2, "loads_30d": 2, "r1_total": 0, "r1_pass_rate": null,
+    "script_touch_rate": 0.5, "unpracticed_rate": 0.5, "avg_context_tokens": null, "roi_score": null,
+    "diagnosis": "unknown / 观测不足", "has_scripts": true, "script_execs": 1
+  }],
+  "S11_context_composition": {
+    "window_cst": "7d", "window_start": "2026-11-05T00:00:00+08:00", "window_end": "2026-11-11T23:59:59+08:00",
+    "source_as_of": "2026-11-11T14:00:00+08:00", "sample_size": 1, "coverage_status": "healthy", "estimated": true,
+    "estimation_method": "fixed-share allocation of observed turn tokens; no measured compression saving",
+    "slices": [], "total_context_tokens": null, "kv_cache_hit_pct": 75.0, "compressed_saved_tokens": null
+  },
+  "S12_tool_context_burn": [{
+    "window_cst": "7d", "window_start": "2026-11-05T00:00:00+08:00", "window_end": "2026-11-11T23:59:59+08:00",
+    "source_as_of": "2026-11-11T14:00:00+08:00", "sample_size": 1, "coverage_status": "healthy", "estimated": true,
+    "estimation_method": "turn context * 0.36 / tool count, not measured tool result tokens",
+    "tool_name": "view", "call_count": 1, "total_tokens": 12000, "p95_tokens": 12000, "bloated_call_count": 1, "share_pct": 100.0, "dominant_skill": "team-lead"
+  }],
+  "low_roi_proposals": []
+}

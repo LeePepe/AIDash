@@ -314,3 +314,256 @@ def collect(container_url: str, prefix: str) -> dict[str, object]:
         os.umask(old_umask)
         if stage is not None and stage.exists():
             shutil.rmtree(stage)
+
+
+SOURCE = "product_blob"
+_CANONICAL_APPS = {
+    "aidash": "AIDash",
+    "vitalstride": "VitalStride",
+    "voxpocket": "VoxPocket",
+    "financial": "Financial",
+}
+_TELEMETRY_DDL = """CREATE TABLE product_telemetry (
+    event_id TEXT PRIMARY KEY,
+    app_name TEXT NOT NULL,
+    app_version TEXT,
+    build_number TEXT,
+    platform TEXT,
+    event_kind TEXT NOT NULL,
+    signature TEXT,
+    stack_top_symbol TEXT,
+    metric_ms REAL,
+    occurred_at TEXT NOT NULL
+)"""
+_TELEMETRY_COLS = (
+    "event_id",
+    "app_name",
+    "app_version",
+    "build_number",
+    "platform",
+    "event_kind",
+    "signature",
+    "stack_top_symbol",
+    "metric_ms",
+    "occurred_at",
+)
+
+
+def _canonical_app_name(raw_value: Any) -> str | None:
+    text = str(raw_value or "").strip()
+    if not text:
+        return None
+    lower = text.lower()
+    for key, canonical in _CANONICAL_APPS.items():
+        if lower == key or lower.startswith(f"{key}.") or f".{key}" in lower:
+            return canonical
+    return text
+
+
+def _classify_event_kind(raw_kind: Any, event_name: str, props: dict[str, Any]) -> str:
+    explicit = str(raw_kind or "").strip().lower()
+    if explicit in {"crash", "perf", "error"}:
+        return explicit
+    lower_name = event_name.lower()
+    if any(tok in lower_name for tok in ("crash", "fatal", "exception", "panic", "abort")):
+        return "crash"
+    if any(tok in lower_name for tok in ("error", "fail")):
+        return "error"
+    if (
+        any(tok in lower_name for tok in ("perf", "performance", "latency", "launch", "ready_scene", "frame", "slow"))
+        or "duration_ms" in props
+        or "metric_ms" in props
+        or "latency_ms" in props
+    ):
+        return "perf"
+    return "perf" if props.get("metric_ms") is not None else "error"
+
+
+def _parse_telemetry_record(
+    raw: dict[str, Any],
+    *,
+    rel_path: str = "",
+    line_no: int = 1,
+) -> dict[str, Any] | None:
+    import hashlib
+    from datetime import datetime, timezone
+
+    props = raw.get("properties") if isinstance(raw.get("properties"), dict) else {}
+    path_parts = [p for p in Path(rel_path).parts if p not in {".", "batches", "product_blob"}]
+    inferred_app = _canonical_app_name(
+        raw.get("app_name")
+        or raw.get("app")
+        or props.get("app_name")
+        or props.get("app")
+        or (str(raw.get("name") or "").split(".", 1)[0] if "." in str(raw.get("name") or "") else None)
+        or (path_parts[1] if len(path_parts) >= 2 else (path_parts[0] if path_parts else None))
+    )
+    if not inferred_app:
+        return None
+
+    inferred_build = str(
+        raw.get("build_number")
+        or raw.get("build")
+        or props.get("build_number")
+        or props.get("build")
+        or (path_parts[2] if len(path_parts) >= 3 else "")
+    ).strip() or None
+    app_version = str(
+        raw.get("app_version")
+        or raw.get("version")
+        or props.get("app_version")
+        or props.get("version")
+        or ""
+    ).strip() or None
+    platform = str(
+        raw.get("platform")
+        or props.get("platform")
+        or ("macos" if inferred_app in {"AIDash", "VoxPocket"} else "ios")
+    ).strip() or None
+
+    event_name = str(raw.get("name") or raw.get("event_name") or raw.get("signature") or "").strip()
+    event_kind = _classify_event_kind(
+        raw.get("event_kind") or props.get("event_kind"),
+        event_name,
+        props,
+    )
+    stack_top_symbol = str(
+        raw.get("stack_top_symbol")
+        or props.get("stack_top_symbol")
+        or props.get("symbol")
+        or raw.get("symbol")
+        or ""
+    ).strip() or None
+    signature = str(
+        raw.get("signature")
+        or props.get("signature")
+        or props.get("crash_signature")
+        or event_name
+        or stack_top_symbol
+        or f"{inferred_app}.{event_kind}"
+    ).strip()
+
+    raw_metric = (
+        raw.get("metric_ms")
+        if raw.get("metric_ms") is not None
+        else raw.get("duration_ms")
+        if raw.get("duration_ms") is not None
+        else props.get("metric_ms")
+        if props.get("metric_ms") is not None
+        else props.get("duration_ms")
+        if props.get("duration_ms") is not None
+        else props.get("latency_ms")
+    )
+    metric_ms: float | None = None
+    if raw_metric is not None and not isinstance(raw_metric, bool):
+        try:
+            metric_val = float(raw_metric)
+            if metric_val >= 0:
+                metric_ms = metric_val
+        except (TypeError, ValueError):
+            metric_ms = None
+
+    raw_ts = (
+        raw.get("occurred_at")
+        or raw.get("timestamp")
+        or raw.get("ts")
+        or props.get("occurred_at")
+        or props.get("timestamp")
+    )
+    if not raw_ts:
+        return None
+    occurred_at = str(raw_ts).strip()
+    try:
+        parsed_dt = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))  # noqa: FURB162
+        if parsed_dt.tzinfo is None:
+            parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)  # noqa: UP017
+        occurred_at = (
+            parsed_dt.astimezone(timezone.utc)  # noqa: UP017
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+    except ValueError:
+        return None
+
+    explicit_id = str(raw.get("event_id") or raw.get("id") or props.get("event_id") or "").strip()
+    if explicit_id:
+        event_id = explicit_id
+    else:
+        digest_input = json.dumps(
+            [rel_path, line_no, inferred_app, inferred_build, event_kind, signature, stack_top_symbol, metric_ms, occurred_at],
+            ensure_ascii=False,
+        )
+        event_id = f"pt-{hashlib.sha256(digest_input.encode('utf-8')).hexdigest()[:24]}"
+
+    return {
+        "event_id": event_id,
+        "app_name": inferred_app,
+        "app_version": app_version,
+        "build_number": inferred_build,
+        "platform": platform,
+        "event_kind": event_kind,
+        "signature": signature,
+        "stack_top_symbol": stack_top_symbol,
+        "metric_ms": metric_ms,
+        "occurred_at": occurred_at,
+    }
+
+
+def _iter_raw_telemetry_records() -> list[dict[str, Any]]:
+    import gzip
+    import zlib
+
+    product_root = RAW_DIR / SOURCE
+    if not product_root.is_dir():
+        return []
+    candidates: list[Path] = []
+    batches_dir = product_root / "batches"
+    if batches_dir.is_dir():
+        candidates.extend(sorted(p for p in batches_dir.rglob("*") if p.is_file()))
+    candidates.extend(sorted(p for p in product_root.glob("*.jsonl") if p.is_file()))
+
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    for file_path in candidates:
+        try:
+            rel_path = str(file_path.relative_to(product_root))
+        except ValueError:
+            rel_path = file_path.name
+        if ".staging" in Path(rel_path).parts:
+            continue
+        try:
+            raw_bytes = file_path.read_bytes()
+            if file_path.suffix == ".gz" or raw_bytes.startswith(b"\x1f\x8b"):
+                text = gzip.decompress(raw_bytes).decode("utf-8")
+            else:
+                text = raw_bytes.decode("utf-8")
+        except (OSError, EOFError, zlib.error, UnicodeDecodeError):
+            continue
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                obj = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            parsed = _parse_telemetry_record(obj, rel_path=rel_path, line_no=line_no)
+            if parsed is not None:
+                rows_by_id[parsed["event_id"]] = parsed
+    return list(rows_by_id.values())
+
+
+def normalize() -> int:
+    """Normalize L1 product telemetry batches/shards into clean/product_blob.db."""
+    from cleanio import write_clean
+
+    rows = _iter_raw_telemetry_records()
+    return write_clean(
+        SOURCE,
+        "product_telemetry",
+        _TELEMETRY_DDL,
+        rows,
+        _TELEMETRY_COLS,
+    )
+

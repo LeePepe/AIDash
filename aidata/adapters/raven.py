@@ -14,12 +14,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from adapters.model_canon import model_canon
-from config import RAVEN_DB
-from rawio import write_raw, read_raw
 from cleanio import write_clean
+from config import RAVEN_DB
+from rawio import read_raw, write_raw
 from sqlite_ro import query_ro
 from state import get_watermark, set_watermark
+
+from adapters.model_canon import model_canon
 
 SOURCE = "raven"
 
@@ -97,6 +98,7 @@ def _split_client(client_name: str) -> tuple[str, str | None]:
 
 def _load_prices() -> dict[str, dict[str, float]]:
     import csv
+
     from config import SCHEMA_DIR
 
     prices: dict[str, dict[str, float]] = {}
@@ -147,8 +149,15 @@ _CLEAN_COLS = (
 
 def normalize() -> int:
     prices = _load_prices()
-    rows: list[dict[str, Any]] = []
+    rows_by_id: dict[str, dict[str, Any]] = {}
     for rec in read_raw(SOURCE):
+        request_id = rec.get("id")
+        if not request_id:
+            continue
+        rows_by_id[request_id] = rec
+
+    rows: list[dict[str, Any]] = []
+    for rec in rows_by_id.values():
         client, version = _split_client(rec.get("client_name", ""))
         sess, has = _parse_session(rec.get("session_id", ""), client)
         model = rec.get("model")

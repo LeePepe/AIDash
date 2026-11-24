@@ -14,6 +14,7 @@ struct AIDash: AsyncParsableCommand {
             CardCommand.self,
             EventsCommand.self,
             SchemaCommand.self,
+            JobActionsCommand.self,
         ]
     )
 

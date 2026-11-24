@@ -1,4 +1,3 @@
--- aidata-tier: explore
 SELECT
     snapshot_date,
     COALESCE(repo_key, 'unknown') AS repo_key,

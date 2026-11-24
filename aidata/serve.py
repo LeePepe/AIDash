@@ -95,11 +95,49 @@ def _connect(required_sources: list[str] | None = None) -> sqlite3.Connection:
                 )
             db = clean_path(src)
             if not db.exists():
-                # Degrade-safe (ADR-23): a missing clean DB is not fatal at
-                # connect time — the query itself surfaces "no such table" only
-                # if it genuinely needs the source.
+                # Degrade-safe: queries may declare optional sources. Provide
+                # empty known schemas so one missing DB cannot hide other rows.
+                if src in {"hermes_tools", "copilot_cli"}:
+                    conn.execute(f"ATTACH DATABASE ':memory:' AS {src}")
+                    conn.execute(f"CREATE TABLE {src}.skill_day (day TEXT, skill TEXT, n INTEGER, PRIMARY KEY (day, skill))")
+                    if src == "hermes_tools":
+                        conn.execute("CREATE TABLE hermes_tools.tool_day (day TEXT, tool_name TEXT, n INTEGER, PRIMARY KEY (day, tool_name))")
                 continue
-            conn.execute(f"ATTACH DATABASE ? AS {src}", (_ro_uri(db),))
+            has_skill_day = True
+            if src == "hermes_tools":
+                try:
+                    with sqlite3.connect(_ro_uri(db), uri=True) as check_conn:
+                        has_skill_day = (
+                            check_conn.execute(
+                                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='skill_day'"
+                            ).fetchone()
+                            is not None
+                        )
+                except sqlite3.Error:
+                    has_skill_day = False
+            if src == "hermes_tools" and not has_skill_day:
+                # Keep legacy tool_day visible while supplying an empty
+                # idempotent skill_day schema for zero-skill Hermes databases.
+                conn.execute("ATTACH DATABASE ':memory:' AS hermes_tools")
+                conn.execute(
+                    "CREATE TABLE hermes_tools.skill_day (day TEXT, skill TEXT, n INTEGER, PRIMARY KEY (day, skill))"
+                )
+                conn.execute(
+                    "CREATE TABLE hermes_tools.tool_day (day TEXT, tool_name TEXT, n INTEGER, PRIMARY KEY (day, tool_name))"
+                )
+                try:
+                    with sqlite3.connect(_ro_uri(db), uri=True) as legacy:
+                        rows = legacy.execute(
+                            "SELECT day, tool_name, n FROM tool_day"
+                        ).fetchall()
+                    conn.executemany(
+                        "INSERT INTO hermes_tools.tool_day(day, tool_name, n) VALUES (?, ?, ?)",
+                        rows,
+                    )
+                except sqlite3.Error:
+                    pass
+            else:
+                conn.execute(f"ATTACH DATABASE ? AS {src}", (_ro_uri(db),))
     except Exception:
         conn.close()
         raise

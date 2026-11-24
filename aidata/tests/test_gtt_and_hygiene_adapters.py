@@ -110,6 +110,36 @@ def test_gtt_receipt_accepts_bundle_style_record(monkeypatch):
 
 
 @pytest.mark.unit
+def test_gtt_receipt_normalize_writes_real_sqlite_with_quoted_escape(monkeypatch, tmp_path):
+    import cleanio
+
+    raw = [{
+        "machine_id": "macbook",
+        "goal_id": "demo",
+        "record_type": "receipt",
+        "rel_path": "demo/receipts/reviewer-r1.md",
+        "skills_used": '["team-lead", "aidash-metrics"]',
+        "content": (
+            "- **Status**: failed\n"
+            "- **Role / Model**: code_reviewer / gemini-4-argon\n"
+            "- **Verdict**: FAIL\n"
+            "- **Findings**: [IMPL_BUG] EV-001 gate catch\n"
+            "Timestamp: 2026-10-28T01:00:00+08:00\n"
+        ),
+    }]
+    monkeypatch.setattr(gtt_receipt, "read_raw", lambda _source: raw)
+    monkeypatch.setattr(gtt_receipt, "_profiles", list)
+    monkeypatch.setattr(cleanio, "CLEAN_DIR", tmp_path)
+    monkeypatch.setattr(cleanio, "clean_path", lambda source: tmp_path / f"{source}.db")
+    assert gtt_receipt.normalize() == 1
+    with sqlite3.connect(tmp_path / "gtt_receipt.db") as conn:
+        row = conn.execute(
+            'SELECT skills_used, eval_case, interception, "escape" FROM task_run'
+        ).fetchone()
+    assert row == ('["aidash-metrics", "team-lead"]', "EV-001", 1, 1)
+
+
+@pytest.mark.unit
 def test_gtt_receipt_maps_hyphenated_role_and_failure(monkeypatch):
     raw = [{
         "machine_id": "MACBOOK",
@@ -201,3 +231,74 @@ def test_run_merge_wires_p0_tables(tmp_path, monkeypatch):
     assert counts["fact_gtt_task_run"] == 1
     assert counts["fact_workspace_hygiene_snapshot"] == 1
     assert counts["dim_repo"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("rel_path", "content", "expected_role"),
+    [
+        (
+            "aidash-hpl/receipts/T1-r10.md",
+            "- **Role / Model**: `steering (inline mode)` (`aidash_hpl_goal_tl_r1`) / `magpie/group/steering`\n",
+            "steering",
+        ),
+        (
+            "aidash-main/receipts/TK1-prm-r1.md",
+            "- **Role**: pr merge monitor\n- **Agent**: TK1-prm-r1\n",
+            "pr_monitor",
+        ),
+        (
+            "m2-rename/receipts/T1-m2-r1.md",
+            "- **Role**: M2-Dispatcher (`m2-personal-r1`)\n",
+            "m2",
+        ),
+        (
+            "m3-hub/receipts/T1-m3-r1.md",
+            "- **Role**: personal-m2-assistant (`m3_assistant`)\n",
+            "m3",
+        ),
+        (
+            "design-eco/receipts/explore-r1.md",
+            "- **Role**: string, sendable { case accent, onaccent }\n- **Model**: mai-code-2-flash\n",
+            "explorer",
+        ),
+        (
+            "multica-clean/receipts/exp6-explorer-r1.md",
+            "- **Role**: assistant\n- **Agent**: worker.explorer\n",
+            "explorer",
+        ),
+        (
+            "strata/receipts/TK3-reviewer-r1.md",
+            "- **Role**: " + ("long markdown prose with review and design words " * 4) + "\n",
+            "reviewer",
+        ),
+        (
+            "ui-demo/receipts/v01-des-r1.md",
+            "- **Role**: assistant\n- **Model**: magpie/group/designer\n",
+            "designer",
+        ),
+    ],
+)
+def test_gtt_receipt_normalizes_prose_and_inline_roles_to_canonical_set(
+    monkeypatch, rel_path, content, expected_role,
+):
+    raw = [{
+        "machine_id": "mac-mini",
+        "goal_id": "demo-goal",
+        "record_type": "receipt",
+        "rel_path": rel_path,
+        "content": content,
+    }]
+    captured: dict[str, list[dict]] = {}
+    monkeypatch.setattr(gtt_receipt, "read_raw", lambda _source: raw)
+    monkeypatch.setattr(gtt_receipt, "_profiles", list)
+    monkeypatch.setattr(
+        gtt_receipt,
+        "write_clean",
+        lambda _source, table, _ddl, rows, _columns: captured.setdefault(table, rows) or len(rows),
+    )
+    assert gtt_receipt.normalize() == 1
+    role_name = captured["task_run"][0]["role_name"]
+    assert role_name == expected_role
+    assert role_name in gtt_receipt._CANONICAL_ROLES
+

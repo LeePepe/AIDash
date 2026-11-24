@@ -73,6 +73,45 @@ def _bundle_records(path: Path) -> Iterable[dict[str, Any]]:
         return
 
 
+_SKILL_RE = re.compile(r"(?:/([A-Za-z][A-Za-z0-9._-]{1,127})\b|skills/([A-Za-z][A-Za-z0-9._-]{1,127})\b|\bSkill\s*[:=]\s*([A-Za-z][A-Za-z0-9._-]{1,127}))", re.IGNORECASE)
+
+
+def _skills_used(content: str) -> list[str]:
+    aliases = {"goal-target-task": "team-lead", "goal-task": "team-lead"}
+    ignore = {
+        "users", "home", "private", "tmp", "var", "opt", "usr", "etc", "volumes",
+        "applications", "development", "handoff", "worktrees", "skills", "scripts",
+        "references", "receipts", "briefs", "commands", "help", "dev", "null", "bin",
+    }
+    found = set()
+    for match in _SKILL_RE.finditer(content):
+        value = next((part for part in match.groups() if part), None)
+        if not value:
+            continue
+        lowered = value.lower().strip("._-")
+        if not lowered or lowered == "skill.md" or lowered in ignore or "." in lowered:
+            continue
+        found.add(aliases.get(lowered, lowered))
+    return sorted(found)
+
+
+def _eval_metadata(content: str, extra_skills: list[str] | None = None) -> dict[str, Any]:
+    upper = content.upper()
+    case = next((value for value in re.findall(r"\b(?:EV|CASE)[-_]?[A-Z0-9]+\b", content, re.IGNORECASE)), None)
+    interception = int(any(token in upper for token in ("REVIEW_FAIL", "TASK_BLOCKED", "GATE", "CONTRACT", "EVAL CATCH")))
+    escape = int(any(token in upper for token in ("[IMPL_BUG]", "[SPEC_GAP]", "REGRESSION", "REVIEW FAIL")))
+    merged = sorted(set(_skills_used(content)) | set(extra_skills or []))
+    return {"skills_used": json.dumps(merged, ensure_ascii=False), "eval_case": case,
+            "interception": interception, "escape": escape}
+
+
+def _receipt_record(record: dict[str, Any]) -> dict[str, Any]:
+    clean = dict(record)
+    extra = clean.pop("_goal_skills", None)
+    content = str(clean.get("content", ""))
+    return {**clean, **_eval_metadata(content, extra)}
+
+
 def collect() -> int:
     from adapters import cloud_sync
 
@@ -84,6 +123,14 @@ def collect() -> int:
         except OSError:
             continue
         for goal in goals:
+            goal_skill_text = ""
+            for doc in (goal / "spec.md", *sorted((goal / "briefs").glob("*.md"))[:10]):
+                if doc.is_file():
+                    try:
+                        goal_skill_text += "\n" + doc.read_text(encoding="utf-8", errors="ignore")
+                    except OSError:
+                        pass
+            goal_skills = _skills_used(goal_skill_text)
             try:
                 receipts = sorted((goal / "receipts").glob("*.md"))
             except OSError:
@@ -95,7 +142,8 @@ def collect() -> int:
                     continue
                 records.append({"machine_id": _machine_id(), "goal_id": goal.name,
                                 "rel_path": f"{goal.name}/receipts/{path.name}",
-                                "record_type": "receipt", "content": _normalize_path(content)})
+                                "record_type": "receipt", "content": _normalize_path(content),
+                                "_goal_skills": goal_skills})
     try:
         bundles = sorted(GTT_XFER_DIR.rglob("*.jsonl"))
         bundles.extend(sorted(GTT_XFER_DIR.rglob("*.tgz")))
@@ -103,6 +151,7 @@ def collect() -> int:
         bundles = []
     for bundle in bundles:
         records.extend(_bundle_records(bundle))
+    records = [_receipt_record(record) for record in records]
     old = dict(get_watermark(SOURCE) or {})
     changed = []
     current: dict[str, str] = {}
@@ -133,32 +182,56 @@ def _field(text: str, names: tuple[str, ...]) -> str | None:
     return None
 
 
-def _role_from_name(role: str) -> str:
-    raw = role.lower().strip()
-    for token, canonical in (
-        ("planner_reviewer", "planner_reviewer"),
-        ("planner-reviewer", "planner_reviewer"),
-        ("code_reviewer", "code_reviewer"),
-        ("code-reviewer", "code_reviewer"),
-        ("writer_escalated", "writer_escalated"),
-        ("writer-escalated", "writer_escalated"),
-        ("pr_monitor", "pr_monitor"),
-        ("pr-monitor", "pr_monitor"),
-        ("prmon", "pr_monitor"),
-        ("reviewer", "reviewer"),
-        ("review", "reviewer"),
-        ("rev", "reviewer"),
-        ("explorer", "explorer"),
-        ("explore", "explorer"),
-        ("exp", "explorer"),
-        ("designer", "designer"),
-        ("planner", "planner"),
-        ("writer", "writer"),
-        ("analyst", "planner"),
+_CANONICAL_ROLES: frozenset[str] = frozenset({
+    "m3", "m2", "steering", "planner", "planner_reviewer", "explorer",
+    "designer", "writer", "writer_escalated", "reviewer", "code_reviewer",
+    "pr_monitor",
+})
+
+
+def _match_canonical_role(raw: str) -> str | None:
+    cleaned = re.sub(r"[`*_\"']+", " ", raw.lower()).strip()
+    if not cleaned:
+        return None
+    normalized = re.sub(r"[\s-]+", "_", cleaned).strip("_")
+    if normalized in _CANONICAL_ROLES:
+        return normalized
+    for pattern, canonical in (
+        (r"\b(?:planner[_ -]+reviewer)\b", "planner_reviewer"),
+        (r"\b(?:code[_ -]+reviewer)\b", "code_reviewer"),
+        (r"\b(?:writer[_ -]+escalated|group/coding[_ -]+escalated)\b", "writer_escalated"),
+        (r"\b(?:pr[_ -]+monitor|pr[_ -]+merge[_ -]+monitor|workflow[_ -]+monitor|prmon|prm)\b", "pr_monitor"),
+        (r"(?:group/steering|\b(?:m1[_ -]+steering|steering|team[_ -]+lead|goal[_ -]+tl|tl[_ -]+start|tl|m1)\b)", "steering"),
+        (r"\b(?:personal[_ -]+m2[_ -]+assistant|m3[_ -]+assistant|m3)\b", "m3"),
+        (r"\b(?:m2[_ -]+dispatcher|dispatcher|m2)\b", "m2"),
+        (r"\b(?:reviewer|group/reviewing|review|rev)\b", "reviewer"),
+        (r"\b(?:explorer|explore|exp)\b", "explorer"),
+        (r"(?:group/designer|\b(?:designer|design)\b)", "designer"),
+        (r"\b(?:planner|analyst)\b", "planner"),
+        (r"(?:group/coding|\b(?:writer|coder)\b)", "writer"),
     ):
-        if raw == token or token in raw:
+        if re.search(pattern, cleaned):
             return canonical
-    return raw.replace("-", "_")
+    return None
+
+
+def _role_from_name(role: str, fallback_role: str | None = None) -> str:
+    stripped = role.strip()
+    is_code_or_long_prose = len(stripped) > 120 or any(tok in stripped for tok in ("{", "}", "->", "_>"))
+    if is_code_or_long_prose:
+        if fallback_role:
+            matched_fallback = _match_canonical_role(fallback_role)
+            if matched_fallback:
+                return matched_fallback
+        return "writer"
+    matched = _match_canonical_role(stripped)
+    if matched:
+        return matched
+    if fallback_role:
+        matched_fallback = _match_canonical_role(fallback_role)
+        if matched_fallback:
+            return matched_fallback
+    return "writer"
 
 
 def _canonical_v5(raw_v5: str | None, failure_text: str) -> str | None:
@@ -183,7 +256,8 @@ CREATE TABLE task_run (
     goal_id TEXT NOT NULL, task_id TEXT NOT NULL, role_name TEXT NOT NULL,
     round_no INTEGER NOT NULL, agent_name TEXT, cli_tool TEXT, model_id TEXT,
     vendor TEXT, status TEXT, v5_verdict TEXT, head_sha TEXT,
-    receipt_sha256 TEXT NOT NULL, completed_at TEXT
+    receipt_sha256 TEXT NOT NULL, completed_at TEXT, skills_used TEXT,
+    eval_case TEXT, interception INTEGER, "escape" INTEGER
 )
 """
 _ROLE_DDL = """
@@ -248,8 +322,9 @@ def normalize() -> int:
         prefix = match.group("prefix")
         known_roles = (
             "writer-escalated", "planner-reviewer", "code-reviewer", "pr-monitor",
-            "reviewer", "explorer", "explore", "designer", "planner", "writer",
-            "prmon", "rev", "review", "exp", "demo", "impl", "fix",
+            "tf-release-monitor", "reviewer", "explorer", "explore", "designer", "design",
+            "planner", "writer", "steering", "team-lead", "goal-tl", "prmon", "prm",
+            "rev", "review", "exp", "des", "tl", "m2", "m3", "demo", "impl", "fix",
         )
         role_from_name = next(
             (role for role in sorted(known_roles, key=len, reverse=True)
@@ -258,6 +333,10 @@ def normalize() -> int:
         )
         if role_from_name in ("demo", "impl", "fix"):
             inferred_file_role = "writer"
+        elif role_from_name == "tf-release-monitor":
+            inferred_file_role = "pr_monitor"
+        elif role_from_name == "des":
+            inferred_file_role = "designer"
         else:
             inferred_file_role = role_from_name
         if role_from_name and prefix.endswith(f"-{role_from_name}"):
@@ -267,7 +346,12 @@ def normalize() -> int:
         else:
             task_id = prefix
         raw_role_field = _field(content, ("Role", "Role / Model"))
-        role = _role_from_name(raw_role_field or inferred_file_role or "writer")
+        agent_hint = _field(content, ("Agent",)) or ""
+        model_hint = model or ""
+        fallback_hint = " ".join(
+            part for part in (inferred_file_role, agent_hint, model_hint) if part
+        )
+        role = _role_from_name(raw_role_field or "", fallback_role=fallback_hint)
         status = (_field(content, ("Status", "Outcome", "Result")) or "completed").lower()
         v5 = _field(content, ("V5", "Review Conclusion", "Verdict", "Conclusion"))
         failure_text = " ".join(
@@ -284,6 +368,15 @@ def normalize() -> int:
         goal = str(record.get("goal_id", "unknown"))
         machine_id = str(record.get("machine_id", "unknown")).lower()
         uid = f"{machine_id}:{rel or name}"
+        meta = _eval_metadata(content)
+        if record.get("skills_used"):
+            try:
+                existing_skills = json.loads(str(record["skills_used"]))
+                if isinstance(existing_skills, list):
+                    merged_skills = sorted(set(_skills_used(content)) | {str(s) for s in existing_skills if s})
+                    meta["skills_used"] = json.dumps(merged_skills, ensure_ascii=False)
+            except ValueError:
+                pass
         task_rows[uid] = {
             "receipt_uid": uid, "goal_uid": f"{machine_id}:{goal}",
             "machine_id": machine_id, "goal_id": goal,
@@ -295,10 +388,13 @@ def normalize() -> int:
             "completed_at": _normalize_iso(
                 _field(content, ("Timestamp", "Updated", "Ended", "Reviewed At"))
             ) or _normalize_iso(record.get("mtime_iso")),
+            **meta,
+            '"escape"': meta.get("escape"),
         }
     task_cols = ("receipt_uid", "goal_uid", "machine_id", "goal_id", "task_id", "role_name",
                  "round_no", "agent_name", "cli_tool", "model_id", "vendor", "status",
-                 "v5_verdict", "head_sha", "receipt_sha256", "completed_at")
+                 "v5_verdict", "head_sha", "receipt_sha256", "completed_at", "skills_used",
+                 "eval_case", "interception", '"escape"')
     role_map = {row["role_model_key"]: row for row in _profiles()}
     roles = list(role_map.values())
     role_cols = ("role_model_key", "role_name", "tier", "cli_tool", "model_id", "vendor", "is_escalated")

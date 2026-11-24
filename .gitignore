@@ -68,6 +68,7 @@ aidata/L5_apps/digest/archive/
 
 # M3 action-inbox 运行时状态（agent 追加写；example 才是 schema 文档）
 aidata/L5_apps/digest/state/proposals.jsonl
+aidata/L5_apps/digest/state/learning_queue.jsonl
 
 # radar LLM 富化缓存（每机一份，内容寻址，可重建）
 aidata/L5_apps/digest/state/repo_enrichment.json

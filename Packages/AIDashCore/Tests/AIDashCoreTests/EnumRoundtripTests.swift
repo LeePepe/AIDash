@@ -52,7 +52,8 @@ struct EnumRoundtripTests {
             "hide",
             "unhide",
             "acknowledgeFinding",
-            "approveRemediation"
+            "approveRemediation",
+            "acknowledgeJobAction"
         ])
     }
 

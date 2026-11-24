@@ -22,39 +22,41 @@ public struct BriefingWindowScene: Scene {
     let state: CloudKitContainer.InitState
     let headless: Bool
     let telemetryCoordinator: AIDashTelemetryCoordinator?
+    let previewHostMode: Bool
+    let onRetry: (() -> Void)?
 
     init(
         state: CloudKitContainer.InitState,
         headless: Bool = false,
-        telemetryCoordinator: AIDashTelemetryCoordinator? = nil
+        telemetryCoordinator: AIDashTelemetryCoordinator? = nil,
+        previewHostMode: Bool = false,
+        onRetry: (() -> Void)? = nil
     ) {
         self.state = state
         self.headless = headless
         self.telemetryCoordinator = telemetryCoordinator
+        self.previewHostMode = previewHostMode
+        self.onRetry = onRetry
     }
 
     public var body: some Scene {
         WindowGroup {
             Group {
+                #if os(macOS)
+                if previewHostMode {
+                    AIDashTwoTabPreviewHostBoard()
+                } else if headless {
+                    EmptyView()
+                } else {
+                    readyContent
+                }
+                #else
                 if headless {
                     EmptyView()
                 } else {
-                    switch state {
-                    case .loading:
-                        BriefingSceneStateView(kind: .loading)
-                    case .ready(let container):
-                        StarFeedbackScope(
-                            container: container,
-                            telemetryCoordinator: telemetryCoordinator
-                        )
-                            .modelContainer(container)
-                            .onAppear {
-                                telemetryCoordinator?.readySceneAppeared()
-                            }
-                    case .failed(let reason):
-                        BriefingSceneStateView(kind: .failed(reason))
-                    }
+                    readyContent
                 }
+                #endif
             }
             #if os(macOS)
             .frame(
@@ -70,11 +72,38 @@ public struct BriefingWindowScene: Scene {
             #endif
         }
         #if os(macOS)
-        .defaultSize(width: 1120, height: 740)
+        .defaultSize(
+            width: previewHostWindowWidth,
+            height: previewHostWindowHeight
+        )
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
         #endif
     }
+
+    @ViewBuilder
+    private var readyContent: some View {
+        switch state {
+        case .loading:
+            BriefingSceneStateView(kind: .loading)
+        case .ready(let container):
+            StarFeedbackScope(
+                container: container,
+                telemetryCoordinator: telemetryCoordinator
+            )
+                .modelContainer(container)
+                .onAppear {
+                    telemetryCoordinator?.readySceneAppeared()
+                }
+        case .failed(let reason):
+            BriefingSceneStateView(kind: .failed(reason), onRetry: onRetry)
+        }
+    }
+
+    #if os(macOS)
+    private var previewHostWindowWidth: CGFloat { previewHostMode ? 1680 : 1120 }
+    private var previewHostWindowHeight: CGFloat { previewHostMode ? 1020 : 740 }
+    #endif
 
     #if !os(macOS)
     @ViewBuilder
@@ -113,6 +142,7 @@ private struct BriefingSceneStateView: View {
     }
 
     let kind: Kind
+    var onRetry: (() -> Void)?
 
     var body: some View {
         Group {
@@ -132,6 +162,11 @@ private struct BriefingSceneStateView: View {
                     Label(title, systemImage: "icloud.slash")
                 } description: {
                     Text("\(detail)\n\(reason)")
+                } actions: {
+                    if let onRetry {
+                        Button(String(localized: "briefing.scene.error.retry", defaultValue: "Retry", bundle: .main), action: onRetry)
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -183,6 +218,7 @@ private struct StarFeedbackScope: View {
     /// `doneItemRefs` set via `UserEventWriter.doneRefs(from:)`'s
     /// latest-wins reducer (spec 003 §8, spec 005 D3).
     @Query private var doneEvents: [UserEventModel]
+    @Query private var scheduledActionEvents: [UserEventModel]
 
     init(
         container: ModelContainer,
@@ -202,6 +238,10 @@ private struct StarFeedbackScope: View {
         _doneEvents = Query(filter: #Predicate {
             $0.actionRaw == doneRaw || $0.actionRaw == undoneRaw
         })
+        let scheduledActionRaw = UserEventAction.acknowledgeJobAction.rawValue
+        _scheduledActionEvents = Query(filter: #Predicate {
+            $0.actionRaw == scheduledActionRaw
+        })
     }
 
     var body: some View {
@@ -212,7 +252,14 @@ private struct StarFeedbackScope: View {
         // here from `@Query` and injected alongside.
         Group {
             #if os(macOS)
-            AIDashMacWorkspaceView()
+            AIDashMacWorkspaceView(
+                scheduledActionWriter: { action, responses in
+                    writer.acknowledgeScheduledJobAction(action: action, responses: responses)
+                },
+                acknowledgedScheduledActionIDs: Set(scheduledActionEvents.compactMap { event in
+                    ScheduledJobAction.receiptKey(itemRef: event.itemRef, cardID: event.cardId)
+                })
+            )
             #else
             BriefingView()
             #endif

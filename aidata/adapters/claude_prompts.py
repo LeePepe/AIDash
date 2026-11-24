@@ -53,11 +53,12 @@ import json
 import re
 from typing import Any
 
-from config import CLAUDE_PROJECTS_DIR
-from rawio import write_raw, read_raw
 from cleanio import write_clean
+from config import CLAUDE_PROJECTS_DIR
+from rawio import read_raw, write_raw
 from state import get_watermark, set_watermark
 from timeutil import CST
+
 from adapters._repo import repo_for_path
 
 SOURCE = "claude_prompts"
@@ -136,7 +137,7 @@ def _iso_to_epoch(ts: Any) -> float | None:
         return None
     try:
         from datetime import datetime
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()  # noqa: FURB162
     except (ValueError, TypeError):
         return None
 
@@ -147,7 +148,22 @@ def _cst_day(ts: Any) -> str | None:
     if epoch is None:
         return None
     from datetime import datetime, timezone
-    return datetime.fromtimestamp(epoch, timezone.utc).astimezone(CST).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(epoch, timezone.utc).astimezone(CST).strftime("%Y-%m-%d")  # noqa: UP017
+
+
+def _slash_skill(text: str | None) -> str | None:
+    if not isinstance(text, str):
+        return None
+    for pattern in (
+        r"<command-name>\s*/?([A-Za-z0-9][A-Za-z0-9._-]{0,127})\s*</command-name>",
+        r"<command-message>\s*/?([A-Za-z0-9][A-Za-z0-9._-]{0,127})\s*</command-message>",
+        r"(?:^|\n)\s*/skill\s+([A-Za-z0-9][A-Za-z0-9._-]{0,127})(?=\s|$)",
+        r"(?:^|\n)\s*/([A-Za-z][A-Za-z0-9._-]{0,127})(?=\s|$)",
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _slim_user(obj: dict[str, Any], text: str) -> dict[str, Any]:
@@ -162,6 +178,7 @@ def _slim_user(obj: dict[str, Any], text: str) -> dict[str, Any]:
         "entrypoint": obj.get("entrypoint"),
         "isSidechain": bool(obj.get("isSidechain")),
         "isMeta": bool(obj.get("isMeta")),
+        "slash_skill": _slash_skill(text),
         "text": text,
     }
 
@@ -274,6 +291,7 @@ CREATE TABLE prompt (
     day           TEXT,
     ts            REAL,
     source_kind   TEXT,
+    slash_skill   TEXT,
     text_len      INTEGER,
     text_preview  TEXT,
     prompt_sha    TEXT,
@@ -284,7 +302,7 @@ CREATE TABLE prompt (
 )
 """
 _PROMPT_COLS = ("prompt_id", "agent", "session_id", "day", "ts", "source_kind",
-                "text_len", "text_preview", "prompt_sha", "prefix_100",
+                "slash_skill", "text_len", "text_preview", "prompt_sha", "prefix_100",
                 "cwd", "repo", "git_branch")
 
 _ASK_DDL = """
@@ -328,6 +346,7 @@ def _prompt_row(rec: dict[str, Any]) -> dict[str, Any] | None:
         "cwd": rec.get("cwd"),
         "repo": repo_for_path(rec.get("cwd")),
         "git_branch": rec.get("gitBranch"),
+        "slash_skill": rec.get("slash_skill") or _slash_skill(text),
     }
 
 

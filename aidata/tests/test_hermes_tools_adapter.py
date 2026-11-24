@@ -4,6 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+import adapters.copilot_cli as copilot
 import adapters.hermes_tools as ht
 import pytest
 
@@ -123,3 +124,125 @@ def test_missing_db_degrades(monkeypatch, tmp_path):
     monkeypatch.setattr(ht, "HERMES_STATE_DB", tmp_path / "missing.db")
     monkeypatch.setattr(ht, "query_ro", lambda *args: pytest.fail("must not query"))
     assert ht.collect() == 0
+
+
+@pytest.mark.unit
+def test_copilot_collects_skill_metadata_without_prompt_bodies(monkeypatch, tmp_path):
+    db = tmp_path / "session-store.db"
+    with sqlite3.connect(db) as con:
+        con.execute("CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, timestamp TEXT, assistant_response TEXT)")
+        con.execute("INSERT INTO turns VALUES (1, 's1', '2026-11-12T01:00:00Z', '/skill team-lead SECRET_PROMPT')")
+        con.commit()
+    captured = []
+    monkeypatch.setattr(copilot, "COPILOT_SESSION_DB", db)
+    monkeypatch.setattr(copilot, "write_raw", lambda source, rows: captured.extend(rows) or len(rows))
+    monkeypatch.setattr(copilot, "get_watermark", lambda source: 0)
+    monkeypatch.setattr(copilot, "set_watermark", lambda source, value: None)
+    assert copilot.collect() == 1
+    assert len(captured) == 1
+    assert {key: captured[0][key] for key in ("turn_id", "session_id", "timestamp", "skill")} == {"turn_id": 1, "session_id": "s1", "timestamp": "2026-11-12T01:00:00Z", "skill": "team-lead"}
+    assert "SECRET_PROMPT" not in repr(captured)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("omit", [None, "turns", "session_files"])
+def test_copilot_real_skill_markers_are_bounded_metadata_and_deduped(tmp_path, monkeypatch, omit):
+    from datetime import datetime, timezone
+
+    db = tmp_path / "copilot.db"
+    with sqlite3.connect(db) as con:
+        if omit != "turns":
+            con.execute("CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, turn_index INTEGER, timestamp TEXT, user_message TEXT, assistant_response TEXT)")
+            con.executemany("INSERT INTO turns VALUES (?, ?, ?, ?, ?, ?)", [
+                (1, "s1", 0, "2026-11-12T01:00:00Z", '<skill-context name="team-lead">SECRET_BODY</skill-context>', '/Users/test/.copilot/skills/team-lead/SKILL.md SECRET_REPLY'),
+                (2, "s1", 1, "2026-11-12T02:00:00Z", "read /Users/test/.agents/skills/aidash-content/SKILL.md", '<skill-context name="aidash-content">'),
+                (3, "old", 0, "2025-01-01T00:00:00Z", '<skill-context name="old-skill">', ""),
+                (4, "ordinary", 0, "2026-11-12T01:00:00Z", "skillful prose /skills is not an invocation", ""),
+            ])
+        if omit != "session_files":
+            con.execute("CREATE TABLE session_files (session_id TEXT, file_path TEXT, tool_name TEXT, turn_index INTEGER, first_seen_at TEXT)")
+            con.executemany("INSERT INTO session_files VALUES (?, ?, ?, ?, ?)", [
+                ("s1", "/Users/test/.copilot/skills/team-lead/SKILL.md", "view", 0, "2026-11-12T01:00:01Z"),
+                ("s1", "/Users/test/.copilot/skills/team-lead/SKILL.md", "view", 0, "2026-11-12T01:00:02Z"),
+                ("s2", "/Users/test/.agents/skills/retro-loop/SKILL.md", "view", 2, "2026-11-12T03:00:00Z"),
+                ("old", "/Users/test/skills/old-skill/SKILL.md", "view", 0, "2025-01-01T00:00:00Z"),
+            ])
+    before = db.read_bytes()
+    raw, checkpoints = [], {}
+    monkeypatch.setattr(copilot, "COPILOT_SESSION_DB", db)
+    monkeypatch.setattr(copilot, "get_watermark", lambda _: dict(checkpoints))
+    monkeypatch.setattr(copilot, "set_watermark", lambda _, value: checkpoints.update(value))
+    monkeypatch.setattr(copilot, "write_raw", lambda _, rows: raw.extend(rows) or len(rows))
+    now = datetime(2026, 11, 12, 12, tzinfo=timezone.utc)  # noqa: UP017 - hook Python 3.9
+    expected = {"team-lead", "aidash-content", "retro-loop"}
+    if omit == "turns":
+        expected.remove("aidash-content")
+    if omit == "session_files":
+        expected.remove("retro-loop")
+    assert copilot.collect(now=now) == len(expected)
+    assert {row["skill"] for row in raw} == expected
+    assert len({row["event_id"] for row in raw}) == len(expected)
+    assert all(row["timestamp"].startswith("2026-11-12") for row in raw)
+    assert "SECRET" not in repr(raw)
+    assert "/Users/test" not in repr(raw)
+    assert copilot.collect(now=now) == 0
+    assert db.read_bytes() == before
+    monkeypatch.setattr(copilot, "read_raw", lambda _: raw + raw)
+    clean = []
+    monkeypatch.setattr(copilot, "write_clean", lambda source, table, ddl, rows, cols: clean.extend(rows) or len(rows))
+    assert copilot.normalize() == len(expected)
+    assert all(row["n"] == 1 for row in clean)
+
+
+@pytest.mark.unit
+def test_copilot_distinguishes_script_execution_from_reads_edits_and_mentions(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    db = tmp_path / "session-store.db"
+    state_dir = tmp_path / "session-state" / "s-exec"
+    state_dir.mkdir(parents=True)
+    with sqlite3.connect(db) as con:
+        con.execute("CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, turn_index INTEGER, timestamp TEXT, user_message TEXT, assistant_response TEXT)")
+        con.execute(
+            "INSERT INTO turns VALUES (1, 's-exec', 0, '2026-11-12T01:00:00Z', "
+            "'Please inspect skills/demo/scripts/not_run.py and skills/demo/references/not_read.md', "
+            "'Reviewed skills/demo/scripts/not_run.py')"
+        )
+        con.execute("CREATE TABLE session_files (session_id TEXT, file_path TEXT, tool_name TEXT, turn_index INTEGER, first_seen_at TEXT)")
+        con.executemany("INSERT INTO session_files VALUES (?, ?, ?, ?, ?)", [
+            ("s-exec", "/Users/test/.agents/skills/demo/scripts/edited.py", "edit", 0, "2026-11-12T01:00:01Z"),
+            ("s-exec", "/Users/test/.agents/skills/demo/references/edited_ref.md", "apply_patch", 0, "2026-11-12T01:00:02Z"),
+        ])
+        con.commit()
+    events_jsonl = state_dir / "events.jsonl"
+    events_jsonl.write_text("\n".join(json.dumps(item) for item in [
+        {"type": "tool.execution_start", "timestamp": "2026-11-12T01:00:03.000Z",
+         "data": {"toolCallId": "c-view-sc", "toolName": "view", "turnId": 0,
+                  "arguments": {"path": "/Users/test/.agents/skills/demo/scripts/viewed.py"}}},
+        {"type": "tool.execution_complete", "timestamp": "2026-11-12T01:00:03.050Z",
+         "data": {"toolCallId": "c-view-sc", "success": True, "result": "ok"}},
+        {"type": "tool.execution_start", "timestamp": "2026-11-12T01:00:04.000Z",
+         "data": {"toolCallId": "c-view-ref", "toolName": "view", "turnId": 0,
+                  "arguments": {"path": "/Users/test/.agents/skills/demo/references/read_me.md"}}},
+        {"type": "tool.execution_complete", "timestamp": "2026-11-12T01:00:04.020Z",
+         "data": {"toolCallId": "c-view-ref", "success": True, "result": "ok"}},
+        {"type": "tool.execution_start", "timestamp": "2026-11-12T01:00:05.000Z",
+         "data": {"toolCallId": "c-run-sc", "toolName": "bash", "turnId": 0,
+                  "arguments": {"command": "python3 /Users/test/.agents/skills/demo/scripts/real_run.py --json"}}},
+        {"type": "tool.execution_complete", "timestamp": "2026-11-12T01:00:05.420Z",
+         "data": {"toolCallId": "c-run-sc", "success": True, "result": "completed with exit code 0"}},
+    ]) + "\n", encoding="utf-8")
+
+    raw = []
+    monkeypatch.setattr(copilot, "COPILOT_SESSION_DB", db)
+    monkeypatch.setattr(copilot, "get_watermark", lambda _: {})
+    monkeypatch.setattr(copilot, "set_watermark", lambda *_: None)
+    monkeypatch.setattr(copilot, "write_raw", lambda _, rows: raw.extend(rows) or len(rows))
+    now = datetime(2026, 11, 12, 12, tzinfo=timezone.utc)  # noqa: UP017
+    assert copilot.collect(now=now) == 2
+    refs = [r for r in raw if r.get("kind") == "reference_hit"]
+    scripts = [r for r in raw if r.get("kind") == "script_call"]
+    assert [r["reference_path"] for r in refs] == ["skills/demo/references/read_me.md"]
+    assert [(s["script_path"], s["exit_code"], s["duration_ms"]) for s in scripts] == [
+        ("skills/demo/scripts/real_run.py", 0, 420)
+    ]
