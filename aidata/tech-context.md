@@ -132,6 +132,33 @@ cp aidata/scripts/aidata_digest_run.sh ~/.hermes/scripts/aidata_digest_run.sh
   **不要**只补 `aidata/L5_apps/digest/aidash.py`
 - 改渲染 → 那是 Swift 侧,读 `Packages/AIDashUI/tech-context.md`
 
+## Skill quality gap pipeline
+
+`quality_contracts.py` is the canonical contract for the explicit 25-skill
+registry (including `aidash-content`), aliases, closed correction classes,
+30-minute correction/observation horizon, 900-second active-gap cap, coverage
+states, and privacy-safe hashes. `adapters/quality_behavior.py` is an explicit
+read-only L1/L2 projection seam; it is not in `SOURCES` and is never launched
+by the 04:00 runner. It stores only bounded-signal metadata in
+`quality_behavior.db`.
+
+L3 merges those optional clean stores into the separate
+`dim_skill_registry`/`fact_skill_*` grains. L4 query files under
+`L4_serve/queries/quality/` are read-only and currently exploratory. L5 may
+carry `quality_behavior` and `quality_judge` beside ROI diagnostics through
+`L5_apps/digest/quality_snapshot.py` and the optional snapshot sections.
+
+`quality_judge.py` is an operator-controlled offline runner: dry-run is the
+default, execution requires a caller-supplied local adapter, no network or
+cron is present, and only strict verdict envelopes are persisted. Components
+are scored 0–3, overall is 1–5 with pass at 4.0; timeout/output caps,
+single-flight execution, deterministic per-skill sampling, and atomic receipt
+replacement are enforced. Eligible and judged populations are explicit;
+abstentions, malformed output, timeouts, and missing evidence never become
+zero scores. The normal L5 snapshot loads both quality sections from the
+warehouse, while behavior collection/normalization requires the explicit
+`./cli.py quality-behavior collect|normalize` command and is not scheduled.
+
 ## 与 local_git 源的自指
 
 `config.LOCAL_GIT_SCAN_ROOTS` 扫 `~/Development` 统计我的提交产出。aidata 并入

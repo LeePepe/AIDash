@@ -23,6 +23,7 @@ from config import (
     WAREHOUSE_DB,
     clean_path,
 )
+from quality_contracts import build_invocations, registry_rows
 
 
 def _load_prices(conn: sqlite3.Connection) -> None:
@@ -175,6 +176,119 @@ def _merge_skill_facts(conn: sqlite3.Connection) -> None:
             _detach(conn, alias)
 
 
+def _merge_quality_facts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Merge optional quality clean stores without recollecting source data."""
+    registry = registry_rows()
+    conn.executemany(
+        "INSERT OR REPLACE INTO dim_skill_registry "
+        "(skill, registry_source, active, registry_version, observed_at) VALUES (?, ?, ?, ?, ?)",
+        [(
+            row["skill"], row["registry_source"], int(row["active"]),
+            row["registry_version"], row["observed_at"],
+        ) for row in registry],
+    )
+    counts = {"dim_skill_registry": len(registry), "fact_skill_invocation": 0,
+              "fact_skill_correction": 0, "fact_skill_judgement": 0,
+              "fact_quality_judge_run": 0}
+    behavior_db = clean_path("quality_behavior")
+    if behavior_db.exists():
+        conn.execute("ATTACH DATABASE ? AS quality_behavior", (str(behavior_db),))
+        try:
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM quality_behavior.sqlite_master WHERE type='table'"
+            )}
+            if {"prompt_signal", "activity_event"}.issubset(tables):
+                prompt_cursor = conn.execute("SELECT * FROM quality_behavior.prompt_signal")
+                prompt_cols = [description[0] for description in prompt_cursor.description or ()]
+                prompts = [dict(zip(prompt_cols, values)) for values in prompt_cursor.fetchall()]
+                activity_cursor = conn.execute("SELECT * FROM quality_behavior.activity_event")
+                activity_cols = [description[0] for description in activity_cursor.description or ()]
+                activity = [dict(zip(activity_cols, values)) for values in activity_cursor.fetchall()]
+                invocations = build_invocations(
+                    {"prompt_signals": prompts, "activity_events": activity},
+                    now=datetime.now(timezone.utc),
+                )
+                conn.executemany(
+                    "INSERT OR REPLACE INTO fact_skill_invocation "
+                    "(invocation_id, source, session_id, skill, start_ts, end_ts, observation_end_ts, "
+                    "assistant_turn_count, edit_tool_calls, normalized_edit_churn, active_duration_sec, "
+                    "max_tokens, source_covered, prompt_linked, closed, eligible, invocationizer_version) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(
+                        row["invocation_id"], row["source"], row["session_id"], row["skill"],
+                        row["start_ts"], row["end_ts"], row["observation_end_ts"],
+                        row["assistant_turn_count"], row["edit_tool_calls"], row["normalized_edit_churn"],
+                        row["active_duration_sec"], int(row["max_tokens"]), int(row["source_covered"]),
+                        int(row["prompt_linked"]), int(row["closed"]), int(row["eligible"]),
+                        row["invocationizer_version"],
+                    ) for row in invocations],
+                )
+                prompt_by_uid = {row.get("signal_uid"): row for row in prompts}
+                corrections = []
+                for row in invocations:
+                    signal_uid = row.get("correction_signal_uid")
+                    signal = prompt_by_uid.get(signal_uid)
+                    if not signal:
+                        continue
+                    corrections.append((
+                        signal_uid, row["invocation_id"], signal.get("source"), signal.get("session_id"),
+                        signal.get("skill"), signal.get("ts"), signal.get("correction_class"),
+                        signal.get("confidence"), signal.get("classifier_version"), signal.get("text_len"),
+                        signal.get("text_sha256"),
+                    ))
+                conn.executemany(
+                    "INSERT OR REPLACE INTO fact_skill_correction "
+                    "(correction_signal_uid, invocation_id, source, session_id, skill, ts, correction_class, "
+                    "confidence, classifier_version, text_len, text_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    corrections,
+                )
+                counts["fact_skill_invocation"] = len(invocations)
+                counts["fact_skill_correction"] = len(corrections)
+        finally:
+            conn.execute("DETACH DATABASE quality_behavior")
+
+    judge_db = clean_path("quality_judge")
+    if judge_db.exists():
+        conn.execute("ATTACH DATABASE ? AS quality_judge", (str(judge_db),))
+        try:
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM quality_judge.sqlite_master WHERE type='table'"
+            )}
+            if "judgement" in tables:
+                columns = [row[1] for row in conn.execute("PRAGMA quality_judge.table_info(judgement)")]
+                rows = [dict(zip(columns, values)) for values in conn.execute("SELECT * FROM quality_judge.judgement")]
+                target_columns = [
+                    "judgement_uid", "judge_run_uid", "invocation_id", "invocation_id_hash", "skill", "source",
+                    "sample_key", "sampled_at", "judge_provider", "judge_model", "rubric_version",
+                    "runner_version", "correctness_score", "instruction_following_score", "actionability_score",
+                    "overall_score", "pass_flag", "confidence", "abstained", "reason_code", "input_sha256",
+                    "response_sha256", "input_len", "response_len", "redaction_version", "latency_ms", "status",
+                ]
+                conn.executemany(
+                    f"INSERT OR REPLACE INTO fact_skill_judgement ({', '.join(target_columns)}) "
+                    f"VALUES ({', '.join('?' for _ in target_columns)})",
+                    [tuple(row.get(column) for column in target_columns) for row in rows],
+                )
+                counts["fact_skill_judgement"] = len(rows)
+            if "run" in tables:
+                columns = [row[1] for row in conn.execute("PRAGMA quality_judge.table_info(run)")]
+                rows = [dict(zip(columns, values)) for values in conn.execute("SELECT * FROM quality_judge.run")]
+                target_columns = [
+                    "judge_run_uid", "runner_version", "rubric_version", "judge_provider", "judge_model",
+                    "started_at", "finished_at", "dry_run", "sampled", "valid", "abstained", "excluded",
+                    "status", "exclusion_reasons",
+                ]
+                conn.executemany(
+                    f"INSERT OR REPLACE INTO fact_quality_judge_run ({', '.join(target_columns)}) "
+                    f"VALUES ({', '.join('?' for _ in target_columns)})",
+                    [tuple(row.get(column) for column in target_columns) for row in rows],
+                )
+                counts["fact_quality_judge_run"] = len(rows)
+        finally:
+            conn.execute("DETACH DATABASE quality_judge")
+    return counts
+
+
 def run_merge() -> dict[str, int]:
     WAREHOUSE_DB.parent.mkdir(parents=True, exist_ok=True)
     # Fresh rebuild — derived artifact.
@@ -193,6 +307,7 @@ def run_merge() -> dict[str, int]:
         counts["dim_automation_rule"] = conn.execute(
             "SELECT count(*) FROM dim_automation_rule"
         ).fetchone()[0]
+        counts.update(_merge_quality_facts(conn))
 
         # --- P0 GTT dimensions/facts ---
         if _attach(conn, "gtt_ledger", "gl"):

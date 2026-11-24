@@ -6,7 +6,7 @@
   "group": "aidata",
   "parent": "aidata/CONTEXT.md",
   "scope": [],
-  "test_paths": ["tests/test_cst_day_contract.py"],
+  "test_paths": ["tests/test_cst_day_contract.py", "tests/test_quality_gaps.py"],
   "dependencies": ["AidataL3", "AidataL4"],
   "dependents": [],
   "red_lines": [
