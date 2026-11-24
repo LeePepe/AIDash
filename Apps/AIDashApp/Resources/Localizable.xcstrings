@@ -13160,6 +13160,13 @@
         }
       }
     },
+    "dashboard.skills_roi.reviewed_skills": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "skills with review"}},
+        "zh-Hans": {"stringUnit": {"state": "translated", "value": "个有评审"}}
+      }
+    },
     "dashboard.skills_roi.vital_adoption_title": {
         "extractionState": "manual",
         "localizations": {
