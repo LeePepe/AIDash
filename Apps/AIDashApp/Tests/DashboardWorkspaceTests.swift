@@ -2250,6 +2250,24 @@ struct DashboardWorkspaceTests {
         #expect(SkillsRoiDiagnosticsCardView.aggregateJudgeMean(judge) == 4.5)
         #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount([behavior]) == 1)
 
+        let missingObservations = try JSONDecoder().decode(
+            SkillsRoiReport.self,
+            from: Data(#"{"metadata":{},"diagnostics":{},"quality_behavior":[{"skill":"team-lead"}]}"#.utf8)
+        )
+        #expect(SkillsRoiDiagnosticsCardView.emptyInvocationCount(missingObservations.qualityBehavior) == nil)
+
+        let extremeScript = try JSONDecoder().decode(
+            SkillScriptDetail.self,
+            from: Data(#"{"rel_path":"slow.py","p50_ms":1e20,"p95_ms":1e20,"success_rate":1e20}"#.utf8)
+        )
+        #expect(SkillsRoiDiagnosticsCardView.millisecondsText(extremeScript.p95Ms) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.optionalPercentText(extremeScript.successRate) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptP95([extremeScript]) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptMedian([extremeScript]) == nil)
+        #expect(SkillsRoiDiagnosticsCardView.millisecondsText(145.4) == "145ms")
+        #expect(SkillsRoiDiagnosticsCardView.optionalPercentText(0.95) == "95%")
+        #expect(SkillsRoiDiagnosticsCardView.optionalPercentText(85.0) == "85%")
+
         let legacy = try JSONDecoder().decode(
             SkillsRoiReport.self,
             from: Data(#"{"metadata":{},"diagnostics":{}}"#.utf8)
