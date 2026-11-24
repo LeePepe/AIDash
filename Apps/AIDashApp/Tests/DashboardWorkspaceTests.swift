@@ -2095,8 +2095,15 @@ struct DashboardWorkspaceTests {
         #expect(prop.displayTitle == "柔化 team-lead/ci-monitor.py 参数路障")
         #expect(prop.primaryRemediationCommand.contains("skill_retro.py emit-briefs --skill team-lead"))
 
-        // 4. Verify rendering of the 5-level progressive disclosure workbench + inspector evolution sub-tab and zero bare S1..S12 codes
+        // 4. Verify rendering of the 3 differentiated stage views + P0 active/total fix and zero bare S1..S12 codes
         let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: report)?.active == 2)
+        #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: report)?.total == 2)
+        let teamLeadDetail = try #require(report.skillDetails.first { $0.skill == "team-lead" })
+        #expect(SkillsRoiDiagnosticsCardView.semanticUsageTier(for: teamLeadDetail, evolution: evo) == .mainstay)
+        #expect(SkillsRoiDiagnosticsCardView.semanticEvolutionVerdict(for: evo) == .converged)
+        #expect(SkillsRoiDiagnosticsCardView.curedRoadblocks(in: report).count == 3)
+
         let recorder = DashboardGeometryRecorder()
         let workbenchView = SkillsRoiDiagnosticsCardView(
             summary: summary,
@@ -2119,6 +2126,7 @@ struct DashboardWorkspaceTests {
 
         let recordedIDs = Set(recorder.samples.map(\.id))
         #expect(recordedIDs.contains("skills-p0-vitals"))
+        #expect(recorder.samples.filter { $0.role == "segmented" }.count == 1)
         #expect(!recordedIDs.contains("skills-table-header"))
         #expect(!recordedIDs.contains("skills-status-stage"))
         #expect(!recordedIDs.contains("skills-four-layer-pulse"))
@@ -2134,6 +2142,7 @@ struct DashboardWorkspaceTests {
                 .environment(\.dashboardGeometryRecorder, lensRecorder)
             _ = try toolbarHeaderBitmap(for: view, scheme: .dark)
             let lensIDs = Set(lensRecorder.samples.map(\.id))
+            #expect(lensRecorder.samples.filter { $0.role == "segmented" }.count == 1)
             #expect(!lensIDs.contains("skills-four-layer-pulse"))
             #expect(!lensIDs.contains("skills-inspector-detail"))
             #expect(!lensIDs.contains("inspector-file-skill-md"))
