@@ -132,6 +132,15 @@ def test_invocationizer_caps_idle_gaps_and_closes_correction_window():
     ]
     repaired = build_invocations(normalize_behavior_records(repaired_records), now=NOW)[0]
     assert repaired["correction_class"] == "negative_feedback"
+    interleaved = normalize_behavior_records([
+        {"source": "copilot_cli", "session_id": "s1", "event_id": 1, "timestamp": "2026-11-24T09:00:00Z", "skill": "team-lead", "source_kind": "typed", "text": "go", "event_type": "assistant_activity", "assistant_activity": True, "assistant_turn": True},
+        {"source": "copilot_cli", "session_id": "s2", "event_id": 1, "timestamp": "2026-11-24T09:02:00Z", "skill": "howto", "source_kind": "typed", "text": "go", "event_type": "assistant_activity", "assistant_activity": True, "assistant_turn": True},
+        {"source": "copilot_cli", "session_id": "s1", "event_id": 2, "timestamp": "2026-11-24T09:05:00Z", "skill": "team-lead", "event_type": "assistant_activity", "assistant_activity": True, "assistant_turn": True},
+        {"source": "copilot_cli", "session_id": "s1", "event_id": 3, "timestamp": "2026-11-24T09:10:00Z", "skill": "howto", "source_kind": "typed", "text": "That is wrong, please fix it", "event_type": "assistant_activity", "assistant_activity": True, "assistant_turn": True},
+    ])
+    episodes = {(row["session_id"], row["skill"]): row for row in build_invocations(interleaved, now=NOW)}
+    assert episodes[("s1", "team-lead")]["active_duration_sec"] == 300
+    assert episodes[("s1", "team-lead")]["correction_class"] is None
 
 
 def test_quality_behavior_manual_collect_and_normalize_are_explicit(monkeypatch):

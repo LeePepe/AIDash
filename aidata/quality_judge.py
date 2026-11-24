@@ -16,6 +16,8 @@ import uuid
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 import multiprocessing
+import os
+import selectors
 from threading import Lock
 from typing import Any, Protocol
 
@@ -106,50 +108,131 @@ class JudgeBusyError(RuntimeError):
 _OFF_MAIN_ADAPTER = Lock()
 
 
-def _invoke_adapter(adapter: JudgeAdapter, request: Mapping[str, Any], timeout_sec: float) -> Mapping[str, Any]:
-    """Invoke adapter in an isolated fork child so timeouts terminate execution."""
+def _invoke_adapter(
+    adapter: JudgeAdapter,
+    request: Mapping[str, Any],
+    timeout_sec: float,
+    max_output_bytes: int = MAX_JUDGE_OUTPUT_BYTES,
+) -> Mapping[str, Any]:
+    """Invoke adapter in an isolated fork child with bounded IPC output and deadline."""
     timeout = max(0.01, float(timeout_sec))
+    max_bytes = max(1, int(max_output_bytes))
+    envelope_cap = max_bytes + 1024
     if not _OFF_MAIN_ADAPTER.acquire(blocking=False):
         raise JudgeBusyError("judge_busy")
     isolated = dict(request)
     ctx = multiprocessing.get_context("fork")
-    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    read_fd, write_fd = os.pipe()
+
+    def _write_all(payload: bytes) -> None:
+        view = memoryview(payload)
+        offset = 0
+        while offset < len(view):
+            offset += os.write(write_fd, view[offset:])
 
     def _proc_target() -> None:
-        parent_conn.close()
+        os.close(read_fd)
         try:
-            child_conn.send(("ok", adapter(isolated)))
+            raw = adapter(isolated)
+            if not isinstance(raw, Mapping):
+                envelope = b"E:ValueError:provider did not return an object"
+            else:
+                try:
+                    encoded = json.dumps(dict(raw), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                except (TypeError, ValueError, UnicodeError):
+                    envelope = b"E:ValueError:malformed_json"
+                else:
+                    if len(encoded) > max_bytes:
+                        envelope = b"E:OverflowError:output_too_large"
+                    else:
+                        envelope = b"O:" + encoded
+            _write_all(envelope[:envelope_cap])
         except BaseException as exc:  # noqa: BLE001
-            child_conn.send(("err", type(exc).__name__, str(exc)))
+            err_msg = f"E:{type(exc).__name__}:{str(exc)[:256]}".encode("utf-8", errors="replace")
+            try:
+                _write_all(err_msg)
+            except OSError:
+                pass
         finally:
             isolated.clear()
-            child_conn.close()
+            os.close(write_fd)
 
     process = ctx.Process(target=_proc_target, daemon=True)
+    selector = selectors.DefaultSelector()
+    write_closed = False
     try:
+        deadline = time.monotonic() + timeout
         process.start()
-        child_conn.close()
-        if not parent_conn.poll(timeout):
+        os.close(write_fd)
+        write_closed = True
+        os.set_blocking(read_fd, False)
+        selector.register(read_fd, selectors.EVENT_READ)
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.terminate()
+                process.join(timeout=0.05)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=0.05)
+                raise TimeoutError
+            ready = selector.select(remaining)
+            if not ready:
+                process.terminate()
+                process.join(timeout=0.05)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=0.05)
+                raise TimeoutError
+            chunk = os.read(read_fd, min(65536, envelope_cap - total + 1))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > envelope_cap:
+                process.terminate()
+                process.join(timeout=0.05)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=0.05)
+                raise OverflowError("output_too_large")
+        join_wait = max(0.0, deadline - time.monotonic())
+        process.join(timeout=min(0.05, join_wait) if join_wait > 0 else 0.01)
+        if process.is_alive():
             process.terminate()
             process.join(timeout=0.05)
             if process.is_alive():
                 process.kill()
                 process.join(timeout=0.05)
             raise TimeoutError
-        status, *payload = parent_conn.recv()
-        process.join(timeout=0.05)
-        if status == "ok":
-            return payload[0]
-        exc_type, message = payload
-        if exc_type == "TimeoutError":
-            raise TimeoutError(message)
-        if exc_type == "OverflowError":
-            raise OverflowError(message)
-        if exc_type == "ValueError":
-            raise ValueError(message)
-        raise RuntimeError(message)
+        data = b"".join(chunks)
+        if data.startswith(b"O:"):
+            raw_bytes = data[2:]
+            if len(raw_bytes) > max_bytes:
+                raise OverflowError("output_too_large")
+            parsed = json.loads(raw_bytes.decode("utf-8"))
+            if not isinstance(parsed, Mapping):
+                raise ValueError("malformed_json")
+            return parsed
+        if data.startswith(b"E:"):
+            parts = data[2:].decode("utf-8", errors="replace").split(":", 1)
+            exc_type = parts[0]
+            message = parts[1] if len(parts) > 1 else ""
+            if exc_type == "TimeoutError":
+                raise TimeoutError(message)
+            if exc_type == "OverflowError":
+                raise OverflowError(message)
+            if exc_type == "ValueError":
+                raise ValueError(message)
+            raise RuntimeError(message)
+        raise RuntimeError("provider_error")
     finally:
-        parent_conn.close()
+        selector.close()
+        if not write_closed:
+            os.close(write_fd)
+        os.close(read_fd)
         isolated.clear()
         _OFF_MAIN_ADAPTER.release()
 
@@ -281,7 +364,7 @@ def _run_judge(
         seen_keys.add(key)
         started = time.monotonic()
         try:
-            raw = _invoke_adapter(adapter, request, adapter_timeout_sec)
+            raw = _invoke_adapter(adapter, request, adapter_timeout_sec, max_output_bytes=max_output_bytes)
             if not isinstance(raw, Mapping):
                 raise ValueError("provider did not return an object")
             raw = dict(raw)

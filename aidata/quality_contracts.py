@@ -400,27 +400,47 @@ def _active_duration(events: Sequence[Mapping[str, Any]]) -> int:
 
 
 def _group_events(events: Sequence[Mapping[str, Any]]) -> list[list[dict[str, Any]]]:
+    by_session: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    for event in events:
+        if _timestamp(event.get("ts")) is None:
+            continue
+        key = (str(event.get("source") or ""), str(event.get("session_id") or ""))
+        by_session.setdefault(key, []).append(event)
     groups: list[list[dict[str, Any]]] = []
-    for event in sorted(events, key=lambda row: (_timestamp(row.get("ts")) or datetime.max.replace(tzinfo=timezone.utc), str(row.get("event_uid") or ""))):
-        stamp = _timestamp(event.get("ts"))
-        if stamp is None:
-            continue
-        if not groups:
-            groups.append([dict(event)])
-            continue
-        previous = groups[-1][-1]
-        previous_stamp = _timestamp(previous.get("ts"))
-        same_skill = (
-            event.get("source") == previous.get("source")
-            and event.get("skill") == previous.get("skill")
-            and event.get("session_id") == previous.get("session_id")
+    for session_events in by_session.values():
+        ordered = sorted(
+            session_events,
+            key=lambda row: (
+                _timestamp(row.get("ts")) or datetime.max.replace(tzinfo=timezone.utc),
+                str(row.get("event_uid") or ""),
+            ),
         )
-        gap = (stamp - previous_stamp).total_seconds() if previous_stamp else INVOCATION_GAP_SEC + 1
-        if same_skill and gap <= INVOCATION_GAP_SEC:
-            groups[-1].append(dict(event))
-        else:
-            groups.append([dict(event)])
-    return groups
+        session_groups: list[list[dict[str, Any]]] = []
+        for event in ordered:
+            stamp = _timestamp(event.get("ts"))
+            if stamp is None:
+                continue
+            if not session_groups:
+                session_groups.append([dict(event)])
+                continue
+            previous = session_groups[-1][-1]
+            previous_stamp = _timestamp(previous.get("ts"))
+            same_skill = event.get("skill") == previous.get("skill")
+            gap = (stamp - previous_stamp).total_seconds() if previous_stamp else INVOCATION_GAP_SEC + 1
+            if same_skill and gap <= INVOCATION_GAP_SEC:
+                session_groups[-1].append(dict(event))
+            else:
+                session_groups.append([dict(event)])
+        groups.extend(session_groups)
+    return sorted(
+        groups,
+        key=lambda grp: (
+            _timestamp(grp[0].get("ts")) or datetime.max.replace(tzinfo=timezone.utc),
+            str(grp[0].get("source") or ""),
+            str(grp[0].get("session_id") or ""),
+            str(grp[0].get("event_uid") or ""),
+        ),
+    )
 
 
 def build_invocations(
@@ -436,13 +456,20 @@ def build_invocations(
     events = [row for row in events if (_timestamp(row.get("ts")) or datetime.min.replace(tzinfo=timezone.utc)) >= lower]
     prompt_rows = [row for row in normalized.get("prompt_signals", []) if isinstance(row, Mapping)]
     invocations: list[dict[str, Any]] = []
-    for group in _group_events(events):
+    groups = _group_events(events)
+    for idx, group in enumerate(groups):
         first, last = group[0], group[-1]
         start = _timestamp(first.get("ts"))
         end = _timestamp(last.get("ts"))
         if start is None or end is None:
             continue
         observation_end = end + timedelta(seconds=CORRECTION_WINDOW_SEC)
+        next_episode_start: datetime | None = None
+        for later in groups[idx + 1:]:
+            if later[0].get("source") == first.get("source") and later[0].get("session_id") == first.get("session_id"):
+                next_episode_start = _timestamp(later[0].get("ts"))
+                break
+        effective_obs_end = min(observation_end, next_episode_start) if next_episode_start is not None else observation_end
         closed = now_stamp >= observation_end
         source_covered = all(bool(row.get("source_covered", True)) for row in group)
         assistant_turns = sum(int(bool(row.get("assistant_turn", row.get("assistant_activity")))) for row in group)
@@ -468,8 +495,10 @@ def build_invocations(
         for prompt in prompt_rows:
             if prompt.get("source") != first.get("source") or prompt.get("session_id") != first.get("session_id"):
                 continue
+            if canonical_skill(prompt.get("skill")) != canonical_skill(first.get("skill")):
+                continue
             prompt_ts = _timestamp(prompt.get("ts"))
-            if prompt_ts is None or not (start < prompt_ts <= observation_end):
+            if prompt_ts is None or not (start < prompt_ts <= effective_obs_end):
                 continue
             if prompt.get("correction_class") in CORRECTION_CLASSES - {"none"}:
                 corrections.append(prompt)
