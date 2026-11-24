@@ -25,6 +25,7 @@ from typing import Any
 import config
 import serve
 from config import resolve_icloud_sync_dir
+from L5_apps.digest.quality_snapshot import load_snapshot_from_warehouse
 from timeutil import CST
 
 _SECTION_TYPES = {
@@ -1793,6 +1794,8 @@ def build_snapshot(
     clean_dir: Path | None = None,
     raw_dir: Path | None = None,
     prior_snapshot: Mapping[str, Any] | None = None,
+    quality_behavior: list[Mapping[str, Any]] | None = None,
+    quality_judge: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate producer shape while preserving its values, nulls and estimates."""
     problems = list(errors or [])
@@ -1831,6 +1834,12 @@ def build_snapshot(
         "diagnostics": report,
         "skills_daily": daily,
     }
+    behavior_rows = quality_behavior if quality_behavior is not None else report.get("quality_behavior")
+    judge_payload = quality_judge if quality_judge is not None else report.get("quality_judge")
+    if isinstance(behavior_rows, list):
+        payload["quality_behavior"] = [dict(row) for row in behavior_rows if isinstance(row, Mapping)]
+    if isinstance(judge_payload, Mapping):
+        payload["quality_judge"] = dict(judge_payload)
     if isinstance(report.get("skill_details"), list):
         payload["skill_details"] = report["skill_details"]
     elif isinstance((prior_snapshot or {}).get("skill_details"), list):
@@ -1954,6 +1963,8 @@ def write_snapshot(
     warehouse_db: Path | None = None,
     clean_dir: Path | None = None,
     raw_dir: Path | None = None,
+    quality_behavior: list[Mapping[str, Any]] | None = None,
+    quality_judge: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Capture the real report and query grain, then atomically replace output."""
     errors: list[str] = [f"retro producer exited {producer_exit_code}"] if producer_exit_code else []
@@ -2002,6 +2013,20 @@ def write_snapshot(
         except Exception as exc:  # noqa: BLE001 - preserve the producer report on query failure
             daily = []
             errors.append(f"skills/daily unavailable: {type(exc).__name__}")
+    # The normal daily path must carry quality sections from the warehouse;
+    # explicit arguments remain available for hermetic producers/tests.
+    if (warehouse_db is not None or not os.environ.get("PYTEST_CURRENT_TEST")) and (
+        quality_behavior is None or quality_judge is None
+    ):
+        try:
+            quality_db = Path(warehouse_db) if warehouse_db is not None else config.WAREHOUSE_DB
+            quality_sections = load_snapshot_from_warehouse(quality_db)
+            if quality_behavior is None:
+                quality_behavior = quality_sections["behavior"].get("skills", [])
+            if quality_judge is None:
+                quality_judge = quality_sections["judge"]
+        except Exception as exc:  # noqa: BLE001 - preserve snapshot write on quality read failure
+            errors.append(f"quality sections unavailable: {type(exc).__name__}")
     payload = build_snapshot(
         report,
         daily,
@@ -2012,6 +2037,8 @@ def write_snapshot(
         clean_dir=clean_dir,
         raw_dir=raw_dir,
         prior_snapshot=prior_snapshot,
+        quality_behavior=quality_behavior,
+        quality_judge=quality_judge,
     )
     if report_was_empty:
         payload["coverage_status"] = "missing"
