@@ -620,6 +620,7 @@ struct TK3SemanticTests {
         #expect(fallbackScript.successRate == nil)
         #expect(fallbackScript.p95Ms == nil)
         #expect(fallbackScript.isUnpracticed)
+        #expect("\(fallbackScript.calls30d ?? 0) · \(fallbackScript.successRate.map { "\(Int($0 * 100))%" } ?? "未知") · \(fallbackScript.p95Ms.map { "\(Int($0))ms" } ?? "未知")" == "0 · 未知 · 未知")
         #expect(inspectorSelected.evalCases.map(\.id) == ["EV-001", "DC-001"])
 
         let repoFiltered = try #require(SkillsRoiDiagnosticsCardView.activeSkillDetail(in: report, selectedSkill: nil, filter: .repoBound))
