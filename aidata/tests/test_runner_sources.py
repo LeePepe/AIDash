@@ -64,7 +64,15 @@ def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None, 
     report_file.write_text(json.dumps(report) if report is not None else fixture.read_text())
     engine = root / "retro.py"
     if producer_present:
-        engine.write_text('import os, sys\nfrom pathlib import Path\nif sys.argv[1] == "skill-roi":\n    print(Path(os.environ["FIXTURE_REPORT"]).read_text())\n    raise SystemExit(int(os.environ["FIXTURE_PRODUCER_EXIT"]))\n')
+        engine.write_text(
+            'import json, os, sys\nfrom pathlib import Path\n'
+            'log = Path(os.environ["AIDASH_JOB_OUTPUT_DIR"]) / "retro-invocations.jsonl"\n'
+            'with log.open("a", encoding="utf-8") as fh:\n'
+            '    fh.write(json.dumps({"argv": sys.argv[1:], "disable_mirror": os.environ.get("AIDASH_DISABLE_ICLOUD_MIRROR"), "icloud_dir": os.environ.get("AIDASH_ICLOUD_SYNC_DIR")}) + "\\n")\n'
+            'if sys.argv[1] == "skill-roi":\n'
+            '    print(Path(os.environ["FIXTURE_REPORT"]).read_text())\n'
+            '    raise SystemExit(int(os.environ["FIXTURE_PRODUCER_EXIT"]))\n'
+        )
     vault = root / "vault.py"
     vault.write_text(
         'import json, os, sys\nfrom pathlib import Path\n'
@@ -106,6 +114,16 @@ def test_digest_runner_exports_real_full_report_and_disjoint_daily_grains(tmp_pa
     assert json.loads((cloud_job_dir / "skills-roi.json").read_text()) == snapshot
     assert (cloud_job_dir / "agent-efficiency.json").is_file()
     assert not list(job_dir.glob(".skills-roi-report.*"))
+    invocations = [
+        json.loads(line)
+        for line in (job_dir / "retro-invocations.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(invocations) == 3
+    assert all(item["disable_mirror"] == "1" for item in invocations)
+    assert all(item["icloud_dir"] == str(job_dir / ".icloud-staging") for item in invocations)
+    skill_roi_call = next(item for item in invocations if item["argv"][0] == "skill-roi")
+    assert "--warehouse-db" in skill_roi_call["argv"]
+    assert "--no-icloud-mirror" in skill_roi_call["argv"]
 
 
 def _run_job_wrapper(

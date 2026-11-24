@@ -28,7 +28,18 @@ SKILLS_ROI_FILE="$JOB_OUTPUT_DIR/skills-roi.json"
 AGENT_EFFICIENCY_FILE="$JOB_OUTPUT_DIR/agent-efficiency.json"
 CHAIN_START_TS="$(date +%s)"
 
+_TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+ICLOUD_STEP_TIMEOUT="${ICLOUD_STEP_TIMEOUT:-15}"
+run_bounded() {
+  if [ -n "$_TIMEOUT_BIN" ]; then
+    "$_TIMEOUT_BIN" "$ICLOUD_STEP_TIMEOUT" "$@"
+  else
+    "$@"
+  fi
+}
+
 sync_job_artifacts() {
+  [ "${AIDASH_DISABLE_ICLOUD_MIRROR:-0}" = "1" ] && return 0
   local job_output_dir="$1" state_file="$2" job_id="$3"
   local cloud_docs="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
   local sync_root="${AIDASH_ICLOUD_SYNC_DIR:-$cloud_docs/AIDashSync}"
@@ -36,18 +47,21 @@ sync_job_artifacts() {
     return 0
   fi
   local target_dir="$sync_root/jobs/$job_id"
-  mkdir -p "$target_dir" || return 1
+  run_bounded mkdir -p "$target_dir" || return 1
   local name source tmp
   for name in state.json actions.jsonl skills-roi.json agent-efficiency.json; do
     source="$job_output_dir/$name"
     [ "$name" = "state.json" ] && source="$state_file"
     [ -f "$source" ] || continue
-    tmp="$(mktemp "$target_dir/.${name}.XXXXXX")" || return 1
-    if ! cp "$source" "$tmp"; then
-      rm -f "$tmp"
+    tmp="$(run_bounded mktemp "$target_dir/.${name}.XXXXXX")" || return 1
+    if ! run_bounded cp "$source" "$tmp"; then
+      run_bounded rm -f "$tmp" >/dev/null 2>&1 || true
       return 1
     fi
-    mv -f "$tmp" "$target_dir/$name" || return 1
+    if ! run_bounded mv -f "$tmp" "$target_dir/$name"; then
+      run_bounded rm -f "$tmp" >/dev/null 2>&1 || true
+      return 1
+    fi
   done
 }
 
@@ -64,7 +78,6 @@ STAGE1_START="$(date +%s)"
 COLLECT_OK=0
 COLLECT_FAIL=0
 PER_SOURCE_TIMEOUT="${PER_SOURCE_TIMEOUT:-300}"
-_TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 # Order matters: the GitHub sources (github_repo radar, github_pr) are fast `gh
 # api` calls but were previously LAST, so on a slow night the per-source budget
 # accumulated and they got starved (Mac asleep / earlier source hung) — leaving
@@ -97,7 +110,7 @@ for src in $SOURCES; do
     fi
   fi
 done
-if ! python3 -c "from adapters.cloud_sync import export_local_telemetry_shards; export_local_telemetry_shards()"; then
+if ! run_bounded python3 -c "from adapters.cloud_sync import export_local_telemetry_shards; export_local_telemetry_shards()"; then
   echo "[aidata-digest]   ! iCloud telemetry export warning"
 fi
 STAGE1_DUR=$(( $(date +%s) - STAGE1_START ))
@@ -127,26 +140,31 @@ run_stage3_step() {
   fi
 }
 mkdir -p "$JOB_OUTPUT_DIR"
+ICLOUD_STAGING_DIR="$JOB_OUTPUT_DIR/.icloud-staging"
+mkdir -p "$ICLOUD_STAGING_DIR"
 ROI_REPORT="$(mktemp "$JOB_OUTPUT_DIR/.skills-roi-report.XXXXXX")" || exit 1
 ROI_RC=1
 trap 'rm -f "$ROI_REPORT"' EXIT
 if [ -f "$RETRO_ENGINE" ]; then
-  run_stage3_step python3 "$RETRO_ENGINE" agent-efficiency --auto-propose >/dev/null \
+  run_stage3_step env AIDASH_DISABLE_ICLOUD_MIRROR=1 AIDASH_ICLOUD_SYNC_DIR="$ICLOUD_STAGING_DIR" \
+    python3 "$RETRO_ENGINE" agent-efficiency --auto-propose >/dev/null \
     || { echo "[aidata-digest]   ! agent-efficiency auto-propose warning"; STAGE3_RC=1; }
   ROI_RC=0
-  run_stage3_step python3 "$RETRO_ENGINE" skill-roi --auto-propose >"$ROI_REPORT" \
+  run_stage3_step env AIDASH_DISABLE_ICLOUD_MIRROR=1 AIDASH_ICLOUD_SYNC_DIR="$ICLOUD_STAGING_DIR" \
+    python3 "$RETRO_ENGINE" skill-roi --warehouse-db "$AIDATA_HOME/L3_merge/warehouse.db" --auto-propose --no-icloud-mirror >"$ROI_REPORT" \
     || { ROI_RC=$?; echo "[aidata-digest]   ! skill-roi auto-propose warning"; STAGE3_RC=1; }
-  run_stage3_step python3 "$RETRO_ENGINE" discover >/dev/null \
+  run_stage3_step env AIDASH_DISABLE_ICLOUD_MIRROR=1 AIDASH_ICLOUD_SYNC_DIR="$ICLOUD_STAGING_DIR" \
+    python3 "$RETRO_ENGINE" discover >/dev/null \
     || { echo "[aidata-digest]   ! retro discover warning"; STAGE3_RC=1; }
 else
   echo "[aidata-digest]   ! retro engine missing"
   STAGE3_RC=1
 fi
-if ! python3 -m L5_apps.digest.skills_roi_snapshot --report "$ROI_REPORT" --output "$SKILLS_ROI_FILE" --producer-exit-code "$ROI_RC"; then
+if ! run_stage3_step python3 -m L5_apps.digest.skills_roi_snapshot --report "$ROI_REPORT" --output "$SKILLS_ROI_FILE" --producer-exit-code "$ROI_RC"; then
   echo "[aidata-digest]   ! skills-roi snapshot failed"
   STAGE3_RC=1
 fi
-python3 -m L5_apps.digest.agent_efficiency_snapshot --output "$AGENT_EFFICIENCY_FILE" \
+run_stage3_step python3 -m L5_apps.digest.agent_efficiency_snapshot --output "$AGENT_EFFICIENCY_FILE" \
   || echo "[aidata-digest]   ! agent-efficiency snapshot warning"
 STAGE3_DUR=$(( $(date +%s) - STAGE3_START ))
 STAGE3_STATUS=$([ "$STAGE3_RC" -eq 0 ] && echo "ok" || echo "warning")
